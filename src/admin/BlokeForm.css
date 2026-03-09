@@ -1,0 +1,198 @@
+/* BlokeForm Styles */
+.bloke-form {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 30px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.bloke-form__title {
+    font-size: 1.5rem;
+    color: #333;
+    margin-bottom: 24px;
+    text-align: center;
+}
+
+.bloke-form__field {
+    margin-bottom: 20px;
+}
+
+.bloke-form__field label {
+    display: block;
+    font-weight: 600;
+    color: #444;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+}
+
+.bloke-form__field input,
+.bloke-form__field textarea,
+.bloke-form__field select {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 16px;
+    transition: border-color 0.2s;
+}
+
+.bloke-form__field input:focus,
+.bloke-form__field textarea:focus,
+.bloke-form__field select:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.bloke-form__field textarea {
+    min-height: 100px;
+    resize: vertical;
+}
+
+/* Color Toggle */
+.bloke-form__color-toggle {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.bloke-form__color-option {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.bloke-form__color-option:hover {
+    border-color: #cbd5e0;
+    background-color: #f7fafc;
+}
+
+.bloke-form__color-option--selected {
+    border-color: #667eea;
+    background-color: #ebf4ff;
+}
+
+.bloke-form__color-dot {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.bloke-form__color-dot--green {
+    background-color: #10b981;
+}
+
+.bloke-form__color-dot--blue {
+    background-color: #3b82f6;
+}
+
+.bloke-form__color-dot--yellow {
+    background-color: #f59e0b;
+}
+
+.bloke-form__color-dot--red {
+    background-color: #ef4444;
+}
+
+.bloke-form__color-label {
+    font-size: 0.9rem;
+    color: #555;
+    font-weight: 500;
+}
+
+/* Form Actions */
+.bloke-form__actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 30px;
+}
+
+.bloke-form__submit,
+.bloke-form__cancel {
+    flex: 1;
+    padding: 14px 20px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.bloke-form__submit {
+    background-color: #667eea;
+    color: white;
+}
+
+.bloke-form__submit:hover {
+    background-color: #5a67d8;
+}
+
+.bloke-form__submit:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.bloke-form__cancel {
+    background-color: #e2e8f0;
+    color: #4a5568;
+}
+
+.bloke-form__cancel:hover {
+    background-color: #cbd5e0;
+}
+
+/* Loading State */
+.bloke-form__loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: #667eea;
+    font-weight: 600;
+}
+
+.bloke-form__loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #e2e8f0;
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Error Message */
+.bloke-form__error {
+    background-color: #fed7d7;
+    color: #c53030;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 0.95rem;
+}
+
+/* Success Message */
+.bloke-form__success {
+    background-color: #c6f6d5;
+    color: #22543d;
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 0.95rem;
+}
