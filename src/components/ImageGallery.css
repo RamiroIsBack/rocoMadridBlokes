@@ -1,0 +1,466 @@
+/* ImageGallery Component Styles */
+
+.gallery {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    border-radius: 8px;
+    background-color: #1a1a1a;
+}
+
+.gallery--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+}
+
+.gallery__placeholder {
+    color: #666;
+    font-size: 14px;
+}
+
+.gallery--single {
+    cursor: pointer;
+}
+
+.gallery--single .gallery__image {
+    width: 100%;
+    height: auto;
+    max-height: 300px;
+    object-fit: cover;
+    transition: transform 0.3s ease;
+}
+
+.gallery--single:hover .gallery__image {
+    transform: scale(1.02);
+}
+
+.gallery__image-container {
+    position: relative;
+    cursor: pointer;
+}
+
+.gallery--carousel .gallery__image {
+    width: 100%;
+    height: auto;
+    max-height: 300px;
+    object-fit: cover;
+}
+
+/* Zoom hint overlay */
+.gallery__zoom-hint {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+
+.gallery__image-container:hover .gallery__zoom-hint,
+.gallery--single:hover .gallery__zoom-hint {
+    opacity: 1;
+}
+
+.gallery__zoom-hint span {
+    background: rgba(0, 0, 0, 0.7);
+    padding: 8px 16px;
+    border-radius: 20px;
+    color: white;
+    font-size: 14px;
+}
+
+/* Carousel controls */
+.gallery__controls {
+    position: absolute;
+    bottom: 40px;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.gallery:hover .gallery__controls,
+.gallery__controls--always-visible {
+    opacity: 1;
+}
+
+.gallery__btn {
+    width: 36px;
+    height: 36px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.9);
+    color: #333;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.gallery__btn:hover {
+    background: white;
+    transform: scale(1.1);
+}
+
+.gallery__counter {
+    color: white;
+    font-size: 14px;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 4px 12px;
+    border-radius: 12px;
+}
+
+/* Dot navigation - removed per user request */
+/* Only showing counter numbers and arrows now */
+
+/* Lightbox styles */
+.lightbox {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    animation: lightbox-fade-in 0.3s ease;
+}
+
+@keyframes lightbox-fade-in {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.lightbox__close {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    font-size: 28px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    z-index: 1001;
+}
+
+.lightbox__close:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.1);
+}
+
+.lightbox__content {
+    width: 75vw;
+    height: 75vh;
+    max-width: 95vw;
+    max-height: 95vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.lightbox__image {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 4px;
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+}
+
+.lightbox__counter {
+    margin-top: 16px;
+    color: white;
+    font-size: 16px;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 8px 20px;
+    border-radius: 20px;
+}
+
+/* Lightbox navigation arrows */
+.lightbox__nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 56px;
+    height: 56px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    font-size: 36px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    z-index: 1001;
+}
+
+.lightbox__nav:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: translateY(-50%) scale(1.1);
+}
+
+.lightbox__nav--prev {
+    left: 20px;
+}
+
+.lightbox__nav--next {
+    right: 20px;
+}
+
+/* ===========================
+   MOBILE RESPONSIVE STYLES
+   =========================== */
+
+/* Tablet styles */
+@media (max-width: 768px) {
+    .lightbox__nav {
+        width: 48px;
+        height: 48px;
+        font-size: 30px;
+    }
+
+    .lightbox__nav--prev {
+        left: 12px;
+    }
+
+    .lightbox__nav--next {
+        right: 12px;
+    }
+
+    .lightbox__close {
+        top: 12px;
+        right: 12px;
+        width: 40px;
+        height: 40px;
+        font-size: 24px;
+    }
+
+    .gallery__btn {
+        width: 32px;
+        height: 32px;
+        font-size: 18px;
+    }
+
+    .gallery__controls {
+        gap: 12px;
+    }
+}
+
+/* Mobile phone styles */
+@media (max-width: 480px) {
+
+    /* Gallery container */
+    .gallery {
+        border-radius: 0;
+    }
+
+    /* Always show carousel controls on mobile */
+    .gallery__controls {
+        opacity: 1;
+        bottom: 36px;
+    }
+
+    /* Make images full width on mobile */
+    .gallery--single .gallery__image,
+    .gallery--carousel .gallery__image {
+        max-height: 250px;
+    }
+
+    /* Lightbox - larger on mobile (90% of viewport) */
+    .lightbox__content {
+        width: 90vw;
+        height: 80vh;
+    }
+
+    .gallery__btn {
+        width: 40px;
+        height: 40px;
+        font-size: 22px;
+        background: rgba(255, 255, 255, 0.95);
+    }
+
+    .gallery__counter {
+        font-size: 13px;
+        padding: 4px 10px;
+    }
+
+    /* Lightbox - large on mobile */
+    .lightbox {
+        padding: 0;
+    }
+
+    .lightbox__close {
+        top: 8px;
+        right: 8px;
+        width: 44px;
+        height: 44px;
+        font-size: 28px;
+        background: rgba(0, 0, 0, 0.5);
+    }
+
+    .lightbox__content {
+        width: 90vw;
+        max-width: 95vw;
+        height: 85vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .lightbox__image {
+        max-width: 100%;
+        max-height: 100vh;
+        border-radius: 0;
+    }
+
+    /* Larger navigation arrows - easier to tap */
+    .lightbox__nav {
+        width: 56px;
+        height: 56px;
+        font-size: 36px;
+        background: rgba(0, 0, 0, 0.4);
+    }
+
+    .lightbox__nav--prev {
+        left: 4px;
+    }
+
+    .lightbox__nav--next {
+        right: 4px;
+    }
+
+    .lightbox__counter {
+        position: absolute;
+        bottom: 80px;
+        font-size: 14px;
+        padding: 6px 14px;
+    }
+
+    /* Zoom hint - always show on mobile */
+    .gallery__zoom-hint {
+        opacity: 1;
+        background: transparent;
+    }
+
+    .gallery__zoom-hint span {
+        font-size: 12px;
+        padding: 6px 12px;
+    }
+
+    /* Better touch feedback */
+    .gallery__btn:active,
+    .lightbox__nav:active,
+    .lightbox__close:active {
+        transform: scale(0.95);
+    }
+
+    .gallery__btn:hover {
+        transform: none;
+    }
+
+    .lightbox__nav:hover {
+        transform: translateY(-50%);
+    }
+}
+
+/* Extra small phones */
+@media (max-width: 360px) {
+    .lightbox__nav {
+        width: 48px;
+        height: 48px;
+        font-size: 28px;
+    }
+
+    .gallery--single .gallery__image,
+    .gallery--carousel .gallery__image {
+        max-height: 200px;
+    }
+
+    .gallery__btn {
+        width: 36px;
+        height: 36px;
+        font-size: 20px;
+    }
+}
+
+/* Landscape orientation on mobile - adjust lightbox */
+@media (max-height: 500px) and (orientation: landscape) {
+    .lightbox__image {
+        max-height: 90vh;
+        max-width: 90vw;
+    }
+
+    .lightbox__nav {
+        width: 44px;
+        height: 44px;
+        font-size: 28px;
+    }
+
+    .lightbox__close {
+        top: 4px;
+        right: 4px;
+    }
+
+    .lightbox__counter {
+        position: static;
+        margin-top: 8px;
+    }
+}
+
+/* Touch device improvements */
+@media (hover: none) and (pointer: coarse) {
+
+    /* Always show controls on touch devices */
+    .gallery__controls {
+        opacity: 1;
+    }
+
+    /* Larger touch targets */
+    .gallery__btn,
+    .gallery__dot {
+        min-width: 36px;
+        min-height: 36px;
+    }
+
+    .lightbox__nav {
+        min-width: 56px;
+        min-height: 56px;
+    }
+
+    /* Remove hover effects that don't work on touch */
+    .gallery--single:hover .gallery__image {
+        transform: none;
+    }
+}
