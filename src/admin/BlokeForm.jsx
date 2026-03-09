@@ -112,8 +112,8 @@ export default function BlokeForm() {
         }
       }
 
-      // Create the post
-      const response = await fetch(`${WORDPRESS_URL}/wp-json/wp/v2/posts`, {
+      // Create the bloke
+      const response = await fetch(`${WORDPRESS_URL}/wp-json/wp/v2/blokes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
