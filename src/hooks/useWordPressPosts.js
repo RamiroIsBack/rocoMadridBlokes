@@ -154,8 +154,8 @@ export function useWordPressPosts() {
                 try {
                     // Build the WordPress REST API URL
                     const categoryIds = Object.values(CATEGORY_MAP).join(',')
-                    const url = `${WORDPRESS_URL}/wp-json/wp/v2/posts?` + new URLSearchParams({
-                        categories: categoryIds,
+                    const url = `${WORDPRESS_URL}/wp-json/wp/v2/blokes?` + new URLSearchParams({
+                                per_page: 100,
                         per_page: 100,
                         _embed: '',
                         acf_format: 'standard',
@@ -303,7 +303,7 @@ export async function recordInteraction(postId, type) {
         }
 
         // Get current post to fetch existing interactions
-        const getResponse = await fetch(`${WORDPRESS_URL}/wp-json/wp/v2/posts/${postId}?acf_format=standard`, {
+        const getResponse = await fetch(`${WORDPRESS_URL}/wp-json/wp/v2/blokes/${postId}?acf_format=standard`, {
             headers: {
                 'Authorization': authHeader
             }
@@ -329,7 +329,7 @@ export async function recordInteraction(postId, type) {
         }
 
         // Update the post via REST API
-        const updateResponse = await fetch(`${WORDPRESS_URL}/wp-json/wp/v2/posts/${postId}`, {
+        const updateResponse = await fetch(`${WORDPRESS_URL}/wp-json/wp/v2/blokes/${postId}`, {
             method: 'POST',
             headers: {
                 'Authorization': authHeader,
