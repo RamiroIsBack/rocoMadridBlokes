@@ -313,14 +313,14 @@
     .event-card__color {
         width: 32px;
         height: 32px;
-        }
+    }
 
-        .event-card__title-row {
-            gap: 8px;
-        }
+    .event-card__title-row {
+        gap: 8px;
+    }
 
-        .event-card__title {
-            font-size: 1.25rem;
+    .event-card__title {
+        font-size: 1.25rem;
     }
 
     .event-card__interactions {

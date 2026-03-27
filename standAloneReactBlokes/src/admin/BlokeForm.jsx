@@ -124,7 +124,6 @@ export default function BlokeForm() {
   const [tipo, setTipo] = useState('bloke') // Default tipo
   const [color, setColor] = useState('green') // Default color
   const [grado, setGrado] = useState('medio') // Default grado
-  const [colorPresa, setColorPresa] = useState('') // Color de presa
   const [sala, setSala] = useState('entrada') // Default sala
   const [subsala, setSubsala] = useState('1') // Default subsala
   const [equipador, setEquipador] = useState('alvaro') // Default equipador
@@ -192,11 +191,6 @@ export default function BlokeForm() {
     
     if (selectedCategories.length === 0) {
       setSubmitStatus({ type: 'error', message: 'Selecciona al menos una categoría' })
-      return
-    }
-
-    if (!colorPresa) {
-      setSubmitStatus({ type: 'error', message: 'Selecciona el color de las presas' })
       return
     }
     

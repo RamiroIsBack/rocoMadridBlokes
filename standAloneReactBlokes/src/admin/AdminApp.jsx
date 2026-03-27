@@ -38,7 +38,7 @@ export default function AdminApp() {
           <footer className="admin-app__footer">
             <p>
               Rocoteca Madrid Admin &middot; 
-              <a href="/blokes" target="_blank" rel="noopener noreferrer">
+              <a href="/" target="_blank" rel="noopener noreferrer">
                 Ver sitio público
               </a>
             </p>

@@ -148,7 +148,7 @@ export default function EventCard({ card }) {
         {/* Color de Presas */}
         {colorPresaInfo && (
           <div className="event-card__colorpresa">
-            <span className="event-card__colorpresa-icon" aria-hidden="true">{colorPresaInfo.icon}</span>
+            <span className="event-card__colorpresa-icon" aria-hidden="true">🟡</span>
             <span className="event-card__colorpresa-text">{colorPresaInfo.name}</span>
           </div>
         )}

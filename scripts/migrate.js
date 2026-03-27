@@ -222,7 +222,7 @@ async function migrate() {
             const blokeData = {
                 timestamp: timestamp || '',
                 description: (description || '').slice(0, 300),
-                title: (title || 'Sin título').slice(0, 20),
+                title: (title || 'Sin título').slice(0, 35),
                 category: (category || '').toUpperCase().trim(),
             };
 

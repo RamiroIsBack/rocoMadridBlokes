@@ -1,0 +1,87 @@
+/* ============================================
+   GOOGLE FONTS — matches rocomadrid.com brand
+   Montserrat: headings | Inter: body text
+   ============================================ */
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800&family=Inter:wght@400;500;600&display=swap');
+
+/* ============================================
+   GLOBAL RESET & DESIGN TOKENS
+   ============================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* Brand colors — rocomadrid.com palette */
+  --color-bg: #f5f5f5;
+  --color-surface: #ffffff;
+  --color-header: #1f1f1f;        /* charcoal — matches site header */
+  --color-text-primary: #1f1f1f;
+  --color-text-secondary: #555555;
+  --color-border: #e0e0e0;
+  --color-accent: #d19d02;        /* golden yellow — primary CTA on rocomadrid.com */
+  --color-accent-hover: #846400;  /* darker gold on hover */
+
+  /* Category badge colors */
+  --color-puzle: #8e44ad;
+  --color-tecnico: #2980b9;
+  --color-entrenamiento: #27ae60;
+  --color-coordinacion: #e67e22;
+
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 40px;
+
+  /* Typography */
+  --font-body: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Montserrat', 'Segoe UI', system-ui, sans-serif;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-lg: 20px;
+  --font-size-xl: 32px;
+
+  /* Shape */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Shadows */
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.10);
+  --shadow-card-hover: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+html {
+  font-size: var(--font-size-base);
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+a {
+  color: var(--color-accent);
+}
