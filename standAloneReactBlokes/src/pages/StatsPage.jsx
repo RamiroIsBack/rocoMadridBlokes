@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { useWordPressPosts, deleteBloke, updateBloke, getAuthHeader } from '../hooks/useWordPressPosts'
+import { useWordPressPosts, deleteBloke } from '../hooks/useWordPressPosts'
 import AdminLogin from '../admin/AdminLogin'
 import './StatsPage.css'
 
@@ -24,7 +24,6 @@ export default function StatsPage() {
     sortOrder: 'desc'
   })
   const [deleteConfirm, setDeleteConfirm] = useState(null) // { postId, title }
-  const [editingBloke, setEditingBloke] = useState(null) // { postId, data }
   const [isDeleting, setIsDeleting] = useState(false)
 
   // Calculate stats from cards data - must be called unconditionally
@@ -195,67 +194,6 @@ export default function StatsPage() {
 
   const handleDeleteCancel = () => {
     setDeleteConfirm(null)
-  }
-
-  // Handle edit button click
-  const handleEditClick = (card) => {
-    setEditingBloke({
-      postId: card.postId,
-      title: card.title,
-      description: card.description,
-      color: card.color,
-      sala: card.sala,
-      subsala: card.subsala,
-      tipo: card.tipo,
-      grado: card.grado,
-      category: card.category,
-      colorPresa: card.colorPresa || ''
-    })
-  }
-
-  const handleEditCancel = () => {
-    setEditingBloke(null)
-  }
-
-  const handleEditSave = async () => {
-    if (!editingBloke) return
-
-    setIsDeleting(true) // Reuse loading state
-    try {
-      // Use custom endpoint for update to handle ACF fields properly
-      const response = await fetch(`${import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'}/wp-json/blokes/v1/update-acf/${editingBloke.postId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeader()
-        },
-        body: JSON.stringify({
-          title: editingBloke.title,
-          content: editingBloke.description,
-          categories: [1], // Keep existing category
-          acf: {
-            bloke_color: editingBloke.color,
-            bloke_sala: editingBloke.sala,
-            bloke_subsala: editingBloke.subsala,
-            bloke_tipo: editingBloke.tipo,
-            bloke_grado: editingBloke.grado,
-            bloke_colorPresa: editingBloke.colorPresa
-          }
-        })
-      })
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.message || 'Error al actualizar el bloke')
-      }
-      
-      setEditingBloke(null)
-      if (refresh) refresh()
-    } catch (err) {
-      alert('Error al actualizar el bloke: ' + err.message)
-    } finally {
-      setIsDeleting(false)
-    }
   }
   
   if (loading) {
@@ -465,14 +403,14 @@ export default function StatsPage() {
                   <option value="yellow">Amarillo</option>
                   <option value="red">Rojo</option>
                   <option value="black">Negro</option>
-                  <option value="blanco">Blanco</option>
+                  <option value="blanco">Trave</option>
                 </select>
               </div>
               
               <div className="stats-filters__field">
-                <label>Color Presas</label>
+                <label>Color de Presas</label>
                 <select 
-                  value={filters.colorPresa || ''}
+                  value={filters.colorPresa}
                   onChange={(e) => handleFilterChange('colorPresa', e.target.value)}
                 >
                   <option value="">Todos</option>
@@ -559,7 +497,7 @@ export default function StatsPage() {
                     <td>
                       <span className={`event-card__color event-card__color--${card.color}`}></span>
                     </td>
-                    <td>{card.colorPresa || '-'}</td>
+                    <td>{card.colorPresa ? card.colorPresa.replace('presas_', '').replace('_', ' ') : '-'}</td>
                     <td>{(card.grado || 'medio').charAt(0).toUpperCase() + (card.grado || 'medio').slice(1)}</td>
                     <td>{Number(card.interactions?.star_1) || 0}</td>
                     <td>{Number(card.interactions?.star_2) || 0}</td>
@@ -567,13 +505,6 @@ export default function StatsPage() {
                     <td>{Number(card.interactions?.skull) || 0}</td>
                     <td><strong>{Number(card.totalInteractions) || 0}</strong></td>
                     <td>
-                      <button 
-                        className="stats-table__edit-btn"
-                        onClick={() => handleEditClick(card)}
-                        title="Editar bloke"
-                      >
-                        ✏️
-                      </button>
                       <button 
                         className="stats-table__delete-btn"
                         onClick={() => handleDeleteClick(card)}
@@ -611,125 +542,6 @@ export default function StatsPage() {
                 disabled={isDeleting}
               >
                 {isDeleting ? 'Eliminando...' : 'Eliminar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Edit Bloke Modal */}
-      {editingBloke && (
-        <div className="stats-modal-overlay" onClick={handleEditCancel}>
-          <div className="stats-modal stats-modal--edit" onClick={(e) => e.stopPropagation()}>
-            <h3>Editar bloke</h3>
-            <div className="stats-edit-form">
-              <div className="stats-edit-field">
-                <label>Título</label>
-                <input 
-                  type="text" 
-                  value={editingBloke.title} 
-                  onChange={(e) => setEditingBloke({...editingBloke, title: e.target.value})}
-                  maxLength={40}
-                />
-              </div>
-              <div className="stats-edit-field">
-                <label>Descripción</label>
-                <textarea 
-                  value={editingBloke.description || ''} 
-                  onChange={(e) => setEditingBloke({...editingBloke, description: e.target.value})}
-                  maxLength={300}
-                />
-              </div>
-              <div className="stats-edit-row">
-                <div className="stats-edit-field">
-                  <label>Sala</label>
-                  <select 
-                    value={editingBloke.sala} 
-                    onChange={(e) => setEditingBloke({...editingBloke, sala: e.target.value})}
-                  >
-                    <option value="entrada">Entrada</option>
-                    <option value="sala_grande">Sala Grande</option>
-                    <option value="cueva">Cueva</option>
-                  </select>
-                </div>
-                <div className="stats-edit-field">
-                  <label>Subsala</label>
-                  <input 
-                    type="text" 
-                    value={editingBloke.subsala} 
-                    onChange={(e) => setEditingBloke({...editingBloke, subsala: e.target.value})}
-                  />
-                </div>
-              </div>
-              <div className="stats-edit-row">
-                <div className="stats-edit-field">
-                  <label>Tipo</label>
-                  <select 
-                    value={editingBloke.tipo} 
-                    onChange={(e) => setEditingBloke({...editingBloke, tipo: e.target.value})}
-                  >
-                    <option value="intro">INTRO</option>
-                    <option value="trave">TRAVE</option>
-                    <option value="bloke">BLOKE</option>
-                  </select>
-                </div>
-                <div className="stats-edit-field">
-                  <label>Grado</label>
-                  <select 
-                    value={editingBloke.grado} 
-                    onChange={(e) => setEditingBloke({...editingBloke, grado: e.target.value})}
-                  >
-                    <option value="suave">Suave</option>
-                    <option value="medio">Medio</option>
-                    <option value="duro">Duro</option>
-                  </select>
-                </div>
-              </div>
-              <div className="stats-edit-field">
-                <label>Color</label>
-                <select 
-                  value={editingBloke.color} 
-                  onChange={(e) => setEditingBloke({...editingBloke, color: e.target.value})}
-                >
-                  <option value="green">Verde</option>
-                  <option value="blue">Azul</option>
-                  <option value="yellow">Amarillo</option>
-                  <option value="red">Rojo</option>
-                  <option value="black">Negro</option>
-                  <option value="blanco">Blanco</option>
-                </select>
-              </div>
-              <div className="stats-edit-field">
-                <label>Color de Presas</label>
-                <select 
-                  value={editingBloke.colorPresa || ''} 
-                  onChange={(e) => setEditingBloke({...editingBloke, colorPresa: e.target.value})}
-                >
-                  <option value="">Selecciona un color</option>
-                  <option value="presas_azules">Presas Azules</option>
-                  <option value="presas_blancas">Presas Blancas</option>
-                  <option value="presas_negras">Presas Negras</option>
-                  <option value="presas_rojas">Presas Rojas</option>
-                  <option value="presas_amarillas">Presas Amarillas</option>
-                  <option value="presas_verdes">Presas Verdes</option>
-                  <option value="presas_color_raro">Presas Color Raro</option>
-                </select>
-              </div>
-            </div>
-            <div className="stats-modal__actions">
-              <button 
-                className="stats-modal__cancel"
-                onClick={handleEditCancel}
-                disabled={isDeleting}
-              >
-                Cancelar
-              </button>
-              <button 
-                className="stats-modal__confirm"
-                onClick={handleEditSave}
-                disabled={isDeleting}
-              >
-                {isDeleting ? 'Guardando...' : 'Guardar cambios'}
               </button>
             </div>
           </div>

@@ -2,25 +2,14 @@
 /**
  * Plugin Name: Blokes Extension
  * Plugin URI: https://rocomadrid.com
- * Description: Custom REST API for Blokes climbing problems (custom post type) - v1.3.0
- * Version: 1.3.0
+ * Description: Custom REST API for Blokes climbing problems (custom post type) - v1.2.0
+ * Version: 1.2.0
  * Author: Rocoteca Madrid
  * License: GPL v2 or later
  */
 
 // Exit if accessed directly
 if (!defined('ABSPATH')) exit;
-
-/**
- * Change upload directory for blokes media to /blokes subfolder
- * This ensures all blokes images/videos are organized in /wp-content/uploads/blokes/
- */
-add_filter('upload_dir', function($dirs) {
-    $dirs['baseurl'] = $dirs['baseurl'] . '/blokes';
-    $dirs['path'] = $dirs['path'] . '/blokes';
-    $dirs['subdir'] = '/blokes';
-    return $dirs;
-});
 
 /**
  * Register custom REST API endpoints for blokes

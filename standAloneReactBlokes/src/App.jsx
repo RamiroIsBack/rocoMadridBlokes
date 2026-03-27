@@ -6,12 +6,12 @@ import './App.css'
 
 export default function App() {
   return (
-    <BrowserRouter basename="/blokes">
+    <BrowserRouter>
       <div className="app">
         <header className="app-header">
           <div className="app-header__logo-section">
             <img 
-              src="https://rocomadrid.com/wp-content/uploads/2025/12/cropped-icono-rocomadrid.png" 
+              src="https://rocomadrid.com/wp-content/uploads/2025/12/favicon.png" 
               alt="Rocoteca Madrid" 
               className="app-header__logo"
             />

@@ -1,0 +1,66 @@
+/* Color Toggle Styles */
+.color-toggle {
+    margin-bottom: 24px;
+}
+
+.color-toggle__label {
+    display: block;
+    font-weight: 600;
+    color: #444;
+    margin-bottom: 12px;
+}
+
+.color-toggle__options {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.color-toggle__option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: white;
+    border: 2px solid #e2e8f0;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 80px;
+}
+
+.color-toggle__option:hover {
+    border-color: #cbd5e0;
+    transform: translateY(-2px);
+}
+
+.color-toggle__option--selected {
+    border-color: #3b82f6;
+    background-color: #eff6ff;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+}
+
+.color-toggle__circle {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 3px solid white;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.color-toggle__option--selected .color-toggle__circle {
+    border-color: #3b82f6;
+    transform: scale(1.1);
+}
+
+.color-toggle__label-text {
+    font-size: 0.9rem;
+    color: #4a5568;
+    font-weight: 500;
+}
+
+.color-toggle__option--selected .color-toggle__label-text {
+    color: #3b82f6;
+    font-weight: 600;
+}
