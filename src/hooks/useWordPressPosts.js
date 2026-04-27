@@ -31,12 +31,20 @@ export function getAuthHeader() {
     return null
 }
 
-const CATEGORY_MAP = {
-    // Map WordPress category IDs to your category codes
-    // You'll need to update these IDs after creating categories in WordPress
-    PUZLE: 1, // Replace with actual category ID
-    TECNICO: 2, // Replace with actual category ID
-    ENTRENAMIENTO: 3, // Replace with actual category ID
+// Normalize legacy numeric category IDs to string names
+const CATEGORY_ID_MAP = { 1: 'FUERZA', 2: 'TECNICA', 3: 'DINAMICO' }
+function normalizeCategory(raw) {
+    if (!raw) return 'FUERZA'
+    const str = String(raw).trim()
+    return CATEGORY_ID_MAP[str] || CATEGORY_ID_MAP[Number(str)] || str
+}
+
+// Normalize legacy equipador values
+const EQUIPADOR_MAP = { sigur: 'sigurd' }
+function normalizeEquipador(raw) {
+    if (!raw) return 'alvaro'
+    const str = String(raw).trim().toLowerCase()
+    return EQUIPADOR_MAP[str] || str
 }
 
 // Mock data for local testing without WordPress
@@ -172,9 +180,7 @@ export function useWordPressPosts() {
             if (hasCredentials) {
                 try {
                     // Build the WordPress REST API URL
-                    const categoryIds = Object.values(CATEGORY_MAP).join(',')
                     const url = `${WORDPRESS_URL}/wp-json/wp/v2/blokes?` + new URLSearchParams({
-                                per_page: 100,
                         per_page: 100,
                         _embed: '',
                         acf_format: 'standard',
@@ -209,6 +215,7 @@ export function useWordPressPosts() {
                                 const featuredMedia = post._embedded['wp:featuredmedia'][0]
                                 const isVideo = featuredMedia.mime_type && featuredMedia.mime_type.startsWith('video/')
                                 images.push({
+                                    id: featuredMedia.id,
                                     url: featuredMedia.source_url,
                                     isVideo
                                 })
@@ -225,16 +232,15 @@ export function useWordPressPosts() {
                                     if (img.mime_type) {
                                         isVideo = img.mime_type.startsWith('video/')
                                     } else if (img.media_details && img.media_details.mime_type) {
-                                        // Check media_details as fallback
                                         isVideo = img.media_details.mime_type.startsWith('video/')
                                     } else if (mediaUrl) {
-                                        // Check by file extension as last resort
                                         const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.m4v']
                                         isVideo = videoExtensions.some(ext => mediaUrl.toLowerCase().endsWith(ext))
                                     }
 
                                     if (mediaUrl && !images.some(i => i.url === mediaUrl)) {
                                         images.push({
+                                            id: img.id || null,
                                             url: mediaUrl,
                                             isVideo
                                         })
@@ -242,22 +248,17 @@ export function useWordPressPosts() {
                                 })
                             }
 
-                            let category = 'PUZLE'
-                            if (post.categories && post.categories.length > 0) {
-                                const categoryId = post.categories[0]
-                                const categoryName = Object.keys(CATEGORY_MAP).find(
-                                    key => CATEGORY_MAP[key] === categoryId
-                                )
-                                if (categoryName) category = categoryName
-                            }
+                            const category = normalizeCategory(acf.bloke_category)
 
                             const color = acf.bloke_color || 'green'
                             const sala = acf.bloke_sala || 'entrada'
                             const subsala = acf.bloke_subsala || '1'
                             const tipo = acf.bloke_tipo || 'bloke'
                             const grado = acf.bloke_grado || 'medio'
-                            const equipador = acf.bloke_equipador || 'alvaro'
-                            const colorPresa = acf.bloke_colorPresa || ''
+                            const equipador = normalizeEquipador(acf.bloke_equipador)
+                            // Read colorPresa: ACF field, rest_prepare filter injection, or post meta fallback
+                            const meta = post.meta || {}
+                            const colorPresa = acf.bloke_colorPresa || acf.bloke_colorpresa || post.bloke_colorPresa || meta.bloke_colorPresa || ''
                             const blokeInteractions = acf.bloke_interactions || {}
                             const interactions = {
                                     star_1: Number(blokeInteractions.star_1 || 0),
@@ -282,7 +283,8 @@ export function useWordPressPosts() {
                                 colorPresa,
                                 equipador,
                                 interactions,
-                                totalInteractions: interactions.star_1 + interactions.star_2 + interactions.star_3 + interactions.skull
+                                totalInteractions: interactions.star_1 + interactions.star_2 + interactions.star_3 + interactions.skull,
+                                completionCount: parseInt(post.bloke_completion_count || 0, 10),
                             }
                         })
 
@@ -381,8 +383,7 @@ export function useWordPressPosts() {
                                             }
                                         })
                                     }
-                                    const category = acf.bloke_category ?
-                                        Object.keys(CATEGORY_MAP).find(k => CATEGORY_MAP[k] === acf.bloke_category) || 'TECNICA' : 'TECNICA'
+                                    const category = normalizeCategory(acf.bloke_category)
                                     const blokeInteractions = acf.bloke_interactions || {}
                                     const interactions = {
                                         star_1: Number(blokeInteractions.star_1 || 0),
@@ -403,8 +404,8 @@ export function useWordPressPosts() {
                                         tipo: acf.bloke_tipo || 'bloke',
                                         grado: acf.bloke_grado || 'medio',
                                         color: acf.bloke_color || 'green',
-                                        colorPresa: acf.bloke_colorPresa || '',
-                                        equipador: acf.bloke_equipador || 'alvaro',
+                                        colorPresa: acf.bloke_colorPresa || acf.bloke_colorpresa || post.bloke_colorPresa || (post.meta && post.meta.bloke_colorPresa) || '',
+                                        equipador: normalizeEquipador(acf.bloke_equipador),
                                         interactions
                                     }
                                 })

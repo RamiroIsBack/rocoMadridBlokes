@@ -3,12 +3,6 @@ import ImageGallery from './ImageGallery'
 import { recordInteraction } from '../hooks/useWordPressPosts'
 import './EventCard.css'
 
-const CATEGORY_LABELS = {
-  FUERZA: 'Fuerza',
-  TECNICA: 'Técnica',
-  DINAMICO: 'Dinámico',
-}
-
 // Color mapping for display
 const COLOR_MAP = {
   green: { name: 'Verde', class: 'event-card__color--green' },
@@ -28,13 +22,30 @@ const SALA_MAP = {
 
 // Color de presas mapping for display
 const COLOR_PRESA_MAP = {
-  presas_azules: { name: 'Presas Azules', icon: '🟦' },
-  presas_blancas: { name: 'Presas Blancas', icon: '⬜' },
-  presas_negras: { name: 'Presas Negras', icon: '⚫' },
-  presas_rojas: { name: 'Presas Rojas', icon: '🔴' },
-  presas_amarillas: { name: 'Presas Amarillas', icon: '🟡' },
-  presas_verdes: { name: 'Presas Verdes', icon: '🟢' },
-  presas_color_raro: { name: 'Presas Color Raro', icon: '🌈' },
+  presas_azules:        { name: 'Presas Azules',         bg: '#eff6ff', text: '#3b82f6' },
+  presas_blancas:       { name: 'Presas Blancas',        bg: '#f9f9f9', text: '#6b7280' },
+  presas_negras:        { name: 'Presas Negras',         bg: '#f3f4f6', text: '#374151' },
+  presas_rojas:         { name: 'Presas Rojas',          bg: '#fff5f5', text: '#ef4444' },
+  presas_amarillas:     { name: 'Presas Amarillas',      bg: '#fffde7', text: '#b45309' },
+  presas_verdes:        { name: 'Presas Verdes',         bg: '#f0fdf4', text: '#16a34a' },
+  presas_moradas:       { name: 'Presas Moradas',        bg: '#faf5ff', text: '#7c3aed' },
+  presas_rosas:         { name: 'Presas Rosas',          bg: '#fdf2f8', text: '#be185d' },
+  presas_grises:        { name: 'Presas Grises',         bg: '#f4f4f5', text: '#52525b' },
+  presas_turquesa:      { name: 'Presas Turquesa',       bg: '#f0fdfa', text: '#0d9488' },
+  presas_amarillo_fluor:{ name: 'Presas Amarillo Fluor', bg: '#fefce8', text: '#65a30d' },
+  presas_naranja:       { name: 'Presas Naranja',        bg: '#fff7ed', text: '#ea580c' },
+  presas_color_raro:    { name: 'Presas Color Raro',     bg: '#f5f5f5', text: '#6b7280' },
+}
+
+function HoldIcon() {
+  return (
+    <img
+      className="event-card__hold-icon"
+      src="https://rocomadrid.com/wp-content/uploads/2026/03/presas.png"
+      alt="presa"
+      aria-hidden="true"
+    />
+  )
 }
 
 // Icon definitions
@@ -72,9 +83,8 @@ const ICONS = [
 /**
  * @param {{ card: Object }} props
  */
-export default function EventCard({ card }) {
-  const { images, title, description, category, color, sala, tipo, interactions, postId, colorPresa } = card
-  const categoryLabel = CATEGORY_LABELS[category] || category
+export default function EventCard({ card, isNew = false, isHof = false, isDone = false, completionCount = 0, onToggleDone, isLoggedIn = false, loginUrl = '/wp-login.php' }) {
+  const { images, title, description, color, sala, tipo, interactions, postId, colorPresa } = card
   const colorInfo = COLOR_MAP[color] || COLOR_MAP.green
   const salaInfo = SALA_MAP[sala] || SALA_MAP.entrada
   const colorPresaInfo = COLOR_PRESA_MAP[colorPresa] || null
@@ -111,9 +121,53 @@ export default function EventCard({ card }) {
     }
   }
   
+  const handleDoneClick = () => {
+    if (!isLoggedIn) {
+      window.location.href = loginUrl
+      return
+    }
+    if (onToggleDone) onToggleDone()
+  }
+
   return (
     <article className="event-card">
       <ImageGallery images={images} title={title} />
+      {/* Zero-height anchor placed at gallery bottom — done button straddles gallery/body */}
+      <div className="event-card__done-anchor">
+        <div className="event-card__done-wrap">
+          {isLoggedIn ? (
+            <span className="event-card__done-count" title={`${completionCount} TOPs`}>
+              {completionCount}
+            </span>
+          ) : (
+            <span
+              className="event-card__done-count event-card__done-count--locked"
+              title="Número de TOPs"
+              onClick={handleDoneClick}
+            >
+              ?
+            </span>
+          )}
+          <button
+            className={`event-card__done-btn${isDone ? ' event-card__done-btn--active' : ''}`}
+            onClick={handleDoneClick}
+            title={isDone ? 'Marcar como no completado' : isLoggedIn ? 'Marcar como completado' : 'Inicia sesión para marcarlo como completado'}
+            aria-label={isDone ? 'Marcar como no completado' : 'Marcar como completado'}
+          >
+            ✓
+          </button>
+        </div>
+      </div>
+      {isNew && (
+        <div className="event-card__new-badge" aria-label="Nuevo">
+          <span>NUEVO</span>
+        </div>
+      )}
+      {isHof && (
+        <div className="event-card__hof-badge" aria-label="Hall of Fame">
+          🏆 Hall of Fame
+        </div>
+      )}
       <div className="event-card__body">
         {/* Title, Color and Sala on same row */}
         <div className="event-card__header">
@@ -147,8 +201,11 @@ export default function EventCard({ card }) {
         
         {/* Color de Presas */}
         {colorPresaInfo && (
-          <div className="event-card__colorpresa">
-            <span className="event-card__colorpresa-icon" aria-hidden="true">{colorPresaInfo.icon}</span>
+          <div
+            className="event-card__colorpresa"
+            style={{ backgroundColor: colorPresaInfo.bg, color: colorPresaInfo.text, borderColor: colorPresaInfo.bg }}
+          >
+            <HoldIcon />
             <span className="event-card__colorpresa-text">{colorPresaInfo.name}</span>
           </div>
         )}

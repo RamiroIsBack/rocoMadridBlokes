@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Blokes Extension
  * Plugin URI: https://rocomadrid.com
- * Description: Custom REST API for Blokes climbing problems (custom post type) - v1.3.0
- * Version: 1.3.0
+ * Description: Custom REST API for Blokes climbing problems (custom post type) - v1.5.1
+ * Version: 1.5.1
  * Author: Rocoteca Madrid
  * License: GPL v2 or later
  */
@@ -12,14 +12,26 @@
 if (!defined('ABSPATH')) exit;
 
 /**
- * Change upload directory for blokes media to /blokes subfolder
- * This ensures all blokes images/videos are organized in /wp-content/uploads/blokes/
+ * Inject bloke_colorPresa into the WP REST API response for blokes.
+ * Using rest_prepare_{post_type} instead of register_post_meta to avoid
+ * interfering with the _embed functionality that returns featured images.
  */
-add_filter('upload_dir', function($dirs) {
-    $dirs['baseurl'] = $dirs['baseurl'] . '/blokes';
-    $dirs['path'] = $dirs['path'] . '/blokes';
-    $dirs['subdir'] = '/blokes';
-    return $dirs;
+add_filter('rest_prepare_blokes', function($response, $post, $request) {
+    $data = $response->get_data();
+    $data['bloke_colorPresa'] = get_post_meta($post->ID, 'bloke_colorPresa', true);
+    $data['bloke_completion_count'] = (int) get_post_meta($post->ID, '_bloke_completion_count', true);
+    $response->set_data($data);
+    return $response;
+}, 10, 3);
+
+// Inject auth data for the React SPA so it can make cookie-authenticated REST calls
+add_action('wp_head', function() {
+    $data = array(
+        'nonce'      => wp_create_nonce('wp_rest'),
+        'isLoggedIn' => is_user_logged_in(),
+        'loginUrl'   => wp_login_url(home_url('/blokes/')),
+    );
+    echo '<script>window.blokesSiteData = ' . wp_json_encode($data) . ';</script>' . "\n";
 });
 
 /**
@@ -66,6 +78,34 @@ add_action('rest_api_init', function() {
         }
     ));
     
+    // Hall of Fame - get & save
+    register_rest_route('blokes/v1', '/hall-of-fame', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'blokes_get_hall_of_fame',
+            'permission_callback' => '__return_true',
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'blokes_save_hall_of_fame',
+            'permission_callback' => function() { return is_user_logged_in(); },
+        ),
+    ));
+
+    // Get current user's completed blokes (requires cookie auth + nonce)
+    register_rest_route('blokes/v1', '/my-completions', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_get_my_completions',
+        'permission_callback' => function() { return is_user_logged_in(); },
+    ));
+
+    // Toggle a bloke as done/not-done for the current user
+    register_rest_route('blokes/v1', '/completions/(?P<id>\d+)/toggle', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_toggle_completion',
+        'permission_callback' => function() { return is_user_logged_in(); },
+    ));
+
     // Endpoint to delete a bloke and its associated media
     register_rest_route('blokes/v1', '/delete/(?P<id>\d+)', array(
         'methods' => 'DELETE',
@@ -184,8 +224,13 @@ function blokes_create_with_acf($request) {
         foreach ($acf_fields as $field_name => $field_value) {
             update_field($field_name, $field_value, $post_id);
         }
+        // Ensure bloke_colorPresa is also saved as registered post meta
+        // so it is exposed via the WP REST API
+        if (isset($acf_fields['bloke_colorPresa'])) {
+            update_post_meta($post_id, 'bloke_colorPresa', sanitize_text_field($acf_fields['bloke_colorPresa']));
+        }
     }
-    
+
     return array(
         'success' => true,
         'post_id' => $post_id,
@@ -197,26 +242,148 @@ function blokes_create_with_acf($request) {
  * Update ACF fields for existing bloke
  */
 function blokes_update_acf($request) {
-    $post_id = intval($request['id']);
-    $acf_fields = $request->get_param('acf');
-    
+    $post_id        = intval($request['id']);
+    $acf_fields     = $request->get_param('acf');
+    $title          = $request->get_param('title');
+    $featured_media = $request->get_param('featured_media');
+
     // Validate post exists and is a bloke
     $post = get_post($post_id);
     if (!$post || $post->post_type !== 'blokes') {
         return new WP_Error('invalid_bloke', 'Invalid bloke ID', array('status' => 404));
     }
-    
+
+    // Update post title if provided
+    if ($title !== null && $title !== '') {
+        wp_update_post(array(
+            'ID'         => $post_id,
+            'post_title' => sanitize_text_field($title),
+        ));
+    }
+
+    // Update featured image if an ID was provided
+    if ($featured_media !== null) {
+        $media_id = intval($featured_media);
+        if ($media_id > 0) {
+            set_post_thumbnail($post_id, $media_id);
+        } else {
+            delete_post_thumbnail($post_id);
+        }
+    }
+
     // Update ACF fields
     if (is_array($acf_fields)) {
         foreach ($acf_fields as $field_name => $field_value) {
             update_field($field_name, $field_value, $post_id);
         }
+        // Ensure bloke_colorPresa is also saved as registered post meta
+        if (isset($acf_fields['bloke_colorPresa'])) {
+            update_post_meta($post_id, 'bloke_colorPresa', sanitize_text_field($acf_fields['bloke_colorPresa']));
+        }
     }
-    
+
     return array(
         'success' => true,
         'post_id' => $post_id,
-        'acf' => get_fields($post_id)
+        'acf'     => get_fields($post_id),
+    );
+}
+
+/**
+ * Hall of Fame - get stored list
+ */
+function blokes_get_hall_of_fame($request) {
+    $data = get_option('blokes_hall_of_fame', array());
+    return is_array($data) ? $data : array();
+}
+
+/**
+ * Hall of Fame - save list (array of bloke objects from React)
+ */
+function blokes_save_hall_of_fame($request) {
+    $blokes = $request->get_param('blokes');
+    if (!is_array($blokes)) {
+        return new WP_Error('invalid_data', 'blokes must be an array', array('status' => 400));
+    }
+    $clean = array();
+    foreach (array_slice($blokes, 0, 10) as $b) {
+        if (!is_array($b)) continue;
+        $clean[] = array(
+            'postId'            => intval(isset($b['postId']) ? $b['postId'] : 0),
+            'title'             => sanitize_text_field(isset($b['title']) ? $b['title'] : ''),
+            'color'             => sanitize_text_field(isset($b['color']) ? $b['color'] : ''),
+            'sala'              => sanitize_text_field(isset($b['sala']) ? $b['sala'] : ''),
+            'equipador'         => sanitize_text_field(isset($b['equipador']) ? $b['equipador'] : ''),
+            'totalInteractions' => intval(isset($b['totalInteractions']) ? $b['totalInteractions'] : 0),
+            'timestamp'         => sanitize_text_field(isset($b['timestamp']) ? $b['timestamp'] : ''),
+        );
+    }
+    update_option('blokes_hall_of_fame', $clean, false);
+    return array('success' => true, 'count' => count($clean));
+}
+
+/**
+ * Return the list of bloke IDs the current user has marked as done
+ */
+function blokes_get_my_completions($request) {
+    $user_id = get_current_user_id();
+    $saved   = get_user_meta($user_id, '_blokes_completed', true);
+    $my_ids  = is_array($saved) ? array_values(array_map('intval', $saved)) : array();
+    $log     = get_user_meta($user_id, '_blokes_completion_log', true);
+    if (!is_array($log)) $log = array();
+    return array(
+        'myIds' => $my_ids,
+        'log'   => $log,  // [{postId, color, timestamp}, ...] for future stats page
+    );
+}
+
+/**
+ * Toggle a bloke as done/not-done for the current user.
+ * Updates user meta (_blokes_completed) and post meta (_bloke_completion_count).
+ */
+function blokes_toggle_completion($request) {
+    $post_id = intval($request['id']);
+    $user_id = get_current_user_id();
+
+    $post = get_post($post_id);
+    if (!$post || $post->post_type !== 'blokes') {
+        return new WP_Error('invalid_bloke', 'Invalid bloke ID', array('status' => 404));
+    }
+
+    $saved         = get_user_meta($user_id, '_blokes_completed', true);
+    $completed_ids = is_array($saved) ? array_map('intval', $saved) : array();
+
+    $log = get_user_meta($user_id, '_blokes_completion_log', true);
+    if (!is_array($log)) $log = array();
+
+    if (in_array($post_id, $completed_ids)) {
+        // Unmark: remove from IDs list and from log
+        $completed_ids = array_values(array_diff($completed_ids, array($post_id)));
+        $log           = array_values(array_filter($log, function($e) use ($post_id) {
+            return intval($e['postId']) !== $post_id;
+        }));
+        $completed = false;
+        $count     = max(0, (int) get_post_meta($post_id, '_bloke_completion_count', true) - 1);
+    } else {
+        // Mark: add to IDs list and log with color + timestamp
+        $completed_ids[] = $post_id;
+        $color = sanitize_text_field(get_field('bloke_color', $post_id) ?: 'green');
+        $log[] = array(
+            'postId'    => $post_id,
+            'color'     => $color,
+            'timestamp' => current_time('c'),
+        );
+        $completed = true;
+        $count     = (int) get_post_meta($post_id, '_bloke_completion_count', true) + 1;
+    }
+
+    update_user_meta($user_id, '_blokes_completed', $completed_ids);
+    update_user_meta($user_id, '_blokes_completion_log', $log);
+    update_post_meta($post_id, '_bloke_completion_count', $count);
+
+    return array(
+        'completed' => $completed,
+        'count'     => $count,
     );
 }
 
