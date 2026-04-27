@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/components/EventCard.jsx' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/components/EventCard.jsx')",
+      "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/components/EventCard.css' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/components/EventCard.css')",
+      "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/components/FilterBar.jsx' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/components/FilterBar.jsx')",
+      "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/App.css' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/App.css')",
+      "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/pages/StatsPage.jsx' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/pages/StatsPage.jsx')",
+      "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/pages/StatsPage.css' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/pages/StatsPage.css')"
+    ]
+  }
+}

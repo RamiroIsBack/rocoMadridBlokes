@@ -12,8 +12,8 @@ const WORDPRESS_URL =
 const ENV_AUTH =
     import.meta.env.VITE_WORDPRESS_AUTH
 
-// Get auth header for API calls
-function getAuthHeader() {
+// Get auth header for API calls - exported for use in other modules
+export function getAuthHeader() {
     if (ENV_AUTH) {
         const [username, password] = ENV_AUTH.split(':')
         return `Basic ${btoa(`${username}:${password}`)}`
@@ -31,12 +31,20 @@ function getAuthHeader() {
     return null
 }
 
-const CATEGORY_MAP = {
-    // Map WordPress category IDs to your category codes
-    // You'll need to update these IDs after creating categories in WordPress
-    PUZLE: 1, // Replace with actual category ID
-    TECNICO: 2, // Replace with actual category ID
-    ENTRENAMIENTO: 3, // Replace with actual category ID
+// Normalize legacy numeric category IDs to string names
+const CATEGORY_ID_MAP = { 1: 'FUERZA', 2: 'TECNICA', 3: 'DINAMICO' }
+function normalizeCategory(raw) {
+    if (!raw) return 'FUERZA'
+    const str = String(raw).trim()
+    return CATEGORY_ID_MAP[str] || CATEGORY_ID_MAP[Number(str)] || str
+}
+
+// Normalize legacy equipador values
+const EQUIPADOR_MAP = { sigur: 'sigurd' }
+function normalizeEquipador(raw) {
+    if (!raw) return 'alvaro'
+    const str = String(raw).trim().toLowerCase()
+    return EQUIPADOR_MAP[str] || str
 }
 
 // Mock data for local testing without WordPress
@@ -52,9 +60,9 @@ const MOCK_CARDS = [{
         title: 'Problema de Prueba',
         category: 'ENTRENAMIENTO',
         sala: 'entrada',
-        subsala: '1',
-        tipo: 'intro',
-        grado: 'suave',
+            subsala: '1',
+            tipo: 'intro',
+            grado: 'suave',
         color: 'green',
         interactions: {
             star_1: 5,
@@ -68,13 +76,15 @@ const MOCK_CARDS = [{
         id: 'post-2',
         postId: 2,
         timestamp: '2024-01-16T14:30:00Z',
-        images: [{
-            url: 'https://rocomadrid.com/wp-content/uploads/2025/12/categoria-bebidas-comida.jpg',
-            isVideo: false
-        }, {
-            url: 'https://rocomadrid.com/wp-content/uploads/2025/12/categoria-ropa.jpg',
-            isVideo: false
-        }],
+        images: [
+            {
+                url: 'https://rocomadrid.com/wp-content/uploads/2025/12/categoria-bebidas-comida.jpg',
+                isVideo: false
+            }, {
+                url: 'https://rocomadrid.com/wp-content/uploads/2025/12/categoria-ropa.jpg',
+                isVideo: false
+            }
+        ],
         description: 'Problema técnico de precisión.',
         title: 'El Techo',
         category: 'TECNICO',
@@ -91,16 +101,18 @@ const MOCK_CARDS = [{
         id: 'post-3',
         postId: 3,
         timestamp: '2024-01-17T09:15:00Z',
-        images: [{
-            url: 'https://rocomadrid.com/wp-content/uploads/2025/12/categoria-bebidas-comida.jpg',
-            isVideo: false
-        }, {
-            url: 'https://rocomadrid.com/wp-content/uploads/2025/12/categoria-ropa.jpg',
-            isVideo: false
-        }, {
-            url: 'https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4',
-            isVideo: true
-        }],
+        images: [
+            {
+                url: 'https://rocomadrid.com/wp-content/uploads/2025/12/categoria-bebidas-comida.jpg',
+                isVideo: false
+            }, {
+                url: 'https://rocomadrid.com/wp-content/uploads/2025/12/categoria-ropa.jpg',
+                isVideo: false
+            }, {
+                url: 'https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4',
+                isVideo: true
+            }
+        ],
         description: 'Puzzle de movimientos complejos.',
         title: 'El Laberinto',
         category: 'PUZLE',
@@ -168,9 +180,7 @@ export function useWordPressPosts() {
             if (hasCredentials) {
                 try {
                     // Build the WordPress REST API URL
-                    const categoryIds = Object.values(CATEGORY_MAP).join(',')
                     const url = `${WORDPRESS_URL}/wp-json/wp/v2/blokes?` + new URLSearchParams({
-                        per_page: 100,
                         per_page: 100,
                         _embed: '',
                         acf_format: 'standard',
@@ -205,6 +215,7 @@ export function useWordPressPosts() {
                                 const featuredMedia = post._embedded['wp:featuredmedia'][0]
                                 const isVideo = featuredMedia.mime_type && featuredMedia.mime_type.startsWith('video/')
                                 images.push({
+                                    id: featuredMedia.id,
                                     url: featuredMedia.source_url,
                                     isVideo
                                 })
@@ -221,16 +232,15 @@ export function useWordPressPosts() {
                                     if (img.mime_type) {
                                         isVideo = img.mime_type.startsWith('video/')
                                     } else if (img.media_details && img.media_details.mime_type) {
-                                        // Check media_details as fallback
                                         isVideo = img.media_details.mime_type.startsWith('video/')
                                     } else if (mediaUrl) {
-                                        // Check by file extension as last resort
                                         const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.m4v']
                                         isVideo = videoExtensions.some(ext => mediaUrl.toLowerCase().endsWith(ext))
                                     }
 
                                     if (mediaUrl && !images.some(i => i.url === mediaUrl)) {
                                         images.push({
+                                            id: img.id || null,
                                             url: mediaUrl,
                                             isVideo
                                         })
@@ -238,28 +248,23 @@ export function useWordPressPosts() {
                                 })
                             }
 
-                            let category = 'PUZLE'
-                            if (post.categories && post.categories.length > 0) {
-                                const categoryId = post.categories[0]
-                                const categoryName = Object.keys(CATEGORY_MAP).find(
-                                    key => CATEGORY_MAP[key] === categoryId
-                                )
-                                if (categoryName) category = categoryName
-                            }
+                            const category = normalizeCategory(acf.bloke_category)
 
                             const color = acf.bloke_color || 'green'
                             const sala = acf.bloke_sala || 'entrada'
                             const subsala = acf.bloke_subsala || '1'
                             const tipo = acf.bloke_tipo || 'bloke'
                             const grado = acf.bloke_grado || 'medio'
-                            const equipador = acf.bloke_equipador || 'alvaro'
-                            const colorPresa = acf.bloke_colorPresa || ''
+                            const equipador = normalizeEquipador(acf.bloke_equipador)
+                            // Read colorPresa: ACF field, rest_prepare filter injection, or post meta fallback
+                            const meta = post.meta || {}
+                            const colorPresa = acf.bloke_colorPresa || acf.bloke_colorpresa || post.bloke_colorPresa || meta.bloke_colorPresa || ''
                             const blokeInteractions = acf.bloke_interactions || {}
                             const interactions = {
-                                star_1: Number(blokeInteractions.star_1 || 0),
-                                star_2: Number(blokeInteractions.star_2 || 0),
-                                star_3: Number(blokeInteractions.star_3 || 0),
-                                skull: Number(blokeInteractions.skull || 0)
+                                    star_1: Number(blokeInteractions.star_1 || 0),
+                                    star_2: Number(blokeInteractions.star_2 || 0),
+                                    star_3: Number(blokeInteractions.star_3 || 0),
+                                    skull: Number(blokeInteractions.skull || 0)
                             }
 
                             return {
@@ -328,14 +333,12 @@ export function useWordPressPosts() {
             // Trigger a reload by calling fetchData again
             setLoading(true)
             setError(null)
-
             // Use a timeout to ensure state is set first
             setTimeout(() => {
                 // Re-trigger the effect by manually fetching
                 const forceMock =
                     import.meta.env.VITE_USE_MOCK === 'true'
                 const hasCredentials = !!ENV_AUTH
-
                 if (forceMock) {
                     setCards(MOCK_CARDS)
                     setDataSource('mock')
@@ -379,8 +382,7 @@ export function useWordPressPosts() {
                                             }
                                         })
                                     }
-                                    const category = acf.bloke_category ?
-                                        Object.keys(CATEGORY_MAP).find(k => CATEGORY_MAP[k] === acf.bloke_category) || 'TECNICA' : 'TECNICA'
+                                    const category = normalizeCategory(acf.bloke_category)
                                     const blokeInteractions = acf.bloke_interactions || {}
                                     const interactions = {
                                         star_1: Number(blokeInteractions.star_1 || 0),
@@ -401,8 +403,8 @@ export function useWordPressPosts() {
                                         tipo: acf.bloke_tipo || 'bloke',
                                         grado: acf.bloke_grado || 'medio',
                                         color: acf.bloke_color || 'green',
-                                        colorPresa: acf.bloke_colorPresa || '',
-                                        equipador: acf.bloke_equipador || 'alvaro',
+                                        colorPresa: acf.bloke_colorPresa || acf.bloke_colorpresa || post.bloke_colorPresa || (post.meta && post.meta.bloke_colorPresa) || '',
+                                        equipador: normalizeEquipador(acf.bloke_equipador),
                                         interactions
                                     }
                                 })
@@ -425,7 +427,7 @@ export function useWordPressPosts() {
                 }
             }, 100)
         }, [])
-    }
+        }
 }
 
 /**
@@ -435,52 +437,53 @@ export function useWordPressPosts() {
  * @returns {Promise<Object>}
  */
 export async function recordInteraction(postId, type) {
-    // Use the public custom endpoint - no authentication needed
-    // The endpoint handles incrementing the count server-side
-    try {
-        const response = await fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/interact/${postId}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                type
+        // Use the public custom endpoint - no authentication needed
+        // The endpoint handles incrementing the count server-side
+        try {
+            const response = await fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/interact/${postId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    type
+                })
             })
-        })
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}))
-            throw new Error(errorData.message || 'Failed to record interaction')
-        }
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}))
+                throw new Error(errorData.message || 'Failed to record interaction')
+            }
 
         const result = await response.json()
         return {
             success: true,
             mock: false,
-            interactions: result.interactions
+                interactions: result.interactions
+            }
+            }
+            catch (err) {
+                console.error('Error recording interaction:', err)
+                return {
+                    success: false,
+                    error: err.message
+                }
+            }
+            }
+            /**
+             * Delete a bloke and its associated media
+             * @param {number} postId - The ID of the bloke to delete
+             * @returns {Promise<Object>}
+             */
+            export async function deleteBloke(postId) {
+        const authHeader = getAuthHeader()
+        if (!authHeader) {
+            throw new Error('No authentication configured')
         }
-    } catch (err) {
-        console.error('Error recording interaction:', err)
-        return {
-            success: false,
-            error: err.message
-        }
-    }
-}
-/**
- * Delete a bloke and its associated media
- * @param {number} postId - The ID of the bloke to delete
- * @returns {Promise<Object>}
- */
-export async function deleteBloke(postId) {
-    const authHeader = getAuthHeader()
-    if (!authHeader) {
-        throw new Error('No authentication configured')
-    }
 
     try {
         const response = await fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/delete/${postId}`, {
-            method: 'DELETE',
+                    method: 'DELETE',
             headers: {
                 'Authorization': authHeader,
                 'Content-Type': 'application/json'
@@ -493,11 +496,12 @@ export async function deleteBloke(postId) {
         }
 
         return await response.json()
-    } catch (err) {
-        console.error('Error deleting bloke:', err)
-        throw err
-    }
-}
+        }
+        catch (err) {
+            console.error('Error deleting bloke:', err)
+            throw err
+        }
+        }
 
 /**
  * Update an existing bloke (data only, not media)
@@ -506,10 +510,10 @@ export async function deleteBloke(postId) {
  * @returns {Promise<Object>}
  */
 export async function updateBloke(postId, data) {
-    const authHeader = getAuthHeader()
-    if (!authHeader) {
-        throw new Error('No authentication configured')
-    }
+        const authHeader = getAuthHeader()
+        if (!authHeader) {
+            throw new Error('No authentication configured')
+        }
 
     try {
         const response = await fetch(`${WORDPRESS_URL}/wp-json/wp/v2/blokes/${postId}`, {

@@ -4,8 +4,9 @@
     position: relative;
     width: 100%;
     overflow: hidden;
-    border-radius: 8px;
-    background-color: #1a1a1a;
+    border-radius: 7px 7px 0 0;
+    background-color: #fdfaf0;
+    padding: 6px 6px 0 6px; /* white photo-print border on 3 sides */
 }
 
 .gallery--empty {
@@ -315,7 +316,7 @@
 
     /* Gallery container */
     .gallery {
-        border-radius: 0;
+        border-radius: 7px 7px 0 0;
     }
 
     /* Always show carousel controls on mobile */

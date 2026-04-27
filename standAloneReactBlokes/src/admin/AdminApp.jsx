@@ -8,18 +8,18 @@ const SESSION_KEY = 'blokes_auth'
 
 export default function AdminApp() {
   const [showLogin, setShowLogin] = useState(() => {
-    // Check sessionStorage on initial load
-    return !sessionStorage.getItem(SESSION_KEY)
+    // Check localStorage on initial load
+    return !localStorage.getItem(SESSION_KEY)
   })
 
   const handleLoginSuccess = () => {
-    // Store in sessionStorage
-    sessionStorage.setItem(SESSION_KEY, 'true')
+    // Store in localStorage
+    localStorage.setItem(SESSION_KEY, 'true')
     setShowLogin(false)
   }
 
   const handleLogout = () => {
-    sessionStorage.removeItem(SESSION_KEY)
+    localStorage.removeItem(SESSION_KEY)
     setShowLogin(true)
   }
 
@@ -35,14 +35,6 @@ export default function AdminApp() {
             </div>
           </main>
 
-          <footer className="admin-app__footer">
-            <p>
-              Rocoteca Madrid Admin &middot; 
-              <a href="/" target="_blank" rel="noopener noreferrer">
-                Ver sitio público
-              </a>
-            </p>
-          </footer>
         </div>
       )}
     </div>

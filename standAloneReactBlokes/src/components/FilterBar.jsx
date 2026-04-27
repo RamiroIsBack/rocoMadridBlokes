@@ -5,22 +5,64 @@ const SALAS = [
   { key: 'cueva', label: 'Cueva' },
 ]
 
-/**
- * @param {{ activeFilter: string, onFilterChange: (sala: string) => void }} props
- */
-export default function FilterBar({ activeFilter, onFilterChange }) {
+const COLORES = [
+  { key: 'TODOS', label: 'Todos' },
+  { key: 'green', label: 'Verde' },
+  { key: 'blue', label: 'Azul' },
+  { key: 'yellow', label: 'Amarillo' },
+  { key: 'red', label: 'Rojo' },
+  { key: 'black', label: 'Negro' },
+  { key: 'blanco', label: 'Trave' },
+]
+
+export default function FilterBar({ activeSala, onSalaChange, activeColor, onColorChange, sortMode, onSortMode }) {
   return (
-    <nav className="filter-bar" aria-label="Filtrar por sala">
-      {SALAS.map((sala) => (
-        <button
-          key={sala.key}
-          className={`filter-btn ${activeFilter === sala.key ? 'filter-btn--active' : ''}`}
-          onClick={() => onFilterChange(sala.key)}
-          aria-pressed={activeFilter === sala.key}
+    <nav className="filter-bar" aria-label="Filtros">
+      <label className="filter-bar__field">
+        <span className="filter-bar__label">Sala</span>
+        <select
+          className="filter-select"
+          value={activeSala}
+          onChange={(e) => onSalaChange(e.target.value)}
         >
-          {sala.label}
-        </button>
-      ))}
+          {SALAS.map((sala) => (
+            <option key={sala.key} value={sala.key}>{sala.label}</option>
+          ))}
+        </select>
+      </label>
+
+      <label className="filter-bar__field">
+        <span className="filter-bar__label">Color</span>
+        <select
+          className="filter-select"
+          value={activeColor}
+          onChange={(e) => onColorChange(e.target.value)}
+        >
+          {COLORES.map((color) => (
+            <option key={color.key} value={color.key}>{color.label}</option>
+          ))}
+        </select>
+      </label>
+
+      <div className="filter-bar__field">
+        <span className="filter-bar__label">Orden</span>
+        <div className="filter-bar__sort-group">
+          <button
+            className={`filter-bar__sort-btn${sortMode === 'newest' ? ' filter-bar__sort-btn--active' : ''}`}
+            onClick={() => onSortMode('newest')}
+            title="Más nuevos primero"
+          >
+            NEW
+          </button>
+          <button
+            className={`filter-bar__sort-btn${sortMode === 'stars' ? ' filter-bar__sort-btn--active' : ''}`}
+            onClick={() => onSortMode('stars')}
+            title="Más votados primero"
+          >
+            ⭐
+          </button>
+        </div>
+      </div>
     </nav>
   )
 }

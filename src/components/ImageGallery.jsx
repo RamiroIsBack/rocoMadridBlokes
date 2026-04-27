@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import './ImageGallery.css'
 
 /**
@@ -19,6 +20,7 @@ export default function ImageGallery({ images, title }) {
   const touchEndX = useRef(0)
   const touchStartY = useRef(0)
   const touchEndY = useRef(0)
+  const didSwipe = useRef(false)
 
   // Normalize images to array of objects with url and isVideo
   const normalizedImages = (images || []).map(img => {
@@ -27,6 +29,16 @@ export default function ImageGallery({ images, title }) {
     }
     return { url: img.url || img, isVideo: img.isVideo || false }
   })
+
+  // Lock body scroll when lightbox is open
+  useEffect(() => {
+    if (lightboxOpen) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => { document.body.style.overflow = '' }
+  }, [lightboxOpen])
 
   // Handle keyboard navigation in lightbox
   useEffect(() => {
@@ -53,27 +65,18 @@ export default function ImageGallery({ images, title }) {
   const handleTouchStart = (e) => {
     touchStartX.current = e.changedTouches[0].screenX
     touchStartY.current = e.changedTouches[0].screenY
+    didSwipe.current = false
   }
 
   const handleTouchEnd = (e) => {
     touchEndX.current = e.changedTouches[0].screenX
     touchEndY.current = e.changedTouches[0].screenY
-    handleSwipe()
-  }
-
-  const handleSwipe = () => {
     const deltaX = touchEndX.current - touchStartX.current
     const deltaY = touchEndY.current - touchStartY.current
-    
-    // Only trigger if horizontal swipe is greater than vertical
-    if (Math.abs(deltaX) > Math.abs(deltaY)) {
-      if (Math.abs(deltaX) > 50) { // Minimum swipe distance
-        if (deltaX > 0) {
-          goToPrev()
-        } else {
-          goToNext()
-        }
-      }
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 40) {
+      didSwipe.current = true
+      if (deltaX > 0) goToPrev()
+      else goToNext()
     }
   }
 
@@ -146,8 +149,8 @@ export default function ImageGallery({ images, title }) {
           </div>
         </div>
 
-        {lightboxOpen && (
-          <div 
+        {lightboxOpen && createPortal(
+          <div
             className={`lightbox ${isFullscreen ? 'lightbox--fullscreen' : ''}`}
             onClick={closeLightbox}
             onTouchStart={handleTouchStart}
@@ -156,8 +159,8 @@ export default function ImageGallery({ images, title }) {
             aria-modal="true"
             aria-label={`${isVideo ? 'Video' : 'Imagen'} ampliada: ${title}`}
           >
-            <button 
-              className="lightbox__close" 
+            <button
+              className="lightbox__close"
               onClick={closeLightbox}
               aria-label="Cerrar"
             >
@@ -180,7 +183,8 @@ export default function ImageGallery({ images, title }) {
                 />
               )}
             </div>
-          </div>
+          </div>,
+          document.body
         )}
       </>
     )
@@ -188,14 +192,16 @@ export default function ImageGallery({ images, title }) {
 
   return (
     <>
-      <div 
+      <div
         className="gallery gallery--carousel"
         onMouseEnter={() => setIsHovering(true)}
         onMouseLeave={() => setIsHovering(false)}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
       >
-        <div 
+        <div
           className="gallery__image-container"
-          onClick={openLightbox}
+          onClick={() => { if (!didSwipe.current) openLightbox() }}
         >
           {isCurrentVideo ? (
             <video
@@ -240,8 +246,8 @@ export default function ImageGallery({ images, title }) {
         </div>
       </div>
 
-      {lightboxOpen && (
-        <div 
+      {lightboxOpen && createPortal(
+        <div
           className={`lightbox ${isFullscreen ? 'lightbox--fullscreen' : ''}`}
           onClick={closeLightbox}
           onTouchStart={handleTouchStart}
@@ -250,14 +256,14 @@ export default function ImageGallery({ images, title }) {
           aria-modal="true"
           aria-label={`Galería de imágenes: ${title}`}
         >
-          <button 
-            className="lightbox__close" 
+          <button
+            className="lightbox__close"
             onClick={closeLightbox}
             aria-label="Cerrar"
           >
             ×
           </button>
-          
+
           {normalizedImages.length > 1 && (
             <>
               <button
@@ -276,7 +282,7 @@ export default function ImageGallery({ images, title }) {
               </button>
             </>
           )}
-          
+
           <div className="lightbox__content" onClick={(e) => e.stopPropagation()}>
             {isCurrentVideo ? (
               <video
@@ -299,7 +305,8 @@ export default function ImageGallery({ images, title }) {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   )

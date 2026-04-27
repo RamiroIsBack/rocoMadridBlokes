@@ -1,18 +1,17 @@
-# Blokes — React SPA for /blokes subdirectory
+# Blokes — React SPA deployed at root
 <IfModule mod_rewrite.c>
   RewriteEngine On
-  RewriteBase /blokes/
-  
-  # If it's a file, serve it directly
+  RewriteBase /
+
+  # Serve existing files and directories directly
   RewriteCond %{REQUEST_FILENAME} -f
   RewriteRule ^ - [L]
-  
-  # If it's a directory, serve it directly
+
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
-  
-  # Otherwise, rewrite to index.html for React Router
-  RewriteRule ^ /blokes/index.html [L]
+
+  # Everything else → index.html (React Router)
+  RewriteRule ^ /index.html [L]
 </IfModule>
 
 # Aggressive cache for hashed assets (JS, CSS, fonts, images)

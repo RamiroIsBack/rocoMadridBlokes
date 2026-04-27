@@ -1,8 +1,9 @@
 /* ============================================
    GOOGLE FONTS — matches rocomadrid.com brand
+   Playfair Display: display headings (retro serif)
    Montserrat: headings | Inter: body text
    ============================================ */
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Montserrat:wght@700;800&family=Inter:wght@400;500;600&display=swap');
 
 /* ============================================
    GLOBAL RESET & DESIGN TOKENS
@@ -17,13 +18,13 @@
 }
 
 :root {
-  /* Brand colors — rocomadrid.com palette */
-  --color-bg: #f5f5f5;
-  --color-surface: #ffffff;
+  /* Brand colors — rocomadrid.com palette, warmed up for retro feel */
+  --color-bg: #f4f0e4;            /* parchment warm */
+  --color-surface: #fdfaf3;       /* warm white */
   --color-header: #1f1f1f;        /* charcoal — matches site header */
-  --color-text-primary: #1f1f1f;
-  --color-text-secondary: #555555;
-  --color-border: #e0e0e0;
+  --color-text-primary: #2a2520;
+  --color-text-secondary: #5e5650;
+  --color-border: #cfc9b8;        /* warm beige border */
   --color-accent: #d19d02;        /* golden yellow — primary CTA on rocomadrid.com */
   --color-accent-hover: #846400;  /* darker gold on hover */
 
@@ -43,19 +44,20 @@
   /* Typography */
   --font-body: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-heading: 'Montserrat', 'Segoe UI', system-ui, sans-serif;
+  --font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --font-size-sm: 14px;
   --font-size-base: 16px;
   --font-size-lg: 20px;
   --font-size-xl: 32px;
 
-  /* Shape */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  /* Shape — less rounded for retro feel */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
 
-  /* Shadows */
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.10);
-  --shadow-card-hover: 0 6px 20px rgba(0, 0, 0, 0.18);
+  /* Shadows — subtler, more matte */
+  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--color-border);
+  --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.12), 0 0 0 1px #bfb89e;
 }
 
 html {

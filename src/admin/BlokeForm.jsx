@@ -28,13 +28,19 @@ const GRADOS = [
 
 // Color de presas options
 const COLOR_PRESAS = [
-  { value: 'presas_azules', label: 'Presas Azules' },
-  { value: 'presas_blancas', label: 'Presas Blancas' },
-  { value: 'presas_negras', label: 'Presas Negras' },
-  { value: 'presas_rojas', label: 'Presas Rojas' },
-  { value: 'presas_amarillas', label: 'Presas Amarillas' },
-  { value: 'presas_verdes', label: 'Presas Verdes' },
-  { value: 'presas_color_raro', label: 'Presas Color Raro' },
+  { value: 'presas_azules',         label: 'Presas Azules' },
+  { value: 'presas_blancas',        label: 'Presas Blancas' },
+  { value: 'presas_negras',         label: 'Presas Negras' },
+  { value: 'presas_rojas',          label: 'Presas Rojas' },
+  { value: 'presas_amarillas',      label: 'Presas Amarillas' },
+  { value: 'presas_verdes',         label: 'Presas Verdes' },
+  { value: 'presas_moradas',        label: 'Presas Moradas' },
+  { value: 'presas_rosas',          label: 'Presas Rosas' },
+  { value: 'presas_grises',         label: 'Presas Grises' },
+  { value: 'presas_turquesa',       label: 'Presas Turquesa' },
+  { value: 'presas_amarillo_fluor', label: 'Presas Amarillo Fluor' },
+  { value: 'presas_naranja',        label: 'Presas Naranja' },
+  { value: 'presas_color_raro',     label: 'Presas Color Raro' },
 ]
 
 // All color options
@@ -82,7 +88,7 @@ const SUBSALAS = {
 // Equipador options
 const EQUIPADORES = [
   { value: 'alvaro', label: 'Alvaro' },
-  { value: 'sigur', label: 'Sigur' },
+  { value: 'sigurd', label: 'Sigurd' },
   { value: 'sara', label: 'Sara' },
   { value: 'lucia', label: 'Lucia' },
   { value: 'ana', label: 'Ana' },
@@ -238,7 +244,7 @@ export default function BlokeForm() {
       const acfFields = {
         bloke_description: description,
         bloke_gallery: uploadedImages.map(img => img.id).slice(1), // All except first (featured image)
-        bloke_category: selectedCategories.length > 0 ? parseInt(selectedCategories[0]) : 1,
+        bloke_category: selectedCategories.length > 0 ? (CATEGORIES.find(c => c.id === selectedCategories[0])?.name || 'FUERZA') : 'FUERZA',
         bloke_tipo: tipo,
         bloke_color: color,
         bloke_grado: grado,
