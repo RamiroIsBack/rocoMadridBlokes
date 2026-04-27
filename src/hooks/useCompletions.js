@@ -21,6 +21,11 @@ export function useCompletions() {
   const [countOverrides, setCountOverrides] = useState({})
   const [myRatings, setMyRatings] = useState(loadLocalRatings)
   const [ratingCountOverrides, setRatingCountOverrides] = useState({})
+  // postIds the user has already voted on this session — prevents re-voting same icon
+  const [sessionVoted, setSessionVoted] = useState(() => {
+    const stored = loadLocalRatings()
+    return new Set(Object.keys(stored).filter(k => stored[k] != null))
+  })
 
   useEffect(() => {
     if (!siteData.isLoggedIn || !siteData.nonce) return
@@ -33,7 +38,9 @@ export function useCompletions() {
       .then(data => {
         setCompletedByMe(new Set((data.myIds || []).map(Number)))
         if (data.myRatings && Object.keys(data.myRatings).length > 0) {
-          setMyRatings(data.myRatings)
+          const serverRatings = data.myRatings
+          setMyRatings(serverRatings)
+          setSessionVoted(new Set(Object.keys(serverRatings).filter(k => serverRatings[k] != null)))
         }
       })
       .catch(e => console.warn('Could not load completions:', e))
@@ -86,27 +93,34 @@ export function useCompletions() {
   }, [completedByMe])
 
   const rateBloke = useCallback(async (postId, type, baseRatings = {}) => {
-    const { nonce, loginUrl, isLoggedIn } = getSiteData()
+    const { nonce } = getSiteData()
     const key = String(postId)
     const currentRating = myRatings[key] || null
-    const newRating = currentRating === type ? null : type
+    const alreadyVoted = sessionVoted.has(key)
+
+    // Already voted this session and clicking the same icon → do nothing
+    if (alreadyVoted && currentRating === type) return
+
+    const newRating = type
+    const previousType = currentRating
 
     // Optimistic: update selection
     setMyRatings(prev => ({ ...prev, [key]: newRating }))
 
     // Optimistic: update counts
     const optimisticCounts = { ...baseRatings }
-    if (currentRating && optimisticCounts[currentRating] !== undefined) {
-      optimisticCounts[currentRating] = Math.max(0, (Number(optimisticCounts[currentRating]) || 0) - 1)
+    if (previousType && optimisticCounts[previousType] !== undefined) {
+      optimisticCounts[previousType] = Math.max(0, (Number(optimisticCounts[previousType]) || 0) - 1)
     }
-    if (newRating) {
-      optimisticCounts[newRating] = (Number(optimisticCounts[newRating]) || 0) + 1
-    }
+    optimisticCounts[newRating] = (Number(optimisticCounts[newRating]) || 0) + 1
     setRatingCountOverrides(prev => ({ ...prev, [postId]: optimisticCounts }))
 
-    // Persist in localStorage (works for everyone, overwritten by server for logged-in)
+    // Mark as voted this session
+    setSessionVoted(prev => new Set([...prev, key]))
+
+    // Persist in localStorage
     const stored = loadLocalRatings()
-    if (newRating === null) { delete stored[key] } else { stored[key] = newRating }
+    stored[key] = newRating
     saveLocalRatings(stored)
 
     try {
@@ -117,28 +131,24 @@ export function useCompletions() {
         method: 'POST',
         credentials: 'include',
         headers,
-        body: JSON.stringify({ type, previousType: currentRating }),
+        body: JSON.stringify({ type, previousType }),
       })
       const data = await res.json()
       setMyRatings(prev => ({ ...prev, [key]: data.rating }))
-      if (data.ratings) {
-        setRatingCountOverrides(prev => ({ ...prev, [postId]: data.ratings }))
+      if (data.interactions) {
+        setRatingCountOverrides(prev => ({ ...prev, [postId]: data.interactions }))
       }
-
-      // Sync localStorage with confirmed server rating
-      const confirmed = loadLocalRatings()
-      if (data.rating === null) { delete confirmed[key] } else { confirmed[key] = data.rating }
-      saveLocalRatings(confirmed)
     } catch (e) {
       // Rollback
       setMyRatings(prev => ({ ...prev, [key]: currentRating }))
       setRatingCountOverrides(prev => { const next = { ...prev }; delete next[postId]; return next })
+      if (!alreadyVoted) setSessionVoted(prev => { const next = new Set(prev); next.delete(key); return next })
       const rolled = loadLocalRatings()
       if (currentRating === null) { delete rolled[key] } else { rolled[key] = currentRating }
       saveLocalRatings(rolled)
       console.error('Rating failed:', e)
     }
-  }, [myRatings])
+  }, [myRatings, sessionVoted])
 
   return {
     isLoggedIn: siteData.isLoggedIn,

@@ -20,11 +20,6 @@ add_filter('rest_prepare_blokes', function($response, $post, $request) {
     $data = $response->get_data();
     $data['bloke_colorPresa'] = get_post_meta($post->ID, 'bloke_colorPresa', true);
     $data['bloke_completion_count'] = (int) get_post_meta($post->ID, '_bloke_completion_count', true);
-    $ratings = get_post_meta($post->ID, '_bloke_ratings', true);
-    if (!is_array($ratings)) {
-        $ratings = array('star_1' => 0, 'star_2' => 0, 'star_3' => 0, 'skull' => 0);
-    }
-    $data['bloke_ratings'] = $ratings;
     $response->set_data($data);
     return $response;
 }, 10, 3);
@@ -430,27 +425,22 @@ function blokes_rate_bloke($request) {
         return new WP_Error('invalid_bloke', 'Invalid bloke ID', array('status' => 404));
     }
 
-    $ratings = get_post_meta($post_id, '_bloke_ratings', true);
-    if (!is_array($ratings)) {
-        $ratings = array('star_1' => 0, 'star_2' => 0, 'star_3' => 0, 'skull' => 0);
+    // Work on the existing bloke_interactions ACF field so counts are unified
+    $interactions = get_field('bloke_interactions', $post_id);
+    if (!is_array($interactions)) {
+        $interactions = array('star_1' => 0, 'star_2' => 0, 'star_3' => 0, 'skull' => 0);
     }
 
-    // Decrement the previous different vote
-    if ($previous && $previous !== $type && isset($ratings[$previous])) {
-        $ratings[$previous] = max(0, intval($ratings[$previous]) - 1);
+    // Decrement previous vote if changing opinion
+    if ($previous && $previous !== $type && isset($interactions[$previous])) {
+        $interactions[$previous] = max(0, intval($interactions[$previous]) - 1);
     }
 
-    if ($previous === $type) {
-        // Toggle off
-        $ratings[$type] = max(0, intval(isset($ratings[$type]) ? $ratings[$type] : 0) - 1);
-        $new_rating = null;
-    } else {
-        // New or changed vote
-        $ratings[$type] = intval(isset($ratings[$type]) ? $ratings[$type] : 0) + 1;
-        $new_rating = $type;
-    }
+    // Increment new vote
+    $interactions[$type] = intval(isset($interactions[$type]) ? $interactions[$type] : 0) + 1;
+    $new_rating = $type;
 
-    update_post_meta($post_id, '_bloke_ratings', $ratings);
+    update_field('bloke_interactions', $interactions, $post_id);
 
     // For logged-in users: also track per-user for stats page
     if (is_user_logged_in()) {
@@ -464,25 +454,20 @@ function blokes_rate_bloke($request) {
         $rating_log = array_values(array_filter($rating_log, function($e) use ($post_id) {
             return intval($e['postId']) !== $post_id;
         }));
-
-        if ($new_rating === null) {
-            unset($my_ratings[$key]);
-        } else {
-            $my_ratings[$key] = $new_rating;
-            $rating_log[] = array(
-                'postId'    => $post_id,
-                'type'      => $new_rating,
-                'timestamp' => current_time('c'),
-            );
-        }
+        $my_ratings[$key] = $new_rating;
+        $rating_log[] = array(
+            'postId'    => $post_id,
+            'type'      => $new_rating,
+            'timestamp' => current_time('c'),
+        );
 
         update_user_meta($user_id, '_blokes_my_ratings', $my_ratings);
         update_user_meta($user_id, '_blokes_rating_log', $rating_log);
     }
 
     return array(
-        'rating'  => $new_rating,
-        'ratings' => $ratings,
+        'rating'      => $new_rating,
+        'interactions' => $interactions,
     );
 }
 

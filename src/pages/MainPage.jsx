@@ -72,8 +72,8 @@ function MainPage() {
                 isLoggedIn={isLoggedIn}
                 loginUrl={loginUrl}
                 myRating={myRatings[String(card.postId)] || null}
-                ratingCounts={ratingCountOverrides[card.postId] ?? card.ratings}
-                onRate={(type) => rateBloke(card.postId, type, ratingCountOverrides[card.postId] ?? card.ratings)}
+                ratingCounts={ratingCountOverrides[card.postId] ?? card.interactions}
+                onRate={(type) => rateBloke(card.postId, type, ratingCountOverrides[card.postId] ?? card.interactions)}
               />
             ))}
           </div>
