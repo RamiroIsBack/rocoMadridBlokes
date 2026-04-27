@@ -7,7 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 
 function MainPage() {
   const { cards, loading, error } = useWordPressPosts()
-  const { isLoggedIn, loginUrl, completedByMe, countOverrides, toggleCompletion, myRatings, rateBloke } = useCompletions()
+  const { isLoggedIn, loginUrl, completedByMe, countOverrides, toggleCompletion, myRatings, ratingCountOverrides, rateBloke } = useCompletions()
   const [activeSala, setActiveSala] = useState('TODOS')
   const [activeColor, setActiveColor] = useState('TODOS')
   const [sortMode, setSortMode] = useState('newest')
@@ -72,7 +72,8 @@ function MainPage() {
                 isLoggedIn={isLoggedIn}
                 loginUrl={loginUrl}
                 myRating={myRatings[String(card.postId)] || null}
-                onRate={(type) => rateBloke(card.postId, type)}
+                ratingCounts={ratingCountOverrides[card.postId] ?? card.ratings}
+                onRate={(type) => rateBloke(card.postId, type, ratingCountOverrides[card.postId] ?? card.ratings)}
               />
             ))}
           </div>

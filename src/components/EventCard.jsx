@@ -50,8 +50,9 @@ const RATING_ICONS = [
   { id: 'skull',  emoji: '💀',    title: 'Amor-odio',       type: 'skull' },
 ]
 
-export default function EventCard({ card, isNew = false, isHof = false, isDone = false, completionCount = 0, onToggleDone, isLoggedIn = false, loginUrl = '/wp-login.php', myRating = null, onRate }) {
-  const { images, title, description, color, sala, tipo, postId, colorPresa, ratings = {} } = card
+export default function EventCard({ card, isNew = false, isHof = false, isDone = false, completionCount = 0, onToggleDone, isLoggedIn = false, loginUrl = '/wp-login.php', myRating = null, ratingCounts, onRate }) {
+  const { images, title, description, color, sala, tipo, postId, colorPresa, ratings: cardRatings = {} } = card
+  const ratings = ratingCounts || cardRatings
   const colorInfo = COLOR_MAP[color] || COLOR_MAP.green
   const salaInfo = SALA_MAP[sala] || SALA_MAP.entrada
   const colorPresaInfo = COLOR_PRESA_MAP[colorPresa] || null

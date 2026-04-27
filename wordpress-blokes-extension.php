@@ -104,17 +104,21 @@ add_action('rest_api_init', function() {
         'permission_callback' => function() { return is_user_logged_in(); },
     ));
 
-    // Rate a bloke (star_1, star_2, star_3, skull) — toggles if same type sent
+    // Rate a bloke (star_1, star_2, star_3, skull) — public, no login required
     register_rest_route('blokes/v1', '/rate/(?P<id>\d+)', array(
         'methods'             => 'POST',
         'callback'            => 'blokes_rate_bloke',
-        'permission_callback' => function() { return is_user_logged_in(); },
+        'permission_callback' => '__return_true',
         'args'                => array(
             'type' => array(
                 'required'          => true,
                 'validate_callback' => function($param) {
                     return in_array($param, ['star_1', 'star_2', 'star_3', 'skull']);
                 }
+            ),
+            'previousType' => array(
+                'required' => false,
+                'default'  => null,
             )
         )
     ));
@@ -417,9 +421,9 @@ function blokes_toggle_completion($request) {
  * Rate a bloke for the current user. Toggles off if same type is sent again.
  */
 function blokes_rate_bloke($request) {
-    $post_id = intval($request['id']);
-    $type    = sanitize_text_field($request->get_param('type'));
-    $user_id = get_current_user_id();
+    $post_id  = intval($request['id']);
+    $type     = sanitize_text_field($request->get_param('type'));
+    $previous = sanitize_text_field($request->get_param('previousType') ?: '');
 
     $post = get_post($post_id);
     if (!$post || $post->post_type !== 'blokes') {
@@ -431,43 +435,50 @@ function blokes_rate_bloke($request) {
         $ratings = array('star_1' => 0, 'star_2' => 0, 'star_3' => 0, 'skull' => 0);
     }
 
-    $my_ratings = get_user_meta($user_id, '_blokes_my_ratings', true);
-    if (!is_array($my_ratings)) $my_ratings = array();
-
-    $rating_log = get_user_meta($user_id, '_blokes_rating_log', true);
-    if (!is_array($rating_log)) $rating_log = array();
-
-    $key     = strval($post_id);
-    $current = isset($my_ratings[$key]) ? $my_ratings[$key] : null;
-
-    // Remove previous rating from aggregate
-    if ($current !== null && isset($ratings[$current])) {
-        $ratings[$current] = max(0, intval($ratings[$current]) - 1);
+    // Decrement the previous different vote
+    if ($previous && $previous !== $type && isset($ratings[$previous])) {
+        $ratings[$previous] = max(0, intval($ratings[$previous]) - 1);
     }
-    // Remove previous entry from log
-    $rating_log = array_values(array_filter($rating_log, function($e) use ($post_id) {
-        return intval($e['postId']) !== $post_id;
-    }));
 
-    if ($current === $type) {
+    if ($previous === $type) {
         // Toggle off
-        unset($my_ratings[$key]);
+        $ratings[$type] = max(0, intval(isset($ratings[$type]) ? $ratings[$type] : 0) - 1);
         $new_rating = null;
     } else {
-        // Set new rating
+        // New or changed vote
         $ratings[$type] = intval(isset($ratings[$type]) ? $ratings[$type] : 0) + 1;
-        $my_ratings[$key] = $type;
-        $rating_log[] = array(
-            'postId'    => $post_id,
-            'type'      => $type,
-            'timestamp' => current_time('c'),
-        );
         $new_rating = $type;
     }
 
-    update_user_meta($user_id, '_blokes_my_ratings', $my_ratings);
-    update_user_meta($user_id, '_blokes_rating_log', $rating_log);
     update_post_meta($post_id, '_bloke_ratings', $ratings);
+
+    // For logged-in users: also track per-user for stats page
+    if (is_user_logged_in()) {
+        $user_id    = get_current_user_id();
+        $my_ratings = get_user_meta($user_id, '_blokes_my_ratings', true);
+        if (!is_array($my_ratings)) $my_ratings = array();
+        $rating_log = get_user_meta($user_id, '_blokes_rating_log', true);
+        if (!is_array($rating_log)) $rating_log = array();
+
+        $key        = strval($post_id);
+        $rating_log = array_values(array_filter($rating_log, function($e) use ($post_id) {
+            return intval($e['postId']) !== $post_id;
+        }));
+
+        if ($new_rating === null) {
+            unset($my_ratings[$key]);
+        } else {
+            $my_ratings[$key] = $new_rating;
+            $rating_log[] = array(
+                'postId'    => $post_id,
+                'type'      => $new_rating,
+                'timestamp' => current_time('c'),
+            );
+        }
+
+        update_user_meta($user_id, '_blokes_my_ratings', $my_ratings);
+        update_user_meta($user_id, '_blokes_rating_log', $rating_log);
+    }
 
     return array(
         'rating'  => $new_rating,
