@@ -7,7 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 
 function MainPage() {
   const { cards, loading, error } = useWordPressPosts()
-  const { isLoggedIn, loginUrl, completedByMe, countOverrides, toggleCompletion } = useCompletions()
+  const { isLoggedIn, loginUrl, completedByMe, countOverrides, toggleCompletion, myRatings, rateBloke } = useCompletions()
   const [activeSala, setActiveSala] = useState('TODOS')
   const [activeColor, setActiveColor] = useState('TODOS')
   const [sortMode, setSortMode] = useState('newest')
@@ -71,6 +71,8 @@ function MainPage() {
                 onToggleDone={() => toggleCompletion(card.postId, countOverrides[card.postId] ?? card.completionCount ?? 0)}
                 isLoggedIn={isLoggedIn}
                 loginUrl={loginUrl}
+                myRating={myRatings[String(card.postId)] || null}
+                onRate={(type) => rateBloke(card.postId, type)}
               />
             ))}
           </div>

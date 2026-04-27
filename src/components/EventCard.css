@@ -303,121 +303,56 @@
     color: #4338ca;
 }
 
-/* Interactive icons section */
-.event-card__interactions {
-    margin-top: 20px;
-    padding-top: 16px;
-    border-top: 2px dotted #c8bc9a;
-}
-
-.event-card__interactions-label {
-    font-size: 0.78rem;
-    color: var(--color-text-secondary);
-    margin-bottom: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-}
-
-.event-card__icons {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-}
-
-.event-card__icon {
-    position: relative;
+/* Rating icons - left side of photo bottom */
+.event-card__rating-wrap {
+    position: absolute;
+    top: -18px;
+    left: 12px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    background: var(--color-surface);
-    border: 1.5px solid var(--color-border);
-    border-radius: 0;
-    padding: 6px 10px;
+    gap: 3px;
+}
+
+.event-card__rating-btn {
+    background: rgba(255, 255, 255, 0.92);
+    border: 1.5px solid #e5e7eb;
+    border-radius: 14px;
+    height: 28px;
+    padding: 0 7px;
+    font-size: 11px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    font-size: 1rem;
-    color: var(--color-text-primary);
-    min-width: 36px;
-    min-height: 36px;
-}
-
-.event-card__icon:hover {
-    border-color: var(--color-accent);
-    background-color: #fdf7e6;
-    transform: translateY(-1px);
-}
-
-.event-card__icon:active {
-    transform: translateY(0);
-}
-
-.event-card__icon:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
-}
-
-.event-card__icon--loading {
-    opacity: 0.7;
-}
-
-.event-card__icon-emoji {
-    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+    transition: border-color 0.15s, background 0.15s, transform 0.1s;
     line-height: 1;
+    white-space: nowrap;
 }
 
-/* Badge overlay on bottom-right */
-.event-card__icon-badge {
-    position: absolute;
-    bottom: -4px;
-    right: -4px;
-    background: #667eea;
-    color: white;
-    font-size: 0.65rem;
-    font-weight: 700;
-    min-width: 16px;
-    height: 16px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0 4px;
-    border: 2px solid white;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+.event-card__rating-btn--star:hover,
+.event-card__rating-btn--star.event-card__rating-btn--active {
+    border-color: #fbbf24;
+    background: #fff;
 }
 
-.event-card__icon-loading {
-    position: absolute;
-    bottom: -4px;
-    right: -4px;
-    background: #9ca3af;
-    color: white;
-    font-size: 0.6rem;
-    min-width: 14px;
-    height: 14px;
-    border-radius: 7px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+.event-card__rating-btn--star.event-card__rating-btn--active {
+    transform: scale(1.08);
 }
 
-@keyframes pulse {
-
-    0%,
-    100% {
-        opacity: 1;
-    }
-
-    50% {
-        opacity: 0.5;
-    }
+.event-card__rating-btn--skull:hover {
+    border-color: #6b7280;
+    background: #fff;
 }
 
-.event-card__interactions-hint {
-    font-size: 0.72rem;
-    color: #9a9280;
-    font-style: italic;
+.event-card__rating-btn--skull.event-card__rating-btn--active {
+    border-color: #374151;
+    background: #fff;
+    transform: scale(1.08);
+}
+
+.event-card__rating-emoji--inactive {
+    filter: grayscale(1) opacity(0.3);
 }
 
 /* Category badges */
@@ -452,102 +387,35 @@
     color: #5b21b6;
 }
 
-/* Responsive adjustments */
-@media (max-width: 640px) {
-    .event-card__icons {
-        flex-wrap: wrap;
-    }
-
-    .event-card__icon {
-        flex: 1;
-        min-width: 70px;
-        justify-content: center;
-        padding: 8px 6px;
-    }
-
-    .event-card__icon-emoji {
-        font-size: 1.2rem;
-    }
-}
-
-/* Mobile phone styles - bigger color dot */
+/* Mobile phone styles - smaller color dot */
 @media (max-width: 480px) {
     .event-card__color {
         width: 32px;
         height: 32px;
-        }
-
-        .event-card__title-row {
-            gap: 8px;
-        }
-
-        .event-card__title {
-            font-size: 1.25rem;
     }
 
-    .event-card__interactions {
-        margin-top: 16px;
-        padding-top: 16px;
+    .event-card__title-row {
+        gap: 8px;
     }
 
-    .event-card__interactions-label {
-        font-size: 0.85rem;
-        margin-bottom: 10px;
+    .event-card__title {
+        font-size: 1.25rem;
     }
 
-    .event-card__icons {
-        gap: 6px;
-        margin-bottom: 6px;
-    }
-
-    .event-card__icon {
-        min-width: 60px;
-        min-height: 44px;
-        padding: 6px 4px;
-    }
-
-    .event-card__icon-emoji {
-        font-size: 1.1rem;
-    }
-
-    .event-card__icon-badge {
-        font-size: 0.6rem;
-        min-width: 14px;
-        height: 14px;
-    }
-
-    .event-card__badge {
-        padding: 3px 8px;
-        font-size: 0.7rem;
-    }
-
-    .event-card__interactions-hint {
-        font-size: 0.75rem;
-    }
-}
-
-/* Extra small phones */
-@media (max-width: 360px) {
-    .event-card__icon {
-        min-width: 50px;
-        min-height: 40px;
-    }
-
-    .event-card__icon-emoji {
-        font-size: 1rem;
+    .event-card__rating-btn {
+        height: 26px;
+        padding: 0 5px;
+        font-size: 10px;
     }
 }
 
 /* Touch device improvements */
 @media (hover: none) and (pointer: coarse) {
-    .event-card__icon:hover {
+    .event-card__rating-btn:hover {
         transform: none;
-        border-color: #e5e7eb;
-        background-color: white;
     }
 
-    .event-card__icon:active {
-        background-color: #f3f4f6;
-        border-color: #9ca3af;
+    .event-card__rating-btn:active {
+        transform: scale(0.95);
     }
 }

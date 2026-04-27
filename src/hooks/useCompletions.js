@@ -10,6 +10,7 @@ export function useCompletions() {
   const siteData = getSiteData()
   const [completedByMe, setCompletedByMe] = useState(new Set())
   const [countOverrides, setCountOverrides] = useState({})
+  const [myRatings, setMyRatings] = useState({})
 
   useEffect(() => {
     if (!siteData.isLoggedIn || !siteData.nonce) return
@@ -19,7 +20,10 @@ export function useCompletions() {
       headers: { 'X-WP-Nonce': siteData.nonce },
     })
       .then(r => r.json())
-      .then(data => setCompletedByMe(new Set((data.myIds || []).map(Number))))
+      .then(data => {
+        setCompletedByMe(new Set((data.myIds || []).map(Number)))
+        setMyRatings(data.myRatings || {})
+      })
       .catch(e => console.warn('Could not load completions:', e))
   }, [])
 
@@ -55,7 +59,6 @@ export function useCompletions() {
       })
       setCountOverrides(prev => ({ ...prev, [postId]: data.count }))
     } catch (e) {
-      // Rollback on error
       setCompletedByMe(prev => {
         const next = new Set(prev)
         wasCompleted ? next.add(postId) : next.delete(postId)
@@ -70,11 +73,42 @@ export function useCompletions() {
     }
   }, [completedByMe])
 
+  const rateBloke = useCallback(async (postId, type) => {
+    const { isLoggedIn, nonce, loginUrl } = getSiteData()
+
+    if (!isLoggedIn) {
+      window.location.href = loginUrl
+      return
+    }
+
+    const key = String(postId)
+    const currentRating = myRatings[key] || null
+    const newRating = currentRating === type ? null : type
+
+    setMyRatings(prev => ({ ...prev, [key]: newRating }))
+
+    try {
+      const res = await fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/rate/${postId}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type }),
+      })
+      const data = await res.json()
+      setMyRatings(prev => ({ ...prev, [key]: data.rating }))
+    } catch (e) {
+      setMyRatings(prev => ({ ...prev, [key]: currentRating }))
+      console.error('Rating failed:', e)
+    }
+  }, [myRatings])
+
   return {
     isLoggedIn: siteData.isLoggedIn,
     loginUrl: siteData.loginUrl,
     completedByMe,
     countOverrides,
     toggleCompletion,
+    myRatings,
+    rateBloke,
   }
 }

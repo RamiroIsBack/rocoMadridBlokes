@@ -20,6 +20,11 @@ add_filter('rest_prepare_blokes', function($response, $post, $request) {
     $data = $response->get_data();
     $data['bloke_colorPresa'] = get_post_meta($post->ID, 'bloke_colorPresa', true);
     $data['bloke_completion_count'] = (int) get_post_meta($post->ID, '_bloke_completion_count', true);
+    $ratings = get_post_meta($post->ID, '_bloke_ratings', true);
+    if (!is_array($ratings)) {
+        $ratings = array('star_1' => 0, 'star_2' => 0, 'star_3' => 0, 'skull' => 0);
+    }
+    $data['bloke_ratings'] = $ratings;
     $response->set_data($data);
     return $response;
 }, 10, 3);
@@ -97,6 +102,21 @@ add_action('rest_api_init', function() {
         'methods'             => 'GET',
         'callback'            => 'blokes_get_my_completions',
         'permission_callback' => function() { return is_user_logged_in(); },
+    ));
+
+    // Rate a bloke (star_1, star_2, star_3, skull) — toggles if same type sent
+    register_rest_route('blokes/v1', '/rate/(?P<id>\d+)', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_rate_bloke',
+        'permission_callback' => function() { return is_user_logged_in(); },
+        'args'                => array(
+            'type' => array(
+                'required'          => true,
+                'validate_callback' => function($param) {
+                    return in_array($param, ['star_1', 'star_2', 'star_3', 'skull']);
+                }
+            )
+        )
     ));
 
     // Toggle a bloke as done/not-done for the current user
@@ -331,9 +351,15 @@ function blokes_get_my_completions($request) {
     $my_ids  = is_array($saved) ? array_values(array_map('intval', $saved)) : array();
     $log     = get_user_meta($user_id, '_blokes_completion_log', true);
     if (!is_array($log)) $log = array();
+    $my_ratings = get_user_meta($user_id, '_blokes_my_ratings', true);
+    if (!is_array($my_ratings)) $my_ratings = array();
+    $rating_log = get_user_meta($user_id, '_blokes_rating_log', true);
+    if (!is_array($rating_log)) $rating_log = array();
     return array(
-        'myIds' => $my_ids,
-        'log'   => $log,  // [{postId, color, timestamp}, ...] for future stats page
+        'myIds'     => $my_ids,
+        'log'       => $log,
+        'myRatings' => $my_ratings,
+        'ratingLog' => $rating_log,
     );
 }
 
@@ -384,6 +410,68 @@ function blokes_toggle_completion($request) {
     return array(
         'completed' => $completed,
         'count'     => $count,
+    );
+}
+
+/**
+ * Rate a bloke for the current user. Toggles off if same type is sent again.
+ */
+function blokes_rate_bloke($request) {
+    $post_id = intval($request['id']);
+    $type    = sanitize_text_field($request->get_param('type'));
+    $user_id = get_current_user_id();
+
+    $post = get_post($post_id);
+    if (!$post || $post->post_type !== 'blokes') {
+        return new WP_Error('invalid_bloke', 'Invalid bloke ID', array('status' => 404));
+    }
+
+    $ratings = get_post_meta($post_id, '_bloke_ratings', true);
+    if (!is_array($ratings)) {
+        $ratings = array('star_1' => 0, 'star_2' => 0, 'star_3' => 0, 'skull' => 0);
+    }
+
+    $my_ratings = get_user_meta($user_id, '_blokes_my_ratings', true);
+    if (!is_array($my_ratings)) $my_ratings = array();
+
+    $rating_log = get_user_meta($user_id, '_blokes_rating_log', true);
+    if (!is_array($rating_log)) $rating_log = array();
+
+    $key     = strval($post_id);
+    $current = isset($my_ratings[$key]) ? $my_ratings[$key] : null;
+
+    // Remove previous rating from aggregate
+    if ($current !== null && isset($ratings[$current])) {
+        $ratings[$current] = max(0, intval($ratings[$current]) - 1);
+    }
+    // Remove previous entry from log
+    $rating_log = array_values(array_filter($rating_log, function($e) use ($post_id) {
+        return intval($e['postId']) !== $post_id;
+    }));
+
+    if ($current === $type) {
+        // Toggle off
+        unset($my_ratings[$key]);
+        $new_rating = null;
+    } else {
+        // Set new rating
+        $ratings[$type] = intval(isset($ratings[$type]) ? $ratings[$type] : 0) + 1;
+        $my_ratings[$key] = $type;
+        $rating_log[] = array(
+            'postId'    => $post_id,
+            'type'      => $type,
+            'timestamp' => current_time('c'),
+        );
+        $new_rating = $type;
+    }
+
+    update_user_meta($user_id, '_blokes_my_ratings', $my_ratings);
+    update_user_meta($user_id, '_blokes_rating_log', $rating_log);
+    update_post_meta($post_id, '_bloke_ratings', $ratings);
+
+    return array(
+        'rating'  => $new_rating,
+        'ratings' => $ratings,
     );
 }
 
