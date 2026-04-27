@@ -314,6 +314,7 @@
 }
 
 .event-card__rating-btn {
+    position: relative;
     background: rgba(255, 255, 255, 0.92);
     border: 1.5px solid #e5e7eb;
     border-radius: 14px;
@@ -353,6 +354,36 @@
 
 .event-card__rating-emoji--inactive {
     filter: grayscale(1) opacity(0.3);
+}
+
+.event-card__rating-count {
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.6rem;
+    font-weight: 700;
+    min-width: 14px;
+    height: 14px;
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    border: 1.5px solid white;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+    white-space: nowrap;
+    pointer-events: none;
+}
+
+.event-card__rating-count--star {
+    background: #fbbf24;
+    color: #78350f;
+}
+
+.event-card__rating-count--skull {
+    background: #4b5563;
+    color: #fff;
 }
 
 /* Category badges */

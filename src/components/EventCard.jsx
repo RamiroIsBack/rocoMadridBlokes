@@ -51,7 +51,7 @@ const RATING_ICONS = [
 ]
 
 export default function EventCard({ card, isNew = false, isHof = false, isDone = false, completionCount = 0, onToggleDone, isLoggedIn = false, loginUrl = '/wp-login.php', myRating = null, onRate }) {
-  const { images, title, description, color, sala, tipo, postId, colorPresa } = card
+  const { images, title, description, color, sala, tipo, postId, colorPresa, ratings = {} } = card
   const colorInfo = COLOR_MAP[color] || COLOR_MAP.green
   const salaInfo = SALA_MAP[sala] || SALA_MAP.entrada
   const colorPresaInfo = COLOR_PRESA_MAP[colorPresa] || null
@@ -77,6 +77,7 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
         <div className="event-card__rating-wrap">
           {RATING_ICONS.map(icon => {
             const isActive = myRating === icon.id
+            const count = ratings[icon.id] || 0
             return (
               <button
                 key={icon.id}
@@ -88,6 +89,11 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
                 <span className={`event-card__rating-emoji${!isActive ? ' event-card__rating-emoji--inactive' : ''}`}>
                   {icon.emoji}
                 </span>
+                {count > 0 && (
+                  <span className={`event-card__rating-count event-card__rating-count--${icon.type}`}>
+                    {count}
+                  </span>
+                )}
               </button>
             )
           })}

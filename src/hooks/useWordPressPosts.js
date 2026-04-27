@@ -267,6 +267,14 @@ export function useWordPressPosts() {
                                     skull: Number(blokeInteractions.skull || 0)
                             }
 
+                            const blokeRatings = post.bloke_ratings || {}
+                            const ratings = {
+                                star_1: Number(blokeRatings.star_1 || 0),
+                                star_2: Number(blokeRatings.star_2 || 0),
+                                star_3: Number(blokeRatings.star_3 || 0),
+                                skull:  Number(blokeRatings.skull  || 0),
+                            }
+
                             return {
                                 id: `post-${post.id}`,
                                 postId: post.id,
@@ -285,6 +293,7 @@ export function useWordPressPosts() {
                                 interactions,
                                 totalInteractions: interactions.star_1 + interactions.star_2 + interactions.star_3 + interactions.skull,
                                 completionCount: parseInt(post.bloke_completion_count || 0, 10),
+                                ratings,
                             }
                         })
 
