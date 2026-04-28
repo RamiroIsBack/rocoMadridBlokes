@@ -109,21 +109,18 @@ export default function App() {
               <li className="app-nav__item">
                 <Link to="/mis-blokes" className="app-nav__link">Mis blokes</Link>
               </li>
+              {showNav && (
+                <>
+                  <li className="app-nav__item">
+                    <Link to="/setter" className="app-nav__link">Setter</Link>
+                  </li>
+                  <li className="app-nav__item">
+                    <Link to="/stats" className="app-nav__link">Estadísticas</Link>
+                  </li>
+                </>
+              )}
             </ul>
           </nav>
-
-          {showNav && (
-            <nav className="app-nav">
-              <ul className="app-nav__list">
-                <li className="app-nav__item">
-                  <Link to="/setter" className="app-nav__link">Setter</Link>
-                </li>
-                <li className="app-nav__item">
-                  <Link to="/stats" className="app-nav__link">Estadísticas</Link>
-                </li>
-              </ul>
-            </nav>
-          )}
         </header>
 
         <main className="app-main">
