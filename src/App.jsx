@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import MainPage from './pages/MainPage'
 import AdminApp from './admin/AdminApp'
 import StatsPage from './pages/StatsPage'
+import UserStatsPage from './pages/UserStatsPage'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import './App.css'
 
@@ -29,6 +30,7 @@ const COLOR_BUBBLE = {
 export default function App() {
   const [showNav, setShowNav] = useState(false)
   const { cards } = useWordPressPosts()
+  const isLoggedIn = !!(window.blokesSiteData && window.blokesSiteData.isLoggedIn)
 
   const subsalaStats = useMemo(() => {
     const acc = {}
@@ -106,6 +108,11 @@ export default function App() {
                 <li className="app-nav__item">
                   <Link to="/" className="app-nav__link" onClick={() => setShowNav(false)}>Colección</Link>
                 </li>
+                {isLoggedIn && (
+                  <li className="app-nav__item">
+                    <Link to="/mis-blokes" className="app-nav__link" onClick={() => setShowNav(false)}>Mis blokes</Link>
+                  </li>
+                )}
                 <li className="app-nav__item">
                   <Link to="/setter" className="app-nav__link">Setter</Link>
                 </li>
@@ -120,6 +127,7 @@ export default function App() {
         <main className="app-main">
           <Routes>
             <Route path="/" element={<MainPage />} />
+            <Route path="/mis-blokes" element={<UserStatsPage />} />
             <Route path="/setter" element={<AdminApp />} />
             <Route path="/stats" element={<StatsPage />} />
           </Routes>

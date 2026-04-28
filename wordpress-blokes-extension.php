@@ -393,9 +393,11 @@ function blokes_toggle_completion($request) {
         // Mark: add to IDs list and log with color + timestamp
         $completed_ids[] = $post_id;
         $color = sanitize_text_field(get_field('bloke_color', $post_id) ?: 'green');
+        $sala  = sanitize_text_field(get_field('bloke_sala',  $post_id) ?: 'entrada');
         $log[] = array(
             'postId'    => $post_id,
             'color'     => $color,
+            'sala'      => $sala,
             'timestamp' => current_time('c'),
         );
         $completed = true;

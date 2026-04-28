@@ -19,6 +19,8 @@ export function useCompletions() {
   const siteData = getSiteData()
   const [completedByMe, setCompletedByMe] = useState(new Set())
   const [countOverrides, setCountOverrides] = useState({})
+  const [completionLog, setCompletionLog] = useState([])
+  const [ratingLog, setRatingLog] = useState([])
   const [myRatings, setMyRatings] = useState(loadLocalRatings)
   const [ratingCountOverrides, setRatingCountOverrides] = useState({})
   // postIds the user has already voted on this session — prevents re-voting same icon
@@ -37,6 +39,8 @@ export function useCompletions() {
       .then(r => r.json())
       .then(data => {
         setCompletedByMe(new Set((data.myIds || []).map(Number)))
+        setCompletionLog(data.log || [])
+        setRatingLog(data.ratingLog || [])
         if (data.myRatings && Object.keys(data.myRatings).length > 0) {
           const serverRatings = data.myRatings
           setMyRatings(serverRatings)
@@ -159,5 +163,7 @@ export function useCompletions() {
     myRatings,
     ratingCountOverrides,
     rateBloke,
+    completionLog,
+    ratingLog,
   }
 }
