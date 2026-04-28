@@ -116,10 +116,10 @@ export default function App() {
             <nav className="app-nav">
               <ul className="app-nav__list">
                 <li className="app-nav__item">
-                  <Link to="/setter" className="app-nav__link" onClick={() => setShowNav(false)}>Setter</Link>
+                  <Link to="/setter" className="app-nav__link">Setter</Link>
                 </li>
                 <li className="app-nav__item">
-                  <Link to="/stats" className="app-nav__link" onClick={() => setShowNav(false)}>Estadísticas</Link>
+                  <Link to="/stats" className="app-nav__link">Estadísticas</Link>
                 </li>
               </ul>
             </nav>
