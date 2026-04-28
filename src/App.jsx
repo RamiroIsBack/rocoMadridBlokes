@@ -30,7 +30,6 @@ const COLOR_BUBBLE = {
 export default function App() {
   const [showNav, setShowNav] = useState(false)
   const { cards } = useWordPressPosts()
-  const isLoggedIn = !!(window.blokesSiteData && window.blokesSiteData.isLoggedIn)
 
   const subsalaStats = useMemo(() => {
     const acc = {}
@@ -102,22 +101,25 @@ export default function App() {
             </button>
           </div>
 
+          <nav className="app-nav">
+            <ul className="app-nav__list">
+              <li className="app-nav__item">
+                <Link to="/" className="app-nav__link">Colección</Link>
+              </li>
+              <li className="app-nav__item">
+                <Link to="/mis-blokes" className="app-nav__link">Mis blokes</Link>
+              </li>
+            </ul>
+          </nav>
+
           {showNav && (
             <nav className="app-nav">
               <ul className="app-nav__list">
                 <li className="app-nav__item">
-                  <Link to="/" className="app-nav__link" onClick={() => setShowNav(false)}>Colección</Link>
-                </li>
-                {isLoggedIn && (
-                  <li className="app-nav__item">
-                    <Link to="/mis-blokes" className="app-nav__link" onClick={() => setShowNav(false)}>Mis blokes</Link>
-                  </li>
-                )}
-                <li className="app-nav__item">
-                  <Link to="/setter" className="app-nav__link">Setter</Link>
+                  <Link to="/setter" className="app-nav__link" onClick={() => setShowNav(false)}>Setter</Link>
                 </li>
                 <li className="app-nav__item">
-                  <Link to="/stats" className="app-nav__link">Estadísticas</Link>
+                  <Link to="/stats" className="app-nav__link" onClick={() => setShowNav(false)}>Estadísticas</Link>
                 </li>
               </ul>
             </nav>
