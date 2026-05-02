@@ -1,0 +1,179 @@
+/* ProgresoPage */
+
+.progreso {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.progreso__title {
+  font-family: var(--font-serif);
+  font-size: 2rem;
+  font-weight: 700;
+  color: #2a2015;
+  margin: 0 0 24px;
+  letter-spacing: -0.02em;
+}
+
+.progreso__loading {
+  padding: 80px 24px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* Sections */
+.progreso__section {
+  margin-bottom: 40px;
+}
+
+.progreso__section-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-text-secondary);
+  margin: 0 0 6px;
+  padding-bottom: 8px;
+  border-bottom: 2px dotted #c8bc9a;
+}
+
+.progreso__section-hint {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  margin: 0 0 14px;
+  font-style: italic;
+}
+
+/* Pie chart + legend */
+.progreso__distrib {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  margin-top: 16px;
+}
+
+.progreso-pie {
+  width: 160px;
+  height: 160px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+.progreso__legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}
+
+.progreso__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progreso__legend-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid rgba(0,0,0,0.1);
+}
+
+.progreso__legend-name {
+  flex: 1;
+  font-size: 0.82rem;
+  color: #2a2015;
+}
+
+.progreso__legend-count {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #2a2015;
+  width: 24px;
+  text-align: right;
+}
+
+.progreso__legend-pct {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  width: 32px;
+  text-align: right;
+}
+
+/* Rankings */
+.progreso__ranking {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.progreso__rank-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.progreso__rank-num {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  width: 24px;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.progreso__rank-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1.5px solid rgba(0,0,0,0.1);
+}
+
+.progreso__rank-name {
+  font-size: 0.82rem;
+  color: #2a2015;
+  width: 70px;
+  flex-shrink: 0;
+}
+
+.progreso__rank-bar-wrap {
+  flex: 1;
+  height: 14px;
+  background: #f0ece0;
+}
+
+.progreso__rank-bar {
+  height: 100%;
+  min-width: 4px;
+  transition: width 0.5s ease;
+  opacity: 0.85;
+}
+
+.progreso__rank-value {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #2a2015;
+  width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+@media (max-width: 480px) {
+  .progreso__distrib {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  .progreso-pie {
+    width: 140px;
+    height: 140px;
+  }
+}

@@ -654,4 +654,15 @@ d
     font-size: 12px;
     flex: 1;
   }
+
+  .app-nav__list {
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .app-nav__link {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    font-size: 13px;
+  }
 }

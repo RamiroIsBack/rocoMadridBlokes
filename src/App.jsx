@@ -1,9 +1,12 @@
 import { useState, useMemo } from 'react'
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom'
 import MainPage from './pages/MainPage'
 import AdminApp from './admin/AdminApp'
 import StatsPage from './pages/StatsPage'
 import UserStatsPage from './pages/UserStatsPage'
+import ProgresoPage from './pages/ProgresoPage'
+import ProgresoIndexPage from './pages/ProgresoIndexPage'
+import EntrenamientosPage from './pages/EntrenamientosPage'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import './App.css'
 
@@ -107,7 +110,7 @@ export default function App() {
                 <Link to="/" className="app-nav__link">Colección</Link>
               </li>
               <li className="app-nav__item">
-                <Link to="/mis-blokes" className="app-nav__link">Mis blokes</Link>
+                <Link to="/progreso" className="app-nav__link">Progreso</Link>
               </li>
               {showNav && (
                 <>
@@ -116,6 +119,9 @@ export default function App() {
                   </li>
                   <li className="app-nav__item">
                     <Link to="/stats" className="app-nav__link">Estadísticas</Link>
+                  </li>
+                  <li className="app-nav__item">
+                    <Link to="/entrenamientos" className="app-nav__link">Entrenamientos</Link>
                   </li>
                 </>
               )}
@@ -126,9 +132,13 @@ export default function App() {
         <main className="app-main">
           <Routes>
             <Route path="/" element={<MainPage />} />
-            <Route path="/mis-blokes" element={<UserStatsPage />} />
+            <Route path="/progreso" element={<ProgresoIndexPage />} />
+            <Route path="/progreso/comunidad" element={<ProgresoPage />} />
+            <Route path="/progreso/yo" element={<UserStatsPage />} />
+            <Route path="/mis-blokes" element={<Navigate to="/progreso" replace />} />
             <Route path="/setter" element={<AdminApp />} />
             <Route path="/stats" element={<StatsPage />} />
+            <Route path="/entrenamientos" element={<EntrenamientosPage />} />
           </Routes>
         </main>
 
