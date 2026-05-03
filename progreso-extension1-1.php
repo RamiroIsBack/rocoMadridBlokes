@@ -30,6 +30,11 @@ add_action('init', function() {
     }
 });
 
+add_filter('show_admin_bar', function($show) {
+    if (is_page($GLOBALS['blokes_app_slugs'])) return false;
+    return $show;
+});
+
 add_action('template_redirect', function() {
     if (!is_page($GLOBALS['blokes_app_slugs'])) return;
 
@@ -59,7 +64,6 @@ add_action('template_redirect', function() {
 <?php if ($js_url): ?>
 <script type="module" src="<?php echo esc_url($js_url); ?>"></script>
 <?php endif; ?>
-<?php wp_footer(); ?>
 </body>
 </html>
     <?php
