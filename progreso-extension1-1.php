@@ -17,6 +17,56 @@
 if (!defined('ABSPATH')) exit;
 
 // ============================================================
+//  SPA hosting — serves React app for registered slugs
+// ============================================================
+
+// Add slugs here to enable WordPress hosting for that path.
+// When ready for production, add 'blokes' to this array.
+$GLOBALS['blokes_app_slugs'] = ['blokes-dev'];
+
+add_action('init', function() {
+    foreach ($GLOBALS['blokes_app_slugs'] as $slug) {
+        add_rewrite_rule("^{$slug}/(.*)$", "index.php?pagename={$slug}", 'top');
+    }
+});
+
+add_action('template_redirect', function() {
+    if (!is_page($GLOBALS['blokes_app_slugs'])) return;
+
+    $slug    = get_post_field('post_name', get_queried_object_id());
+    $app_dir = trailingslashit(ABSPATH) . $slug . '/';
+    $app_url = trailingslashit(home_url($slug));
+
+    $css_files = glob($app_dir . 'assets/*.css');
+    $js_files  = glob($app_dir . 'assets/*.js');
+    $css_url   = $css_files ? $app_url . 'assets/' . basename($css_files[0]) : '';
+    $js_url    = $js_files  ? $app_url . 'assets/' . basename($js_files[0])  : '';
+
+    header('Content-Type: text/html; charset=UTF-8');
+    ?><!DOCTYPE html>
+<html <?php language_attributes(); ?>>
+<head>
+<meta charset="<?php bloginfo('charset'); ?>">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<?php if ($css_url): ?>
+<link rel="stylesheet" href="<?php echo esc_url($css_url); ?>">
+<?php endif; ?>
+<?php wp_head(); ?>
+</head>
+<body>
+<div id="root"></div>
+<?php if ($js_url): ?>
+<script type="module" src="<?php echo esc_url($js_url); ?>"></script>
+<?php endif; ?>
+<?php wp_footer(); ?>
+</body>
+</html>
+    <?php
+    exit;
+});
+
+// ============================================================
 //  REST API — inject extra fields into blokes responses
 // ============================================================
 
@@ -33,9 +83,24 @@ add_action('wp_head', function() {
     $data = array(
         'nonce'      => wp_create_nonce('wp_rest'),
         'isLoggedIn' => is_user_logged_in(),
-        'loginUrl'   => wp_login_url(home_url('/blokes/')),
+        'loginUrl'   => wp_login_url(),
     );
     echo '<script>window.blokesSiteData = ' . wp_json_encode($data) . ';</script>' . "\n";
+});
+
+// Respect redirect_to after login even for admin users
+add_filter('login_redirect', function($redirect_to, $requested, $user) {
+    if (!empty($requested) && !is_wp_error($user)) {
+        return $requested;
+    }
+    return $redirect_to;
+}, 10, 3);
+
+// Allow redirecting back to the blokes frontend domains after login
+add_filter('allowed_redirect_hosts', function($hosts) {
+    $hosts[] = 'blokes.ramirosantamaria.com';
+    $hosts[] = '127.0.0.1';
+    return $hosts;
 });
 
 // ============================================================
@@ -310,6 +375,7 @@ function blokes_get_my_completions($request) {
         'log'       => $log,
         'myRatings' => $my_ratings,
         'ratingLog' => $rating_log,
+        'nonce'     => wp_create_nonce('wp_rest'),
     );
 }
 

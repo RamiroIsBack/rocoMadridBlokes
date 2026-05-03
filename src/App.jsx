@@ -47,7 +47,7 @@ export default function App() {
   }, [cards])
 
   return (
-    <BrowserRouter basename="/blokes">
+    <BrowserRouter basename={import.meta.env.VITE_ROUTER_BASENAME || '/blokes'}>
       <div className="app">
         <header className="app-header">
           <div className="app-header__logo-section">

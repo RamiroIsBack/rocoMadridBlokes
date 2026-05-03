@@ -4,7 +4,7 @@ const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.
 const LS_RATINGS_KEY = 'blokes_my_ratings'
 
 function getSiteData() {
-  return window.blokesSiteData || { isLoggedIn: false, nonce: null, loginUrl: '/wp-login.php' }
+  return window.blokesSiteData || { isLoggedIn: false, nonce: null, loginUrl: `${WORDPRESS_URL}/wp-login.php?redirect_to=${encodeURIComponent(window.location.href)}` }
 }
 
 function loadLocalRatings() {
@@ -17,27 +17,35 @@ function saveLocalRatings(ratings) {
 
 export function useCompletions() {
   const siteData = getSiteData()
+  const [isLoggedIn, setIsLoggedIn] = useState(siteData.isLoggedIn)
+  const [nonce, setNonce] = useState(siteData.nonce)
   const [completedByMe, setCompletedByMe] = useState(new Set())
   const [countOverrides, setCountOverrides] = useState({})
   const [completionLog, setCompletionLog] = useState([])
   const [ratingLog, setRatingLog] = useState([])
   const [myRatings, setMyRatings] = useState(loadLocalRatings)
   const [ratingCountOverrides, setRatingCountOverrides] = useState({})
-  // postIds the user has already voted on this session — prevents re-voting same icon
   const [sessionVoted, setSessionVoted] = useState(() => {
     const stored = loadLocalRatings()
     return new Set(Object.keys(stored).filter(k => stored[k] != null))
   })
 
   useEffect(() => {
-    if (!siteData.isLoggedIn || !siteData.nonce) return
+    const headers = {}
+    if (siteData.nonce) headers['X-WP-Nonce'] = siteData.nonce
 
     fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/my-completions`, {
       credentials: 'include',
-      headers: { 'X-WP-Nonce': siteData.nonce },
+      headers,
     })
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) return null
+        setIsLoggedIn(true)
+        return r.json()
+      })
       .then(data => {
+        if (!data) return
+        if (data.nonce) setNonce(data.nonce)
         setCompletedByMe(new Set((data.myIds || []).map(Number)))
         setCompletionLog(data.log || [])
         setRatingLog(data.ratingLog || [])

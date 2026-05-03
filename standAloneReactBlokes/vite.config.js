@@ -5,8 +5,8 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  // Deploy to root of domain (public_html)
-  base: '/',
+  // Deploy to rocomadrid.com/blokes-dev/ for testing
+  base: '/blokes-dev/',
   build: {
     outDir: 'dist',
     assetsDir: 'assets',
