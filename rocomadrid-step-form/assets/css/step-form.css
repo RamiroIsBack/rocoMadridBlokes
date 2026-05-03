@@ -1,0 +1,1795 @@
+/* Variables globales - Paleta RocoMadrid 2025 (Alineado con React Theme) */
+/* Variables globales - Paleta basada en #d19d02 */
+:root {
+    /* ===============================
+       BASE (Neve como source of truth)
+       =============================== */
+    --background: var(--nv-site-bg);
+    --foreground: var(--nv-text-color);
+
+    --card: var(--nv-light-bg);
+    --card-foreground: var(--nv-text-color);
+
+    /* ===============================
+       PRIMARY (Énfasis principal)
+       =============================== */
+    --primary: var(--nv-primary-accent);
+    --primary-hover: var(--nv-secondary-accent);
+    --primary-foreground: #ffffff;
+
+    --primary-light: color-mix(in srgb, var(--nv-primary-accent) 8%, transparent);
+    --primary-lighter: color-mix(in srgb, var(--nv-primary-accent) 15%, transparent);
+
+    /* ===============================
+       ACCENT
+       =============================== */
+    --accent: var(--nv-primary-accent);
+    --accent-hover: var(--nv-secondary-accent);
+    --accent-foreground: var(--nv-text-color);
+    --accent-light: color-mix(in srgb, var(--nv-primary-accent) 15%, transparent);
+
+    /* ===============================
+       SECONDARY
+       =============================== */
+    --secondary: var(--nv-c-1);
+    --secondary-hover: color-mix(in srgb, var(--nv-c-1) 85%, #000);
+    --secondary-foreground: #ffffff;
+
+    /* ===============================
+       MUTED / UI
+       =============================== */
+    --muted: var(--nv-site-bg);
+    --muted-foreground: color-mix(in srgb, var(--nv-text-color) 60%, transparent);
+
+    /* ===============================
+       STATUS
+       =============================== */
+    --success: #4d9a5f;
+    --success-hover: #3d8a4f;
+    --success-light: color-mix(in srgb, #4d9a5f 12%, transparent);
+    --success-foreground: #ffffff;
+
+    --warning: var(--nv-primary-accent);
+    --warning-hover: var(--nv-secondary-accent);
+    --warning-light: color-mix(in srgb, var(--nv-primary-accent) 15%, transparent);
+
+    --destructive: var(--nv-c-2);
+    --destructive-hover: color-mix(in srgb, var(--nv-c-2) 85%, #000);
+    --destructive-foreground: #ffffff;
+
+    /* ===============================
+       BORDERS / INPUTS / FOCUS
+       =============================== */
+    --border: color-mix(in srgb, var(--nv-text-color) 12%, transparent);
+    --border-hover: color-mix(in srgb, var(--nv-text-color) 22%, transparent);
+    --input: var(--border);
+    --ring: var(--nv-primary-accent);
+
+    /* ===============================
+       NEVE BUTTON COMPAT
+       =============================== */
+    --primarybtnbg: var(--nv-primary-accent);
+    --primarybtnhoverbg: var(--nv-secondary-accent);
+    --primarybtncolor: #ffffff;
+    --primarybtnhovercolor: #ffffff;
+
+    --secondarybtnbg: var(--nv-c-1);
+    --secondarybtnhoverbg: color-mix(in srgb, var(--nv-c-1) 85%, #000);
+    --secondarybtncolor: #ffffff;
+    --secondarybtnhovercolor: #ffffff;
+
+    /* ===============================
+       TYPO
+       =============================== */
+    --font-family-base: var(--nv-fallback-ff);
+
+    /* ===============================
+       RADIUS
+       =============================== */
+    --radius: 0.75rem;
+    --radius-sm: 0.375rem;
+    --radius-md: 0.75rem;
+    --radius-lg: 1rem;
+    --radius-xl: 1.5rem;
+}
+
+/* ==========================================
+   RESET DE ESTILOS NEVE DENTRO DEL FORMULARIO
+   ========================================== */
+#wc-step-form-container button,
+#wc-step-form-container .btn,
+#wc-step-form-container input[type="button"],
+#wc-step-form-container input[type="submit"],
+#wc-step-form-container .option-btn,
+#wc-step-form-container .btn-add-to-cart,
+#wc-step-form-container .btn-back,
+#wc-step-form-container .btn-restart,
+#wc-step-form-container .btn-siguiente {
+    all: unset;
+    box-sizing: border-box;
+    cursor: pointer;
+}
+
+/* Neutralizar TODOS los hovers de Neve para botones dentro del formulario */
+#wc-step-form-container button:hover,
+#wc-step-form-container .btn:hover,
+#wc-step-form-container input[type="button"]:hover,
+#wc-step-form-container input[type="submit"]:hover,
+#wc-step-form-container .option-btn:hover,
+#wc-step-form-container .btn-add-to-cart:hover,
+#wc-step-form-container .btn-back:hover,
+#wc-step-form-container .btn-restart:hover,
+#wc-step-form-container .btn-siguiente:hover {
+    background: unset;
+    color: unset;
+    border-color: unset;
+}
+
+/* Contenedor principal - Estilo React App */
+#wc-step-form-container {
+    position: relative;
+    max-width: 1024px;
+    margin: 0 auto;
+    padding: 32px 16px 64px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--foreground);
+    background: linear-gradient(to bottom right, var(--background), rgba(245, 245, 245, 0.2));
+    min-height: 60vh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    box-shadow: 1px 2px 3px 4px #00000008;
+    border-radius: 12px;
+}
+
+/* Card contenedora del formulario - como React bg-card */
+.form-card-container {
+    background: var(--card);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+    padding: 24px;
+    margin-bottom: 24px;
+}
+
+@media (min-width: 768px) {
+    #wc-step-form-container {
+        padding: 32px 24px 64px;
+    }
+
+    .form-card-container {
+        padding: 32px 48px;
+    }
+}
+
+/* Indicador de progreso - Estilo React ProgressStepper */
+.step-progress {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    max-width: 700px;
+    margin: 0 auto 48px;
+    padding: 32px 16px;
+    gap: 0;
+}
+
+.step {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    max-width: 140px;
+    font-weight: 500;
+    font-size: 13px;
+    transition: all var(--transition-slow);
+    cursor: default;
+}
+
+.step-circle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--muted);
+    color: var(--muted-foreground);
+    font-weight: 600;
+    font-size: 14px;
+    transition: all var(--transition-slow);
+    position: relative;
+    z-index: 2;
+    border: none;
+}
+
+.step::before {
+    content: '';
+    position: absolute;
+    top: 20px;
+    left: calc(50% + 24px);
+    right: calc(-50% + 24px);
+    height: 2px;
+    background: var(--border);
+    transition: all var(--transition-slow);
+    z-index: 1;
+}
+
+.step:last-child::before {
+    display: none;
+}
+
+/* Paso activo - Color accent como React */
+.step.active .step-circle {
+    background: var(--accent);
+    color: var(--accent-foreground);
+    box-shadow: 0 0 0 4px rgba(212, 168, 85, 0.2);
+}
+
+.step.current .step-circle {
+    animation: none;
+}
+
+.step.completed .step-circle {
+    background: var(--success);
+    color: var(--success-foreground);
+}
+
+.step.completed::before {
+    background: var(--success);
+}
+
+.step-label {
+    font-size: 12px;
+    color: var(--muted-foreground);
+    text-align: center;
+    transition: all var(--transition-normal);
+    font-weight: 500;
+    max-width: 90px;
+    line-height: 1.3;
+}
+
+.step.active .step-label {
+    color: var(--accent-foreground);
+    font-weight: 600;
+}
+
+.step.completed .step-label {
+    color: var(--success);
+    font-weight: 500;
+}
+
+/* Pasos completados clickeables */
+.step.completed {
+    cursor: pointer;
+}
+
+.step.completed:hover .step-circle {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 4px var(--success-light);
+}
+
+.step.completed:hover .step-label {
+    color: var(--foreground);
+}
+
+.step.clickable {
+    cursor: pointer;
+}
+
+.step.clickable:hover .step-circle {
+    transform: scale(1.1);
+}
+
+.step.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Contenido de pasos - Layout limpio como React */
+.step-content {
+    display: none;
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+    box-shadow: none;
+    border: none;
+    margin-bottom: 24px;
+}
+
+.step-content.active {
+    display: block;
+    animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+.step-content h3 {
+    text-align: center;
+    margin-bottom: 8px;
+    color: var(--foreground);
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+}
+
+.step-subtitle {
+    text-align: center;
+    margin-bottom: 24px;
+    color: var(--muted-foreground);
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.5;
+}
+
+/* Grid de opciones - 2 columnas como React */
+.options-grid {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+@media (min-width: 640px) {
+    .options-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* Option buttons - Estilo SelectableCard de React */
+#wc-step-form-container button.option-btn,
+#wc-step-form-container .option-btn,
+.option-btn {
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px 20px;
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    text-align: left;
+    position: relative;
+    color: var(--foreground);
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+}
+
+/* Hover - Efecto "lift" como React SelectableCard */
+#wc-step-form-container button.option-btn:hover,
+#wc-step-form-container .option-btn:hover,
+.option-btn:hover {
+    border-color: rgb(217, 182, 69);
+    box-shadow: var(--shadow-hover);
+    background: var(--card);
+    color: var(--foreground);
+    transform: translateY(-2px);
+}
+
+/* Selected state - Borde primary + fondo sutil */
+#wc-step-form-container button.option-btn.selected,
+#wc-step-form-container .option-btn.selected,
+.option-btn.selected {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    box-shadow: var(--shadow-md);
+}
+
+.option-btn .icon {
+    font-size: 28px;
+    line-height: 1;
+    padding: 12px;
+    border-radius: var(--radius);
+    background: var(--muted);
+    color: var(--muted-foreground);
+    transition: all var(--transition-normal);
+    min-width: 52px;
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.option-btn:hover .icon {
+    background: var(--primary-lighter);
+    color: var(--primary);
+}
+
+.option-btn.selected .icon {
+    background: var(--primary);
+    color: var(--primary-foreground);
+}
+
+.option-btn .text {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.option-btn .text strong {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--foreground);
+}
+
+.option-btn.selected .text strong {
+    color: var(--primary-hover);
+}
+
+.option-btn .text small {
+    font-size: 13px;
+    color: var(--muted-foreground);
+    font-weight: 400;
+    line-height: 1.4;
+}
+
+/* Grid de productos - Cards premium */
+.products-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+    margin-bottom: 32px;
+}
+
+.product-option {
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.product-option::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, transparent 0%, rgba(24, 24, 27, 0.02) 100%);
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.product-option:hover {
+    border-color: var(--primary);
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-4px);
+}
+
+.product-option:hover::before {
+    opacity: 1;
+}
+
+.product-option.selected {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: var(--primary-foreground);
+    box-shadow: 0 0 0 4px rgba(24, 24, 27, 0.1);
+}
+
+.product-option h4 {
+    margin: 0 0 12px 0;
+    color: var(--foreground);
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.product-option.selected h4 {
+    color: var(--primary-foreground);
+}
+
+.product-option .price {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--primary);
+    margin: 12px 0;
+    letter-spacing: -0.02em;
+}
+
+.product-option.selected .price {
+    color: var(--primary-foreground);
+}
+
+.product-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 16px 0;
+}
+
+.product-details span {
+    font-size: 14px;
+    color: var(--muted-foreground);
+    background: var(--muted);
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+}
+
+.product-option.selected .product-details span {
+    background: rgba(255, 255, 255, 0.15);
+    color: var(--primary-foreground);
+}
+
+.product-option small {
+    font-size: 13px;
+    background: rgba(34, 197, 94, 0.1);
+    color: var(--success);
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    display: inline-block;
+    margin-top: 12px;
+    font-weight: 600;
+}
+
+.product-option.selected small {
+    background: rgba(255, 255, 255, 0.2);
+    color: var(--primary-foreground);
+}
+
+/* Resultado del producto - Layout mejorado */
+.product-result {
+    display: flex;
+    gap: 32px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 32px;
+    margin-top: 24px;
+    box-shadow: var(--shadow-sm);
+}
+
+.product-image {
+    flex: 0 0 200px;
+}
+
+.product-image img {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+}
+
+.product-info {
+    flex: 1;
+}
+
+.product-info h3 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    color: var(--foreground);
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.product-info .price {
+    font-size: 32px;
+    font-weight: 900;
+    color: var(--primary);
+    margin: 12px 0;
+    letter-spacing: -0.03em;
+}
+
+.product-meta {
+    background: var(--muted);
+    padding: 20px;
+    border-radius: var(--radius-md);
+    margin: 20px 0;
+    border-left: 3px solid var(--primary);
+}
+
+/* ============================================
+   TARJETA RESULTADO FINAL
+   ============================================ */
+
+.product-result-card {
+    max-width: 600px;
+    margin: 32px auto;
+    background: var(--card);
+    border: 2px solid var(--success);
+    border-radius: var(--radius-lg);
+    padding: 40px 32px;
+    text-align: center;
+    box-shadow: var(--shadow-lg), 0 0 0 4px rgba(16, 185, 129, 0.1);
+}
+
+.product-result-card h2 {
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--success);
+    margin: 0 0 24px;
+}
+
+.product-summary h3 {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--foreground);
+    margin: 0 0 20px;
+}
+
+.selections-summary {
+    background: var(--muted);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 24px;
+    text-align: left;
+}
+
+.selection-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.selection-item:last-child {
+    border-bottom: none;
+}
+
+.selection-label {
+    color: var(--muted-foreground);
+    font-size: 14px;
+}
+
+.selection-value {
+    color: var(--foreground);
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.product-price-final {
+    padding: 24px;
+    background: linear-gradient(135deg, var(--muted), #fff);
+    border-radius: var(--radius);
+    margin-bottom: 24px;
+}
+
+.price-main {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 4px;
+}
+
+.price-main .price-amount {
+    font-size: 48px;
+    font-weight: 900;
+    color: var(--primary);
+    line-height: 1;
+    letter-spacing: -0.02em;
+}
+
+.price-main .price-period {
+    font-size: 18px;
+    color: var(--muted-foreground);
+    font-weight: 500;
+}
+
+.price-breakdown {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+}
+
+.price-breakdown .monthly-equivalent {
+    font-size: 14px;
+    color: var(--muted-foreground);
+}
+
+.price-breakdown .savings-badge {
+    background: var(--success);
+    color: white;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 12px;
+}
+
+.price-note {
+    color: var(--muted-foreground);
+    font-size: 13px;
+    margin-top: -12px;
+    margin-bottom: 20px;
+}
+
+.product-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.product-actions .btn-secondary {
+    background: var(--secondary);
+    color: var(--foreground);
+    border: 1px solid var(--border);
+    padding: 12px 24px;
+    border-radius: var(--radius);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.product-actions .btn-secondary:hover {
+    background: var(--muted);
+    border-color: var(--foreground);
+}
+
+.product-meta p {
+    margin: 6px 0;
+    font-size: 15px;
+    color: var(--foreground);
+    font-weight: 500;
+}
+
+.product-meta strong {
+    color: var(--muted-foreground);
+    font-weight: 600;
+}
+
+/* Botones - Estilo limpio (con especificidad para sobreescribir Neve) */
+.add-to-cart-custom {
+    margin-top: 20px;
+}
+
+#wc-step-form-container .btn-add-to-cart,
+.btn-add-to-cart {
+    background: var(--primary) !important;
+    color: var(--primary-foreground) !important;
+    border: none !important;
+    padding: 14px 24px !important;
+    border-radius: var(--radius) !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    width: 100%;
+}
+
+#wc-step-form-container .btn-add-to-cart:hover:not(:disabled),
+.btn-add-to-cart:hover:not(:disabled) {
+    background: var(--primary-hover) !important;
+    color: var(--primary-foreground) !important;
+    border-color: var(--primary-hover) !important;
+}
+
+.btn-add-to-cart:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.btn-add-to-cart:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+#wc-step-form-container .btn-success,
+.btn-success {
+    background: var(--success) !important;
+}
+
+#wc-step-form-container .btn-success:hover,
+.btn-success:hover {
+    background: var(--success-hover) !important;
+}
+
+/* Acciones del carrito - Diseño moderno */
+.cart-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.btn-go-to-cart {
+    background: var(--success);
+    color: var(--success-foreground);
+    padding: 12px 20px;
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    font-weight: 600;
+    flex: 1;
+    text-align: center;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: var(--shadow-sm);
+}
+
+.btn-go-to-cart:hover {
+    background: #16a34a;
+    text-decoration: none;
+    color: var(--success-foreground);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-continue-shopping {
+    background: var(--secondary);
+    border: 1px solid var(--border);
+    color: var(--secondary-foreground);
+    padding: 12px 20px;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    cursor: pointer;
+    flex: 1;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-continue-shopping:hover {
+    background: var(--accent);
+    border-color: var(--foreground);
+}
+
+/* Loading — Overlay spinner */
+.loading {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    background: rgba(255, 255, 255, 0.88);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 12px;
+}
+
+.spinner {
+    position: relative;
+    width: 60px;
+    height: 60px;
+    flex-shrink: 0;
+}
+
+.spinner::before,
+.spinner::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    border: 3px solid transparent;
+    animation: spin linear infinite;
+}
+
+/* Anillo exterior */
+.spinner::before {
+    inset: 0;
+    border-top-color: var(--primary);
+    border-right-color: color-mix(in srgb, var(--primary) 30%, transparent);
+    animation-duration: 0.85s;
+}
+
+/* Anillo interior contrarrotante */
+.spinner::after {
+    inset: 10px;
+    border-top-color: color-mix(in srgb, var(--primary) 70%, transparent);
+    border-left-color: color-mix(in srgb, var(--primary) 30%, transparent);
+    animation-duration: 1.3s;
+    animation-direction: reverse;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.loading p {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+    margin: 0;
+}
+
+/* Mensajes */
+.error-message {
+    background: #fef2f2;
+    color: var(--destructive);
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    margin: 16px 0;
+    text-align: center;
+    border-left: 3px solid var(--destructive);
+    font-size: 14px;
+}
+
+.success-message {
+    background: var(--success-light);
+    color: #047857;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    margin: 16px 0;
+    text-align: center;
+    border-left: 3px solid var(--success);
+    font-size: 14px;
+}
+
+/* Navegación de pasos - Estilo React con flexbox centrado */
+.step-navigation {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 24px;
+    padding-top: 0;
+    gap: 16px;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+/* Botón Volver - Estilo secundario/outline */
+#wc-step-form-container .btn-back,
+.btn-back {
+    background: transparent !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    padding: 12px 20px !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    display: inline-flex !important;
+    align-items: center;
+    gap: 8px;
+    color: var(--foreground) !important;
+}
+
+#wc-step-form-container .btn-back:hover,
+.btn-back:hover {
+    background: var(--muted) !important;
+    border-color: var(--border-hover) !important;
+    color: var(--foreground) !important;
+}
+
+/* Botón Reiniciar - Destructivo outline */
+#wc-step-form-container .btn-restart,
+.btn-restart {
+    background: transparent !important;
+    color: var(--muted-foreground) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: var(--radius) !important;
+    padding: 12px 20px !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    display: inline-flex !important;
+    align-items: center;
+    gap: 8px;
+}
+
+#wc-step-form-container .btn-restart:hover,
+.btn-restart:hover {
+    background: var(--destructive) !important;
+    color: var(--destructive-foreground) !important;
+    border-color: var(--destructive) !important;
+}
+
+/* Botón Siguiente/Primary - Estilo React Button */
+#wc-step-form-container .btn-siguiente,
+.btn-siguiente {
+    background: var(--primary) !important;
+    color: var(--primary-foreground) !important;
+    border: none !important;
+    border-radius: var(--radius) !important;
+    padding: 12px 24px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    display: inline-flex !important;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    box-shadow: var(--shadow-sm);
+}
+
+#wc-step-form-container .btn-siguiente:hover,
+.btn-siguiente:hover {
+    background: var(--primary-hover) !important;
+    color: var(--primary-foreground) !important;
+    box-shadow: var(--shadow-md);
+}
+
+.btn-siguiente:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+
+/* Compatibilidad con estilos de WooCommerce */
+.cart-actions.woocommerce-message {
+    background: var(--card);
+    border: 2px solid var(--success);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    margin-top: 24px;
+}
+
+.cart-actions .button {
+    background: var(--gradient-primary);
+    color: var(--primary-foreground);
+    text-decoration: none;
+    padding: 14px 24px;
+    border-radius: var(--radius);
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cart-actions .button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px -4px rgba(249, 115, 22, 0.5);
+    text-decoration: none;
+}
+
+.cart-actions .btn-go-to-cart.button {
+    background: var(--success);
+}
+
+.cart-actions .btn-go-to-cart.button:hover {
+    background: #16a34a;
+}
+
+.cart-actions .btn-continue-shopping.button {
+    background: var(--secondary);
+    color: var(--secondary-foreground);
+    border: 1px solid var(--border);
+}
+
+.cart-actions .btn-continue-shopping.button:hover {
+    background: var(--accent);
+}
+
+/* Integración con estilos nativos de WooCommerce */
+.woocommerce .btn-add-to-cart {
+    background: var(--primary);
+    color: var(--primary-foreground);
+    border: none;
+    padding: 14px 28px;
+    border-radius: var(--radius-md);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 100%;
+}
+
+.woocommerce .btn-add-to-cart:hover:not(:disabled) {
+    background: var(--foreground);
+    transform: translateY(-2px);
+}
+
+.woocommerce .btn-add-to-cart:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.woocommerce .btn-success {
+    background: var(--success) !important;
+}
+
+.woocommerce .btn-success:hover {
+    background: #16a34a !important;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    #wc-step-form-container {
+        padding: 24px 16px;
+    }
+
+    .step-progress {
+        padding: 20px 0;
+    }
+
+    .step-circle {
+        width: 36px;
+        height: 36px;
+        font-size: 13px;
+    }
+
+    .step::before {
+        top: 18px;
+    }
+
+    .step-label {
+        font-size: 10px;
+    }
+
+    .step-content h3 {
+        font-size: 24px;
+    }
+
+    .step-subtitle {
+        font-size: 14px;
+    }
+
+    .options-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .products-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
+    .option-btn {
+        padding: 20px;
+    }
+
+    .product-result {
+        flex-direction: column;
+        gap: 20px;
+        padding: 24px 20px;
+    }
+
+    .product-image {
+        flex: none;
+        max-width: 180px;
+        margin: 0 auto;
+    }
+
+    .product-info h3 {
+        font-size: 24px;
+    }
+
+    .product-info .price {
+        font-size: 28px;
+    }
+
+    .step-navigation {
+        flex-direction: column;
+        gap: 12px;
+        margin-top: 24px;
+    }
+
+    .btn-back,
+    .btn-restart {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .cart-actions {
+        flex-direction: column;
+        gap: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    #wc-step-form-container {
+        padding: 20px 12px;
+    }
+
+    .step-progress {
+        padding: 16px 0;
+    }
+
+    .step-circle {
+        width: 32px;
+        height: 32px;
+        font-size: 12px;
+    }
+
+    .step::before {
+        top: 16px;
+        height: 1px;
+    }
+
+    .step-label {
+        font-size: 9px;
+    }
+
+    .step-content h3 {
+        font-size: 20px;
+    }
+
+    .step-subtitle {
+        font-size: 13px;
+    }
+
+    .option-btn {
+        padding: 16px;
+        gap: 12px;
+    }
+
+    .option-btn .icon {
+        font-size: 24px;
+        padding: 10px;
+        min-width: 44px;
+    }
+
+    .option-btn .text strong {
+        font-size: 16px;
+    }
+
+    .option-btn .text small {
+        font-size: 13px;
+    }
+
+    .product-option {
+        padding: 20px 16px;
+    }
+
+    .product-option h4 {
+        font-size: 18px;
+    }
+
+    .product-option .price {
+        font-size: 22px;
+    }
+}
+
+/* Accesibilidad - movimiento reducido */
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* Focus visible para accesibilidad */
+*:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+}
+
+.option-btn:focus-visible,
+.product-option:focus-visible,
+.btn-add-to-cart:focus-visible,
+.btn-back:focus-visible,
+.btn-restart:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+}
+
+/* ===========================
+   ESTILOS PARA PLANES DE PAGO
+   =========================== */
+
+/* Contenedor del resultado del producto */
+.product-result-wrapper {
+    max-width: 960px;
+    margin: 0 auto;
+    background: var(--card);
+    border-radius: var(--radius-lg);
+    padding: 36px;
+    border: 1px solid var(--border);
+}
+
+/* Resumen del producto seleccionado */
+.product-summary {
+    text-align: center;
+    margin-bottom: 40px;
+    padding-bottom: 28px;
+    border-bottom: 1px solid var(--border);
+}
+
+.product-summary h3 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--foreground);
+    margin-bottom: 16px;
+    letter-spacing: -0.02em;
+}
+
+.product-meta-summary {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.meta-badge {
+    background: var(--secondary);
+    color: var(--foreground);
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.meta-badge::before {
+    content: '✓';
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 12px;
+}
+
+/* Sección de planes de pago */
+.pricing-plans-section {
+    margin-top: 32px;
+}
+
+.plans-title {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--foreground);
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+}
+
+.plans-subtitle {
+    text-align: center;
+    color: var(--muted-foreground);
+    font-size: 14px;
+    margin-bottom: 28px;
+}
+
+/* Grid de tarjetas de planes */
+.pricing-plans-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+@media (max-width: 900px) {
+    .pricing-plans-grid {
+        grid-template-columns: 1fr;
+        max-width: 360px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+}
+
+/* Tarjeta individual de plan */
+.pricing-plan-card {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 24px 20px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.pricing-plan-card:hover {
+    border-color: var(--muted-foreground);
+    box-shadow: var(--shadow-md);
+}
+
+.pricing-plan-card.selected {
+    border-color: var(--primary);
+    background: var(--primary-light);
+}
+
+.pricing-plan-card.recommended {
+    border-color: var(--primary);
+    border-width: 2px;
+}
+
+.pricing-plan-card.recommended:hover {
+    box-shadow: var(--shadow-lg);
+}
+
+.pricing-plan-card.best-value {
+    border-color: var(--accent);
+    border-width: 2px;
+}
+
+/* Badges de recomendado y mejor precio */
+.recommended-badge,
+.best-value-badge {
+    position: absolute;
+    top: -11px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 5px 12px;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 12px;
+    white-space: nowrap;
+    z-index: 2;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.recommended-badge {
+    background: var(--primary);
+    color: var(--primary-foreground);
+}
+
+.best-value-badge {
+    background: var(--accent);
+    color: var(--accent-foreground);
+}
+
+/* Ahorro en planes trimestral y anual */
+.plan-savings {
+    background: var(--accent-light);
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.monthly-price {
+    font-size: 13px;
+    color: var(--muted-foreground);
+}
+
+.savings-tag {
+    display: inline-block;
+    background: var(--accent);
+    color: var(--accent-foreground);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 8px;
+}
+
+/* Features del plan */
+.plan-features {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 16px;
+    width: 100%;
+    text-align: left;
+}
+
+.plan-features li {
+    padding: 7px 0;
+    font-size: 13px;
+    color: var(--foreground);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.plan-features li::before {
+    content: '✓';
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 12px;
+}
+
+.plan-features li:last-child {
+    border-bottom: none;
+}
+
+/* Botón dentro de las tarjetas de planes (con especificidad para sobreescribir Neve) */
+#wc-step-form-container .pricing-plan-card .btn-add-to-cart,
+.pricing-plan-card .btn-add-to-cart {
+    width: 100%;
+    margin-top: auto;
+    padding: 11px 18px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    border-radius: var(--radius) !important;
+    background: var(--secondary) !important;
+    color: var(--foreground) !important;
+    border: none !important;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+#wc-step-form-container .pricing-plan-card .btn-add-to-cart:hover,
+.pricing-plan-card .btn-add-to-cart:hover {
+    background: var(--primary) !important;
+    color: var(--primary-foreground) !important;
+}
+
+#wc-step-form-container .pricing-plan-card.recommended .btn-add-to-cart,
+.pricing-plan-card.recommended .btn-add-to-cart {
+    background: var(--primary) !important;
+    color: var(--primary-foreground) !important;
+}
+
+#wc-step-form-container .pricing-plan-card.recommended .btn-add-to-cart:hover,
+.pricing-plan-card.recommended .btn-add-to-cart:hover {
+    background: var(--primary-hover) !important;
+}
+
+#wc-step-form-container .pricing-plan-card.best-value .btn-add-to-cart,
+.pricing-plan-card.best-value .btn-add-to-cart {
+    background: var(--accent) !important;
+    color: var(--accent-foreground) !important;
+}
+
+#wc-step-form-container .pricing-plan-card.best-value .btn-add-to-cart:hover,
+.pricing-plan-card.best-value .btn-add-to-cart:hover {
+    background: var(--accent-hover) !important;
+}
+
+/* Cabecera del plan */
+.plan-header {
+    margin-bottom: 16px;
+}
+
+.plan-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--foreground);
+    margin: 0;
+}
+
+/* Precio del plan */
+.plan-price {
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    margin-bottom: 8px;
+}
+
+.price-currency {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--primary);
+    margin-right: 2px;
+    margin-top: 8px;
+}
+
+.price-amount {
+    font-size: 48px;
+    font-weight: 800;
+    color: var(--primary);
+    line-height: 1;
+    letter-spacing: -0.03em;
+}
+
+/* Periodo del plan */
+.plan-period {
+    color: var(--muted-foreground);
+    font-size: 14px;
+    margin-bottom: 16px;
+}
+
+/* Bloque de pago inicial prorrateado */
+.plan-proration {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    background: #f8f0dc;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 14px;
+}
+
+.proration-today {
+    font-size: 13px;
+    color: #9b5f07;
+}
+
+.proration-today strong {
+    font-size: 15px;
+    font-weight: 700;
+    color: #78350f;
+}
+
+.proration-note {
+    font-size: 11px;
+    color: #9b5f07;
+}
+
+/* Total del plan */
+.plan-total {
+    background: var(--secondary);
+    padding: 14px 18px;
+    border-radius: var(--radius);
+    margin-top: 16px;
+    width: 100%;
+}
+
+.plan-total strong {
+    display: block;
+    color: var(--foreground);
+    font-size: 17px;
+    margin-bottom: 4px;
+    font-weight: 700;
+}
+
+.plan-months {
+    color: var(--muted-foreground);
+    font-size: 13px;
+}
+
+/* Icono del plan */
+.plan-icon {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+}
+
+.icon-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: var(--gradient-accent);
+    color: white;
+    border-radius: 50%;
+    font-size: 18px;
+    font-weight: 700;
+    box-shadow: var(--shadow-md);
+}
+
+.pricing-plan-card:not(.selected) .icon-badge {
+    display: none;
+}
+
+/* Información de stock */
+.stock-info-section {
+    text-align: center;
+    padding: 20px;
+    background: var(--secondary);
+    border-radius: var(--radius);
+    margin-bottom: 24px;
+    border: 1px solid var(--border);
+}
+
+.stock-message {
+    margin: 0;
+    font-size: 14px;
+    color: var(--foreground);
+}
+
+.stock-message strong {
+    color: var(--primary);
+    font-weight: 600;
+}
+
+/* Sección de añadir al carrito */
+.add-to-cart-section {
+    text-align: center;
+}
+
+/* Responsive - Tablets */
+@media (max-width: 768px) {
+    .product-result-wrapper {
+        padding: 24px 16px;
+    }
+
+    .product-summary h3 {
+        font-size: 22px;
+    }
+
+    .plans-title {
+        font-size: 18px;
+    }
+
+    .pricing-plans-grid {
+        grid-template-columns: 1fr;
+        gap: 14px;
+    }
+
+    .pricing-plan-card {
+        padding: 25px 16px;
+    }
+
+    .price-amount {
+        font-size: 40px;
+    }
+
+    .plan-name {
+        font-size: 16px;
+    }
+}
+
+/* Responsive - Móviles */
+@media (max-width: 480px) {
+    .product-meta-summary {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .meta-badge {
+        text-align: center;
+    }
+
+    .price-amount {
+        font-size: 36px;
+    }
+
+    .plan-features li {
+        font-size: 12px;
+        padding: 6px 0;
+    }
+}
+
+/* Tarjeta de horario lleno */
+.schedule-full-card {
+    cursor: default;
+    pointer-events: none;
+    background: #f3f4f6;
+    border: 2px solid #d1d5db;
+    opacity: 0.85;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.schedule-full-info {
+    pointer-events: all;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 5px;
+    width: 100% !important;
+    margin-top: 4px;
+}
+
+.schedule-full-label {
+    color: #dc2626;
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    height: 15px;
+}
+
+.schedule-full-waiting {
+    font-size: 11px;
+    color: #6b7280;
+    margin: 2px 0 4px;
+    height: 20px;
+}
+
+.schedule-full-links {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.schedule-full-wa,
+.schedule-full-form {
+    font-size: 12px;
+    color: #374151;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    line-height: 1.3;
+}
+
+.schedule-full-wa:hover {
+    color: #25d366;
+}
+
+.schedule-full-form:hover {
+    color: var(--primary);
+}

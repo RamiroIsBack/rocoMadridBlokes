@@ -1,0 +1,177 @@
+.achievements { width: 100%; }
+
+.achievements__empty {
+  font-size: 0.82rem;
+  color: #9ca3af;
+  font-style: italic;
+  margin: 8px 0;
+}
+
+.achievements__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.achievements__badge {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 64px;
+  cursor: default;
+  animation: badge-entry 0.4s ease both;
+}
+
+.achievements__circle {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+}
+
+.achievements__circle--locked {
+  background: #e5e7eb !important;
+  box-shadow: none;
+  opacity: 0.5;
+}
+
+/* ── Fire effect: 🔥 badges (consistent, improve_25) ── */
+.achievements__circle--fire {
+  animation: fire-glow 2s ease-in-out infinite;
+}
+
+@keyframes fire-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px #f97316) drop-shadow(0 -3px 8px #fbbf24);
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 10px #ef4444) drop-shadow(0 -6px 14px #f97316);
+    transform: scale(1.06) translateY(-1px);
+  }
+}
+
+/* ── Sparkle effect: 💎🌈 badges ── */
+.achievements__circle--spark {
+  animation: spark-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes spark-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 3px #6366f1) drop-shadow(0 0 8px rgba(99,102,241,0.3));
+    transform: scale(1) rotate(0deg);
+  }
+  33% {
+    filter: drop-shadow(0 0 8px #a78bfa) drop-shadow(0 0 16px rgba(167,139,250,0.5));
+    transform: scale(1.07) rotate(5deg);
+  }
+  66% {
+    filter: drop-shadow(0 0 6px #f9a8d4) drop-shadow(0 0 12px rgba(249,168,212,0.4));
+    transform: scale(1.04) rotate(-4deg);
+  }
+}
+
+/* ── New badge burst: star particles ── */
+.achievements__starburst {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.achievements__star {
+  position: absolute;
+  top: -6px;
+  left: -5px;
+  font-size: 11px;
+  color: #fbbf24;
+  line-height: 1;
+  opacity: 0;
+  animation: star-fly 0.9s ease-out calc(var(--i) * 0.07s + 0.15s) forwards;
+}
+
+@keyframes star-fly {
+  0% {
+    transform: rotate(calc(var(--i) * 72deg)) translateX(0) scale(0.4);
+    opacity: 1;
+  }
+  60% { opacity: 1; }
+  100% {
+    transform: rotate(calc(var(--i) * 72deg)) translateX(30px) scale(0.7);
+    opacity: 0;
+  }
+}
+
+/* ── "¡Nuevo!" label ── */
+.achievements__new-label {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ef4444;
+  color: #fff;
+  font-size: 7.5px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 5px;
+  border-radius: 2px;
+  white-space: nowrap;
+  z-index: 5;
+  animation: new-label-pop 0.4s ease both, new-label-fade 0.5s ease 3s forwards;
+}
+
+@keyframes new-label-pop {
+  0% { transform: translateX(-50%) scale(0); opacity: 0; }
+  70% { transform: translateX(-50%) scale(1.15); }
+  100% { transform: translateX(-50%) scale(1); opacity: 1; }
+}
+
+@keyframes new-label-fade {
+  to { opacity: 0; }
+}
+
+/* ── Badge entry animation ── */
+@keyframes badge-entry {
+  0%   { transform: scale(0.55) translateY(6px); opacity: 0; }
+  70%  { transform: scale(1.1) translateY(-1px); }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* ── Text ── */
+.achievements__emoji {
+  font-size: 26px;
+  line-height: 1;
+  user-select: none;
+  position: relative;
+  z-index: 1;
+}
+
+.achievements__badge--locked .achievements__emoji { font-size: 20px; }
+
+.achievements__title {
+  font-size: 0.62rem;
+  font-weight: 600;
+  color: #374151;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.achievements__badge--locked .achievements__title { color: #9ca3af; }
+
+.achievements__locked-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #9ca3af;
+  margin: 12px 0 6px;
+}

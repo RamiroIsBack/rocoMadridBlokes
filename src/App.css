@@ -43,6 +43,14 @@ d
   margin-top: var(--spacing-xs);
 }
 
+.app-header__greeting {
+  font-size: 0.72rem;
+  color: #f5c842;
+  margin-top: 4px;
+  font-style: italic;
+  letter-spacing: 0.02em;
+}
+
 .app-header__links {
   display: flex;
   gap: var(--spacing-sm);

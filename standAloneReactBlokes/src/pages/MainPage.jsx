@@ -1,11 +1,13 @@
 import { useState, useMemo } from 'react'
 import { useWordPressPosts } from '../hooks/useWordPressPosts'
+import { useCompletions } from '../hooks/useCompletions'
 import FilterBar from '../components/FilterBar'
 import EventCard from '../components/EventCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 
 function MainPage() {
   const { cards, loading, error } = useWordPressPosts()
+  const { isLoggedIn, loginUrl, completedByMe, countOverrides, toggleCompletion, myRatings, ratingCountOverrides, rateBloke } = useCompletions()
   const [activeSala, setActiveSala] = useState('TODOS')
   const [activeColor, setActiveColor] = useState('TODOS')
   const [sortMode, setSortMode] = useState('newest')
@@ -60,7 +62,19 @@ function MainPage() {
         {!loading && !error && filteredCards.length > 0 && (
           <div className="cards-grid">
             {filteredCards.map((card) => (
-              <EventCard key={card.id} card={card} isNew={newCardIds.has(card.id)} />
+              <EventCard
+                key={card.id}
+                card={card}
+                isNew={newCardIds.has(card.id)}
+                isDone={completedByMe.has(card.postId)}
+                completionCount={countOverrides[card.postId] ?? card.completionCount ?? 0}
+                onToggleDone={() => toggleCompletion(card.postId, countOverrides[card.postId] ?? card.completionCount ?? 0)}
+                isLoggedIn={isLoggedIn}
+                loginUrl={loginUrl}
+                myRating={myRatings[String(card.postId)] || null}
+                ratingCounts={ratingCountOverrides[card.postId] ?? card.interactions}
+                onRate={(type) => rateBloke(card.postId, type, ratingCountOverrides[card.postId] ?? card.interactions)}
+              />
             ))}
           </div>
         )}

@@ -6,29 +6,6 @@
   padding: 24px 16px 48px;
 }
 
-.progreso__training {
-  display: flex;
-  gap: 24px;
-  align-items: flex-start;
-}
-.progreso__training-right { flex: 1; min-width: 0; }
-.progreso__test-selector { display: flex; gap: 8px; margin-bottom: 12px; }
-.progreso__test-btn {
-  padding: 6px 16px;
-  border-radius: 20px;
-  border: 2px solid var(--zone-color);
-  background: transparent;
-  color: var(--zone-color);
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-.progreso__test-btn--active { background: var(--zone-color); color: #fff; }
-@media (max-width: 520px) {
-  .progreso__training { flex-direction: column; align-items: center; }
-}
-
 .progreso__title {
   font-family: var(--font-serif);
   font-size: 2rem;

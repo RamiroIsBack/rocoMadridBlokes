@@ -6,6 +6,7 @@ import StatsPage from './pages/StatsPage'
 import UserStatsPage from './pages/UserStatsPage'
 import ProgresoPage from './pages/ProgresoPage'
 import ProgresoIndexPage from './pages/ProgresoIndexPage'
+import MiClaseTab from './pages/MiClaseTab'
 import EntrenamientosPage from './pages/EntrenamientosPage'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import './App.css'
@@ -58,7 +59,10 @@ export default function App() {
                 className="app-header__logo"
               />
             </a>
-            <p className="app-header__subtitle">Problemas de búlder · Roco Madrid</p>
+            <p className="app-header__subtitle">Boulder y entrenamiento · Roco Madrid</p>
+            {window.blokesSiteData?.isLoggedIn && window.blokesSiteData?.userName && (
+              <p className="app-header__greeting">Hola {window.blokesSiteData.userName}, ¡vamos a apretar bicho!</p>
+            )}
             <div className="app-header__links">
               <div className="app-header__link-wrap">
                 <span className="app-header__link-hint">Explora el resto de la web</span>
@@ -132,10 +136,12 @@ export default function App() {
         <main className="app-main">
           <Routes>
             <Route path="/" element={<MainPage />} />
-            <Route path="/progreso" element={<ProgresoIndexPage />} />
-            <Route path="/progreso/comunidad" element={<ProgresoPage />} />
-            <Route path="/progreso/yo" element={<UserStatsPage />} />
-            <Route path="/mis-blokes" element={<Navigate to="/progreso" replace />} />
+            <Route path="/progreso" element={<ProgresoIndexPage />}>
+              <Route path="comunidad" element={<ProgresoPage />} />
+              <Route path="clase" element={<MiClaseTab />} />
+              <Route path="yo" element={<UserStatsPage />} />
+            </Route>
+            <Route path="/mis-blokes" element={<Navigate to="/progreso/yo" replace />} />
             <Route path="/setter" element={<AdminApp />} />
             <Route path="/stats" element={<StatsPage />} />
             <Route path="/entrenamientos" element={<EntrenamientosPage />} />

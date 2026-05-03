@@ -174,22 +174,8 @@
   border-bottom: none;
 }
 
-.entrena__row {
-  cursor: pointer;
-}
-.entrena__row:hover td {
+.entrena__table tr:hover td {
   background: #fdf7e6;
-}
-.entrena__row--active td {
-  background: #fef3c7;
-}
-.entrena__panel-row td {
-  padding: 0 !important;
-  border-bottom: none;
-}
-
-.entrena__panel-wrap {
-  border-top: 3px solid #fbbf24;
 }
 
 .entrena__badge {

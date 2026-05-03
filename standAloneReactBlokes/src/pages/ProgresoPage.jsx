@@ -1,8 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useWordPressPosts } from '../hooks/useWordPressPosts'
-import { useTrainingSummary } from '../hooks/useTraining'
-import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
-import TrainingChart from '../components/TrainingChart'
 import './ProgresoPage.css'
 
 const COLOR_INFO = {
@@ -38,9 +35,6 @@ function PieChart({ slices }) {
 
 export default function ProgresoPage() {
   const { cards, loading } = useWordPressPosts()
-  const trainingSummary = useTrainingSummary()
-  const [activeZone, setActiveZone] = useState('lower')
-  const [activeTest, setActiveTest] = useState(1)
 
   const colorDistrib = useMemo(() => {
     const acc = {}
@@ -79,40 +73,6 @@ export default function ProgresoPage() {
   return (
     <div className="progreso">
       <h1 className="progreso__title">Comunidad</h1>
-
-      <section className="progreso__section">
-        <h2 className="progreso__section-title">Progreso de entrenamiento</h2>
-        <p className="progreso__section-hint">Media de la comunidad por test y mes</p>
-        <div className="progreso__training">
-          <BodyDiagram
-            activeZone={activeZone}
-            onSelectZone={(zone) => {
-              setActiveZone(zone)
-              setActiveTest(ZONES[zone].tests[0])
-            }}
-          />
-          <div className="progreso__training-right">
-            <div className="progreso__test-selector">
-              {ZONES[activeZone].tests.map(tid => (
-                <button
-                  key={tid}
-                  className={`progreso__test-btn ${activeTest === tid ? 'progreso__test-btn--active' : ''}`}
-                  style={{ '--zone-color': ZONES[activeZone].color }}
-                  onClick={() => setActiveTest(tid)}
-                >
-                  {TESTS[tid].label}
-                </button>
-              ))}
-            </div>
-            <TrainingChart
-              userEntries={[]}
-              communitySummary={trainingSummary[activeTest] || {}}
-              color={ZONES[activeZone].color}
-              testLabel={`Test ${activeTest} — ${ZONES[activeZone].label} · Media Roco`}
-            />
-          </div>
-        </div>
-      </section>
 
       <section className="progreso__section">
         <h2 className="progreso__section-title">Distribución de la colección</h2>

@@ -1,0 +1,89 @@
+.training-chart-wrap {
+  width: 100%;
+}
+.training-chart {
+  width: 100%;
+}
+.training-chart--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100px;
+  color: #9ca3af;
+  font-size: 0.85rem;
+}
+.training-chart__label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #6b7280;
+  margin: 0 0 2px 36px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.training-chart__section-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #9ca3af;
+  margin: 8px 0 2px 36px;
+}
+.training-chart__svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.training-chart__tick {
+  font-size: 9px;
+  fill: #9ca3af;
+  font-family: inherit;
+}
+.training-chart__legend {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  margin-top: 4px;
+  margin-bottom: 4px;
+}
+.training-chart__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.74rem;
+  color: #9ca3af;
+}
+.training-chart__legend-line {
+  display: inline-block;
+  width: 18px;
+  height: 2.5px;
+  border-radius: 2px;
+}
+.training-chart__legend-line--dashed {
+  background: repeating-linear-gradient(
+    90deg, #d1d5db 0px, #d1d5db 4px, transparent 4px, transparent 7px
+  );
+  height: 2px;
+}
+
+/* Gauge SVG text */
+.training-progress__pct-svg {
+  font-size: 26px;
+  font-weight: 900;
+  font-family: inherit;
+  letter-spacing: -0.04em;
+}
+.training-progress__arrow-svg {
+  font-size: 11px;
+  font-family: inherit;
+}
+.training-progress__stat-svg {
+  font-size: 11px;
+  fill: #374151;
+  font-weight: 600;
+  font-family: inherit;
+}
+.training-progress__since-svg {
+  font-size: 9px;
+  fill: #9ca3af;
+  font-family: inherit;
+}

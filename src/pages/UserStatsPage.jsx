@@ -1,5 +1,11 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import { useCompletions } from '../hooks/useCompletions'
+import { useUserTraining, useTrainingSummary } from '../hooks/useTraining'
+import { computeAchievements, computeClassmateAchievements } from '../hooks/useAchievements'
+import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
+import TrainingChart from '../components/TrainingChart'
+import Achievements from '../components/Achievements'
 import './UserStatsPage.css'
 
 const COLOR_INFO = {
@@ -31,7 +37,48 @@ function monthLabel(key) {
 }
 
 export default function UserStatsPage() {
+  const outletCtx = (() => { try { return useOutletContext() } catch { return {} } })()
+  const hasClases = outletCtx?.hasClases ?? true
+  const classData = outletCtx?.classData ?? null
+
   const { isLoggedIn, loginUrl, completedByMe, completionLog, ratingLog } = useCompletions()
+  const userId = window.blokesSiteData?.userId || 0
+  const { history: trainingHistory } = useUserTraining(isLoggedIn ? userId : null)
+  const trainingSummary = useTrainingSummary()
+  const [activeZone, setActiveZone] = useState('lower')
+  const [activeTest, setActiveTest] = useState(1)
+
+  const [classNotifs, setClassNotifs] = useState([])
+  const notifsInit = useRef(false)
+
+  useEffect(() => {
+    if (notifsInit.current || !hasClases || !classData?.members?.length) return
+    notifsInit.current = true
+    const KEY = 'blokes_class_notifs_seen'
+    let stored = null
+    try { stored = JSON.parse(localStorage.getItem(KEY)) } catch {}
+    const toStore = {}
+    const notifs = []
+    for (const member of classData.members) {
+      if (member.is_me) continue
+      const achs = computeClassmateAchievements(member)
+      const earnedIds = achs.filter(a => a.earned).map(a => a.id)
+      toStore[member.name] = earnedIds
+      if (stored !== null) {
+        const seen = new Set(stored[member.name] || [])
+        for (const id of earnedIds) {
+          if (!seen.has(id)) notifs.push({ name: member.name, ach: achs.find(a => a.id === id) })
+        }
+      }
+    }
+    try { localStorage.setItem(KEY, JSON.stringify(toStore)) } catch {}
+    setClassNotifs(notifs)
+  }, [hasClases, classData])
+
+  const achievements = useMemo(
+    () => computeAchievements(trainingHistory, completionLog, ratingLog),
+    [trainingHistory, completionLog, ratingLog]
+  )
 
   const byColor = useMemo(() => {
     const acc = {}
@@ -87,6 +134,22 @@ export default function UserStatsPage() {
         <span className="user-stats__total-label">TOPs conseguidos</span>
       </div>
 
+      {classNotifs.length > 0 && (
+        <section className="user-stats__section">
+          <h2 className="user-stats__section-title">Novedades de tu clase</h2>
+          <div className="user-stats__notifs">
+            {classNotifs.map((n, i) => (
+              <div key={i} className="user-stats__notif">
+                <span className="user-stats__notif-icon">🎉</span>
+                <span className="user-stats__notif-text">
+                  ¡Felicita a <strong>{n.name}</strong>! Ha logrado <em>{n.ach.title}</em> {n.ach.emoji}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {total === 0 ? (
         <p className="user-stats__empty">Aún no has marcado ningún bloke como TOP. ¡Venga!</p>
       ) : (
@@ -141,6 +204,98 @@ export default function UserStatsPage() {
           )}
         </>
       )}
+
+      {hasClases && classData?.members?.length > 0 && (() => {
+        const sorted = [...classData.members]
+          .sort((a, b) => (b.bloke_total ?? 0) - (a.bloke_total ?? 0))
+        if (sorted.every(m => !m.bloke_total)) return null
+        const maxTotal = Math.max(1, ...sorted.map(m => m.bloke_total ?? 0))
+        const myRank = sorted.findIndex(m => m.is_me) + 1
+        return (
+          <section className="user-stats__section">
+            <h2 className="user-stats__section-title">Tu clase — Blokes</h2>
+            {myRank > 0 && (
+              <p className="user-stats__class-rank-pill">
+                #{myRank} de {sorted.length} en tu clase
+              </p>
+            )}
+            <div className="user-stats__class-blokes">
+              {sorted.map((m, i) => {
+                const tot = m.bloke_total ?? 0
+                return (
+                  <div key={i} className={`user-stats__class-row ${m.is_me ? 'user-stats__class-row--me' : ''}`}>
+                    <span className="user-stats__class-pos">#{i + 1}</span>
+                    <span className="user-stats__class-name">{m.is_me ? 'Tú' : m.name}</span>
+                    <div className="user-stats__class-bar-wrap">
+                      <div className="user-stats__class-bar" style={{ width: `${(tot / maxTotal) * 100}%` }} />
+                    </div>
+                    <span className="user-stats__class-count">{tot}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })()}
+
+      <section className="user-stats__section">
+        <h2 className="user-stats__section-title">Mi progreso de entrenamiento</h2>
+        {hasClases ? (
+          <div className="user-stats__training">
+            <BodyDiagram
+              activeZone={activeZone}
+              onSelectZone={(zone) => {
+                setActiveZone(zone)
+                setActiveTest(ZONES[zone].tests[0])
+              }}
+            />
+            <div className="user-stats__training-right">
+              <div className="user-stats__test-selector">
+                {ZONES[activeZone].tests.map(tid => (
+                  <button
+                    key={tid}
+                    className={`user-stats__test-btn ${activeTest === tid ? 'user-stats__test-btn--active' : ''}`}
+                    style={{ '--zone-color': ZONES[activeZone].color }}
+                    onClick={() => setActiveTest(tid)}
+                  >
+                    {TESTS[tid].label}
+                  </button>
+                ))}
+              </div>
+              <TrainingChart
+                userEntries={trainingHistory[activeTest] || []}
+                communitySummary={trainingSummary[activeTest] || {}}
+                color={ZONES[activeZone].color}
+                testLabel={`Test ${activeTest} — ${ZONES[activeZone].label}`}
+              />
+              {(() => {
+                const sorted = (classData?.members || [])
+                  .filter(m => m.tests?.[activeTest] !== undefined)
+                  .sort((a, b) => b.tests[activeTest].pct - a.tests[activeTest].pct)
+                const rank = sorted.findIndex(m => m.is_me) + 1
+                if (!rank || sorted.length < 2) return null
+                return (
+                  <div className="user-stats__class-rank-label">
+                    Posición en tu clase: #{rank} de {sorted.length} — {TESTS[activeTest].label}
+                  </div>
+                )
+              })()}
+            </div>
+          </div>
+        ) : (
+          <div className="user-stats__training-locked">
+            <span className="user-stats__training-locked-icon">🔒</span>
+            <p className="user-stats__training-locked-title">Exclusivo para alumnos de clases dirigidas</p>
+            <p className="user-stats__training-locked-text">Tu instructor registra los resultados de tus tests. Apúntate a clases con instructor para desbloquear tu progreso.</p>
+            <a href="https://rocomadrid.com/club/actividades-para-socios" className="user-stats__training-locked-btn">Ver clases disponibles</a>
+          </div>
+        )}
+      </section>
+
+      <section className="user-stats__section">
+        <h2 className="user-stats__section-title">Logros</h2>
+        <Achievements achievements={achievements} />
+      </section>
 
       <section className="user-stats__section">
         <h2 className="user-stats__section-title">Mis valoraciones</h2>

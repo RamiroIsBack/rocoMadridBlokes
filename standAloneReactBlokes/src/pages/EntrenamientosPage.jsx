@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import AdminLogin from '../admin/AdminLogin'
-import TrainingPanel from '../components/TrainingPanel'
 import './EntrenamientosPage.css'
 
 const SESSION_KEY = 'blokes_auth'
@@ -49,7 +48,6 @@ export default function EntrenamientosPage() {
   )
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [allClases, setAllClases] = useState([])
-  const [selectedAlumno, setSelectedAlumno] = useState(null)
   const [alumnos, setAlumnos] = useState([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -205,57 +203,40 @@ export default function EntrenamientosPage() {
           <p className="entrena__empty-hint">Cuando un alumno contrate una suscripción activa aparecerá aquí.</p>
         </div>
       ) : (
-        <>
-          <div className="entrena__table-wrap">
-            <table className="entrena__table">
-              <thead>
-                <tr>
-                  <th>Nombre</th>
-                  <th>Email</th>
-                  <th>Frecuencia</th>
-                  <th>Día</th>
-                  <th>Horario</th>
-                  <th>Turno</th>
-                  <th>Edad</th>
-                  <th>Estado</th>
+        <div className="entrena__table-wrap">
+          <table className="entrena__table">
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Email</th>
+                <th>Frecuencia</th>
+                <th>Día</th>
+                <th>Horario</th>
+                <th>Turno</th>
+                <th>Edad</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {alumnos.map((a, i) => (
+                <tr key={a.id ?? i}>
+                  <td>{a.cliente || a.nombre || '—'}</td>
+                  <td>{a.email || '—'}</td>
+                  <td>{FRECUENCIA_LABEL[a.frecuencia] || a.producto || '—'}</td>
+                  <td>{a.dia || '—'}</td>
+                  <td>{a.horario || '—'}</td>
+                  <td>{a.turno || '—'}</td>
+                  <td>{a.edad || '—'}</td>
+                  <td>
+                    <span className={`entrena__badge entrena__badge--${a.status || 'active'}`}>
+                      {a.status || 'active'}
+                    </span>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {alumnos.map((a, i) => {
-                  const isSelected = selectedAlumno?.id === a.id
-                  return (
-                    <tr
-                      key={a.id ?? i}
-                      className={`entrena__row ${isSelected ? 'entrena__row--active' : ''}`}
-                      onClick={() => setSelectedAlumno(isSelected ? null : a)}
-                    >
-                      <td>{a.cliente || a.nombre || '—'}</td>
-                      <td>{a.email || '—'}</td>
-                      <td>{FRECUENCIA_LABEL[a.frecuencia] || a.producto || '—'}</td>
-                      <td>{a.dia || '—'}</td>
-                      <td>{a.horario || '—'}</td>
-                      <td>{a.turno || '—'}</td>
-                      <td>{a.edad || '—'}</td>
-                      <td>
-                        <span className={`entrena__badge entrena__badge--${a.status || 'active'}`}>
-                          {a.status || 'active'}
-                        </span>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          {selectedAlumno && (
-            <div className="entrena__panel-wrap">
-              <TrainingPanel
-                alumno={selectedAlumno}
-                onClose={() => setSelectedAlumno(null)}
-              />
-            </div>
-          )}
-        </>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )

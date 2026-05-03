@@ -1,0 +1,207 @@
+.mi-clase {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.mi-clase__gate {
+  max-width: 360px;
+  margin: 48px auto;
+  text-align: center;
+  padding: 0 16px;
+}
+.mi-clase__gate-icon { font-size: 2.5rem; display: block; margin-bottom: 12px; }
+.mi-clase__gate-title {
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #2a2015;
+  margin: 0 0 8px;
+}
+.mi-clase__gate-text {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin: 0 0 20px;
+  line-height: 1.5;
+}
+.mi-clase__gate-btn {
+  display: inline-block;
+  padding: 10px 24px;
+  background: #2a2015;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.mi-clase__loading {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.mi-clase__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.mi-clase__title {
+  font-family: var(--font-serif);
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #2a2015;
+  margin: 0 0 2px;
+  letter-spacing: -0.02em;
+}
+.mi-clase__subtitle {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+.mi-clase__stat-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: #f9fafb;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 14px;
+}
+.mi-clase__stat-num {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: #2a2015;
+  line-height: 1;
+}
+.mi-clase__stat-lbl {
+  font-size: 0.62rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+}
+
+.mi-clase__my-rank {
+  background: color-mix(in srgb, var(--zone-color) 12%, #fff);
+  border: 1.5px solid color-mix(in srgb, var(--zone-color) 30%, #e5e7eb);
+  border-radius: 10px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.mi-clase__my-rank-pos {
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: var(--zone-color);
+  letter-spacing: -0.03em;
+}
+.mi-clase__my-rank-lbl {
+  font-size: 0.8rem;
+  color: #6b7280;
+}
+
+.mi-clase__selector-wrap {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+.mi-clase__selector-right {
+  flex: 1;
+  min-width: 0;
+}
+.mi-clase__test-btns {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.mi-clase__test-btn {
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1.5px solid var(--zone-color);
+  background: transparent;
+  color: var(--zone-color);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.mi-clase__test-btn--active {
+  background: var(--zone-color);
+  color: #fff;
+}
+
+.mi-clase__no-data {
+  font-size: 0.82rem;
+  color: #9ca3af;
+  font-style: italic;
+  padding: 16px 0;
+}
+
+.mi-clase__leaderboard { display: flex; flex-direction: column; gap: 6px; }
+
+.mi-clase__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  transition: background 0.1s;
+}
+.mi-clase__row--me {
+  background: color-mix(in srgb, var(--zone-color) 10%, #fff);
+  border: 1.5px solid color-mix(in srgb, var(--zone-color) 25%, #e5e7eb);
+}
+.mi-clase__pos {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #9ca3af;
+  width: 24px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.mi-clase__row--me .mi-clase__pos { color: var(--zone-color); }
+
+.mi-clase__name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #374151;
+  width: 72px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mi-clase__row--me .mi-clase__name { color: var(--zone-color); }
+
+.mi-clase__bar-wrap {
+  flex: 1;
+  height: 8px;
+  background: #f0ece0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.mi-clase__bar {
+  height: 100%;
+  border-radius: 4px;
+  min-width: 4px;
+  transition: width 0.5s ease;
+}
+.mi-clase__pct {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #374151;
+  width: 48px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.mi-clase__pct--neg { color: #f97316; }
+
+@media (max-width: 480px) {
+  .mi-clase__selector-wrap { flex-direction: column; align-items: center; }
+}

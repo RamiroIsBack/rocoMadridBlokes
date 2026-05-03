@@ -25,9 +25,11 @@ export default function AdminLogin({ onLogin, mode = 'setter' }) {
     setIsLoading(false)
   }
 
-  const title = mode === 'setter' ? 'Zona Setter' : 'Estadísticas'
-  const subtitle = mode === 'setter' 
+  const title = mode === 'setter' ? 'Zona Setter' : mode === 'entrenamientos' ? 'Entrenamientos' : 'Estadísticas'
+  const subtitle = mode === 'setter'
     ? 'Introduce la contraseña para acceder'
+    : mode === 'entrenamientos'
+    ? 'Introduce la contraseña para acceder a los datos de alumnos'
     : 'Introduce la contraseña para acceder a las estadísticas'
 
   return (

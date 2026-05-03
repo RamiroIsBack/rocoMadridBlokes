@@ -43,6 +43,58 @@ d
   margin-top: var(--spacing-xs);
 }
 
+.app-header__links {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.app-header__link {
+  display: inline-block;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  text-decoration: none;
+  border: 2px solid #555;
+  color: #cccccc;
+  border-radius: 2px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.app-header__link:hover {
+  border-color: var(--color-accent);
+  color: #ffffff;
+}
+
+.app-header__link--cta {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.app-header__link--cta:hover {
+  background: var(--color-accent);
+  color: #1a1412;
+}
+
+.app-header__link-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.app-header__link-hint {
+  font-size: 9px;
+  color: #777;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  text-align: center;
+}
+
 .app-header__salas-wrap {
   position: relative;
   flex: 1;
@@ -55,6 +107,39 @@ d
   width: 100%;
   max-width: none;
   object-fit: contain;
+}
+
+.map-bubble-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  max-width: 78px;
+}
+
+.map-bubble {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid rgba(255,255,255,0.6);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  line-height: 1;
+}
+
+@media (min-width: 900px) {
+  .map-bubble-group--5 {
+    right: calc(18% + 115px) !important;
+  }
+}
+
+@media (min-width: 1125px) {
+  .app-header__salas-wrap {
+    max-width: 800px;
+  }
 }
 
 .app-nav-toggle {
@@ -568,5 +653,16 @@ d
   .filter-select {
     font-size: 12px;
     flex: 1;
+  }
+
+  .app-nav__list {
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .app-nav__link {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    font-size: 13px;
   }
 }

@@ -15,6 +15,9 @@ const COLORES = [
   { key: 'blanco', label: 'Trave' },
 ]
 
+/**
+ * @param {{ activeSala: string, onSalaChange: Function, activeColor: string, onColorChange: Function }} props
+ */
 export default function FilterBar({ activeSala, onSalaChange, activeColor, onColorChange, sortMode, onSortMode }) {
   return (
     <nav className="filter-bar" aria-label="Filtros">
