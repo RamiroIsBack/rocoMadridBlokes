@@ -1012,17 +1012,50 @@ function progreso_get_class_progress() {
             $color = sanitize_text_field($entry['color'] ?? 'green');
             $bloke_by_color[$color] = ($bloke_by_color[$color] ?? 0) + 1;
         }
+
+        $rating_log = get_user_meta($uid, '_blokes_rating_log', true);
+        if (!is_array($rating_log)) $rating_log = array();
+        $rating_by_type = array('star_1' => 0, 'star_2' => 0, 'star_3' => 0, 'skull' => 0);
+        foreach ($rating_log as $entry) {
+            $type = sanitize_text_field($entry['type'] ?? '');
+            if (array_key_exists($type, $rating_by_type)) $rating_by_type[$type]++;
+        }
+
         $members[] = array(
             'is_me'          => ($uid === $me),
             'name'           => $name,
             'tests'          => $tests,
             'bloke_total'    => count($bloke_log),
             'bloke_by_color' => $bloke_by_color,
+            'rating_total'   => array_sum($rating_by_type),
+            'rating_by_type' => $rating_by_type,
         );
     }
 
+    // Top blokes: aggregate completions across all classmates
+    $bloke_counts = array();
+    foreach (array_keys($uid_to_name) as $uid) {
+        $log = get_user_meta($uid, '_blokes_completion_log', true);
+        if (!is_array($log)) continue;
+        foreach ($log as $entry) {
+            $pid = intval($entry['postId'] ?? 0);
+            if ($pid > 0) $bloke_counts[$pid] = ($bloke_counts[$pid] ?? 0) + 1;
+        }
+    }
+    arsort($bloke_counts);
+    $top_blokes = array();
+    // Post data lives on the main blog; switch context to fetch titles/colors
+    switch_to_blog(get_main_site_id());
+    foreach (array_slice($bloke_counts, 0, 8, true) as $pid => $count) {
+        $title = get_the_title($pid);
+        $color = sanitize_text_field(get_field('bloke_color', $pid) ?: 'green');
+        if ($title) $top_blokes[] = array('post_id' => $pid, 'title' => $title, 'color' => $color, 'count' => $count);
+    }
+    restore_current_blog();
+
     return rest_ensure_response(array('data' => array(
-        'class'   => array('dia' => $dia, 'horario' => $horario),
-        'members' => $members,
+        'class'      => array('dia' => $dia, 'horario' => $horario),
+        'members'    => $members,
+        'top_blokes' => $top_blokes,
     )));
 }
