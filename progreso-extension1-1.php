@@ -90,7 +90,13 @@ add_action('wp_head', function() {
     $user_name = '';
     if (is_user_logged_in()) {
         $cu = wp_get_current_user();
-        $user_name = trim($cu->first_name) ?: (explode(' ', trim($cu->display_name ?: ''))[0] ?? '');
+        $first = trim((string) ($cu->first_name ?? ''));
+        if ($first) {
+            $user_name = $first;
+        } else {
+            $parts = explode(' ', trim((string) ($cu->display_name ?? '')));
+            $user_name = $parts[0] ?? '';
+        }
     }
     $data = array(
         'nonce'      => wp_create_nonce('wp_rest'),
@@ -949,10 +955,12 @@ function progreso_get_class_progress() {
         if ($uid > 0 && !isset($uid_to_name[$uid])) {
             $u = get_user_by('id', $uid);
             if ($u) {
-                $name = trim($u->first_name) ?: explode(' ', trim($u->display_name))[0];
+                $first = trim((string) ($u->first_name ?? ''));
+                $last  = trim((string) ($u->last_name  ?? ''));
+                $full  = trim("$first $last");
+                $name  = $full ?: trim((string) ($u->display_name ?? '')) ?: trim($sub['cliente'] ?? '') ?: 'Compañero';
             } else {
-                $parts = explode(' ', trim($sub['cliente'] ?? ''));
-                $name  = $parts[0] ?: 'Compañero';
+                $name = trim($sub['cliente'] ?? '') ?: 'Compañero';
             }
             $uid_to_name[$uid] = $name;
         }
@@ -1013,5 +1021,4 @@ function progreso_get_class_progress() {
         'class'   => array('dia' => $dia, 'horario' => $horario),
         'members' => $members,
     )));
-}
 }
