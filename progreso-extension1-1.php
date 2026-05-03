@@ -942,12 +942,16 @@ function progreso_get_class_progress() {
     }
 
     $dia = $my_class['dia']; $horario = $my_class['horario'];
+    $my_days = array_map('trim', explode('-', $dia));
 
-    // Collect all classmates (same dia + horario, active)
+    // Two students share a class when their horario matches and at least one day overlaps
+    // e.g. "Lunes" and "Lunes-Miércoles" at the same time are in the same class
     $uid_to_name = array();
     foreach ($all as $sub) {
         if ($sub['status'] !== 'active') continue;
-        if ($sub['dia'] !== $dia || $sub['horario'] !== $horario) continue;
+        if ($sub['horario'] !== $horario) continue;
+        $sub_days = array_map('trim', explode('-', $sub['dia'] ?? ''));
+        if (empty(array_intersect($my_days, $sub_days))) continue;
         $uid = intval(get_post_meta($sub['id'], '_customer_user', true));
         if (!$uid && !empty($sub['email'])) {
             $u = get_user_by('email', $sub['email']); if ($u) $uid = $u->ID;
