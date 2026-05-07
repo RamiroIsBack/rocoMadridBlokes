@@ -98,22 +98,24 @@ add_action('wp_head', function() {
             $user_name = $parts[0] ?? '';
         }
     }
+    $spa_url = home_url('/blokes/');
     $data = array(
         'nonce'      => wp_create_nonce('wp_rest'),
         'clubNonce'  => $club_nonce,
         'isLoggedIn' => is_user_logged_in(),
         'userId'     => get_current_user_id(),
-        'loginUrl'   => wp_login_url(),
+        'loginUrl'   => wp_login_url($spa_url),
+        'logoutUrl'  => wp_logout_url($spa_url),
         'userName'   => $user_name,
     );
     echo '<script>window.blokesSiteData = ' . wp_json_encode($data) . ';</script>' . "\n";
 });
 
-// Respect redirect_to after login even for admin users
+// After login: honour explicit redirect_to; non-admins always go to the SPA
 add_filter('login_redirect', function($redirect_to, $requested, $user) {
-    if (!empty($requested) && !is_wp_error($user)) {
-        return $requested;
-    }
+    if (is_wp_error($user)) return $redirect_to;
+    if (!empty($requested)) return $requested;
+    if (!user_can($user, 'manage_options')) return home_url('/blokes/');
     return $redirect_to;
 }, 10, 3);
 

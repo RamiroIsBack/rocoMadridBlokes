@@ -43,12 +43,58 @@ d
   margin-top: var(--spacing-xs);
 }
 
-.app-header__greeting {
-  font-size: 0.72rem;
+.app-header__login-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  margin-top: 8px;
+  border: 1.5px solid var(--color-accent);
+  color: var(--color-accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: background 0.15s, color 0.15s;
+}
+.app-header__login-btn:hover {
+  background: var(--color-accent);
+  color: #1a1412;
+}
+
+.app-header__user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.app-header__user-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  background: rgba(245, 200, 66, 0.08);
+  border: 1px solid rgba(245, 200, 66, 0.3);
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 600;
   color: #f5c842;
-  margin-top: 4px;
-  font-style: italic;
   letter-spacing: 0.02em;
+}
+.app-header__user-logout {
+  font-size: 0.68rem;
+  color: #666;
+  text-decoration: none;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border: 1px solid #444;
+  transition: color 0.15s, border-color 0.15s;
+}
+.app-header__user-logout:hover {
+  color: #aaa;
+  border-color: #666;
 }
 
 .app-header__links {

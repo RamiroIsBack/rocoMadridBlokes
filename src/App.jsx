@@ -60,9 +60,32 @@ export default function App() {
               />
             </a>
             <p className="app-header__subtitle">Boulder y entrenamiento · Roco Madrid</p>
-            {window.blokesSiteData?.isLoggedIn && window.blokesSiteData?.userName && (
-              <p className="app-header__greeting">Hola {window.blokesSiteData.userName}, ¡vamos a apretar bicho!</p>
-            )}
+            {(() => {
+              const sd = window.blokesSiteData || {}
+              if (sd.isLoggedIn) {
+                return (
+                  <div className="app-header__user">
+                    <span className="app-header__user-name">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <circle cx="12" cy="8" r="3.5"/>
+                        <path d="M12 13.5c-3.5 0-7 1.75-7 3.5V19h14v-2c0-1.75-3.5-3.5-7-3.5z"/>
+                      </svg>
+                      {sd.userName || 'Tú'}
+                    </span>
+                    <a href={sd.logoutUrl} className="app-header__user-logout">Salir</a>
+                  </div>
+                )
+              }
+              return (
+                <a href={sd.loginUrl} className="app-header__login-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M10 17l5-5-5-5v3H3v4h7v3z"/>
+                    <path d="M19 3H5c-1.1 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                  </svg>
+                  Acceder
+                </a>
+              )
+            })()}
             <div className="app-header__links">
               <div className="app-header__link-wrap">
                 <span className="app-header__link-hint">Explora el resto de la web</span>
