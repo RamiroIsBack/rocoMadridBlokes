@@ -11,6 +11,8 @@ import EntrenamientosPage from './pages/EntrenamientosPage'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import './App.css'
 
+const PRODUCT_NAMES = { 'Classes': 'Clases', 'Single Days': 'Días sueltos' }
+
 const SUBSALA_POSITIONS = {
   '1': { top: '5%',   left: '50%',  transform: 'translateX(-50%)' },
   '2': { top: '5%',   left: '18%',  transform: 'translateX(-50%)' },
@@ -32,7 +34,9 @@ const COLOR_BUBBLE = {
 }
 
 export default function App() {
-  const [showNav, setShowNav] = useState(false)
+  const [showNav, setShowNav]       = useState(false)
+  const [logoutOpen, setLogoutOpen] = useState(false)
+  const sd = window.blokesSiteData || {}
   const { cards } = useWordPressPosts()
 
   const subsalaStats = useMemo(() => {
@@ -60,32 +64,54 @@ export default function App() {
               />
             </a>
             <p className="app-header__subtitle">Boulder y entrenamiento · Roco Madrid</p>
-            {(() => {
-              const sd = window.blokesSiteData || {}
-              if (sd.isLoggedIn) {
-                return (
-                  <div className="app-header__user">
-                    <span className="app-header__user-name">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                        <circle cx="12" cy="8" r="3.5"/>
-                        <path d="M12 13.5c-3.5 0-7 1.75-7 3.5V19h14v-2c0-1.75-3.5-3.5-7-3.5z"/>
-                      </svg>
-                      {sd.userName || 'Tú'}
+
+            {sd.isLoggedIn ? (
+              <>
+                <div className="app-header__user">
+                  <span className="app-header__user-name">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <circle cx="12" cy="8" r="3.5"/>
+                      <path d="M12 13.5c-3.5 0-7 1.75-7 3.5V19h14v-2c0-1.75-3.5-3.5-7-3.5z"/>
+                    </svg>
+                    {sd.userName || 'Tú'}
+                  </span>
+                  <button
+                    className="app-header__user-x"
+                    onClick={() => setLogoutOpen(true)}
+                    aria-label="Cerrar sesión"
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                      <line x1="1" y1="1" x2="7" y2="7"/>
+                      <line x1="7" y1="1" x2="1" y2="7"/>
+                    </svg>
+                  </button>
+                </div>
+                {sd.subscription && (
+                  <div className="app-header__sub">
+                    <span className={`app-header__sub-dot app-header__sub-dot--${sd.subscription.status === 'active' ? 'active' : 'inactive'}`} />
+                    <span className="app-header__sub-name">
+                      {PRODUCT_NAMES[sd.subscription.name] || sd.subscription.name || 'Suscripción'}
                     </span>
-                    <a href={sd.logoutUrl} className="app-header__user-logout">Salir</a>
+                    {sd.subscription.status !== 'active' && (
+                      <a href={sd.subscription.renewUrl} className="app-header__renew-btn">
+                        {[0,1,2,3].map(i => (
+                          <span key={i} className="app-header__renew-star" style={{'--i': i}} aria-hidden="true">✦</span>
+                        ))}
+                        Renovar
+                      </a>
+                    )}
                   </div>
-                )
-              }
-              return (
-                <a href={sd.loginUrl} className="app-header__login-btn">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M10 17l5-5-5-5v3H3v4h7v3z"/>
-                    <path d="M19 3H5c-1.1 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
-                  </svg>
-                  Acceder
-                </a>
-              )
-            })()}
+                )}
+              </>
+            ) : (
+              <a href={sd.loginUrl} className="app-header__login-btn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M10 17l5-5-5-5v3H3v4h7v3z"/>
+                  <path d="M19 3H5c-1.1 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                </svg>
+                Acceder
+              </a>
+            )}
             <div className="app-header__links">
               <div className="app-header__link-wrap">
                 <span className="app-header__link-hint">Explora el resto de la web</span>
@@ -171,6 +197,17 @@ export default function App() {
           </Routes>
         </main>
 
+        {logoutOpen && (
+          <div className="logout-overlay" onClick={() => setLogoutOpen(false)}>
+            <div className="logout-dialog" onClick={e => e.stopPropagation()}>
+              <p className="logout-dialog__title">¿Cerrar sesión?</p>
+              <div className="logout-dialog__actions">
+                <button className="logout-dialog__cancel" onClick={() => setLogoutOpen(false)}>Cancelar</button>
+                <a href={sd.logoutUrl} className="logout-dialog__confirm">Salir</a>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </BrowserRouter>
   )

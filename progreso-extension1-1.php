@@ -86,7 +86,35 @@ add_filter('rest_prepare_blokes', function($response, $post, $request) {
 add_action('wp_head', function() {
     switch_to_blog(3);
     $club_nonce = wp_create_nonce('wp_rest');
+
+    // Fetch subscription info while on the club subsite
+    $subscription = null;
+    if (is_user_logged_in() && class_exists('RocoMadrid_SF_Stats')) {
+        $me  = get_current_user_id();
+        $all = RocoMadrid_SF_Stats::get_all_subscription_data();
+        $active_sub = null;
+        $any_sub    = null;
+        foreach ($all as $sub) {
+            $uid = intval(get_post_meta($sub['id'], '_customer_user', true));
+            if (!$uid && !empty($sub['email'])) {
+                $u = get_user_by('email', $sub['email']); if ($u) $uid = $u->ID;
+            }
+            if ($uid !== $me) continue;
+            $info = array('status' => $sub['status'] ?? 'unknown', 'name' => $sub['producto'] ?? '');
+            if ($sub['status'] === 'active') { $active_sub = $info; break; }
+            if (!$any_sub) $any_sub = $info;
+        }
+        $found = $active_sub ?? $any_sub;
+        if ($found) {
+            $found['renewUrl'] = function_exists('wc_get_account_endpoint_url')
+                ? wc_get_account_endpoint_url('subscriptions')
+                : home_url('/mi-cuenta/');
+            $subscription = $found;
+        }
+    }
+
     restore_current_blog();
+
     $user_name = '';
     if (is_user_logged_in()) {
         $cu = wp_get_current_user();
@@ -100,13 +128,14 @@ add_action('wp_head', function() {
     }
     $spa_url = home_url('/blokes/');
     $data = array(
-        'nonce'      => wp_create_nonce('wp_rest'),
-        'clubNonce'  => $club_nonce,
-        'isLoggedIn' => is_user_logged_in(),
-        'userId'     => get_current_user_id(),
-        'loginUrl'   => wp_login_url($spa_url),
-        'logoutUrl'  => wp_logout_url($spa_url),
-        'userName'   => $user_name,
+        'nonce'        => wp_create_nonce('wp_rest'),
+        'clubNonce'    => $club_nonce,
+        'isLoggedIn'   => is_user_logged_in(),
+        'userId'       => get_current_user_id(),
+        'loginUrl'     => wp_login_url($spa_url),
+        'logoutUrl'    => wp_logout_url($spa_url),
+        'userName'     => $user_name,
+        'subscription' => $subscription,
     );
     echo '<script>window.blokesSiteData = ' . wp_json_encode($data) . ';</script>' . "\n";
 });
@@ -117,6 +146,12 @@ add_filter('login_redirect', function($redirect_to, $requested, $user) {
     if (!empty($requested)) return $requested;
     if (!user_can($user, 'manage_options')) return home_url('/blokes/');
     return $redirect_to;
+}, 10, 3);
+
+// After logout: always return to the SPA, never to wp-login.php?loggedout=true
+add_filter('logout_redirect', function($redirect_to, $requested_redirect_to, $user) {
+    if (!empty($requested_redirect_to)) return $requested_redirect_to;
+    return home_url('/blokes/');
 }, 10, 3);
 
 // Allow redirecting back to the blokes frontend domains after login
