@@ -1,4 +1,4 @@
-/* EntrenamientosPage */
+/* EntrenamientosPage — generated styles at bottom */
 
 .entrena {
   max-width: 900px;
@@ -238,3 +238,115 @@
     padding: 7px 7px;
   }
 }
+
+/* ── Mode toggle ── */
+.entrena__mode-toggle {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+.entrena__mode-btn {
+  padding: 6px 18px;
+  background: none;
+  border: 1.5px solid #c8bc9a;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: background 0.15s, color 0.15s;
+}
+.entrena__mode-btn--active {
+  background: #2a2015;
+  color: #f5c842;
+  border-color: #2a2015;
+}
+
+/* ── Test selector (test mode) ── */
+.entrena__test-selector {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.entrena__test-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 14px;
+  background: none;
+  border: 1.5px solid var(--zone-color, #888);
+  color: var(--zone-color, #888);
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+  line-height: 1.2;
+}
+.entrena__test-pill--active {
+  background: var(--zone-color, #888);
+  color: #fff;
+}
+.entrena__test-pill__zone {
+  font-size: 0.6rem;
+  font-weight: 400;
+  opacity: 0.8;
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── Inline panel row (alumno mode) ── */
+.entrena__inline-panel td {
+  padding: 0 !important;
+  background: #f9f7f0;
+}
+.entrena__inline-panel .training-panel {
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  border-top: 2px solid #c8bc9a;
+  border-bottom: 2px solid #c8bc9a;
+}
+
+/* ── Test mode rows ── */
+.entrena__test-row td { vertical-align: middle; }
+.entrena__test-row__name { font-weight: 600; color: #2a2015; }
+.entrena__test-row__meta { font-size: 0.78rem; color: #9ca3af; }
+.entrena__test-row__last { font-size: 0.82rem; color: #374151; min-width: 80px; }
+.entrena__test-empty     { color: #9ca3af; font-style: italic; }
+.entrena__test-loading   { color: #c8bc9a; }
+
+.entrena__test-input-wrap {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.entrena__test-input {
+  width: 72px;
+  padding: 5px 8px;
+  border: 1.5px solid #c8bc9a;
+  background: #fff;
+  font-size: 0.82rem;
+  font-family: inherit;
+  color: #2a2015;
+}
+.entrena__test-input:focus { outline: none; border-color: #2a2015; }
+.entrena__test-save {
+  padding: 5px 10px;
+  background: #2a2015;
+  color: #f5c842;
+  border: none;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.entrena__test-save--ok  { background: #16a34a; color: #fff; }
+.entrena__test-save:disabled { opacity: 0.6; cursor: default; }
+.entrena__test-err { font-size: 0.72rem; color: #ef4444; margin: 3px 0 0; }
