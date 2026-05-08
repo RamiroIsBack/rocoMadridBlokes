@@ -425,6 +425,15 @@ d
   border-bottom-color: var(--color-accent);
 }
 
+.app-nav__link--super {
+  color: #a78bfa;
+  border-bottom-color: #a78bfa;
+}
+.app-nav__link--super:hover, .app-nav__link--super.active {
+  color: #c4b5fd;
+  border-bottom-color: #c4b5fd;
+}
+
 /* ---- Main ---- */
 
 .app-main {

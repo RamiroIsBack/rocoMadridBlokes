@@ -136,6 +136,9 @@ add_action('wp_head', function() {
         'logoutUrl'    => wp_logout_url($spa_url),
         'userName'     => $user_name,
         'subscription' => $subscription,
+        'userRole'     => is_super_admin()
+                              ? 'superadmin'
+                              : (is_user_logged_in() && current_user_can('administrator') ? 'admin' : (is_user_logged_in() ? 'member' : 'guest')),
     );
     echo '<script>window.blokesSiteData = ' . wp_json_encode($data) . ';</script>' . "\n";
 });
@@ -328,6 +331,28 @@ add_action('rest_api_init', function() {
         'methods'             => 'GET',
         'callback'            => 'progreso_get_class_progress',
         'permission_callback' => 'is_user_logged_in',
+    ));
+
+    // ── Superadmin endpoints ──
+    $sa_perm = function() { return is_user_logged_in() && is_super_admin(); };
+
+    register_rest_route('superadmin/v1', '/revenue', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_revenue',
+        'permission_callback' => $sa_perm,
+        'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
+    ));
+    register_rest_route('superadmin/v1', '/products', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_products',
+        'permission_callback' => $sa_perm,
+        'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
+    ));
+    register_rest_route('superadmin/v1', '/classes', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_classes',
+        'permission_callback' => $sa_perm,
+        'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
     ));
 });
 
@@ -1095,4 +1120,182 @@ function progreso_get_class_progress() {
         'members'    => $members,
         'top_blokes' => $top_blokes,
     )));
+}
+
+// ============================================================
+//  Superadmin callbacks
+// ============================================================
+
+/**
+ * Helper: query completed WooCommerce orders on the current blog.
+ * Returns array of ['month' => 'YYYY-MM', 'total' => float, 'items' => [['name','qty','line']] ].
+ */
+function _superadmin_orders_for_blog($start_date) {
+    if (!function_exists('wc_get_orders')) return array();
+    $ids = wc_get_orders(array(
+        'status'     => array('wc-completed', 'wc-processing'),
+        'date_after' => $start_date,
+        'limit'      => -1,
+        'return'     => 'ids',
+    ));
+    $rows = array();
+    foreach ($ids as $oid) {
+        $order = wc_get_order($oid);
+        if (!$order) continue;
+        $dt = $order->get_date_created();
+        if (!$dt) continue;
+        $month = $dt->format('Y-m');
+        $row   = array('month' => $month, 'total' => floatval($order->get_total()), 'items' => array());
+        foreach ($order->get_items() as $item) {
+            $row['items'][] = array(
+                'name'    => $item->get_name(),
+                'qty'     => intval($item->get_quantity()),
+                'revenue' => floatval($item->get_subtotal()),
+            );
+        }
+        $rows[] = $row;
+    }
+    return $rows;
+}
+
+function superadmin_revenue($request) {
+    $months     = max(1, min(60, intval($request->get_param('months'))));
+    $start_date = (new DateTime("-{$months} months"))->format('Y-m-d');
+
+    $by_month = array(); // month => ['store1'=>, 'store2'=>]
+
+    foreach (array(1 => 'store1', 3 => 'store2') as $blog_id => $key) {
+        switch_to_blog($blog_id);
+        $orders = _superadmin_orders_for_blog($start_date);
+        restore_current_blog();
+        foreach ($orders as $row) {
+            if (!isset($by_month[$row['month']])) {
+                $by_month[$row['month']] = array('month' => $row['month'], 'store1' => 0.0, 'store2' => 0.0);
+            }
+            $by_month[$row['month']][$key] += $row['total'];
+        }
+    }
+
+    ksort($by_month);
+    $data = array();
+    foreach ($by_month as $row) {
+        $row['total'] = round($row['store1'] + $row['store2'], 2);
+        $row['store1'] = round($row['store1'], 2);
+        $row['store2'] = round($row['store2'], 2);
+        $data[] = $row;
+    }
+    return rest_ensure_response(array('data' => $data));
+}
+
+function superadmin_products($request) {
+    $months     = max(1, min(60, intval($request->get_param('months'))));
+    $start_date = (new DateTime("-{$months} months"))->format('Y-m-d');
+
+    $products = array(); // "blog_id|name" => [name, store, units, revenue, history]
+
+    foreach (array(1 => 'Principal', 3 => 'Club') as $blog_id => $store_label) {
+        switch_to_blog($blog_id);
+        $orders = _superadmin_orders_for_blog($start_date);
+        restore_current_blog();
+        foreach ($orders as $row) {
+            foreach ($row['items'] as $item) {
+                $key = $blog_id . '|' . $item['name'];
+                if (!isset($products[$key])) {
+                    $products[$key] = array(
+                        'name'    => $item['name'],
+                        'store'   => $store_label,
+                        'units'   => 0,
+                        'revenue' => 0.0,
+                        'history' => array(),
+                    );
+                }
+                $products[$key]['units']   += $item['qty'];
+                $products[$key]['revenue'] += $item['revenue'];
+                $m = $row['month'];
+                if (!isset($products[$key]['history'][$m])) {
+                    $products[$key]['history'][$m] = array('month' => $m, 'units' => 0, 'revenue' => 0.0);
+                }
+                $products[$key]['history'][$m]['units']   += $item['qty'];
+                $products[$key]['history'][$m]['revenue'] += $item['revenue'];
+            }
+        }
+    }
+
+    $data = array_values($products);
+    foreach ($data as &$p) {
+        ksort($p['history']);
+        $p['history'] = array_values($p['history']);
+        $p['revenue'] = round($p['revenue'], 2);
+    }
+    usort($data, function($a, $b) { return $b['revenue'] <=> $a['revenue']; });
+
+    return rest_ensure_response(array('data' => $data));
+}
+
+function superadmin_classes($request) {
+    $months     = max(1, min(60, intval($request->get_param('months'))));
+    $start_date = (new DateTime("-{$months} months"))->format('Y-m-d');
+
+    switch_to_blog(3);
+
+    $classes = array(); // "dia|horario" => [label, dia, horario, active, history by month]
+
+    // Current snapshot from RocoMadrid_SF_Stats
+    if (class_exists('RocoMadrid_SF_Stats')) {
+        $all = RocoMadrid_SF_Stats::get_all_subscription_data();
+        foreach ($all as $sub) {
+            $class_key = ($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '');
+            if (!$class_key || $class_key === '|') continue;
+            if (!isset($classes[$class_key])) {
+                $classes[$class_key] = array(
+                    'label'   => ($sub['dia'] ?? '') . ' · ' . ($sub['horario'] ?? ''),
+                    'dia'     => $sub['dia'] ?? '',
+                    'horario' => $sub['horario'] ?? '',
+                    'active'  => 0,
+                    'all'     => 0,
+                    'history' => array(),
+                );
+            }
+            $classes[$class_key]['all']++;
+            if ($sub['status'] === 'active') $classes[$class_key]['active']++;
+        }
+    }
+
+    // Historical: WC subscriptions start date per class
+    if (function_exists('wc_get_orders')) {
+        $sub_ids = wc_get_orders(array(
+            'type'       => 'shop_subscription',
+            'date_after' => $start_date,
+            'limit'      => -1,
+            'return'     => 'ids',
+        ));
+        foreach ($sub_ids as $sid) {
+            $sub = wc_get_order($sid);
+            if (!$sub) continue;
+            $dt = $sub->get_date_created();
+            if (!$dt) continue;
+            $month = $dt->format('Y-m');
+            // Try to match to a class via subscription product name or meta
+            $dia     = sanitize_text_field(get_post_meta($sid, '_dia', true) ?: '');
+            $horario = sanitize_text_field(get_post_meta($sid, '_horario', true) ?: '');
+            if (!$dia || !$horario) continue;
+            $class_key = $dia . '|' . $horario;
+            if (!isset($classes[$class_key])) continue;
+            if (!isset($classes[$class_key]['history'][$month])) {
+                $classes[$class_key]['history'][$month] = array('month' => $month, 'new' => 0);
+            }
+            $classes[$class_key]['history'][$month]['new']++;
+        }
+    }
+
+    restore_current_blog();
+
+    $data = array_values($classes);
+    foreach ($data as &$c) {
+        ksort($c['history']);
+        $c['history'] = array_values($c['history']);
+    }
+    usort($data, function($a, $b) { return $b['active'] <=> $a['active']; });
+
+    return rest_ensure_response(array('data' => $data));
 }

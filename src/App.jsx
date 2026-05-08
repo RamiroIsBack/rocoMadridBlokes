@@ -8,6 +8,7 @@ import ProgresoPage from './pages/ProgresoPage'
 import ProgresoIndexPage from './pages/ProgresoIndexPage'
 import MiClaseTab from './pages/MiClaseTab'
 import EntrenamientosPage from './pages/EntrenamientosPage'
+import SuperAdminPage from './pages/SuperAdminPage'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import './App.css'
 
@@ -34,7 +35,6 @@ const COLOR_BUBBLE = {
 }
 
 export default function App() {
-  const [showNav, setShowNav]       = useState(false)
   const [logoutOpen, setLogoutOpen] = useState(false)
   const sd = window.blokesSiteData || {}
   const { cards } = useWordPressPosts()
@@ -147,14 +147,6 @@ export default function App() {
                 </div>
               )
             })}
-            <button
-              className="app-nav-toggle"
-              onClick={() => setShowNav(v => !v)}
-              title="Menú"
-              aria-label="Abrir menú"
-            >
-              🔧
-            </button>
           </div>
 
           <nav className="app-nav">
@@ -165,18 +157,23 @@ export default function App() {
               <li className="app-nav__item">
                 <Link to="/progreso" className="app-nav__link">Progreso</Link>
               </li>
-              {showNav && (
+              {(sd.userRole === 'admin' || sd.userRole === 'superadmin') && (
                 <>
+                  <li className="app-nav__item">
+                    <Link to="/entrenamientos" className="app-nav__link">Entrenamientos</Link>
+                  </li>
                   <li className="app-nav__item">
                     <Link to="/setter" className="app-nav__link">Setter</Link>
                   </li>
                   <li className="app-nav__item">
                     <Link to="/stats" className="app-nav__link">Estadísticas</Link>
                   </li>
-                  <li className="app-nav__item">
-                    <Link to="/entrenamientos" className="app-nav__link">Entrenamientos</Link>
-                  </li>
                 </>
+              )}
+              {sd.userRole === 'superadmin' && (
+                <li className="app-nav__item">
+                  <Link to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</Link>
+                </li>
               )}
             </ul>
           </nav>
@@ -194,6 +191,7 @@ export default function App() {
             <Route path="/setter" element={<AdminApp />} />
             <Route path="/stats" element={<StatsPage />} />
             <Route path="/entrenamientos" element={<EntrenamientosPage />} />
+            <Route path="/superadmin" element={<SuperAdminPage />} />
           </Routes>
         </main>
 
