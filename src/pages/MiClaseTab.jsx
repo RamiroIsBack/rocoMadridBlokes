@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
 import './MiClaseTab.css'
+import '../components/GatePreview.css'
 
 const CLUB_URL = 'https://rocomadrid.com/club/actividades-para-socios'
 
@@ -41,7 +42,63 @@ export default function MiClaseTab() {
       <div className="mi-clase__gate">
         <span className="mi-clase__gate-icon">🏫</span>
         <p className="mi-clase__gate-title">Inicia sesión para ver tu clase</p>
-        <a href={loginUrl} className="mi-clase__gate-btn">Iniciar sesión</a>
+        <a href={loginUrl || '/wp-login.php'} className="mi-clase__gate-btn">Iniciar sesión</a>
+
+        <div className="gate-preview">
+          <p className="gate-preview__label">¿Qué verás aquí?</p>
+          <p className="gate-preview__intro">
+            Compara tu rendimiento con el resto de tu clase: ranking de blokes,
+            posición en tests físicos y los problemas más populares de tu grupo.
+          </p>
+          <div className="gate-preview__cards">
+
+            <div className="gate-preview__card">
+              <div className="gate-preview__card-title">Ranking de blokes</div>
+              <div className="gate-preview__leaderboard">
+                {[
+                  { name: 'Ana',    pct: 100, me: false },
+                  { name: 'Tú',    pct: 78,  me: true  },
+                  { name: 'Carlos', pct: 62,  me: false },
+                  { name: 'Laura',  pct: 40,  me: false },
+                ].map((r, i) => (
+                  <div key={i} className={`gate-preview__lb-row${r.me ? ' gate-preview__lb-row--me' : ''}`}>
+                    <span className="gate-preview__lb-pos">#{i + 1}</span>
+                    <span className="gate-preview__lb-name">{r.name}</span>
+                    <div className="gate-preview__lb-bar-wrap">
+                      <div className="gate-preview__lb-bar" style={{ width: `${r.pct}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="gate-preview__card-desc">Blokes conseguidos por cada alumno</p>
+            </div>
+
+            <div className="gate-preview__card">
+              <div className="gate-preview__card-title">Tests físicos</div>
+              <div className="gate-preview__leaderboard">
+                {[
+                  { name: 'Carlos', pct: 100, me: false },
+                  { name: 'Tú',    pct: 85,  me: true  },
+                  { name: 'Ana',   pct: 72,  me: false },
+                  { name: 'Laura', pct: 55,  me: false },
+                ].map((r, i) => (
+                  <div key={i} className={`gate-preview__lb-row${r.me ? ' gate-preview__lb-row--me' : ''}`}>
+                    <span className="gate-preview__lb-pos">#{i + 1}</span>
+                    <span className="gate-preview__lb-name">{r.name}</span>
+                    <div className="gate-preview__lb-bar-wrap">
+                      <div
+                        className="gate-preview__lb-bar"
+                        style={{ width: `${r.pct}%`, background: r.me ? undefined : 'rgba(59,130,246,0.22)' }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="gate-preview__card-desc">Tu posición en fuerza y resistencia</p>
+            </div>
+
+          </div>
+        </div>
       </div>
     )
   }

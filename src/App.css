@@ -1,4 +1,3 @@
-d
 /* ============================================
    APP LAYOUT
    ============================================ */
@@ -28,6 +27,8 @@ d
   flex-direction: column;
   align-items: center;
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
 }
 
 .app-header__logo {
@@ -115,6 +116,14 @@ d
 .app-header__sub-name {
   font-size: 0.7rem;
   color: #888;
+  letter-spacing: 0.02em;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.app-header__sub-class {
+  font-size: 0.65rem;
+  color: #666;
   letter-spacing: 0.02em;
 }
 
@@ -319,29 +328,6 @@ d
   }
 }
 
-.app-nav-toggle {
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  background: rgba(0,0,0,0.35);
-  border: 2px solid var(--color-accent);
-  border-radius: 50%;
-  width: 42px;
-  height: 42px;
-  font-size: 20px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s, transform 0.2s;
-  line-height: 1;
-}
-
-.app-nav-toggle:hover {
-  background: rgba(245,200,66,0.2);
-  transform: translateY(-50%) rotate(25deg);
-}
 
 /* Remove old title style */
 .app-header__title {
@@ -427,7 +413,7 @@ d
 
 .app-nav__link--super {
   color: #a78bfa;
-  border-bottom-color: #a78bfa;
+  border-bottom-color: transparent;
 }
 .app-nav__link--super:hover, .app-nav__link--super.active {
   color: #c4b5fd;

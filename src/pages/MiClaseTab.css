@@ -6,8 +6,8 @@
 
 /* ── Gate / Loading ── */
 .mi-clase__gate {
-  max-width: 360px;
-  margin: 48px auto;
+  max-width: 580px;
+  margin: 40px auto;
   text-align: center;
   padding: 0 16px;
 }

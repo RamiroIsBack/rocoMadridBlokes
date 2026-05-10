@@ -4,7 +4,11 @@ const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.
 const LS_RATINGS_KEY = 'blokes_my_ratings'
 
 function getSiteData() {
-  return window.blokesSiteData || { isLoggedIn: false, nonce: null, loginUrl: `${WORDPRESS_URL}/wp-login.php?redirect_to=${encodeURIComponent(window.location.href)}` }
+  const sd = window.blokesSiteData
+  const fallbackLogin = `${WORDPRESS_URL}/wp-login.php?redirect_to=${encodeURIComponent(window.location.href)}`
+  if (!sd) return { isLoggedIn: false, nonce: null, loginUrl: fallbackLogin }
+  if (!sd.loginUrl) return { ...sd, loginUrl: fallbackLogin }
+  return sd
 }
 
 function loadLocalRatings() {

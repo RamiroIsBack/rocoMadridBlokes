@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { BrowserRouter, Routes, Route, Link, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Link, NavLink, Navigate } from 'react-router-dom'
 import MainPage from './pages/MainPage'
 import AdminApp from './admin/AdminApp'
 import StatsPage from './pages/StatsPage'
@@ -25,6 +25,23 @@ const SUBSALA_POSITIONS = {
   '8': { top: 'calc(52% - 15px)',  right: '18%', transform: 'translateX(50%)' },
 }
 
+const KNOWN_ROUTES = ['/progreso', '/setter', '/stats', '/entrenamientos', '/superadmin', '/mis-blokes']
+
+function detectBasename() {
+  const injected = window.blokesSiteData?.appBasename
+  const path = window.location.pathname
+  // Use injected value only if it's an exact prefix (avoid /blokes matching /blokes-dev)
+  if (injected && (path === injected || path.startsWith(injected + '/'))) return injected
+  // Auto-detect from known sub-routes
+  for (const route of KNOWN_ROUTES) {
+    const idx = path.indexOf(route)
+    if (idx > 0) return path.slice(0, idx)
+  }
+  // Fallback: first path segment or env variable
+  const m = path.match(/^(\/[^/]+)/)
+  return m ? m[1] : (import.meta.env.VITE_ROUTER_BASENAME || '/blokes')
+}
+
 const COLOR_BUBBLE = {
   green:  { bg: '#22c55e', text: '#fff' },
   blue:   { bg: '#3b82f6', text: '#fff' },
@@ -32,6 +49,12 @@ const COLOR_BUBBLE = {
   red:    { bg: '#ef4444', text: '#fff' },
   black:  { bg: '#1f2937', text: '#fff' },
   blanco: { bg: '#e5e7eb', text: '#1f2937' },
+}
+
+function buildLoginUrl(sd) {
+  if (sd.loginUrl) return sd.loginUrl
+  const base = window.location.origin + detectBasename()
+  return window.location.origin + '/wp-login.php?redirect_to=' + encodeURIComponent(base + '/')
 }
 
 export default function App() {
@@ -52,7 +75,7 @@ export default function App() {
   }, [cards])
 
   return (
-    <BrowserRouter basename={import.meta.env.VITE_ROUTER_BASENAME || '/blokes'}>
+    <BrowserRouter basename={detectBasename()}>
       <div className="app">
         <header className="app-header">
           <div className="app-header__logo-section">
@@ -91,6 +114,11 @@ export default function App() {
                     <span className={`app-header__sub-dot app-header__sub-dot--${sd.subscription.status === 'active' ? 'active' : 'inactive'}`} />
                     <span className="app-header__sub-name">
                       {PRODUCT_NAMES[sd.subscription.name] || sd.subscription.name || 'Suscripción'}
+                      {(sd.subscription.dia || sd.subscription.horario) && (
+                        <span className="app-header__sub-class">
+                          {[sd.subscription.dia, sd.subscription.horario].filter(Boolean).join(' · ')}
+                        </span>
+                      )}
                     </span>
                     {sd.subscription.status !== 'active' && (
                       <a href={sd.subscription.renewUrl} className="app-header__renew-btn">
@@ -104,7 +132,7 @@ export default function App() {
                 )}
               </>
             ) : (
-              <a href={sd.loginUrl} className="app-header__login-btn">
+              <a href={buildLoginUrl(sd)} className="app-header__login-btn">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M10 17l5-5-5-5v3H3v4h7v3z"/>
                   <path d="M19 3H5c-1.1 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
@@ -152,27 +180,27 @@ export default function App() {
           <nav className="app-nav">
             <ul className="app-nav__list">
               <li className="app-nav__item">
-                <Link to="/" className="app-nav__link">Colección</Link>
+                <NavLink to="/" className="app-nav__link" end>Colección</NavLink>
               </li>
               <li className="app-nav__item">
-                <Link to="/progreso" className="app-nav__link">Progreso</Link>
+                <NavLink to="/progreso" className="app-nav__link">Progreso</NavLink>
               </li>
               {(sd.userRole === 'admin' || sd.userRole === 'superadmin') && (
                 <>
                   <li className="app-nav__item">
-                    <Link to="/entrenamientos" className="app-nav__link">Entrenamientos</Link>
+                    <NavLink to="/entrenamientos" className="app-nav__link">Entrenamientos</NavLink>
                   </li>
                   <li className="app-nav__item">
-                    <Link to="/setter" className="app-nav__link">Setter</Link>
+                    <NavLink to="/setter" className="app-nav__link">Setter</NavLink>
                   </li>
                   <li className="app-nav__item">
-                    <Link to="/stats" className="app-nav__link">Estadísticas</Link>
+                    <NavLink to="/stats" className="app-nav__link">Estadísticas</NavLink>
                   </li>
                 </>
               )}
               {sd.userRole === 'superadmin' && (
                 <li className="app-nav__item">
-                  <Link to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</Link>
+                  <NavLink to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</NavLink>
                 </li>
               )}
             </ul>

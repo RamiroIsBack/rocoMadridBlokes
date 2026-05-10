@@ -7,6 +7,7 @@ import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
 import TrainingChart from '../components/TrainingChart'
 import Achievements from '../components/Achievements'
 import './UserStatsPage.css'
+import '../components/GatePreview.css'
 
 const COLOR_INFO = {
   green:  { name: 'Verde',    bg: '#22c55e' },
@@ -120,7 +121,66 @@ export default function UserStatsPage() {
     return (
       <div className="user-stats__gate">
         <p className="user-stats__gate-text">Inicia sesión para ver tus estadísticas</p>
-        <a href={loginUrl} className="user-stats__gate-btn">Iniciar sesión</a>
+        <a href={loginUrl || '/wp-login.php'} className="user-stats__gate-btn">Iniciar sesión</a>
+
+        <div className="gate-preview">
+          <p className="gate-preview__label">¿Qué verás aquí?</p>
+          <p className="gate-preview__intro">
+            Registra cuántos blokes has conseguido, sigue tu evolución mes a mes,
+            compara tu nivel con el de tu clase y desbloquea logros según tu actividad.
+          </p>
+          <div className="gate-preview__cards">
+
+            <div className="gate-preview__card">
+              <div className="gate-preview__card-title">Progresión mensual</div>
+              <div className="gate-preview__bars">
+                {[28, 45, 38, 62, 55, 80].map((h, i) => (
+                  <div key={i} className="gate-preview__month-bar" style={{ height: `${h}%` }} />
+                ))}
+              </div>
+              <p className="gate-preview__card-desc">Cuántos tops consigues cada mes</p>
+            </div>
+
+            <div className="gate-preview__card">
+              <div className="gate-preview__card-title">Por color</div>
+              <div className="gate-preview__colors">
+                {[
+                  { bg: '#22c55e', pct: 100 },
+                  { bg: '#3b82f6', pct: 68 },
+                  { bg: '#ef4444', pct: 44 },
+                  { bg: '#eab308', pct: 27 },
+                  { bg: '#1f2937', pct: 14 },
+                ].map((c, i) => (
+                  <div key={i} className="gate-preview__color-row">
+                    <span className="gate-preview__dot" style={{ background: c.bg }} />
+                    <div className="gate-preview__color-bar-wrap">
+                      <div className="gate-preview__color-bar" style={{ width: `${c.pct}%`, background: c.bg }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="gate-preview__card-desc">Tops desglosados por nivel</p>
+            </div>
+
+            <div className="gate-preview__card">
+              <div className="gate-preview__card-title">Logros</div>
+              <div className="gate-preview__achievements">
+                {[
+                  { emoji: '🏆', title: 'Primeros pasos', earned: true },
+                  { emoji: '🔥', title: 'Racha imparable', earned: true },
+                  { emoji: '💪', title: 'Escalador del mes', earned: false },
+                ].map((a, i) => (
+                  <div key={i} className={`gate-preview__ach gate-preview__ach--${a.earned ? 'earned' : 'locked'}`}>
+                    <span className="gate-preview__ach-emoji">{a.emoji}</span>
+                    <span className="gate-preview__ach-title">{a.title}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="gate-preview__card-desc">Retos desbloqueados según tu actividad</p>
+            </div>
+
+          </div>
+        </div>
       </div>
     )
   }

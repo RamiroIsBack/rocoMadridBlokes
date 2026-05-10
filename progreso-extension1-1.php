@@ -36,9 +36,25 @@ add_filter('show_admin_bar', function($show) {
 });
 
 add_action('template_redirect', function() {
-    if (!is_page($GLOBALS['blokes_app_slugs'])) return;
+    // Primary: WordPress page match. Fallback: match by URL path (no WP page needed).
+    $slug = null;
+    if (is_page($GLOBALS['blokes_app_slugs'])) {
+        $slug = get_post_field('post_name', get_queried_object_id());
+    } else {
+        $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+        foreach ($GLOBALS['blokes_app_slugs'] as $s) {
+            if ($path === $s || strpos($path, $s . '/') === 0) {
+                $slug = $s;
+                break;
+            }
+        }
+    }
+    if (!$slug) return;
 
-    $slug    = get_post_field('post_name', get_queried_object_id());
+    // Prevent SiteGround Dynamic Cache and browser cache from serving stale
+    // login state — isLoggedIn must always be computed fresh per request.
+    nocache_headers();
+
     $app_dir = trailingslashit(ABSPATH) . $slug . '/';
     $app_url = trailingslashit(home_url($slug));
 
@@ -100,7 +116,12 @@ add_action('wp_head', function() {
                 $u = get_user_by('email', $sub['email']); if ($u) $uid = $u->ID;
             }
             if ($uid !== $me) continue;
-            $info = array('status' => $sub['status'] ?? 'unknown', 'name' => $sub['producto'] ?? '');
+            $info = array(
+                'status'  => $sub['status'] ?? 'unknown',
+                'name'    => $sub['producto'] ?? '',
+                'dia'     => $sub['dia'] ?? '',
+                'horario' => $sub['horario'] ?? '',
+            );
             if ($sub['status'] === 'active') { $active_sub = $info; break; }
             if (!$any_sub) $any_sub = $info;
         }
@@ -126,7 +147,21 @@ add_action('wp_head', function() {
             $user_name = $parts[0] ?? '';
         }
     }
-    $spa_url = home_url('/blokes/');
+    // Detect the actual page slug so the SPA router uses the correct basename
+    $app_slug = 'blokes';
+    if (is_page($GLOBALS['blokes_app_slugs'])) {
+        $slug_candidate = get_post_field('post_name', get_queried_object_id());
+        if ($slug_candidate) $app_slug = $slug_candidate;
+    } else {
+        $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+        foreach ($GLOBALS['blokes_app_slugs'] as $s) {
+            if ($path === $s || strpos($path, $s . '/') === 0) {
+                $app_slug = $s;
+                break;
+            }
+        }
+    }
+    $spa_url = home_url('/' . $app_slug . '/');
     $data = array(
         'nonce'        => wp_create_nonce('wp_rest'),
         'clubNonce'    => $club_nonce,
@@ -136,6 +171,7 @@ add_action('wp_head', function() {
         'logoutUrl'    => wp_logout_url($spa_url),
         'userName'     => $user_name,
         'subscription' => $subscription,
+        'appBasename'  => '/' . $app_slug,
         'userRole'     => is_super_admin()
                               ? 'superadmin'
                               : (is_user_logged_in() && current_user_can('administrator') ? 'admin' : (is_user_logged_in() ? 'member' : 'guest')),
@@ -143,18 +179,32 @@ add_action('wp_head', function() {
     echo '<script>window.blokesSiteData = ' . wp_json_encode($data) . ';</script>' . "\n";
 });
 
-// After login: honour explicit redirect_to; non-admins always go to the SPA
+// After login: honour explicit redirect_to; otherwise send to the SPA that referred us
 add_filter('login_redirect', function($redirect_to, $requested, $user) {
     if (is_wp_error($user)) return $redirect_to;
     if (!empty($requested)) return $requested;
+    // Detect which app referred the login from the referer header
+    $referer = wp_get_referer();
+    foreach ($GLOBALS['blokes_app_slugs'] as $slug) {
+        if ($referer && strpos($referer, '/' . $slug) !== false) {
+            return home_url('/' . $slug . '/');
+        }
+    }
     if (!user_can($user, 'manage_options')) return home_url('/blokes/');
     return $redirect_to;
 }, 10, 3);
 
-// After logout: always return to the SPA, never to wp-login.php?loggedout=true
+// After logout: honour explicit redirect_to; otherwise return to the SPA that referred us
 add_filter('logout_redirect', function($redirect_to, $requested_redirect_to, $user) {
     if (!empty($requested_redirect_to)) return $requested_redirect_to;
-    return home_url('/blokes/');
+    $referer = wp_get_referer();
+    foreach ($GLOBALS['blokes_app_slugs'] as $slug) {
+        if ($referer && strpos($referer, '/' . $slug) !== false) {
+            return home_url('/' . $slug . '/');
+        }
+    }
+    $first_slug = $GLOBALS['blokes_app_slugs'][0] ?? 'blokes';
+    return home_url('/' . $first_slug . '/');
 }, 10, 3);
 
 // Allow redirecting back to the blokes frontend domains after login
@@ -354,7 +404,104 @@ add_action('rest_api_init', function() {
         'permission_callback' => $sa_perm,
         'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
     ));
+
+    register_rest_route('superadmin/v1', '/expenses', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'superadmin_get_expenses',
+            'permission_callback' => $sa_perm,
+            'args'                => array('months' => array('type' => 'integer', 'default' => 6)),
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'superadmin_save_expenses',
+            'permission_callback' => $sa_perm,
+        ),
+    ));
 });
+
+// ============================================================
+//  superadmin/v1 — expenses
+// ============================================================
+
+function superadmin_save_expenses($request) {
+    $body   = $request->get_json_params();
+    $month  = sanitize_text_field($body['month']  ?? '');
+    $entity = sanitize_text_field($body['entity'] ?? 'rocoteca');
+    $items  = is_array($body['items'] ?? null) ? $body['items'] : array();
+
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
+    }
+
+    $clean = array();
+    foreach ($items as $item) {
+        $clean[] = array(
+            'fecha'    => sanitize_text_field($item['fecha']    ?? ''),
+            'concepto' => sanitize_text_field($item['concepto'] ?? ''),
+            'importe'  => floatval($item['importe']  ?? 0),
+            'category' => sanitize_text_field($item['category'] ?? 'otros'),
+            'iva'      => intval($item['iva']      ?? 0),
+            'excluded' => (bool) ($item['excluded'] ?? false),
+            'section'  => in_array($item['section'], array('ingresos','costes')) ? $item['section'] : 'costes',
+        );
+    }
+
+    $key  = 'blokes_exp_' . str_replace('-', '_', $month) . '_' . $entity;
+    update_option($key, wp_json_encode(array(
+        'month'  => $month,
+        'entity' => $entity,
+        'items'  => $clean,
+        'saved'  => (new DateTime())->format('c'),
+    )), false);
+
+    return rest_ensure_response(array('success' => true, 'month' => $month));
+}
+
+function superadmin_get_expenses($request) {
+    $months     = max(1, min(60, intval($request->get_param('months'))));
+    $start      = new DateTime("-{$months} months");
+
+    global $wpdb;
+    $rows = $wpdb->get_results(
+        "SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE 'blokes_exp_%'",
+        ARRAY_A
+    );
+
+    $data = array();
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!$saved || !isset($saved['month'])) continue;
+        $dt = DateTime::createFromFormat('Y-m', $saved['month']);
+        if (!$dt || $dt < $start) continue;
+
+        $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0;
+        foreach ($saved['items'] as $item) {
+            if ($item['excluded']) continue;
+            $amt  = abs(floatval($item['importe']));
+            $rate = floatval($item['iva']) / 100;
+            $iva  = $rate > 0 ? $amt * $rate / (1 + $rate) : 0;
+            if ($item['section'] === 'costes') {
+                $tc    += $amt;
+                $iva_s += $iva;
+            } else {
+                $ti    += $amt;
+                $iva_r += $iva;
+            }
+        }
+        $data[] = array(
+            'month'           => $saved['month'],
+            'entity'          => $saved['entity'] ?? 'rocoteca',
+            'total_costes'    => round($tc,    2),
+            'total_ingresos'  => round($ti,    2),
+            'iva_soportado'   => round($iva_s, 2),
+            'iva_repercutido' => round($iva_r, 2),
+        );
+    }
+
+    usort($data, function($a, $b) { return strcmp($a['month'], $b['month']); });
+    return rest_ensure_response(array('data' => $data));
+}
 
 // ============================================================
 //  blokes/v1 callbacks  (identical to v1.5.1 local)
@@ -1145,7 +1292,7 @@ function _superadmin_orders_for_blog($start_date) {
         $dt = $order->get_date_created();
         if (!$dt) continue;
         $month = $dt->format('Y-m');
-        $row   = array('month' => $month, 'total' => floatval($order->get_total()), 'items' => array());
+        $row   = array('month' => $month, 'total' => floatval($order->get_total()), 'tax' => floatval($order->get_total_tax()), 'items' => array());
         foreach ($order->get_items() as $item) {
             $row['items'][] = array(
                 'name'    => $item->get_name(),
@@ -1162,7 +1309,10 @@ function superadmin_revenue($request) {
     $months     = max(1, min(60, intval($request->get_param('months'))));
     $start_date = (new DateTime("-{$months} months"))->format('Y-m-d');
 
-    $by_month = array(); // month => ['store1'=>, 'store2'=>]
+    $exclude_transfer  = (bool) $request->get_param('exclude_transfer');
+    $transfer_products = array('Uso de Rocódromo x 2');
+
+    $by_month = array();
 
     foreach (array(1 => 'store1', 3 => 'store2') as $blog_id => $key) {
         switch_to_blog($blog_id);
@@ -1170,18 +1320,29 @@ function superadmin_revenue($request) {
         restore_current_blog();
         foreach ($orders as $row) {
             if (!isset($by_month[$row['month']])) {
-                $by_month[$row['month']] = array('month' => $row['month'], 'store1' => 0.0, 'store2' => 0.0);
+                $by_month[$row['month']] = array('month' => $row['month'], 'store1' => 0.0, 'store2' => 0.0, 'store1_tax' => 0.0);
             }
-            $by_month[$row['month']][$key] += $row['total'];
+            $amount = $row['total'];
+            if ($key === 'store1') {
+                // IVA always includes the full amount (Uso de Rocódromo included)
+                $by_month[$row['month']]['store1_tax'] += $row['tax'];
+                if ($exclude_transfer) {
+                    foreach ($row['items'] as $item) {
+                        if (in_array($item['name'], $transfer_products)) $amount -= $item['revenue'];
+                    }
+                }
+            }
+            $by_month[$row['month']][$key] += $amount;
         }
     }
 
     ksort($by_month);
     $data = array();
     foreach ($by_month as $row) {
-        $row['total'] = round($row['store1'] + $row['store2'], 2);
-        $row['store1'] = round($row['store1'], 2);
-        $row['store2'] = round($row['store2'], 2);
+        $row['total']      = round($row['store1'] + $row['store2'], 2);
+        $row['store1']     = round($row['store1'], 2);
+        $row['store2']     = round($row['store2'], 2);
+        $row['store1_tax'] = round($row['store1_tax'], 2);
         $data[] = $row;
     }
     return rest_ensure_response(array('data' => $data));

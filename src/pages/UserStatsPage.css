@@ -18,7 +18,9 @@
 /* Not logged in */
 .user-stats__gate {
     text-align: center;
-    padding: 80px 24px;
+    padding: 40px 24px;
+    max-width: 580px;
+    margin: 0 auto;
 }
 
 .user-stats__gate-text {
