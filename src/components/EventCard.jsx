@@ -44,10 +44,7 @@ function HoldIcon() {
 }
 
 const RATING_ICONS = [
-  { id: 'star_1', emoji: '⭐',    title: 'Buen bloke',      type: 'star' },
-  { id: 'star_2', emoji: '⭐⭐',  title: 'Muy buen bloke',  type: 'star' },
-  { id: 'star_3', emoji: '⭐⭐⭐',title: 'Blokazo',         type: 'star' },
-  { id: 'skull',  emoji: '💀',    title: 'Amor-odio',       type: 'skull' },
+  { id: 'star_1', emoji: '⭐', title: '¡Blokazo!', type: 'star' },
 ]
 
 export default function EventCard({ card, isNew = false, isHof = false, isDone = false, completionCount = 0, onToggleDone, isLoggedIn = false, loginUrl = '/wp-login.php', myRating = null, ratingCounts, onRate }) {
@@ -68,8 +65,13 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
   }
 
   const handleRateClick = (iconId) => {
-    if (onRate) onRate(iconId)
+    if (!onRate) return
+    if (starActive) return
+    onRate(iconId)
   }
+
+  const starCount = (ratings.star_1 || 0) + (ratings.star_2 || 0) + (ratings.star_3 || 0) + (ratings.skull || 0)
+  const starActive = myRating === 'star_1' || myRating === 'star_2' || myRating === 'star_3' || myRating === 'skull'
 
   return (
     <article className="event-card">
@@ -77,8 +79,8 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
       <div className="event-card__done-anchor">
         <div className="event-card__rating-wrap">
           {RATING_ICONS.map(icon => {
-            const isActive = myRating === icon.id
-            const count = ratings[icon.id] || 0
+            const isActive = icon.type === 'star' ? starActive : myRating === icon.id
+            const count = icon.type === 'star' ? starCount : skullCount
             return (
               <button
                 key={icon.id}
@@ -91,7 +93,7 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
                   {icon.emoji}
                 </span>
                 {count > 0 && (
-                  <span className={`event-card__rating-count event-card__rating-count--${icon.type}`}>
+                  <span className="event-card__rating-count event-card__rating-count--star">
                     {count}
                   </span>
                 )}
@@ -101,17 +103,19 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
         </div>
         <div className="event-card__done-wrap">
           {isLoggedIn ? (
-            <span className="event-card__done-count" title={`${completionCount} TOPs`}>
-              {completionCount}
-            </span>
+            <div className="event-card__done-count" title={`${completionCount} TOPs`}>
+              <span className="event-card__done-tops">tops</span>
+              <span>{completionCount}</span>
+            </div>
           ) : (
-            <span
+            <div
               className="event-card__done-count event-card__done-count--locked"
               title="Número de TOPs"
               onClick={handleDoneClick}
             >
-              ?
-            </span>
+              <span className="event-card__done-tops">tops</span>
+              <span>?</span>
+            </div>
           )}
           <button
             className={`event-card__done-btn${isDone ? ' event-card__done-btn--active' : ''}`}

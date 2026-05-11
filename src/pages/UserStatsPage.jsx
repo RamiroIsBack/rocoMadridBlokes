@@ -25,10 +25,7 @@ const SALA_LABELS = {
 }
 
 const RATING_ICONS = [
-  { id: 'star_1', emoji: '⭐',     label: 'Buen bloke' },
-  { id: 'star_2', emoji: '⭐⭐',   label: 'Muy buen bloke' },
-  { id: 'star_3', emoji: '⭐⭐⭐', label: 'Blokazo' },
-  { id: 'skull',  emoji: '💀',     label: 'Amor-odio' },
+  { id: 'star_1', emoji: '⭐', label: 'Me gusta' },
 ]
 
 function monthLabel(key) {
@@ -111,7 +108,7 @@ export default function UserStatsPage() {
   const ratingCounts = useMemo(() => {
     const acc = { star_1: 0, star_2: 0, star_3: 0, skull: 0 }
     ratingLog.forEach(e => { if (acc[e.type] !== undefined) acc[e.type]++ })
-    return acc
+    return { star_1: acc.star_1 + acc.star_2 + acc.star_3 + acc.skull }
   }, [ratingLog])
 
   const totalRatings = Object.values(ratingCounts).reduce((a, b) => a + b, 0)

@@ -16,10 +16,7 @@ const COLOR_INFO = {
 }
 
 const RATING_ICONS = [
-  { id: 'star_1', emoji: '⭐',     label: 'Buen bloke' },
-  { id: 'star_2', emoji: '⭐⭐',   label: 'Muy buen bloke' },
-  { id: 'star_3', emoji: '⭐⭐⭐', label: 'Blokazo' },
-  { id: 'skull',  emoji: '💀',     label: 'Amor-odio' },
+  { id: 'star_1', emoji: '⭐', label: 'Me gusta' },
 ]
 
 export default function MiClaseTab() {
@@ -308,7 +305,8 @@ export default function MiClaseTab() {
                 <span className="mi-clase__rating-name">{m.is_me ? 'Tú' : m.name}</span>
                 <div className="mi-clase__rating-chips">
                   {RATING_ICONS.map(({ id, emoji, label }) => {
-                    const cnt = m.rating_by_type?.[id] ?? 0
+                    const r = m.rating_by_type || {}
+                    const cnt = (r.star_1 ?? 0) + (r.star_2 ?? 0) + (r.star_3 ?? 0) + (r.skull ?? 0)
                     if (!cnt) return null
                     return (
                       <span

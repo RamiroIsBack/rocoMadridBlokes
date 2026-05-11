@@ -66,14 +66,16 @@ export default function StatsPage() {
   //   - HoF members NEVER leave because they were deleted — only if a new bloke beats them.
   //   - Update interaction counts for members that still exist.
   //   - A new bloke enters only if HoF has < 10 slots OR it outscores the current lowest.
+  const hofScore = (b) => (b.totalInteractions || 0) + (b.completionCount || 0)
+
   useEffect(() => {
     if (!cards.length) return
     setHallOfFame(prev => {
       // 1. Update scores for existing HoF members that are still active
       let updated = prev.map(hofBloke => {
         const live = cards.find(c => c.postId === hofBloke.postId)
-        if (live && (live.totalInteractions || 0) > (hofBloke.totalInteractions || 0)) {
-          return { ...hofBloke, totalInteractions: live.totalInteractions }
+        if (live && hofScore(live) > hofScore(hofBloke)) {
+          return { ...hofBloke, totalInteractions: live.totalInteractions, completionCount: live.completionCount }
         }
         return hofBloke
       })
@@ -82,23 +84,23 @@ export default function StatsPage() {
       const hofIds = new Set(updated.map(b => b.postId))
       const candidates = [...cards]
         .filter(c => !hofIds.has(c.postId))
-        .sort((a, b) => (b.totalInteractions || 0) - (a.totalInteractions || 0))
+        .sort((a, b) => hofScore(b) - hofScore(a))
 
       for (const bloke of candidates) {
-        updated.sort((a, b) => (b.totalInteractions || 0) - (a.totalInteractions || 0))
+        updated.sort((a, b) => hofScore(b) - hofScore(a))
         if (updated.length < 10) {
           updated.push({ ...bloke })
           hofIds.add(bloke.postId)
         } else {
           const lowest = updated[updated.length - 1]
-          if ((bloke.totalInteractions || 0) > (lowest.totalInteractions || 0)) {
+          if (hofScore(bloke) > hofScore(lowest)) {
             updated[updated.length - 1] = { ...bloke }
             hofIds.add(bloke.postId)
           }
         }
       }
 
-      updated.sort((a, b) => (b.totalInteractions || 0) - (a.totalInteractions || 0))
+      updated.sort((a, b) => hofScore(b) - hofScore(a))
 
       // 3. Save to WP only if something changed
       const prevStr = prev.map(b => b.postId + ':' + (b.totalInteractions || 0)).join(',')
@@ -123,17 +125,18 @@ export default function StatsPage() {
     let totalIntro = 0
     let totalTrave = 0
     
+    let totalCompletions = 0
     cards.forEach(card => {
       // Color distribution
       if (colorDistribution[card.color] !== undefined) {
         colorDistribution[card.color]++
       }
-      
+
       // Category distribution
       if (categoryDistribution[card.category] !== undefined) {
         categoryDistribution[card.category]++
       }
-      
+
       // Tipo distribution (INTRO and TRAVE)
       const tipo = card.tipo || 'bloke'
       const color = card.color || 'green'
@@ -142,11 +145,11 @@ export default function StatsPage() {
       } else if (tipo === 'trave' || color === 'blanco') {
         totalTrave++
       }
-      
+
       // Equipador distribution
       const equipador = card.equipador || 'alvaro'
       equipadorDistribution[equipador] = (equipadorDistribution[equipador] || 0) + 1
-      
+
       // Interactions - convert to numbers to avoid string concatenation
       if (card.interactions) {
         interactions.star_1 += Number(card.interactions.star_1) || 0
@@ -154,8 +157,10 @@ export default function StatsPage() {
         interactions.star_3 += Number(card.interactions.star_3) || 0
         interactions.skull += Number(card.interactions.skull) || 0
       }
+
+      totalCompletions += card.completionCount || 0
     })
-    
+
     return {
       totalBlokes: cards.length,
       totalIntro,
@@ -164,6 +169,7 @@ export default function StatsPage() {
       categoryDistribution,
       interactions,
       equipadorDistribution,
+      totalCompletions,
       blokes: cards
     }
   }, [cards])
@@ -210,18 +216,12 @@ export default function StatsPage() {
         return filters.sortOrder === 'asc' 
           ? aVal.localeCompare(bVal)
           : bVal.localeCompare(aVal)
+      } else if (filters.sortBy === 'completionCount') {
+        aVal = a.completionCount || 0
+        bVal = b.completionCount || 0
       } else if (filters.sortBy === 'star_1') {
-        aVal = a.interactions?.star_1 || 0
-        bVal = b.interactions?.star_1 || 0
-      } else if (filters.sortBy === 'star_2') {
-        aVal = a.interactions?.star_2 || 0
-        bVal = b.interactions?.star_2 || 0
-      } else if (filters.sortBy === 'star_3') {
-        aVal = a.interactions?.star_3 || 0
-        bVal = b.interactions?.star_3 || 0
-      } else if (filters.sortBy === 'skull') {
-        aVal = a.interactions?.skull || 0
-        bVal = b.interactions?.skull || 0
+        aVal = (Number(a.interactions?.star_1) || 0) + (Number(a.interactions?.star_2) || 0) + (Number(a.interactions?.star_3) || 0) + (Number(a.interactions?.skull) || 0)
+        bVal = (Number(b.interactions?.star_1) || 0) + (Number(b.interactions?.star_2) || 0) + (Number(b.interactions?.star_3) || 0) + (Number(b.interactions?.skull) || 0)
       }
       
       if (typeof aVal === 'number') {
@@ -498,20 +498,12 @@ export default function StatsPage() {
             <h3>Interacciones</h3>
             <div className="stats-summary__interactions">
               <div className="stats-summary__interaction">
-                <span>⭐ Buen bloke:</span>
-                <span>{stats.interactions.star_1}</span>
+                <span>⭐ Estrellas:</span>
+                <span>{stats.interactions.star_1 + stats.interactions.star_2 + stats.interactions.star_3 + stats.interactions.skull}</span>
               </div>
               <div className="stats-summary__interaction">
-                <span>⭐⭐ Muy buen bloke:</span>
-                <span>{stats.interactions.star_2}</span>
-              </div>
-              <div className="stats-summary__interaction">
-                <span>⭐⭐⭐ Blokazo:</span>
-                <span>{stats.interactions.star_3}</span>
-              </div>
-              <div className="stats-summary__interaction">
-                <span>💀 Amor-odio:</span>
-                <span>{stats.interactions.skull}</span>
+                <span>✓ TOPs:</span>
+                <span>{stats.totalCompletions}</span>
               </div>
             </div>
           </div>
@@ -638,10 +630,8 @@ export default function StatsPage() {
                       onChange={(e) => handleFilterChange('sortBy', e.target.value)}
                     >
                       <option value="totalInteractions">Total Interacciones</option>
-                      <option value="star_1">⭐</option>
-                      <option value="star_2">⭐⭐</option>
-                      <option value="star_3">⭐⭐⭐</option>
-                      <option value="skull">💀</option>
+                      <option value="completionCount">✓ TOPs</option>
+                      <option value="star_1">⭐ Estrellas</option>
                       <option value="title">Título</option>
                     </select>
                   </div>
@@ -697,10 +687,8 @@ export default function StatsPage() {
                     <>
                       <th title="Categoría del problema">Categoría</th>
                       <th title="Grado">Grado</th>
-                      <th title="Buen bloke">⭐</th>
-                      <th title="Muy buen bloke">⭐⭐</th>
-                      <th title="Blokazo">⭐⭐⭐</th>
-                      <th title="Amor-odio">💀</th>
+                      <th title="TOPs">✓</th>
+                      <th title="Estrellas">⭐</th>
                       <th title="Total de interacciones">Total</th>
                     </>
                   )}
@@ -749,10 +737,8 @@ export default function StatsPage() {
                       <>
                         <td>{card.category}</td>
                         <td>{(card.grado || 'medio').charAt(0).toUpperCase() + (card.grado || 'medio').slice(1)}</td>
-                        <td>{Number(card.interactions?.star_1) || 0}</td>
-                        <td>{Number(card.interactions?.star_2) || 0}</td>
-                        <td>{Number(card.interactions?.star_3) || 0}</td>
-                        <td>{Number(card.interactions?.skull) || 0}</td>
+                        <td>{card.completionCount || 0}</td>
+                        <td>{(Number(card.interactions?.star_1) || 0) + (Number(card.interactions?.star_2) || 0) + (Number(card.interactions?.star_3) || 0) + (Number(card.interactions?.skull) || 0)}</td>
                         <td><strong>{Number(card.totalInteractions) || 0}</strong></td>
                       </>
                     )}
@@ -799,7 +785,7 @@ export default function StatsPage() {
                         )}
                       </div>
                       <span className={`stats-hof__color-dot event-card__color event-card__color--${bloke.color}`}></span>
-                      <span className="stats-hof__score">⭐ {bloke.totalInteractions || 0}</span>
+                      <span className="stats-hof__score">⭐ {bloke.totalInteractions || 0} · ✓ {bloke.completionCount || 0}</span>
                       {!hofPostIds.has(bloke.postId) && <span className="stats-hof__deleted-tag">eliminado</span>}
                       <span className="stats-hof__badge">HALL OF FAME</span>
                     </div>
