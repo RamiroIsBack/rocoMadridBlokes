@@ -64,6 +64,13 @@ export default function FilterBar({ activeSala, onSalaChange, activeColor, onCol
           >
             ⭐
           </button>
+          <button
+            className={`filter-bar__sort-btn${sortMode === 'tops' ? ' filter-bar__sort-btn--active' : ''}`}
+            onClick={() => onSortMode('tops')}
+            title="Más tops primero"
+          >
+            ✓
+          </button>
         </div>
       </div>
     </nav>

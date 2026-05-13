@@ -4,6 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import { useRevenue, useProducts, useClasses } from '../hooks/useSuperAdmin'
+import ExpensesSection from '../components/ExpensesSection'
 import './SuperAdminPage.css'
 
 const PERIOD_OPTIONS = [
@@ -43,29 +44,64 @@ function PeriodSelector({ value, onChange }) {
 function LoadingBlock() { return <div className="sa-loading">Cargando…</div> }
 function ErrorBlock({ msg }) { return <div className="sa-error">Error: {msg}</div> }
 
+const IVA_COLOR = '#f97316'
+
+function quarterLabel() {
+  const m = new Date().getMonth() + 1
+  return `Q${Math.ceil(m / 3)} ${new Date().getFullYear()}`
+}
+function currentQuarterMonths() {
+  const now = new Date()
+  const y   = now.getFullYear()
+  const q   = Math.ceil((now.getMonth() + 1) / 3)
+  const s   = (q - 1) * 3 + 1
+  return [0, 1, 2].map(i => `${y}-${String(s + i).padStart(2, '0')}`)
+}
+
 // ─── Revenue section ────────────────────────────────────────────────
 function RevenueSection() {
-  const [months, setMonths] = useState(12)
-  const { data, loading, error } = useRevenue(months)
+  const [months, setMonths]               = useState(12)
+  const [excludeTransfer, setExclude]     = useState(false)
+  const { data, loading, error }          = useRevenue(months, excludeTransfer)
 
   const totals = useMemo(() => {
     if (!data) return {}
     return {
-      store1: data.reduce((s, r) => s + (r.store1 || 0), 0),
-      store2: data.reduce((s, r) => s + (r.store2 || 0), 0),
-      total:  data.reduce((s, r) => s + (r.total  || 0), 0),
+      store1:     data.reduce((s, r) => s + (r.store1     || 0), 0),
+      store2:     data.reduce((s, r) => s + (r.store2     || 0), 0),
+      total:      data.reduce((s, r) => s + (r.total      || 0), 0),
+      store1_tax: data.reduce((s, r) => s + (r.store1_tax || 0), 0),
     }
+  }, [data])
+
+  const quarterIva = useMemo(() => {
+    if (!data) return 0
+    const qm = currentQuarterMonths()
+    return data.filter(r => qm.includes(r.month)).reduce((s, r) => s + (r.store1_tax || 0), 0)
   }, [data])
 
   const chartData = useMemo(() =>
     (data || []).map(r => ({ ...r, month: fmtMonth(r.month) }))
   , [data])
 
+  const ivaData = useMemo(() =>
+    (data || []).map(r => ({ month: fmtMonth(r.month), iva: r.store1_tax || 0 }))
+  , [data])
+
   return (
     <section className="sa-section">
       <div className="sa-section__header">
         <SectionTitle>Ingresos</SectionTitle>
-        <PeriodSelector value={months} onChange={setMonths} />
+        <div className="sa-header-controls">
+          <button
+            className={`sa-transfer-toggle${excludeTransfer ? ' sa-transfer-toggle--on' : ''}`}
+            onClick={() => setExclude(x => !x)}
+            title="Factura de Uso de Rocódromo x 2 (club → rocoteca)"
+          >
+            {excludeTransfer ? 'Sin transferencia club' : 'Con transferencia club'}
+          </button>
+          <PeriodSelector value={months} onChange={setMonths} />
+        </div>
       </div>
 
       {loading && <LoadingBlock />}
@@ -75,7 +111,7 @@ function RevenueSection() {
         <>
           <div className="sa-kpis">
             {[
-              { key: 'store1', label: 'Tienda Principal' },
+              { key: 'store1', label: excludeTransfer ? 'Principal (sin transf.)' : 'Tienda Principal' },
               { key: 'store2', label: 'Tienda Club' },
               { key: 'total',  label: 'Total combinado' },
             ].map(({ key, label }) => (
@@ -84,6 +120,10 @@ function RevenueSection() {
                 <span className="sa-kpi__label">{label}</span>
               </div>
             ))}
+            <div className="sa-kpi" style={{ '--kpi-color': IVA_COLOR }}>
+              <span className="sa-kpi__value">{fmtEur(quarterIva)}</span>
+              <span className="sa-kpi__label">IVA {quarterLabel()}</span>
+            </div>
           </div>
 
           <ResponsiveContainer width="100%" height={240}>
@@ -110,6 +150,23 @@ function RevenueSection() {
               <Area type="monotone" dataKey="total"  stroke={STORE_COLORS.total}  fill={`url(#grad-total)`}  strokeWidth={2} dot={false} strokeDasharray="4 2" />
             </AreaChart>
           </ResponsiveContainer>
+
+          <div className="sa-iva-block">
+            <p className="sa-iva-title">IVA mensual · Tienda Principal</p>
+            <ResponsiveContainer width="100%" height={110}>
+              <BarChart data={ivaData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
+                <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
+                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={48} />
+                <Tooltip
+                  contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
+                  labelStyle={{ color: IVA_COLOR }}
+                  formatter={v => [fmtEur(v), 'IVA']}
+                />
+                <Bar dataKey="iva" fill={IVA_COLOR} radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </>
       )}
     </section>
@@ -319,6 +376,7 @@ export default function SuperAdminPage() {
       <RevenueSection />
       <ProductsSection />
       <ClassesSection />
+      <ExpensesSection />
     </div>
   )
 }

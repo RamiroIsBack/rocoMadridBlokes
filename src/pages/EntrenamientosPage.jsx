@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
-import AdminLogin from '../admin/AdminLogin'
 import TrainingPanel from '../components/TrainingPanel'
 import { useUserTraining } from '../hooks/useTraining'
 import { ZONES, TESTS as TEST_MAP } from '../components/BodyDiagram'
+import '../admin/AdminLogin.css'
 import './EntrenamientosPage.css'
 
-const SESSION_KEY = 'blokes_auth'
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 
 const EMPTY_FILTERS = { frecuencia: '', dia: '', turno: '', edad: '', horario: '', status: 'active' }
@@ -20,10 +19,19 @@ function getAuthHeaders() {
   return nonce ? { 'X-WP-Nonce': nonce } : {}
 }
 
+function diaMatches(claDia, filterDia) {
+  if (!filterDia) return true
+  if (!claDia) return false
+  if (claDia === filterDia) return true
+  // Single-day filter matches combined schedules containing that day
+  if (!filterDia.includes('-')) return claDia.split('-').includes(filterDia)
+  return false
+}
+
 function applyClaseFilters(clases, filters, exclude) {
   return clases.filter(c => {
     if (exclude !== 'frecuencia' && filters.frecuencia && c.tipo    !== filters.frecuencia) return false
-    if (exclude !== 'dia'        && filters.dia        && c.dia     !== filters.dia)        return false
+    if (exclude !== 'dia'        && !diaMatches(c.dia, exclude === 'dia' ? '' : filters.dia)) return false
     if (exclude !== 'turno'      && filters.turno      && c.turno   !== filters.turno)      return false
     if (exclude !== 'edad'       && filters.edad       && c.edad    !== filters.edad)       return false
     if (exclude !== 'horario'    && filters.horario    && c.horario !== filters.horario)    return false
@@ -115,9 +123,7 @@ function TestModeRow({ alumno, testId }) {
 
 // ─── Main page ───────────────────────────────────────────────────────
 export default function EntrenamientosPage() {
-  const [isAuthenticated, setIsAuthenticated] = useState(
-    () => !!(window.blokesSiteData?.isLoggedIn) || !!localStorage.getItem(SESSION_KEY)
-  )
+  const isAuthenticated = ['admin', 'superadmin'].includes(window.blokesSiteData?.userRole)
   const [viewMode, setViewMode]         = useState('alumno') // 'alumno' | 'test'
   const [filters, setFilters]           = useState(EMPTY_FILTERS)
   const [allClases, setAllClases]       = useState([])
@@ -173,11 +179,17 @@ export default function EntrenamientosPage() {
   const horarioOptions = distinct(applyClaseFilters(allClases, filters, 'horario'), 'horario').sort()
 
   if (!isAuthenticated) {
+    const sd = window.blokesSiteData || {}
     return (
-      <AdminLogin
-        mode="entrenamientos"
-        onLogin={() => { localStorage.setItem(SESSION_KEY, 'true'); setIsAuthenticated(true) }}
-      />
+      <div className="admin-login">
+        <div className="admin-login__card">
+          <h1 className="admin-login__title">Entrenamientos</h1>
+          <p className="admin-login__subtitle">Esta sección requiere permisos de administrador.</p>
+          {sd.loginUrl && (
+            <a href={sd.loginUrl} className="admin-login__submit">Iniciar sesión</a>
+          )}
+        </div>
+      </div>
     )
   }
 

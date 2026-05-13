@@ -26,8 +26,8 @@ function useEndpoint(path, params = {}) {
   return { data, loading, error }
 }
 
-export function useRevenue(months) {
-  return useEndpoint('/revenue', { months })
+export function useRevenue(months, excludeTransfer = false) {
+  return useEndpoint('/revenue', { months, exclude_transfer: excludeTransfer ? 1 : 0 })
 }
 
 export function useProducts(months) {
@@ -36,4 +36,8 @@ export function useProducts(months) {
 
 export function useClasses(months) {
   return useEndpoint('/classes', { months })
+}
+
+export function useExpenses(months, entity = 'all', excludeInternal = true) {
+  return useEndpoint('/expenses', { months, entity, exclude_internal: excludeInternal ? 1 : 0 })
 }

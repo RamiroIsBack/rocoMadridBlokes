@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useWordPressPosts } from '../hooks/useWordPressPosts'
 import { useCompletions } from '../hooks/useCompletions'
 import FilterBar from '../components/FilterBar'
 import EventCard from '../components/EventCard'
 import LoadingSpinner from '../components/LoadingSpinner'
+import CelebrationDialog from '../components/CelebrationDialog'
 
 function MainPage() {
   const { cards, loading, error } = useWordPressPosts()
@@ -11,6 +12,15 @@ function MainPage() {
   const [activeSala, setActiveSala] = useState('TODOS')
   const [activeColor, setActiveColor] = useState('TODOS')
   const [sortMode, setSortMode] = useState('newest')
+  const [celebration, setCelebration] = useState(null)
+
+  const handleToggleDone = useCallback(async (card) => {
+    const currentCount = countOverrides[card.postId] ?? card.completionCount ?? 0
+    const result = await toggleCompletion(card.postId, currentCount)
+    if (result?.completed) {
+      setCelebration({ title: card.title, count: result.count })
+    }
+  }, [toggleCompletion, countOverrides])
 
   const newCardIds = useMemo(() => {
     const sorted = [...cards].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
@@ -29,12 +39,23 @@ function MainPage() {
           const diff = (b.totalInteractions || 0) - (a.totalInteractions || 0)
           return diff !== 0 ? diff : new Date(b.timestamp) - new Date(a.timestamp)
         }
+        if (sortMode === 'tops') {
+          const diff = (b.completionCount || 0) - (a.completionCount || 0)
+          return diff !== 0 ? diff : new Date(b.timestamp) - new Date(a.timestamp)
+        }
         return new Date(b.timestamp) - new Date(a.timestamp)
       })
   }, [cards, activeSala, activeColor, sortMode])
 
   return (
     <div className="app">
+      {celebration && (
+        <CelebrationDialog
+          title={celebration.title}
+          count={celebration.count}
+          onClose={() => setCelebration(null)}
+        />
+      )}
       <main className="app-main">
         <FilterBar
           activeSala={activeSala}
@@ -68,7 +89,7 @@ function MainPage() {
                 isNew={newCardIds.has(card.id)}
                 isDone={completedByMe.has(card.postId)}
                 completionCount={countOverrides[card.postId] ?? card.completionCount ?? 0}
-                onToggleDone={() => toggleCompletion(card.postId, countOverrides[card.postId] ?? card.completionCount ?? 0)}
+                onToggleDone={() => handleToggleDone(card)}
                 isLoggedIn={isLoggedIn}
                 loginUrl={loginUrl}
                 myRating={myRatings[String(card.postId)] || null}

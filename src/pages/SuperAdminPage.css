@@ -40,6 +40,48 @@
   margin-bottom: 18px;
 }
 
+.sa-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Transfer toggle ── */
+.sa-transfer-toggle {
+  padding: 4px 12px;
+  background: none;
+  border: 1px solid #3a3020;
+  color: #666;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.sa-transfer-toggle:hover { color: #999; border-color: #555; }
+.sa-transfer-toggle--on {
+  background: rgba(249, 115, 22, 0.1);
+  border-color: #f97316;
+  color: #f97316;
+}
+
+/* ── IVA block ── */
+.sa-iva-block {
+  margin-top: 20px;
+  border-top: 1px solid #2a2015;
+  padding-top: 14px;
+}
+.sa-iva-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #f97316;
+  margin: 0 0 10px;
+}
+
 .sa-section-title {
   font-family: var(--font-serif);
   font-size: 1.1rem;

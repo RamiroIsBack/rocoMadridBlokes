@@ -93,6 +93,7 @@ export function useCompletions() {
         return next
       })
       setCountOverrides(prev => ({ ...prev, [postId]: data.count }))
+      return data
     } catch (e) {
       setCompletedByMe(prev => {
         const next = new Set(prev)
@@ -105,6 +106,7 @@ export function useCompletions() {
         return next
       })
       console.error('Toggle completion failed:', e)
+      return null
     }
   }, [completedByMe])
 

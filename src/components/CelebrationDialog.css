@@ -1,0 +1,96 @@
+.celeb-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: celeb-fade-in 0.2s ease;
+}
+
+@keyframes celeb-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.celeb-dialog {
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px 28px 24px;
+  max-width: 320px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  animation: celeb-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes celeb-pop {
+  from { transform: scale(0.7); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+
+.celeb-monkey {
+  font-size: 4rem;
+  line-height: 1;
+  margin-bottom: 12px;
+  display: block;
+  animation: celeb-climb 0.6s ease-in-out infinite alternate;
+  transform-origin: center bottom;
+}
+
+@keyframes celeb-climb {
+  from { transform: translateY(0)    rotate(-8deg); }
+  to   { transform: translateY(-10px) rotate(8deg); }
+}
+
+.celeb-heading {
+  font-family: var(--font-serif, serif);
+  font-size: 1.9rem;
+  font-weight: 900;
+  color: #1a1208;
+  margin: 0 0 14px;
+  letter-spacing: -0.02em;
+}
+
+.celeb-main {
+  font-size: 1rem;
+  color: #374151;
+  margin: 0 0 4px;
+  line-height: 1.4;
+}
+
+.celeb-main strong {
+  font-size: 1.4rem;
+  font-weight: 900;
+  color: #22c55e;
+}
+
+.celeb-bloke {
+  font-size: 0.85rem;
+  color: #6b7280;
+  font-style: italic;
+  margin: 0 0 10px;
+}
+
+.celeb-sub {
+  font-size: 0.95rem;
+  color: #374151;
+  margin: 0 0 22px;
+}
+
+.celeb-btn {
+  background: #1a1208;
+  color: #f5c842;
+  border: none;
+  border-radius: 24px;
+  padding: 10px 28px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.celeb-btn:hover  { background: #2a2015; }
+.celeb-btn:active { transform: scale(0.96); }
