@@ -162,13 +162,22 @@ function UploadPanel({ onSaved }) {
           setItems([])
           return
         }
-        setItems(all)
+        // Deduplicate: same (fecha, concepto, importe) → keep first occurrence
+        const seen = new Set()
+        let dupCount = 0
+        const deduped = all.filter(item => {
+          const sig = `${item.fecha}||${item.concepto}||${item.importe}`
+          if (seen.has(sig)) { dupCount++; return false }
+          seen.add(sig)
+          return true
+        })
+        setItems(deduped)
         setPreviewMonth('all')
         setPreviewAccount('all')
         setSaved(false)
-        setError(null)
+        setError(dupCount > 0 ? `Se eliminaron ${dupCount} movimiento${dupCount > 1 ? 's' : ''} duplicado${dupCount > 1 ? 's' : ''} (mismo día, concepto e importe).` : null)
         // auto-map known accounts, unknown → rocoteca
-        const accounts = [...new Set(all.filter(i => i.cuenta).map(i => i.cuenta))]
+        const accounts = [...new Set(deduped.filter(i => i.cuenta).map(i => i.cuenta))]
         const map = {}
         accounts.forEach(a => { map[a] = KNOWN_ACCOUNTS[a] || 'rocoteca' })
         setAccountMap(map)
@@ -278,7 +287,7 @@ function UploadPanel({ onSaved }) {
         )}
       </div>
 
-      {error && <p className="exp-error">Error: {error}</p>}
+      {error && <p className={error.startsWith('Se eliminaron') ? 'exp-hint' : 'exp-error'}>{error.startsWith('Se eliminaron') ? `ⓘ ${error}` : `Error: ${error}`}</p>}
 
       {items.length > 0 && (
         <>
@@ -345,12 +354,33 @@ const ENTITY_OPTIONS = [
 ]
 
 // ── History charts ────────────────────────────────────────────────────
-function HistoryView({ months }) {
+function HistoryView({ months, onDeleted }) {
   const [entity, setEntity]                   = useState('all')
   const [excludeInternal, setExcludeInternal] = useState(true)
+  const [showManager, setShowManager]         = useState(false)
+  const [deletingKey, setDeletingKey]         = useState(null)
   // In consolidated view ('all'), internals cancel out naturally — no need to exclude
   const effectiveExclude = entity === 'all' ? false : excludeInternal
   const { data, loading, error } = useExpenses(months, entity, effectiveExclude)
+
+  const handleDelete = async (month, ent) => {
+    const key = `${month}·${ent}`
+    if (!window.confirm(`¿Borrar datos de ${fmtMonth(month)} (${ent}) de la base de datos? Esta acción no se puede deshacer.`)) return
+    setDeletingKey(key)
+    try {
+      const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
+      const res = await fetch(
+        `${CLUB_URL}/wp-json/superadmin/v1/expenses?month=${month}&entity=${ent}`,
+        { method: 'DELETE', headers: { 'X-WP-Nonce': nonce } }
+      )
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (onDeleted) onDeleted()
+    } catch (e) {
+      alert(`Error al borrar: ${e.message}`)
+    } finally {
+      setDeletingKey(null)
+    }
+  }
 
   // PHP may return multiple rows per month (one per account upload) — merge them
   const byMonth = useMemo(() => {
@@ -457,6 +487,34 @@ function HistoryView({ months }) {
           <Bar dataKey="iva_soportado"   fill="#6366f1" radius={[3,3,0,0]} />
         </BarChart>
       </ResponsiveContainer>
+
+      <div className="exp-manager">
+        <button className="exp-manager-toggle" onClick={() => setShowManager(v => !v)}>
+          {showManager ? '▲' : '▼'} Gestionar datos guardados ({data.length} {data.length === 1 ? 'entrada' : 'entradas'})
+        </button>
+        {showManager && (
+          <div className="exp-manager-list">
+            {data.map(r => {
+              const key = `${r.month}·${r.entity}`
+              const isDeleting = deletingKey === key
+              return (
+                <div key={key} className="exp-manager-row">
+                  <span className="exp-manager-month">{fmtMonth(r.month)}</span>
+                  <span className="exp-manager-entity">{r.entity}</span>
+                  <span className="exp-manager-amounts">
+                    ↑{fmtEur(r.total_ingresos)} ↓{fmtEur(r.total_costes)}
+                  </span>
+                  <button
+                    className="exp-manager-del"
+                    onClick={() => handleDelete(r.month, r.entity)}
+                    disabled={isDeleting}
+                  >{isDeleting ? '…' : '× Borrar'}</button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -485,7 +543,7 @@ export default function ExpensesSection() {
 
       <div className="exp-divider" />
 
-      <HistoryView key={refreshKey} months={months} />
+      <HistoryView key={refreshKey} months={months} onDeleted={() => setRefresh(k => k + 1)} />
     </section>
   )
 }

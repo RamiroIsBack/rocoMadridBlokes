@@ -236,11 +236,13 @@
 }
 .exp-kpi__val {
   display: block;
-  font-family: var(--font-serif);
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 1.2rem;
   font-weight: 700;
   color: var(--c, #888);
   line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 .exp-kpi__lbl {
   display: block;
@@ -259,6 +261,59 @@
   color: #666;
   margin: 0 0 8px;
 }
+
+/* ── Data manager ── */
+.exp-manager {
+  margin-top: 20px;
+  border-top: 1px solid #2a2015;
+  padding-top: 12px;
+}
+.exp-manager-toggle {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.04em;
+  padding: 0;
+  text-transform: uppercase;
+}
+.exp-manager-toggle:hover { color: #888; }
+
+.exp-manager-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.exp-manager-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid #2a2015;
+  font-size: 0.75rem;
+}
+.exp-manager-month  { color: #f5c842; font-weight: 700; min-width: 52px; }
+.exp-manager-entity { color: #aaa; min-width: 64px; }
+.exp-manager-amounts{ color: #666; font-size: 0.68rem; flex: 1; font-variant-numeric: tabular-nums; }
+.exp-manager-del {
+  padding: 2px 10px;
+  background: none;
+  border: 1px solid #3a2020;
+  color: #ef4444;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: 0.03em;
+  transition: background 0.12s;
+}
+.exp-manager-del:hover:not(:disabled) { background: rgba(239,68,68,0.12); }
+.exp-manager-del:disabled { opacity: 0.4; cursor: default; }
 
 @media (max-width: 600px) {
   .exp-kpi { min-width: 100%; }

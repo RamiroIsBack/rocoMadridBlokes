@@ -35,6 +35,17 @@ add_filter('show_admin_bar', function($show) {
     return $show;
 });
 
+// Redirect /blokes-dev/anything to /blokes-dev/ so SPA subroutes don't 404
+add_action('template_redirect', function() {
+    $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+    foreach ($GLOBALS['blokes_app_slugs'] as $slug) {
+        if (strpos($path, $slug . '/') === 0 && strlen($path) > strlen($slug) + 1) {
+            wp_safe_redirect(home_url('/' . $slug . '/'), 302);
+            exit;
+        }
+    }
+}, 1);
+
 add_action('template_redirect', function() {
     // Primary: WordPress page match. Fallback: match by URL path (no WP page needed).
     $slug = null;
@@ -1355,7 +1366,6 @@ function superadmin_revenue($request) {
     $start_date = (new DateTime("-{$months} months"))->format('Y-m-d');
 
     $exclude_transfer  = (bool) $request->get_param('exclude_transfer');
-    $transfer_products = array('Uso de Rocódromo x 2');
 
     $by_month = array();
 
@@ -1373,7 +1383,10 @@ function superadmin_revenue($request) {
                 $by_month[$row['month']]['store1_tax'] += $row['tax'];
                 if ($exclude_transfer) {
                     foreach ($row['items'] as $item) {
-                        if (in_array($item['name'], $transfer_products)) $amount -= $item['revenue'];
+                        // Match any product that refers to "Rocódromo" (inter-company transfer Club→Rocoteca)
+                        if (stripos($item['name'], 'Rocodromo') !== false || stripos($item['name'], 'Rocódromo') !== false) {
+                            $amount -= $item['revenue'];
+                        }
                     }
                 }
             }

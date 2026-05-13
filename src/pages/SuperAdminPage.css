@@ -2,12 +2,13 @@
   max-width: 900px;
   margin: 0 auto;
   padding: 28px 16px 60px;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
 .sa-page__title {
-  font-family: var(--font-serif);
-  font-size: 1.8rem;
-  font-weight: 700;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 1.5rem;
+  font-weight: 800;
   color: #a78bfa;
   margin: 0 0 28px;
   letter-spacing: -0.02em;
@@ -83,11 +84,12 @@
 }
 
 .sa-section-title {
-  font-family: var(--font-serif);
-  font-size: 1.1rem;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 1.0rem;
   font-weight: 700;
   color: #f0ece0;
   margin: 0;
+  letter-spacing: 0.01em;
 }
 
 /* ── Loading / Error ── */
@@ -127,11 +129,13 @@
 }
 .sa-kpi__value {
   display: block;
-  font-family: var(--font-serif);
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 1.4rem;
   font-weight: 700;
   color: var(--kpi-color, #f5c842);
   line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 .sa-kpi__label {
   display: block;
