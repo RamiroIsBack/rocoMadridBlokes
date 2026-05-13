@@ -129,17 +129,18 @@ function UploadPanel({ onSaved }) {
     return [...s].sort()
   }, [items])
 
-  // actual lotes = account × month pairs that have at least one item
+  // actual lotes = unique (entity, month) groups — what will actually be POSTed
   const totalLotes = useMemo(() => {
-    if (uniqueAccounts.length === 0) return uniqueMonths.length
-    let c = 0
-    for (const a of uniqueAccounts) {
-      for (const m of uniqueMonths) {
-        if (items.some(i => i.cuenta === a && i.month === m)) c++
-      }
-    }
-    return c || uniqueMonths.length
-  }, [uniqueAccounts, uniqueMonths, items])
+    const groups = new Set()
+    items.forEach(item => {
+      if (!item.month) return
+      const entity = uniqueAccounts.length > 0
+        ? (accountMap[item.cuenta] || 'rocoteca')
+        : singleEntity
+      groups.add(`${entity}||${item.month}`)
+    })
+    return groups.size || 0
+  }, [items, uniqueAccounts, accountMap, singleEntity])
 
   const visibleItems = useMemo(() => {
     let filtered = items
@@ -188,39 +189,31 @@ function UploadPanel({ onSaved }) {
   const handleSave = async () => {
     if (!items.length) return
     setSaving(true); setError(null); setSaved(false)
+
+    // Group by (entity, month) — prevents overwrite when two accounts share the same entity
+    const groupMap = {}
+    items.forEach(item => {
+      if (!item.month) return
+      const entity = uniqueAccounts.length > 0
+        ? (accountMap[item.cuenta] || 'rocoteca')
+        : singleEntity
+      const key = `${entity}||${item.month}`
+      if (!groupMap[key]) groupMap[key] = { entity, month: item.month, items: [] }
+      groupMap[key].items.push(item)
+    })
+    const lotes = Object.values(groupMap).filter(g => g.items.length)
+
     let count = 0
     try {
-      if (uniqueAccounts.length > 0) {
-        // split by account × month (Santander format with Cuenta column)
-        for (const cuenta of uniqueAccounts) {
-          const entity = accountMap[cuenta] || 'rocoteca'
-          for (const m of uniqueMonths) {
-            const monthItems = items.filter(i => i.cuenta === cuenta && i.month === m)
-            if (!monthItems.length) continue
-            count++
-            setSaveProgress(`${count}/${totalLotes}`)
-            const res = await fetch(`${CLUB_URL}/wp-json/superadmin/v1/expenses`, {
-              method: 'POST',
-              headers: getAuthHeaders(),
-              body: JSON.stringify({ month: m, entity, items: monthItems }),
-            })
-            if (!res.ok) throw new Error(`HTTP ${res.status} al guardar ${fmtMonth(m)} (${entity})`)
-          }
-        }
-      } else {
-        // no Cuenta column in CSV — single entity for all rows
-        for (let mi = 0; mi < uniqueMonths.length; mi++) {
-          const m = uniqueMonths[mi]
-          count++
-          setSaveProgress(`${count}/${totalLotes}`)
-          const monthItems = items.filter(i => i.month === m)
-          const res = await fetch(`${CLUB_URL}/wp-json/superadmin/v1/expenses`, {
-            method: 'POST',
-            headers: getAuthHeaders(),
-            body: JSON.stringify({ month: m, entity: singleEntity, items: monthItems }),
-          })
-          if (!res.ok) throw new Error(`HTTP ${res.status} al guardar ${fmtMonth(m)}`)
-        }
+      for (const lote of lotes) {
+        count++
+        setSaveProgress(`${count}/${lotes.length}`)
+        const res = await fetch(`${CLUB_URL}/wp-json/superadmin/v1/expenses`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ month: lote.month, entity: lote.entity, items: lote.items }),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status} al guardar ${fmtMonth(lote.month)} (${lote.entity})`)
       }
       setSaved(true)
       if (onSaved) onSaved()

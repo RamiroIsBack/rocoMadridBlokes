@@ -410,12 +410,25 @@ add_action('rest_api_init', function() {
             'methods'             => 'GET',
             'callback'            => 'superadmin_get_expenses',
             'permission_callback' => $sa_perm,
-            'args'                => array('months' => array('type' => 'integer', 'default' => 6)),
+            'args'                => array(
+                'months'           => array('type' => 'integer', 'default' => 6),
+                'entity'           => array('type' => 'string',  'default' => 'all'),
+                'exclude_internal' => array('type' => 'integer', 'default' => 1),
+            ),
         ),
         array(
             'methods'             => 'POST',
             'callback'            => 'superadmin_save_expenses',
             'permission_callback' => $sa_perm,
+        ),
+        array(
+            'methods'             => 'DELETE',
+            'callback'            => 'superadmin_delete_expenses',
+            'permission_callback' => $sa_perm,
+            'args'                => array(
+                'month'  => array('type' => 'string', 'required' => true),
+                'entity' => array('type' => 'string', 'required' => false, 'default' => ''),
+            ),
         ),
     ));
 });
@@ -459,8 +472,10 @@ function superadmin_save_expenses($request) {
 }
 
 function superadmin_get_expenses($request) {
-    $months     = max(1, min(60, intval($request->get_param('months'))));
-    $start      = new DateTime("-{$months} months");
+    $months           = max(1, min(60, intval($request->get_param('months'))));
+    $entity_filter    = sanitize_text_field($request->get_param('entity') ?: 'all');
+    $exclude_internal = (bool) intval($request->get_param('exclude_internal') ?? 1);
+    $start            = new DateTime("-{$months} months");
 
     global $wpdb;
     $rows = $wpdb->get_results(
@@ -472,12 +487,16 @@ function superadmin_get_expenses($request) {
     foreach ($rows as $row) {
         $saved = json_decode($row['option_value'], true);
         if (!$saved || !isset($saved['month'])) continue;
+
+        $row_entity = $saved['entity'] ?? 'rocoteca';
+        if ($entity_filter !== 'all' && $row_entity !== $entity_filter) continue;
+
         $dt = DateTime::createFromFormat('Y-m', $saved['month']);
         if (!$dt || $dt < $start) continue;
 
         $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0;
         foreach ($saved['items'] as $item) {
-            if ($item['excluded']) continue;
+            if ($exclude_internal && $item['excluded']) continue;
             $amt  = abs(floatval($item['importe']));
             $rate = floatval($item['iva']) / 100;
             $iva  = $rate > 0 ? $amt * $rate / (1 + $rate) : 0;
@@ -491,7 +510,7 @@ function superadmin_get_expenses($request) {
         }
         $data[] = array(
             'month'           => $saved['month'],
-            'entity'          => $saved['entity'] ?? 'rocoteca',
+            'entity'          => $row_entity,
             'total_costes'    => round($tc,    2),
             'total_ingresos'  => round($ti,    2),
             'iva_soportado'   => round($iva_s, 2),
@@ -501,6 +520,32 @@ function superadmin_get_expenses($request) {
 
     usort($data, function($a, $b) { return strcmp($a['month'], $b['month']); });
     return rest_ensure_response(array('data' => $data));
+}
+
+function superadmin_delete_expenses($request) {
+    $month  = sanitize_text_field($request->get_param('month'));
+    $entity = sanitize_text_field($request->get_param('entity') ?: '');
+
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return new WP_Error('invalid_month', 'Formato de mes inválido. Usa YYYY-MM.', array('status' => 400));
+    }
+
+    global $wpdb;
+
+    if ($entity) {
+        $key = 'blokes_exp_' . str_replace('-', '_', $month) . '_' . $entity;
+        delete_option($key);
+        return rest_ensure_response(array('success' => true, 'deleted' => array($key)));
+    }
+
+    // No entity specified — delete all records for that month
+    $prefix = 'blokes_exp_' . str_replace('-', '_', $month) . '_%';
+    $keys = $wpdb->get_col($wpdb->prepare(
+        "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",
+        $prefix
+    ));
+    foreach ($keys as $key) { delete_option($key); }
+    return rest_ensure_response(array('success' => true, 'deleted' => $keys));
 }
 
 // ============================================================
