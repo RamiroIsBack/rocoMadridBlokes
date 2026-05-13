@@ -1,7 +1,11 @@
-// ── Auto-exclusion: transfers between accounts of the same entity ─────
-// USO DE ROCODROMO is a real payment from Club → Rocoteca, NOT excluded
+// ── Auto-exclusion: intra-entity transfers + inter-company payments ───
+// These cancel out in a consolidated view of both companies.
+// They are auto-marked excluded so the "Sin internos" toggle hides them,
+// but remain visible individually (IVA, per-entity analysis).
 const EXCLUDE_CONCEPTS = [
   'Transferencia entre cuentas',
+  'USO DE ROCODROMO',
+  'Uso de Rocodromo',
 ]
 
 // ── Category definitions ──────────────────────────────────────────────

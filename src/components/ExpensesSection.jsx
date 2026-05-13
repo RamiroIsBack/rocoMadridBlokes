@@ -331,7 +331,7 @@ function UploadPanel({ onSaved }) {
               Ingresos banco ({ingresos.filter(i => !i.excluded).length})
             </button>
           </div>
-          <p className="exp-hint">Desmarca las filas que no quieras contabilizar. Las transferencias entre cuentas de la misma entidad ya están excluidas automáticamente.</p>
+          <p className="exp-hint">Los movimientos inter-empresa (USO DE ROCODROMO) y transferencias entre cuentas propias están excluidos por defecto — se anulan al consolidar las dos empresas. Actívalos si necesitas ver el IVA o el detalle por entidad.</p>
           <PreviewTable
             items={visibleItems}
             section={tab}
@@ -396,7 +396,7 @@ function HistoryView({ months }) {
         <button
           className={`sa-transfer-toggle${excludeInternal ? ' sa-transfer-toggle--on' : ''}`}
           onClick={() => setExcludeInternal(v => !v)}
-          title="Transferencias internas entre cuentas de la misma entidad (Transferencia entre cuentas)"
+          title="Movimientos que se anulan al consolidar ambas empresas: transferencias entre cuentas propias + USO DE ROCODROMO (pago inter-empresa Club↔Rocoteca)"
         >
           {excludeInternal ? 'Sin internos' : 'Con internos'}
         </button>
