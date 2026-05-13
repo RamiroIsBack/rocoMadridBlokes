@@ -14,7 +14,7 @@ const PERIOD_OPTIONS = [
 ]
 
 const STORE_COLORS = { store1: '#f5c842', store2: '#60a5fa', total: '#34d399' }
-const STORE_LABELS = { store1: 'Principal', store2: 'Club', total: 'Total' }
+const STORE_LABELS = { store1: 'Rocoteca', store2: 'Club', total: 'Total' }
 
 function fmtEur(v) { return `${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €` }
 function fmtMonth(m) {

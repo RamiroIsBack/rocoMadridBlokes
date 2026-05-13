@@ -355,7 +355,9 @@ const ENTITY_OPTIONS = [
 function HistoryView({ months }) {
   const [entity, setEntity]                   = useState('all')
   const [excludeInternal, setExcludeInternal] = useState(true)
-  const { data, loading, error } = useExpenses(months, entity, excludeInternal)
+  // In consolidated view ('all'), internals cancel out naturally — no need to exclude
+  const effectiveExclude = entity === 'all' ? false : excludeInternal
+  const { data, loading, error } = useExpenses(months, entity, effectiveExclude)
 
   const chartData = useMemo(() => {
     if (!data) return []
@@ -393,13 +395,15 @@ function HistoryView({ months }) {
             >{o.l}</button>
           ))}
         </div>
-        <button
-          className={`sa-transfer-toggle${excludeInternal ? ' sa-transfer-toggle--on' : ''}`}
-          onClick={() => setExcludeInternal(v => !v)}
-          title="Movimientos que se anulan al consolidar ambas empresas: transferencias entre cuentas propias + USO DE ROCODROMO (pago inter-empresa Club↔Rocoteca)"
-        >
-          {excludeInternal ? 'Sin internos' : 'Con internos'}
-        </button>
+        {entity !== 'all' && (
+          <button
+            className={`sa-transfer-toggle${excludeInternal ? ' sa-transfer-toggle--on' : ''}`}
+            onClick={() => setExcludeInternal(v => !v)}
+            title="Movimientos que se anulan al consolidar ambas empresas: transferencias entre cuentas propias + USO DE ROCODROMO (pago inter-empresa Club↔Rocoteca)"
+          >
+            {excludeInternal ? 'Sin internos' : 'Con internos'}
+          </button>
+        )}
       </div>
 
       <div className="exp-kpis">
