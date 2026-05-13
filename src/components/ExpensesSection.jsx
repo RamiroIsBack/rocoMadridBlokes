@@ -359,25 +359,35 @@ function HistoryView({ months }) {
   const effectiveExclude = entity === 'all' ? false : excludeInternal
   const { data, loading, error } = useExpenses(months, entity, effectiveExclude)
 
-  const chartData = useMemo(() => {
+  // PHP may return multiple rows per month (one per account upload) — merge them
+  const byMonth = useMemo(() => {
     if (!data) return []
-    return data.map(r => ({
-      month:           fmtMonth(r.month),
-      gastos:          Math.abs(r.total_costes    || 0),
-      ingresos_banco:  Math.abs(r.total_ingresos  || 0),
-      iva_soportado:   Math.abs(r.iva_soportado   || 0),
-      iva_repercutido: Math.abs(r.iva_repercutido || 0),
-    }))
+    const acc = {}
+    data.forEach(r => {
+      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0 }
+      acc[r.month].costes   += Math.abs(r.total_costes    || 0)
+      acc[r.month].ingresos += Math.abs(r.total_ingresos  || 0)
+      acc[r.month].iva_s    += Math.abs(r.iva_soportado   || 0)
+      acc[r.month].iva_r    += Math.abs(r.iva_repercutido || 0)
+    })
+    return Object.values(acc).sort((a, b) => a.month.localeCompare(b.month))
   }, [data])
 
-  const totals = useMemo(() => {
-    if (!data) return {}
-    return {
-      gastos:   data.reduce((s, r) => s + Math.abs(r.total_costes    || 0), 0),
-      ingresos: data.reduce((s, r) => s + Math.abs(r.total_ingresos  || 0), 0),
-      iva_net:  data.reduce((s, r) => s + Math.abs(r.iva_repercutido || 0) - Math.abs(r.iva_soportado || 0), 0),
-    }
-  }, [data])
+  const chartData = useMemo(() =>
+    byMonth.map(r => ({
+      month:           fmtMonth(r.month),
+      gastos:          r.costes,
+      ingresos_banco:  r.ingresos,
+      iva_soportado:   r.iva_s,
+      iva_repercutido: r.iva_r,
+    }))
+  , [byMonth])
+
+  const totals = useMemo(() => ({
+    gastos:   byMonth.reduce((s, r) => s + r.costes,             0),
+    ingresos: byMonth.reduce((s, r) => s + r.ingresos,           0),
+    iva_net:  byMonth.reduce((s, r) => s + r.iva_r - r.iva_s,   0),
+  }), [byMonth])
 
   if (loading) return <div className="exp-loading">Cargando historial…</div>
   if (error)   return <div className="exp-error">Error: {error}</div>
