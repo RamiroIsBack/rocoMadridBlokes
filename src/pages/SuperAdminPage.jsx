@@ -269,24 +269,51 @@ function ProductsSection() {
 
 // ─── Classes section ────────────────────────────────────────────────
 function ClassesSection() {
-  const [months, setMonths]      = useState(12)
-  const [selected, setSelected]  = useState(null)
-  const { data, loading, error } = useClasses(months)
+  const [months, setMonths]       = useState(12)
+  const [selected, setSelected]   = useState(null)
+  const [viewMode, setViewMode]   = useState('inscritos') // 'inscritos' | 'ingresos'
+  const { data, loading, error }  = useClasses(months)
 
   const top12 = (data || []).slice(0, 12)
+  // Revenue mode active only when PHP returns revenue field
+  const hasRevenue   = top12.some(c => c.revenue != null)
+  const maxActive    = top12[0]?.active || 1
+  const maxRevenue   = Math.max(...top12.map(c => c.revenue || 0), 1)
+  const totalRevenue = top12.reduce((s, c) => s + (c.revenue || 0), 0)
+
+  const mode = hasRevenue ? viewMode : 'inscritos'
 
   const histData = useMemo(() => {
     if (!selected || !selected.history?.length) return []
     return selected.history.map(h => ({ ...h, month: fmtMonth(h.month) }))
   }, [selected])
 
-  const maxActive = top12[0]?.active || 1
+  const chartRows = top12.map(c => ({
+    name:    c.label,
+    activos: c.active,
+    total:   c.all,
+    ...(hasRevenue && { revenue: c.revenue || 0 }),
+  }))
 
   return (
     <section className="sa-section">
       <div className="sa-section__header">
         <SectionTitle>Clases</SectionTitle>
-        <PeriodSelector value={months} onChange={setMonths} />
+        <div className="sa-header-controls">
+          {hasRevenue && (
+            <div className="sa-period">
+              <button
+                className={`sa-period__btn${mode === 'inscritos' ? ' sa-period__btn--active' : ''}`}
+                onClick={() => setViewMode('inscritos')}
+              >Inscritos</button>
+              <button
+                className={`sa-period__btn${mode === 'ingresos' ? ' sa-period__btn--active' : ''}`}
+                onClick={() => setViewMode('ingresos')}
+              >Ingresos</button>
+            </div>
+          )}
+          <PeriodSelector value={months} onChange={setMonths} />
+        </div>
       </div>
 
       {loading && <LoadingBlock />}
@@ -294,48 +321,79 @@ function ClassesSection() {
 
       {!loading && !error && data && (
         <>
+          {hasRevenue && (
+            <div className="sa-kpis">
+              <div className="sa-kpi" style={{ '--kpi-color': '#34d399' }}>
+                <span className="sa-kpi__value">{fmtEur(totalRevenue)}</span>
+                <span className="sa-kpi__label">Ingresos WC clases ({months}m)</span>
+              </div>
+              <div className="sa-kpi" style={{ '--kpi-color': '#888' }}>
+                <span className="sa-kpi__value">—</span>
+                <span className="sa-kpi__label">Ing. banco clases (pendiente PHP /expenses income_tpv)</span>
+              </div>
+            </div>
+          )}
+
           <div className="sa-class-chart">
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart
-                data={top12.map(c => ({ name: c.label, activos: c.active, total: c.all }))}
-                layout="vertical"
-                margin={{ top: 4, right: 16, left: 8, bottom: 0 }}
-              >
+              <BarChart data={chartRows} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" horizontal={false} />
-                <XAxis type="number" tick={{ fill: '#888', fontSize: 10 }} />
+                <XAxis
+                  type="number"
+                  tick={{ fill: '#888', fontSize: 10 }}
+                  tickFormatter={mode === 'ingresos' ? v => `${v}€` : undefined}
+                />
                 <YAxis type="category" dataKey="name" width={130} tick={{ fill: '#ccc', fontSize: 10 }} />
                 <Tooltip
                   contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                   labelStyle={{ color: '#f5c842' }}
-                  formatter={(v, name) => [v, name === 'activos' ? 'Activos ahora' : 'Histórico total']}
+                  formatter={(v, name) => {
+                    if (name === 'revenue') return [fmtEur(v), 'Ingresos WC']
+                    if (name === 'activos') return [v, 'Activos']
+                    return [v, 'Total histórico']
+                  }}
                 />
-                <Legend formatter={k => k === 'activos' ? 'Activos ahora' : 'Histórico total'} />
-                <Bar dataKey="total"   fill="#3a3020" radius={[0, 3, 3, 0]} />
-                <Bar dataKey="activos" fill="#f5c842" radius={[0, 3, 3, 0]} />
+                <Legend formatter={k => k === 'revenue' ? 'Ingresos WC' : k === 'activos' ? 'Activos' : 'Histórico'} />
+                {mode === 'ingresos' ? (
+                  <Bar dataKey="revenue" fill="#34d399" radius={[0, 3, 3, 0]} />
+                ) : (
+                  <>
+                    <Bar dataKey="total"   fill="#3a3020" radius={[0, 3, 3, 0]} />
+                    <Bar dataKey="activos" fill="#f5c842" radius={[0, 3, 3, 0]} />
+                  </>
+                )}
               </BarChart>
             </ResponsiveContainer>
           </div>
 
           <div className="sa-class-list">
-            {top12.map((c, i) => (
-              <button
-                key={i}
-                className={`sa-class-row${selected === c ? ' sa-class-row--active' : ''}`}
-                onClick={() => setSelected(selected === c ? null : c)}
-              >
-                <span className="sa-class-row__pos">#{i + 1}</span>
-                <span className="sa-class-row__label">{c.label}</span>
-                <div className="sa-class-row__bar-wrap">
-                  <div className="sa-class-row__bar" style={{ width: `${(c.active / maxActive) * 100}%` }} />
-                </div>
-                <span className="sa-class-row__count">{c.active} activos</span>
-              </button>
-            ))}
+            {top12.map((c, i) => {
+              const pct = mode === 'ingresos'
+                ? ((c.revenue || 0) / maxRevenue) * 100
+                : (c.active / maxActive) * 100
+              return (
+                <button
+                  key={i}
+                  className={`sa-class-row${selected === c ? ' sa-class-row--active' : ''}`}
+                  onClick={() => setSelected(selected === c ? null : c)}
+                >
+                  <span className="sa-class-row__pos">#{i + 1}</span>
+                  <span className="sa-class-row__label">{c.label}</span>
+                  <div className="sa-class-row__bar-wrap">
+                    <div className="sa-class-row__bar" style={{ width: `${pct}%` }} />
+                  </div>
+                  {mode === 'ingresos'
+                    ? <span className="sa-class-row__rev">{fmtEur(c.revenue || 0)}</span>
+                    : <span className="sa-class-row__count">{c.active} activos</span>
+                  }
+                </button>
+              )
+            })}
           </div>
 
           {selected && histData.length > 0 && (
             <div className="sa-class-detail">
-              <p className="sa-product-detail__title">{selected.label} — nuevas inscripciones</p>
+              <p className="sa-product-detail__title">{selected.label} — histórico</p>
               <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={histData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
@@ -344,12 +402,24 @@ function ClassesSection() {
                   <Tooltip
                     contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                     labelStyle={{ color: '#f5c842' }}
-                    formatter={v => [v, 'Nuevas inscripciones']}
+                    formatter={(v, name) => [
+                      name === 'revenue' ? fmtEur(v) : v,
+                      name === 'revenue' ? 'Ingresos WC' : 'Nuevas inscripciones'
+                    ]}
                   />
                   <Bar dataKey="new" fill="#34d399" radius={[3, 3, 0, 0]} />
+                  {histData[0]?.revenue != null && (
+                    <Bar dataKey="revenue" fill="#f5c842" radius={[3, 3, 0, 0]} />
+                  )}
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          )}
+
+          {!hasRevenue && (
+            <p className="sa-pending-note">
+              Para ver ingresos por clase, el PHP necesita devolver <code>revenue</code> en <code>/classes</code> e <code>income_tpv</code> en <code>/expenses</code>.
+            </p>
           )}
         </>
       )}

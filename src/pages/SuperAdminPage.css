@@ -230,6 +230,23 @@
 .sa-class-row__bar-wrap { flex: 1; height: 6px; background: #1e1a12; border-radius: 3px; overflow: hidden; }
 .sa-class-row__bar    { height: 100%; background: #f5c842; border-radius: 3px; }
 .sa-class-row__count  { font-size: 0.72rem; font-weight: 600; color: #aaa; width: 70px; text-align: right; flex-shrink: 0; }
+.sa-class-row__rev    { font-size: 0.78rem; font-weight: 700; color: #34d399; width: 76px; text-align: right; flex-shrink: 0; }
+
+.sa-pending-note {
+  font-size: 0.72rem;
+  color: #555;
+  font-style: italic;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-left: 2px solid #2a2015;
+}
+.sa-pending-note code {
+  font-size: 0.7rem;
+  background: #1a1710;
+  padding: 1px 4px;
+  color: #888;
+  border-radius: 2px;
+}
 
 .sa-class-detail {
   background: rgba(255,255,255,0.02);

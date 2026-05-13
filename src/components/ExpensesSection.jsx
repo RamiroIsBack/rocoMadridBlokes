@@ -362,20 +362,20 @@ function HistoryView({ months }) {
   const chartData = useMemo(() => {
     if (!data) return []
     return data.map(r => ({
-      month:         fmtMonth(r.month),
-      gastos:        r.total_costes || 0,
-      ingresos_banco: r.total_ingresos || 0,
-      iva_soportado: r.iva_soportado || 0,
-      iva_repercutido: r.iva_repercutido || 0,
+      month:           fmtMonth(r.month),
+      gastos:          Math.abs(r.total_costes    || 0),
+      ingresos_banco:  Math.abs(r.total_ingresos  || 0),
+      iva_soportado:   Math.abs(r.iva_soportado   || 0),
+      iva_repercutido: Math.abs(r.iva_repercutido || 0),
     }))
   }, [data])
 
   const totals = useMemo(() => {
     if (!data) return {}
     return {
-      gastos:   data.reduce((s, r) => s + (r.total_costes    || 0), 0),
-      ingresos: data.reduce((s, r) => s + (r.total_ingresos  || 0), 0),
-      iva_net:  data.reduce((s, r) => s + (r.iva_repercutido || 0) - (r.iva_soportado || 0), 0),
+      gastos:   data.reduce((s, r) => s + Math.abs(r.total_costes    || 0), 0),
+      ingresos: data.reduce((s, r) => s + Math.abs(r.total_ingresos  || 0), 0),
+      iva_net:  data.reduce((s, r) => s + Math.abs(r.iva_repercutido || 0) - Math.abs(r.iva_soportado || 0), 0),
     }
   }, [data])
 
@@ -413,7 +413,7 @@ function HistoryView({ months }) {
         </div>
         <div className="exp-kpi" style={{ '--c': '#60a5fa' }}>
           <span className="exp-kpi__val">{fmtEur(totals.ingresos)}</span>
-          <span className="exp-kpi__lbl">Ing. banco no-WC ({months}m)</span>
+          <span className="exp-kpi__lbl">Ingresos banco ({months}m)</span>
         </div>
         <div className="exp-kpi" style={{ '--c': '#f97316' }}>
           <span className="exp-kpi__val">{fmtEur(Math.abs(totals.iva_net))}</span>
@@ -421,7 +421,7 @@ function HistoryView({ months }) {
         </div>
       </div>
 
-      <p className="exp-chart-title">Gastos e ingresos no-WC por mes</p>
+      <p className="exp-chart-title">Gastos e ingresos banco por mes (incluye WooCommerce)</p>
       <ResponsiveContainer width="100%" height={180}>
         <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
@@ -432,7 +432,7 @@ function HistoryView({ months }) {
             labelStyle={{ color: '#f5c842' }}
             formatter={(v, name) => [fmtEur(v), name === 'gastos' ? 'Gastos' : 'Ingresos banco']}
           />
-          <Legend formatter={k => k === 'gastos' ? 'Gastos' : 'Ingresos banco no-WC'} />
+          <Legend formatter={k => k === 'gastos' ? 'Gastos' : 'Ingresos banco'} />
           <Bar dataKey="ingresos_banco" fill="#60a5fa" radius={[3,3,0,0]} />
           <Bar dataKey="gastos"         fill="#ef4444" radius={[3,3,0,0]} />
         </BarChart>
