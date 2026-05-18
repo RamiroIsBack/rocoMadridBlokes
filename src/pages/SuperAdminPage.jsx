@@ -59,10 +59,9 @@ function currentQuarterMonths() {
 }
 
 // ─── Revenue section ────────────────────────────────────────────────
-function RevenueSection() {
-  const [months, setMonths]               = useState(12)
-  const [excludeTransfer, setExclude]     = useState(false)
-  const { data, loading, error }          = useRevenue(months, excludeTransfer)
+function RevenueSection({ excludeTransfer, onToggleExclude }) {
+  const [months, setMonths]      = useState(12)
+  const { data, loading, error } = useRevenue(months, excludeTransfer)
 
   const totals = useMemo(() => {
     if (!data) return {}
@@ -95,7 +94,7 @@ function RevenueSection() {
         <div className="sa-header-controls">
           <button
             className={`sa-transfer-toggle${excludeTransfer ? ' sa-transfer-toggle--on' : ''}`}
-            onClick={() => setExclude(x => !x)}
+            onClick={onToggleExclude}
             title="Factura de Uso de Rocódromo x 2 (club → rocoteca)"
           >
             {excludeTransfer ? 'Sin transferencia club' : 'Con transferencia club'}
@@ -173,8 +172,14 @@ function RevenueSection() {
   )
 }
 
+// Strip accents for matching (mirrors PHP iconv approach)
+function normName(s) {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+const isRocodromo = name => normName(name).includes('rocodromo')
+
 // ─── Products section ────────────────────────────────────────────────
-function ProductsSection() {
+function ProductsSection({ excludeTransfer }) {
   const [months, setMonths]       = useState(12)
   const [storeFilter, setStore]   = useState('Todas')
   const [selected, setSelected]   = useState(null)
@@ -187,8 +192,10 @@ function ProductsSection() {
 
   const filtered = useMemo(() => {
     if (!data) return []
-    return storeFilter === 'Todas' ? data : data.filter(p => p.store === storeFilter)
-  }, [data, storeFilter])
+    let d = storeFilter === 'Todas' ? data : data.filter(p => p.store === storeFilter)
+    if (excludeTransfer) d = d.filter(p => !isRocodromo(p.name))
+    return d
+  }, [data, storeFilter, excludeTransfer])
 
   const top10 = filtered.slice(0, 10)
 
@@ -440,11 +447,13 @@ export default function SuperAdminPage() {
     )
   }
 
+  const [excludeTransfer, setExclude] = useState(false)
+
   return (
     <div className="sa-page">
       <h1 className="sa-page__title">Superadmin</h1>
-      <RevenueSection />
-      <ProductsSection />
+      <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
+      <ProductsSection excludeTransfer={excludeTransfer} />
       <ClassesSection />
       <ExpensesSection />
     </div>

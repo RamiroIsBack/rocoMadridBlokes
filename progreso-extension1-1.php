@@ -1412,8 +1412,11 @@ function superadmin_revenue($request) {
                 $by_month[$row['month']]['store1_tax'] += $row['tax'];
                 if ($exclude_transfer) {
                     foreach ($row['items'] as $item) {
-                        // Match any product that refers to "Rocódromo" (inter-company transfer Club→Rocoteca)
-                        if (stripos($item['name'], 'Rocodromo') !== false || stripos($item['name'], 'Rocódromo') !== false) {
+                        // Normalize to ASCII so accent encoding differences don't break the match
+                        $name_ascii = function_exists('iconv')
+                            ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['name']))
+                            : strtolower($item['name']);
+                        if (strpos($name_ascii, 'rocodromo') !== false) {
                             $amount -= $item['revenue'];
                         }
                     }
