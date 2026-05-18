@@ -314,6 +314,13 @@
 }
 .exp-manager-del:hover:not(:disabled) { background: rgba(239,68,68,0.12); }
 .exp-manager-del:disabled { opacity: 0.4; cursor: default; }
+.exp-manager-del--all {
+  margin-top: 8px;
+  width: 100%;
+  padding: 5px 0;
+  border-color: #7f1d1d;
+  letter-spacing: 0.05em;
+}
 
 @media (max-width: 600px) {
   .exp-kpi { min-width: 100%; }

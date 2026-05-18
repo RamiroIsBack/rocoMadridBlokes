@@ -466,7 +466,7 @@ add_action('rest_api_init', function() {
             'callback'            => 'superadmin_delete_expenses',
             'permission_callback' => $sa_perm,
             'args'                => array(
-                'month'  => array('type' => 'string', 'required' => true),
+                'month'  => array('type' => 'string', 'required' => false, 'default' => ''),
                 'entity' => array('type' => 'string', 'required' => false, 'default' => ''),
             ),
         ),
@@ -563,14 +563,23 @@ function superadmin_get_expenses($request) {
 }
 
 function superadmin_delete_expenses($request) {
-    $month  = sanitize_text_field($request->get_param('month'));
+    $month  = sanitize_text_field($request->get_param('month') ?: '');
     $entity = sanitize_text_field($request->get_param('entity') ?: '');
+
+    global $wpdb;
+
+    // No month → delete ALL expense data
+    if (!$month) {
+        $keys = $wpdb->get_col(
+            "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE 'blokes_exp_%'"
+        );
+        foreach ($keys as $key) { delete_option($key); }
+        return rest_ensure_response(array('success' => true, 'deleted' => $keys));
+    }
 
     if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
         return new WP_Error('invalid_month', 'Formato de mes inválido. Usa YYYY-MM.', array('status' => 400));
     }
-
-    global $wpdb;
 
     if ($entity) {
         $key = 'blokes_exp_' . str_replace('-', '_', $month) . '_' . $entity;
@@ -578,7 +587,6 @@ function superadmin_delete_expenses($request) {
         return rest_ensure_response(array('success' => true, 'deleted' => array($key)));
     }
 
-    // No entity specified — delete all records for that month
     $prefix = 'blokes_exp_' . str_replace('-', '_', $month) . '_%';
     $keys = $wpdb->get_col($wpdb->prepare(
         "SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",

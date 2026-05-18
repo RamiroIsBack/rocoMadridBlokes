@@ -512,6 +512,25 @@ function HistoryView({ months, onDeleted }) {
                 </div>
               )
             })}
+            {data.length > 0 && (
+              <button
+                className="exp-manager-del exp-manager-del--all"
+                disabled={!!deletingKey}
+                onClick={async () => {
+                  if (!window.confirm(`¿Borrar TODOS los datos del banco (${data.length} entradas)? Esta acción no se puede deshacer.`)) return
+                  setDeletingKey('__all__')
+                  try {
+                    const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
+                    const res = await fetch(`${CLUB_URL}/wp-json/superadmin/v1/expenses`, {
+                      method: 'DELETE', headers: { 'X-WP-Nonce': nonce }
+                    })
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                    if (onDeleted) onDeleted()
+                  } catch (e) { alert(`Error: ${e.message}`) }
+                  finally { setDeletingKey(null) }
+                }}
+              >{deletingKey === '__all__' ? 'Borrando…' : '× Borrar todos los datos'}</button>
+            )}
           </div>
         )}
       </div>
