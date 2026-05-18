@@ -66,23 +66,15 @@ add_filter('show_admin_bar', function($show) {
     return $show;
 });
 
-// Redirect /blokes-dev/anything to /blokes-dev/ so SPA subroutes don't 404
+// Priority 1: runs before WordPress's redirect_canonical (priority 10).
+// Catches both the exact slug (/blokes-dev/) and any subroute (/blokes-dev/superadmin).
+// Serves the SPA HTML directly — no redirect round-trip needed.
 add_action('template_redirect', function() {
-    $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
-    foreach ($GLOBALS['blokes_app_slugs'] as $slug) {
-        if (strpos($path, $slug . '/') === 0 && strlen($path) > strlen($slug) + 1) {
-            wp_safe_redirect(home_url('/' . $slug . '/'), 302);
-            exit;
-        }
-    }
-}, 1);
-
-add_action('template_redirect', function() {
-    // Primary: WordPress page match. Fallback: match by URL path (no WP page needed).
     $slug = null;
     if (is_page($GLOBALS['blokes_app_slugs'])) {
         $slug = get_post_field('post_name', get_queried_object_id());
-    } else {
+    }
+    if (!$slug) {
         $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
         foreach ($GLOBALS['blokes_app_slugs'] as $s) {
             if ($path === $s || strpos($path, $s . '/') === 0) {
@@ -126,7 +118,7 @@ add_action('template_redirect', function() {
 </html>
     <?php
     exit;
-});
+}, 1);
 
 // ============================================================
 //  REST API — inject extra fields into blokes responses
