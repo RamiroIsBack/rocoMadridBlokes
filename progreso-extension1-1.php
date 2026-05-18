@@ -24,6 +24,38 @@ if (!defined('ABSPATH')) exit;
 // When ready for production, add 'blokes' to this array.
 $GLOBALS['blokes_app_slugs'] = ['blokes-dev'];
 
+// ── App-level role whitelist ────────────────────────────────────────────
+// Determines what the React SPA shows — independent of WordPress roles.
+// WordPress super_admins/admins NOT in these lists get 'admin' app role.
+$GLOBALS['blokes_superadmin_emails'] = array(
+    'ramiro.santamaria.alvarez@gmail.com', // Ramiro — panel financiero completo
+);
+$GLOBALS['blokes_admin_emails'] = array(
+    'javier_buendia@hotmail.com', // Javier Buendía
+    'alvilu2@hotmail.com',         // Álvaro (alvilu2)
+    'xaruman2007@gmail.com',       // Víctor (xaruman2007)
+);
+
+/**
+ * Returns the app-level role for the current user.
+ * Checked against email whitelists — independent of WordPress roles.
+ *   'superadmin' → panel financiero completo (solo Ramiro)
+ *   'admin'      → secciones de gestión sin panel financiero
+ *   'member'     → usuario logueado sin permisos de gestión
+ *   'guest'      → no logueado
+ */
+function blokes_get_app_role() {
+    if (!is_user_logged_in()) return 'guest';
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    $sa_emails    = array_map('strtolower', $GLOBALS['blokes_superadmin_emails']);
+    $admin_emails = array_map('strtolower', $GLOBALS['blokes_admin_emails']);
+    if (in_array($email, $sa_emails))    return 'superadmin';
+    if (in_array($email, $admin_emails)) return 'admin';
+    // WordPress super_admins/admins not in the whitelist → admin (no financial panel)
+    if (is_super_admin() || current_user_can('administrator')) return 'admin';
+    return 'member';
+}
+
 add_action('init', function() {
     foreach ($GLOBALS['blokes_app_slugs'] as $slug) {
         add_rewrite_rule("^{$slug}/(.*)$", "index.php?pagename={$slug}", 'top');
@@ -183,9 +215,7 @@ add_action('wp_head', function() {
         'userName'     => $user_name,
         'subscription' => $subscription,
         'appBasename'  => '/' . $app_slug,
-        'userRole'     => is_super_admin()
-                              ? 'superadmin'
-                              : (is_user_logged_in() && current_user_can('administrator') ? 'admin' : (is_user_logged_in() ? 'member' : 'guest')),
+        'userRole'     => blokes_get_app_role(),
     );
     echo '<script>window.blokesSiteData = ' . wp_json_encode($data) . ';</script>' . "\n";
 });
@@ -395,7 +425,7 @@ add_action('rest_api_init', function() {
     ));
 
     // ── Superadmin endpoints ──
-    $sa_perm = function() { return is_user_logged_in() && is_super_admin(); };
+    $sa_perm = function() { return blokes_get_app_role() === 'superadmin'; };
 
     register_rest_route('superadmin/v1', '/revenue', array(
         'methods'             => 'GET',
