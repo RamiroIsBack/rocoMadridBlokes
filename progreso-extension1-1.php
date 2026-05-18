@@ -28,10 +28,10 @@ $GLOBALS['blokes_app_slugs'] = ['blokes-dev'];
 // Determines what the React SPA shows — independent of WordPress roles.
 // WordPress super_admins/admins NOT in these lists get 'admin' app role.
 $GLOBALS['blokes_superadmin_emails'] = array(
-    'ramiro.santamaria.alvarez@gmail.com', // Ramiro
-    'javier_buendia@hotmail.com',          // Javier Buendía
-    'alvilu2@hotmail.com',                 // Álvaro (alvilu2)
-    'xaruman2007@gmail.com',               // Víctor (xaruman2007)
+    'rocomadrid7a@gmail.com',     // Ramiro
+    'javier_buendia@hotmail.com', // Javier Buendía
+    'alvilu2@hotmail.com',        // Álvaro (alvilu2)
+    'xaruman2007@gmail.com',      // Víctor (xaruman2007)
 );
 $GLOBALS['blokes_admin_emails'] = array();
 
