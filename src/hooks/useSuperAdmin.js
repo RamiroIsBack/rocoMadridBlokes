@@ -39,5 +39,22 @@ export function useClasses(months) {
 }
 
 export function useExpenses(months, entity = 'all', excludeInternal = true) {
-  return useEndpoint('/expenses', { months, entity, exclude_internal: excludeInternal ? 1 : 0 })
+  const [data,      setData]      = useState(null)
+  const [breakdown, setBreakdown] = useState(null)
+  const [loading,   setLoading]   = useState(true)
+  const [error,     setError]     = useState(null)
+
+  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
+  const url = `${CLUB_URL}/wp-json/superadmin/v1/expenses?months=${months}&entity=${entity}&exclude_internal=${excludeInternal ? 1 : 0}`
+
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    fetch(url, { headers: { 'X-WP-Nonce': nonce } })
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
+      .then(json => { setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setLoading(false) })
+      .catch(e  => { setError(e.message); setLoading(false) })
+  }, [url])
+
+  return { data, breakdown, loading, error }
 }

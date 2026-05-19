@@ -515,7 +515,9 @@ function superadmin_get_expenses($request) {
         ARRAY_A
     );
 
-    $data = array();
+    $data            = array();
+    $concepto_totals = array(); // aggregated across all months for breakdown table
+
     foreach ($rows as $row) {
         $saved = json_decode($row['option_value'], true);
         if (!$saved || !isset($saved['month'])) continue;
@@ -526,16 +528,28 @@ function superadmin_get_expenses($request) {
         $dt = DateTime::createFromFormat('Y-m', $saved['month']);
         if (!$dt || $dt < $start) continue;
 
-        $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0;
+        $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0;
         foreach ($saved['items'] as $item) {
             if ($exclude_internal && $item['excluded']) continue;
             $amt  = abs(floatval($item['importe']));
-            // Club is IVA-exempt — ignore any stored IVA rate for club entries
             $rate = ($row_entity !== 'club') ? floatval($item['iva']) / 100 : 0;
             $iva  = $rate > 0 ? $amt * $rate / (1 + $rate) : 0;
+
+            // Detect nóminas: concepto contains "nomina" regardless of accent/case
+            $concepto_norm = function_exists('iconv')
+                ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
+                : strtolower($item['concepto'] ?? '');
+            $is_nomina = strpos($concepto_norm, 'nomina') !== false;
+
             if ($item['section'] === 'costes') {
                 $tc    += $amt;
                 $iva_s += $iva;
+                if ($is_nomina) {
+                    $nom += $amt;
+                } else {
+                    $ck = trim($item['concepto'] ?? 'Sin concepto');
+                    $concepto_totals[$ck] = ($concepto_totals[$ck] ?? 0) + $amt;
+                }
             } else {
                 $ti    += $amt;
                 $iva_r += $iva;
@@ -548,11 +562,26 @@ function superadmin_get_expenses($request) {
             'total_ingresos'  => round($ti,    2),
             'iva_soportado'   => round($iva_s, 2),
             'iva_repercutido' => round($iva_r, 2),
+            'nominas'         => round($nom,   2),
         );
     }
 
     usort($data, function($a, $b) { return strcmp($a['month'], $b['month']); });
-    return rest_ensure_response(array('data' => $data));
+
+    arsort($concepto_totals);
+    $by_concepto = array();
+    foreach ($concepto_totals as $concepto => $total) {
+        $by_concepto[] = array('concepto' => $concepto, 'total' => round($total, 2));
+    }
+    $nominas_total = array_sum(array_column($data, 'nominas'));
+
+    return rest_ensure_response(array(
+        'data'      => $data,
+        'breakdown' => array(
+            'nominas'     => round($nominas_total, 2),
+            'by_concepto' => $by_concepto,
+        ),
+    ));
 }
 
 function superadmin_delete_expenses($request) {
