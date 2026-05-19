@@ -95,9 +95,9 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
           <button
             className={`sa-transfer-toggle${excludeTransfer ? ' sa-transfer-toggle--on' : ''}`}
             onClick={onToggleExclude}
-            title="Factura de Uso de Rocódromo x 2 (club → rocoteca)"
+            title="Factura de Uso de Rocódromo (transferencia inter-empresa club → rocoteca)"
           >
-            {excludeTransfer ? 'Sin transferencia club' : 'Con transferencia club'}
+            {excludeTransfer ? 'Sin uso Rocódromo' : 'Con uso Rocódromo'}
           </button>
           <PeriodSelector value={months} onChange={setMonths} />
         </div>
@@ -110,7 +110,7 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
         <>
           <div className="sa-kpis">
             {[
-              { key: 'store1', label: excludeTransfer ? 'Principal (sin transf.)' : 'Tienda Principal' },
+              { key: 'store1', label: excludeTransfer ? 'Principal (sin Rocódromo)' : 'Tienda Principal' },
               { key: 'store2', label: 'Tienda Club' },
               { key: 'total',  label: 'Total combinado' },
             ].map(({ key, label }) => (
