@@ -23,7 +23,7 @@ function getAuthHeaders() {
 }
 
 // ── Preview table (after CSV parse) ──────────────────────────────────
-function PreviewTable({ items, section, onToggleExclude, onChangeCategory, onChangeIva }) {
+function PreviewTable({ items, section, onToggleExclude, onChangeCategory, onChangeIva, clubItemIds = new Set() }) {
   const visible = items.filter(i => i.section === section)
   if (!visible.length) return <p className="exp-empty">Sin datos</p>
 
@@ -72,14 +72,18 @@ function PreviewTable({ items, section, onToggleExclude, onChangeCategory, onCha
                 </select>
               </td>
               <td>
-                <select
-                  className="exp-select exp-select--iva"
-                  value={item.iva}
-                  onChange={e => onChangeIva(item.id, parseInt(e.target.value))}
-                  disabled={item.excluded || item.category === 'nominas' || item.category === 'ss'}
-                >
-                  {IVA_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
-                </select>
+                {clubItemIds.has(item.id)
+                  ? <span style={{ fontSize: '0.68rem', color: '#555' }}>Exento</span>
+                  : (
+                  <select
+                    className="exp-select exp-select--iva"
+                    value={item.iva}
+                    onChange={e => onChangeIva(item.id, parseInt(e.target.value))}
+                    disabled={item.excluded || item.category === 'nominas' || item.category === 'ss'}
+                  >
+                    {IVA_RATES.map(r => <option key={r} value={r}>{r}%</option>)}
+                  </select>
+                )}
               </td>
               <td className={`exp-cell--amount${item.excluded ? '' : item.importe < 0 ? ' exp-cell--neg' : ' exp-cell--pos'}`}>
                 {item.excluded ? <s>{fmtEur(item.importe)}</s> : fmtEur(item.importe)}
@@ -140,6 +144,17 @@ function UploadPanel({ onSaved }) {
       groups.add(`${entity}||${item.month}`)
     })
     return groups.size || 0
+  }, [items, uniqueAccounts, accountMap, singleEntity])
+
+  const clubItemIds = useMemo(() => {
+    const s = new Set()
+    items.forEach(item => {
+      const entity = uniqueAccounts.length > 0
+        ? (accountMap[item.cuenta] || 'rocoteca')
+        : singleEntity
+      if (entity === 'club') s.add(item.id)
+    })
+    return s
   }, [items, uniqueAccounts, accountMap, singleEntity])
 
   const visibleItems = useMemo(() => {
@@ -340,6 +355,7 @@ function UploadPanel({ onSaved }) {
             onToggleExclude={toggle}
             onChangeCategory={changeCategory}
             onChangeIva={changeIva}
+            clubItemIds={clubItemIds}
           />
         </>
       )}

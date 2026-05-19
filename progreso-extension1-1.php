@@ -530,7 +530,8 @@ function superadmin_get_expenses($request) {
         foreach ($saved['items'] as $item) {
             if ($exclude_internal && $item['excluded']) continue;
             $amt  = abs(floatval($item['importe']));
-            $rate = floatval($item['iva']) / 100;
+            // Club is IVA-exempt — ignore any stored IVA rate for club entries
+            $rate = ($row_entity !== 'club') ? floatval($item['iva']) / 100 : 0;
             $iva  = $rate > 0 ? $amt * $rate / (1 + $rate) : 0;
             if ($item['section'] === 'costes') {
                 $tc    += $amt;
