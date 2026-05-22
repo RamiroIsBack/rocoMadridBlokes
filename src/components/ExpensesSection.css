@@ -322,6 +322,23 @@
   letter-spacing: 0.05em;
 }
 
+.exp-breakdown-month-header td {
+  background: rgba(245, 200, 66, 0.08);
+  color: #f5c842;
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 5px 8px;
+  border-top: 1px solid #3a3020;
+}
+.exp-breakdown-subtotal td {
+  background: rgba(255,255,255,0.03);
+  font-size: 0.72rem;
+  color: #aaa;
+  border-bottom: 2px solid #3a3020;
+}
+
 @media (max-width: 600px) {
   .exp-kpi { min-width: 100%; }
 }

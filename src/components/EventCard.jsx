@@ -47,8 +47,8 @@ const RATING_ICONS = [
   { id: 'star_1', emoji: '⭐', title: '¡Blokazo!', type: 'star' },
 ]
 
-export default function EventCard({ card, isNew = false, isHof = false, isDone = false, completionCount = 0, onToggleDone, isLoggedIn = false, loginUrl = '/wp-login.php', myRating = null, ratingCounts, onRate }) {
-  const { images, title, description, color, sala, tipo, postId, colorPresa, ratings: cardRatings = {} } = card
+export default function EventCard({ card, isNew = false, isHof = false, isDone = false, isMyFirstAscent = false, completionCount = 0, onToggleDone, isLoggedIn = false, loginUrl = '/wp-login.php', myRating = null, ratingCounts, onRate }) {
+  const { images, title, description, color, sala, tipo, postId, colorPresa, ratings: cardRatings = {}, firstAscent } = card
   const ratings = ratingCounts || cardRatings
   const colorInfo = COLOR_MAP[color] || COLOR_MAP.green
   const salaInfo = SALA_MAP[sala] || SALA_MAP.entrada
@@ -135,6 +135,11 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
       {isHof && (
         <div className="event-card__hof-badge" aria-label="Hall of Fame">
           🏆 Hall of Fame
+        </div>
+      )}
+      {firstAscent?.name && (
+        <div className={`event-card__fa-badge${isMyFirstAscent ? ' event-card__fa-badge--mine' : ''}`} title="Primer TOP del gym">
+          🏴 {firstAscent.name}
         </div>
       )}
       <div className="event-card__body">

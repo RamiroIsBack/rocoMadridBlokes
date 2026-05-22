@@ -126,8 +126,10 @@ add_action('template_redirect', function() {
 
 add_filter('rest_prepare_blokes', function($response, $post, $request) {
     $data = $response->get_data();
-    $data['bloke_colorPresa']      = get_post_meta($post->ID, 'bloke_colorPresa', true);
+    $data['bloke_colorPresa']       = get_post_meta($post->ID, 'bloke_colorPresa', true);
     $data['bloke_completion_count'] = (int) get_post_meta($post->ID, '_bloke_completion_count', true);
+    $fa = get_post_meta($post->ID, '_bloke_first_ascent', true);
+    $data['bloke_first_ascent']     = is_array($fa) ? $fa : null;
     $response->set_data($data);
     return $response;
 }, 10, 3);
@@ -385,7 +387,7 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/training/summary', array(
         'methods'             => 'GET',
         'callback'            => 'progreso_training_summary',
-        'permission_callback' => 'is_user_logged_in',
+        'permission_callback' => '__return_true',
     ));
 
     register_rest_route('progreso/v1', '/training/(?P<user_id>\d+)', array(
@@ -515,8 +517,7 @@ function superadmin_get_expenses($request) {
         ARRAY_A
     );
 
-    $data            = array();
-    $concepto_totals = array(); // aggregated across all months for breakdown table
+    $data = array();
 
     foreach ($rows as $row) {
         $saved = json_decode($row['option_value'], true);
@@ -529,16 +530,19 @@ function superadmin_get_expenses($request) {
         if (!$dt || $dt < $start) continue;
 
         $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0;
+        $row_concepto = array(); // concepto totals for this DB row (month+entity)
         foreach ($saved['items'] as $item) {
-            if ($exclude_internal && $item['excluded']) continue;
-            $amt  = abs(floatval($item['importe']));
-            $rate = ($row_entity !== 'club') ? floatval($item['iva']) / 100 : 0;
-            $iva  = $rate > 0 ? $amt * $rate / (1 + $rate) : 0;
-
-            // Detect nóminas: concepto contains "nomina" regardless of accent/case
             $concepto_norm = function_exists('iconv')
                 ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
                 : strtolower($item['concepto'] ?? '');
+            // Internal: flagged at upload time OR matches key patterns (catches accent variants)
+            $is_internal = $item['excluded']
+                || strpos($concepto_norm, 'rocodromo') !== false
+                || strpos($concepto_norm, 'transferencia entre cuentas') !== false;
+            if ($exclude_internal && $is_internal) continue;
+            $amt  = abs(floatval($item['importe']));
+            $rate = ($row_entity !== 'club') ? floatval($item['iva']) / 100 : 0;
+            $iva  = $rate > 0 ? $amt * $rate / (1 + $rate) : 0;
             $is_nomina = strpos($concepto_norm, 'nomina') !== false;
 
             if ($item['section'] === 'costes') {
@@ -548,13 +552,14 @@ function superadmin_get_expenses($request) {
                     $nom += $amt;
                 } else {
                     $ck = trim($item['concepto'] ?? 'Sin concepto');
-                    $concepto_totals[$ck] = ($concepto_totals[$ck] ?? 0) + $amt;
+                    $row_concepto[$ck] = ($row_concepto[$ck] ?? 0) + $amt;
                 }
             } else {
                 $ti    += $amt;
                 $iva_r += $iva;
             }
         }
+        arsort($row_concepto);
         $data[] = array(
             'month'           => $saved['month'],
             'entity'          => $row_entity,
@@ -563,25 +568,12 @@ function superadmin_get_expenses($request) {
             'iva_soportado'   => round($iva_s, 2),
             'iva_repercutido' => round($iva_r, 2),
             'nominas'         => round($nom,   2),
+            'by_concepto'     => $row_concepto,
         );
     }
 
     usort($data, function($a, $b) { return strcmp($a['month'], $b['month']); });
-
-    arsort($concepto_totals);
-    $by_concepto = array();
-    foreach ($concepto_totals as $concepto => $total) {
-        $by_concepto[] = array('concepto' => $concepto, 'total' => round($total, 2));
-    }
-    $nominas_total = array_sum(array_column($data, 'nominas'));
-
-    return rest_ensure_response(array(
-        'data'      => $data,
-        'breakdown' => array(
-            'nominas'     => round($nominas_total, 2),
-            'by_concepto' => $by_concepto,
-        ),
-    ));
+    return rest_ensure_response(array('data' => $data));
 }
 
 function superadmin_delete_expenses($request) {
@@ -770,12 +762,15 @@ function blokes_get_my_completions($request) {
     if (!is_array($my_ratings)) $my_ratings = array();
     $rating_log = get_user_meta($user_id, '_blokes_rating_log', true);
     if (!is_array($rating_log)) $rating_log = array();
+    $my_fa = get_user_meta($user_id, '_blokes_first_ascents', true);
+    if (!is_array($my_fa)) $my_fa = array();
     return array(
-        'myIds'     => $my_ids,
-        'log'       => $log,
-        'myRatings' => $my_ratings,
-        'ratingLog' => $rating_log,
-        'nonce'     => wp_create_nonce('wp_rest'),
+        'myIds'          => $my_ids,
+        'log'            => $log,
+        'myRatings'      => $my_ratings,
+        'ratingLog'      => $rating_log,
+        'firstAscentIds' => array_values(array_map('intval', $my_fa)),
+        'nonce'          => wp_create_nonce('wp_rest'),
     );
 }
 
@@ -812,13 +807,31 @@ function blokes_toggle_completion($request) {
         );
         $completed = true;
         $count     = (int) get_post_meta($post_id, '_bloke_completion_count', true) + 1;
+
+        // First Ascent: first person ever to complete this bloke
+        $first_ascent = false;
+        if ($count === 1) {
+            $display_name = get_userdata($user_id)->display_name ?? '';
+            $first_name   = explode(' ', trim($display_name))[0];
+            update_post_meta($post_id, '_bloke_first_ascent', array(
+                'user_id'   => $user_id,
+                'name'      => $first_name ?: $display_name,
+                'timestamp' => current_time('c'),
+            ));
+            // Add to user's own first-ascent list
+            $my_fa = get_user_meta($user_id, '_blokes_first_ascents', true);
+            if (!is_array($my_fa)) $my_fa = array();
+            $my_fa[] = $post_id;
+            update_user_meta($user_id, '_blokes_first_ascents', $my_fa);
+            $first_ascent = true;
+        }
     }
 
     update_user_meta($user_id, '_blokes_completed', $completed_ids);
     update_user_meta($user_id, '_blokes_completion_log', $log);
     update_post_meta($post_id, '_bloke_completion_count', $count);
 
-    return array('completed' => $completed, 'count' => $count);
+    return array('completed' => $completed, 'count' => $count, 'first_ascent' => $first_ascent);
 }
 
 function blokes_rate_bloke($request) {
@@ -1367,20 +1380,44 @@ function progreso_get_class_progress() {
         }
     }
     arsort($bloke_counts);
+
+    // Recent completions: last 7 days, classmates only (excluding self)
+    $cutoff = time() - 7 * 24 * 60 * 60;
+    $recent_counts = array();
+    foreach (array_keys($uid_to_name) as $uid) {
+        if ($uid === $me) continue;
+        $log = get_user_meta($uid, '_blokes_completion_log', true);
+        if (!is_array($log)) continue;
+        foreach ($log as $entry) {
+            $ts = strtotime($entry['timestamp'] ?? '');
+            if (!$ts || $ts < $cutoff) continue;
+            $pid = intval($entry['postId'] ?? 0);
+            if ($pid > 0) $recent_counts[$pid] = ($recent_counts[$pid] ?? 0) + 1;
+        }
+    }
+    arsort($recent_counts);
+
+    // Fetch post data for both in a single blog context switch
     $top_blokes = array();
-    // Post data lives on the main blog; switch context to fetch titles/colors
+    $recent_completions = array();
     switch_to_blog(get_main_site_id());
     foreach (array_slice($bloke_counts, 0, 8, true) as $pid => $count) {
         $title = get_the_title($pid);
         $color = sanitize_text_field(get_field('bloke_color', $pid) ?: 'green');
         if ($title) $top_blokes[] = array('post_id' => $pid, 'title' => $title, 'color' => $color, 'count' => $count);
     }
+    foreach (array_slice($recent_counts, 0, 10, true) as $pid => $count) {
+        $title = get_the_title($pid);
+        $color = sanitize_text_field(get_field('bloke_color', $pid) ?: 'green');
+        if ($title) $recent_completions[] = array('post_id' => $pid, 'title' => $title, 'color' => $color, 'count' => $count);
+    }
     restore_current_blog();
 
     return rest_ensure_response(array('data' => array(
-        'class'      => array('dia' => $dia, 'horario' => $horario),
-        'members'    => $members,
-        'top_blokes' => $top_blokes,
+        'class'              => array('dia' => $dia, 'horario' => $horario),
+        'members'            => $members,
+        'top_blokes'         => $top_blokes,
+        'recent_completions' => $recent_completions,
     )));
 }
 

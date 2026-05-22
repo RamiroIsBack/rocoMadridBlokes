@@ -3,10 +3,13 @@
 // They are auto-marked excluded so the "Sin internos" toggle hides them,
 // but remain visible individually (IVA, per-entity analysis).
 const EXCLUDE_CONCEPTS = [
-  'Transferencia entre cuentas',
-  'USO DE ROCODROMO',
-  'Uso de Rocodromo',
+  'transferencia entre cuentas',
+  'rocodromo',  // catches: "Uso rocódromo", "Servicios rocódromo", "USO DE ROCODROMO", etc.
 ]
+
+function normStr(s) {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
 
 // ── Category definitions ──────────────────────────────────────────────
 export const CATEGORIES = {
@@ -68,14 +71,15 @@ const INCOME_RULES = [
   { test: c => /DEV\.COM\./i.test(c),   cat: 'comisiones_banco' },
 ]
 
-function autoCategory(concepto, isIncome) {
+export function autoCategory(concepto, isIncome) {
   const rules = isIncome ? INCOME_RULES : EXPENSE_RULES
   for (const r of rules) { if (r.test(concepto)) return r.cat }
   return isIncome ? 'transferencia' : 'otros'
 }
 
 function isExcluded(concepto) {
-  return EXCLUDE_CONCEPTS.some(ex => concepto.toLowerCase().includes(ex.toLowerCase()))
+  const n = normStr(concepto)
+  return EXCLUDE_CONCEPTS.some(ex => n.includes(ex))
 }
 
 function parseAmount(str) {

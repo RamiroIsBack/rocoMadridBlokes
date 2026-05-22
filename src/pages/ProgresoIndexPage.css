@@ -11,18 +11,24 @@
   position: sticky;
   top: 0;
   z-index: 10;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
+.progreso-idx__tabs::-webkit-scrollbar { display: none; }
 
 .progreso-idx__tab {
   flex: 1;
-  padding: 13px 4px;
+  min-width: max-content;
+  padding: 14px 12px;
+  min-height: 48px;
   text-align: center;
   text-decoration: none;
   color: #9ca3af;
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   border-bottom: 3px solid transparent;
   margin-bottom: -2px;
   transition: color 0.15s, border-color 0.15s;
@@ -30,6 +36,15 @@
   align-items: center;
   justify-content: center;
   gap: 4px;
+  white-space: nowrap;
+}
+
+@media (max-width: 400px) {
+  .progreso-idx__tab {
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    padding: 14px 8px;
+  }
 }
 
 .progreso-idx__tab:hover { color: #4b5563; }

@@ -12,7 +12,18 @@
   align-items: flex-start;
 }
 .progreso__training-right { flex: 1; min-width: 0; }
-.progreso__test-selector { display: flex; gap: 8px; margin-bottom: 12px; }
+.progreso__test-selector {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  align-items: center;
+  padding-bottom: 2px;
+}
+.progreso__test-selector::-webkit-scrollbar { display: none; }
 .progreso__test-btn {
   padding: 6px 16px;
   border-radius: 20px;
@@ -23,6 +34,8 @@
   font-weight: 600;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 .progreso__test-btn--active { background: var(--zone-color); color: #fff; }
 @media (max-width: 520px) {

@@ -27,6 +27,7 @@ export function useCompletions() {
   const [countOverrides, setCountOverrides] = useState({})
   const [completionLog, setCompletionLog] = useState([])
   const [ratingLog, setRatingLog] = useState([])
+  const [firstAscentIds, setFirstAscentIds] = useState(new Set())
   const [myRatings, setMyRatings] = useState(loadLocalRatings)
   const [ratingCountOverrides, setRatingCountOverrides] = useState({})
   const [sessionVoted, setSessionVoted] = useState(() => {
@@ -53,6 +54,7 @@ export function useCompletions() {
         setCompletedByMe(new Set((data.myIds || []).map(Number)))
         setCompletionLog(data.log || [])
         setRatingLog(data.ratingLog || [])
+        setFirstAscentIds(new Set((data.firstAscentIds || []).map(Number)))
         if (data.myRatings && Object.keys(data.myRatings).length > 0) {
           const serverRatings = data.myRatings
           setMyRatings(serverRatings)
@@ -93,6 +95,9 @@ export function useCompletions() {
         return next
       })
       setCountOverrides(prev => ({ ...prev, [postId]: data.count }))
+      if (data.first_ascent) {
+        setFirstAscentIds(prev => new Set([...prev, postId]))
+      }
       return data
     } catch (e) {
       setCompletedByMe(prev => {
@@ -179,5 +184,6 @@ export function useCompletions() {
     rateBloke,
     completionLog,
     ratingLog,
+    firstAscentIds,
   }
 }

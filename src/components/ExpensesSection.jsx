@@ -1,9 +1,9 @@
-import { useState, useMemo, useRef, useCallback } from 'react'
+import React, { useState, useMemo, useRef, useCallback } from 'react'
 import {
   BarChart, Bar, ComposedChart, Line, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { parseExpensesCSV, CATEGORIES, CATEGORY_IVA } from '../utils/expensesParser'
+import { parseExpensesCSV, CATEGORIES, CATEGORY_IVA, autoCategory } from '../utils/expensesParser'
 import { useExpenses } from '../hooks/useSuperAdmin'
 import './ExpensesSection.css'
 
@@ -376,8 +376,7 @@ function HistoryView({ months, onDeleted }) {
   const [excludeInternal, setExcludeInternal] = useState(true)
   const [showManager, setShowManager]         = useState(false)
   const [deletingKey, setDeletingKey]         = useState(null)
-  // In consolidated view ('all'), internals cancel out naturally — no need to exclude
-  const effectiveExclude = entity === 'all' ? false : excludeInternal
+  const effectiveExclude = excludeInternal
   const { data, breakdown, loading, error } = useExpenses(months, entity, effectiveExclude)
 
   const handleDelete = async (month, ent) => {
@@ -404,12 +403,19 @@ function HistoryView({ months, onDeleted }) {
     if (!data) return []
     const acc = {}
     data.forEach(r => {
-      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, nominas: 0 }
+      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, nominas: 0, nominas_by_entity: {}, by_concepto: {} }
       acc[r.month].costes   += Math.abs(r.total_costes    || 0)
       acc[r.month].ingresos += Math.abs(r.total_ingresos  || 0)
       acc[r.month].iva_s    += Math.abs(r.iva_soportado   || 0)
       acc[r.month].iva_r    += Math.abs(r.iva_repercutido || 0)
       acc[r.month].nominas  += Math.abs(r.nominas         || 0)
+      if ((r.nominas || 0) > 0) {
+        const ent = r.entity || 'rocoteca'
+        acc[r.month].nominas_by_entity[ent] = (acc[r.month].nominas_by_entity[ent] || 0) + Math.abs(r.nominas)
+      }
+      Object.entries(r.by_concepto || {}).forEach(([k, v]) => {
+        acc[r.month].by_concepto[k] = (acc[r.month].by_concepto[k] || 0) + v
+      })
     })
     return Object.values(acc).sort((a, b) => a.month.localeCompare(b.month))
   }, [data])
@@ -459,15 +465,13 @@ function HistoryView({ months, onDeleted }) {
             >{o.l}</button>
           ))}
         </div>
-        {entity !== 'all' && (
-          <button
-            className={`sa-transfer-toggle${excludeInternal ? ' sa-transfer-toggle--on' : ''}`}
-            onClick={() => setExcludeInternal(v => !v)}
-            title="Movimientos que se anulan al consolidar ambas empresas: transferencias entre cuentas propias + USO DE ROCODROMO (pago inter-empresa Club↔Rocoteca)"
-          >
-            {excludeInternal ? 'Sin internos' : 'Con internos'}
-          </button>
-        )}
+        <button
+          className={`sa-transfer-toggle${excludeInternal ? ' sa-transfer-toggle--on' : ''}`}
+          onClick={() => setExcludeInternal(v => !v)}
+          title="Excluye transferencias internas (USO DE ROCODROMO, entre cuentas propias) y cobros TPV/WooCommerce que ya están en la sección de Ingresos"
+        >
+          {excludeInternal ? 'Sin internos' : 'Con internos'}
+        </button>
       </div>
 
       <div className="exp-kpis">
@@ -485,7 +489,7 @@ function HistoryView({ months, onDeleted }) {
         </div>
       </div>
 
-      <p className="exp-chart-title">Gastos e ingresos banco por mes (incluye WooCommerce)</p>
+      <p className="exp-chart-title">Gastos e ingresos banco por mes</p>
       <ResponsiveContainer width="100%" height={180}>
         <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
@@ -536,7 +540,7 @@ function HistoryView({ months, onDeleted }) {
               <Legend formatter={k => k === 'net' ? 'Neto mes' : 'Acumulado'} />
               <Bar dataKey="net" radius={[3, 3, 0, 0]}>
                 {netData.map((e, i) => (
-                  <Cell key={i} fill={e.net >= 0 ? '#34d399' : '#ef4444'} />
+                  <Cell key={i} fill={e.net >= 0 ? '#94a3b8' : '#475569'} />
                 ))}
               </Bar>
               <Line type="monotone" dataKey="acumulado" stroke="#f5c842" strokeWidth={2} dot={false} />
@@ -565,11 +569,11 @@ function HistoryView({ months, onDeleted }) {
         </>
       )}
 
-      {/* ─── Desglose de gastos por concepto ─── */}
-      {breakdown && (breakdown.nominas > 0 || breakdown.by_concepto?.length > 0) && (
+      {/* ─── Desglose de gastos por mes ─── */}
+      {byMonth.some(r => r.nominas > 0 || Object.keys(r.by_concepto).length > 0) && (
         <>
-          <p className="exp-chart-title" style={{ marginTop: 16 }}>Desglose de gastos</p>
-          <div className="exp-table-wrap" style={{ maxHeight: 320 }}>
+          <p className="exp-chart-title" style={{ marginTop: 16 }}>Desglose de gastos por concepto</p>
+          <div className="exp-table-wrap" style={{ maxHeight: 420 }}>
             <table className="exp-table">
               <thead>
                 <tr>
@@ -578,27 +582,49 @@ function HistoryView({ months, onDeleted }) {
                 </tr>
               </thead>
               <tbody>
-                {breakdown.nominas > 0 && (
-                  <tr style={{ color: '#a78bfa', fontWeight: 700 }}>
-                    <td>Nóminas</td>
-                    <td className="exp-cell--amount">{fmtEur(breakdown.nominas)}</td>
-                  </tr>
-                )}
-                {(breakdown.by_concepto || []).map((r, i) => (
-                  <tr key={i}>
-                    <td className="exp-cell--concept">{r.concepto}</td>
-                    <td className="exp-cell--amount">{fmtEur(r.total)}</td>
-                  </tr>
-                ))}
+                {byMonth.map(row => {
+                  // Group raw concepts by category, sum totals
+                  const byCat = {}
+                  Object.entries(row.by_concepto).forEach(([concepto, total]) => {
+                    const cat = autoCategory(concepto, false)
+                    byCat[cat] = (byCat[cat] || 0) + total
+                  })
+                  // Filter out 0€ (rounded) entries, sort by total desc
+                  const catEntries = Object.entries(byCat)
+                    .filter(([, v]) => Math.round(v) > 0)
+                    .sort((a, b) => b[1] - a[1])
+
+                  if (row.nominas === 0 && catEntries.length === 0) return null
+                  const monthTotal = row.nominas + catEntries.reduce((s, [, v]) => s + v, 0)
+                  return (
+                    <React.Fragment key={row.month}>
+                      <tr className="exp-breakdown-month-header">
+                        <td colSpan={2}>{fmtMonth(row.month)}</td>
+                      </tr>
+                      {Object.entries(row.nominas_by_entity || {})
+                        .filter(([, v]) => Math.round(v) > 0)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([ent, v]) => (
+                          <tr key={`nom-${ent}`} style={{ color: '#a78bfa', fontWeight: 700 }}>
+                            <td>Nóminas {ent === 'club' ? 'Club' : 'Rocoteca'}</td>
+                            <td className="exp-cell--amount">{fmtEur(v)}</td>
+                          </tr>
+                        ))
+                      }
+                      {catEntries.map(([cat, total]) => (
+                        <tr key={cat}>
+                          <td>{CATEGORIES[cat] ?? cat}</td>
+                          <td className="exp-cell--amount">{fmtEur(total)}</td>
+                        </tr>
+                      ))}
+                      <tr className="exp-breakdown-subtotal">
+                        <td className="exp-total-label">Total {fmtMonth(row.month)}</td>
+                        <td className="exp-cell--amount exp-cell--neg">{fmtEur(monthTotal)}</td>
+                      </tr>
+                    </React.Fragment>
+                  )
+                })}
               </tbody>
-              <tfoot>
-                <tr>
-                  <td className="exp-total-label">Total gastos</td>
-                  <td className="exp-cell--amount exp-cell--neg">
-                    {fmtEur((breakdown.nominas || 0) + (breakdown.by_concepto || []).reduce((s, r) => s + r.total, 0))}
-                  </td>
-                </tr>
-              </tfoot>
             </table>
           </div>
         </>

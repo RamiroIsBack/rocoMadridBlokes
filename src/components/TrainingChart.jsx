@@ -44,7 +44,7 @@ function fillSeries(rawData, months) {
 
 // ── Max chart (kg line) ──────────────────────────────────────────────────────
 
-function MaxChart({ userEntries, communitySummary, color, months }) {
+function MaxChart({ userEntries, communitySummary, color, months, hideValues, unit = 'kg' }) {
   const rawUserData = months.map(m => {
     const entries = userEntries.filter(e => e.logged_at?.startsWith(m))
     return entries.length ? entries[entries.length - 1].value_kg : null
@@ -80,9 +80,12 @@ function MaxChart({ userEntries, communitySummary, color, months }) {
           <line key={v} x1={PAD.left} y1={yPos(v)} x2={W - PAD.right} y2={yPos(v)}
             stroke="#e5e7eb" strokeWidth="1" />
         ))}
-        {yTicks.map(v => (
-          <text key={v} x={PAD.left - 4} y={yPos(v) + 4} textAnchor="end" className="training-chart__tick">{v}</text>
-        ))}
+        {hideValues
+          ? <text x={PAD.left - 4} y={yPos(maxY) + 4} textAnchor="end" className="training-chart__tick">{unit}</text>
+          : yTicks.map(v => (
+              <text key={v} x={PAD.left - 4} y={yPos(v) + 4} textAnchor="end" className="training-chart__tick">{v}</text>
+            ))
+        }
         {months.map((m, i) => i % 2 === 0 && (
           <text key={m} x={xPos(i)} y={H - 6} textAnchor="middle" className="training-chart__tick">{monthLabel(m)}</text>
         ))}
@@ -139,7 +142,7 @@ function progressArcPath(t) {
   return `M ${GCX - GR},${GCY} A ${GR},${GR} 0 0 0 ${end.x.toFixed(2)},${end.y.toFixed(2)}`
 }
 
-function ProgressGauge({ userEntries, communitySummary, color, months }) {
+function ProgressGauge({ userEntries, communitySummary, color, months, hideValues, unit = 'kg' }) {
   const hasUser = userEntries.length > 0
   const rawValues = hasUser
     ? months.map(m => {
@@ -211,27 +214,37 @@ function ProgressGauge({ userEntries, communitySummary, color, months }) {
           />
         )}
 
-        {/* Center: big % */}
-        <text x={GCX} y={GCY - 18} textAnchor="middle" className="training-progress__pct-svg" fill={activeColor}>
-          {pctStr}
-        </text>
-
-        {/* Center: arrow */}
-        <text x={GCX} y={GCY - 2} textAnchor="middle" className="training-progress__arrow-svg" fill={activeColor}>
-          {improved ? '▲' : '▼'}
-        </text>
+        {/* Center: big % — hidden when showing community-only view */}
+        {!hideValues && (
+          <>
+            <text x={GCX} y={GCY - 18} textAnchor="middle" className="training-progress__pct-svg" fill={activeColor}>
+              {pctStr}
+            </text>
+            <text x={GCX} y={GCY - 2} textAnchor="middle" className="training-progress__arrow-svg" fill={activeColor}>
+              {improved ? '▲' : '▼'}
+            </text>
+          </>
+        )}
 
         {/* Base line */}
         <line x1={GCX - GR - GSW / 2} y1={GCY} x2={GCX + GR + GSW / 2} y2={GCY}
           stroke="#f3f4f6" strokeWidth="2" />
 
         {/* Stats below */}
-        <text x={GCX} y={GCY + 22} textAnchor="middle" className="training-progress__stat-svg">
-          {baseline.toFixed(1)} kg → {latest.toFixed(1)} kg
-        </text>
-        <text x={GCX} y={GCY + 36} textAnchor="middle" className="training-progress__since-svg">
-          desde {since} · {hasUser ? 'tú' : 'media Roco'}
-        </text>
+        {hideValues ? (
+          <text x={GCX} y={GCY + 22} textAnchor="middle" className="training-progress__since-svg">
+            {unit} · desde {since} · {hasUser ? 'tú' : 'media Roco'}
+          </text>
+        ) : (
+          <>
+            <text x={GCX} y={GCY + 22} textAnchor="middle" className="training-progress__stat-svg">
+              {baseline.toFixed(1)} kg → {latest.toFixed(1)} kg
+            </text>
+            <text x={GCX} y={GCY + 36} textAnchor="middle" className="training-progress__since-svg">
+              desde {since} · {hasUser ? 'tú' : 'media Roco'}
+            </text>
+          </>
+        )}
       </svg>
     </div>
   )
@@ -239,13 +252,13 @@ function ProgressGauge({ userEntries, communitySummary, color, months }) {
 
 // ── Public export ────────────────────────────────────────────────────────────
 
-export default function TrainingChart({ userEntries = [], communitySummary = {}, color = '#3b82f6', testLabel = '' }) {
+export default function TrainingChart({ userEntries = [], communitySummary = {}, color = '#3b82f6', testLabel = '', hideValues = false, unit = 'kg' }) {
   const months = getLast12Months()
   return (
     <div className="training-chart-wrap">
       {testLabel && <p className="training-chart__label">{testLabel}</p>}
-      <MaxChart userEntries={userEntries} communitySummary={communitySummary} color={color} months={months} />
-      <ProgressGauge userEntries={userEntries} communitySummary={communitySummary} color={color} months={months} />
+      <MaxChart userEntries={userEntries} communitySummary={communitySummary} color={color} months={months} hideValues={hideValues} unit={unit} />
+      <ProgressGauge userEntries={userEntries} communitySummary={communitySummary} color={color} months={months} hideValues={hideValues} unit={unit} />
     </div>
   )
 }

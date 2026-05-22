@@ -41,6 +41,7 @@ export default function ProgresoPage() {
   const trainingSummary = useTrainingSummary()
   const [activeZone, setActiveZone] = useState('lower')
   const [activeTest, setActiveTest] = useState(1)
+  const [testInfoId, setTestInfoId] = useState(null)
 
   const colorDistrib = useMemo(() => {
     const acc = {}
@@ -103,12 +104,15 @@ export default function ProgresoPage() {
                   {TESTS[tid].label}
                 </button>
               ))}
+              <button className="test-info-btn" onClick={() => setTestInfoId(activeTest)} title="Descripción del test">ℹ</button>
             </div>
             <TrainingChart
               userEntries={[]}
               communitySummary={trainingSummary[activeTest] || {}}
               color={ZONES[activeZone].color}
-              testLabel={`Test ${activeTest} — ${ZONES[activeZone].label} · Media Roco`}
+              testLabel={`${TESTS[activeTest].label} — ${ZONES[activeZone].label} · Media Roco`}
+              unit={TESTS[activeTest].unit}
+              hideValues
             />
           </div>
         </div>
@@ -166,6 +170,18 @@ export default function ProgresoPage() {
           ))}
         </div>
       </section>
+      {testInfoId !== null && (
+        <div className="test-info-overlay" onClick={() => setTestInfoId(null)}>
+          <div className="test-info-card" onClick={e => e.stopPropagation()}>
+            <div className="test-info-card__header">
+              <span className="test-info-card__name">{TESTS[testInfoId].label}</span>
+              <span className="test-info-card__unit">({TESTS[testInfoId].unit})</span>
+            </div>
+            <button className="test-info-card__close" onClick={() => setTestInfoId(null)}>×</button>
+            <p className="test-info-card__desc">{TESTS[testInfoId].desc}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

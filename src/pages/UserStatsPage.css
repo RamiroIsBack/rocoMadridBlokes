@@ -256,7 +256,13 @@
     display: flex;
     gap: 8px;
     margin-bottom: 12px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
 }
+.user-stats__test-selector::-webkit-scrollbar { display: none; }
 .user-stats__test-btn {
     padding: 6px 16px;
     border-radius: 20px;
@@ -267,6 +273,8 @@
     font-weight: 600;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 .user-stats__test-btn--active {
     background: var(--zone-color);
@@ -447,6 +455,61 @@
     font-size: 0.82rem;
     font-weight: 600;
     color: #2a2015;
+}
+
+/* Week highlight */
+.user-stats__week-pill {
+    margin-top: 6px;
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    background: rgba(245, 200, 66, 0.12);
+    border: 1px solid rgba(245, 200, 66, 0.3);
+    border-radius: 20px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #f5c842;
+    letter-spacing: 0.04em;
+}
+
+/* Bloke history */
+.user-stats__history {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.user-stats__history-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    background: #fdf7e6;
+    border-radius: 6px;
+}
+
+.user-stats__history-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.1);
+    flex-shrink: 0;
+}
+
+.user-stats__history-title {
+    flex: 1;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #2a2015;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.user-stats__history-date {
+    font-size: 0.7rem;
+    color: var(--color-text-secondary);
+    flex-shrink: 0;
 }
 
 @media (max-width: 480px) {

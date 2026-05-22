@@ -94,3 +94,26 @@
 
 .celeb-btn:hover  { background: #2a2015; }
 .celeb-btn:active { transform: scale(0.96); }
+
+/* ── First Ascent variant ── */
+.celeb-dialog--first {
+  background: #071207;
+  border: 2px solid #4ade80;
+  box-shadow: 0 0 40px rgba(74, 222, 128, 0.3), 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+.celeb-heading--first {
+  color: #4ade80;
+  font-size: 1.5rem;
+  letter-spacing: 0.04em;
+  text-shadow: 0 0 18px rgba(74, 222, 128, 0.6);
+}
+.celeb-dialog--first .celeb-main  { color: #d1fae5; }
+.celeb-dialog--first .celeb-bloke { color: #86efac; }
+.celeb-dialog--first .celeb-sub   { color: #86efac; }
+.celeb-dialog--first .celeb-btn   { background: #166534; color: #dcfce7; }
+.celeb-dialog--first .celeb-btn:hover { background: #15803d; }
+.celeb-dialog--first .celeb-monkey { animation: fa-flag 0.8s ease-in-out infinite alternate; }
+@keyframes fa-flag {
+  from { transform: rotate(-12deg) scale(1); }
+  to   { transform: rotate(12deg) scale(1.15); }
+}

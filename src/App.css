@@ -27,6 +27,7 @@
   flex-direction: column;
   align-items: center;
   flex-shrink: 0;
+  width: 100%;
   position: relative;
   z-index: 1;
 }
@@ -284,13 +285,17 @@
 .app-header__salas-wrap {
   position: relative;
   flex: 1;
+  width: 100%;
   display: flex;
   align-items: center;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .app-header__salas {
   height: 200px;
   width: 100%;
+  min-width: 550px;
   max-width: none;
   object-fit: contain;
 }
@@ -311,12 +316,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid rgba(255,255,255,0.6);
   box-shadow: 0 1px 3px rgba(0,0,0,0.5);
   line-height: 1;
+  border: 2px solid rgba(255,255,255,0.65);
 }
 
-@media (min-width: 900px) {
+@media (min-width: 1000px) {
   .map-bubble-group--5 {
     right: calc(18% + 115px) !important;
   }
@@ -335,7 +340,7 @@
 }
 
 /* Responsive: larger screens - salas on the right */
-@media (min-width: 900px) {
+@media (min-width: 1000px) {
   .app-header {
     flex-direction: row;
     flex-wrap: wrap;
@@ -345,10 +350,13 @@
 
   .app-header__logo-section {
     flex-shrink: 0;
+    width: auto;
   }
 
   .app-header__salas-wrap {
     margin-left: var(--spacing-md);
+    width: auto;
+    overflow-x: hidden;
   }
 
   .app-header__salas {
@@ -371,28 +379,31 @@
 .app-nav__list {
   display: flex;
   justify-content: center;
-  gap: var(--spacing-lg);
+  flex-wrap: wrap;
+  gap: 2px var(--spacing-md);
   list-style: none;
-  padding: 0;
+  padding: 0 var(--spacing-sm);
   margin: 0;
 }
 
 .app-nav__item {
-  display: inline-block;
+  display: flex;
 }
 
 .app-nav__link {
-  display: inline-block;
-  padding: var(--spacing-xs) var(--spacing-md);
+  display: inline-flex;
+  align-items: center;
+  padding: 11px 14px;
+  min-height: 44px;
   background-color: transparent;
   color: #cccccc;
   text-decoration: none;
-  border-radius: 0;
   border-bottom: 2px solid transparent;
   font-size: var(--font-size-sm);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  white-space: nowrap;
   transition: color 0.2s, border-color 0.2s;
 }
 
@@ -418,6 +429,18 @@
 .app-nav__link--super:hover, .app-nav__link--super.active {
   color: #c4b5fd;
   border-bottom-color: #c4b5fd;
+}
+
+/* Mobile: reduce header padding */
+@media (max-width: 640px) {
+  .app-header {
+    padding: var(--spacing-md) var(--spacing-md);
+  }
+  .app-nav__link {
+    font-size: 12px;
+    padding: 11px 10px;
+    letter-spacing: 0.05em;
+  }
 }
 
 /* ---- Main ---- */

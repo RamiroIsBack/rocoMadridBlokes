@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useWordPressAuth } from '../hooks/useWordPressAuth'
+import { getAdminHeaders } from '../hooks/useWordPressPosts'
 import './ImageUploader.css'
 
 const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
@@ -10,7 +10,6 @@ export default function ImageUploader({ onImagesUploaded, maxImages = 3 }) {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState({})
   const [error, setError] = useState('')
-  const { getAuthHeader } = useWordPressAuth()
 
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files)
@@ -71,8 +70,9 @@ export default function ImageUploader({ onImagesUploaded, maxImages = 3 }) {
 
         const response = await fetch(`${WORDPRESS_URL}/wp-json/wp/v2/media`, {
           method: 'POST',
+          credentials: 'include',
           headers: {
-            ...getAuthHeader(),
+            ...getAdminHeaders(),
             // Don't set Content-Type - let browser set it with boundary
           },
           body: formData

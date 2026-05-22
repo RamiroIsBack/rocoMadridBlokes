@@ -31,6 +31,14 @@ export function getAuthHeader() {
     return null
 }
 
+// Prefer the logged-in WordPress session nonce over Application Password
+export function getAdminHeaders() {
+    const nonce = window.blokesSiteData?.nonce || ''
+    if (nonce) return { 'X-WP-Nonce': nonce }
+    const auth = getAuthHeader()
+    return auth ? { 'Authorization': auth } : {}
+}
+
 // Normalize legacy numeric category IDs to string names
 const CATEGORY_ID_MAP = { 1: 'FUERZA', 2: 'TECNICA', 3: 'DINAMICO' }
 function normalizeCategory(raw) {
@@ -294,6 +302,7 @@ export function useWordPressPosts() {
                                 totalInteractions: interactions.star_1 + interactions.star_2 + interactions.star_3 + interactions.skull,
                                 completionCount: parseInt(post.bloke_completion_count || 0, 10),
                                 ratings,
+                                firstAscent: post.bloke_first_ascent || null,
                             }
                         })
 
@@ -486,16 +495,12 @@ export async function recordInteraction(postId, type) {
              * @returns {Promise<Object>}
              */
             export async function deleteBloke(postId) {
-        const authHeader = getAuthHeader()
-        if (!authHeader) {
-            throw new Error('No authentication configured')
-        }
-
     try {
         const response = await fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/delete/${postId}`, {
-                    method: 'DELETE',
+            method: 'DELETE',
+            credentials: 'include',
             headers: {
-                'Authorization': authHeader,
+                ...getAdminHeaders(),
                 'Content-Type': 'application/json'
             }
         })

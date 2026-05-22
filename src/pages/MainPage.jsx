@@ -8,7 +8,7 @@ import CelebrationDialog from '../components/CelebrationDialog'
 
 function MainPage() {
   const { cards, loading, error } = useWordPressPosts()
-  const { isLoggedIn, loginUrl, completedByMe, countOverrides, toggleCompletion, myRatings, ratingCountOverrides, rateBloke } = useCompletions()
+  const { isLoggedIn, loginUrl, completedByMe, countOverrides, toggleCompletion, myRatings, ratingCountOverrides, rateBloke, firstAscentIds } = useCompletions()
   const [activeSala, setActiveSala] = useState('TODOS')
   const [activeColor, setActiveColor] = useState('TODOS')
   const [sortMode, setSortMode] = useState('newest')
@@ -18,7 +18,7 @@ function MainPage() {
     const currentCount = countOverrides[card.postId] ?? card.completionCount ?? 0
     const result = await toggleCompletion(card.postId, currentCount)
     if (result?.completed) {
-      setCelebration({ title: card.title, count: result.count })
+      setCelebration({ title: card.title, count: result.count, firstAscent: result.first_ascent === true })
     }
   }, [toggleCompletion, countOverrides])
 
@@ -53,6 +53,7 @@ function MainPage() {
         <CelebrationDialog
           title={celebration.title}
           count={celebration.count}
+          firstAscent={celebration.firstAscent}
           onClose={() => setCelebration(null)}
         />
       )}
@@ -88,6 +89,7 @@ function MainPage() {
                 card={card}
                 isNew={newCardIds.has(card.id)}
                 isDone={completedByMe.has(card.postId)}
+                isMyFirstAscent={firstAscentIds.has(card.postId)}
                 completionCount={countOverrides[card.postId] ?? card.completionCount ?? 0}
                 onToggleDone={() => handleToggleDone(card)}
                 isLoggedIn={isLoggedIn}

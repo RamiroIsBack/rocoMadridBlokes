@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import { useCompletions } from '../hooks/useCompletions'
+import { useWordPressPosts } from '../hooks/useWordPressPosts'
 import { useUserTraining, useTrainingSummary } from '../hooks/useTraining'
 import { computeAchievements, computeClassmateAchievements } from '../hooks/useAchievements'
 import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
@@ -28,6 +29,14 @@ const RATING_ICONS = [
   { id: 'star_1', emoji: '⭐', label: 'Me gusta' },
 ]
 
+function fmtDate(ts) {
+  const diffD = Math.floor((Date.now() - new Date(ts)) / 86400000)
+  if (diffD === 0) return 'Hoy'
+  if (diffD === 1) return 'Ayer'
+  if (diffD < 7) return `Hace ${diffD}d`
+  return new Date(ts).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })
+}
+
 function monthLabel(key) {
   const [year, month] = key.split('-')
   return new Date(parseInt(year), parseInt(month) - 1)
@@ -39,12 +48,14 @@ export default function UserStatsPage() {
   const hasClases = outletCtx?.hasClases ?? true
   const classData = outletCtx?.classData ?? null
 
-  const { isLoggedIn, loginUrl, completedByMe, completionLog, ratingLog } = useCompletions()
+  const { isLoggedIn, loginUrl, completedByMe, completionLog, ratingLog, firstAscentIds } = useCompletions()
+  const { cards } = useWordPressPosts()
   const userId = window.blokesSiteData?.userId || 0
   const { history: trainingHistory } = useUserTraining(isLoggedIn ? userId : null)
   const trainingSummary = useTrainingSummary()
   const [activeZone, setActiveZone] = useState('lower')
   const [activeTest, setActiveTest] = useState(1)
+  const [testInfoId, setTestInfoId] = useState(null)
 
   const [classNotifs, setClassNotifs] = useState([])
   const notifsInit = useRef(false)
@@ -74,8 +85,8 @@ export default function UserStatsPage() {
   }, [hasClases, classData])
 
   const achievements = useMemo(
-    () => computeAchievements(trainingHistory, completionLog, ratingLog),
-    [trainingHistory, completionLog, ratingLog]
+    () => computeAchievements(trainingHistory, completionLog, ratingLog, firstAscentIds),
+    [trainingHistory, completionLog, ratingLog, firstAscentIds]
   )
 
   const byColor = useMemo(() => {
@@ -110,6 +121,25 @@ export default function UserStatsPage() {
     ratingLog.forEach(e => { if (acc[e.type] !== undefined) acc[e.type]++ })
     return { star_1: acc.star_1 + acc.star_2 + acc.star_3 + acc.skull }
   }, [ratingLog])
+
+  const cardMap = useMemo(() => {
+    const m = {}
+    cards.forEach(c => { m[c.postId] = c })
+    return m
+  }, [cards])
+
+  const thisWeekCount = useMemo(() => {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
+    return completionLog.filter(e => new Date(e.timestamp) >= cutoff).length
+  }, [completionLog])
+
+  const completionHistory = useMemo(() => (
+    [...completionLog]
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .filter(e => cardMap[e.postId])
+      .slice(0, 30)
+      .map(e => ({ ...e, card: cardMap[e.postId] }))
+  ), [completionLog, cardMap])
 
   const totalRatings = Object.values(ratingCounts).reduce((a, b) => a + b, 0)
   const total = completedByMe.size
@@ -188,7 +218,12 @@ export default function UserStatsPage() {
 
       <div className="user-stats__total">
         <span className="user-stats__total-num">{total}</span>
-        <span className="user-stats__total-label">TOPs conseguidos</span>
+        <div>
+          <span className="user-stats__total-label">TOPs conseguidos</span>
+          {thisWeekCount > 0 && (
+            <div className="user-stats__week-pill">+{thisWeekCount} esta semana</div>
+          )}
+        </div>
       </div>
 
       {classNotifs.length > 0 && (
@@ -259,6 +294,26 @@ export default function UserStatsPage() {
               </div>
             </section>
           )}
+
+          {completionHistory.length > 0 && (
+            <section className="user-stats__section">
+              <h2 className="user-stats__section-title">
+                Historial{completionLog.length > 30 ? ' (últimos 30)' : ''}
+              </h2>
+              <div className="user-stats__history">
+                {completionHistory.map((e, i) => (
+                  <div key={i} className="user-stats__history-row">
+                    <span
+                      className="user-stats__history-dot"
+                      style={{ background: COLOR_INFO[e.color]?.bg ?? '#ccc' }}
+                    />
+                    <span className="user-stats__history-title">{e.card.title}</span>
+                    <span className="user-stats__history-date">{fmtDate(e.timestamp)}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </>
       )}
 
@@ -318,12 +373,14 @@ export default function UserStatsPage() {
                     {TESTS[tid].label}
                   </button>
                 ))}
+                <button className="test-info-btn" onClick={() => setTestInfoId(activeTest)} title="Descripción del test">ℹ</button>
               </div>
               <TrainingChart
                 userEntries={trainingHistory[activeTest] || []}
                 communitySummary={trainingSummary[activeTest] || {}}
                 color={ZONES[activeZone].color}
-                testLabel={`Test ${activeTest} — ${ZONES[activeZone].label}`}
+                testLabel={`${TESTS[activeTest].label} — ${ZONES[activeZone].label}`}
+                unit={TESTS[activeTest].unit}
               />
               {(() => {
                 const sorted = (classData?.members || [])
@@ -370,6 +427,19 @@ export default function UserStatsPage() {
           </div>
         )}
       </section>
+
+      {testInfoId !== null && (
+        <div className="test-info-overlay" onClick={() => setTestInfoId(null)}>
+          <div className="test-info-card" onClick={e => e.stopPropagation()}>
+            <div className="test-info-card__header">
+              <span className="test-info-card__name">{TESTS[testInfoId].label}</span>
+              <span className="test-info-card__unit">({TESTS[testInfoId].unit})</span>
+            </div>
+            <button className="test-info-card__close" onClick={() => setTestInfoId(null)}>×</button>
+            <p className="test-info-card__desc">{TESTS[testInfoId].desc}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

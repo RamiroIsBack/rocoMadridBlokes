@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useWordPressPosts, deleteBloke, getAuthHeader } from '../hooks/useWordPressPosts'
+import { useWordPressPosts, deleteBloke, getAuthHeader, getAdminHeaders } from '../hooks/useWordPressPosts'
 import AdminLogin from '../admin/AdminLogin'
 import ImageUploader from '../admin/ImageUploader'
 import EventCard from '../components/EventCard'
@@ -108,7 +108,7 @@ export default function StatsPage() {
       if (prevStr !== newStr) {
         fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/hall-of-fame`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': getAuthHeader() },
+          headers: { 'Content-Type': 'application/json', ...getAdminHeaders() },
           body: JSON.stringify({ blokes: updated })
         }).catch(() => {})
       }
@@ -380,7 +380,7 @@ export default function StatsPage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': getAuthHeader()
+          ...getAdminHeaders()
         },
         body: JSON.stringify({
           title: editingBloke.title,

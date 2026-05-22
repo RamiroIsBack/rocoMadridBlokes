@@ -24,6 +24,7 @@ export default function MiClaseTab() {
   const [activeZone, setActiveZone] = useState('lower')
   const [activeTest, setActiveTest] = useState(1)
   const [animated, setAnimated]     = useState(false)
+  const [testInfoId, setTestInfoId] = useState(null)
   const data    = classData
   const loading = !data && isLoggedIn
 
@@ -111,7 +112,7 @@ export default function MiClaseTab() {
     )
   }
 
-  const { class: cls, members, top_blokes: topBlokes = [] } = data
+  const { class: cls, members, top_blokes: topBlokes = [], recent_completions: recentCompletions = [] } = data
 
   // ── Training ──
   const testEntries = members
@@ -147,6 +148,22 @@ export default function MiClaseTab() {
         )}
       </div>
 
+      {/* ─── ESTA SEMANA ─── */}
+      {recentCompletions.length > 0 && (
+        <section className="mi-clase__section">
+          <h3 className="mi-clase__section-title">Esta semana en tu clase</h3>
+          <div className="mi-clase__recent">
+            {recentCompletions.map((r, i) => (
+              <div key={r.post_id} className="mi-clase__recent-row" style={{ animationDelay: `${i * 40}ms` }}>
+                <span className="mi-clase__recent-dot" style={{ background: COLOR_INFO[r.color]?.bg ?? '#ccc' }} />
+                <span className="mi-clase__recent-title">{r.title}</span>
+                <span className="mi-clase__recent-count">{r.count} {r.count === 1 ? 'compañero' : 'compañeros'}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* ─── ENTRENAMIENTO ─── */}
       <section className="mi-clase__section">
         <h3 className="mi-clase__section-title">Entrenamiento</h3>
@@ -178,6 +195,7 @@ export default function MiClaseTab() {
                   {TESTS[tid].label}
                 </button>
               ))}
+              <button className="test-info-btn" onClick={() => setTestInfoId(activeTest)} title="Descripción del test">ℹ</button>
             </div>
             {testEntries.length === 0 ? (
               <p className="mi-clase__no-data">Sin datos en este test todavía</p>
@@ -327,6 +345,18 @@ export default function MiClaseTab() {
         </section>
       )}
 
+      {testInfoId !== null && (
+        <div className="test-info-overlay" onClick={() => setTestInfoId(null)}>
+          <div className="test-info-card" onClick={e => e.stopPropagation()}>
+            <div className="test-info-card__header">
+              <span className="test-info-card__name">{TESTS[testInfoId].label}</span>
+              <span className="test-info-card__unit">({TESTS[testInfoId].unit})</span>
+            </div>
+            <button className="test-info-card__close" onClick={() => setTestInfoId(null)}>×</button>
+            <p className="test-info-card__desc">{TESTS[testInfoId].desc}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

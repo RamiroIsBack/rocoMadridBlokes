@@ -41,6 +41,11 @@ export const ACHIEVEMENTS = [
   },
   // ── Blokes ───────────────────────────────────────────────────────────────
   {
+    id: 'first_ascent', emoji: '🏴', title: '¡Primero!', category: 'blokes',
+    desc: 'Primer TOP del gym en un bloke nuevo',
+    check: ({ completions }) => completions.firstAscents >= 1,
+  },
+  {
     id: 'first_bloke', emoji: '🧗', title: 'Primera vía', category: 'blokes',
     desc: 'Encadena tu primer bloke',
     check: ({ completions }) => completions.total >= 1,
@@ -114,11 +119,11 @@ export function computeClassmateAchievements(member) {
     .map(a => ({ ...a, earned: check(a.id) }))
 }
 
-export function computeAchievements(trainingHistory, completionLog, ratingLog) {
+export function computeAchievements(trainingHistory, completionLog, ratingLog, firstAscentIds = new Set()) {
   const colors = new Set(completionLog.map(e => e.color).filter(Boolean))
   const ctx = {
     training:    trainingHistory || {},
-    completions: { total: completionLog.length, colors: colors.size },
+    completions: { total: completionLog.length, colors: colors.size, firstAscents: firstAscentIds.size },
     ratings:     { total: ratingLog.length },
   }
   return ACHIEVEMENTS.map(a => ({ ...a, earned: a.check(ctx) }))
