@@ -5,7 +5,7 @@ import { useWordPressPosts } from '../hooks/useWordPressPosts'
 import { useUserTraining, useTrainingSummary } from '../hooks/useTraining'
 import { computeAchievements, computeClassmateAchievements } from '../hooks/useAchievements'
 import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
-import TrainingChart from '../components/TrainingChart'
+import TrainingChart, { ProgressGauge } from '../components/TrainingChart'
 import Achievements from '../components/Achievements'
 import './UserStatsPage.css'
 import '../components/GatePreview.css'
@@ -353,7 +353,7 @@ export default function UserStatsPage() {
       <section className="user-stats__section">
         <h2 className="user-stats__section-title">Mi progreso de entrenamiento</h2>
         {hasClases ? (
-          <div className="user-stats__training">
+          <div className="training-block">
             <BodyDiagram
               activeZone={activeZone}
               onSelectZone={(zone) => {
@@ -361,25 +361,29 @@ export default function UserStatsPage() {
                 setActiveTest(ZONES[zone].tests[0])
               }}
             />
-            <div className="user-stats__training-right">
-              <div className="user-stats__test-selector">
+            <div className="training-select-row">
+              <select
+                value={activeTest}
+                onChange={e => setActiveTest(Number(e.target.value))}
+                className="training-test-select"
+              >
                 {ZONES[activeZone].tests.map(tid => (
-                  <button
-                    key={tid}
-                    className={`user-stats__test-btn ${activeTest === tid ? 'user-stats__test-btn--active' : ''}`}
-                    style={{ '--zone-color': ZONES[activeZone].color }}
-                    onClick={() => setActiveTest(tid)}
-                  >
-                    {TESTS[tid].label}
-                  </button>
+                  <option key={tid} value={tid}>{TESTS[tid].label} ({TESTS[tid].unit})</option>
                 ))}
-                <button className="test-info-btn" onClick={() => setTestInfoId(activeTest)} title="Descripción del test">ℹ</button>
-              </div>
-              <TrainingChart
+              </select>
+              <button className="test-info-btn" onClick={() => setTestInfoId(activeTest)} title="Descripción del test">ℹ</button>
+            </div>
+            <TrainingChart
+              userEntries={trainingHistory[activeTest] || []}
+              communitySummary={trainingSummary[activeTest] || {}}
+              color={ZONES[activeZone].color}
+              unit={TESTS[activeTest].unit}
+            />
+            <div className="training-bottom">
+              <ProgressGauge
                 userEntries={trainingHistory[activeTest] || []}
                 communitySummary={trainingSummary[activeTest] || {}}
                 color={ZONES[activeZone].color}
-                testLabel={`${TESTS[activeTest].label} — ${ZONES[activeZone].label}`}
                 unit={TESTS[activeTest].unit}
               />
               {(() => {

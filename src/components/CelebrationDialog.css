@@ -30,18 +30,12 @@
   to   { transform: scale(1);   opacity: 1; }
 }
 
-.celeb-monkey {
-  font-size: 4rem;
-  line-height: 1;
-  margin-bottom: 12px;
+.celeb-monkey-gif {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
   display: block;
-  animation: celeb-climb 0.6s ease-in-out infinite alternate;
-  transform-origin: center bottom;
-}
-
-@keyframes celeb-climb {
-  from { transform: translateY(0)    rotate(-8deg); }
-  to   { transform: translateY(-10px) rotate(8deg); }
+  margin: 0 auto 12px;
 }
 
 .celeb-heading {
@@ -112,8 +106,3 @@
 .celeb-dialog--first .celeb-sub   { color: #86efac; }
 .celeb-dialog--first .celeb-btn   { background: #166534; color: #dcfce7; }
 .celeb-dialog--first .celeb-btn:hover { background: #15803d; }
-.celeb-dialog--first .celeb-monkey { animation: fa-flag 0.8s ease-in-out infinite alternate; }
-@keyframes fa-flag {
-  from { transform: rotate(-12deg) scale(1); }
-  to   { transform: rotate(12deg) scale(1.15); }
-}

@@ -6,41 +6,6 @@
   padding: 24px 16px 48px;
 }
 
-.progreso__training {
-  display: flex;
-  gap: 24px;
-  align-items: flex-start;
-}
-.progreso__training-right { flex: 1; min-width: 0; }
-.progreso__test-selector {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-  align-items: center;
-  padding-bottom: 2px;
-}
-.progreso__test-selector::-webkit-scrollbar { display: none; }
-.progreso__test-btn {
-  padding: 6px 16px;
-  border-radius: 20px;
-  border: 2px solid var(--zone-color);
-  background: transparent;
-  color: var(--zone-color);
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-.progreso__test-btn--active { background: var(--zone-color); color: #fff; }
-@media (max-width: 520px) {
-  .progreso__training { flex-direction: column; align-items: center; }
-}
 
 .progreso__title {
   font-family: var(--font-serif);
@@ -142,6 +107,30 @@
   text-align: right;
 }
 
+/* Training benefits text */
+.progreso__benefits {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.progreso__benefits-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #2a2015;
+  margin: 0 0 10px;
+}
+
+.progreso__benefits-text {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  line-height: 1.65;
+  margin: 0;
+}
+
 /* Rankings */
 .progreso__ranking {
   display: flex;
@@ -199,6 +188,62 @@
   width: 36px;
   text-align: right;
   flex-shrink: 0;
+}
+
+/* Color tabs */
+.progreso__color-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.progreso__color-tab {
+  padding: 6px 14px;
+  border: 2px solid #c8bc9a;
+  border-radius: 20px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.progreso__color-tab--active {
+  border-color: #f97316;
+  background: #f97316;
+  color: #fff;
+}
+
+.progreso__color-tab:hover:not(.progreso__color-tab--active) {
+  border-color: #f97316;
+  color: #f97316;
+}
+
+.progreso__month-select {
+  margin-bottom: 16px;
+}
+
+/* Subsection titles within a section */
+.progreso__subsection-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-text-secondary);
+  margin: 24px 0 6px;
+}
+
+.progreso__subsection-title:first-of-type {
+  margin-top: 0;
+}
+
+/* Hall of Fame */
+.progreso__hof-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }
 
 @media (max-width: 480px) {

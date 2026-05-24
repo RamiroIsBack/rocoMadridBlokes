@@ -11,7 +11,7 @@ export default function CelebrationDialog({ title, count, firstAscent = false, o
     return (
       <div className="celeb-overlay" onClick={onClose}>
         <div className="celeb-dialog celeb-dialog--first" onClick={e => e.stopPropagation()}>
-          <div className="celeb-monkey">🏴</div>
+          <img src="https://rocomadrid.com/wp-content/uploads/2026/05/gifmonodandovueltas.gif" alt="" className="celeb-monkey-gif" />
           <h2 className="celeb-heading celeb-heading--first">¡PRIMER TOP DEL GYM!</h2>
           <p className="celeb-main">Eres el <strong>primero</strong> en encadenar</p>
           <p className="celeb-bloke">"{title}"</p>
@@ -25,7 +25,7 @@ export default function CelebrationDialog({ title, count, firstAscent = false, o
   return (
     <div className="celeb-overlay" onClick={onClose}>
       <div className="celeb-dialog" onClick={e => e.stopPropagation()}>
-        <div className="celeb-monkey">🧗</div>
+        <img src="https://rocomadrid.com/wp-content/uploads/2026/05/gifmonodandovueltas.gif" alt="" className="celeb-monkey-gif" />
         <h2 className="celeb-heading">¡Vamo bicho!</h2>
         <p className="celeb-main">
           ¡Eres el número <strong>{count}</strong> que ha subido

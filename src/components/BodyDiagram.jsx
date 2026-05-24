@@ -27,44 +27,31 @@ const BODY_IMG = {
   default: 'https://rocomadrid.com/wp-content/uploads/2026/05/cuerpo-vacio.png',
 }
 
-const HAND_IMG = {
-  active:  'https://rocomadrid.com/wp-content/uploads/2026/05/mano-seleccionada.png',
-  default: 'https://rocomadrid.com/wp-content/uploads/2026/05/mano-sin-seleccionar.png',
-}
+const HAND_IMG = 'https://rocomadrid.com/wp-content/uploads/2026/05/mano-seleccionada.png'
 
 export default function BodyDiagram({ activeZone, onSelectZone }) {
-  const bodyImg = BODY_IMG[activeZone] || BODY_IMG.default
-  const handImg = activeZone === 'fingers' ? HAND_IMG.active : HAND_IMG.default
+  const img = activeZone === 'fingers' ? HAND_IMG : (BODY_IMG[activeZone] || BODY_IMG.default)
 
   return (
     <div className="body-diagram">
-      <div className="body-diagram__images">
-        <img
-          src={bodyImg}
-          alt={activeZone === 'lower' ? 'Tren inferior' : activeZone === 'upper' ? 'Tren superior' : 'Cuerpo'}
-          className="body-diagram__body"
-          draggable={false}
-        />
-        <img
-          src={handImg}
-          alt="Dedos"
-          className="body-diagram__hand"
-          onClick={() => onSelectZone('fingers')}
-          draggable={false}
-        />
-      </div>
-
-      <div className="body-diagram__legend">
+      <div className="body-diagram__zones">
         {Object.entries(ZONES).map(([key, z]) => (
           <button
             key={key}
-            className={`body-diagram__zone-btn ${activeZone === key ? 'body-diagram__zone-btn--active' : ''}`}
-            style={{ '--zone-color': z.color }}
+            className={`body-diagram__zone-btn${activeZone === key ? ' body-diagram__zone-btn--active' : ''}`}
             onClick={() => onSelectZone(key)}
           >
             {z.label}
           </button>
         ))}
+      </div>
+      <div className="body-diagram__img-wrap">
+        <img
+          src={img}
+          alt={ZONES[activeZone]?.label || ''}
+          className={`body-diagram__img${activeZone === 'fingers' ? ' body-diagram__img--hand' : ''}`}
+          draggable={false}
+        />
       </div>
     </div>
   )

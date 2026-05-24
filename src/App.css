@@ -288,14 +288,11 @@
   width: 100%;
   display: flex;
   align-items: center;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
 }
 
 .app-header__salas {
   height: 200px;
   width: 100%;
-  min-width: 550px;
   max-width: none;
   object-fit: contain;
 }
@@ -319,12 +316,6 @@
   box-shadow: 0 1px 3px rgba(0,0,0,0.5);
   line-height: 1;
   border: 2px solid rgba(255,255,255,0.65);
-}
-
-@media (min-width: 1000px) {
-  .map-bubble-group--5 {
-    right: calc(18% + 115px) !important;
-  }
 }
 
 @media (min-width: 1125px) {
@@ -356,7 +347,6 @@
   .app-header__salas-wrap {
     margin-left: var(--spacing-md);
     width: auto;
-    overflow-x: hidden;
   }
 
   .app-header__salas {
@@ -429,6 +419,27 @@
 .app-nav__link--super:hover, .app-nav__link--super.active {
   color: #c4b5fd;
   border-bottom-color: #c4b5fd;
+}
+
+/* Floating nav — fixed at top, slides in on scroll-up */
+.app-nav--floating {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: var(--color-header);
+  border-bottom: 3px solid var(--color-accent);
+  box-shadow: 0 3px 16px rgba(0,0,0,0.5);
+  margin-top: 0;
+  width: 100%;
+  box-sizing: border-box;
+  transform: translateY(-110%);
+  transition: transform 0.25s ease;
+}
+
+.app-nav--floating.app-nav--visible {
+  transform: translateY(0);
 }
 
 /* Mobile: reduce header padding */

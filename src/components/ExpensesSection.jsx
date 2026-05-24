@@ -370,12 +370,156 @@ const ENTITY_OPTIONS = [
   { v: 'club',     l: 'Club' },
 ]
 
+// ── Variation detection helpers ───────────────────────────────────────
+const NOTES_KEY = 'blokes_exp_notes'
+function loadNotes() { try { return JSON.parse(localStorage.getItem(NOTES_KEY) || '{}') } catch { return {} } }
+function saveNotes(n) { try { localStorage.setItem(NOTES_KEY, JSON.stringify(n)) } catch {} }
+function median(arr) {
+  const s = [...arr].sort((a, b) => a - b)
+  const m = Math.floor(s.length / 2)
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
+}
+
+function VariationsPanel({ byMonth }) {
+  const [notes, setNotes]     = useState(loadNotes)
+  const [editing, setEditing] = useState({})
+
+  const variations = useMemo(() => {
+    // Build per-category monthly amounts
+    const catMonthly = {}
+    byMonth.forEach(row => {
+      const byCat = {}
+      if (row.nominas > 0) byCat['nominas'] = row.nominas
+      Object.entries(row.by_concepto || {}).forEach(([c, v]) => {
+        const cat = autoCategory(c, false)
+        byCat[cat] = (byCat[cat] || 0) + v
+      })
+      Object.entries(byCat).forEach(([cat, amt]) => {
+        if (Math.round(amt) <= 0) return
+        if (!catMonthly[cat]) catMonthly[cat] = []
+        catMonthly[cat].push({ month: row.month, amount: Math.round(amt) })
+      })
+    })
+
+    const flags = []
+    Object.entries(catMonthly).forEach(([cat, history]) => {
+      if (history.length < 3) return
+      const amounts = history.map(h => h.amount)
+      const med = Math.round(median(amounts))
+      if (med === 0) return
+
+      history.forEach(({ month, amount }) => {
+        const pct = Math.round(((amount - med) / med) * 100)
+        if (Math.abs(pct) < 30 || Math.abs(amount - med) < 100) return
+        const similar = history.filter(h =>
+          h.month !== month &&
+          Math.abs(((h.amount - med) / med) * 100) >= 25 &&
+          Math.abs(h.amount - med) >= 100
+        )
+        flags.push({ cat, month, amount, med, pct, similar })
+      })
+    })
+
+    return flags
+      .sort((a, b) => b.month.localeCompare(a.month) || Math.abs(b.pct) - Math.abs(a.pct))
+      .slice(0, 12)
+  }, [byMonth])
+
+  const startEdit  = (key, val) => setEditing(e => ({ ...e, [key]: val }))
+  const cancelEdit = (key)      => setEditing(e => { const n = { ...e }; delete n[key]; return n })
+  const handleSave = (key, txt) => {
+    const next = { ...notes }
+    txt.trim() ? next[key] = txt.trim() : delete next[key]
+    setNotes(next); saveNotes(next); cancelEdit(key)
+  }
+
+  if (!variations.length) return (
+    <p className="exp-variations__empty">✓ Sin variaciones significativas en el período cargado.</p>
+  )
+
+  return (
+    <div className="exp-variations">
+      {variations.map(({ cat, month, amount, med, pct, similar }) => {
+        const key      = `${cat}::${month}`
+        const note     = notes[key] || ''
+        const isEdit   = key in editing
+        const draft    = isEdit ? editing[key] : note
+        const isUp     = pct > 0
+        return (
+          <div key={key} className={`exp-variation exp-variation--${isUp ? 'up' : 'down'}`}>
+            <div className="exp-variation__header">
+              <span className="exp-variation__cat">{CATEGORIES[cat] ?? cat}</span>
+              <span className="exp-variation__month">{fmtMonth(month)}</span>
+              <span className={`exp-variation__pct exp-variation__pct--${isUp ? 'up' : 'down'}`}>
+                {isUp ? '+' : ''}{pct}%
+              </span>
+            </div>
+            <p className="exp-variation__amounts">
+              {fmtEur(amount)} <span className="exp-variation__vs">vs habitual ~{fmtEur(med)}</span>
+            </p>
+            {similar.length > 0 && (
+              <p className="exp-variation__similar">
+                {'Ya ocurrió en '}
+                {similar.map((s, i) => {
+                  const sNote = notes[`${cat}::${s.month}`]
+                  return (
+                    <span key={s.month}>
+                      {i > 0 && ', '}
+                      {fmtMonth(s.month)} ({fmtEur(s.amount)}{sNote ? ` · ${sNote}` : ''})
+                    </span>
+                  )
+                })}
+              </p>
+            )}
+            {isEdit ? (
+              <div className="exp-variation__edit">
+                <textarea
+                  className="exp-variation__textarea"
+                  value={draft}
+                  onChange={e => setEditing(ed => ({ ...ed, [key]: e.target.value }))}
+                  placeholder="¿A qué se debe? Ej: Felix cierre año, informe extra"
+                  rows={2}
+                  autoFocus
+                />
+                <div className="exp-variation__actions">
+                  <button className="exp-variation__save"   onClick={() => handleSave(key, draft)}>Guardar</button>
+                  <button className="exp-variation__cancel" onClick={() => cancelEdit(key)}>Cancelar</button>
+                  {note && <button className="exp-variation__del" onClick={() => handleSave(key, '')}>Borrar nota</button>}
+                </div>
+              </div>
+            ) : note ? (
+              <p className="exp-variation__note">
+                📝 {note}
+                <button className="exp-variation__edit-btn" onClick={() => startEdit(key, note)}>Editar</button>
+              </p>
+            ) : (
+              <button className="exp-variation__add-btn" onClick={() => startEdit(key, '')}>＋ Añadir explicación</button>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ── History charts ────────────────────────────────────────────────────
 function HistoryView({ months, onDeleted }) {
   const [entity, setEntity]                   = useState('all')
   const [excludeInternal, setExcludeInternal] = useState(true)
   const [showManager, setShowManager]         = useState(false)
   const [deletingKey, setDeletingKey]         = useState(null)
+  const [expandedMonths, setExpandedMonths]   = useState(new Set())
+  const [expandedCats,   setExpandedCats]     = useState(new Set())
+  const toggleMonth = (month) => setExpandedMonths(prev => {
+    const next = new Set(prev)
+    next.has(month) ? next.delete(month) : next.add(month)
+    return next
+  })
+  const toggleCat = (key) => setExpandedCats(prev => {
+    const next = new Set(prev)
+    next.has(key) ? next.delete(key) : next.add(key)
+    return next
+  })
   const effectiveExclude = excludeInternal
   const { data, breakdown, loading, error } = useExpenses(months, entity, effectiveExclude)
 
@@ -403,7 +547,7 @@ function HistoryView({ months, onDeleted }) {
     if (!data) return []
     const acc = {}
     data.forEach(r => {
-      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, nominas: 0, nominas_by_entity: {}, by_concepto: {} }
+      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, nominas: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {} }
       acc[r.month].costes   += Math.abs(r.total_costes    || 0)
       acc[r.month].ingresos += Math.abs(r.total_ingresos  || 0)
       acc[r.month].iva_s    += Math.abs(r.iva_soportado   || 0)
@@ -413,8 +557,12 @@ function HistoryView({ months, onDeleted }) {
         const ent = r.entity || 'rocoteca'
         acc[r.month].nominas_by_entity[ent] = (acc[r.month].nominas_by_entity[ent] || 0) + Math.abs(r.nominas)
       }
+      const ent = r.entity || 'rocoteca'
       Object.entries(r.by_concepto || {}).forEach(([k, v]) => {
         acc[r.month].by_concepto[k] = (acc[r.month].by_concepto[k] || 0) + v
+        if (autoCategory(k, false) === 'retirada_efectivo') {
+          acc[r.month].retiradas_by_entity[ent] = (acc[r.month].retiradas_by_entity[ent] || 0) + v
+        }
       })
     })
     return Object.values(acc).sort((a, b) => a.month.localeCompare(b.month))
@@ -430,7 +578,12 @@ function HistoryView({ months, onDeleted }) {
   }, [byMonth])
 
   const nominasData = useMemo(() =>
-    byMonth.map(r => ({ month: fmtMonth(r.month), nominas: r.nominas }))
+    byMonth.map(r => ({
+      month: fmtMonth(r.month),
+      nominas: r.nominas,
+      retiradas_rocoteca: r.retiradas_by_entity?.rocoteca || 0,
+      retiradas_club:     r.retiradas_by_entity?.club     || 0,
+    }))
   , [byMonth])
 
   const chartData = useMemo(() =>
@@ -533,14 +686,29 @@ function HistoryView({ months, onDeleted }) {
               <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
               <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={56} />
               <Tooltip
-                contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
-                labelStyle={{ color: '#f5c842' }}
-                formatter={(v, name) => [fmtEur(v), name === 'net' ? 'Neto mes' : 'Acumulado']}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null
+                  return (
+                    <div style={{ background: '#1b1710', border: '1px solid #3a3020', borderRadius: 6, padding: '8px 12px', fontSize: 12 }}>
+                      <p style={{ color: '#f5c842', margin: '0 0 6px', fontWeight: 700 }}>{label}</p>
+                      {payload.map(p => {
+                        const isNeg = p.value < 0
+                        const color = isNeg ? '#ef4444' : (p.dataKey === 'acumulado' ? '#f5c842' : '#c8a87a')
+                        const display = `${isNeg ? '-' : ''}${fmtEur(p.value)}`
+                        return (
+                          <p key={p.dataKey} style={{ color, margin: '2px 0' }}>
+                            {p.dataKey === 'net' ? 'Neto mes' : 'Acumulado'}: {display}
+                          </p>
+                        )
+                      })}
+                    </div>
+                  )
+                }}
               />
               <Legend formatter={k => k === 'net' ? 'Neto mes' : 'Acumulado'} />
-              <Bar dataKey="net" radius={[3, 3, 0, 0]}>
+              <Bar dataKey="net" fill="#c8a87a" radius={[3, 3, 0, 0]}>
                 {netData.map((e, i) => (
-                  <Cell key={i} fill={e.net >= 0 ? '#94a3b8' : '#475569'} />
+                  <Cell key={i} fill={e.net >= 0 ? '#c8a87a' : '#7c5c3e'} />
                 ))}
               </Bar>
               <Line type="monotone" dataKey="acumulado" stroke="#f5c842" strokeWidth={2} dot={false} />
@@ -549,21 +717,41 @@ function HistoryView({ months, onDeleted }) {
         </>
       )}
 
-      {/* ─── Nóminas por mes ─── */}
-      {nominasData.some(r => r.nominas > 0) && (
+      {/* ─── Nóminas + retiradas por mes ─── */}
+      {nominasData.some(r => r.nominas > 0 || r.retiradas_rocoteca > 0 || r.retiradas_club > 0) && (
         <>
           <p className="exp-chart-title" style={{ marginTop: 16 }}>Nóminas por mes</p>
-          <ResponsiveContainer width="100%" height={140}>
+          <ResponsiveContainer width="100%" height={160}>
             <BarChart data={nominasData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
               <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
               <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={52} />
               <Tooltip
                 contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
-                labelStyle={{ color: '#a78bfa' }}
-                formatter={v => [fmtEur(v), 'Nóminas']}
+                labelStyle={{ color: '#f5c842' }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null
+                  const total = payload.reduce((s, p) => s + (p.value || 0), 0)
+                  const LABELS = { nominas: 'Nóminas', retiradas_rocoteca: 'Retiradas Rocoteca', retiradas_club: 'Retiradas Club' }
+                  return (
+                    <div style={{ background: '#1b1710', border: '1px solid #3a3020', borderRadius: 6, padding: '8px 12px', fontSize: 12 }}>
+                      <p style={{ color: '#f5c842', margin: '0 0 6px', fontWeight: 700 }}>{label}</p>
+                      {payload.map(p => p.value > 0 && (
+                        <p key={p.dataKey} style={{ color: p.fill, margin: '2px 0' }}>
+                          {LABELS[p.dataKey]}: {fmtEur(p.value)}
+                        </p>
+                      ))}
+                      <p style={{ color: '#fff', margin: '6px 0 0', borderTop: '1px solid #3a3020', paddingTop: 6, fontWeight: 700 }}>
+                        Total: {fmtEur(total)}
+                      </p>
+                    </div>
+                  )
+                }}
               />
-              <Bar dataKey="nominas" fill="#a78bfa" radius={[3, 3, 0, 0]} />
+              <Legend formatter={k => k === 'nominas' ? 'Nóminas' : k === 'retiradas_rocoteca' ? 'Retiradas Rocoteca' : 'Retiradas Club'} />
+              <Bar dataKey="nominas"            stackId="a" fill="#a78bfa" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="retiradas_rocoteca" stackId="a" fill="#f472b6" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="retiradas_club"     stackId="a" fill="#fda4af" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </>
@@ -582,45 +770,79 @@ function HistoryView({ months, onDeleted }) {
                 </tr>
               </thead>
               <tbody>
-                {byMonth.map(row => {
-                  // Group raw concepts by category, sum totals
-                  const byCat = {}
+                {[...byMonth].reverse().map(row => {
+                  // Group raw concepts by category, keeping individual lines
+                  const byCatDetailed = {}
                   Object.entries(row.by_concepto).forEach(([concepto, total]) => {
                     const cat = autoCategory(concepto, false)
-                    byCat[cat] = (byCat[cat] || 0) + total
+                    if (!byCatDetailed[cat]) byCatDetailed[cat] = { total: 0, lines: [] }
+                    byCatDetailed[cat].total += total
+                    if (Math.round(total) > 0) byCatDetailed[cat].lines.push({ concepto, total })
                   })
-                  // Filter out 0€ (rounded) entries, sort by total desc
-                  const catEntries = Object.entries(byCat)
-                    .filter(([, v]) => Math.round(v) > 0)
-                    .sort((a, b) => b[1] - a[1])
+                  const catEntries = Object.entries(byCatDetailed)
+                    .filter(([, v]) => Math.round(v.total) > 0)
+                    .sort((a, b) => b[1].total - a[1].total)
 
                   if (row.nominas === 0 && catEntries.length === 0) return null
-                  const monthTotal = row.nominas + catEntries.reduce((s, [, v]) => s + v, 0)
+                  const monthTotal = row.nominas + catEntries.reduce((s, [, v]) => s + v.total, 0)
+                  const isExpanded = expandedMonths.has(row.month)
+
                   return (
                     <React.Fragment key={row.month}>
-                      <tr className="exp-breakdown-month-header">
-                        <td colSpan={2}>{fmtMonth(row.month)}</td>
-                      </tr>
-                      {Object.entries(row.nominas_by_entity || {})
-                        .filter(([, v]) => Math.round(v) > 0)
-                        .sort((a, b) => b[1] - a[1])
-                        .map(([ent, v]) => (
-                          <tr key={`nom-${ent}`} style={{ color: '#a78bfa', fontWeight: 700 }}>
-                            <td>Nóminas {ent === 'club' ? 'Club' : 'Rocoteca'}</td>
-                            <td className="exp-cell--amount">{fmtEur(v)}</td>
-                          </tr>
-                        ))
-                      }
-                      {catEntries.map(([cat, total]) => (
-                        <tr key={cat}>
-                          <td>{CATEGORIES[cat] ?? cat}</td>
-                          <td className="exp-cell--amount">{fmtEur(total)}</td>
-                        </tr>
-                      ))}
-                      <tr className="exp-breakdown-subtotal">
-                        <td className="exp-total-label">Total {fmtMonth(row.month)}</td>
+                      <tr
+                        className="exp-breakdown-month-header exp-breakdown-month-header--toggle"
+                        onClick={() => toggleMonth(row.month)}
+                      >
+                        <td>
+                          <span className="exp-breakdown-chevron">{isExpanded ? '▾' : '▸'}</span>
+                          {fmtMonth(row.month)}
+                        </td>
                         <td className="exp-cell--amount exp-cell--neg">{fmtEur(monthTotal)}</td>
                       </tr>
+
+                      {isExpanded && (
+                        <>
+                          {Object.entries(row.nominas_by_entity || {})
+                            .filter(([, v]) => Math.round(v) > 0)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([ent, v]) => (
+                              <tr key={`nom-${ent}`} className="exp-breakdown-cat" style={{ color: '#a78bfa' }}>
+                                <td>Nóminas {ent === 'club' ? 'Club' : 'Rocoteca'}</td>
+                                <td className="exp-cell--amount">{fmtEur(v)}</td>
+                              </tr>
+                            ))}
+                          {catEntries.map(([cat, { total: catTotal, lines }]) => {
+                            const catKey = `${row.month}::${cat}`
+                            const catExpanded = expandedCats.has(catKey)
+                            const sortedLines = [...lines].sort((a, b) => b.total - a.total)
+                            return (
+                              <React.Fragment key={cat}>
+                                <tr
+                                  className="exp-breakdown-cat exp-breakdown-cat--toggle"
+                                  onClick={() => toggleCat(catKey)}
+                                >
+                                  <td>
+                                    <span className="exp-breakdown-chevron">{catExpanded ? '▾' : '▸'}</span>
+                                    {CATEGORIES[cat] ?? cat}
+                                    <span className="exp-breakdown-cat-count"> ({sortedLines.length})</span>
+                                  </td>
+                                  <td className="exp-cell--amount">{fmtEur(catTotal)}</td>
+                                </tr>
+                                {catExpanded && sortedLines.map(({ concepto, total }, idx) => (
+                                  <tr key={idx} className="exp-breakdown-line">
+                                    <td>{concepto}</td>
+                                    <td className="exp-cell--amount">{fmtEur(total)}</td>
+                                  </tr>
+                                ))}
+                              </React.Fragment>
+                            )
+                          })}
+                          <tr className="exp-breakdown-subtotal">
+                            <td className="exp-total-label">Total {fmtMonth(row.month)}</td>
+                            <td className="exp-cell--amount exp-cell--neg">{fmtEur(monthTotal)}</td>
+                          </tr>
+                        </>
+                      )}
                     </React.Fragment>
                   )
                 })}
@@ -629,6 +851,9 @@ function HistoryView({ months, onDeleted }) {
           </div>
         </>
       )}
+
+      <p className="exp-chart-title" style={{ marginTop: 24 }}>Variaciones a revisar</p>
+      <VariationsPanel byMonth={byMonth} />
 
       <div className="exp-manager">
         <button className="exp-manager-toggle" onClick={() => setShowManager(v => !v)}>

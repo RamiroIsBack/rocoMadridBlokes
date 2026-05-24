@@ -322,6 +322,46 @@
   letter-spacing: 0.05em;
 }
 
+.exp-breakdown-month-header--toggle {
+  cursor: pointer;
+  user-select: none;
+}
+.exp-breakdown-month-header--toggle:hover td {
+  background: rgba(245, 200, 66, 0.14);
+}
+.exp-breakdown-chevron {
+  display: inline-block;
+  width: 14px;
+  font-size: 0.7rem;
+  color: #f5c842;
+  margin-right: 4px;
+}
+.exp-breakdown-cat td {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #d1c9a8;
+  padding: 4px 8px 4px 16px;
+  background: rgba(255,255,255,0.015);
+}
+.exp-breakdown-cat--toggle {
+  cursor: pointer;
+  user-select: none;
+}
+.exp-breakdown-cat--toggle:hover td {
+  background: rgba(255,255,255,0.04);
+}
+.exp-breakdown-cat-count {
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: #6b6040;
+  margin-left: 4px;
+}
+.exp-breakdown-line td {
+  font-size: 0.74rem;
+  color: #6b6040;
+  padding: 2px 8px 2px 28px;
+  font-style: italic;
+}
 .exp-breakdown-month-header td {
   background: rgba(245, 200, 66, 0.08);
   color: #f5c842;
@@ -338,6 +378,170 @@
   color: #aaa;
   border-bottom: 2px solid #3a3020;
 }
+
+/* ── Variations panel ─────────────────────────────────────────────── */
+.exp-variations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.exp-variations__empty {
+  font-size: 0.8rem;
+  color: #6b5f3a;
+  font-style: italic;
+  padding: 4px 0 12px;
+}
+
+.exp-variation {
+  border-left: 3px solid transparent;
+  background: rgba(255,255,255,0.03);
+  border-radius: 0 6px 6px 0;
+  padding: 10px 12px;
+}
+
+.exp-variation--up   { border-left-color: #ef4444; }
+.exp-variation--down { border-left-color: #22c55e; }
+
+.exp-variation__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+
+.exp-variation__cat {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #d1c9a8;
+}
+
+.exp-variation__month {
+  font-size: 0.74rem;
+  color: #6b5f3a;
+}
+
+.exp-variation__pct {
+  margin-left: auto;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.exp-variation__pct--up   { color: #ef4444; }
+.exp-variation__pct--down { color: #22c55e; }
+
+.exp-variation__amounts {
+  font-size: 0.82rem;
+  color: #d1c9a8;
+  margin: 0 0 5px;
+}
+
+.exp-variation__vs {
+  font-size: 0.74rem;
+  color: #6b5f3a;
+}
+
+.exp-variation__similar {
+  font-size: 0.74rem;
+  color: #6b5f3a;
+  font-style: italic;
+  margin: 0 0 5px;
+}
+
+.exp-variation__note {
+  font-size: 0.78rem;
+  color: #a89878;
+  margin: 6px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.exp-variation__edit-btn,
+.exp-variation__add-btn {
+  background: transparent;
+  border: 1px solid #3a3020;
+  border-radius: 4px;
+  color: #6b5f3a;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 2px 7px;
+  font-family: inherit;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.exp-variation__edit-btn:hover,
+.exp-variation__add-btn:hover { color: #f5c842; border-color: #f5c842; }
+
+.exp-variation__add-btn {
+  display: inline-block;
+  margin-top: 6px;
+}
+
+.exp-variation__edit { margin-top: 8px; }
+
+.exp-variation__textarea {
+  width: 100%;
+  background: #120f08;
+  border: 1px solid #3a3020;
+  border-radius: 4px;
+  color: #d1c9a8;
+  font-size: 0.78rem;
+  font-family: inherit;
+  padding: 6px 8px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.exp-variation__textarea:focus { outline: none; border-color: #f5c842; }
+
+.exp-variation__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  align-items: center;
+}
+
+.exp-variation__save {
+  background: #f5c842;
+  color: #1a1208;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 14px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.exp-variation__cancel {
+  background: transparent;
+  color: #6b5f3a;
+  border: 1px solid #3a3020;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s;
+}
+
+.exp-variation__cancel:hover { color: #d1c9a8; }
+
+.exp-variation__del {
+  background: transparent;
+  border: none;
+  color: #7f1d1d;
+  font-size: 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+  margin-left: auto;
+  transition: color 0.15s;
+}
+
+.exp-variation__del:hover { color: #ef4444; }
 
 @media (max-width: 600px) {
   .exp-kpi { min-width: 100%; }

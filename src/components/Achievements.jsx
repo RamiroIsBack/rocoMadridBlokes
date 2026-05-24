@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import './Achievements.css'
 
 const STORAGE_KEY = 'blokes_achievements_seen'
+const HOF_GIF = 'https://rocomadrid.com/wp-content/uploads/2026/05/gifnonoguinaojo.gif'
 
 const CATEGORY_STYLE = {
   training:  { from: '#f97316', to: '#fbbf24' },
@@ -23,8 +24,33 @@ function StarBurst() {
   )
 }
 
+function AchievementPopup({ achievement, onClose }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 6000)
+    return () => clearTimeout(t)
+  }, [onClose])
+
+  const { from, to } = CATEGORY_STYLE[achievement.category] || CATEGORY_STYLE.blokes
+
+  return (
+    <div className="ach-popup-overlay" onClick={onClose}>
+      <div className="ach-popup" onClick={e => e.stopPropagation()}>
+        <img src={HOF_GIF} alt="" className="ach-popup__gif" />
+        <div className="ach-popup__badge" style={{ background: `linear-gradient(135deg, ${from}, ${to})` }}>
+          <span className="ach-popup__emoji">{achievement.emoji}</span>
+        </div>
+        <p className="ach-popup__new">¡Nuevo logro!</p>
+        <h2 className="ach-popup__title">{achievement.title}</h2>
+        <p className="ach-popup__desc">{achievement.desc}</p>
+        <button className="ach-popup__btn" onClick={onClose}>¡Genial!</button>
+      </div>
+    </div>
+  )
+}
+
 export default function Achievements({ achievements }) {
   const [newIds, setNewIds] = useState(() => new Set())
+  const [popupQueue, setPopupQueue] = useState([])
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -34,16 +60,25 @@ export default function Achievements({ achievements }) {
     try {
       const seen = new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'))
       const freshIds = earned.filter(id => !seen.has(id))
-      if (freshIds.length) setNewIds(new Set(freshIds))
+      if (freshIds.length) {
+        setNewIds(new Set(freshIds))
+        const freshAchs = achievements.filter(a => freshIds.includes(a.id))
+        setPopupQueue(freshAchs)
+      }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(earned))
     } catch {}
   }, [achievements])
+
+  const dismissPopup = () => setPopupQueue(q => q.slice(1))
 
   const earned = achievements.filter(a => a.earned)
   const locked = achievements.filter(a => !a.earned)
 
   return (
     <div className="achievements">
+      {popupQueue.length > 0 && (
+        <AchievementPopup achievement={popupQueue[0]} onClose={dismissPopup} />
+      )}
       {earned.length === 0 && (
         <p className="achievements__empty">¡Completa retos para ganar medallas!</p>
       )}

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate } from 'react-router-dom'
 import MainPage from './pages/MainPage'
 import AdminApp from './admin/AdminApp'
@@ -17,12 +17,12 @@ const PRODUCT_NAMES = { 'Classes': 'Clases', 'Single Days': 'Días sueltos' }
 const SUBSALA_POSITIONS = {
   '1': { top: '5%',   left: '50%',  transform: 'translateX(-50%)' },
   '2': { top: '5%',   left: '18%',  transform: 'translateX(-50%)' },
-  '3': { top: '52%',  left: 'calc(18% + 30px)',  transform: 'translateX(-50%)' },
-  '4': { top: '52%',  left: 'calc(50% + 10px)',  transform: 'translateX(-50%)' },
-  '5': { bottom: '5%', right: 'calc(18% + 80px)', transform: 'translateX(50%)' },
-  '6': { bottom: '5%', left: 'calc(50% - 20px)', transform: 'translateX(-50%)' },
+  '3': { top: '52%',  left: '23.5%', transform: 'translateX(-50%)' },
+  '4': { top: '52%',  left: '52%',  transform: 'translateX(-50%)' },
+  '5': { bottom: '5%', right: '32.5%', transform: 'translateX(50%)' },
+  '6': { bottom: '5%', left: '46.5%', transform: 'translateX(-50%)' },
   '7': { bottom: '5%', left: '18%', transform: 'translateX(-50%)' },
-  '8': { top: 'calc(52% - 15px)',  right: '18%', transform: 'translateX(50%)' },
+  '8': { top: '44.5%', right: '18%', transform: 'translateX(50%)' },
 }
 
 const KNOWN_ROUTES = ['/progreso', '/setter', '/stats', '/entrenamientos', '/superadmin', '/mis-blokes']
@@ -59,7 +59,28 @@ function buildLoginUrl(sd) {
 
 export default function App() {
   const [logoutOpen, setLogoutOpen] = useState(false)
+  const [navFloating, setNavFloating] = useState(false)
+  const [navVisible, setNavVisible] = useState(false)
+  const lastScrollY = useRef(0)
   const sd = window.blokesSiteData || {}
+
+  useEffect(() => {
+    const THRESHOLD = 180
+    const onScroll = () => {
+      const y = window.scrollY
+      const goingUp = y < lastScrollY.current
+      if (y > THRESHOLD) {
+        setNavFloating(true)
+        setNavVisible(goingUp)
+      } else {
+        setNavFloating(false)
+        setNavVisible(false)
+      }
+      lastScrollY.current = y
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
   const { cards } = useWordPressPosts()
 
   const subsalaStats = useMemo(() => {
@@ -177,7 +198,7 @@ export default function App() {
             })}
           </div>
 
-          <nav className="app-nav">
+          <nav className={`app-nav${navFloating ? ' app-nav--floating' : ''}${navFloating && navVisible ? ' app-nav--visible' : ''}`}>
             <ul className="app-nav__list">
               <li className="app-nav__item">
                 <NavLink to="/" className="app-nav__link" end>Colección</NavLink>

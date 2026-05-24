@@ -85,26 +85,6 @@
 }
 
 /* ── Training selector ── */
-.mi-clase__selector-wrap  { display: flex; gap: 20px; align-items: flex-start; }
-.mi-clase__selector-right { flex: 1; min-width: 0; }
-.mi-clase__test-btns {
-  display: flex;
-  gap: 6px;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
-  margin-bottom: 12px;
-  padding-bottom: 2px;
-}
-.mi-clase__test-btns::-webkit-scrollbar { display: none; }
-.mi-clase__test-btn {
-  padding: 5px 14px; border-radius: 20px; border: 1.5px solid var(--zone-color);
-  background: transparent; color: var(--zone-color); font-size: 0.78rem; font-weight: 600;
-  cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s;
-  flex-shrink: 0; white-space: nowrap;
-}
-.mi-clase__test-btn--active { background: var(--zone-color); color: #fff; }
 .mi-clase__no-data { font-size: 0.82rem; color: #9ca3af; font-style: italic; padding: 16px 0; }
 
 /* ── Training leaderboard rows ── */
@@ -344,7 +324,6 @@
 }
 
 @media (max-width: 480px) {
-  .mi-clase__selector-wrap { flex-direction: column; align-items: center; }
-  .mi-clase__top-blokes    { grid-template-columns: 1fr 1fr; }
+  .mi-clase__top-blokes { grid-template-columns: 1fr 1fr; }
   .mi-clase__bloke-name, .mi-clase__name { width: 64px; }
 }

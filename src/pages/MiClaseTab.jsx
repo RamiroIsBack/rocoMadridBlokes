@@ -175,7 +175,7 @@ export default function MiClaseTab() {
           </div>
         )}
 
-        <div className="mi-clase__selector-wrap">
+        <div className="training-block">
           <BodyDiagram
             activeZone={activeZone}
             onSelectZone={zone => {
@@ -183,53 +183,50 @@ export default function MiClaseTab() {
               setActiveTest(ZONES[zone].tests[0])
             }}
           />
-          <div className="mi-clase__selector-right">
-            <div className="mi-clase__test-btns">
+          <div className="training-select-row">
+            <select
+              value={activeTest}
+              onChange={e => setActiveTest(Number(e.target.value))}
+              className="training-test-select"
+            >
               {ZONES[activeZone].tests.map(tid => (
-                <button
-                  key={tid}
-                  className={`mi-clase__test-btn ${activeTest === tid ? 'mi-clase__test-btn--active' : ''}`}
-                  style={{ '--zone-color': ZONES[activeZone].color }}
-                  onClick={() => setActiveTest(tid)}
-                >
-                  {TESTS[tid].label}
-                </button>
+                <option key={tid} value={tid}>{TESTS[tid].label} ({TESTS[tid].unit})</option>
               ))}
-              <button className="test-info-btn" onClick={() => setTestInfoId(activeTest)} title="Descripción del test">ℹ</button>
-            </div>
-            {testEntries.length === 0 ? (
-              <p className="mi-clase__no-data">Sin datos en este test todavía</p>
-            ) : (
-              <div className="mi-clase__leaderboard">
-                {testEntries.map((m, i) => {
-                  const pct    = m.tests[activeTest].pct
-                  const barPct = Math.abs(pct) / maxPct * 100
-                  return (
-                    <div
-                      key={i}
-                      className={`mi-clase__row${m.is_me ? ' mi-clase__row--me' : ''}`}
-                      style={{ '--zone-color': ZONES[activeZone].color, animationDelay: `${i * 55}ms` }}
-                    >
-                      <span className="mi-clase__pos">#{i + 1}</span>
-                      <span className="mi-clase__name">{m.is_me ? 'Tú' : m.name}</span>
-                      <div className="mi-clase__bar-wrap">
-                        <div
-                          className="mi-clase__bar"
-                          style={{
-                            width: animated ? `${barPct}%` : '0%',
-                            background: pct >= 0 ? 'var(--zone-color)' : '#f97316',
-                          }}
-                        />
-                      </div>
-                      <span className={`mi-clase__pct${pct < 0 ? ' mi-clase__pct--neg' : ''}`}>
-                        {pct >= 0 ? '+' : ''}{pct}%
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
+            </select>
+            <button className="test-info-btn" onClick={() => setTestInfoId(activeTest)} title="Descripción del test">ℹ</button>
           </div>
+          {testEntries.length === 0 ? (
+            <p className="mi-clase__no-data">Sin datos en este test todavía</p>
+          ) : (
+            <div className="mi-clase__leaderboard">
+              {testEntries.map((m, i) => {
+                const pct    = m.tests[activeTest].pct
+                const barPct = Math.abs(pct) / maxPct * 100
+                return (
+                  <div
+                    key={i}
+                    className={`mi-clase__row${m.is_me ? ' mi-clase__row--me' : ''}`}
+                    style={{ '--zone-color': ZONES[activeZone].color, animationDelay: `${i * 55}ms` }}
+                  >
+                    <span className="mi-clase__pos">#{i + 1}</span>
+                    <span className="mi-clase__name">{m.is_me ? 'Tú' : m.name}</span>
+                    <div className="mi-clase__bar-wrap">
+                      <div
+                        className="mi-clase__bar"
+                        style={{
+                          width: animated ? `${barPct}%` : '0%',
+                          background: pct >= 0 ? 'var(--zone-color)' : '#f97316',
+                        }}
+                      />
+                    </div>
+                    <span className={`mi-clase__pct${pct < 0 ? ' mi-clase__pct--neg' : ''}`}>
+                      {pct >= 0 ? '+' : ''}{pct}%
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </section>
 
