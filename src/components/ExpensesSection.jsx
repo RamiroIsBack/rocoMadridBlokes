@@ -657,6 +657,7 @@ function HistoryView({ months, onDeleted }) {
             contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
             labelStyle={{ color: '#f5c842' }}
             formatter={(v, name) => [fmtEur(v), name === 'gastos' ? 'Gastos' : 'Ingresos banco']}
+            wrapperStyle={{ transform: 'translateY(-10px)' }}
           />
           <Legend formatter={k => k === 'gastos' ? 'Gastos' : 'Ingresos banco'} />
           <Bar dataKey="ingresos_banco" fill="#60a5fa" radius={[3,3,0,0]} />
@@ -674,6 +675,7 @@ function HistoryView({ months, onDeleted }) {
             contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
             labelStyle={{ color: '#f97316' }}
             formatter={(v, name) => [fmtEur(v), name === 'iva_soportado' ? 'IVA soportado (gastos)' : 'IVA repercutido (ventas)']}
+            wrapperStyle={{ transform: 'translateY(-10px)' }}
           />
           <Legend formatter={k => k === 'iva_soportado' ? 'IVA soportado' : 'IVA repercutido'} />
           <Bar dataKey="iva_repercutido" fill="#f97316" radius={[3,3,0,0]} />
@@ -691,6 +693,7 @@ function HistoryView({ months, onDeleted }) {
               <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
               <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={56} />
               <Tooltip
+                wrapperStyle={{ transform: 'translateY(-10px)' }}
                 content={({ active, payload, label }) => {
                   if (!active || !payload?.length) return null
                   return (
@@ -734,6 +737,7 @@ function HistoryView({ months, onDeleted }) {
               <Tooltip
                 contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                 labelStyle={{ color: '#f5c842' }}
+                wrapperStyle={{ transform: 'translateY(-10px)' }}
                 content={({ active, payload, label }) => {
                   if (!active || !payload?.length) return null
                   const total = payload.reduce((s, p) => s + (p.value || 0), 0)
