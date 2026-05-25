@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Deploy dist/ to SiteGround via FTP
+      - name: Deploy dist/assets/ to SiteGround
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.SFTP_HOST }}
@@ -23,6 +23,17 @@ jobs:
           password: ${{ secrets.SFTP_PASSWORD }}
           port: 21
           protocol: ftps
-          local-dir: ./dist/
-          server-dir: ${{ secrets.SFTP_REMOTE_PATH }}
+          local-dir: ./dist/assets/
+          server-dir: ${{ secrets.SFTP_REMOTE_PATH }}assets/
           dangerous-clean-slate: false
+
+      - name: Upload PHP files via FTPS
+        run: |
+          curl --ssl-reqd \
+            --user "${{ secrets.SFTP_USERNAME }}:${{ secrets.SFTP_PASSWORD }}" \
+            -T server-index.php \
+            "ftp://${{ secrets.SFTP_HOST }}:21${{ secrets.SFTP_REMOTE_PATH }}index.php"
+          curl --ssl-reqd \
+            --user "${{ secrets.SFTP_USERNAME }}:${{ secrets.SFTP_PASSWORD }}" \
+            -T progreso-extension1-1.php \
+            "ftp://${{ secrets.SFTP_HOST }}:21${{ secrets.SFTP_PLUGIN_PATH }}progreso-extension1-1.php"
