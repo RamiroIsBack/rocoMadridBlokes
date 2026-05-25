@@ -6,6 +6,9 @@ on:
       - master
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   deploy:
     name: Deploy via FTP
@@ -26,14 +29,15 @@ jobs:
           local-dir: ./dist/assets/
           server-dir: ${{ secrets.SFTP_REMOTE_PATH }}assets/
           dangerous-clean-slate: false
+          security: loose
 
       - name: Upload PHP files via FTPS
         run: |
-          curl --ssl-reqd \
+          curl -k --ssl-reqd \
             --user "${{ secrets.SFTP_USERNAME }}:${{ secrets.SFTP_PASSWORD }}" \
             -T server-index.php \
             "ftp://${{ secrets.SFTP_HOST }}:21${{ secrets.SFTP_REMOTE_PATH }}index.php"
-          curl --ssl-reqd \
+          curl -k --ssl-reqd \
             --user "${{ secrets.SFTP_USERNAME }}:${{ secrets.SFTP_PASSWORD }}" \
             -T progreso-extension1-1.php \
             "ftp://${{ secrets.SFTP_HOST }}:21${{ secrets.SFTP_PLUGIN_PATH }}progreso-extension1-1.php"
