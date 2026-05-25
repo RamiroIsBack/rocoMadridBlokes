@@ -547,7 +547,7 @@ function HistoryView({ months, onDeleted }) {
     if (!data) return []
     const acc = {}
     data.forEach(r => {
-      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, nominas: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {} }
+      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, nominas: 0, ss: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {} }
       acc[r.month].costes   += Math.abs(r.total_costes    || 0)
       acc[r.month].ingresos += Math.abs(r.total_ingresos  || 0)
       acc[r.month].iva_s    += Math.abs(r.iva_soportado   || 0)
@@ -560,8 +560,12 @@ function HistoryView({ months, onDeleted }) {
       const ent = r.entity || 'rocoteca'
       Object.entries(r.by_concepto || {}).forEach(([k, v]) => {
         acc[r.month].by_concepto[k] = (acc[r.month].by_concepto[k] || 0) + v
-        if (autoCategory(k, false) === 'retirada_efectivo') {
+        const cat = autoCategory(k, false)
+        if (cat === 'retirada_efectivo') {
           acc[r.month].retiradas_by_entity[ent] = (acc[r.month].retiradas_by_entity[ent] || 0) + v
+        }
+        if (cat === 'ss') {
+          acc[r.month].ss += v
         }
       })
     })
@@ -580,7 +584,8 @@ function HistoryView({ months, onDeleted }) {
   const nominasData = useMemo(() =>
     byMonth.map(r => ({
       month: fmtMonth(r.month),
-      nominas: r.nominas,
+      nominas:            r.nominas,
+      ss:                 r.ss || 0,
       retiradas_rocoteca: r.retiradas_by_entity?.rocoteca || 0,
       retiradas_club:     r.retiradas_by_entity?.club     || 0,
     }))
@@ -718,7 +723,7 @@ function HistoryView({ months, onDeleted }) {
       )}
 
       {/* ─── Nóminas + retiradas por mes ─── */}
-      {nominasData.some(r => r.nominas > 0 || r.retiradas_rocoteca > 0 || r.retiradas_club > 0) && (
+      {nominasData.some(r => r.nominas > 0 || r.ss > 0 || r.retiradas_rocoteca > 0 || r.retiradas_club > 0) && (
         <>
           <p className="exp-chart-title" style={{ marginTop: 16 }}>Nóminas por mes</p>
           <ResponsiveContainer width="100%" height={160}>
@@ -732,7 +737,7 @@ function HistoryView({ months, onDeleted }) {
                 content={({ active, payload, label }) => {
                   if (!active || !payload?.length) return null
                   const total = payload.reduce((s, p) => s + (p.value || 0), 0)
-                  const LABELS = { nominas: 'Nóminas', retiradas_rocoteca: 'Retiradas Rocoteca', retiradas_club: 'Retiradas Club' }
+                  const LABELS = { nominas: 'Nóminas', ss: 'Seg. Social', retiradas_rocoteca: 'Retiradas Rocoteca', retiradas_club: 'Retiradas Club' }
                   return (
                     <div style={{ background: '#1b1710', border: '1px solid #3a3020', borderRadius: 6, padding: '8px 12px', fontSize: 12 }}>
                       <p style={{ color: '#f5c842', margin: '0 0 6px', fontWeight: 700 }}>{label}</p>
@@ -748,8 +753,9 @@ function HistoryView({ months, onDeleted }) {
                   )
                 }}
               />
-              <Legend formatter={k => k === 'nominas' ? 'Nóminas' : k === 'retiradas_rocoteca' ? 'Retiradas Rocoteca' : 'Retiradas Club'} />
+              <Legend formatter={k => ({ nominas: 'Nóminas', ss: 'Seg. Social', retiradas_rocoteca: 'Retiradas Rocoteca', retiradas_club: 'Retiradas Club' }[k] || k)} />
               <Bar dataKey="nominas"            stackId="a" fill="#a78bfa" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="ss"                 stackId="a" fill="#7c3aed" radius={[0, 0, 0, 0]} />
               <Bar dataKey="retiradas_rocoteca" stackId="a" fill="#f472b6" radius={[0, 0, 0, 0]} />
               <Bar dataKey="retiradas_club"     stackId="a" fill="#fda4af" radius={[3, 3, 0, 0]} />
             </BarChart>
