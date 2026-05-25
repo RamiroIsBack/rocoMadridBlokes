@@ -546,3 +546,7 @@
 @media (max-width: 600px) {
   .exp-kpi { min-width: 100%; }
 }
+
+.exp-history .recharts-tooltip-wrapper {
+  translate: 0 -10px;
+}
