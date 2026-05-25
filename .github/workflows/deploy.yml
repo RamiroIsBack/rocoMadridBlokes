@@ -6,6 +6,9 @@ on:
       - master
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   deploy:
     name: Deploy via FTP
@@ -14,6 +17,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install lftp
+        run: sudo apt-get install -y lftp
 
       - name: Deploy dist/assets/ to SiteGround
         env:
