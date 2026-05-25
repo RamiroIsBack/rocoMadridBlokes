@@ -1,46 +1,21 @@
 name: 🚀 Deploy to Production (SiteGround)
 
-# Triggers on every push to master
 on:
   push:
     branches:
       - master
-
-  # Also allows manual trigger from the Actions tab
   workflow_dispatch:
 
 jobs:
-  build-and-deploy:
-    name: Build & Deploy via SFTP
+  deploy:
+    name: Deploy via FTP
     runs-on: ubuntu-latest
 
     steps:
-      # ─── 1. Checkout the code ──────────────────────────────────────────────
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ─── 2. Set up Node.js ─────────────────────────────────────────────────
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      # ─── 3. Install dependencies ───────────────────────────────────────────
-      - name: Install dependencies
-        run: npm ci
-
-      # ─── 4. Build the Vite/React app ───────────────────────────────────────
-      # vite.config.js → outDir: 'dist' (confirmed)
-      - name: Build app
-        run: npm run build
-        env:
-          NODE_ENV: production
-
-      # ─── 5. Deploy via FTP ─────────────────────────────────────────────────
-      # Using SamKirkland/FTP-Deploy-Action — more reliable than SFTP on cPanel hosts.
-      # Connects via FTPS (FTP over TLS) on port 21, which SiteGround supports natively.
-      - name: Deploy to SiteGround via FTP
+      - name: Deploy dist/ to SiteGround via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.SFTP_HOST }}
@@ -48,13 +23,6 @@ jobs:
           password: ${{ secrets.SFTP_PASSWORD }}
           port: 21
           protocol: ftps
-
-          # Upload only the built dist/ folder
           local-dir: ./dist/
-
-          # ⚠️ Remote path — must end with /
-          # Should point to the blokes-dev/ subfolder on your server
           server-dir: ${{ secrets.SFTP_REMOTE_PATH }}
-
-          # Only uploads changed files (faster on subsequent deploys)
           dangerous-clean-slate: false
