@@ -18,9 +18,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install lftp
-        run: sudo apt-get install -y lftp
-
       - name: Deploy dist/assets/ to SiteGround
         env:
           FTP_HOST: ${{ secrets.SFTP_HOST }}
@@ -28,13 +25,14 @@ jobs:
           FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
           FTP_PATH: ${{ secrets.SFTP_REMOTE_PATH }}
         run: |
-          lftp -u "$FTP_USER","$FTP_PASS" -e "
-          set ssl:verify-certificate no
-          set ftp:ssl-force yes
-          set ftp:ssl-protect-data yes
-          mirror --reverse --verbose --only-newer ./dist/assets/ ${FTP_PATH}assets/
-          quit
-          " ftp://$FTP_HOST:21
+          for f in dist/assets/*; do
+            [ -f "$f" ] || continue
+            echo "Uploading $f..."
+            curl -k --ssl-reqd \
+              --user "$FTP_USER:$FTP_PASS" \
+              -T "$f" \
+              "ftp://$FTP_HOST:21${FTP_PATH}assets/$(basename $f)"
+          done
 
       - name: Upload PHP files
         env:
