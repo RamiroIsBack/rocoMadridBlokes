@@ -25,17 +25,33 @@ jobs:
           FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
           FTP_PATH: ${{ secrets.SFTP_REMOTE_PATH }}
         run: |
-          echo "=== dist/assets/ contents ==="
+          # ── 1. Borrar ficheros viejos en assets/ del servidor ──────────────
+          echo "=== Limpiando assets/ antiguos en el servidor ==="
+          listing=$(curl -sk --ssl-reqd \
+            --user "$FTP_USER:$FTP_PASS" \
+            "ftp://$FTP_HOST:21${FTP_PATH}assets/" 2>/dev/null || true)
+          while IFS= read -r fname; do
+            fname=$(echo "$fname" | tr -d '\r\n ')
+            [ -z "$fname" ] && continue
+            echo "Borrando: $fname"
+            curl -sk --ssl-reqd \
+              --user "$FTP_USER:$FTP_PASS" \
+              -Q "DELE ${FTP_PATH}assets/$fname" \
+              "ftp://$FTP_HOST:21/" || true
+          done <<< "$listing"
+
+          # ── 2. Subir nuevos assets ─────────────────────────────────────────
+          echo "=== Subiendo dist/assets/ ==="
           ls -la dist/assets/
           for f in dist/assets/*; do
             [ -f "$f" ] || continue
             fname=$(basename "$f")
             url="ftp://$FTP_HOST:21${FTP_PATH}assets/$fname"
-            echo "Uploading $fname → $url"
-            curl -v -k --ssl-reqd --ftp-create-dirs --fail \
+            echo "Uploading $fname"
+            curl -sk --ssl-reqd --ftp-create-dirs --fail \
               --user "$FTP_USER:$FTP_PASS" \
               -T "$f" \
-              "$url" || { echo "FAILED uploading $fname (exit $?)"; exit 1; }
+              "$url" || { echo "FAILED: $fname (exit $?)"; exit 1; }
             echo "OK: $fname"
           done
 
