@@ -28,7 +28,7 @@ jobs:
           for f in dist/assets/*; do
             [ -f "$f" ] || continue
             echo "Uploading $f..."
-            curl -k --ssl-reqd \
+            curl -k --ssl-reqd --ftp-create-dirs \
               --user "$FTP_USER:$FTP_PASS" \
               -T "$f" \
               "ftp://$FTP_HOST:21${FTP_PATH}assets/$(basename $f)"
