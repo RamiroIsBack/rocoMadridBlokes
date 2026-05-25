@@ -6,9 +6,6 @@ on:
       - master
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   deploy:
     name: Deploy via FTP
@@ -19,25 +16,33 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Deploy dist/assets/ to SiteGround
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.SFTP_HOST }}
-          username: ${{ secrets.SFTP_USERNAME }}
-          password: ${{ secrets.SFTP_PASSWORD }}
-          port: 21
-          protocol: ftps
-          local-dir: ./dist/assets/
-          server-dir: ${{ secrets.SFTP_REMOTE_PATH }}assets/
-          dangerous-clean-slate: false
-          security: loose
+        env:
+          FTP_HOST: ${{ secrets.SFTP_HOST }}
+          FTP_USER: ${{ secrets.SFTP_USERNAME }}
+          FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
+          FTP_PATH: ${{ secrets.SFTP_REMOTE_PATH }}
+        run: |
+          lftp -u "$FTP_USER","$FTP_PASS" -e "
+          set ssl:verify-certificate no
+          set ftp:ssl-force yes
+          set ftp:ssl-protect-data yes
+          mirror --reverse --verbose --only-newer ./dist/assets/ ${FTP_PATH}assets/
+          quit
+          " ftp://$FTP_HOST:21
 
-      - name: Upload PHP files via FTPS
+      - name: Upload PHP files
+        env:
+          FTP_HOST: ${{ secrets.SFTP_HOST }}
+          FTP_USER: ${{ secrets.SFTP_USERNAME }}
+          FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
+          FTP_PATH: ${{ secrets.SFTP_REMOTE_PATH }}
+          PLUGIN_PATH: ${{ secrets.SFTP_PLUGIN_PATH }}
         run: |
           curl -k --ssl-reqd \
-            --user "${{ secrets.SFTP_USERNAME }}:${{ secrets.SFTP_PASSWORD }}" \
+            --user "$FTP_USER:$FTP_PASS" \
             -T server-index.php \
-            "ftp://${{ secrets.SFTP_HOST }}:21${{ secrets.SFTP_REMOTE_PATH }}index.php"
+            "ftp://$FTP_HOST:21${FTP_PATH}index.php"
           curl -k --ssl-reqd \
-            --user "${{ secrets.SFTP_USERNAME }}:${{ secrets.SFTP_PASSWORD }}" \
+            --user "$FTP_USER:$FTP_PASS" \
             -T progreso-extension1-1.php \
-            "ftp://${{ secrets.SFTP_HOST }}:21${{ secrets.SFTP_PLUGIN_PATH }}progreso-extension1-1.php"
+            "ftp://$FTP_HOST:21${PLUGIN_PATH}progreso-extension1-1.php"
