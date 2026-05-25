@@ -37,22 +37,24 @@ jobs:
         env:
           NODE_ENV: production
 
-      # ─── 5. Deploy via SFTP ────────────────────────────────────────────────
-      - name: Deploy to SiteGround via SFTP
-        uses: wlixcc/SFTP-Deploy-Action@v1.2.4
+      # ─── 5. Deploy via FTP ─────────────────────────────────────────────────
+      # Using SamKirkland/FTP-Deploy-Action — more reliable than SFTP on cPanel hosts.
+      # Connects via FTPS (FTP over TLS) on port 21, which SiteGround supports natively.
+      - name: Deploy to SiteGround via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.SFTP_HOST }}
           username: ${{ secrets.SFTP_USERNAME }}
           password: ${{ secrets.SFTP_PASSWORD }}
-          port: ${{ secrets.SFTP_PORT }}
+          port: 21
+          protocol: ftps
 
-          # Uploads the built app (dist/ folder contents)
-          local_path: './dist/*'
+          # Upload only the built dist/ folder
+          local-dir: ./dist/
 
-          # ⚠️ Set SFTP_REMOTE_PATH in GitHub Secrets before pushing!
+          # ⚠️ Remote path — must end with /
           # Should point to the blokes-dev/ subfolder on your server
-          # e.g. /home/youraccount/public_html/blokes-dev/
-          remote_path: ${{ secrets.SFTP_REMOTE_PATH }}
+          server-dir: ${{ secrets.SFTP_REMOTE_PATH }}
 
-          sftpArgs: '-o ConnectTimeout=10'
-          delete_remote_files: false
+          # Only uploads changed files (faster on subsequent deploys)
+          dangerous-clean-slate: false
