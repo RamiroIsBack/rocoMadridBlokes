@@ -25,13 +25,18 @@ jobs:
           FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
           FTP_PATH: ${{ secrets.SFTP_REMOTE_PATH }}
         run: |
+          echo "=== dist/assets/ contents ==="
+          ls -la dist/assets/
           for f in dist/assets/*; do
             [ -f "$f" ] || continue
-            echo "Uploading $f..."
-            curl -k --ssl-reqd --ftp-create-dirs \
+            fname=$(basename "$f")
+            url="ftp://$FTP_HOST:21${FTP_PATH}assets/$fname"
+            echo "Uploading $fname → $url"
+            curl -v -k --ssl-reqd --ftp-create-dirs --fail \
               --user "$FTP_USER:$FTP_PASS" \
               -T "$f" \
-              "ftp://$FTP_HOST:21${FTP_PATH}assets/$(basename $f)"
+              "$url" || { echo "FAILED uploading $fname (exit $?)"; exit 1; }
+            echo "OK: $fname"
           done
 
       - name: Upload PHP files
