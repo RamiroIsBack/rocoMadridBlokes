@@ -26,19 +26,25 @@ $GLOBALS['blokes_app_slugs'] = ['blokes-dev'];
 
 // ── App-level role whitelist ────────────────────────────────────────────
 // Determines what the React SPA shows — independent of WordPress roles.
-// WordPress super_admins/admins NOT in these lists get 'admin' app role.
+// Only users explicitly listed here get elevated access; WP roles are ignored.
 $GLOBALS['blokes_superadmin_emails'] = array(
     'rocomadrid7a@gmail.com',     // Ramiro
     'javier_buendia@hotmail.com', // Javier Buendía
-    'alvilu2@hotmail.com',        // Álvaro (alvilu2)
-    'xaruman2007@gmail.com',      // Víctor (xaruman2007)
+    'alvilu2@hotmail.com',        // Álvaro
 );
-$GLOBALS['blokes_admin_emails'] = array();
+$GLOBALS['blokes_admin_emails'] = array(
+    'caye.suomi@gmail.com',
+    'rocomadridgestion@gmail.com',
+    'sigurdbaum@yahoo.es',
+    'sara.coronadosanz@gmail.com',
+    'ana.llorenteg03@gmail.com',
+    'alobo@ymail.com',
+);
 
 /**
  * Returns the app-level role for the current user.
  * Checked against email whitelists — independent of WordPress roles.
- *   'superadmin' → panel financiero completo (solo Ramiro)
+ *   'superadmin' → panel financiero completo
  *   'admin'      → secciones de gestión sin panel financiero
  *   'member'     → usuario logueado sin permisos de gestión
  *   'guest'      → no logueado
@@ -50,8 +56,6 @@ function blokes_get_app_role() {
     $admin_emails = array_map('strtolower', $GLOBALS['blokes_admin_emails']);
     if (in_array($email, $sa_emails))    return 'superadmin';
     if (in_array($email, $admin_emails)) return 'admin';
-    // WordPress super_admins/admins not in the whitelist → admin (no financial panel)
-    if (is_super_admin() || current_user_can('administrator')) return 'admin';
     return 'member';
 }
 
