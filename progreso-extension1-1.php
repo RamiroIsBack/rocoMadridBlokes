@@ -39,6 +39,7 @@ $GLOBALS['blokes_admin_emails'] = array(
     'sara.coronadosanz@gmail.com',
     'ana.llorenteg03@gmail.com',
     'alobo@ymail.com',
+    'luciapcaas@gmail.com',       // Lucía
 );
 
 /**
