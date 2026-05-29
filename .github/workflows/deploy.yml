@@ -30,8 +30,8 @@ jobs:
           listing=$(curl -sk --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
             "ftp://$FTP_HOST:21${FTP_PATH}assets/" 2>/dev/null || true)
-          while IFS= read -r fname; do
-            fname=$(echo "$fname" | tr -d '\r\n ')
+          while IFS= read -r line; do
+            fname=$(echo "$line" | awk '{print $NF}' | tr -d '\r')
             [ -z "$fname" ] && continue
             echo "Borrando: $fname"
             curl -sk --ssl-reqd \
