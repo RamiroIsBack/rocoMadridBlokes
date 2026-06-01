@@ -836,7 +836,17 @@ function blokes_toggle_completion($request) {
     update_user_meta($user_id, '_blokes_completion_log', $log);
     update_post_meta($post_id, '_bloke_completion_count', $count);
 
-    return array('completed' => $completed, 'count' => $count, 'first_ascent' => $first_ascent);
+    $league_update = null;
+    if ($completed) {
+        $league_update = blokes_register_top_for_leagues($user_id, $post_id);
+    }
+
+    return array(
+        'completed'    => $completed,
+        'count'        => $count,
+        'first_ascent' => isset($first_ascent) ? $first_ascent : false,
+        'league'       => $league_update,
+    );
 }
 
 function blokes_rate_bloke($request) {
@@ -1621,4 +1631,431 @@ function superadmin_classes($request) {
     usort($data, function($a, $b) { return $b['active'] <=> $a['active']; });
 
     return rest_ensure_response(array('data' => $data));
+}
+
+// ============================================================
+//  SISTEMA DE LIGAS
+// ============================================================
+
+// ── Instalación de tablas ─────────────────────────────────────
+add_action('plugins_loaded', function() {
+    if (get_option('blokes_leagues_db_version') !== '1.0') {
+        blokes_leagues_create_tables();
+        blokes_leagues_seed();
+        update_option('blokes_leagues_db_version', '1.0');
+    }
+});
+
+function blokes_leagues_create_tables() {
+    global $wpdb;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+    dbDelta("CREATE TABLE IF NOT EXISTS {$wpdb->prefix}blokes_leagues (
+        id           SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        name         VARCHAR(64)       NOT NULL,
+        slug         VARCHAR(32)       NOT NULL,
+        tier         TINYINT UNSIGNED  NOT NULL,
+        promo_pct    FLOAT             NOT NULL DEFAULT 0.30,
+        demotion_pct FLOAT             NOT NULL DEFAULT 0.20,
+        PRIMARY KEY (id),
+        UNIQUE KEY tier (tier)
+    ) $charset;");
+
+    dbDelta("CREATE TABLE IF NOT EXISTS {$wpdb->prefix}blokes_user_leagues (
+        id             INT UNSIGNED      NOT NULL AUTO_INCREMENT,
+        user_id        BIGINT UNSIGNED   NOT NULL,
+        league_id      SMALLINT UNSIGNED NOT NULL,
+        total_points   INT               NOT NULL DEFAULT 0,
+        rank_in_league INT               NOT NULL DEFAULT 1,
+        zone           ENUM('promotion','stay','demotion') NOT NULL DEFAULT 'stay',
+        joined_at      DATETIME          NOT NULL,
+        last_updated   DATETIME          NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY user_id (user_id),
+        KEY league_points (league_id, total_points)
+    ) $charset;");
+
+    dbDelta("CREATE TABLE IF NOT EXISTS {$wpdb->prefix}blokes_league_events (
+        id                   INT UNSIGNED      NOT NULL AUTO_INCREMENT,
+        user_id              BIGINT UNSIGNED   NOT NULL,
+        event_type           ENUM('promoted','demoted','top_scored') NOT NULL,
+        from_league_id       SMALLINT UNSIGNED,
+        to_league_id         SMALLINT UNSIGNED,
+        points_at_event      INT               NOT NULL DEFAULT 0,
+        triggered_by_user_id BIGINT UNSIGNED,
+        created_at           DATETIME          NOT NULL,
+        seen                 TINYINT(1)        NOT NULL DEFAULT 0,
+        PRIMARY KEY (id),
+        KEY user_seen (user_id, seen)
+    ) $charset;");
+}
+
+function blokes_leagues_seed() {
+    global $wpdb;
+    $table = $wpdb->prefix . 'blokes_leagues';
+    if ((int) $wpdb->get_var("SELECT COUNT(*) FROM $table") > 0) return;
+
+    $leagues = array(
+        array('Liga Pedri',      'pedri',      1),
+        array('Liga Albarracín', 'albarracin', 2),
+        array('Liga Fonte',      'fonte',      3),
+        array('Liga Yosemite',   'yosemite',   4),
+        array('Liga Hueco',      'hueco',      5),
+        array('Liga Rocklands',  'rocklands',  6),
+    );
+    foreach ($leagues as $lg) {
+        $wpdb->insert($table, array(
+            'name'         => $lg[0],
+            'slug'         => $lg[1],
+            'tier'         => $lg[2],
+            'promo_pct'    => 0.30,
+            'demotion_pct' => 0.20,
+        ));
+    }
+}
+
+// ── Cálculo de puntos ─────────────────────────────────────────
+function blokes_calculate_points($post_id) {
+    $color = strtolower(sanitize_text_field(get_field('bloke_color', $post_id) ?: 'green'));
+    $grado = strtolower(sanitize_text_field(get_field('bloke_grado', $post_id) ?: 'medio'));
+
+    $color_base  = array('green' => 0, 'blue' => 3, 'yellow' => 6, 'red' => 9, 'black' => 12);
+    $grado_bonus = array('suave' => 1, 'medio' => 2, 'duro' => 3);
+
+    return ($color_base[$color] ?? 0) + ($grado_bonus[$grado] ?? 2);
+}
+
+// ── Lógica principal ──────────────────────────────────────────
+
+function blokes_register_top_for_leagues($user_id, $post_id) {
+    global $wpdb;
+    $ul = $wpdb->prefix . 'blokes_user_leagues';
+    $l  = $wpdb->prefix . 'blokes_leagues';
+
+    $pts = blokes_calculate_points($post_id);
+    if ($pts <= 0) return null;
+
+    $wpdb->query('START TRANSACTION');
+
+    $row = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $ul WHERE user_id = %d FOR UPDATE", $user_id
+    ));
+
+    if (!$row) {
+        $pedri = $wpdb->get_row("SELECT * FROM $l WHERE tier = 1");
+        if (!$pedri) { $wpdb->query('ROLLBACK'); return null; }
+
+        $wpdb->insert($ul, array(
+            'user_id'        => $user_id,
+            'league_id'      => $pedri->id,
+            'total_points'   => $pts,
+            'rank_in_league' => 9999,
+            'zone'           => 'stay',
+            'joined_at'      => current_time('mysql'),
+            'last_updated'   => current_time('mysql'),
+        ));
+        $wpdb->query('COMMIT');
+        blokes_recalculate_league_ranks((int) $pedri->id);
+        return array('pointsEarned' => $pts, 'newTotal' => $pts, 'leagueChanged' => false);
+    }
+
+    $new_total = (int) $row->total_points + $pts;
+    $wpdb->update($ul,
+        array('total_points' => $new_total, 'last_updated' => current_time('mysql')),
+        array('user_id' => $user_id)
+    );
+    $wpdb->query('COMMIT');
+
+    $change = blokes_evaluate_league_change((int) $user_id, $new_total, (int) $row->league_id);
+    return array(
+        'pointsEarned'  => $pts,
+        'newTotal'      => $new_total,
+        'leagueChanged' => $change['changed'],
+        'newLeague'     => $change['newLeague'] ?? null,
+    );
+}
+
+function blokes_evaluate_league_change($user_id, $new_points, $current_league_id) {
+    global $wpdb;
+    $ul = $wpdb->prefix . 'blokes_user_leagues';
+    $l  = $wpdb->prefix . 'blokes_leagues';
+    $ev = $wpdb->prefix . 'blokes_league_events';
+
+    $current = $wpdb->get_row($wpdb->prepare("SELECT * FROM $l WHERE id = %d", $current_league_id));
+    if (!$current || (int) $current->tier >= 6) {
+        blokes_recalculate_league_ranks($current_league_id);
+        return array('changed' => false);
+    }
+
+    $next = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $l WHERE tier = %d", (int) $current->tier + 1
+    ));
+    if (!$next) { blokes_recalculate_league_ranks($current_league_id); return array('changed' => false); }
+
+    $wpdb->query('START TRANSACTION');
+
+    $weakest = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $ul WHERE league_id = %d ORDER BY total_points ASC, rank_in_league DESC LIMIT 1 FOR UPDATE",
+        $next->id
+    ));
+
+    if (!$weakest || $new_points <= (int) $weakest->total_points) {
+        $wpdb->query('ROLLBACK');
+        blokes_recalculate_league_ranks($current_league_id);
+        return array('changed' => false);
+    }
+
+    // Swap atómico
+    $wpdb->update($ul, array('league_id' => $next->id,           'last_updated' => current_time('mysql')), array('user_id' => $user_id));
+    $wpdb->update($ul, array('league_id' => $current_league_id, 'last_updated' => current_time('mysql')), array('user_id' => $weakest->user_id));
+
+    $now = current_time('mysql');
+    $wpdb->insert($ev, array(
+        'user_id'              => $user_id,
+        'event_type'           => 'promoted',
+        'from_league_id'       => $current_league_id,
+        'to_league_id'         => $next->id,
+        'points_at_event'      => $new_points,
+        'triggered_by_user_id' => null,
+        'created_at'           => $now,
+        'seen'                 => 0,
+    ));
+    $wpdb->insert($ev, array(
+        'user_id'              => $weakest->user_id,
+        'event_type'           => 'demoted',
+        'from_league_id'       => $next->id,
+        'to_league_id'         => $current_league_id,
+        'points_at_event'      => (int) $weakest->total_points,
+        'triggered_by_user_id' => $user_id,
+        'created_at'           => $now,
+        'seen'                 => 0,
+    ));
+
+    $wpdb->query('COMMIT');
+
+    blokes_recalculate_league_ranks($current_league_id);
+    blokes_recalculate_league_ranks((int) $next->id);
+
+    return array(
+        'changed'  => true,
+        'newLeague' => array('id' => (int) $next->id, 'name' => $next->name, 'tier' => (int) $next->tier),
+    );
+}
+
+function blokes_recalculate_league_ranks($league_id) {
+    global $wpdb;
+    $ul = $wpdb->prefix . 'blokes_user_leagues';
+    $l  = $wpdb->prefix . 'blokes_leagues';
+
+    $league  = $wpdb->get_row($wpdb->prepare("SELECT * FROM $l WHERE id = %d", $league_id));
+    $members = $wpdb->get_results($wpdb->prepare(
+        "SELECT user_id FROM $ul WHERE league_id = %d ORDER BY total_points DESC", $league_id
+    ));
+
+    $total = count($members);
+    if (!$league || $total === 0) return;
+
+    $promo_n    = max(1, (int) ceil($total * (float) $league->promo_pct));
+    $demotion_n = max(1, (int) ceil($total * (float) $league->demotion_pct));
+
+    foreach ($members as $i => $m) {
+        $rank = $i + 1;
+        $zone = ($rank <= $promo_n) ? 'promotion' : (($rank > $total - $demotion_n) ? 'demotion' : 'stay');
+        $wpdb->update($ul, array('rank_in_league' => $rank, 'zone' => $zone), array('user_id' => $m->user_id));
+    }
+}
+
+// ── REST endpoints de ligas ───────────────────────────────────
+add_action('rest_api_init', function() {
+
+    register_rest_route('blokes/v1', '/leagues', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_get_leagues',
+        'permission_callback' => '__return_true',
+    ));
+
+    register_rest_route('blokes/v1', '/leagues/me', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_get_my_league',
+        'permission_callback' => 'is_user_logged_in',
+    ));
+
+    register_rest_route('blokes/v1', '/leagues/me/leaderboard', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_get_my_leaderboard',
+        'permission_callback' => 'is_user_logged_in',
+    ));
+
+    register_rest_route('blokes/v1', '/leagues/me/events', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_get_my_events',
+        'permission_callback' => 'is_user_logged_in',
+    ));
+
+    register_rest_route('blokes/v1', '/leagues/me/events/seen', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_api_mark_events_seen',
+        'permission_callback' => 'is_user_logged_in',
+    ));
+
+    register_rest_route('blokes/v1', '/leagues/initial-placement', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_api_initial_placement',
+        'permission_callback' => function() { return blokes_get_app_role() === 'superadmin'; },
+    ));
+});
+
+function blokes_api_get_leagues() {
+    global $wpdb;
+    $rows = $wpdb->get_results("SELECT id, name, slug, tier FROM {$wpdb->prefix}blokes_leagues ORDER BY tier ASC");
+    return rest_ensure_response(array_map(function($r) {
+        return array('id' => (int) $r->id, 'name' => $r->name, 'slug' => $r->slug, 'tier' => (int) $r->tier);
+    }, $rows ?: array()));
+}
+
+function blokes_api_get_my_league() {
+    global $wpdb;
+    $uid = get_current_user_id();
+    $ul  = $wpdb->prefix . 'blokes_user_leagues';
+    $l   = $wpdb->prefix . 'blokes_leagues';
+
+    $row = $wpdb->get_row($wpdb->prepare(
+        "SELECT ul.total_points, ul.rank_in_league, ul.zone,
+                l.id AS league_id, l.name, l.slug, l.tier
+         FROM $ul ul JOIN $l l ON l.id = ul.league_id
+         WHERE ul.user_id = %d", $uid
+    ));
+
+    if (!$row) return new WP_Error('no_league', 'Not placed yet', array('status' => 404));
+
+    return rest_ensure_response(array(
+        'leagueId'    => (int) $row->league_id,
+        'name'        => $row->name,
+        'slug'        => $row->slug,
+        'tier'        => (int) $row->tier,
+        'totalPoints' => (int) $row->total_points,
+        'rank'        => (int) $row->rank_in_league,
+        'zone'        => $row->zone,
+    ));
+}
+
+function blokes_api_get_my_leaderboard() {
+    global $wpdb;
+    $uid = get_current_user_id();
+    $ul  = $wpdb->prefix . 'blokes_user_leagues';
+
+    $league_id = $wpdb->get_var($wpdb->prepare("SELECT league_id FROM $ul WHERE user_id = %d", $uid));
+    if (!$league_id) return new WP_Error('no_league', 'Not placed', array('status' => 403));
+
+    $members = $wpdb->get_results($wpdb->prepare(
+        "SELECT user_id, total_points, rank_in_league, zone FROM $ul
+         WHERE league_id = %d ORDER BY rank_in_league ASC", $league_id
+    ));
+
+    $result = array();
+    foreach ($members as $m) {
+        $u     = get_userdata($m->user_id);
+        $first = $u ? trim($u->first_name ?? '') : '';
+        $name  = $first ?: ($u ? (explode(' ', trim($u->display_name ?? ''))[0] ?? '') : '');
+        $result[] = array(
+            'userId'      => (int) $m->user_id,
+            'name'        => $name ?: 'Usuario',
+            'totalPoints' => (int) $m->total_points,
+            'rank'        => (int) $m->rank_in_league,
+            'zone'        => $m->zone,
+            'isMe'        => ((int) $m->user_id === (int) $uid),
+        );
+    }
+
+    return rest_ensure_response(array('leagueId' => (int) $league_id, 'members' => $result));
+}
+
+function blokes_api_get_my_events() {
+    global $wpdb;
+    $uid = get_current_user_id();
+    $ev  = $wpdb->prefix . 'blokes_league_events';
+    $l   = $wpdb->prefix . 'blokes_leagues';
+
+    $unseen = $wpdb->get_results($wpdb->prepare(
+        "SELECT ev.id, ev.event_type, ev.points_at_event, ev.created_at,
+                lf.name AS from_league, lf.tier AS from_tier,
+                lt.name AS to_league,   lt.tier AS to_tier
+         FROM $ev ev
+         LEFT JOIN $l lf ON lf.id = ev.from_league_id
+         LEFT JOIN $l lt ON lt.id = ev.to_league_id
+         WHERE ev.user_id = %d AND ev.seen = 0 AND ev.event_type IN ('promoted','demoted')
+         ORDER BY ev.created_at DESC", $uid
+    ));
+
+    $history = $wpdb->get_results($wpdb->prepare(
+        "SELECT ev.id, ev.event_type, ev.points_at_event, ev.created_at,
+                lf.name AS from_league, lt.name AS to_league
+         FROM $ev ev
+         LEFT JOIN $l lf ON lf.id = ev.from_league_id
+         LEFT JOIN $l lt ON lt.id = ev.to_league_id
+         WHERE ev.user_id = %d AND ev.event_type IN ('promoted','demoted')
+         ORDER BY ev.created_at DESC LIMIT 20", $uid
+    ));
+
+    return rest_ensure_response(array('unseen' => $unseen, 'history' => $history));
+}
+
+function blokes_api_mark_events_seen() {
+    global $wpdb;
+    $uid = get_current_user_id();
+    $wpdb->update("{$wpdb->prefix}blokes_league_events", array('seen' => 1), array('user_id' => $uid, 'seen' => 0));
+    return rest_ensure_response(array('ok' => true));
+}
+
+function blokes_api_initial_placement() {
+    global $wpdb;
+    $ul = $wpdb->prefix . 'blokes_user_leagues';
+    $l  = $wpdb->prefix . 'blokes_leagues';
+
+    if ((int) $wpdb->get_var("SELECT COUNT(*) FROM $ul") > 0)
+        return new WP_Error('already_done', 'Placement already done', array('status' => 409));
+
+    $rows = $wpdb->get_results(
+        "SELECT user_id, meta_value FROM {$wpdb->usermeta} WHERE meta_key = '_blokes_completion_log'"
+    );
+
+    $user_points = array();
+    foreach ($rows as $row) {
+        $log = maybe_unserialize($row->meta_value);
+        if (!is_array($log)) continue;
+        $pts = 0;
+        foreach ($log as $entry) {
+            $pid = (int) ($entry['postId'] ?? 0);
+            if ($pid > 0) $pts += blokes_calculate_points($pid);
+        }
+        if ($pts > 0) $user_points[(int) $row->user_id] = $pts;
+    }
+
+    if (empty($user_points)) return rest_ensure_response(array('placed' => 0));
+
+    arsort($user_points);
+    $users   = array_keys($user_points);
+    $total   = count($users);
+    $now     = current_time('mysql');
+    $leagues = $wpdb->get_results("SELECT * FROM $l ORDER BY tier DESC"); // Rocklands primero
+    $size    = (int) ceil($total / 6);
+
+    foreach ($leagues as $li => $league) {
+        foreach (array_slice($users, $li * $size, $size) as $rank0 => $uid) {
+            $wpdb->insert($ul, array(
+                'user_id'        => $uid,
+                'league_id'      => $league->id,
+                'total_points'   => $user_points[$uid],
+                'rank_in_league' => $rank0 + 1,
+                'zone'           => 'stay',
+                'joined_at'      => $now,
+                'last_updated'   => $now,
+            ));
+        }
+    }
+
+    foreach ($leagues as $league) blokes_recalculate_league_ranks((int) $league->id);
+
+    return rest_ensure_response(array('placed' => count($user_points), 'totalUsers' => $total));
 }

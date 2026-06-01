@@ -9,6 +9,7 @@ import ProgresoIndexPage from './pages/ProgresoIndexPage'
 import MiClaseTab from './pages/MiClaseTab'
 import EntrenamientosPage from './pages/EntrenamientosPage'
 import SuperAdminPage from './pages/SuperAdminPage'
+import LeaguesPage from './pages/LeaguesPage'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import './App.css'
 
@@ -25,7 +26,7 @@ const SUBSALA_POSITIONS = {
   '8': { top: '44.5%', right: '18%', transform: 'translateX(50%)' },
 }
 
-const KNOWN_ROUTES = ['/progreso', '/setter', '/stats', '/entrenamientos', '/superadmin', '/mis-blokes']
+const KNOWN_ROUTES = ['/progreso', '/setter', '/stats', '/entrenamientos', '/superadmin', '/mis-blokes', '/ligas']
 
 function detectBasename() {
   const injected = window.blokesSiteData?.appBasename
@@ -206,6 +207,11 @@ export default function App() {
               <li className="app-nav__item">
                 <NavLink to="/progreso" className="app-nav__link">Progreso</NavLink>
               </li>
+              {sd.isLoggedIn && (
+                <li className="app-nav__item">
+                  <NavLink to="/ligas" className="app-nav__link">Ligas</NavLink>
+                </li>
+              )}
               {(sd.userRole === 'admin' || sd.userRole === 'superadmin') && (
                 <>
                   <li className="app-nav__item">
@@ -241,6 +247,7 @@ export default function App() {
             <Route path="/stats" element={<StatsPage />} />
             <Route path="/entrenamientos" element={<EntrenamientosPage />} />
             <Route path="/superadmin" element={<SuperAdminPage />} />
+            <Route path="/ligas" element={<LeaguesPage />} />
           </Routes>
         </main>
 

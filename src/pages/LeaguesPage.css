@@ -1,0 +1,152 @@
+.league-page {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px 0 40px;
+}
+
+/* ── Header ── */
+.league-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-left: 4px solid #888;
+  background: rgba(255,255,255,0.03);
+  margin-bottom: 20px;
+}
+
+.league-header__emoji {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.league-header__name {
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.1;
+}
+
+.league-header__stats {
+  font-size: 0.8rem;
+  color: #aaa;
+  margin-top: 3px;
+}
+
+.league-header__zone {
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+/* ── Leaderboard ── */
+.league-leaderboard {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.league-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid transparent;
+  transition: background 0.12s;
+}
+
+.league-member--me {
+  background: rgba(245,200,66,0.07);
+  border-color: #3a3020;
+}
+
+.league-member__rank {
+  font-size: 0.72rem;
+  color: #555;
+  min-width: 28px;
+  font-variant-numeric: tabular-nums;
+}
+
+.league-member__name {
+  flex: 1;
+  font-size: 0.88rem;
+  color: #ccc;
+  font-weight: 500;
+}
+
+.league-member--me .league-member__name {
+  color: #f5c842;
+  font-weight: 700;
+}
+
+.league-member__zone-dot {
+  font-size: 0.7rem;
+}
+
+.league-member__pts {
+  font-size: 0.78rem;
+  color: #888;
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+  text-align: right;
+}
+
+.league-member--me .league-member__pts {
+  color: #f5c842;
+}
+
+/* ── Zone separators ── */
+.league-zone-sep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 4px;
+  border-top: 1px solid #2a2015;
+  margin-top: 6px;
+}
+
+.league-zone-sep:first-child {
+  margin-top: 0;
+  border-top: none;
+}
+
+.league-zone-sep span {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* ── Empty / loading states ── */
+.league-loading,
+.league-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: #666;
+  font-size: 0.88rem;
+}
+
+.league-empty__sub {
+  font-size: 0.78rem;
+  color: #444;
+  margin-top: 6px;
+}
+
+.league-login {
+  text-align: center;
+  padding: 40px 20px;
+  color: #888;
+}
+
+.league-login__btn {
+  display: inline-block;
+  margin-top: 14px;
+  padding: 8px 22px;
+  background: #2a2015;
+  border: 1px solid #f5c842;
+  color: #f5c842;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-decoration: none;
+  letter-spacing: 0.04em;
+}
