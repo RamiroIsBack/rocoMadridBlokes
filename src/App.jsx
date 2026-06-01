@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate } from 'react-router-dom'
 import MainPage from './pages/MainPage'
 import AdminApp from './admin/AdminApp'
@@ -10,6 +10,8 @@ import MiClaseTab from './pages/MiClaseTab'
 import EntrenamientosPage from './pages/EntrenamientosPage'
 import SuperAdminPage from './pages/SuperAdminPage'
 import LeaguesPage from './pages/LeaguesPage'
+import ProfileSetupModal from './components/ProfileSetupModal'
+import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import './App.css'
 
@@ -64,6 +66,41 @@ export default function App() {
   const [navVisible, setNavVisible] = useState(false)
   const lastScrollY = useRef(0)
   const sd = window.blokesSiteData || {}
+
+  // Profile modal state
+  const { profileComplete, saveProfile, checkNickname, uploadPhoto } = useProfile()
+  const [profileModalOpen,    setProfileModalOpen]    = useState(false)
+  const [profileModalBlock,   setProfileModalBlock]   = useState(false)
+  const [profileModalMsg,     setProfileModalMsg]     = useState('')
+  const [profileModalOnSaved, setProfileModalOnSaved] = useState(null)
+
+  // Show dismissible modal on first open for logged-in users without a profile
+  useEffect(() => {
+    if (sd.isLoggedIn && !profileComplete) {
+      setProfileModalOpen(true)
+      setProfileModalBlock(false)
+      setProfileModalMsg('')
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Expose globally so useCompletions / any component can trigger it
+  const openProfileModal = useCallback(({ blocking = false, message = '', onSaved = null } = {}) => {
+    setProfileModalBlock(blocking)
+    setProfileModalMsg(message || '')
+    setProfileModalOnSaved(() => onSaved)
+    setProfileModalOpen(true)
+  }, [])
+
+  useEffect(() => {
+    window.blokesOpenProfileModal = openProfileModal
+    return () => { window.blokesOpenProfileModal = null }
+  }, [openProfileModal])
+
+  const handleProfileSaved = useCallback(() => {
+    setProfileModalOpen(false)
+    profileModalOnSaved?.()
+    setProfileModalOnSaved(null)
+  }, [profileModalOnSaved])
 
   useEffect(() => {
     const THRESHOLD = 180
@@ -261,6 +298,19 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {sd.isLoggedIn && (
+          <ProfileSetupModal
+            isOpen={profileModalOpen}
+            isDismissible={!profileModalBlock}
+            blockingMessage={profileModalMsg}
+            onClose={() => setProfileModalOpen(false)}
+            onSaved={handleProfileSaved}
+            saveProfile={saveProfile}
+            checkNickname={checkNickname}
+            uploadPhoto={uploadPhoto}
+          />
         )}
       </div>
     </BrowserRouter>

@@ -60,6 +60,28 @@ function blokes_get_app_role() {
     return 'member';
 }
 
+// ── Profile helpers ──────────────────────────────────────────────────────────
+function blokes_is_profile_complete($user_id) {
+    return (bool) get_user_meta((int) $user_id, '_blokes_profile_complete', true);
+}
+function blokes_get_user_nickname($user_id) {
+    return get_user_meta((int) $user_id, '_blokes_nickname', true) ?: '';
+}
+function blokes_get_user_avatar($user_id) {
+    $type = get_user_meta((int) $user_id, '_blokes_avatar_type', true) ?: '';
+    $raw  = get_user_meta((int) $user_id, '_blokes_avatar_data', true) ?: '{}';
+    $data = json_decode($raw);
+    return array('type' => $type, 'data' => $data ?: new stdClass());
+}
+function blokes_nickname_exists($nickname, $exclude_user_id = 0) {
+    global $wpdb;
+    return (bool) $wpdb->get_var($wpdb->prepare(
+        "SELECT user_id FROM {$wpdb->usermeta}
+         WHERE meta_key = '_blokes_nickname' AND meta_value = %s AND user_id != %d LIMIT 1",
+        $nickname, (int) $exclude_user_id
+    ));
+}
+
 add_action('init', function() {
     foreach ($GLOBALS['blokes_app_slugs'] as $slug) {
         add_rewrite_rule("^{$slug}/(.*)$", "index.php?pagename={$slug}", 'top');
@@ -212,8 +234,14 @@ add_action('wp_head', function() {
         'logoutUrl'    => wp_logout_url($spa_url),
         'userName'     => $user_name,
         'subscription' => $subscription,
-        'appBasename'  => '/' . $app_slug,
-        'userRole'     => blokes_get_app_role(),
+        'appBasename'      => '/' . $app_slug,
+        'userRole'         => blokes_get_app_role(),
+        'profileComplete'  => is_user_logged_in() ? blokes_is_profile_complete(get_current_user_id()) : false,
+        'userNickname'     => is_user_logged_in() ? blokes_get_user_nickname(get_current_user_id()) : '',
+        'userAvatarType'   => is_user_logged_in() ? (get_user_meta(get_current_user_id(), '_blokes_avatar_type', true) ?: '') : '',
+        'userAvatarData'   => is_user_logged_in()
+                                ? (json_decode(get_user_meta(get_current_user_id(), '_blokes_avatar_data', true) ?: '{}') ?: new stdClass())
+                                : new stdClass(),
     );
     echo '<script>window.blokesSiteData = ' . wp_json_encode($data) . ';</script>' . "\n";
 });
@@ -786,6 +814,10 @@ function blokes_toggle_completion($request) {
     $post = get_post($post_id);
     if (!$post || $post->post_type !== 'blokes') {
         return new WP_Error('invalid_bloke', 'Invalid bloke ID', array('status' => 404));
+    }
+
+    if (!blokes_is_profile_complete($user_id)) {
+        return new WP_Error('profile_incomplete', 'Completa tu perfil antes de registrar un top.', array('status' => 403));
     }
 
     $saved         = get_user_meta($user_id, '_blokes_completed', true);
@@ -1904,6 +1936,32 @@ add_action('rest_api_init', function() {
         'callback'            => 'blokes_api_initial_placement',
         'permission_callback' => function() { return blokes_get_app_role() === 'superadmin'; },
     ));
+
+    // ── Perfil de usuario ─────────────────────────────────────────────────────
+    register_rest_route('blokes/v1', '/profile/me', array(
+        array('methods' => 'GET',  'callback' => 'blokes_api_get_profile',  'permission_callback' => 'is_user_logged_in'),
+        array('methods' => 'POST', 'callback' => 'blokes_api_save_profile', 'permission_callback' => 'is_user_logged_in'),
+    ));
+    register_rest_route('blokes/v1', '/profile/check-nickname', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_check_nickname',
+        'permission_callback' => 'is_user_logged_in',
+    ));
+    register_rest_route('blokes/v1', '/users/(?P<id>\d+)/avatar', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_get_user_avatar_endpoint',
+        'permission_callback' => '__return_true',
+    ));
+    register_rest_route('blokes/v1', '/profile/upload-avatar', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_api_upload_avatar',
+        'permission_callback' => 'is_user_logged_in',
+    ));
+    register_rest_route('blokes/v1', '/comunidad/leagues', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_get_comunidad_leagues',
+        'permission_callback' => '__return_true',
+    ));
 });
 
 function blokes_api_get_leagues() {
@@ -1958,9 +2016,13 @@ function blokes_api_get_my_leaderboard() {
         $u     = get_userdata($m->user_id);
         $first = $u ? trim($u->first_name ?? '') : '';
         $name  = $first ?: ($u ? (explode(' ', trim($u->display_name ?? ''))[0] ?? '') : '');
+        $av = blokes_get_user_avatar($m->user_id);
         $result[] = array(
             'userId'      => (int) $m->user_id,
             'name'        => $name ?: 'Usuario',
+            'nickname'    => blokes_get_user_nickname($m->user_id),
+            'avatarType'  => $av['type'],
+            'avatarData'  => $av['data'],
             'totalPoints' => (int) $m->total_points,
             'rank'        => (int) $m->rank_in_league,
             'zone'        => $m->zone,
@@ -2058,4 +2120,151 @@ function blokes_api_initial_placement() {
     foreach ($leagues as $league) blokes_recalculate_league_ranks((int) $league->id);
 
     return rest_ensure_response(array('placed' => count($user_points), 'totalUsers' => $total));
+}
+
+// ============================================================
+//  PERFIL DE USUARIO
+// ============================================================
+
+function blokes_api_get_profile() {
+    $uid = get_current_user_id();
+    $av  = blokes_get_user_avatar($uid);
+    return rest_ensure_response(array(
+        'nickname'        => blokes_get_user_nickname($uid),
+        'avatarType'      => $av['type'],
+        'avatarData'      => $av['data'],
+        'profileComplete' => blokes_is_profile_complete($uid),
+    ));
+}
+
+function blokes_api_save_profile($request) {
+    $uid  = get_current_user_id();
+    $body = $request->get_json_params();
+
+    $nickname    = sanitize_text_field($body['nickname']    ?? '');
+    $avatar_type = sanitize_text_field($body['avatarType']  ?? '');
+    $avatar_data = $body['avatarData'] ?? array();
+
+    if (strlen($nickname) < 3 || strlen($nickname) > 20) {
+        return new WP_Error('invalid_nickname', 'El nickname debe tener entre 3 y 20 caracteres.', array('status' => 400));
+    }
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $nickname)) {
+        return new WP_Error('invalid_nickname', 'Solo letras, números y guión bajo.', array('status' => 400));
+    }
+    if (!in_array($avatar_type, array('dicebear', 'photo', ''), true)) {
+        return new WP_Error('invalid_avatar', 'Tipo de avatar inválido.', array('status' => 400));
+    }
+    if (blokes_nickname_exists($nickname, $uid)) {
+        return new WP_Error('nickname_taken', 'Este nickname ya está en uso.', array('status' => 409));
+    }
+
+    update_user_meta($uid, '_blokes_nickname', $nickname);
+    update_user_meta($uid, '_blokes_avatar_type', $avatar_type);
+    update_user_meta($uid, '_blokes_avatar_data', wp_json_encode($avatar_data));
+    update_user_meta($uid, '_blokes_profile_complete', '1');
+
+    $av = blokes_get_user_avatar($uid);
+    return rest_ensure_response(array(
+        'success'         => true,
+        'nickname'        => $nickname,
+        'avatarType'      => $av['type'],
+        'avatarData'      => $av['data'],
+        'profileComplete' => true,
+    ));
+}
+
+function blokes_api_check_nickname($request) {
+    $uid      = get_current_user_id();
+    $nickname = sanitize_text_field($request->get_param('value') ?: '');
+
+    if (strlen($nickname) < 3 || strlen($nickname) > 20) {
+        return rest_ensure_response(array('available' => false, 'reason' => 'length'));
+    }
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $nickname)) {
+        return rest_ensure_response(array('available' => false, 'reason' => 'chars'));
+    }
+
+    return rest_ensure_response(array('available' => !blokes_nickname_exists($nickname, $uid)));
+}
+
+function blokes_api_get_user_avatar_endpoint($request) {
+    $av = blokes_get_user_avatar(intval($request['id']));
+    return rest_ensure_response($av);
+}
+
+function blokes_api_upload_avatar($request) {
+    $files = $request->get_file_params();
+    if (empty($files['file'])) {
+        return new WP_Error('no_file', 'No file uploaded.', array('status' => 400));
+    }
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/media.php';
+    require_once ABSPATH . 'wp-admin/includes/image.php';
+
+    $attachment_id = media_handle_upload('file', 0);
+    if (is_wp_error($attachment_id)) return $attachment_id;
+
+    return rest_ensure_response(array('url' => wp_get_attachment_url($attachment_id)));
+}
+
+function blokes_api_get_comunidad_leagues() {
+    global $wpdb;
+    $is_auth      = is_user_logged_in();
+    $my_uid       = $is_auth ? get_current_user_id() : 0;
+    $my_league_id = 0;
+
+    if ($is_auth) {
+        $my_league_id = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT league_id FROM {$wpdb->prefix}blokes_user_leagues WHERE user_id = %d", $my_uid
+        ));
+    }
+
+    $leagues = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}blokes_leagues ORDER BY tier DESC");
+    $result  = array();
+
+    foreach ($leagues as $league) {
+        $members_raw = $wpdb->get_results($wpdb->prepare(
+            "SELECT user_id, total_points, rank_in_league, zone
+             FROM {$wpdb->prefix}blokes_user_leagues
+             WHERE league_id = %d ORDER BY rank_in_league ASC LIMIT 30",
+            $league->id
+        ));
+
+        $is_my_league = ($is_auth && (int) $league->id === $my_league_id);
+        $member_data  = array();
+
+        foreach ($members_raw as $m) {
+            $uid   = (int) $m->user_id;
+            $av    = blokes_get_user_avatar($uid);
+            $entry = array(
+                'userId'     => $uid,
+                'isMe'       => ($uid === $my_uid),
+                'avatarType' => $av['type'],
+                'avatarData' => $av['data'],
+            );
+            if ($is_auth) {
+                $entry['nickname'] = blokes_get_user_nickname($uid) ?: 'Usuario';
+            }
+            if ($is_my_league) {
+                $entry['totalPoints'] = (int) $m->total_points;
+                $entry['rank']        = (int) $m->rank_in_league;
+                $entry['zone']        = $m->zone;
+            }
+            $member_data[] = $entry;
+        }
+
+        $result[] = array(
+            'id'          => (int) $league->id,
+            'name'        => $league->name,
+            'slug'        => $league->slug,
+            'tier'        => (int) $league->tier,
+            'memberCount' => (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->prefix}blokes_user_leagues WHERE league_id = %d", $league->id
+            )),
+            'members'     => $member_data,
+            'isMyLeague'  => $is_my_league,
+        );
+    }
+
+    return rest_ensure_response($result);
 }

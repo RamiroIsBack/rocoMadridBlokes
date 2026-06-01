@@ -481,3 +481,87 @@
         padding: 10px 14px;
     }
 }
+
+/* ── Mini-league block ── */
+.user-stats__league-mini {
+  padding: 0;
+}
+
+.usl-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-left: 4px solid #888;
+  background: rgba(255,255,255,0.02);
+  margin-bottom: 8px;
+}
+
+.usl-emoji { font-size: 1.6rem; line-height: 1; }
+
+.usl-name {
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  line-height: 1.1;
+}
+
+.usl-info {
+  font-size: 0.75rem;
+  color: #aaa;
+  margin-top: 2px;
+}
+
+.usl-zone { font-size: 0.72rem; font-weight: 600; }
+
+.usl-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.usl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.02);
+}
+
+.usl-row--me {
+  background: rgba(245,200,66,0.07);
+}
+
+.usl-row--me .ua-nick { color: #f5c842; font-weight: 700; }
+
+.usl-row .ua-wrap { flex: 1; min-width: 0; }
+
+.usl-rank {
+  font-size: 0.68rem;
+  color: #555;
+  min-width: 24px;
+  font-variant-numeric: tabular-nums;
+}
+
+.usl-pts {
+  font-size: 0.72rem;
+  color: #777;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usl-row--me .usl-pts { color: #f5c842; }
+
+.usl-link {
+  display: block;
+  text-align: right;
+  font-size: 0.72rem;
+  color: #f5c842;
+  text-decoration: none;
+  padding: 4px 10px;
+  opacity: 0.8;
+}
+
+.usl-link:hover { opacity: 1; }
+

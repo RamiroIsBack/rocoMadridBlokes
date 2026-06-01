@@ -1,14 +1,28 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import { useOutletContext } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useCompletions } from '../hooks/useCompletions'
 import { useWordPressPosts } from '../hooks/useWordPressPosts'
 import { useUserTraining, useTrainingSummary } from '../hooks/useTraining'
 import { computeAchievements, computeClassmateAchievements } from '../hooks/useAchievements'
+import { useLeague } from '../hooks/useLeague'
 import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
 import TrainingChart, { ProgressGauge } from '../components/TrainingChart'
 import Achievements from '../components/Achievements'
+import UserAvatar from '../components/UserAvatar'
 import './UserStatsPage.css'
 import '../components/GatePreview.css'
+
+const TIER_META = {
+  1: { color: '#6b7280', emoji: '⛰️' },
+  2: { color: '#84cc16', emoji: '🌿' },
+  3: { color: '#3b82f6', emoji: '💧' },
+  4: { color: '#f59e0b', emoji: '🌄' },
+  5: { color: '#f97316', emoji: '🔥' },
+  6: { color: '#ef4444', emoji: '💎' },
+}
+
+const ZONE_COLORS = { promotion: '#22c55e', stay: '#888', demotion: '#ef4444' }
 
 const COLOR_INFO = {
   green:  { name: 'Verde',    bg: '#22c55e' },
@@ -51,6 +65,7 @@ export default function UserStatsPage() {
   const { isLoggedIn, loginUrl, completedByMe, completionLog, ratingLog, firstAscentIds } = useCompletions()
   const { cards } = useWordPressPosts()
   const userId = window.blokesSiteData?.userId || 0
+  const { myLeague, leaderboard: leagueLb } = useLeague()
   const { history: trainingHistory } = useUserTraining(isLoggedIn ? userId : null)
   const trainingSummary = useTrainingSummary()
   const [activeZone, setActiveZone] = useState('lower')
@@ -225,6 +240,46 @@ export default function UserStatsPage() {
           )}
         </div>
       </div>
+
+      {/* Mini league leaderboard */}
+      {myLeague && (() => {
+        const meta = TIER_META[myLeague.tier] || TIER_META[1]
+        const mini = leagueLb.slice(0, 5)
+        return (
+          <section className="user-stats__section user-stats__league-mini">
+            <div className="usl-header" style={{ borderColor: meta.color }}>
+              <span className="usl-emoji">{meta.emoji}</span>
+              <div>
+                <div className="usl-name" style={{ color: meta.color }}>{myLeague.name}</div>
+                <div className="usl-info">
+                  Puesto <strong>#{myLeague.rank}</strong> · {myLeague.totalPoints} pts
+                  <span className="usl-zone" style={{ color: ZONE_COLORS[myLeague.zone] }}>
+                    {' '}· {myLeague.zone === 'promotion' ? '🟢 Ascenso' : myLeague.zone === 'demotion' ? '🔴 Descenso' : '⚪ Permanencia'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="usl-rows">
+              {mini.map(m => (
+                <div key={m.userId} className={`usl-row${m.isMe ? ' usl-row--me' : ''}`}>
+                  <span className="usl-rank">#{m.rank}</span>
+                  <UserAvatar
+                    size="xs"
+                    avatarType={m.avatarType || ''}
+                    avatarData={m.avatarData || {}}
+                    nickname={m.nickname || ''}
+                    name={m.name || ''}
+                    isMe={m.isMe}
+                    showNickname
+                  />
+                  <span className="usl-pts">{m.totalPoints} pts</span>
+                </div>
+              ))}
+            </div>
+            <Link to="/ligas" className="usl-link">Ver liga completa →</Link>
+          </section>
+        )
+      })()}
 
       {classNotifs.length > 0 && (
         <section className="user-stats__section">

@@ -1,3 +1,72 @@
+/* ProgresoPage — Leagues section */
+
+.progreso-leagues {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progreso-league {
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.progreso-league--mine {
+  border-width: 1px;
+  background: rgba(255,255,255,0.04);
+}
+
+.progreso-league__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.progreso-league__emoji { font-size: 1.1rem; line-height: 1; }
+
+.progreso-league__name {
+  flex: 1;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #ccc;
+}
+
+.progreso-league__count {
+  font-size: 0.68rem;
+  color: #555;
+}
+
+.progreso-league__members {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.progreso-league__me-av {
+  outline: 2px solid #f5c842;
+  border-radius: 50%;
+}
+
+.progreso-league__more {
+  font-size: 0.68rem;
+  color: #555;
+}
+
+.progreso-league__link {
+  display: block;
+  font-size: 0.7rem;
+  color: #f5c842;
+  text-decoration: none;
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
+.progreso-league__link:hover { opacity: 1; }
+
 /* ProgresoPage */
 
 .progreso {

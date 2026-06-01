@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useLeague } from '../hooks/useLeague'
 import LeaguePromotionDialog from '../components/LeaguePromotionDialog'
+import UserAvatar from '../components/UserAvatar'
 import './LeaguesPage.css'
 
 const TIER_META = {
@@ -42,7 +43,17 @@ function MemberRow({ member, isZoneStart, zone }) {
         className={`league-member${member.isMe ? ' league-member--me' : ''}`}
       >
         <span className="league-member__rank">#{member.rank}</span>
-        <span className="league-member__name">{member.name}</span>
+        <UserAvatar
+          size="xs"
+          avatarType={member.avatarType || ''}
+          avatarData={member.avatarData || {}}
+          nickname={member.nickname || ''}
+          name={member.name || ''}
+          isMe={member.isMe}
+          showNickname
+          nicknameStyle="right"
+          className="league-member__avatar"
+        />
         <span className="league-member__zone-dot" title={ZONE_META[member.zone]?.label}>
           {ZONE_META[member.zone]?.dot}
         </span>

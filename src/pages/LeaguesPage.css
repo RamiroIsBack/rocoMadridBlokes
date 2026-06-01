@@ -67,16 +67,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-.league-member__name {
+/* ua-wrap from UserAvatar fills leaderboard row */
+.league-member .ua-wrap {
   flex: 1;
-  font-size: 0.88rem;
-  color: #ccc;
-  font-weight: 500;
-}
-
-.league-member--me .league-member__name {
-  color: #f5c842;
-  font-weight: 700;
+  min-width: 0;
 }
 
 .league-member__zone-dot {

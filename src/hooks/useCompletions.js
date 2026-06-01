@@ -65,10 +65,19 @@ export function useCompletions() {
   }, [])
 
   const toggleCompletion = useCallback(async (postId, currentCount) => {
-    const { isLoggedIn, nonce, loginUrl } = getSiteData()
+    const { isLoggedIn, nonce, loginUrl, profileComplete } = getSiteData()
 
     if (!isLoggedIn) {
       window.location.href = loginUrl
+      return
+    }
+
+    if (!profileComplete) {
+      window.blokesOpenProfileModal?.({
+        blocking: true,
+        message: 'Necesitas un nickname y avatar para registrar un top.',
+        onSaved: () => toggleCompletion(postId, currentCount),
+      })
       return
     }
 

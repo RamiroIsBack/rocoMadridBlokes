@@ -1,10 +1,37 @@
 import { useMemo, useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { useWordPressPosts } from '../hooks/useWordPressPosts'
 import { useTrainingSummary } from '../hooks/useTraining'
 import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
 import TrainingChart, { ProgressGauge } from '../components/TrainingChart'
 import EventCard from '../components/EventCard'
+import UserAvatar from '../components/UserAvatar'
 import './ProgresoPage.css'
+
+const WP_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
+
+const TIER_META_PROG = {
+  1: { color: '#6b7280', emoji: '⛰️' },
+  2: { color: '#84cc16', emoji: '🌿' },
+  3: { color: '#3b82f6', emoji: '💧' },
+  4: { color: '#f59e0b', emoji: '🌄' },
+  5: { color: '#f97316', emoji: '🔥' },
+  6: { color: '#ef4444', emoji: '💎' },
+}
+
+function useComunidadLeagues() {
+  const [leagues, setLeagues] = useState(null)
+  useEffect(() => {
+    const headers = {}
+    const nonce = window.blokesSiteData?.nonce
+    if (nonce) headers['X-WP-Nonce'] = nonce
+    fetch(`${WP_URL}/wp-json/blokes/v1/comunidad/leagues`, { headers })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setLeagues(data) })
+      .catch(() => {})
+  }, [])
+  return leagues
+}
 
 const COLOR_INFO = {
   green:  { name: 'Verde',    bg: '#22c55e' },
@@ -52,6 +79,7 @@ function PieChart({ slices }) {
 export default function ProgresoPage() {
   const { cards, loading } = useWordPressPosts()
   const trainingSummary = useTrainingSummary()
+  const comunidadLeagues = useComunidadLeagues()
   const [activeZone, setActiveZone] = useState('lower')
   const [activeTest, setActiveTest] = useState(1)
   const [testInfoId, setTestInfoId] = useState(null)
@@ -127,6 +155,66 @@ export default function ProgresoPage() {
   return (
     <div className="progreso">
       <h1 className="progreso__title">Comunidad</h1>
+
+      {/* ── Ligas ── */}
+      {comunidadLeagues && (
+        <section className="progreso__section">
+          <h2 className="progreso__section-title">Ligas</h2>
+          <div className="progreso-leagues">
+            {comunidadLeagues.map(league => {
+              const meta = TIER_META_PROG[league.tier] || TIER_META_PROG[1]
+              return (
+                <div
+                  key={league.id}
+                  className={`progreso-league${league.isMyLeague ? ' progreso-league--mine' : ''}`}
+                  style={{ borderColor: league.isMyLeague ? meta.color : 'transparent' }}
+                >
+                  <div className="progreso-league__head">
+                    <span className="progreso-league__emoji">{meta.emoji}</span>
+                    <span className="progreso-league__name" style={{ color: league.isMyLeague ? meta.color : undefined }}>
+                      {league.name}
+                    </span>
+                    <span className="progreso-league__count">{league.memberCount} escal.</span>
+                  </div>
+                  {league.members.length > 0 && (
+                    <div className="progreso-league__members">
+                      {league.members.slice(0, 8).map(m => (
+                        sd.isLoggedIn ? (
+                          <UserAvatar
+                            key={m.userId}
+                            size="xs"
+                            avatarType={m.avatarType || ''}
+                            avatarData={m.avatarData || {}}
+                            nickname={m.nickname || ''}
+                            isMe={m.isMe}
+                            showNickname={league.isMyLeague}
+                            nicknameStyle={league.isMyLeague ? 'below' : 'right'}
+                            className={m.isMe ? 'progreso-league__me-av' : ''}
+                          />
+                        ) : (
+                          <UserAvatar
+                            key={m.userId}
+                            size="xs"
+                            avatarType={m.avatarType || ''}
+                            avatarData={m.avatarData || {}}
+                            hideInitials
+                          />
+                        )
+                      ))}
+                      {league.memberCount > 8 && (
+                        <span className="progreso-league__more">+{league.memberCount - 8}</span>
+                      )}
+                    </div>
+                  )}
+                  {league.isMyLeague && (
+                    <Link to="/ligas" className="progreso-league__link">Ver mi liga →</Link>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="progreso__section">
         <h2 className="progreso__section-title">Progreso de entrenamiento</h2>
