@@ -62,6 +62,42 @@
   margin: 0 0 14px;
 }
 
+/* View mode */
+.ps-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 4px;
+}
+.ps-view-nick {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #f5c842;
+  letter-spacing: 0.03em;
+  margin: 0;
+}
+
+/* Edit mode header with back button */
+.ps-edit-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.ps-back-btn {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  flex-shrink: 0;
+  transition: color 0.12s;
+}
+.ps-back-btn:hover { color: #ccc; }
+
 .ps-preview {
   display: flex;
   justify-content: center;

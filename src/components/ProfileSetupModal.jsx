@@ -37,6 +37,8 @@ export default function ProfileSetupModal({
   const sd = window.blokesSiteData || {}
 
   const existingNick = sd.userNickname || ''
+  const hasProfile   = !!(existingNick || sd.userAvatarType)
+  const [viewMode,    setViewMode]    = useState(hasProfile)
   const [nickLocked,  setNickLocked]  = useState(!!existingNick)
   const [nickname,    setNickname]    = useState(existingNick)
   const [nickStatus,  setNickStatus]  = useState(existingNick ? 'ok' : 'idle')
@@ -57,11 +59,13 @@ export default function ProfileSetupModal({
   const nickOk = nickLocked || (nickname.trim().length >= 3 && nickStatus === 'ok')
   const canSave = nickOk && (avatarMode === 'dicebear' || (avatarMode === 'photo' && photoUrl))
 
-  // Reset form to current saved values when modal opens
+  // Reset to view mode and current saved values each time the modal opens
   useEffect(() => {
     if (!isOpen) return
     const fresh = window.blokesSiteData || {}
     const freshNick = fresh.userNickname || ''
+    const freshHasProfile = !!(freshNick || fresh.userAvatarType)
+    setViewMode(freshHasProfile)
     setNickLocked(!!freshNick)
     setNickname(freshNick)
     setNickStatus(freshNick ? 'ok' : 'idle')
@@ -129,140 +133,175 @@ export default function ProfileSetupModal({
     return <span className="ps-nick-meta">3–20 caracteres · letras, números y _</span>
   }
 
+  // Current saved avatar data (always read from blokesSiteData which useProfile keeps fresh)
+  const savedAvatarType = window.blokesSiteData?.userAvatarType || ''
+  const savedAvatarData = window.blokesSiteData?.userAvatarData || {}
+  const savedNickname   = window.blokesSiteData?.userNickname   || ''
+
   return (
     <div className="ps-overlay" onClick={isDismissible ? onClose : undefined}>
       <div className="ps-modal" onClick={e => e.stopPropagation()}>
-        {isDismissible && (
-          <button className="ps-close" onClick={onClose} aria-label="Cerrar">×</button>
-        )}
-
-        <h2 className="ps-title">Crea tu perfil</h2>
+        <button className="ps-close" onClick={onClose} aria-label="Cerrar">×</button>
 
         {blockingMessage && (
           <p className="ps-blocking-msg">{blockingMessage}</p>
         )}
 
-        {/* Avatar preview */}
-        <div className="ps-preview">
-          <UserAvatar
-            size="lg"
-            avatarType={avatarType}
-            avatarData={avatarData}
-            nickname={nickname.trim()}
-            isMe
-          />
-        </div>
-
-        {/* Mode tabs */}
-        <div className="ps-tabs">
-          <button
-            className={`ps-tab${avatarMode === 'dicebear' ? ' ps-tab--active' : ''}`}
-            onClick={() => setAvatarMode('dicebear')}
-          >Estilo generado</button>
-          <button
-            className={`ps-tab${avatarMode === 'photo' ? ' ps-tab--active' : ''}`}
-            onClick={() => setAvatarMode('photo')}
-          >Foto propia</button>
-        </div>
-
-        {avatarMode === 'dicebear' && (
-          <div className="ps-styles">
-            <div className="ps-styles-grid">
-              {STYLES_META.map(s => {
-                let uri = null
-                try {
-                  const svg = createAvatar(STYLE_MAP[s.id], { seed }).toString()
-                  uri = `data:image/svg+xml,${encodeURIComponent(svg)}`
-                } catch {}
-                return (
-                  <button
-                    key={s.id}
-                    className={`ps-style-btn${style === s.id ? ' ps-style-btn--active' : ''}`}
-                    onClick={() => setStyle(s.id)}
-                    title={s.label}
-                  >
-                    {uri
-                      ? <img src={uri} alt={s.label} className="ps-style-img" />
-                      : <span className="ps-style-img ps-style-img--empty" />
-                    }
-                    <span className="ps-style-label">{s.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-            <button className="ps-reseed" onClick={() => setSeed(randomSeed())}>
-              🔀 Cambiar apariencia
-            </button>
-          </div>
-        )}
-
-        {avatarMode === 'photo' && (
-          <div className="ps-photo">
-            {photoUrl && (
-              <img src={photoUrl} alt="Tu foto" className="ps-photo-preview" />
-            )}
-            <label className="ps-upload-btn">
-              {uploading ? 'Subiendo...' : (photoUrl ? 'Cambiar foto' : 'Subir foto')}
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handlePhotoUpload}
-                disabled={uploading}
-                hidden
+        {/* ── VIEW MODE ── */}
+        {viewMode ? (
+          <>
+            <h2 className="ps-title">Mi perfil</h2>
+            <div className="ps-view">
+              <UserAvatar
+                size="lg"
+                avatarType={savedAvatarType}
+                avatarData={savedAvatarData}
+                nickname={savedNickname}
+                isMe
               />
-            </label>
-          </div>
-        )}
-
-        {/* Nickname */}
-        <div className="ps-nick-wrap">
-          <label className="ps-nick-label">Nickname</label>
-          {nickLocked ? (
-            <div className="ps-nick-locked">
-              <span className="ps-nick-locked-val">@{nickname}</span>
+              {savedNickname && (
+                <p className="ps-view-nick">@{savedNickname}</p>
+              )}
               <button
-                className="ps-nick-change-btn"
-                onClick={() => setNickLocked(false)}
-                type="button"
-              >Cambiar</button>
+                className="ps-save-btn"
+                onClick={() => setViewMode(false)}
+                style={{ marginTop: 8 }}
+              >Editar perfil</button>
             </div>
-          ) : (
-            <>
-              <div className={`ps-nick-row${nickStatus === 'ok' ? ' ps-nick-row--ok' : (nickStatus === 'taken' || nickStatus === 'short' || nickStatus === 'long' || nickStatus === 'chars') ? ' ps-nick-row--err' : ''}`}>
-                <span className="ps-nick-at">@</span>
-                <input
-                  className="ps-nick-input"
-                  type="text"
-                  value={nickname}
-                  onChange={e => handleNicknameChange(e.target.value)}
-                  placeholder="mi_nick"
-                  maxLength={20}
-                  autoComplete="off"
-                  autoFocus
-                />
-                {window.blokesSiteData?.userNickname && (
-                  <button
-                    className="ps-nick-cancel-btn"
-                    onClick={() => { setNickname(window.blokesSiteData.userNickname); setNickStatus('ok'); setNickLocked(true) }}
-                    type="button"
-                    title="Cancelar cambio"
-                  >✕</button>
-                )}
+          </>
+        ) : (
+        /* ── EDIT MODE ── */
+          <>
+            <div className="ps-edit-header">
+              {savedNickname && (
+                <button className="ps-back-btn" onClick={() => setViewMode(true)}>← Volver</button>
+              )}
+              <h2 className="ps-title" style={{ marginBottom: 0 }}>
+                {savedNickname ? 'Editar perfil' : 'Crea tu perfil'}
+              </h2>
+            </div>
+
+            {/* Live avatar preview */}
+            <div className="ps-preview">
+              <UserAvatar
+                size="lg"
+                avatarType={avatarType}
+                avatarData={avatarData}
+                nickname={nickname.trim()}
+                isMe
+              />
+            </div>
+
+            {/* Mode tabs */}
+            <div className="ps-tabs">
+              <button
+                className={`ps-tab${avatarMode === 'dicebear' ? ' ps-tab--active' : ''}`}
+                onClick={() => setAvatarMode('dicebear')}
+              >Estilo generado</button>
+              <button
+                className={`ps-tab${avatarMode === 'photo' ? ' ps-tab--active' : ''}`}
+                onClick={() => setAvatarMode('photo')}
+              >Foto propia</button>
+            </div>
+
+            {avatarMode === 'dicebear' && (
+              <div className="ps-styles">
+                <div className="ps-styles-grid">
+                  {STYLES_META.map(s => {
+                    let uri = null
+                    try {
+                      const svg = createAvatar(STYLE_MAP[s.id], { seed }).toString()
+                      uri = `data:image/svg+xml,${encodeURIComponent(svg)}`
+                    } catch {}
+                    return (
+                      <button
+                        key={s.id}
+                        className={`ps-style-btn${style === s.id ? ' ps-style-btn--active' : ''}`}
+                        onClick={() => setStyle(s.id)}
+                        title={s.label}
+                      >
+                        {uri
+                          ? <img src={uri} alt={s.label} className="ps-style-img" />
+                          : <span className="ps-style-img ps-style-img--empty" />
+                        }
+                        <span className="ps-style-label">{s.label}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+                <button className="ps-reseed" onClick={() => setSeed(randomSeed())}>
+                  🔀 Cambiar apariencia
+                </button>
               </div>
-              <div className="ps-nick-hint">{nickHint()}</div>
-            </>
-          )}
-        </div>
+            )}
 
-        {formError && <p className="ps-error">{formError}</p>}
+            {avatarMode === 'photo' && (
+              <div className="ps-photo">
+                {photoUrl && (
+                  <img src={photoUrl} alt="Tu foto" className="ps-photo-preview" />
+                )}
+                <label className="ps-upload-btn">
+                  {uploading ? 'Subiendo...' : (photoUrl ? 'Cambiar foto' : 'Subir foto')}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoUpload}
+                    disabled={uploading}
+                    hidden
+                  />
+                </label>
+              </div>
+            )}
 
-        <button
-          className="ps-save-btn"
-          onClick={handleSave}
-          disabled={!canSave || saving}
-        >
-          {saving ? 'Guardando...' : 'Guardar perfil'}
-        </button>
+            {/* Nickname */}
+            <div className="ps-nick-wrap">
+              <label className="ps-nick-label">Nickname</label>
+              {nickLocked ? (
+                <div className="ps-nick-locked">
+                  <span className="ps-nick-locked-val">@{nickname}</span>
+                  <button className="ps-nick-change-btn" onClick={() => setNickLocked(false)} type="button">
+                    Cambiar
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className={`ps-nick-row${nickStatus === 'ok' ? ' ps-nick-row--ok' : (nickStatus === 'taken' || nickStatus === 'short' || nickStatus === 'long' || nickStatus === 'chars') ? ' ps-nick-row--err' : ''}`}>
+                    <span className="ps-nick-at">@</span>
+                    <input
+                      className="ps-nick-input"
+                      type="text"
+                      value={nickname}
+                      onChange={e => handleNicknameChange(e.target.value)}
+                      placeholder="mi_nick"
+                      maxLength={20}
+                      autoComplete="off"
+                      autoFocus
+                    />
+                    {window.blokesSiteData?.userNickname && (
+                      <button
+                        className="ps-nick-cancel-btn"
+                        onClick={() => { setNickname(window.blokesSiteData.userNickname); setNickStatus('ok'); setNickLocked(true) }}
+                        type="button"
+                        title="Cancelar cambio"
+                      >✕</button>
+                    )}
+                  </div>
+                  <div className="ps-nick-hint">{nickHint()}</div>
+                </>
+              )}
+            </div>
+
+            {formError && <p className="ps-error">{formError}</p>}
+
+            <button
+              className="ps-save-btn"
+              onClick={handleSave}
+              disabled={!canSave || saving}
+            >
+              {saving ? 'Guardando...' : 'Guardar'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   )
