@@ -91,6 +91,15 @@ export function useCompletions() {
     })
     setCountOverrides(prev => ({ ...prev, [postId]: optimisticCount }))
 
+    const revertOptimistic = () => {
+      setCompletedByMe(prev => {
+        const next = new Set(prev)
+        wasCompleted ? next.add(postId) : next.delete(postId)
+        return next
+      })
+      setCountOverrides(prev => { const next = { ...prev }; delete next[postId]; return next })
+    }
+
     try {
       const res = await fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/completions/${postId}/toggle`, {
         method: 'POST',
@@ -98,6 +107,20 @@ export function useCompletions() {
         headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' },
       })
       const data = await res.json()
+
+      // Server blocked because profile not complete (stale client state)
+      if (!res.ok && data.code === 'profile_incomplete') {
+        revertOptimistic()
+        if (window.blokesSiteData) window.blokesSiteData.profileComplete = false
+        try { localStorage.removeItem('blokes_profile_complete') } catch {}
+        window.blokesOpenProfileModal?.({
+          blocking: true,
+          message: 'Necesitas un nickname y avatar para registrar un top.',
+          onSaved: () => toggleCompletion(postId, currentCount),
+        })
+        return null
+      }
+
       setCompletedByMe(prev => {
         const next = new Set(prev)
         data.completed ? next.add(postId) : next.delete(postId)
@@ -109,16 +132,7 @@ export function useCompletions() {
       }
       return data
     } catch (e) {
-      setCompletedByMe(prev => {
-        const next = new Set(prev)
-        wasCompleted ? next.add(postId) : next.delete(postId)
-        return next
-      })
-      setCountOverrides(prev => {
-        const next = { ...prev }
-        delete next[postId]
-        return next
-      })
+      revertOptimistic()
       console.error('Toggle completion failed:', e)
       return null
     }

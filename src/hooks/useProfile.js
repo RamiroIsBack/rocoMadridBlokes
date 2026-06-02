@@ -9,9 +9,17 @@ function getHeaders(json = false) {
   return h
 }
 
+const LS_KEY = 'blokes_profile_complete'
+
+function lsProfileComplete() {
+  try { return localStorage.getItem(LS_KEY) === '1' } catch { return false }
+}
+
 export function useProfile() {
   const sd = window.blokesSiteData || {}
-  const [profileComplete, setProfileComplete] = useState(() => sd.profileComplete ?? false)
+  const [profileComplete, setProfileComplete] = useState(
+    () => !!(sd.profileComplete || lsProfileComplete())
+  )
   const [nickname, setNickname]               = useState(() => sd.userNickname || '')
   const [avatarType, setAvatarType]           = useState(() => sd.userAvatarType || '')
   const [avatarData, setAvatarData]           = useState(() => sd.userAvatarData || {})
@@ -37,13 +45,14 @@ export function useProfile() {
       setAvatarType(type)
       setAvatarData(data)
       setProfileComplete(true)
-      // Keep blokesSiteData in sync so guards read fresh state
+      // Keep blokesSiteData + localStorage in sync so guards read fresh state
       if (window.blokesSiteData) {
         window.blokesSiteData.profileComplete = true
         window.blokesSiteData.userNickname    = nick
         window.blokesSiteData.userAvatarType  = type
         window.blokesSiteData.userAvatarData  = data
       }
+      try { localStorage.setItem(LS_KEY, '1') } catch {}
       setSaving(false)
       return true
     } catch {

@@ -74,12 +74,16 @@ export default function App() {
   const [profileModalMsg,     setProfileModalMsg]     = useState('')
   const [profileModalOnSaved, setProfileModalOnSaved] = useState(null)
 
-  // Show dismissible modal on first open for logged-in users without a profile
+  // Show dismissible modal on first app load for logged-in users without a profile.
+  // Depends on profileComplete being accurate (backed by localStorage fallback).
   useEffect(() => {
     if (sd.isLoggedIn && !profileComplete) {
-      setProfileModalOpen(true)
-      setProfileModalBlock(false)
-      setProfileModalMsg('')
+      const timer = setTimeout(() => {
+        setProfileModalOpen(true)
+        setProfileModalBlock(false)
+        setProfileModalMsg('')
+      }, 800) // small delay so it doesn't flash on fast page loads
+      return () => clearTimeout(timer)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

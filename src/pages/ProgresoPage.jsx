@@ -156,66 +156,6 @@ export default function ProgresoPage() {
     <div className="progreso">
       <h1 className="progreso__title">Comunidad</h1>
 
-      {/* ── Ligas ── */}
-      {comunidadLeagues && (
-        <section className="progreso__section">
-          <h2 className="progreso__section-title">Ligas</h2>
-          <div className="progreso-leagues">
-            {comunidadLeagues.map(league => {
-              const meta = TIER_META_PROG[league.tier] || TIER_META_PROG[1]
-              return (
-                <div
-                  key={league.id}
-                  className={`progreso-league${league.isMyLeague ? ' progreso-league--mine' : ''}`}
-                  style={{ borderColor: league.isMyLeague ? meta.color : 'transparent' }}
-                >
-                  <div className="progreso-league__head">
-                    <span className="progreso-league__emoji">{meta.emoji}</span>
-                    <span className="progreso-league__name" style={{ color: league.isMyLeague ? meta.color : undefined }}>
-                      {league.name}
-                    </span>
-                    <span className="progreso-league__count">{league.memberCount} escal.</span>
-                  </div>
-                  {league.members.length > 0 && (
-                    <div className="progreso-league__members">
-                      {league.members.slice(0, 8).map(m => (
-                        sd.isLoggedIn ? (
-                          <UserAvatar
-                            key={m.userId}
-                            size="xs"
-                            avatarType={m.avatarType || ''}
-                            avatarData={m.avatarData || {}}
-                            nickname={m.nickname || ''}
-                            isMe={m.isMe}
-                            showNickname={league.isMyLeague}
-                            nicknameStyle={league.isMyLeague ? 'below' : 'right'}
-                            className={m.isMe ? 'progreso-league__me-av' : ''}
-                          />
-                        ) : (
-                          <UserAvatar
-                            key={m.userId}
-                            size="xs"
-                            avatarType={m.avatarType || ''}
-                            avatarData={m.avatarData || {}}
-                            hideInitials
-                          />
-                        )
-                      ))}
-                      {league.memberCount > 8 && (
-                        <span className="progreso-league__more">+{league.memberCount - 8}</span>
-                      )}
-                    </div>
-                  )}
-                  {league.isMyLeague && (
-                    <Link to="/ligas" className="progreso-league__link">Ver mi liga →</Link>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </section>
-      )}
-
       <section className="progreso__section">
         <h2 className="progreso__section-title">Progreso de entrenamiento</h2>
         <p className="progreso__section-hint">Media de la comunidad por test y mes</p>
@@ -340,6 +280,53 @@ export default function ProgresoPage() {
             ))}
         </div>
       </section>
+
+      {/* ── Ligas — avatars only, before Hall of Fame ── */}
+      {comunidadLeagues && (
+        <section className="progreso__section">
+          <h2 className="progreso__section-title">Ligas</h2>
+          <div className="progreso-leagues">
+            {comunidadLeagues.map(league => {
+              const meta = TIER_META_PROG[league.tier] || TIER_META_PROG[1]
+              return (
+                <div
+                  key={league.id}
+                  className={`progreso-league${league.isMyLeague ? ' progreso-league--mine' : ''}`}
+                  style={{ borderColor: league.isMyLeague ? meta.color : 'transparent' }}
+                >
+                  <div className="progreso-league__head">
+                    <span className="progreso-league__emoji">{meta.emoji}</span>
+                    <span className="progreso-league__name" style={{ color: league.isMyLeague ? meta.color : undefined }}>
+                      {league.name}
+                    </span>
+                    <span className="progreso-league__count">{league.memberCount} escal.</span>
+                  </div>
+                  {league.members.length > 0 && (
+                    <div className="progreso-league__members">
+                      {league.members.slice(0, 10).map(m => (
+                        <UserAvatar
+                          key={m.userId}
+                          size="xs"
+                          avatarType={m.avatarType || ''}
+                          avatarData={m.avatarData || {}}
+                          nickname={m.nickname || ''}
+                          isMe={m.isMe}
+                        />
+                      ))}
+                      {league.memberCount > 10 && (
+                        <span className="progreso-league__more">+{league.memberCount - 10}</span>
+                      )}
+                    </div>
+                  )}
+                  {league.isMyLeague && (
+                    <Link to="/ligas" className="progreso-league__link">Ver mi liga →</Link>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {hofCards.length > 0 && (
         <section className="progreso__section">
