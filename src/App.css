@@ -84,6 +84,34 @@
   color: #f5c842;
   letter-spacing: 0.02em;
 }
+
+/* Avatar + nickname button replacing the old user-name chip */
+.app-header__avatar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px 3px 4px;
+  background: rgba(245, 200, 66, 0.08);
+  border: 1px solid rgba(245, 200, 66, 0.3);
+  border-radius: 20px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+.app-header__avatar-btn:hover {
+  background: rgba(245, 200, 66, 0.14);
+  border-color: rgba(245, 200, 66, 0.5);
+}
+.app-header__user-nick {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #f5c842;
+  letter-spacing: 0.02em;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .app-header__user-x {
   background: none;
   border: none;

@@ -11,6 +11,7 @@ import EntrenamientosPage from './pages/EntrenamientosPage'
 import SuperAdminPage from './pages/SuperAdminPage'
 import LeaguesPage from './pages/LeaguesPage'
 import ProfileSetupModal from './components/ProfileSetupModal'
+import UserAvatar from './components/UserAvatar'
 import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import './App.css'
@@ -68,7 +69,7 @@ export default function App() {
   const sd = window.blokesSiteData || {}
 
   // Profile modal state
-  const { profileComplete, verified, saveProfile, checkNickname, uploadPhoto } = useProfile()
+  const { profileComplete, verified, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto } = useProfile()
   const [profileModalOpen,    setProfileModalOpen]    = useState(false)
   const [profileModalBlock,   setProfileModalBlock]   = useState(false)
   const [profileModalMsg,     setProfileModalMsg]     = useState('')
@@ -152,13 +153,23 @@ export default function App() {
             {sd.isLoggedIn ? (
               <>
                 <div className="app-header__user">
-                  <span className="app-header__user-name">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                      <circle cx="12" cy="8" r="3.5"/>
-                      <path d="M12 13.5c-3.5 0-7 1.75-7 3.5V19h14v-2c0-1.75-3.5-3.5-7-3.5z"/>
-                    </svg>
-                    {sd.userName || 'Tú'}
-                  </span>
+                  <button
+                    className="app-header__avatar-btn"
+                    onClick={() => openProfileModal()}
+                    title="Editar perfil"
+                  >
+                    <UserAvatar
+                      size="sm"
+                      avatarType={avatarType}
+                      avatarData={avatarData}
+                      nickname={nickname}
+                      name={sd.userName}
+                      isMe
+                    />
+                    <span className="app-header__user-nick">
+                      {nickname ? `@${nickname}` : (sd.userName || 'Tú')}
+                    </span>
+                  </button>
                   <button
                     className="app-header__user-x"
                     onClick={() => setLogoutOpen(true)}
@@ -202,10 +213,6 @@ export default function App() {
               </a>
             )}
             <div className="app-header__links">
-              <div className="app-header__link-wrap">
-                <span className="app-header__link-hint">Explora el resto de la web</span>
-                <a href="https://rocomadrid.com" className="app-header__link">rocomadrid.com</a>
-              </div>
               <div className="app-header__link-wrap">
                 <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
                 <a href="https://rocomadrid.com/club" className="app-header__link app-header__link--cta">Apúntate a clases</a>
