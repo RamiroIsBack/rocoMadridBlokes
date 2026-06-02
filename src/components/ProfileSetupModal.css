@@ -1,7 +1,7 @@
 .ps-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.82);
+  background: rgba(0,0,0,0.55);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -11,7 +11,7 @@
 }
 
 .ps-modal {
-  background: #161616;
+  background: #2a2a2a;
   border-radius: 18px;
   padding: 30px 22px 24px;
   max-width: 340px;
@@ -72,7 +72,7 @@
 .ps-tabs {
   display: flex;
   gap: 2px;
-  background: #0e0e0e;
+  background: #1a1a1a;
   border-radius: 9px;
   padding: 2px;
   margin-bottom: 14px;
@@ -106,7 +106,7 @@
 }
 
 .ps-style-btn {
-  background: #111;
+  background: #1e1e1e;
   border: 2px solid transparent;
   border-radius: 10px;
   padding: 6px 3px 5px;
@@ -216,8 +216,8 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  background: #0e0e0e;
-  border: 1px solid #2e2e2e;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
   border-radius: 9px;
   padding: 9px 12px;
   transition: border-color 0.15s;

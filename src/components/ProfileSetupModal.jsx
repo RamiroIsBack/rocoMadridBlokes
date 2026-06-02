@@ -220,6 +220,7 @@ export default function ProfileSetupModal({
               placeholder="mi_nick"
               maxLength={20}
               autoComplete="off"
+              autoFocus
             />
           </div>
           <div className="ps-nick-hint">{nickHint()}</div>
