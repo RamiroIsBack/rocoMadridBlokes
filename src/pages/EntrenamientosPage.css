@@ -142,7 +142,7 @@
 
 /* Table */
 .entrena__table-wrap {
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .entrena__table {

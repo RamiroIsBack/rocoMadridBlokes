@@ -42,11 +42,8 @@
 
 .training-panel__grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 10px;
-}
-@media (max-width: 520px) {
-  .training-panel__grid { grid-template-columns: 1fr; }
 }
 
 .training-panel__test {

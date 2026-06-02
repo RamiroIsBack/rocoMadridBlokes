@@ -328,13 +328,9 @@ export default function EntrenamientosPage() {
             <thead>
               <tr>
                 <th>Nombre</th>
-                <th>Email</th>
                 <th>Frecuencia</th>
                 <th>Día</th>
                 <th>Horario</th>
-                <th>Turno</th>
-                <th>Edad</th>
-                <th>Estado</th>
               </tr>
             </thead>
             <tbody>
@@ -347,21 +343,13 @@ export default function EntrenamientosPage() {
                       onClick={() => setSelectedAlumno(isSelected ? null : a)}
                     >
                       <td>{a.cliente || a.nombre || '—'}</td>
-                      <td>{a.email || '—'}</td>
                       <td>{FRECUENCIA_LABEL[a.frecuencia] || a.producto || '—'}</td>
                       <td>{a.dia || '—'}</td>
                       <td>{a.horario || '—'}</td>
-                      <td>{a.turno || '—'}</td>
-                      <td>{a.edad || '—'}</td>
-                      <td>
-                        <span className={`entrena__badge entrena__badge--${a.status || 'active'}`}>
-                          {a.status || 'active'}
-                        </span>
-                      </td>
                     </tr>
                     {isSelected && (
                       <tr className="entrena__inline-panel">
-                        <td colSpan={8}>
+                        <td colSpan={4}>
                           <TrainingPanel
                             alumno={a}
                             onClose={() => setSelectedAlumno(null)}
