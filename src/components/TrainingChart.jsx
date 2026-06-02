@@ -1,5 +1,5 @@
 import {
-  ComposedChart, Bar, Line,
+  AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import './TrainingChart.css'
@@ -18,60 +18,89 @@ function monthLabel(key) {
   return MONTH_SHORT[parseInt(key.split('-')[1]) - 1]
 }
 
-// ── Bar + Line chart ──────────────────────────────────────────────────────────
+function addZeroAnchor(rawData) {
+  const firstIdx = rawData.findIndex(v => v !== null)
+  if (firstIdx === -1) return rawData
+  const anchored = [...rawData]
+  const anchorIdx = firstIdx > 0 ? firstIdx - 1 : 0
+  if (anchored[anchorIdx] === null) anchored[anchorIdx] = 0
+  return anchored
+}
 
-function BarLineChart({ userEntries, communitySummary, color, months, unit }) {
-  const chartData = months.map(m => {
+// ── Area chart ────────────────────────────────────────────────────────────────
+
+function AreaChartView({ userEntries, communitySummary, color, months, unit }) {
+  const rawUserData = months.map(m => {
     const entries = userEntries.filter(e => e.logged_at?.startsWith(m))
-    const userVal = entries.length ? entries[entries.length - 1].value_kg : null
-    const commVal = communitySummary[m]?.avg_kg ?? null
-    return { month: monthLabel(m), tú: userVal, comunidad: commVal }
+    return entries.length ? entries[entries.length - 1].value_kg : null
   })
+  const rawCommData = months.map(m => communitySummary[m]?.avg_kg ?? null)
+
+  const userAnchored = addZeroAnchor(rawUserData)
+  const commAnchored = addZeroAnchor(rawCommData)
+
+  const chartData = months.map((m, i) => ({
+    month: monthLabel(m),
+    tú: userAnchored[i],
+    comunidad: commAnchored[i],
+  }))
 
   const hasUser = userEntries.length > 0
   const hasComm = Object.values(communitySummary).some(v => v?.avg_kg != null)
-  const hasAny  = chartData.some(d => d.tú !== null || d.comunidad !== null)
+  const allVals = [...rawUserData, ...rawCommData].filter(v => v !== null)
 
-  if (!hasAny) return (
+  if (!allVals.length) return (
     <div className="training-chart--empty">Sin datos todavía</div>
   )
 
+  const uid = color.replace('#', 'tc-')
+
   return (
-    <ResponsiveContainer width="100%" height={200}>
-      <ComposedChart data={chartData} margin={{ top: 6, right: 12, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-        <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
-        <YAxis tick={{ fill: '#888', fontSize: 10 }} width={38} />
+    <ResponsiveContainer width="100%" height={220}>
+      <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <defs>
+          <linearGradient id={`${uid}-user`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%"  stopColor={color}    stopOpacity={0.45} />
+            <stop offset="95%" stopColor={color}    stopOpacity={0}    />
+          </linearGradient>
+          <linearGradient id={`${uid}-comm`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.2} />
+            <stop offset="95%" stopColor="#22c55e" stopOpacity={0}   />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="#1a2a1a" />
+        <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fill: '#888', fontSize: 10 }} width={38} axisLine={false} tickLine={false} />
         <Tooltip
-          contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12, borderRadius: 6 }}
+          contentStyle={{ background: '#0d1a0d', border: '1px solid #2a3a20', fontSize: 12, borderRadius: 6 }}
           labelStyle={{ color: '#f5c842' }}
           formatter={(v, name) => [
             v !== null && v !== undefined ? `${v} ${unit}` : '—',
             name === 'tú' ? 'Tú' : 'Media Roco',
           ]}
-          cursor={{ fill: 'rgba(245,200,66,0.04)' }}
+          cursor={{ stroke: color, strokeWidth: 1, strokeDasharray: '4 2' }}
         />
         {(hasUser || hasComm) && (
           <Legend
             formatter={k => k === 'tú' ? 'Tú' : 'Media Roco'}
-            wrapperStyle={{ fontSize: 11, color: '#888' }}
+            wrapperStyle={{ fontSize: 11, color: '#888', paddingTop: 4 }}
+          />
+        )}
+        {hasComm && (
+          <Area
+            type="monotone" dataKey="comunidad"
+            stroke="#22c55e" fill={`url(#${uid}-comm)`} strokeWidth={1.5}
+            strokeDasharray="5 3" connectNulls dot={false}
           />
         )}
         {hasUser && (
-          <Bar dataKey="tú" fill={color} radius={[3, 3, 0, 0]} maxBarSize={28} />
-        )}
-        {hasComm && (
-          <Line
-            dataKey="comunidad"
-            type="monotone"
-            stroke="#555"
-            strokeWidth={1.5}
-            strokeDasharray="4 3"
-            dot={false}
-            connectNulls
+          <Area
+            type="monotone" dataKey="tú"
+            stroke={color} fill={`url(#${uid}-user)`} strokeWidth={2}
+            connectNulls dot={{ r: 3, fill: color, strokeWidth: 0 }} activeDot={{ r: 5 }}
           />
         )}
-      </ComposedChart>
+      </AreaChart>
     </ResponsiveContainer>
   )
 }
@@ -124,13 +153,6 @@ export function ProgressGauge({ userEntries, communitySummary, color, hideValues
   return (
     <div className="training-progress-gauge">
       <svg viewBox={`0 0 ${GW} ${GH}`} className="training-gauge__svg">
-        <defs>
-          <linearGradient id={`gauge-glow-${color.replace('#','')}`} x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%"   stopColor={arcColor} stopOpacity="0.6" />
-            <stop offset="100%" stopColor={arcColor} stopOpacity="1"   />
-          </linearGradient>
-        </defs>
-
         {/* Tick marks */}
         {ticks.map(tc => {
           const p  = gaugeArc(tc)
@@ -148,30 +170,26 @@ export function ProgressGauge({ userEntries, communitySummary, color, hideValues
           )
         })}
 
-        {/* Track */}
+        {/* Track (dark with inner highlight) */}
         <path
           d={`M ${GCX - GR},${GCY} A ${GR},${GR} 0 0 0 ${GCX + GR},${GCY}`}
-          fill="none" stroke="#1e1e1e" strokeWidth={GSW} strokeLinecap="round"
+          fill="none" stroke="#1a1a1a" strokeWidth={GSW} strokeLinecap="round"
         />
-        {/* Track inner highlight */}
         <path
           d={`M ${GCX - GR},${GCY} A ${GR},${GR} 0 0 0 ${GCX + GR},${GCY}`}
-          fill="none" stroke="#2a2a2a" strokeWidth={GSW - 6} strokeLinecap="round"
+          fill="none" stroke="#252525" strokeWidth={GSW - 6} strokeLinecap="round"
         />
 
         {/* Progress arc */}
         {t > 0 && (
           <path
             d={progressArcPath(t)}
-            fill="none"
-            stroke={arcColor}
-            strokeWidth={GSW}
-            strokeLinecap="round"
+            fill="none" stroke={arcColor} strokeWidth={GSW} strokeLinecap="round"
             style={{ filter: `drop-shadow(0 0 8px ${arcColor}88)` }}
           />
         )}
 
-        {/* Baseline separator */}
+        {/* Baseline */}
         <line
           x1={GCX - GR - GSW / 2} y1={GCY}
           x2={GCX + GR + GSW / 2} y2={GCY}
@@ -181,12 +199,8 @@ export function ProgressGauge({ userEntries, communitySummary, color, hideValues
         {/* Center text */}
         {!hideValues ? (
           <>
-            <text x={GCX} y={GCY - 20} textAnchor="middle" className="tg-pct" fill={arcColor}>
-              {pctStr}
-            </text>
-            <text x={GCX} y={GCY - 4} textAnchor="middle" className="tg-arrow" fill={arcColor}>
-              {improved ? '▲' : '▼'}
-            </text>
+            <text x={GCX} y={GCY - 20} textAnchor="middle" className="tg-pct" fill={arcColor}>{pctStr}</text>
+            <text x={GCX} y={GCY - 4}  textAnchor="middle" className="tg-arrow" fill={arcColor}>{improved ? '▲' : '▼'}</text>
             <text x={GCX} y={GCY + 20} textAnchor="middle" className="tg-vals">
               {baseline.toFixed(1)} → {latest.toFixed(1)} {unit}
             </text>
@@ -210,7 +224,7 @@ export default function TrainingChart({ userEntries = [], communitySummary = {},
   const months = getLast12Months()
   return (
     <div className="training-chart-wrap">
-      <BarLineChart
+      <AreaChartView
         userEntries={userEntries}
         communitySummary={communitySummary}
         color={color}
