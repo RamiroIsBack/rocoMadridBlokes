@@ -68,7 +68,7 @@
 .app-header__user {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   margin-top: 8px;
 }
 .app-header__user-name {
@@ -84,33 +84,54 @@
   color: #f5c842;
   letter-spacing: 0.02em;
 }
-
-/* Avatar + nickname button replacing the old user-name chip */
-.app-header__avatar-btn {
-  display: inline-flex;
+/* Avatar + nickname stacked vertically */
+.app-header__user-profile {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 7px;
-  padding: 3px 10px 3px 4px;
-  background: rgba(245, 200, 66, 0.08);
-  border: 1px solid rgba(245, 200, 66, 0.3);
-  border-radius: 20px;
+  gap: 3px;
+}
+.app-header__avatar-btn {
+  background: none;
+  border: 2px solid rgba(245, 200, 66, 0.35);
+  padding: 0;
+  border-radius: 50%;
   cursor: pointer;
-  font-family: inherit;
-  transition: background 0.15s, border-color 0.15s;
+  display: block;
+  transition: border-color 0.15s;
+  line-height: 0;
 }
 .app-header__avatar-btn:hover {
-  background: rgba(245, 200, 66, 0.14);
-  border-color: rgba(245, 200, 66, 0.5);
+  border-color: rgba(245, 200, 66, 0.7);
 }
 .app-header__user-nick {
-  font-size: 0.78rem;
-  font-weight: 600;
+  font-size: 0.7rem;
+  font-weight: 700;
   color: #f5c842;
   letter-spacing: 0.02em;
-  max-width: 120px;
+  max-width: 90px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Log out text button */
+.app-header__logout-btn {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: inherit;
+  letter-spacing: 0.03em;
+  transition: color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+.app-header__logout-btn:hover {
+  color: #ccc;
+  background: rgba(255,255,255,0.06);
 }
 .app-header__user-x {
   background: none;

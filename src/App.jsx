@@ -153,32 +153,30 @@ export default function App() {
             {sd.isLoggedIn ? (
               <>
                 <div className="app-header__user">
-                  <button
-                    className="app-header__avatar-btn"
-                    onClick={() => openProfileModal()}
-                    title="Editar perfil"
-                  >
-                    <UserAvatar
-                      size="sm"
-                      avatarType={avatarType}
-                      avatarData={avatarData}
-                      nickname={nickname}
-                      name={sd.userName}
-                      isMe
-                    />
+                  <div className="app-header__user-profile">
+                    <button
+                      className="app-header__avatar-btn"
+                      onClick={() => openProfileModal()}
+                      title="Editar perfil"
+                    >
+                      <UserAvatar
+                        size="sm"
+                        avatarType={avatarType}
+                        avatarData={avatarData}
+                        nickname={nickname}
+                        name={sd.userName}
+                        isMe
+                      />
+                    </button>
                     <span className="app-header__user-nick">
                       {nickname ? `@${nickname}` : (sd.userName || 'Tú')}
                     </span>
-                  </button>
+                  </div>
                   <button
-                    className="app-header__user-x"
+                    className="app-header__logout-btn"
                     onClick={() => setLogoutOpen(true)}
-                    aria-label="Cerrar sesión"
                   >
-                    <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                      <line x1="1" y1="1" x2="7" y2="7"/>
-                      <line x1="7" y1="1" x2="1" y2="7"/>
-                    </svg>
+                    × Log out
                   </button>
                 </div>
                 {sd.subscription && (

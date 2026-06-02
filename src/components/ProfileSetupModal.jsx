@@ -36,8 +36,10 @@ export default function ProfileSetupModal({
 }) {
   const sd = window.blokesSiteData || {}
 
-  const [nickname,    setNickname]    = useState(sd.userNickname || '')
-  const [nickStatus,  setNickStatus]  = useState(sd.userNickname ? 'ok' : 'idle')
+  const existingNick = sd.userNickname || ''
+  const [nickLocked,  setNickLocked]  = useState(!!existingNick)
+  const [nickname,    setNickname]    = useState(existingNick)
+  const [nickStatus,  setNickStatus]  = useState(existingNick ? 'ok' : 'idle')
   const [avatarMode,  setAvatarMode]  = useState(sd.userAvatarType === 'photo' ? 'photo' : 'dicebear')
   const [style,       setStyle]       = useState(sd.userAvatarData?.style || 'adventurer')
   const [seed,        setSeed]        = useState(sd.userAvatarData?.seed  || randomSeed())
@@ -52,18 +54,17 @@ export default function ProfileSetupModal({
     ? { url: photoUrl }
     : { style, seed }
 
-  const canSave = (
-    nickname.trim().length >= 3 &&
-    nickStatus === 'ok' &&
-    (avatarMode === 'dicebear' || (avatarMode === 'photo' && photoUrl))
-  )
+  const nickOk = nickLocked || (nickname.trim().length >= 3 && nickStatus === 'ok')
+  const canSave = nickOk && (avatarMode === 'dicebear' || (avatarMode === 'photo' && photoUrl))
 
   // Reset form to current saved values when modal opens
   useEffect(() => {
     if (!isOpen) return
     const fresh = window.blokesSiteData || {}
-    setNickname(fresh.userNickname || '')
-    setNickStatus(fresh.userNickname ? 'ok' : 'idle')
+    const freshNick = fresh.userNickname || ''
+    setNickLocked(!!freshNick)
+    setNickname(freshNick)
+    setNickStatus(freshNick ? 'ok' : 'idle')
     setAvatarMode(fresh.userAvatarType === 'photo' ? 'photo' : 'dicebear')
     setStyle(fresh.userAvatarData?.style || 'adventurer')
     setSeed(fresh.userAvatarData?.seed   || randomSeed())
@@ -104,7 +105,10 @@ export default function ProfileSetupModal({
     if (!canSave || saving) return
     setSaving(true)
     setFormError('')
-    const ok = await saveProfile({ nickname: nickname.trim(), avatarType, avatarData })
+    const savedNick = nickLocked
+      ? (window.blokesSiteData?.userNickname || nickname.trim())
+      : nickname.trim()
+    const ok = await saveProfile({ nickname: savedNick, avatarType, avatarData })
     setSaving(false)
     if (ok) {
       onSaved?.()
@@ -212,21 +216,42 @@ export default function ProfileSetupModal({
 
         {/* Nickname */}
         <div className="ps-nick-wrap">
-          <label className="ps-nick-label">Tu nickname</label>
-          <div className={`ps-nick-row${nickStatus === 'ok' ? ' ps-nick-row--ok' : (nickStatus === 'taken' || nickStatus === 'short' || nickStatus === 'long' || nickStatus === 'chars') ? ' ps-nick-row--err' : ''}`}>
-            <span className="ps-nick-at">@</span>
-            <input
-              className="ps-nick-input"
-              type="text"
-              value={nickname}
-              onChange={e => handleNicknameChange(e.target.value)}
-              placeholder="mi_nick"
-              maxLength={20}
-              autoComplete="off"
-              autoFocus
-            />
-          </div>
-          <div className="ps-nick-hint">{nickHint()}</div>
+          <label className="ps-nick-label">Nickname</label>
+          {nickLocked ? (
+            <div className="ps-nick-locked">
+              <span className="ps-nick-locked-val">@{nickname}</span>
+              <button
+                className="ps-nick-change-btn"
+                onClick={() => setNickLocked(false)}
+                type="button"
+              >Cambiar</button>
+            </div>
+          ) : (
+            <>
+              <div className={`ps-nick-row${nickStatus === 'ok' ? ' ps-nick-row--ok' : (nickStatus === 'taken' || nickStatus === 'short' || nickStatus === 'long' || nickStatus === 'chars') ? ' ps-nick-row--err' : ''}`}>
+                <span className="ps-nick-at">@</span>
+                <input
+                  className="ps-nick-input"
+                  type="text"
+                  value={nickname}
+                  onChange={e => handleNicknameChange(e.target.value)}
+                  placeholder="mi_nick"
+                  maxLength={20}
+                  autoComplete="off"
+                  autoFocus
+                />
+                {window.blokesSiteData?.userNickname && (
+                  <button
+                    className="ps-nick-cancel-btn"
+                    onClick={() => { setNickname(window.blokesSiteData.userNickname); setNickStatus('ok'); setNickLocked(true) }}
+                    type="button"
+                    title="Cancelar cambio"
+                  >✕</button>
+                )}
+              </div>
+              <div className="ps-nick-hint">{nickHint()}</div>
+            </>
+          )}
         </div>
 
         {formError && <p className="ps-error">{formError}</p>}

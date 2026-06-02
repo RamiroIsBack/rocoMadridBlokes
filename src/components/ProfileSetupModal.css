@@ -239,6 +239,48 @@
   min-width: 0;
 }
 
+/* Nickname locked state */
+.ps-nick-locked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 9px;
+  padding: 9px 12px;
+}
+.ps-nick-locked-val {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #f5c842;
+  letter-spacing: 0.02em;
+}
+.ps-nick-change-btn {
+  background: none;
+  border: 1px solid #444;
+  color: #aaa;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
+}
+.ps-nick-change-btn:hover { border-color: #888; color: #eee; }
+
+.ps-nick-cancel-btn {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.ps-nick-cancel-btn:hover { color: #ccc; }
+
 .ps-nick-hint {
   min-height: 18px;
   margin-top: 5px;
