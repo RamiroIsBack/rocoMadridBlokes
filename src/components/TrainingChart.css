@@ -7,13 +7,15 @@
   align-items: center;
   justify-content: center;
   min-height: 100px;
-  color: #9ca3af;
+  color: #666;
   font-size: 0.85rem;
 }
 
 /* Gauge container */
 .training-progress-gauge {
   width: 100%;
+  max-width: 300px;
+  margin: 0 auto;
 }
 
 .training-gauge__svg {
@@ -22,25 +24,31 @@
   overflow: visible;
 }
 
-/* Gauge SVG text */
-.training-progress__pct-svg {
-  font-size: 26px;
+/* Gauge text styles */
+.tg-pct {
+  font-size: 28px;
   font-weight: 900;
   font-family: inherit;
   letter-spacing: -0.04em;
 }
-.training-progress__arrow-svg {
+.tg-arrow {
   font-size: 11px;
   font-family: inherit;
 }
-.training-progress__stat-svg {
+.tg-vals {
   font-size: 11px;
-  fill: #374151;
+  fill: #777;
   font-weight: 600;
   font-family: inherit;
 }
-.training-progress__since-svg {
+.tg-since {
   font-size: 9px;
-  fill: #9ca3af;
+  fill: #444;
   font-family: inherit;
 }
+
+/* Legacy class names kept for safety */
+.training-progress__pct-svg   { font-size: 26px; font-weight: 900; font-family: inherit; letter-spacing: -0.04em; }
+.training-progress__arrow-svg { font-size: 11px; font-family: inherit; }
+.training-progress__stat-svg  { font-size: 11px; fill: #777; font-weight: 600; font-family: inherit; }
+.training-progress__since-svg { font-size: 9px;  fill: #444; font-family: inherit; }
