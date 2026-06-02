@@ -27,17 +27,23 @@ export function useProfile() {
   const [saveError, setSaveError]             = useState(null)
   const [verified, setVerified]               = useState(profileComplete)
 
-  // If profile looks incomplete, verify with the API.
-  // Handles: PHP serving stale blokesSiteData, or user saved before localStorage feature.
+  // Always fetch fresh profile on mount for logged-in users.
+  // Fixes: stale blokesSiteData (PHP cache), avatar mismatch after refresh,
+  // and users who saved before the localStorage feature was added.
   useEffect(() => {
-    if (!sd.isLoggedIn || profileComplete) { setVerified(true); return }
+    if (!sd.isLoggedIn) { setVerified(true); return }
     fetch(`${WP_URL}/wp-json/blokes/v1/profile/me`, { headers: getHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.profileComplete) {
-          setProfileComplete(true)
-          if (window.blokesSiteData) window.blokesSiteData.profileComplete = true
-          try { localStorage.setItem(LS_KEY, '1') } catch {}
+        if (data) {
+          if (data.profileComplete) {
+            setProfileComplete(true)
+            if (window.blokesSiteData) window.blokesSiteData.profileComplete = true
+            try { localStorage.setItem(LS_KEY, '1') } catch {}
+          }
+          if (data.nickname)    setNickname(data.nickname)
+          if (data.avatarType)  setAvatarType(data.avatarType)
+          if (data.avatarData)  setAvatarData(data.avatarData)
         }
         setVerified(true)
       })

@@ -153,31 +153,28 @@ export default function App() {
             {sd.isLoggedIn ? (
               <>
                 <div className="app-header__user">
-                  <div className="app-header__user-profile">
-                    <button
-                      className="app-header__avatar-btn"
-                      onClick={() => openProfileModal()}
-                      title="Editar perfil"
-                    >
-                      <UserAvatar
-                        size="sm"
-                        avatarType={avatarType}
-                        avatarData={avatarData}
-                        nickname={nickname}
-                        name={sd.userName}
-                        isMe
-                      />
-                    </button>
-                    <span className="app-header__user-nick">
-                      {nickname ? `@${nickname}` : (sd.userName || 'Tú')}
-                    </span>
-                  </div>
                   <button
-                    className="app-header__logout-btn"
-                    onClick={() => setLogoutOpen(true)}
+                    className="app-header__avatar-btn"
+                    onClick={() => openProfileModal()}
+                    title="Editar perfil"
                   >
-                    × Log out
+                    <UserAvatar
+                      size="sm"
+                      avatarType={avatarType}
+                      avatarData={avatarData}
+                      nickname={nickname}
+                      name={sd.userName}
+                      isMe
+                    />
                   </button>
+                  <div className="app-header__user-info">
+                    <span className="app-header__user-name">{sd.userName || 'Tú'}</span>
+                    {nickname && <span className="app-header__user-nick">@{nickname}</span>}
+                    <button
+                      className="app-header__logout-btn"
+                      onClick={() => setLogoutOpen(true)}
+                    >× Log out</button>
+                  </div>
                 </div>
                 {sd.subscription && (
                   <div className="app-header__sub">
