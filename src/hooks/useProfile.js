@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 
 const WP_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
 
@@ -25,6 +25,24 @@ export function useProfile() {
   const [avatarData, setAvatarData]           = useState(() => sd.userAvatarData || {})
   const [saving, setSaving]                   = useState(false)
   const [saveError, setSaveError]             = useState(null)
+  const [verified, setVerified]               = useState(profileComplete)
+
+  // If profile looks incomplete, verify with the API.
+  // Handles: PHP serving stale blokesSiteData, or user saved before localStorage feature.
+  useEffect(() => {
+    if (!sd.isLoggedIn || profileComplete) { setVerified(true); return }
+    fetch(`${WP_URL}/wp-json/blokes/v1/profile/me`, { headers: getHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.profileComplete) {
+          setProfileComplete(true)
+          if (window.blokesSiteData) window.blokesSiteData.profileComplete = true
+          try { localStorage.setItem(LS_KEY, '1') } catch {}
+        }
+        setVerified(true)
+      })
+      .catch(() => setVerified(true))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveProfile = useCallback(async ({ nickname: nick, avatarType: type, avatarData: data }) => {
     setSaving(true)
@@ -91,6 +109,7 @@ export function useProfile() {
 
   return {
     profileComplete,
+    verified,
     nickname,
     avatarType,
     avatarData,

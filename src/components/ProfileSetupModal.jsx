@@ -165,8 +165,11 @@ export default function ProfileSetupModal({
           <div className="ps-styles">
             <div className="ps-styles-grid">
               {STYLES_META.map(s => {
-                let svg = null
-                try { svg = createAvatar(STYLE_MAP[s.id], { seed }).toString() } catch {}
+                let uri = null
+                try {
+                  const svg = createAvatar(STYLE_MAP[s.id], { seed }).toString()
+                  uri = `data:image/svg+xml,${encodeURIComponent(svg)}`
+                } catch {}
                 return (
                   <button
                     key={s.id}
@@ -174,9 +177,9 @@ export default function ProfileSetupModal({
                     onClick={() => setStyle(s.id)}
                     title={s.label}
                   >
-                    {svg
-                      ? <span className="ps-style-svg" dangerouslySetInnerHTML={{ __html: svg }} />
-                      : <span className="ps-style-svg ps-style-svg--empty" />
+                    {uri
+                      ? <img src={uri} alt={s.label} className="ps-style-img" />
+                      : <span className="ps-style-img ps-style-img--empty" />
                     }
                     <span className="ps-style-label">{s.label}</span>
                   </button>

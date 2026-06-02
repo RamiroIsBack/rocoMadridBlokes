@@ -68,24 +68,22 @@ export default function App() {
   const sd = window.blokesSiteData || {}
 
   // Profile modal state
-  const { profileComplete, saveProfile, checkNickname, uploadPhoto } = useProfile()
+  const { profileComplete, verified, saveProfile, checkNickname, uploadPhoto } = useProfile()
   const [profileModalOpen,    setProfileModalOpen]    = useState(false)
   const [profileModalBlock,   setProfileModalBlock]   = useState(false)
   const [profileModalMsg,     setProfileModalMsg]     = useState('')
   const [profileModalOnSaved, setProfileModalOnSaved] = useState(null)
 
-  // Show dismissible modal on first app load for logged-in users without a profile.
-  // Depends on profileComplete being accurate (backed by localStorage fallback).
+  // Open dismissible modal once the API verification resolves as incomplete.
+  // `verified` flips to true only after /profile/me responds, so we never
+  // flash the modal for users who already have a profile but had stale state.
   useEffect(() => {
-    if (sd.isLoggedIn && !profileComplete) {
-      const timer = setTimeout(() => {
-        setProfileModalOpen(true)
-        setProfileModalBlock(false)
-        setProfileModalMsg('')
-      }, 800) // small delay so it doesn't flash on fast page loads
-      return () => clearTimeout(timer)
+    if (verified && sd.isLoggedIn && !profileComplete) {
+      setProfileModalOpen(true)
+      setProfileModalBlock(false)
+      setProfileModalMsg('')
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [verified]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Expose globally so useCompletions / any component can trigger it
   const openProfileModal = useCallback(({ blocking = false, message = '', onSaved = null } = {}) => {

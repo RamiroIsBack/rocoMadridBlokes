@@ -13,16 +13,29 @@ const STYLE_MAP = {
   thumbs:     collection.thumbs,
 }
 
-export function getAvatarSvg(avatarType, avatarData) {
-  if (avatarType !== 'dicebear') return null
-  const style = STYLE_MAP[avatarData?.style] || collection.adventurer
-  const seed  = avatarData?.seed || 'default'
+// Use data URI so each SVG is isolated — prevents gradient/filter ID clashes
+// when multiple avatars are rendered on the same page.
+function svgToDataUri(svg) {
   try {
-    return createAvatar(style, { seed }).toString()
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`
   } catch {
     return null
   }
 }
+
+export function getAvatarDataUri(avatarType, avatarData) {
+  if (avatarType !== 'dicebear') return null
+  const style = STYLE_MAP[avatarData?.style] || collection.adventurer
+  const seed  = avatarData?.seed || 'default'
+  try {
+    return svgToDataUri(createAvatar(style, { seed }).toString())
+  } catch {
+    return null
+  }
+}
+
+// Keep old name as alias so any existing callers still work
+export const getAvatarSvg = getAvatarDataUri
 
 function getInitials(text) {
   if (!text) return '?'
@@ -48,10 +61,12 @@ export default function UserAvatar({
 
   const displayLabel = nickname || name
 
-  // Always generate a deterministic avatar from name/nickname as seed fallback
-  const svg = useMemo(() => {
+  // Always generate a deterministic avatar from name/nickname as seed fallback.
+  // Returns a data URI so the SVG is isolated — prevents gradient ID clashes
+  // when multiple avatars are rendered on the same page.
+  const dataUri = useMemo(() => {
     if (avatarType === 'dicebear') {
-      return getAvatarSvg('dicebear', {
+      return getAvatarDataUri('dicebear', {
         style: avatarData?.style || 'adventurer',
         seed:  avatarData?.seed  || displayLabel || 'user',
       })
@@ -59,7 +74,7 @@ export default function UserAvatar({
     // Auto-generate from name for users without explicit avatar
     if (!avatarType && displayLabel && !hideInitials) {
       try {
-        return createAvatar(collection.adventurer, { seed: displayLabel }).toString()
+        return svgToDataUri(createAvatar(collection.adventurer, { seed: displayLabel }).toString())
       } catch {
         return null
       }
@@ -75,8 +90,8 @@ export default function UserAvatar({
     >
       {avatarType === 'photo' && avatarData?.url ? (
         <img src={avatarData.url} alt={displayLabel || 'avatar'} className="ua__img" />
-      ) : svg ? (
-        <span className="ua__svg" dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : dataUri ? (
+        <img src={dataUri} alt={displayLabel || 'avatar'} className="ua__img" />
       ) : (
         <span className="ua__initials" style={{ fontSize: Math.round(px * 0.38) }}>
           {hideInitials ? '' : getInitials(displayLabel)}
