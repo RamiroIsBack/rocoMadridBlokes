@@ -309,6 +309,9 @@ export default function App() {
             isOpen={profileModalOpen}
             isDismissible={!profileModalBlock}
             blockingMessage={profileModalMsg}
+            currentNickname={nickname}
+            currentAvatarType={avatarType}
+            currentAvatarData={avatarData}
             onClose={() => setProfileModalOpen(false)}
             onSaved={handleProfileSaved}
             saveProfile={saveProfile}

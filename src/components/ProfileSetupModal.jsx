@@ -28,24 +28,25 @@ export default function ProfileSetupModal({
   isOpen,
   isDismissible = true,
   blockingMessage = '',
+  currentNickname   = '',
+  currentAvatarType = '',
+  currentAvatarData = {},
   onClose,
   onSaved,
   saveProfile,
   checkNickname,
   uploadPhoto,
 }) {
-  const sd = window.blokesSiteData || {}
-
-  const existingNick = sd.userNickname || ''
-  const hasProfile   = !!(existingNick || sd.userAvatarType)
+  const existingNick = currentNickname || ''
+  const hasProfile   = !!(existingNick || currentAvatarType)
   const [viewMode,    setViewMode]    = useState(hasProfile)
   const [nickLocked,  setNickLocked]  = useState(!!existingNick)
   const [nickname,    setNickname]    = useState(existingNick)
   const [nickStatus,  setNickStatus]  = useState(existingNick ? 'ok' : 'idle')
-  const [avatarMode,  setAvatarMode]  = useState(sd.userAvatarType === 'photo' ? 'photo' : 'dicebear')
-  const [style,       setStyle]       = useState(sd.userAvatarData?.style || 'adventurer')
-  const [seed,        setSeed]        = useState(sd.userAvatarData?.seed  || randomSeed())
-  const [photoUrl,    setPhotoUrl]    = useState(sd.userAvatarType === 'photo' ? (sd.userAvatarData?.url || '') : '')
+  const [avatarMode,  setAvatarMode]  = useState(currentAvatarType === 'photo' ? 'photo' : 'dicebear')
+  const [style,       setStyle]       = useState(currentAvatarData?.style || 'adventurer')
+  const [seed,        setSeed]        = useState(currentAvatarData?.seed  || randomSeed())
+  const [photoUrl,    setPhotoUrl]    = useState(currentAvatarType === 'photo' ? (currentAvatarData?.url || '') : '')
   const [uploading,   setUploading]   = useState(false)
   const [saving,      setSaving]      = useState(false)
   const [formError,   setFormError]   = useState('')
@@ -59,22 +60,20 @@ export default function ProfileSetupModal({
   const nickOk = nickLocked || (nickname.trim().length >= 3 && nickStatus === 'ok')
   const canSave = nickOk && (avatarMode === 'dicebear' || (avatarMode === 'photo' && photoUrl))
 
-  // Reset to view mode and current saved values each time the modal opens
+  // Reset to view mode using the fresh props each time the modal opens
   useEffect(() => {
     if (!isOpen) return
-    const fresh = window.blokesSiteData || {}
-    const freshNick = fresh.userNickname || ''
-    const freshHasProfile = !!(freshNick || fresh.userAvatarType)
-    setViewMode(freshHasProfile)
-    setNickLocked(!!freshNick)
-    setNickname(freshNick)
-    setNickStatus(freshNick ? 'ok' : 'idle')
-    setAvatarMode(fresh.userAvatarType === 'photo' ? 'photo' : 'dicebear')
-    setStyle(fresh.userAvatarData?.style || 'adventurer')
-    setSeed(fresh.userAvatarData?.seed   || randomSeed())
-    setPhotoUrl(fresh.userAvatarType === 'photo' ? (fresh.userAvatarData?.url || '') : '')
+    const hasP = !!(currentNickname || currentAvatarType)
+    setViewMode(hasP)
+    setNickLocked(!!currentNickname)
+    setNickname(currentNickname || '')
+    setNickStatus(currentNickname ? 'ok' : 'idle')
+    setAvatarMode(currentAvatarType === 'photo' ? 'photo' : 'dicebear')
+    setStyle(currentAvatarData?.style || 'adventurer')
+    setSeed(currentAvatarData?.seed   || randomSeed())
+    setPhotoUrl(currentAvatarType === 'photo' ? (currentAvatarData?.url || '') : '')
     setFormError('')
-  }, [isOpen])
+  }, [isOpen, currentNickname, currentAvatarType, currentAvatarData])
 
   const handleNicknameChange = useCallback((val) => {
     setNickname(val)
@@ -109,9 +108,7 @@ export default function ProfileSetupModal({
     if (!canSave || saving) return
     setSaving(true)
     setFormError('')
-    const savedNick = nickLocked
-      ? (window.blokesSiteData?.userNickname || nickname.trim())
-      : nickname.trim()
+    const savedNick = nickLocked ? (currentNickname || nickname.trim()) : nickname.trim()
     const ok = await saveProfile({ nickname: savedNick, avatarType, avatarData })
     setSaving(false)
     if (ok) {
@@ -133,10 +130,7 @@ export default function ProfileSetupModal({
     return <span className="ps-nick-meta">3–20 caracteres · letras, números y _</span>
   }
 
-  // Current saved avatar data (always read from blokesSiteData which useProfile keeps fresh)
-  const savedAvatarType = window.blokesSiteData?.userAvatarType || ''
-  const savedAvatarData = window.blokesSiteData?.userAvatarData || {}
-  const savedNickname   = window.blokesSiteData?.userNickname   || ''
+  // Use props (kept fresh by useProfile's API fetch) for the view mode display
 
   return (
     <div className="ps-overlay" onClick={isDismissible ? onClose : undefined}>
@@ -154,13 +148,13 @@ export default function ProfileSetupModal({
             <div className="ps-view">
               <UserAvatar
                 size="lg"
-                avatarType={savedAvatarType}
-                avatarData={savedAvatarData}
-                nickname={savedNickname}
+                avatarType={currentAvatarType}
+                avatarData={currentAvatarData}
+                nickname={currentNickname}
                 isMe
               />
-              {savedNickname && (
-                <p className="ps-view-nick">@{savedNickname}</p>
+              {currentNickname && (
+                <p className="ps-view-nick">@{currentNickname}</p>
               )}
               <button
                 className="ps-save-btn"
@@ -277,10 +271,10 @@ export default function ProfileSetupModal({
                       autoComplete="off"
                       autoFocus
                     />
-                    {window.blokesSiteData?.userNickname && (
+                    {currentNickname && (
                       <button
                         className="ps-nick-cancel-btn"
-                        onClick={() => { setNickname(window.blokesSiteData.userNickname); setNickStatus('ok'); setNickLocked(true) }}
+                        onClick={() => { setNickname(currentNickname); setNickStatus('ok'); setNickLocked(true) }}
                         type="button"
                         title="Cancelar cambio"
                       >✕</button>

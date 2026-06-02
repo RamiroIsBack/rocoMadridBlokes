@@ -38,12 +38,18 @@ export function useProfile() {
         if (data) {
           if (data.profileComplete) {
             setProfileComplete(true)
-            if (window.blokesSiteData) window.blokesSiteData.profileComplete = true
             try { localStorage.setItem(LS_KEY, '1') } catch {}
           }
-          if (data.nickname)    setNickname(data.nickname)
-          if (data.avatarType)  setAvatarType(data.avatarType)
-          if (data.avatarData)  setAvatarData(data.avatarData)
+          if (data.nickname)   setNickname(data.nickname)
+          if (data.avatarType) setAvatarType(data.avatarType)
+          if (data.avatarData) setAvatarData(data.avatarData)
+          // Sync blokesSiteData so ProfileSetupModal reads fresh values
+          if (window.blokesSiteData) {
+            window.blokesSiteData.profileComplete = !!data.profileComplete
+            window.blokesSiteData.userNickname    = data.nickname   || ''
+            window.blokesSiteData.userAvatarType  = data.avatarType || ''
+            window.blokesSiteData.userAvatarData  = data.avatarData || {}
+          }
         }
         setVerified(true)
       })
