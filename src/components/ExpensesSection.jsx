@@ -900,8 +900,8 @@ function HistoryView({ months, onDeleted }) {
           <p className="exp-chart-title" style={{ marginTop: 24 }}>Desglose de ingresos por categoría</p>
           <p className="exp-income-legend">
             <span style={{ color: INCOME_COLORS['Clases dirigidas'] }}>● Clases dirigidas</span> — entidad Club (cualquier concepto) &nbsp;·&nbsp;
-            <span style={{ color: INCOME_COLORS['Eventos'] }}>● Eventos</span> — Rocoteca ≥ 200 € &nbsp;·&nbsp;
-            <span style={{ color: INCOME_COLORS['Ingresos Rocoteca'] }}>● Ingresos Rocoteca</span> — Rocoteca &lt; 200 €
+            <span style={{ color: INCOME_COLORS['Ingresos Rocoteca'] }}>● Ingresos Rocoteca</span> — Rocoteca &lt; 200 € &nbsp;·&nbsp;
+            <span style={{ color: INCOME_COLORS['Eventos'] }}>● Eventos</span> — Rocoteca ≥ 200 €
           </p>
 
           {/* KPIs por categoría */}
