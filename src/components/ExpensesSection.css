@@ -261,6 +261,12 @@
   color: #666;
   margin: 0 0 8px;
 }
+.exp-income-legend {
+  font-size: 0.7rem;
+  color: #666;
+  margin: -4px 0 12px;
+  line-height: 1.6;
+}
 
 /* ── Data manager ── */
 .exp-manager {
