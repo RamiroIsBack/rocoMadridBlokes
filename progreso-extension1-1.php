@@ -563,7 +563,8 @@ function superadmin_get_expenses($request) {
         if (!$dt || $dt < $start) continue;
 
         $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0;
-        $row_concepto = array(); // concepto totals for this DB row (month+entity)
+        $row_concepto  = array(); // expense concept totals for this entity-month
+        $row_ingresos  = array(); // income items for this entity-month
         foreach ($saved['items'] as $item) {
             $concepto_norm = function_exists('iconv')
                 ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
@@ -590,6 +591,10 @@ function superadmin_get_expenses($request) {
             } else {
                 $ti    += $amt;
                 $iva_r += $iva;
+                $row_ingresos[] = array(
+                    'concepto' => trim($item['concepto'] ?? ''),
+                    'importe'  => $amt,
+                );
             }
         }
         arsort($row_concepto);
@@ -602,6 +607,7 @@ function superadmin_get_expenses($request) {
             'iva_repercutido' => round($iva_r, 2),
             'nominas'         => round($nom,   2),
             'by_concepto'     => $row_concepto,
+            'ingresos_items'  => $row_ingresos,
         );
     }
 

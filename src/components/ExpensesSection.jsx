@@ -502,6 +502,16 @@ function VariationsPanel({ byMonth }) {
   )
 }
 
+// ── Income categorisation ────────────────────────────────────────────
+const INCOME_CATS = ['Clases dirigidas', 'Ingresos Rocoteca', 'Eventos']
+const INCOME_COLORS = { 'Clases dirigidas': '#60a5fa', 'Ingresos Rocoteca': '#22c55e', 'Eventos': '#f97316' }
+
+function categorizeIncomeItem(concepto, amount, entity) {
+  if (entity === 'club') return 'Clases dirigidas'
+  // Rocoteca: fallback rule by amount
+  return amount >= 200 ? 'Eventos' : 'Ingresos Rocoteca'
+}
+
 // ── History charts ────────────────────────────────────────────────────
 function HistoryView({ months, onDeleted }) {
   const [entity, setEntity]                   = useState('all')
@@ -547,17 +557,16 @@ function HistoryView({ months, onDeleted }) {
     if (!data) return []
     const acc = {}
     data.forEach(r => {
-      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, nominas: 0, ss: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {} }
+      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, nominas: 0, ss: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {}, ingresos_items: [] }
       acc[r.month].costes   += Math.abs(r.total_costes    || 0)
       acc[r.month].ingresos += Math.abs(r.total_ingresos  || 0)
       acc[r.month].iva_s    += Math.abs(r.iva_soportado   || 0)
       acc[r.month].iva_r    += Math.abs(r.iva_repercutido || 0)
       acc[r.month].nominas  += Math.abs(r.nominas         || 0)
+      const ent = r.entity || 'rocoteca'
       if ((r.nominas || 0) > 0) {
-        const ent = r.entity || 'rocoteca'
         acc[r.month].nominas_by_entity[ent] = (acc[r.month].nominas_by_entity[ent] || 0) + Math.abs(r.nominas)
       }
-      const ent = r.entity || 'rocoteca'
       Object.entries(r.by_concepto || {}).forEach(([k, v]) => {
         acc[r.month].by_concepto[k] = (acc[r.month].by_concepto[k] || 0) + v
         const cat = autoCategory(k, false)
@@ -567,6 +576,9 @@ function HistoryView({ months, onDeleted }) {
         if (cat === 'ss') {
           acc[r.month].ss += v
         }
+      })
+      ;(r.ingresos_items || []).forEach(item => {
+        acc[r.month].ingresos_items.push({ ...item, entity: ent })
       })
     })
     return Object.values(acc).sort((a, b) => a.month.localeCompare(b.month))
@@ -607,6 +619,30 @@ function HistoryView({ months, onDeleted }) {
     iva_net:  byMonth.reduce((s, r) => s + r.iva_r - r.iva_s,   0),
   }), [byMonth])
 
+  const incomeBreakdown = useMemo(() => {
+    // Per-month categorised income for chart
+    const chartRows = byMonth.map(r => {
+      const row = { month: fmtMonth(r.month) }
+      INCOME_CATS.forEach(c => { row[c] = 0 })
+      r.ingresos_items.forEach(item => {
+        const cat = categorizeIncomeItem(item.concepto, item.importe, item.entity)
+        row[cat] = (row[cat] || 0) + item.importe
+      })
+      return row
+    })
+    // Totals per category
+    const catTotals = {}
+    INCOME_CATS.forEach(c => { catTotals[c] = 0 })
+    byMonth.forEach(r => {
+      r.ingresos_items.forEach(item => {
+        const cat = categorizeIncomeItem(item.concepto, item.importe, item.entity)
+        catTotals[cat] = (catTotals[cat] || 0) + item.importe
+      })
+    })
+    const hasData = Object.values(catTotals).some(v => v > 0)
+    return { chartRows, catTotals, hasData }
+  }, [byMonth])
+
   if (loading) return <div className="exp-loading">Cargando historial…</div>
   if (error)   return <div className="exp-error">Error: {error}</div>
   if (!data?.length) return <p className="exp-empty">Sube el primer CSV para ver el historial.</p>
@@ -626,9 +662,9 @@ function HistoryView({ months, onDeleted }) {
         <button
           className={`sa-transfer-toggle${excludeInternal ? ' sa-transfer-toggle--on' : ''}`}
           onClick={() => setExcludeInternal(v => !v)}
-          title="Excluye transferencias internas (USO DE ROCODROMO, entre cuentas propias) y cobros TPV/WooCommerce que ya están en la sección de Ingresos"
+          title="Movimientos internos: transferencias entre cuentas propias, USO DE ROCODROMO, cobros TPV/WooCommerce ya contabilizados en Ingresos"
         >
-          {excludeInternal ? 'Sin internos' : 'Con internos'}
+          {excludeInternal ? '🚫' : '👁️'} Movimientos internos
         </button>
       </div>
 
@@ -852,6 +888,84 @@ function HistoryView({ months, onDeleted }) {
                     </React.Fragment>
                   )
                 })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {/* ─── Desglose de ingresos por categoría ─── */}
+      {incomeBreakdown.hasData && (
+        <>
+          <p className="exp-chart-title" style={{ marginTop: 24 }}>Desglose de ingresos por categoría</p>
+
+          {/* KPIs por categoría */}
+          <div className="exp-kpis" style={{ marginBottom: 12 }}>
+            {INCOME_CATS.map(cat => (
+              incomeBreakdown.catTotals[cat] > 0 && (
+                <div key={cat} className="exp-kpi" style={{ '--c': INCOME_COLORS[cat] }}>
+                  <span className="exp-kpi__val">{fmtEur(incomeBreakdown.catTotals[cat])}</span>
+                  <span className="exp-kpi__lbl">{cat} ({months}m)</span>
+                </div>
+              )
+            ))}
+          </div>
+
+          {/* Stacked bar chart por mes */}
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={incomeBreakdown.chartRows} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
+              <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
+              <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={52} />
+              <Tooltip
+                contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12, borderRadius: 6 }}
+                labelStyle={{ color: '#f5c842' }}
+                formatter={(v, name) => [fmtEur(v), name]}
+              />
+              <Legend />
+              <Bar dataKey="Clases dirigidas"  stackId="i" fill={INCOME_COLORS['Clases dirigidas']}  radius={[0,0,0,0]} />
+              <Bar dataKey="Ingresos Rocoteca" stackId="i" fill={INCOME_COLORS['Ingresos Rocoteca']} radius={[0,0,0,0]} />
+              <Bar dataKey="Eventos"           stackId="i" fill={INCOME_COLORS['Eventos']}           radius={[3,3,0,0]} />
+            </BarChart>
+          </ResponsiveContainer>
+
+          {/* Tabla desglosada por mes */}
+          <div className="exp-table-wrap" style={{ maxHeight: 380, marginTop: 12 }}>
+            <table className="exp-table">
+              <thead>
+                <tr>
+                  <th>Mes</th>
+                  {INCOME_CATS.map(c => <th key={c} style={{ textAlign: 'right', color: INCOME_COLORS[c] }}>{c}</th>)}
+                  <th style={{ textAlign: 'right' }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...incomeBreakdown.chartRows].reverse().map(row => {
+                  const rowTotal = INCOME_CATS.reduce((s, c) => s + (row[c] || 0), 0)
+                  if (rowTotal === 0) return null
+                  return (
+                    <tr key={row.month} className="exp-breakdown-cat">
+                      <td>{row.month}</td>
+                      {INCOME_CATS.map(c => (
+                        <td key={c} className="exp-cell--amount" style={{ color: row[c] > 0 ? INCOME_COLORS[c] : '#444' }}>
+                          {row[c] > 0 ? fmtEur(row[c]) : '—'}
+                        </td>
+                      ))}
+                      <td className="exp-cell--amount" style={{ color: '#f5c842', fontWeight: 700 }}>{fmtEur(rowTotal)}</td>
+                    </tr>
+                  )
+                })}
+                <tr className="exp-breakdown-subtotal">
+                  <td className="exp-total-label">TOTAL</td>
+                  {INCOME_CATS.map(c => (
+                    <td key={c} className="exp-cell--amount" style={{ color: INCOME_COLORS[c], fontWeight: 700 }}>
+                      {incomeBreakdown.catTotals[c] > 0 ? fmtEur(incomeBreakdown.catTotals[c]) : '—'}
+                    </td>
+                  ))}
+                  <td className="exp-cell--amount" style={{ color: '#f5c842', fontWeight: 700 }}>
+                    {fmtEur(INCOME_CATS.reduce((s, c) => s + incomeBreakdown.catTotals[c], 0))}
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>
