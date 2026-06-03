@@ -167,11 +167,11 @@ export default function ProfileSetupModal({
         /* ── EDIT MODE ── */
           <>
             <div className="ps-edit-header">
-              {savedNickname && (
+              {currentNickname && (
                 <button className="ps-back-btn" onClick={() => setViewMode(true)}>← Volver</button>
               )}
               <h2 className="ps-title" style={{ marginBottom: 0 }}>
-                {savedNickname ? 'Editar perfil' : 'Crea tu perfil'}
+                {currentNickname ? 'Editar perfil' : 'Crea tu perfil'}
               </h2>
             </div>
 
