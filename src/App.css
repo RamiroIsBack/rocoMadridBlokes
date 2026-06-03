@@ -86,6 +86,16 @@
 }
 .app-header__avatar-btn:hover { border-color: rgba(245, 200, 66, 0.75); }
 
+/* Shown while the API fetch is in-flight to avoid the stale-avatar flash */
+.app-header__avatar-placeholder {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #222;
+  border: 2px solid rgba(245, 200, 66, 0.15);
+  flex-shrink: 0;
+}
+
 /* Text column to the right of avatar */
 .app-header__user-info {
   display: flex;

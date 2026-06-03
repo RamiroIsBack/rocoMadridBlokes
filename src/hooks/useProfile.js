@@ -20,18 +20,18 @@ export function useProfile() {
   const [profileComplete, setProfileComplete] = useState(
     () => !!(sd.profileComplete || lsProfileComplete())
   )
-  const [nickname, setNickname]               = useState(() => sd.userNickname || '')
-  const [avatarType, setAvatarType]           = useState(() => sd.userAvatarType || '')
-  const [avatarData, setAvatarData]           = useState(() => sd.userAvatarData || {})
-  const [saving, setSaving]                   = useState(false)
-  const [saveError, setSaveError]             = useState(null)
-  const [verified, setVerified]               = useState(profileComplete)
+  const [nickname, setNickname]   = useState(() => sd.userNickname || '')
+  const [avatarType, setAvatarType] = useState(() => sd.userAvatarType || '')
+  const [avatarData, setAvatarData] = useState(() => sd.userAvatarData || {})
+  const [saving, setSaving]       = useState(false)
+  const [saveError, setSaveError] = useState(null)
+  const [verified, setVerified]   = useState(profileComplete)
+  // true while the first API fetch is in-flight — used to suppress the
+  // stale-avatar flash before fresh data arrives from the server
+  const [fetching, setFetching]   = useState(!!sd.isLoggedIn)
 
-  // Always fetch fresh profile on mount for logged-in users.
-  // Fixes: stale blokesSiteData (PHP cache), avatar mismatch after refresh,
-  // and users who saved before the localStorage feature was added.
   useEffect(() => {
-    if (!sd.isLoggedIn) { setVerified(true); return }
+    if (!sd.isLoggedIn) { setVerified(true); setFetching(false); return }
     fetch(`${WP_URL}/wp-json/blokes/v1/profile/me`, { headers: getHeaders() })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -43,7 +43,6 @@ export function useProfile() {
           if (data.nickname)   setNickname(data.nickname)
           if (data.avatarType) setAvatarType(data.avatarType)
           if (data.avatarData) setAvatarData(data.avatarData)
-          // Sync blokesSiteData so ProfileSetupModal reads fresh values
           if (window.blokesSiteData) {
             window.blokesSiteData.profileComplete = !!data.profileComplete
             window.blokesSiteData.userNickname    = data.nickname   || ''
@@ -52,8 +51,9 @@ export function useProfile() {
           }
         }
         setVerified(true)
+        setFetching(false)
       })
-      .catch(() => setVerified(true))
+      .catch(() => { setVerified(true); setFetching(false) })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveProfile = useCallback(async ({ nickname: nick, avatarType: type, avatarData: data }) => {
@@ -75,7 +75,6 @@ export function useProfile() {
       setAvatarType(type)
       setAvatarData(data)
       setProfileComplete(true)
-      // Keep blokesSiteData + localStorage in sync so guards read fresh state
       if (window.blokesSiteData) {
         window.blokesSiteData.profileComplete = true
         window.blokesSiteData.userNickname    = nick
@@ -122,6 +121,7 @@ export function useProfile() {
   return {
     profileComplete,
     verified,
+    fetching,
     nickname,
     avatarType,
     avatarData,

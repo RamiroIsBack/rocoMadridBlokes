@@ -69,7 +69,7 @@ export default function App() {
   const sd = window.blokesSiteData || {}
 
   // Profile modal state
-  const { profileComplete, verified, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto } = useProfile()
+  const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto } = useProfile()
   const [profileModalOpen,    setProfileModalOpen]    = useState(false)
   const [profileModalBlock,   setProfileModalBlock]   = useState(false)
   const [profileModalMsg,     setProfileModalMsg]     = useState('')
@@ -153,23 +153,27 @@ export default function App() {
             {sd.isLoggedIn ? (
               <>
                 <div className="app-header__user">
-                  <button
-                    className="app-header__avatar-btn"
-                    onClick={() => openProfileModal()}
-                    title="Editar perfil"
-                  >
-                    <UserAvatar
-                      size="sm"
-                      avatarType={avatarType}
-                      avatarData={avatarData}
-                      nickname={nickname}
-                      name={sd.userName}
-                      isMe
-                    />
-                  </button>
+                  {profileFetching ? (
+                    <div className="app-header__avatar-placeholder" />
+                  ) : (
+                    <button
+                      className="app-header__avatar-btn"
+                      onClick={() => openProfileModal()}
+                      title="Editar perfil"
+                    >
+                      <UserAvatar
+                        size="sm"
+                        avatarType={avatarType}
+                        avatarData={avatarData}
+                        nickname={nickname}
+                        name={sd.userName}
+                        isMe
+                      />
+                    </button>
+                  )}
                   <div className="app-header__user-info">
                     <span className="app-header__user-name">{sd.userName || 'Tú'}</span>
-                    {nickname && <span className="app-header__user-nick">@{nickname}</span>}
+                    {!profileFetching && nickname && <span className="app-header__user-nick">@{nickname}</span>}
                     <button
                       className="app-header__logout-btn"
                       onClick={() => setLogoutOpen(true)}
