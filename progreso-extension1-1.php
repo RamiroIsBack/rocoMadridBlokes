@@ -149,20 +149,28 @@ add_action('template_redirect', function() {
 }, 1);
 
 // ============================================================
-//  Legacy /blokes support — media uploads sin login WordPress
+//  Legacy /blokes support — operaciones sin login WordPress
+//  Cubre: validación de credenciales, subida de medios y creación de posts
 //  TODO: eliminar cuando /blokes use sesión WP
 // ============================================================
 add_filter('rest_pre_dispatch', function($result, $server, $request) {
-    if (
-        $request->get_route() === '/wp/v2/media' &&
-        $request->get_method() === 'POST' &&
-        !is_user_logged_in()
-    ) {
+    if (is_user_logged_in()) return $result;
+
+    $route  = $request->get_route();
+    $method = $request->get_method();
+
+    $needs_user =
+        ($route === '/wp/v2/users/me')                              ||  // validación de credenciales
+        ($route === '/wp/v2/media'        && $method === 'POST')    ||  // subida de imágenes
+        (preg_match('#^/blokes/v1/(create|update-acf)#', $route) && $method === 'POST'); // crear/editar bloke
+
+    if ($needs_user) {
         $admins = get_users(array('role' => 'administrator', 'number' => 1, 'fields' => 'ID'));
         if (!empty($admins)) {
             wp_set_current_user((int) $admins[0]);
         }
     }
+
     return $result;
 }, 10, 3);
 
