@@ -160,9 +160,10 @@ add_filter('rest_pre_dispatch', function($result, $server, $request) {
     $method = $request->get_method();
 
     $needs_user =
-        ($route === '/wp/v2/users/me')                              ||  // validación de credenciales
-        ($route === '/wp/v2/media'        && $method === 'POST')    ||  // subida de imágenes
-        (preg_match('#^/blokes/v1/(create|update-acf)#', $route) && $method === 'POST'); // crear/editar bloke
+        ($route === '/wp/v2/users/me')                                          ||  // validación de credenciales
+        ($route === '/wp/v2/media'             && $method === 'POST')           ||  // subida de imágenes
+        (preg_match('#^/blokes/v1/(create|update-acf)#', $route) && $method === 'POST')  ||  // crear/editar bloke
+        (preg_match('#^/blokes/v1/delete/#', $route)             && $method === 'DELETE'); // eliminar bloke
 
     if ($needs_user) {
         $admins = get_users(array('role' => 'administrator', 'number' => 1, 'fields' => 'ID'));
