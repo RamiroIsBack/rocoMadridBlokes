@@ -29,6 +29,7 @@ $GLOBALS['blokes_app_slugs'] = ['blokes-dev'];
 // Only users explicitly listed here get elevated access; WP roles are ignored.
 $GLOBALS['blokes_superadmin_emails'] = array(
     'rocomadrid7a@gmail.com',     // Ramiro
+    'ramirosan69@hotmail.com',    // Ramiro (cuenta alternativa)
     'javier_buendia@hotmail.com', // Javier Buendía
     'alvilu2@hotmail.com',        // Álvaro
 );
