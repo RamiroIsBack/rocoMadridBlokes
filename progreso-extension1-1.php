@@ -149,6 +149,24 @@ add_action('template_redirect', function() {
 }, 1);
 
 // ============================================================
+//  Legacy /blokes support — media uploads sin login WordPress
+//  TODO: eliminar cuando /blokes use sesión WP
+// ============================================================
+add_filter('rest_pre_dispatch', function($result, $server, $request) {
+    if (
+        $request->get_route() === '/wp/v2/media' &&
+        $request->get_method() === 'POST' &&
+        !is_user_logged_in()
+    ) {
+        $admins = get_users(array('role' => 'administrator', 'number' => 1, 'fields' => 'ID'));
+        if (!empty($admins)) {
+            wp_set_current_user((int) $admins[0]);
+        }
+    }
+    return $result;
+}, 10, 3);
+
+// ============================================================
 //  REST API — inject extra fields into blokes responses
 // ============================================================
 
