@@ -452,7 +452,7 @@ export default function StatsPage() {
                     {equipadorData.map(item => (
                       <div key={item.key} className="stats-summary__bar-container" title={`${item.fullName}: ${item.value} blokes`}>
                         <div className="stats-summary__bar-value">{item.value}</div>
-                        <div className="stats-summary__bar" style={{ height: `${(item.value / maxValue) * 100}%` }}></div>
+                        <div className="stats-summary__bar" style={{ height: `${(item.value / maxValue) * 80}px` }}></div>
                         <div className="stats-summary__bar-label">{item.label}</div>
                       </div>
                     ))}
