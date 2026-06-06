@@ -373,6 +373,15 @@ add_action('rest_api_init', function() {
         'permission_callback' => function() { return is_user_logged_in(); },
     ));
 
+    // Endpoint para subir imágenes sin necesidad de login WordPress
+    // TODO: restaurar cuando /blokes use sesión WP
+    // 'permission_callback' => 'is_user_logged_in',
+    register_rest_route('blokes/v1', '/upload-image', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_upload_image',
+        'permission_callback' => '__return_true',
+    ));
+
     // ── Progreso/v1 — community stats (new namespace, public) ────────────────
 
     // Returns community completion totals grouped by color.
@@ -976,6 +985,49 @@ function blokes_delete_with_media($request) {
         );
     }
     return new WP_Error('delete_failed', 'Failed to delete bloke', array('status' => 500));
+}
+
+function blokes_upload_image($request) {
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/media.php';
+    require_once ABSPATH . 'wp-admin/includes/image.php';
+
+    $files = $request->get_file_params();
+    if (empty($files['file'])) {
+        return new WP_Error('no_file', 'No file uploaded.', array('status' => 400));
+    }
+
+    $upload = wp_handle_upload($files['file'], array('test_form' => false));
+    if (isset($upload['error'])) {
+        return new WP_Error('upload_error', $upload['error'], array('status' => 500));
+    }
+
+    $admins    = get_users(array('role' => 'administrator', 'number' => 1, 'fields' => 'ID'));
+    $author_id = !empty($admins) ? (int) $admins[0] : 1;
+
+    $attachment_id = wp_insert_attachment(array(
+        'post_mime_type' => $upload['type'],
+        'post_title'     => sanitize_file_name(basename($upload['file'])),
+        'post_content'   => '',
+        'post_status'    => 'inherit',
+        'post_author'    => $author_id,
+    ), $upload['file']);
+
+    if (is_wp_error($attachment_id)) return $attachment_id;
+
+    wp_update_attachment_metadata($attachment_id, wp_generate_attachment_metadata($attachment_id, $upload['file']));
+
+    $thumb = wp_get_attachment_thumb_url($attachment_id) ?: wp_get_attachment_url($attachment_id);
+
+    return rest_ensure_response(array(
+        'id'           => $attachment_id,
+        'source_url'   => wp_get_attachment_url($attachment_id),
+        'media_details' => array(
+            'sizes' => array(
+                'thumbnail' => array('source_url' => $thumb),
+            ),
+        ),
+    ));
 }
 
 // ============================================================

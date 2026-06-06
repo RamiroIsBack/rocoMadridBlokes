@@ -68,9 +68,8 @@ export default function ImageUploader({ onImagesUploaded, maxImages = 3 }) {
         formData.append('caption', '')
         formData.append('alt_text', '')
 
-        const response = await fetch(`${WORDPRESS_URL}/wp-json/wp/v2/media`, {
+        const response = await fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/upload-image`, {
           method: 'POST',
-          credentials: 'include',
           headers: {
             ...getAdminHeaders(),
             // Don't set Content-Type - let browser set it with boundary
