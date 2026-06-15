@@ -43,6 +43,18 @@ $GLOBALS['blokes_admin_emails'] = array(
     'luciapcaas@gmail.com',       // Lucía
 );
 
+// Emails que pueden ver el tab de Supervisión (superadmins + equipo gestión)
+$GLOBALS['blokes_supervision_emails'] = array_merge(
+    $GLOBALS['blokes_superadmin_emails'],
+    array('rocomadridgestion@gmail.com') // Eva
+);
+
+function blokes_can_supervise() {
+    if (!is_user_logged_in()) return false;
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    return in_array($email, array_map('strtolower', $GLOBALS['blokes_supervision_emails']));
+}
+
 /**
  * Returns the app-level role for the current user.
  * Checked against email whitelists — independent of WordPress roles.
@@ -264,6 +276,7 @@ add_action('wp_head', function() {
         'subscription' => $subscription,
         'appBasename'      => '/' . $app_slug,
         'userRole'         => blokes_get_app_role(),
+        'canSupervise'     => blokes_can_supervise(),
         'profileComplete'  => is_user_logged_in() ? blokes_is_profile_complete(get_current_user_id()) : false,
         'userNickname'     => is_user_logged_in() ? blokes_get_user_nickname(get_current_user_id()) : '',
         'userAvatarType'   => is_user_logged_in() ? (get_user_meta(get_current_user_id(), '_blokes_avatar_type', true) ?: '') : '',

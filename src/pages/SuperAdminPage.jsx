@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useRevenue, useProducts, useClasses } from '../hooks/useSuperAdmin'
+import { useRevenue, useProducts } from '../hooks/useSuperAdmin'
 import ExpensesSection from '../components/ExpensesSection'
 import './SuperAdminPage.css'
 
@@ -274,12 +274,12 @@ function ProductsSection({ excludeTransfer }) {
   )
 }
 
-// ─── Classes section ────────────────────────────────────────────────
-function ClassesSection() {
+// ClassesSection moved to SupervisionPage
+function ClassesSection_UNUSED() {
   const [months, setMonths]       = useState(12)
   const [selected, setSelected]   = useState(null)
   const [viewMode, setViewMode]   = useState('inscritos') // 'inscritos' | 'ingresos'
-  const { data, loading, error }  = useClasses(months)
+  const data = null; const loading = false; const error = null; void months
 
   const top12 = (data || []).slice(0, 12)
   // Revenue mode active only when PHP returns revenue field
@@ -454,7 +454,6 @@ export default function SuperAdminPage() {
       <h1 className="sa-page__title">Superadmin</h1>
       <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
       <ProductsSection excludeTransfer={excludeTransfer} />
-      <ClassesSection />
       <ExpensesSection />
     </div>
   )

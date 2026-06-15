@@ -9,6 +9,7 @@ import ProgresoIndexPage from './pages/ProgresoIndexPage'
 import MiClaseTab from './pages/MiClaseTab'
 import EntrenamientosPage from './pages/EntrenamientosPage'
 import SuperAdminPage from './pages/SuperAdminPage'
+import SupervisionPage from './pages/SupervisionPage'
 import LeaguesPage from './pages/LeaguesPage'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
@@ -29,7 +30,7 @@ const SUBSALA_POSITIONS = {
   '8': { top: '44.5%', right: '18%', transform: 'translateX(50%)' },
 }
 
-const KNOWN_ROUTES = ['/progreso', '/setter', '/stats', '/entrenamientos', '/superadmin', '/mis-blokes', '/ligas']
+const KNOWN_ROUTES = ['/progreso', '/setter', '/stats', '/entrenamientos', '/superadmin', '/supervision', '/mis-blokes', '/ligas']
 
 function detectBasename() {
   const injected = window.blokesSiteData?.appBasename
@@ -275,6 +276,11 @@ export default function App() {
                   <NavLink to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</NavLink>
                 </li>
               )}
+              {sd.canSupervise && (
+                <li className="app-nav__item">
+                  <NavLink to="/supervision" className="app-nav__link app-nav__link--super">Supervisión</NavLink>
+                </li>
+              )}
             </ul>
           </nav>
         </header>
@@ -292,6 +298,7 @@ export default function App() {
             <Route path="/stats" element={<StatsPage />} />
             <Route path="/entrenamientos" element={<EntrenamientosPage />} />
             <Route path="/superadmin" element={<SuperAdminPage />} />
+            <Route path="/supervision" element={<SupervisionPage />} />
             <Route path="/ligas" element={<LeaguesPage />} />
           </Routes>
         </main>
