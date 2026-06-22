@@ -44,6 +44,12 @@ $GLOBALS['blokes_profesores_emails'] = array(
     'alobo@ymail.com',
     'luciapcaas@gmail.com',
 );
+// Aliases para compatibilidad con plugins del club que referencian los nombres anteriores
+$GLOBALS['blokes_superadmin_emails'] = $GLOBALS['blokes_socios_emails'];
+$GLOBALS['blokes_admin_emails']      = array_merge(
+    $GLOBALS['blokes_gestion_emails'],
+    $GLOBALS['blokes_profesores_emails']
+);
 
 /**
  * Returns the app-level role for the current user.
