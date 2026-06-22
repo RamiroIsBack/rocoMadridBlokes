@@ -259,6 +259,52 @@
   margin-top: 8px;
 }
 
+/* ── Collapsible section ── */
+.sa-section--no-pad { padding: 0; }
+
+.sa-collapsible { width: 100%; }
+
+.sa-collapsible__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background 0.15s;
+}
+.sa-collapsible__summary::-webkit-details-marker { display: none; }
+.sa-collapsible__summary:hover { background: rgba(255,255,255,0.02); }
+
+.sa-collapsible__title {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 1.0rem;
+  font-weight: 700;
+  color: #f0ece0;
+  letter-spacing: 0.01em;
+}
+
+.sa-collapsible__arrow {
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #555;
+  border-bottom: 2px solid #555;
+  transform: rotate(45deg);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+details[open] .sa-collapsible__arrow {
+  transform: rotate(-135deg);
+  margin-top: 4px;
+}
+
+.sa-collapsible__body {
+  padding: 0 20px 20px;
+  border-top: 1px solid #2a2015;
+}
+
 /* ── Listas de acceso ── */
 .sa-lists-note {
   font-size: 0.72rem;

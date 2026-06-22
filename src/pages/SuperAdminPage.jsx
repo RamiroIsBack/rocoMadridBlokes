@@ -487,29 +487,36 @@ function ListasSection() {
   if (!lists) return null
 
   return (
-    <section className="sa-section">
-      <SectionTitle>Listas de acceso</SectionTitle>
-      <p className="sa-lists-note">
-        Acceso basado en email — el rol de WordPress no influye.
-      </p>
-      <div className="sa-lists">
-        {LISTA_CONFIG.map(({ key, label, color, acceso }) => (
-          <div key={key} className="sa-list-group" style={{ '--list-color': color }}>
-            <div className="sa-list-group__header">
-              <span className="sa-list-group__name">{label}</span>
-              <span className="sa-list-group__acceso">{acceso}</span>
-            </div>
-            <div className="sa-list-group__emails">
-              {(lists[key] || []).map((email, i) => (
-                <span key={i} className="sa-list-email">{email}</span>
-              ))}
-              {(!lists[key] || lists[key].length === 0) && (
-                <span className="sa-list-empty">Sin emails configurados</span>
-              )}
-            </div>
+    <section className="sa-section sa-section--no-pad">
+      <details className="sa-collapsible">
+        <summary className="sa-collapsible__summary">
+          <span className="sa-collapsible__title">Listas de acceso</span>
+          <span className="sa-collapsible__arrow" aria-hidden="true" />
+        </summary>
+        <div className="sa-collapsible__body">
+          <p className="sa-lists-note">
+            Acceso basado en email — el rol de WordPress no influye.
+          </p>
+          <div className="sa-lists">
+            {LISTA_CONFIG.map(({ key, label, color, acceso }) => (
+              <div key={key} className="sa-list-group" style={{ '--list-color': color }}>
+                <div className="sa-list-group__header">
+                  <span className="sa-list-group__name">{label}</span>
+                  <span className="sa-list-group__acceso">{acceso}</span>
+                </div>
+                <div className="sa-list-group__emails">
+                  {(lists[key] || []).map((email, i) => (
+                    <span key={i} className="sa-list-email">{email}</span>
+                  ))}
+                  {(!lists[key] || lists[key].length === 0) && (
+                    <span className="sa-list-empty">Sin emails configurados</span>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </div>
+      </details>
     </section>
   )
 }
