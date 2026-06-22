@@ -510,7 +510,7 @@ add_action('rest_api_init', function() {
     ));
 
     // ── Superadmin endpoints ──
-    $sa_perm = function() { return blokes_get_app_role() === 'superadmin'; };
+    $sa_perm = function() { return in_array(blokes_get_app_role(), array('socio', 'gestion')); };
 
     register_rest_route('superadmin/v1', '/revenue', array(
         'methods'             => 'GET',
@@ -2042,7 +2042,7 @@ add_action('rest_api_init', function() {
     register_rest_route('blokes/v1', '/leagues/initial-placement', array(
         'methods'             => 'POST',
         'callback'            => 'blokes_api_initial_placement',
-        'permission_callback' => function() { return blokes_get_app_role() === 'superadmin'; },
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
     ));
 
     // ── Perfil de usuario ─────────────────────────────────────────────────────
