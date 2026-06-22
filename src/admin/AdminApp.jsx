@@ -5,7 +5,7 @@ import './AdminApp.css'
 export default function AdminApp() {
   const role = window.blokesSiteData?.userRole
 
-  if (role !== 'admin' && role !== 'superadmin') {
+  if (!['profesor', 'gestion', 'socio'].includes(role)) {
     return <AdminLogin mode="setter" />
   }
 

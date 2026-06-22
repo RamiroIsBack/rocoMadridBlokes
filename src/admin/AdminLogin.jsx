@@ -8,7 +8,7 @@ export default function AdminLogin({ mode = 'setter' }) {
     <div className="admin-login">
       <div className="admin-login__card">
         <h1 className="admin-login__title">{title}</h1>
-        <p className="admin-login__subtitle">Esta sección requiere permisos de administrador.</p>
+        <p className="admin-login__subtitle">Inicia sesión para acceder a esta sección.</p>
         {sd.loginUrl && (
           <a href={sd.loginUrl} className="admin-login__submit">Iniciar sesión</a>
         )}

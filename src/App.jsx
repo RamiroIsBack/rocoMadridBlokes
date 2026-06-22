@@ -258,7 +258,7 @@ export default function App() {
                   <NavLink to="/ligas" className="app-nav__link">Ligas</NavLink>
                 </li>
               )}
-              {(sd.userRole === 'admin' || sd.userRole === 'superadmin') && (
+              {['profesor', 'gestion', 'socio'].includes(sd.userRole) && (
                 <>
                   <li className="app-nav__item">
                     <NavLink to="/entrenamientos" className="app-nav__link">Entrenamientos</NavLink>
@@ -271,12 +271,12 @@ export default function App() {
                   </li>
                 </>
               )}
-              {sd.userRole === 'superadmin' && (
+              {sd.userRole === 'socio' && (
                 <li className="app-nav__item">
                   <NavLink to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</NavLink>
                 </li>
               )}
-              {sd.canSupervise && (
+              {['profesor', 'gestion', 'socio'].includes(sd.userRole) && (
                 <li className="app-nav__item">
                   <NavLink to="/supervision" className="app-nav__link app-nav__link--super">Supervisión</NavLink>
                 </li>

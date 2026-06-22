@@ -123,7 +123,7 @@ function TestModeRow({ alumno, testId }) {
 
 // ─── Main page ───────────────────────────────────────────────────────
 export default function EntrenamientosPage() {
-  const isAuthenticated = ['admin', 'superadmin'].includes(window.blokesSiteData?.userRole)
+  const isAuthenticated = ['profesor', 'gestion', 'socio'].includes(window.blokesSiteData?.userRole)
   const [viewMode, setViewMode]         = useState('alumno') // 'alumno' | 'test'
   const [filters, setFilters]           = useState(EMPTY_FILTERS)
   const [allClases, setAllClases]       = useState([])

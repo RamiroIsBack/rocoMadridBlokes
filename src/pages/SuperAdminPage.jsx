@@ -438,11 +438,11 @@ function ClassesSection_UNUSED() {
 export default function SuperAdminPage() {
   const role = window.blokesSiteData?.userRole
 
-  if (role !== 'superadmin') {
+  if (role !== 'socio') {
     return (
       <div className="sa-forbidden">
         <span className="sa-forbidden__icon">🔒</span>
-        <p>Acceso restringido a superadministradores.</p>
+        <p>Acceso restringido a socios.</p>
       </div>
     )
   }
@@ -455,6 +455,61 @@ export default function SuperAdminPage() {
       <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
       <ProductsSection excludeTransfer={excludeTransfer} />
       <ExpensesSection />
+      <ListasSection />
     </div>
+  )
+}
+
+// ─── Listas de acceso ─────────────────────────────────────────────────────────
+const LISTA_CONFIG = [
+  {
+    key:   'socios',
+    label: 'Socios',
+    color: '#a78bfa',
+    acceso: 'Todo + Superadmin',
+  },
+  {
+    key:   'gestion',
+    label: 'Gestión',
+    color: '#34d399',
+    acceso: 'Todo de profesores + ExcelMuerte (Supervisión)',
+  },
+  {
+    key:   'profesores',
+    label: 'Profesores',
+    color: '#f5c842',
+    acceso: 'Setter · Estadísticas · Entrenamientos · Fichaje · TimeOff',
+  },
+]
+
+function ListasSection() {
+  const lists = window.blokesSiteData?.emailLists
+  if (!lists) return null
+
+  return (
+    <section className="sa-section">
+      <SectionTitle>Listas de acceso</SectionTitle>
+      <p className="sa-lists-note">
+        Acceso basado en email — el rol de WordPress no influye.
+      </p>
+      <div className="sa-lists">
+        {LISTA_CONFIG.map(({ key, label, color, acceso }) => (
+          <div key={key} className="sa-list-group" style={{ '--list-color': color }}>
+            <div className="sa-list-group__header">
+              <span className="sa-list-group__name">{label}</span>
+              <span className="sa-list-group__acceso">{acceso}</span>
+            </div>
+            <div className="sa-list-group__emails">
+              {(lists[key] || []).map((email, i) => (
+                <span key={i} className="sa-list-email">{email}</span>
+              ))}
+              {(!lists[key] || lists[key].length === 0) && (
+                <span className="sa-list-empty">Sin emails configurados</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }

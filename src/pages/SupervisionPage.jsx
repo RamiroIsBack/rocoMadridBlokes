@@ -361,17 +361,20 @@ function ComingSoon({ name, detail }) {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-const TABS = [
-  { id: 'clases',  label: 'Clases'   },
-  { id: 'fichaje', label: 'Fichaje'  },
-  { id: 'timeoff', label: 'Time Off' },
-]
-
 export default function SupervisionPage() {
-  const [tab, setTab]   = useState('clases')
-  const canSupervise    = window.blokesSiteData?.canSupervise
+  const role             = window.blokesSiteData?.userRole
+  const canAccess        = ['profesor', 'gestion', 'socio'].includes(role)
+  const canSeeExcelMuerte = ['gestion', 'socio'].includes(role)
 
-  if (!canSupervise) {
+  const TABS = [
+    ...(canSeeExcelMuerte ? [{ id: 'excelmuerte', label: 'ExcelMuerte' }] : []),
+    { id: 'fichaje', label: 'Fichaje'  },
+    { id: 'timeoff', label: 'Time Off' },
+  ]
+
+  const [tab, setTab] = useState(canSeeExcelMuerte ? 'excelmuerte' : 'fichaje')
+
+  if (!canAccess) {
     return (
       <div className="sv-forbidden">
         <span className="sv-forbidden__icon">🔒</span>
@@ -394,9 +397,9 @@ export default function SupervisionPage() {
         ))}
       </div>
 
-      {tab === 'clases'  && <ClasesTab />}
-      {tab === 'fichaje' && <ComingSoon name="Fichaje"  detail="Control de horarios y fichaje del equipo" />}
-      {tab === 'timeoff' && <ComingSoon name="Time Off" detail="Gestión de vacaciones y ausencias" />}
+      {tab === 'excelmuerte' && <ClasesTab />}
+      {tab === 'fichaje'     && <ComingSoon name="Fichaje"  detail="Control de horarios y fichaje del equipo" />}
+      {tab === 'timeoff'     && <ComingSoon name="Time Off" detail="Gestión de vacaciones y ausencias" />}
     </div>
   )
 }

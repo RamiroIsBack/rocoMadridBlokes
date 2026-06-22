@@ -27,8 +27,8 @@ const COLOR_PRESA_LABELS = {
 
 export default function StatsPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    // Check localStorage on initial load
-    return !!localStorage.getItem(SESSION_KEY)
+    const role = window.blokesSiteData?.userRole
+    return ['profesor', 'gestion', 'socio'].includes(role) || !!localStorage.getItem(SESSION_KEY)
   })
   const { cards, loading, error, refresh } = useWordPressPosts()
   const [filters, setFilters] = useState({

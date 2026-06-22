@@ -259,6 +259,60 @@
   margin-top: 8px;
 }
 
+/* ── Listas de acceso ── */
+.sa-lists-note {
+  font-size: 0.72rem;
+  color: #555;
+  margin: 0 0 16px;
+  font-style: italic;
+}
+.sa-lists {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sa-list-group {
+  border-left: 3px solid var(--list-color, #888);
+  padding-left: 14px;
+}
+.sa-list-group__header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.sa-list-group__name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--list-color, #888);
+  letter-spacing: 0.02em;
+}
+.sa-list-group__acceso {
+  font-size: 0.68rem;
+  color: #555;
+  font-weight: 500;
+}
+.sa-list-group__emails {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.sa-list-email {
+  font-size: 0.72rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid #2a2015;
+  color: #aaa;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.sa-list-empty {
+  font-size: 0.72rem;
+  color: #444;
+  font-style: italic;
+}
+
 @media (max-width: 600px) {
   .sa-kpi { min-width: 100%; }
   .sa-class-row__label { width: 100px; }

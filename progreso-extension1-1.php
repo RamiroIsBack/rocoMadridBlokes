@@ -24,53 +24,47 @@ if (!defined('ABSPATH')) exit;
 // When ready for production, add 'blokes' to this array.
 $GLOBALS['blokes_app_slugs'] = ['blokes-dev'];
 
-// ── App-level role whitelist ────────────────────────────────────────────
-// Determines what the React SPA shows — independent of WordPress roles.
-// Only users explicitly listed here get elevated access; WP roles are ignored.
-$GLOBALS['blokes_superadmin_emails'] = array(
+// ── App-level role whitelist ─────────────────────────────────────────────────
+// Roles independientes de WordPress — el rol de WP no importa, solo estas listas.
+// Jerarquía: socio > gestion > profesor > member > guest
+$GLOBALS['blokes_socios_emails'] = array(
     'rocomadrid7a@gmail.com',     // Ramiro
     'ramirosan69@hotmail.com',    // Ramiro (cuenta alternativa)
     'javier_buendia@hotmail.com', // Javier Buendía
     'alvilu2@hotmail.com',        // Álvaro
 );
-$GLOBALS['blokes_admin_emails'] = array(
+$GLOBALS['blokes_gestion_emails'] = array(
+    'rocomadridgestion@gmail.com', // Eva
+);
+$GLOBALS['blokes_profesores_emails'] = array(
     'caye.suomi@gmail.com',
-    'rocomadridgestion@gmail.com',
     'sigurdbaum@yahoo.es',
     'sara.coronadosanz@gmail.com',
     'ana.llorenteg03@gmail.com',
     'alobo@ymail.com',
-    'luciapcaas@gmail.com',       // Lucía
+    'luciapcaas@gmail.com',
 );
-
-// Emails que pueden ver el tab de Supervisión (superadmins + equipo gestión)
-$GLOBALS['blokes_supervision_emails'] = array_merge(
-    $GLOBALS['blokes_superadmin_emails'],
-    array('rocomadridgestion@gmail.com') // Eva
-);
-
-function blokes_can_supervise() {
-    if (!is_user_logged_in()) return false;
-    $email = strtolower(trim(wp_get_current_user()->user_email));
-    return in_array($email, array_map('strtolower', $GLOBALS['blokes_supervision_emails']));
-}
 
 /**
  * Returns the app-level role for the current user.
  * Checked against email whitelists — independent of WordPress roles.
- *   'superadmin' → panel financiero completo
- *   'admin'      → secciones de gestión sin panel financiero
- *   'member'     → usuario logueado sin permisos de gestión
- *   'guest'      → no logueado
+ *   'socio'    → acceso total + Superadmin
+ *   'gestion'  → acceso profesor + ExcelMuerte (Supervisión)
+ *   'profesor' → Setter, Stats, Entrenamientos, Supervisión (Fichaje/TimeOff)
+ *   'member'   → usuario logueado sin permisos de gestión
+ *   'guest'    → no logueado
  */
 function blokes_get_app_role() {
     if (!is_user_logged_in()) return 'guest';
     $email = strtolower(trim(wp_get_current_user()->user_email));
-    $sa_emails    = array_map('strtolower', $GLOBALS['blokes_superadmin_emails']);
-    $admin_emails = array_map('strtolower', $GLOBALS['blokes_admin_emails']);
-    if (in_array($email, $sa_emails))    return 'superadmin';
-    if (in_array($email, $admin_emails)) return 'admin';
+    if (in_array($email, array_map('strtolower', $GLOBALS['blokes_socios_emails'])))    return 'socio';
+    if (in_array($email, array_map('strtolower', $GLOBALS['blokes_gestion_emails'])))   return 'gestion';
+    if (in_array($email, array_map('strtolower', $GLOBALS['blokes_profesores_emails']))) return 'profesor';
     return 'member';
+}
+
+function blokes_can_supervise() {
+    return in_array(blokes_get_app_role(), array('profesor', 'gestion', 'socio'));
 }
 
 // ── Profile helpers ──────────────────────────────────────────────────────────
@@ -277,6 +271,11 @@ add_action('wp_head', function() {
         'appBasename'      => '/' . $app_slug,
         'userRole'         => blokes_get_app_role(),
         'canSupervise'     => blokes_can_supervise(),
+        'emailLists'       => blokes_get_app_role() === 'socio' ? array(
+            'socios'    => $GLOBALS['blokes_socios_emails'],
+            'gestion'   => $GLOBALS['blokes_gestion_emails'],
+            'profesores'=> $GLOBALS['blokes_profesores_emails'],
+        ) : null,
         'profileComplete'  => is_user_logged_in() ? blokes_is_profile_complete(get_current_user_id()) : false,
         'userNickname'     => is_user_logged_in() ? blokes_get_user_nickname(get_current_user_id()) : '',
         'userAvatarType'   => is_user_logged_in() ? (get_user_meta(get_current_user_id(), '_blokes_avatar_type', true) ?: '') : '',
