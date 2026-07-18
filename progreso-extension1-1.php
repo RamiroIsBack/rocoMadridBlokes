@@ -22,7 +22,7 @@ if (!defined('ABSPATH')) exit;
 
 // Add slugs here to enable WordPress hosting for that path.
 // When ready for production, add 'blokes' to this array.
-$GLOBALS['blokes_app_slugs'] = ['blokes-dev'];
+$GLOBALS['blokes_app_slugs'] = ['blokes-dev', 'blokes'];
 
 // ── App-level role whitelist ─────────────────────────────────────────────────
 // Roles independientes de WordPress — el rol de WP no importa, solo estas listas.
@@ -288,7 +288,7 @@ add_action('wp_head', function() {
         'appBasename'      => '/' . $app_slug,
         'userRole'         => blokes_get_app_role(),
         'canSupervise'     => blokes_can_supervise(),
-        'emailLists'       => blokes_get_app_role() === 'socio' ? blokes_get_email_lists() : null,
+        'emailLists'       => in_array(blokes_get_app_role(), array('socio', 'superadmin')) ? blokes_get_email_lists() : null,
         'fichajeEmbedUrl'  => '',
         'profileComplete'  => is_user_logged_in() ? blokes_is_profile_complete(get_current_user_id()) : false,
         'userNickname'     => is_user_logged_in() ? blokes_get_user_nickname(get_current_user_id()) : '',

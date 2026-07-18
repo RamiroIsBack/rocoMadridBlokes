@@ -5,8 +5,8 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  // base must match the subdirectory on the server: https://rocomadrid.com/blokes-dev
-  base: '/blokes-dev/',
+  // base is set via VITE_BASE_PATH env var: /blokes-dev/ (dev) or /blokes/ (prod)
+  base: process.env.VITE_BASE_PATH || '/blokes-dev/',
   build: {
     outDir: 'dist',
     assetsDir: 'assets',

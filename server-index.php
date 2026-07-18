@@ -1,30 +1,31 @@
 <?php
 /**
- * React SPA entry point for /blokes-dev/.
- *
- * Uses wp-load.php (not wp-blog-header.php) to bootstrap WordPress
- * without triggering the query/template system. This way the HTML
- * is generated here directly — no WordPress page or rewrite rule needed.
- *
- * Upload this file as /blokes-dev/index.php on the server.
+ * React SPA entry point — serves /blokes/ or /blokes-dev/.
+ * Auto-detects the app slug from the request URI.
+ * Requires progreso-extension1-1.php plugin to be active for full role/data support.
  */
 
-ob_start();                               // capture any early output from plugins
+ob_start();
 require dirname(__DIR__) . '/wp-load.php';
-ob_end_clean();                           // discard it so our HTML starts clean
+ob_end_clean();
 
 nocache_headers();
 
+// Detect which slug we're serving from the request URI
+$_path  = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+$_parts = explode('/', $_path);
+$slug   = !empty($_parts[0]) ? $_parts[0] : 'blokes';
+
 // Locate built assets in this same directory
 $app_dir = __DIR__ . '/';
-$app_url = trailingslashit(home_url('blokes-dev'));
+$app_url = trailingslashit(home_url($slug));
 
 $css_files = glob($app_dir . 'assets/*.css') ?: [];
 $js_files  = glob($app_dir . 'assets/*.js')  ?: [];
 $css_url   = $css_files ? $app_url . 'assets/' . basename($css_files[0]) : '';
 $js_url    = $js_files  ? $app_url . 'assets/' . basename($js_files[0])  : '';
 
-// Gather user/subscription data — mirrors the plugin's wp_head hook
+// Subscription data (club WP, blog 3)
 switch_to_blog(3);
 $club_nonce   = wp_create_nonce('wp_rest');
 $subscription = null;
@@ -74,22 +75,30 @@ if (is_user_logged_in()) {
     }
 }
 
-$spa_url   = home_url('/blokes-dev/');
+$app_role = function_exists('blokes_get_app_role')
+    ? blokes_get_app_role()
+    : (is_user_logged_in() ? 'member' : 'guest');
+
+$spa_url   = home_url('/' . $slug . '/');
 $site_data = [
-    'nonce'        => wp_create_nonce('wp_rest'),
-    'clubNonce'    => $club_nonce,
-    'isLoggedIn'   => is_user_logged_in(),
-    'userId'       => get_current_user_id(),
-    'loginUrl'     => wp_login_url($spa_url),
-    'logoutUrl'    => wp_logout_url($spa_url),
-    'userName'     => $user_name,
-    'subscription' => $subscription,
-    'appBasename'  => '/blokes-dev',
-    'userRole'     => is_super_admin()
-                          ? 'superadmin'
-                          : (is_user_logged_in() && current_user_can('administrator')
-                              ? 'admin'
-                              : (is_user_logged_in() ? 'member' : 'guest')),
+    'nonce'           => wp_create_nonce('wp_rest'),
+    'clubNonce'       => $club_nonce,
+    'isLoggedIn'      => is_user_logged_in(),
+    'userId'          => get_current_user_id(),
+    'loginUrl'        => wp_login_url($spa_url),
+    'logoutUrl'       => wp_logout_url($spa_url),
+    'userName'        => $user_name,
+    'subscription'    => $subscription,
+    'appBasename'     => '/' . $slug,
+    'userRole'        => $app_role,
+    'canSupervise'    => function_exists('blokes_can_supervise') ? blokes_can_supervise() : false,
+    'emailLists'      => (function_exists('blokes_get_email_lists') && in_array($app_role, ['socio', 'superadmin']))
+                             ? blokes_get_email_lists() : null,
+    'fichajeEmbedUrl' => '',
+    'profileComplete' => is_user_logged_in() && function_exists('blokes_is_profile_complete')
+                             ? blokes_is_profile_complete(get_current_user_id()) : false,
+    'userNickname'    => is_user_logged_in() && function_exists('blokes_get_user_nickname')
+                             ? blokes_get_user_nickname(get_current_user_id()) : '',
 ];
 
 header('Content-Type: text/html; charset=UTF-8');
