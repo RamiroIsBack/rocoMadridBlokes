@@ -39,9 +39,7 @@ jobs:
           FTP_USER: ${{ secrets.SFTP_USERNAME }}
           FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
         run: |
-          echo "=== FTP_PATH: ${FTP_PATH} ==="
-
-          # Borrar ficheros viejos en assets/ del servidor
+          echo "FTP_PATH=${FTP_PATH}"
           listing=$(curl -sk --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
             "ftp://$FTP_HOST:21${FTP_PATH}assets/" 2>/dev/null || true)
@@ -53,8 +51,6 @@ jobs:
               -Q "DELE ${FTP_PATH}assets/$fname" \
               "ftp://$FTP_HOST:21/" || true
           done <<< "$listing"
-
-          # Subir nuevos assets
           ls -la dist/assets/
           for f in dist/assets/*; do
             [ -f "$f" ] || continue
@@ -63,8 +59,7 @@ jobs:
             echo "Uploading $fname"
             curl -sk --ssl-reqd --ftp-create-dirs --fail \
               --user "$FTP_USER:$FTP_PASS" \
-              -T "$f" \
-              "$url" || { echo "FAILED: $fname"; exit 1; }
+              -T "$f" "$url" || { echo "FAILED: $fname"; exit 1; }
           done
 
       - name: Upload PHP files and .htaccess
@@ -74,27 +69,20 @@ jobs:
           FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
           PLUGIN_PATH: ${{ secrets.SFTP_PLUGIN_PATH }}
         run: |
-          # Eliminar index.html antiguo si existe
           curl -sk --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
             -Q "DELE ${FTP_PATH}index.html" \
             "ftp://$FTP_HOST:21/" || true
-
-          # index.php
           curl -k --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
             -T server-index.php \
             "ftp://$FTP_HOST:21${FTP_PATH}index.php"
-
-          # .htaccess con el slug correcto para esta rama
           sed "s|RewriteBase /blokes-dev/|RewriteBase /$APP_SLUG/|" \
             public/.htaccess > /tmp/htaccess-deploy
           curl -k --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
             -T /tmp/htaccess-deploy \
             "ftp://$FTP_HOST:21${FTP_PATH}.htaccess"
-
-          # Plugin
           curl -k --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
             -T progreso-extension1-1.php \
