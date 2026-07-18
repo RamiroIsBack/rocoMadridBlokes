@@ -1,4 +1,6 @@
-# Blokes-dev — React SPA served via index.php
+# React SPA served via index.php
+DirectoryIndex index.php index.html
+
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /blokes-dev/

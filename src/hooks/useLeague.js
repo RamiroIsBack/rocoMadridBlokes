@@ -19,24 +19,23 @@ export function useLeague() {
 
     try {
       const headers = getHeaders()
-      const [leagueRes, lbRes, evRes] = await Promise.all([
-        fetch(`${WP_URL}/wp-json/blokes/v1/leagues/me`,              { headers }),
-        fetch(`${WP_URL}/wp-json/blokes/v1/leagues/me/leaderboard`,  { headers }),
-        fetch(`${WP_URL}/wp-json/blokes/v1/leagues/me/events`,       { headers }),
+      const leagueRes = await fetch(`${WP_URL}/wp-json/blokes/v1/leagues/me`, { headers })
+
+      if (!leagueRes.ok) {
+        if (leagueRes.status !== 404) setError('Error cargando liga')
+        setLoading(false)
+        return
+      }
+
+      setMyLeague(await leagueRes.json())
+
+      const [lbRes, evRes] = await Promise.all([
+        fetch(`${WP_URL}/wp-json/blokes/v1/leagues/me/leaderboard`, { headers }),
+        fetch(`${WP_URL}/wp-json/blokes/v1/leagues/me/events`,      { headers }),
       ])
 
-      if (leagueRes.ok)  setMyLeague(await leagueRes.json())
-      else if (leagueRes.status !== 404) setError('Error cargando liga')
-
-      if (lbRes.ok) {
-        const data = await lbRes.json()
-        setLeaderboard(data.members || [])
-      }
-
-      if (evRes.ok) {
-        const data = await evRes.json()
-        setUnseen(data.unseen || [])
-      }
+      if (lbRes.ok) setLeaderboard((await lbRes.json()).members || [])
+      if (evRes.ok) setUnseen((await evRes.json()).unseen || [])
     } catch (e) {
       setError('Error de conexión')
     }
