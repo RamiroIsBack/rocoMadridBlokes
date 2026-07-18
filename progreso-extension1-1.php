@@ -51,9 +51,11 @@ $GLOBALS['blokes_admin_emails']      = array_merge(
     $GLOBALS['blokes_profesores_emails']
 );
 
-// Devuelve las listas activas: primero wp_options (editadas desde UI), luego hardcoded como fallback
+// Devuelve las listas activas: siempre desde blog 1 (fuente de verdad única en multisite)
 function blokes_get_email_lists() {
+    switch_to_blog(1);
     $saved = get_option('blokes_email_lists');
+    restore_current_blog();
     return array(
         'socios'     => (is_array($saved) && !empty($saved['socios']))     ? $saved['socios']     : $GLOBALS['blokes_socios_emails'],
         'gestion'    => (is_array($saved) && !empty($saved['gestion']))    ? $saved['gestion']    : $GLOBALS['blokes_gestion_emails'],
@@ -325,8 +327,7 @@ add_filter('logout_redirect', function($redirect_to, $requested_redirect_to, $us
             return home_url('/' . $slug . '/');
         }
     }
-    $first_slug = $GLOBALS['blokes_app_slugs'][0] ?? 'blokes';
-    return home_url('/' . $first_slug . '/');
+    return home_url('/blokes/');
 }, 10, 3);
 
 // Allow redirecting back to the blokes frontend domains after login
@@ -2394,10 +2395,12 @@ function blokes_api_get_comunidad_leagues() {
 }
 
 function blokes_api_save_email_lists(WP_REST_Request $request) {
-    $body        = $request->get_json_params();
-    $allowed     = array('socios', 'gestion', 'profesores');
-    $existing    = get_option('blokes_email_lists', array());
-    $updated     = is_array($existing) ? $existing : array();
+    $body    = $request->get_json_params();
+    $allowed = array('socios', 'gestion', 'profesores');
+
+    switch_to_blog(1);
+    $existing = get_option('blokes_email_lists', array());
+    $updated  = is_array($existing) ? $existing : array();
 
     foreach ($allowed as $key) {
         if (!isset($body[$key]) || !is_array($body[$key])) continue;
@@ -2410,6 +2413,7 @@ function blokes_api_save_email_lists(WP_REST_Request $request) {
     }
 
     update_option('blokes_email_lists', $updated);
+    restore_current_blog();
 
     return rest_ensure_response(array('success' => true, 'lists' => blokes_get_email_lists()));
 }
