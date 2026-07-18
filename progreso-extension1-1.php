@@ -290,6 +290,7 @@ add_action('wp_head', function() {
         'canSupervise'     => blokes_can_supervise(),
         'emailLists'       => in_array(blokes_get_app_role(), array('socio', 'superadmin')) ? blokes_get_email_lists() : null,
         'fichajeEmbedUrl'  => '',
+        'timeOffEmbedUrl'  => '',
         'profileComplete'  => is_user_logged_in() ? blokes_is_profile_complete(get_current_user_id()) : false,
         'userNickname'     => is_user_logged_in() ? blokes_get_user_nickname(get_current_user_id()) : '',
         'userAvatarType'   => is_user_logged_in() ? (get_user_meta(get_current_user_id(), '_blokes_avatar_type', true) ?: '') : '',

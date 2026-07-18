@@ -95,6 +95,7 @@ $site_data = [
     'emailLists'      => (function_exists('blokes_get_email_lists') && in_array($app_role, ['socio', 'superadmin']))
                              ? blokes_get_email_lists() : null,
     'fichajeEmbedUrl' => '',
+    'timeOffEmbedUrl' => '',
     'profileComplete' => is_user_logged_in() && function_exists('blokes_is_profile_complete')
                              ? blokes_is_profile_complete(get_current_user_id()) : false,
     'userNickname'    => is_user_logged_in() && function_exists('blokes_get_user_nickname')

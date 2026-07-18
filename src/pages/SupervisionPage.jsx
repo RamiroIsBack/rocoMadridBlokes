@@ -363,17 +363,16 @@ function ComingSoon({ name, detail }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SupervisionPage() {
-  const role             = window.blokesSiteData?.userRole
-  const canAccess        = ['profesor', 'gestion', 'socio'].includes(role)
-  const canSeeExcelMuerte = ['gestion', 'socio'].includes(role)
+  const role          = window.blokesSiteData?.userRole
+  const canAccess     = ['gestion', 'socio'].includes(role)
 
   const TABS = [
-    ...(canSeeExcelMuerte ? [{ id: 'excelmuerte',  label: 'ExcelMuerte'  }] : []),
-    ...(canSeeExcelMuerte ? [{ id: 'ctrlfichaje',  label: 'CTRL Fichaje' }] : []),
-    { id: 'timeoff', label: 'Time Off' },
+    { id: 'excelmuerte', label: 'ExcelMuerte'  },
+    { id: 'ctrlfichaje', label: 'CTRL Fichaje' },
+    { id: 'timeoff',     label: 'Time Off'     },
   ]
 
-  const [tab, setTab] = useState(canSeeExcelMuerte ? 'excelmuerte' : 'timeoff')
+  const [tab, setTab] = useState('excelmuerte')
 
   if (!canAccess) {
     return (
