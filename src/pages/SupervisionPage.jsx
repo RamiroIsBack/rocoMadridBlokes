@@ -349,28 +349,6 @@ function ClasesTab() {
 }
 
 // ─── Coming soon ──────────────────────────────────────────────────────────────
-function FichajeTab() {
-  const url = window.blokesSiteData?.fichajeEmbedUrl
-  if (!url) {
-    return (
-      <div className="sv-coming-soon">
-        <span className="sv-coming-soon__icon">🕐</span>
-        <p className="sv-coming-soon__title">Fichaje</p>
-        <p className="sv-coming-soon__detail">Configura <code>fichajeEmbedUrl</code> en el plugin para activar esta sección.</p>
-      </div>
-    )
-  }
-  return (
-    <div className="sv-embed-wrap">
-      <iframe
-        src={url}
-        className="sv-embed-frame"
-        title="Fichaje"
-        allow="same-origin"
-      />
-    </div>
-  )
-}
 
 function ComingSoon({ name, detail }) {
   return (
@@ -390,12 +368,12 @@ export default function SupervisionPage() {
   const canSeeExcelMuerte = ['gestion', 'socio'].includes(role)
 
   const TABS = [
-    ...(canSeeExcelMuerte ? [{ id: 'excelmuerte', label: 'ExcelMuerte' }] : []),
-    { id: 'fichaje', label: 'Fichaje'  },
+    ...(canSeeExcelMuerte ? [{ id: 'excelmuerte',  label: 'ExcelMuerte'  }] : []),
+    ...(canSeeExcelMuerte ? [{ id: 'ctrlfichaje',  label: 'CTRL Fichaje' }] : []),
     { id: 'timeoff', label: 'Time Off' },
   ]
 
-  const [tab, setTab] = useState(canSeeExcelMuerte ? 'excelmuerte' : 'fichaje')
+  const [tab, setTab] = useState(canSeeExcelMuerte ? 'excelmuerte' : 'timeoff')
 
   if (!canAccess) {
     return (
@@ -421,8 +399,8 @@ export default function SupervisionPage() {
       </div>
 
       {tab === 'excelmuerte' && <ClasesTab />}
-      {tab === 'fichaje'     && <FichajeTab />}
-      {tab === 'timeoff'     && <ComingSoon name="Time Off" detail="Gestión de vacaciones y ausencias" />}
+      {tab === 'ctrlfichaje' && <ComingSoon name="CTRL Fichaje" detail="Control de fichajes, horas y seguimiento mensual del equipo" />}
+      {tab === 'timeoff'     && <ComingSoon name="Time Off"    detail="Gestión de vacaciones y ausencias" />}
     </div>
   )
 }
