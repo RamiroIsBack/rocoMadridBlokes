@@ -462,29 +462,57 @@ export default function SuperAdminPage() {
 
 // ─── Listas de acceso ─────────────────────────────────────────────────────────
 const LISTA_CONFIG = [
-  {
-    key:   'socios',
-    label: 'Socios',
-    color: '#a78bfa',
-    acceso: 'Todo + Superadmin',
-  },
-  {
-    key:   'gestion',
-    label: 'Gestión',
-    color: '#34d399',
-    acceso: 'Todo de profesores + ExcelMuerte (Supervisión)',
-  },
-  {
-    key:   'profesores',
-    label: 'Profesores',
-    color: '#f5c842',
-    acceso: 'Setter · Estadísticas · Entrenamientos · Fichaje · TimeOff',
-  },
+  { key: 'socios',     label: 'Socios',     color: '#a78bfa', acceso: 'Todo + Superadmin' },
+  { key: 'gestion',    label: 'Gestión',    color: '#34d399', acceso: 'Todo de profesores + ExcelMuerte (Supervisión)' },
+  { key: 'profesores', label: 'Profesores', color: '#f5c842', acceso: 'Setter · Estadísticas · Entrenamientos · Fichaje · TimeOff' },
 ]
 
+const WP_URL = window.location.origin
+
 function ListasSection() {
-  const lists = window.blokesSiteData?.emailLists
-  if (!lists) return null
+  const initial = window.blokesSiteData?.emailLists
+  if (!initial) return null
+
+  const [state, setState] = useState(() =>
+    Object.fromEntries(LISTA_CONFIG.map(({ key }) => [key, {
+      emails: initial[key] || [],
+      input:  '',
+      saving: false,
+      saved:  false,
+      error:  null,
+    }]))
+  )
+
+  const nonce = window.blokesSiteData?.nonce || ''
+
+  const patch = (key, changes) =>
+    setState(s => ({ ...s, [key]: { ...s[key], ...changes } }))
+
+  const addEmail = (key) => {
+    const email = state[key].input.trim().toLowerCase()
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return
+    if (state[key].emails.includes(email)) { patch(key, { input: '' }); return }
+    patch(key, { emails: [...state[key].emails, email], input: '' })
+  }
+
+  const removeEmail = (key, email) =>
+    patch(key, { emails: state[key].emails.filter(e => e !== email) })
+
+  const saveList = async (key) => {
+    patch(key, { saving: true, saved: false, error: null })
+    try {
+      const res = await fetch(`${WP_URL}/wp-json/blokes/v1/admin/email-lists`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
+        body: JSON.stringify({ [key]: state[key].emails }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      patch(key, { saving: false, saved: true })
+      setTimeout(() => patch(key, { saved: false }), 3000)
+    } catch (e) {
+      patch(key, { saving: false, error: e.message })
+    }
+  }
 
   return (
     <section className="sa-section sa-section--no-pad">
@@ -494,26 +522,47 @@ function ListasSection() {
           <span className="sa-collapsible__arrow" aria-hidden="true" />
         </summary>
         <div className="sa-collapsible__body">
-          <p className="sa-lists-note">
-            Acceso basado en email — el rol de WordPress no influye.
-          </p>
+          <p className="sa-lists-note">Acceso basado en email — el rol de WordPress no influye.</p>
           <div className="sa-lists">
-            {LISTA_CONFIG.map(({ key, label, color, acceso }) => (
-              <div key={key} className="sa-list-group" style={{ '--list-color': color }}>
-                <div className="sa-list-group__header">
-                  <span className="sa-list-group__name">{label}</span>
-                  <span className="sa-list-group__acceso">{acceso}</span>
+            {LISTA_CONFIG.map(({ key, label, color, acceso }) => {
+              const s = state[key]
+              return (
+                <div key={key} className="sa-list-group" style={{ '--list-color': color }}>
+                  <div className="sa-list-group__header">
+                    <span className="sa-list-group__name">{label}</span>
+                    <span className="sa-list-group__acceso">{acceso}</span>
+                  </div>
+                  <div className="sa-list-group__emails">
+                    {s.emails.map(email => (
+                      <span key={email} className="sa-list-email">
+                        {email}
+                        <button className="sa-list-email__remove" onClick={() => removeEmail(key, email)} aria-label="Quitar">×</button>
+                      </span>
+                    ))}
+                    {s.emails.length === 0 && <span className="sa-list-empty">Sin emails configurados</span>}
+                  </div>
+                  <div className="sa-list-add">
+                    <input
+                      type="email"
+                      className="sa-list-add__input"
+                      placeholder="nuevo@email.com"
+                      value={s.input}
+                      onChange={e => patch(key, { input: e.target.value })}
+                      onKeyDown={e => e.key === 'Enter' && addEmail(key)}
+                    />
+                    <button className="sa-list-add__btn" onClick={() => addEmail(key)}>+</button>
+                    <button
+                      className={`sa-list-save__btn${s.saved ? ' sa-list-save__btn--saved' : ''}`}
+                      onClick={() => saveList(key)}
+                      disabled={s.saving}
+                    >
+                      {s.saving ? '…' : s.saved ? 'Guardado ✓' : 'Guardar'}
+                    </button>
+                    {s.error && <span className="sa-list-error">{s.error}</span>}
+                  </div>
                 </div>
-                <div className="sa-list-group__emails">
-                  {(lists[key] || []).map((email, i) => (
-                    <span key={i} className="sa-list-email">{email}</span>
-                  ))}
-                  {(!lists[key] || lists[key].length === 0) && (
-                    <span className="sa-list-empty">Sin emails configurados</span>
-                  )}
-                </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       </details>

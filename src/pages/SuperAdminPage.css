@@ -359,6 +359,82 @@ details[open] .sa-collapsible__arrow {
   font-style: italic;
 }
 
+/* ── Email remove button ── */
+.sa-list-email {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.sa-list-email__remove {
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 0 1px;
+  transition: color 0.15s;
+}
+.sa-list-email__remove:hover { color: #f97316; }
+
+/* ── Add / save row ── */
+.sa-list-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.sa-list-add__input {
+  flex: 1;
+  min-width: 180px;
+  background: #0d0b07;
+  border: 1px solid #2a2015;
+  color: #ccc;
+  font-size: 0.75rem;
+  padding: 5px 10px;
+  font-family: inherit;
+  outline: none;
+  border-radius: 2px;
+}
+.sa-list-add__input:focus { border-color: #555; }
+.sa-list-add__btn {
+  background: none;
+  border: 1px solid #3a3020;
+  color: #888;
+  font-size: 1rem;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s, border-color 0.15s;
+  border-radius: 2px;
+}
+.sa-list-add__btn:hover { color: #f5c842; border-color: #f5c842; }
+
+.sa-list-save__btn {
+  padding: 4px 14px;
+  background: none;
+  border: 1px solid #3a3020;
+  color: #888;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+  border-radius: 2px;
+}
+.sa-list-save__btn:hover:not(:disabled) { color: #f5c842; border-color: #f5c842; }
+.sa-list-save__btn:disabled { opacity: 0.5; cursor: default; }
+.sa-list-save__btn--saved { color: #34d399 !important; border-color: #34d399 !important; }
+
+.sa-list-error {
+  font-size: 0.7rem;
+  color: #f97316;
+}
+
 @media (max-width: 600px) {
   .sa-kpi { min-width: 100%; }
   .sa-class-row__label { width: 100px; }

@@ -51,6 +51,16 @@ $GLOBALS['blokes_admin_emails']      = array_merge(
     $GLOBALS['blokes_profesores_emails']
 );
 
+// Devuelve las listas activas: primero wp_options (editadas desde UI), luego hardcoded como fallback
+function blokes_get_email_lists() {
+    $saved = get_option('blokes_email_lists');
+    return array(
+        'socios'     => (is_array($saved) && !empty($saved['socios']))     ? $saved['socios']     : $GLOBALS['blokes_socios_emails'],
+        'gestion'    => (is_array($saved) && !empty($saved['gestion']))    ? $saved['gestion']    : $GLOBALS['blokes_gestion_emails'],
+        'profesores' => (is_array($saved) && !empty($saved['profesores'])) ? $saved['profesores'] : $GLOBALS['blokes_profesores_emails'],
+    );
+}
+
 /**
  * Returns the app-level role for the current user.
  * Checked against email whitelists — independent of WordPress roles.
@@ -63,9 +73,10 @@ $GLOBALS['blokes_admin_emails']      = array_merge(
 function blokes_get_app_role() {
     if (!is_user_logged_in()) return 'guest';
     $email = strtolower(trim(wp_get_current_user()->user_email));
-    if (in_array($email, array_map('strtolower', $GLOBALS['blokes_socios_emails'])))    return 'socio';
-    if (in_array($email, array_map('strtolower', $GLOBALS['blokes_gestion_emails'])))   return 'gestion';
-    if (in_array($email, array_map('strtolower', $GLOBALS['blokes_profesores_emails']))) return 'profesor';
+    $lists = blokes_get_email_lists();
+    if (in_array($email, array_map('strtolower', $lists['socios'])))     return 'socio';
+    if (in_array($email, array_map('strtolower', $lists['gestion'])))    return 'gestion';
+    if (in_array($email, array_map('strtolower', $lists['profesores']))) return 'profesor';
     return 'member';
 }
 
@@ -277,11 +288,8 @@ add_action('wp_head', function() {
         'appBasename'      => '/' . $app_slug,
         'userRole'         => blokes_get_app_role(),
         'canSupervise'     => blokes_can_supervise(),
-        'emailLists'       => blokes_get_app_role() === 'socio' ? array(
-            'socios'    => $GLOBALS['blokes_socios_emails'],
-            'gestion'   => $GLOBALS['blokes_gestion_emails'],
-            'profesores'=> $GLOBALS['blokes_profesores_emails'],
-        ) : null,
+        'emailLists'       => blokes_get_app_role() === 'socio' ? blokes_get_email_lists() : null,
+        'fichajeEmbedUrl'  => '',
         'profileComplete'  => is_user_logged_in() ? blokes_is_profile_complete(get_current_user_id()) : false,
         'userNickname'     => is_user_logged_in() ? blokes_get_user_nickname(get_current_user_id()) : '',
         'userAvatarType'   => is_user_logged_in() ? (get_user_meta(get_current_user_id(), '_blokes_avatar_type', true) ?: '') : '',
@@ -2045,6 +2053,13 @@ add_action('rest_api_init', function() {
         'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
     ));
 
+    // ── Listas de acceso (editable por socios) ───────────────────────────────
+    register_rest_route('blokes/v1', '/admin/email-lists', array(
+        'methods'             => 'PUT',
+        'callback'            => 'blokes_api_save_email_lists',
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+    ));
+
     // ── Perfil de usuario ─────────────────────────────────────────────────────
     register_rest_route('blokes/v1', '/profile/me', array(
         array('methods' => 'GET',  'callback' => 'blokes_api_get_profile',  'permission_callback' => 'is_user_logged_in'),
@@ -2375,4 +2390,25 @@ function blokes_api_get_comunidad_leagues() {
     }
 
     return rest_ensure_response($result);
+}
+
+function blokes_api_save_email_lists(WP_REST_Request $request) {
+    $body        = $request->get_json_params();
+    $allowed     = array('socios', 'gestion', 'profesores');
+    $existing    = get_option('blokes_email_lists', array());
+    $updated     = is_array($existing) ? $existing : array();
+
+    foreach ($allowed as $key) {
+        if (!isset($body[$key]) || !is_array($body[$key])) continue;
+        $clean = array();
+        foreach ($body[$key] as $email) {
+            $e = sanitize_email(strtolower(trim($email)));
+            if ($e) $clean[] = $e;
+        }
+        $updated[$key] = array_values(array_unique($clean));
+    }
+
+    update_option('blokes_email_lists', $updated);
+
+    return rest_ensure_response(array('success' => true, 'lists' => blokes_get_email_lists()));
 }

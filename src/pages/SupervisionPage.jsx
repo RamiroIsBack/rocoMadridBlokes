@@ -349,6 +349,29 @@ function ClasesTab() {
 }
 
 // ─── Coming soon ──────────────────────────────────────────────────────────────
+function FichajeTab() {
+  const url = window.blokesSiteData?.fichajeEmbedUrl
+  if (!url) {
+    return (
+      <div className="sv-coming-soon">
+        <span className="sv-coming-soon__icon">🕐</span>
+        <p className="sv-coming-soon__title">Fichaje</p>
+        <p className="sv-coming-soon__detail">Configura <code>fichajeEmbedUrl</code> en el plugin para activar esta sección.</p>
+      </div>
+    )
+  }
+  return (
+    <div className="sv-embed-wrap">
+      <iframe
+        src={url}
+        className="sv-embed-frame"
+        title="Fichaje"
+        allow="same-origin"
+      />
+    </div>
+  )
+}
+
 function ComingSoon({ name, detail }) {
   return (
     <div className="sv-soon">
@@ -398,7 +421,7 @@ export default function SupervisionPage() {
       </div>
 
       {tab === 'excelmuerte' && <ClasesTab />}
-      {tab === 'fichaje'     && <ComingSoon name="Fichaje"  detail="Control de horarios y fichaje del equipo" />}
+      {tab === 'fichaje'     && <FichajeTab />}
       {tab === 'timeoff'     && <ComingSoon name="Time Off" detail="Gestión de vacaciones y ausencias" />}
     </div>
   )

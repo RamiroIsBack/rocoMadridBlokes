@@ -318,6 +318,21 @@
 .sv-soon__text   { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: #34d399; margin: 0 0 12px; }
 .sv-soon__detail { font-size: 0.78rem; color: #444; margin: 0; }
 
+/* ── Fichaje embed ── */
+.sv-embed-wrap {
+  width: 100%;
+  min-height: 600px;
+  border: 1px solid #2a2015;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.sv-embed-frame {
+  width: 100%;
+  height: 700px;
+  border: none;
+  display: block;
+}
+
 /* ── Mobile ── */
 @media (max-width: 600px) {
   .sv-controls  { flex-direction: column; align-items: flex-start; }
