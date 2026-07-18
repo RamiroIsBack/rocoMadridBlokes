@@ -318,9 +318,16 @@ add_filter('login_redirect', function($redirect_to, $requested, $user) {
     return $redirect_to;
 }, 10, 3);
 
-// After logout: honour explicit redirect_to; otherwise return to the SPA that referred us
+// After logout: honour explicit redirect_to; otherwise detect source app from cookie or referer
 add_filter('logout_redirect', function($redirect_to, $requested_redirect_to, $user) {
     if (!empty($requested_redirect_to)) return $requested_redirect_to;
+    // Cookie set by server-index.php on every SPA page load
+    if (!empty($_COOKIE['blokes_last_app'])) {
+        $cookie_slug = sanitize_text_field($_COOKIE['blokes_last_app']);
+        if (in_array($cookie_slug, $GLOBALS['blokes_app_slugs'], true)) {
+            return home_url('/' . $cookie_slug . '/');
+        }
+    }
     $referer = wp_get_referer();
     foreach ($GLOBALS['blokes_app_slugs'] as $slug) {
         if ($referer && strpos($referer, '/' . $slug) !== false) {

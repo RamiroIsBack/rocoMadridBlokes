@@ -102,6 +102,7 @@ $site_data = [
                              ? blokes_get_user_nickname(get_current_user_id()) : '',
 ];
 
+setcookie('blokes_last_app', $slug, 0, '/', '', is_ssl(), true);
 header('Content-Type: text/html; charset=UTF-8');
 ?><!DOCTYPE html>
 <html lang="es">
