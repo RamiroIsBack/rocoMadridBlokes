@@ -31,7 +31,6 @@ jobs:
             RAW="${{ secrets.SFTP_REMOTE_PATH }}"
             echo "APP_SLUG=blokes-dev" >> $GITHUB_ENV
           fi
-          # Ensure trailing slash
           echo "FTP_PATH=${RAW%/}/" >> $GITHUB_ENV
 
       - name: Deploy dist/assets/ to SiteGround
@@ -40,34 +39,32 @@ jobs:
           FTP_USER: ${{ secrets.SFTP_USERNAME }}
           FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
         run: |
-          # ── 1. Borrar ficheros viejos en assets/ del servidor ──────────────
-          echo "=== Limpiando assets/ antiguos en el servidor (${FTP_PATH}assets/) ==="
+          echo "=== FTP_PATH: ${FTP_PATH} ==="
+
+          # Borrar ficheros viejos en assets/ del servidor
           listing=$(curl -sk --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
             "ftp://$FTP_HOST:21${FTP_PATH}assets/" 2>/dev/null || true)
           while IFS= read -r line; do
             fname=$(echo "$line" | awk '{print $NF}' | tr -d '\r')
             [ -z "$fname" ] && continue
-            echo "Borrando: $fname"
             curl -sk --ssl-reqd \
               --user "$FTP_USER:$FTP_PASS" \
               -Q "DELE ${FTP_PATH}assets/$fname" \
               "ftp://$FTP_HOST:21/" || true
           done <<< "$listing"
 
-          # ── 2. Subir nuevos assets ─────────────────────────────────────────
-          echo "=== Subiendo dist/assets/ ==="
+          # Subir nuevos assets
           ls -la dist/assets/
           for f in dist/assets/*; do
             [ -f "$f" ] || continue
             fname=$(basename "$f")
             url="ftp://$FTP_HOST:21${FTP_PATH}assets/$fname"
-            echo "Uploading $fname → $url"
+            echo "Uploading $fname"
             curl -sk --ssl-reqd --ftp-create-dirs --fail \
               --user "$FTP_USER:$FTP_PASS" \
               -T "$f" \
-              "$url" || { echo "FAILED: $fname (exit $?)"; exit 1; }
-            echo "OK: $fname"
+              "$url" || { echo "FAILED: $fname"; exit 1; }
           done
 
       - name: Upload PHP files and .htaccess
@@ -77,7 +74,7 @@ jobs:
           FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
           PLUGIN_PATH: ${{ secrets.SFTP_PLUGIN_PATH }}
         run: |
-          # Eliminar index.html antiguo si existe (instalaciones previas estáticas)
+          # Eliminar index.html antiguo si existe
           curl -sk --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
             -Q "DELE ${FTP_PATH}index.html" \
@@ -89,7 +86,7 @@ jobs:
             -T server-index.php \
             "ftp://$FTP_HOST:21${FTP_PATH}index.php"
 
-          # .htaccess — sustituir slug según rama
+          # .htaccess con el slug correcto para esta rama
           sed "s|RewriteBase /blokes-dev/|RewriteBase /$APP_SLUG/|" \
             public/.htaccess > /tmp/htaccess-deploy
           curl -k --ssl-reqd \

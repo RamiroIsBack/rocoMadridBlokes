@@ -1,9 +1,9 @@
-# Prompt para Claude Code — Sistema de Ligas Blokes
+# Prompt para Claude Code — Sistema de Ligas, Avatares y Perfil de Usuario — Blokes
 
 ## Contexto del proyecto
 
-Estamos construyendo el sistema de ligas para la app de entrenamiento de escalada Blokes.
-La app tiene entre 120 y 200 usuarios en total.
+Estamos construyendo el sistema de ligas, avatares y perfil de usuario para la app de
+entrenamiento de escalada Blokes. La app tiene entre 120 y 200 usuarios en total.
 
 El sistema está inspirado en Duolingo pero con una diferencia clave: **no hay ciclos
 semanales ni períodos de espera**. Los ascensos y descensos son **inmediatos y en
@@ -360,7 +360,7 @@ El endpoint devuelve 403 si intentan acceder a otra.
 
 ---
 
-## Tests mínimos requeridos
+## Tests mínimos requeridos — Ligas
 
 ```
 ✓ registerTop suma correctamente según color y dificultad del bloke
@@ -373,4 +373,277 @@ El endpoint devuelve 403 si intentan acceder a otra.
 ✓ Leaderboard solo accesible para miembros de esa liga (403 si no)
 ✓ league_events se crean correctamente para promoted y demoted
 ✓ Las zonas se recalculan correctamente con porcentajes tras un swap
+```
+
+---
+
+---
+
+# PARTE 2 — Sistema de Avatares, Nickname y Perfil de Usuario
+
+---
+
+## Resumen
+
+Cada usuario (incluyendo admins y superadmins) debe tener un **nickname** y un
+**avatar** antes de poder realizar acciones clave en la app. Los avatares reemplazan
+los nombres de texto en **todos los lugares** de la interfaz donde antes aparecía el
+nombre del usuario.
+
+---
+
+## Librería de avatares: DiceBear + opción de foto propia
+
+Instalar las siguientes dependencias:
+
+```bash
+npm install @dicebear/core @dicebear/collection react-native-svg
+# Si se usa expo:
+npx expo install expo-image-picker expo-image-manipulator
+# Sin expo:
+npm install react-native-image-picker react-native-image-crop-picker
+```
+
+El usuario puede elegir entre dos modos de avatar:
+
+**Modo A — Avatar generado (DiceBear)**
+- El usuario elige un estilo visual de entre los disponibles en `@dicebear/collection`
+- Estilos recomendados para una app de escalada/fitness:
+  `adventurer`, `lorelei`, `avataaars`, `bottts`, `fun-emoji`
+- Dentro del estilo elegido puede personalizar características (color de piel,
+  pelo, accesorios, expresión facial) mediante un panel de opciones
+- Se almacena como JSON: `{ type: 'dicebear', style: 'adventurer', seed: '...', options: {...} }`
+- Se renderiza en la app con `SvgXml` de `react-native-svg`
+
+**Modo B — Foto propia**
+- El usuario selecciona una foto de su galería o cámara
+- Se recorta automáticamente a formato circular
+- Se almacena la URL de la imagen subida: `{ type: 'photo', url: 'https://...' }`
+
+---
+
+## Cambios en el modelo de datos — tabla `users`
+
+```sql
+-- Añadir a la tabla users existente:
+nickname          VARCHAR(30)   UNIQUE NOT NULL (cuando profile_complete = true)
+avatar_type       ENUM('dicebear', 'photo')   nullable hasta completar perfil
+avatar_data       JSONB         nullable hasta completar perfil
+                  -- Dicebear: { style, seed, options }
+                  -- Photo:    { url }
+profile_complete  BOOLEAN       DEFAULT false
+```
+
+---
+
+## Reglas de perfil completo por rol
+
+| Acción bloqueada sin perfil       | Usuario | Admin | Superadmin |
+|-----------------------------------|---------|-------|------------|
+| Registrar un top                  | ✅      | —     | —          |
+| Registrar un bloke                | —       | ✅    | ✅         |
+| Editar un entrenamiento           | —       | ✅    | ✅         |
+| Ver ligas / leaderboard           | ✅      | ✅    | ✅         |
+| Aparecer en comunidad con nick    | ✅      | ✅    | ✅         |
+
+---
+
+## Flujo del ProfileSetupModal
+
+```
+Al abrir la app:
+  ├─ profile_complete = true  → app normal
+  └─ profile_complete = false → mostrar ProfileSetupModal (DISMISSIBLE)
+       El usuario puede cerrarlo, pero las acciones bloqueadas
+       mostrarán el modal de nuevo (NO dismissible) con el mensaje:
+       "Necesitas un nickname y avatar para [acción]"
+
+Al intentar acción bloqueada sin perfil:
+  └─ Mostrar ProfileSetupModal (NO DISMISSIBLE)
+       Con banner: "Crea tu perfil para poder [registrar tops / añadir blokes]"
+```
+
+### Componente `ProfileSetupModal`
+
+```
+ProfileSetupModal
+  ├── Header: "Crea tu perfil"
+  ├── NicknameInput
+  │     - Min 3 / Max 20 caracteres
+  │     - Solo letras, números, guión bajo
+  │     - Validación de unicidad en tiempo real (debounce 500ms)
+  │     - Mensaje de error si ya existe
+  ├── AvatarPicker
+  │     ├── Tab "Elige un estilo"
+  │     │     ├── Grid de estilos DiceBear (previews circulares)
+  │     │     └── Panel de personalización del estilo elegido
+  │     │           (color piel, pelo, accesorios según estilo)
+  │     └── Tab "Sube tu foto"
+  │           ├── Botón "Galería" → expo-image-picker
+  │           ├── Botón "Cámara" → expo-image-picker con cámara
+  │           └── Recorte circular automático
+  ├── Preview circular del avatar resultante (tamaño 80px)
+  └── Botón "Guardar perfil"
+        → POST /api/users/me/profile
+        → marca profile_complete = true
+        → cierra modal
+        → si había acción pendiente bloqueada, la ejecuta
+```
+
+---
+
+## Componente `UserAvatar` — reutilizable en toda la app
+
+Crear un componente genérico que reemplaza **cualquier lugar donde antes
+aparecía el nombre** del usuario:
+
+```typescript
+interface UserAvatarProps {
+  userId: string
+  size?: 'xs' | 'sm' | 'md' | 'lg'   // 20 / 32 / 48 / 80 px
+  showNickname?: boolean               // muestra nick debajo o al lado
+  nicknameStyle?: 'below' | 'right'
+  isCurrentUser?: boolean              // añade borde destacado
+}
+```
+
+**Tamaños por contexto:**
+- `xs` (20px) — listas densas, rankings de liga
+- `sm` (32px) — feeds de actividad, comentarios
+- `md` (48px) — cards de tops, cabecera de perfil
+- `lg` (80px) — pantalla de perfil propio, ProfileSetupModal
+
+---
+
+## Dónde reemplazar nombres por `UserAvatar`
+
+Sustituir **todos** los lugares donde antes aparecía el nombre en texto:
+
+```
+✅ Leaderboard de liga        → avatar xs + nickname
+✅ Feed de tops en el muro    → avatar sm + nickname
+✅ Historial de tops del bloke → avatar sm + nickname
+✅ Tab Progreso               → avatar md (propio) + nickname + info de liga
+✅ Tab Comunidad              → ver reglas de visibilidad abajo
+✅ Notificaciones             → avatar xs + nickname del que causó el evento
+✅ Diálogo de subida de liga  → avatar lg propio
+✅ Banner de bajada de liga   → avatar lg propio
+✅ Pantalla de perfil         → avatar lg + nickname + liga + zona
+```
+
+---
+
+## Tab Progreso — Información de liga integrada
+
+El tab "Progreso" del usuario autenticado debe mostrar una sección de liga:
+
+```
+┌─────────────────────────────────────┐
+│  [Avatar lg]  @nickname             │
+│               Liga Yosemite  🟢     │  ← nombre liga + badge zona
+│               Posición #8           │
+│               1.240 pts             │
+├─────────────────────────────────────┤
+│  Mini leaderboard de su liga        │
+│  (top 5 con avatar xs + nickname    │
+│   + puntos, usuario propio resalt.) │
+│  [ Ver liga completa → ]            │
+└─────────────────────────────────────┘
+```
+
+El mini leaderboard se actualiza en tiempo real via WebSocket
+(mismo canal `league:updated` ya definido en la Parte 1).
+
+---
+
+## Tab Comunidad — Visibilidad por estado de sesión
+
+El tab Comunidad muestra las 6 ligas con sus participantes actuales.
+
+### Usuario NO autenticado (visitante)
+- Ve las 6 ligas con sus nombres
+- Dentro de cada liga: solo los **avatares circulares** de los participantes
+  (grid o fila horizontal), SIN nickname ni puntos
+- Efecto de "preview" para incentivar el registro
+
+```
+Liga Rocklands  [🧗][🧗][🧗][🧗]...
+Liga Hueco      [🧗][🧗][🧗][🧗][🧗]...
+...
+```
+
+### Usuario autenticado
+- Ve las 6 ligas con sus nombres e iconos
+- Dentro de cada liga: **avatar + nickname** de cada participante
+- En SU liga: además se muestra su posición y zona resaltadas
+- Puntos visibles solo para los miembros de la misma liga del usuario
+  (ver regla de privacidad de la Parte 1)
+
+```
+Liga Rocklands  [Avatar] @nick1  [Avatar] @nick2 ...
+Liga Hueco      [Avatar] @nick3  [Avatar] @nick4 ...  ← tu liga resaltada
+...
+```
+
+---
+
+## API Endpoints nuevos — Perfil y Avatar
+
+```
+POST  /api/users/me/profile
+      Body: { nickname, avatarType, avatarData }
+      → Crea/actualiza perfil, marca profile_complete = true
+      → Valida unicidad de nickname
+      → Devuelve: { user }
+
+GET   /api/users/me/profile
+      → Devuelve perfil completo del usuario autenticado
+
+GET   /api/users/:userId/avatar
+      → Devuelve avatar_type + avatar_data de cualquier usuario
+      → Público (para renderizar avatares en comunidad)
+
+GET   /api/nicknames/check?value=xxx
+      → Comprueba si un nickname está disponible
+      → Devuelve: { available: boolean }
+
+POST  /api/users/me/avatar/upload
+      → Sube foto de perfil a storage (S3 / Supabase Storage / Cloudinary)
+      → Devuelve: { url }
+
+GET   /api/comunidad/leagues
+      → Si autenticado: devuelve las 6 ligas con avatar + nickname de participantes
+      → Si no autenticado: devuelve las 6 ligas con avatar SOLAMENTE (sin nicknames)
+```
+
+---
+
+## Orden de implementación recomendado — Parte 2
+
+1. Migración: añadir campos `nickname`, `avatar_type`, `avatar_data`, `profile_complete` a `users`
+2. Endpoint `GET /api/nicknames/check` con debounce-friendly response
+3. Endpoint `POST /api/users/me/profile`
+4. Endpoint `POST /api/users/me/avatar/upload` + integración con storage
+5. Componente `UserAvatar` base con soporte DiceBear y foto
+6. Componente `ProfileSetupModal` (modo dismissible + modo bloqueante)
+7. HOC / hook `useProfileGuard(action)` que envuelve acciones bloqueadas
+8. Reemplazar todos los nombres en texto por `<UserAvatar>` en la app
+9. Actualizar tab Progreso con sección de liga + mini leaderboard
+10. Actualizar tab Comunidad con lógica de visibilidad autenticado/visitante
+
+---
+
+## Tests mínimos requeridos — Perfil y Avatar
+
+```
+✓ No se puede registrar un top si profile_complete = false
+✓ No se puede registrar un bloke (admin) si profile_complete = false
+✓ Nickname duplicado devuelve error de validación
+✓ Nickname con caracteres inválidos es rechazado
+✓ POST /profile marca profile_complete = true correctamente
+✓ GET /comunidad/leagues sin auth no devuelve nicknames
+✓ GET /comunidad/leagues con auth devuelve nicknames
+✓ Puntos solo visibles para miembros de la misma liga
+✓ UserAvatar renderiza correctamente en modo DiceBear
+✓ UserAvatar renderiza correctamente en modo foto
 ```

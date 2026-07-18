@@ -7,7 +7,12 @@
       "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/components/FilterBar.jsx' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/components/FilterBar.jsx')",
       "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/App.css' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/App.css')",
       "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/pages/StatsPage.jsx' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/pages/StatsPage.jsx')",
-      "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/pages/StatsPage.css' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/pages/StatsPage.css')"
+      "Bash(cp 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/src/pages/StatsPage.css' 'c:/Users/ramir/OneDrive/Documentos/Rocoteca7a/web/Setting ReactJS/standAloneReactBlokes/src/pages/StatsPage.css')",
+      "Bash(git restore *)",
+      "Bash(git stash *)",
+      "Bash(git status *)",
+      "Bash(git checkout *)",
+      "Bash(git commit *)"
     ]
   }
 }
