@@ -307,6 +307,20 @@
   white-space: nowrap;
 }
 
+/* ── Class selector ── */
+.sv-class-select {
+  width: 100%;
+  background: #1b1710;
+  border: 1px solid #3a3020;
+  color: #ccc;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.sv-class-select:focus { outline: none; border-color: #f5c842; }
+
 /* ── Coming soon ── */
 .sv-soon {
   max-width: 360px;

@@ -49,6 +49,27 @@ function fmtMonth(m) {
   return new Date(+y, +mo - 1).toLocaleString('es-ES', { month: 'short', year: '2-digit' })
 }
 
+function monthRange(n) {
+  const now = new Date()
+  const result = []
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    result.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
+  }
+  return result
+}
+
+function histByMonth(classes, mRange, key = 'nuevos') {
+  const acc = {}
+  mRange.forEach(m => { acc[m] = 0 })
+  classes.forEach(c => {
+    ;(c.history || []).forEach(h => {
+      if (acc[h.month] !== undefined) acc[h.month] += h.new || 0
+    })
+  })
+  return mRange.map(m => ({ month: fmtMonth(m), [key]: acc[m] }))
+}
+
 function fmtEur(v) {
   return `${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €`
 }
@@ -175,12 +196,123 @@ function ScheduleGrid({ classes, filter }) {
   )
 }
 
+const CHART_STYLE = {
+  tooltip: { background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 },
+  label:   { color: '#f5c842' },
+  tick:    { fill: '#888', fontSize: 10 },
+  grid:    '#2a2015',
+}
+
+function MonthlyBarChart({ data, bars, height = 160 }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke={CHART_STYLE.grid} />
+        <XAxis dataKey="month" tick={CHART_STYLE.tick} />
+        <YAxis allowDecimals={false} tick={CHART_STYLE.tick} width={28} />
+        <Tooltip contentStyle={CHART_STYLE.tooltip} labelStyle={CHART_STYLE.label}
+          formatter={(v, name) => [v, bars.find(b => b.key === name)?.label || name]} />
+        {bars.length > 1 && <Legend formatter={name => bars.find(b => b.key === name)?.label || name} />}
+        {bars.map(b => <Bar key={b.key} dataKey={b.key} name={b.label} fill={b.color} radius={[3, 3, 0, 0]} />)}
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
+function TrendCharts({ data, months, selectedKey, onSelectKey }) {
+  const mRange = useMemo(() => monthRange(months), [months])
+
+  const classKey = selectedKey || (data[0] ? `${data[0].dia}|${data[0].horario}|${data[0].edad}` : '')
+  const selectedClass = useMemo(
+    () => data.find(c => `${c.dia}|${c.horario}|${c.edad}` === classKey) || data[0],
+    [data, classKey]
+  )
+
+  const classChartData = useMemo(() => {
+    if (!selectedClass) return []
+    return histByMonth([selectedClass], mRange)
+  }, [selectedClass, mRange])
+
+  const matData = useMemo(() => {
+    const mAcc = {}, tAcc = {}
+    mRange.forEach(m => { mAcc[m] = 0; tAcc[m] = 0 })
+    data.forEach(c => {
+      const start = (c.horario || '').split('-')[0].trim()
+      const isMorn = isMañana(start)
+      ;(c.history || []).forEach(h => {
+        if (mAcc[h.month] !== undefined) {
+          if (isMorn) mAcc[h.month] += h.new || 0
+          else        tAcc[h.month] += h.new || 0
+        }
+      })
+    })
+    return mRange.map(m => ({ month: fmtMonth(m), mañana: mAcc[m], tarde: tAcc[m] }))
+  }, [data, mRange])
+
+  const kids  = useMemo(() => data.filter(c => c.edad && c.edad.toLowerCase() !== 'adultos'), [data])
+  const kidsData  = useMemo(() => histByMonth(kids,  mRange), [kids,  mRange])
+  const totalData = useMemo(() => histByMonth(data,  mRange), [data,  mRange])
+
+  return (
+    <>
+      <section className="sv-section">
+        <h2 className="sv-section-title">Evolución por clase</h2>
+        <select
+          value={classKey}
+          onChange={e => onSelectKey(e.target.value)}
+          className="sv-class-select"
+        >
+          {data.map((c, i) => {
+            const key = `${c.dia}|${c.horario}|${c.edad}`
+            const lbl = c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label
+            return <option key={i} value={key}>{lbl} — {c.active} activos</option>
+          })}
+        </select>
+        <MonthlyBarChart
+          data={classChartData}
+          bars={[{ key: 'nuevos', label: 'Nuevas inscripciones', color: '#f5c842' }]}
+        />
+      </section>
+
+      <section className="sv-section">
+        <h2 className="sv-section-title">Mañanas vs Tardes</h2>
+        <MonthlyBarChart
+          data={matData}
+          bars={[
+            { key: 'mañana', label: 'Mañana', color: '#f5c842' },
+            { key: 'tarde',  label: 'Tarde',  color: '#60a5fa' },
+          ]}
+        />
+      </section>
+
+      {kids.length > 0 && (
+        <section className="sv-section">
+          <h2 className="sv-section-title">Niños</h2>
+          <MonthlyBarChart
+            data={kidsData}
+            bars={[{ key: 'nuevos', label: 'Nuevas inscripciones', color: '#34d399' }]}
+          />
+        </section>
+      )}
+
+      <section className="sv-section">
+        <h2 className="sv-section-title">Total usuarios</h2>
+        <MonthlyBarChart
+          data={totalData}
+          bars={[{ key: 'nuevos', label: 'Nuevas inscripciones', color: '#34d399' }]}
+        />
+      </section>
+    </>
+  )
+}
+
 // ─── Clases tab ───────────────────────────────────────────────────────────────
 function ClasesTab() {
-  const [months, setMonths]     = useState(12)
-  const [filter, setFilter]     = useState('todos')
-  const [selected, setSelected] = useState(null)
-  const [viewMode, setViewMode] = useState('inscritos')
+  const [months, setMonths]           = useState(12)
+  const [filter, setFilter]           = useState('todos')
+  const [selected, setSelected]       = useState(null)
+  const [viewMode, setViewMode]       = useState('inscritos')
+  const [selectedClassKey, setSelectedClassKey] = useState('')
   const { data, loading, error } = useClasses(months)
 
   const filtered = useMemo(() => {
@@ -344,6 +476,8 @@ function ClasesTab() {
               </div>
             )}
           </section>
+
+          <TrendCharts data={data} months={months} selectedKey={selectedClassKey} onSelectKey={setSelectedClassKey} />
         </>
       )}
     </div>

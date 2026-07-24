@@ -1734,13 +1734,15 @@ function superadmin_classes($request) {
     if (class_exists('RocoMadrid_SF_Stats')) {
         $all = RocoMadrid_SF_Stats::get_all_subscription_data();
         foreach ($all as $sub) {
-            $class_key = ($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '');
-            if (!$class_key || $class_key === '|') continue;
+            $edad      = sanitize_text_field($sub['edad'] ?? '') ?: 'Adultos';
+            $class_key = ($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '') . '|' . $edad;
+            if (!$sub['dia'] && !$sub['horario']) continue;
             if (!isset($classes[$class_key])) {
                 $classes[$class_key] = array(
                     'label'   => ($sub['dia'] ?? '') . ' · ' . ($sub['horario'] ?? ''),
                     'dia'     => $sub['dia'] ?? '',
                     'horario' => $sub['horario'] ?? '',
+                    'edad'    => $edad,
                     'active'  => 0,
                     'all'     => 0,
                     'history' => array(),
@@ -1769,7 +1771,8 @@ function superadmin_classes($request) {
             $dia     = sanitize_text_field(get_post_meta($sid, '_dia', true) ?: '');
             $horario = sanitize_text_field(get_post_meta($sid, '_horario', true) ?: '');
             if (!$dia || !$horario) continue;
-            $class_key = $dia . '|' . $horario;
+            $edad      = sanitize_text_field(get_post_meta($sid, '_edad', true) ?: 'Adultos') ?: 'Adultos';
+            $class_key = $dia . '|' . $horario . '|' . $edad;
             if (!isset($classes[$class_key])) continue;
             if (!isset($classes[$class_key]['history'][$month])) {
                 $classes[$class_key]['history'][$month] = array('month' => $month, 'new' => 0);
