@@ -1730,7 +1730,9 @@ function superadmin_classes($request) {
 
     $classes = array(); // "dia|horario" => [label, dia, horario, active, history by month]
 
-    // Current snapshot from RocoMadrid_SF_Stats
+    // Snapshot + histórico en un solo paso usando RocoMadrid_SF_Stats
+    // (los atributos dia/horario/edad solo están disponibles via esta clase,
+    //  no como post_meta en los pedidos WC)
     if (class_exists('RocoMadrid_SF_Stats')) {
         $all = RocoMadrid_SF_Stats::get_all_subscription_data();
         foreach ($all as $sub) {
@@ -1750,34 +1752,21 @@ function superadmin_classes($request) {
             }
             $classes[$class_key]['all']++;
             if ($sub['status'] === 'active') $classes[$class_key]['active']++;
-        }
-    }
 
-    // Historical: WC subscriptions start date per class
-    if (function_exists('wc_get_orders')) {
-        $sub_ids = wc_get_orders(array(
-            'type'       => 'shop_subscription',
-            'date_after' => $start_date,
-            'limit'      => -1,
-            'return'     => 'ids',
-        ));
-        foreach ($sub_ids as $sid) {
-            $sub = wc_get_order($sid);
-            if (!$sub) continue;
-            $dt = $sub->get_date_created();
-            if (!$dt) continue;
-            $month = $dt->format('Y-m');
-            // Try to match to a class via subscription product name or meta
-            $dia     = sanitize_text_field(get_post_meta($sid, '_dia', true) ?: '');
-            $horario = sanitize_text_field(get_post_meta($sid, '_horario', true) ?: '');
-            if (!$dia || !$horario) continue;
-            $edad      = sanitize_text_field(get_post_meta($sid, '_edad', true) ?: 'Adultos') ?: 'Adultos';
-            $class_key = $dia . '|' . $horario . '|' . $edad;
-            if (!isset($classes[$class_key])) continue;
-            if (!isset($classes[$class_key]['history'][$month])) {
-                $classes[$class_key]['history'][$month] = array('month' => $month, 'new' => 0);
+            // Fecha de creación de la suscripción para el histórico
+            if (function_exists('wc_get_order') && !empty($sub['id'])) {
+                $sub_obj = wc_get_order(intval($sub['id']));
+                if ($sub_obj) {
+                    $dt = $sub_obj->get_date_created();
+                    if ($dt && $dt->format('Y-m-d') >= $start_date) {
+                        $month = $dt->format('Y-m');
+                        if (!isset($classes[$class_key]['history'][$month])) {
+                            $classes[$class_key]['history'][$month] = array('month' => $month, 'new' => 0);
+                        }
+                        $classes[$class_key]['history'][$month]['new']++;
+                    }
+                }
             }
-            $classes[$class_key]['history'][$month]['new']++;
         }
     }
 
