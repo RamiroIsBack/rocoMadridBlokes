@@ -1,13 +1,12 @@
 import './BodyDiagram.css'
 
 export const ZONES = {
-  lower:   { label: 'Tren inferior', color: '#3b82f6', tests: [1, 2, 9, 10, 11, 12] },
+  lower:   { label: 'Tren inferior', color: '#3b82f6', tests: [2, 9, 10, 11, 12] },
   upper:   { label: 'Tren superior', color: '#f97316', tests: [3, 4, 7, 8] },
-  fingers: { label: 'Dedos',         color: '#a855f7', tests: [5, 6] },
+  fingers: { label: 'Dedos',         color: '#a855f7', tests: [5, 6, 13] },
 }
 
 export const TESTS = {
-  1:  { zone: 'lower',   label: 'Puente glúteo',        unit: 'reps',   desc: 'Nº máximas repeticiones con cada pierna.' },
   2:  { zone: 'lower',   label: 'Sentadilla en silla',  unit: 'reps',   desc: 'Nº máximas repeticiones en 30 seg con brazos cruzados en hombros.' },
   9:  { zone: 'lower',   label: 'Rodillas al pecho',    unit: 'reps',   desc: 'Nº repeticiones colgados en barra subir piernas hasta 90°.' },
   10: { zone: 'lower',   label: 'Apertura caderas',     unit: 'cm',     desc: 'De pie piernas abiertas al máximo. Medimos distancia entre pies.' },
@@ -16,9 +15,10 @@ export const TESTS = {
   3:  { zone: 'upper',   label: 'Dominadas',            unit: 'reps',   desc: 'Nº máximas repeticiones.' },
   4:  { zone: 'upper',   label: 'Flexiones',            unit: 'reps',   desc: 'Nº máximas repeticiones tocando el suelo con el pecho.' },
   7:  { zone: 'upper',   label: 'Campus',               unit: 'cm',     desc: '3 intentos, marcar la altura máxima con ambas manos.' },
-  8:  { zone: 'upper',   label: 'Ángulo pared',         unit: '°',      desc: 'Sentadilla en pared con piernas en 90°, toda la espalda apoyada. Codos en pared en 90°. Llevar muñecas a la pared sin despegar la espalda; subir manos hacia el techo hasta donde se pueda. Medimos cóndilo codo al suelo.' },
+  8:  { zone: 'upper',   label: 'Ángel pared',          unit: 'cm',     desc: 'Sentadilla en pared con piernas en 90°, toda la espalda apoyada. Codos en pared en 90°. Llevar muñecas a la pared sin despegar la espalda; subir manos hacia el techo hasta donde se pueda. Medimos cóndilo codo al suelo.' },
   5:  { zone: 'fingers', label: 'Resis. Flex. Prof.',   unit: 'series', desc: 'Nº series completadas en 7 seg. Suspensión, 3 seg descanso. Regleta 20mm.' },
-  6:  { zone: 'fingers', label: 'Kg Máx dedos',         unit: 'kg',     desc: 'En posición caballero (rodilla en suelo y otra levantada) medimos fuerza máxima de mismo brazo que rodilla en suelo.' },
+  6:  { zone: 'fingers', label: 'Kg Máx Der.',          unit: 'kg',     desc: 'En posición caballero (rodilla derecha en suelo y otra levantada) medimos fuerza máxima de brazo derecho.' },
+  13: { zone: 'fingers', label: 'Kg Máx Izq.',          unit: 'kg',     desc: 'En posición caballero (rodilla izquierda en suelo y otra levantada) medimos fuerza máxima de brazo izquierdo.' },
 }
 
 const BODY_IMG = {

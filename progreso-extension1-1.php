@@ -318,9 +318,16 @@ add_filter('login_redirect', function($redirect_to, $requested, $user) {
     return $redirect_to;
 }, 10, 3);
 
-// After logout: honour explicit redirect_to; otherwise return to the SPA that referred us
+// After logout: honour explicit redirect_to; otherwise detect source app from cookie or referer
 add_filter('logout_redirect', function($redirect_to, $requested_redirect_to, $user) {
     if (!empty($requested_redirect_to)) return $requested_redirect_to;
+    // Cookie set by server-index.php on every SPA page load
+    if (!empty($_COOKIE['blokes_last_app'])) {
+        $cookie_slug = sanitize_text_field($_COOKIE['blokes_last_app']);
+        if (in_array($cookie_slug, $GLOBALS['blokes_app_slugs'], true)) {
+            return home_url('/' . $cookie_slug . '/');
+        }
+    }
     $referer = wp_get_referer();
     foreach ($GLOBALS['blokes_app_slugs'] as $slug) {
         if ($referer && strpos($referer, '/' . $slug) !== false) {
@@ -1297,7 +1304,7 @@ function progreso_log_training($request) {
     $user_id  = intval($request->get_param('user_id'));
     $test_id  = intval($request->get_param('test_id'));
     $value_kg = floatval($request->get_param('value_kg'));
-    if ($user_id <= 0 || $test_id < 1 || $test_id > 6 || $value_kg <= 0) {
+    if ($user_id <= 0 || $test_id < 2 || $test_id > 13 || $value_kg < 0) {
         return new WP_Error('invalid_data',
             "Datos inválidos. user_id={$user_id} test_id={$test_id} value_kg={$value_kg}",
             array('status' => 400));

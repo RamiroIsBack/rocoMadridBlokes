@@ -7,10 +7,10 @@ export const ACHIEVEMENTS = [
   },
   {
     id: 'all_tests', emoji: '💪', title: 'Cuerpo completo', category: 'training',
-    desc: 'Datos en los 6 tests de entrenamiento',
+    desc: 'Datos en los 12 tests de entrenamiento',
     check: ({ training }) => {
       const vals = Object.values(training)
-      return vals.length >= 6 && vals.every(e => e.length > 0)
+      return vals.length >= 12 && vals.every(e => e.length > 0)
     },
   },
   {
@@ -100,7 +100,7 @@ export function computeClassmateAchievements(member) {
   const check = (id) => {
     switch (id) {
       case 'first_training': return testVals.length > 0
-      case 'all_tests':      return testVals.length >= 6
+      case 'all_tests':      return testVals.length >= 12
       case 'consistent':     return maxMonths >= 3
       case 'improve_10':     return maxPct >= 10
       case 'improve_25':     return maxPct >= 25

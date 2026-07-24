@@ -63,7 +63,7 @@
 }
 .training-panel__test-num {
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.82rem;
   color: var(--zone-color);
 }
 .training-panel__test-zone {
@@ -158,4 +158,15 @@
   font-size: 0.72rem;
   color: #ef4444;
   margin: 4px 0 0;
+}
+
+.training-panel__zone {
+  margin-bottom: 16px;
+}
+.training-panel__zone-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 8px;
 }

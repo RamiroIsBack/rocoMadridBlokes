@@ -369,7 +369,7 @@ export default function SupervisionPage() {
   const TABS = [
     { id: 'excelmuerte', label: 'ExcelMuerte'  },
     { id: 'ctrlfichaje', label: 'CTRL Fichaje' },
-    { id: 'timeoff',     label: 'Time Off'     },
+    { id: 'timeoff',     label: 'CTRL Time Off' },
   ]
 
   const [tab, setTab] = useState('excelmuerte')
