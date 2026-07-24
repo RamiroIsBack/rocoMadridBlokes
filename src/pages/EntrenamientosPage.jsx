@@ -11,8 +11,7 @@ const EMPTY_FILTERS = { frecuencia: '', dia: '', turno: '', edad: '', horario: '
 const FRECUENCIA_LABEL = { single: '1 día/semana', classes: '2 días/semana' }
 const ORDEN_DIAS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Lunes-Miércoles','Martes-Jueves']
 
-// Test list matching TrainingPanel
-const TESTS_LIST = [1, 2, 3, 4, 5, 6]
+const TESTS_LIST = Object.values(ZONES).flatMap(z => z.tests)
 
 function getAuthHeaders() {
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
@@ -76,7 +75,7 @@ function TestModeRow({ alumno, testId }) {
 
   const handleSave = async () => {
     const val = parseFloat(value)
-    if (!val || val <= 0) { setErr('Introduce un valor'); return }
+    if (isNaN(val) || val < 0) { setErr('Introduce un valor'); return }
     setErr(null); setSaving(true)
     try {
       if (last && editable) {
@@ -95,18 +94,20 @@ function TestModeRow({ alumno, testId }) {
       <td className="entrena__test-row__meta">{alumno.dia} · {alumno.horario}</td>
       <td className="entrena__test-row__last">
         {loading ? <span className="entrena__test-loading">…</span>
-          : last ? <span title={formatDate(last.logged_at)}>{last.value_kg} kg{editable ? '' : ' ·hist'}</span>
+          : last ? <span title={formatDate(last.logged_at)}>{last.value_kg} {TEST_MAP[testId]?.unit || 'kg'}{editable ? '' : ' ·hist'}</span>
           : <span className="entrena__test-empty">—</span>
         }
       </td>
       <td className="entrena__test-row__input">
         <div className="entrena__test-input-wrap">
           <input
-            type="number" step="0.5" min="0"
+            type="number"
+            step={TEST_MAP[testId]?.unit === 'reps' || TEST_MAP[testId]?.unit === 'series' ? '1' : '0.5'}
+            min="0"
             value={value}
             onChange={e => setValue(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleSave()}
-            placeholder="kg"
+            placeholder={TEST_MAP[testId]?.unit || 'valor'}
             className="entrena__test-input"
           />
           <button
@@ -128,7 +129,7 @@ export default function EntrenamientosPage() {
   const [filters, setFilters]           = useState(EMPTY_FILTERS)
   const [allClases, setAllClases]       = useState([])
   const [selectedAlumno, setSelectedAlumno] = useState(null)
-  const [selectedTest, setSelectedTest] = useState(1)
+  const [selectedTest, setSelectedTest] = useState(TESTS_LIST[0])
   const [alumnos, setAlumnos]           = useState([])
   const [total, setTotal]               = useState(0)
   const [loading, setLoading]           = useState(false)

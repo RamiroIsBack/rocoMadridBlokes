@@ -1304,7 +1304,7 @@ function progreso_log_training($request) {
     $user_id  = intval($request->get_param('user_id'));
     $test_id  = intval($request->get_param('test_id'));
     $value_kg = floatval($request->get_param('value_kg'));
-    if ($user_id <= 0 || $test_id < 1 || $test_id > 6 || $value_kg <= 0) {
+    if ($user_id <= 0 || $test_id < 2 || $test_id > 13 || $value_kg < 0) {
         return new WP_Error('invalid_data',
             "Datos inválidos. user_id={$user_id} test_id={$test_id} value_kg={$value_kg}",
             array('status' => 400));
