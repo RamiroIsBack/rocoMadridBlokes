@@ -18,12 +18,12 @@ function parseClassMeta(label) {
   const m = label.match(/(\d{1,2}:\d{2})-(\d{1,2}:\d{2})/)
   if (!m) return null
   const norm = normStr(label)
-  let dayIdx = -1
+  const days = []
   for (const [d, i] of Object.entries(DAY_NORM)) {
-    if (norm.includes(d)) { dayIdx = i; break }
+    if (norm.includes(d)) days.push(i)
   }
-  if (dayIdx < 0) return null
-  return { time: m[0], timeStart: m[1], day: dayIdx }
+  if (!days.length) return null
+  return { time: m[0], timeStart: m[1], days }
 }
 
 function isMañana(timeStart) {
@@ -101,8 +101,10 @@ function ScheduleGrid({ classes, filter }) {
     const g = {}
     timeSlots.forEach(slot => { g[slot] = [0, 0, 0, 0, 0] })
     parsed.forEach(c => {
-      const { time, day } = c.meta
-      if (day < 5 && g[time] !== undefined) g[time][day] += c.active
+      const { time, days } = c.meta
+      days.forEach(day => {
+        if (day < 5 && g[time] !== undefined) g[time][day] += c.active
+      })
     })
     return g
   }, [parsed, timeSlots])
