@@ -235,6 +235,48 @@ function MonthlyBarChart({ data, bars, height = 160 }) {
   )
 }
 
+// [dia_norm, horario_start] por profesor (basado en horario marzo 2026)
+const TEACHER_CLASSES = {
+  Alvaro: [
+    ['lunes','18:00'],['lunes','19:30'],
+    ['martes','14:00'],['martes','16:30'],['martes','18:00'],['martes','19:30'],
+    ['miercoles','18:00'],['miercoles','19:30'],
+    ['jueves','14:00'],['jueves','16:30'],['jueves','18:00'],['jueves','19:30'],
+  ],
+  Sigurd: [
+    ['martes','17:30'],['martes','19:00'],['martes','20:30'],
+    ['jueves','17:30'],['jueves','19:00'],['jueves','20:30'],
+  ],
+  'Lucía': [
+    ['lunes','17:30'],['lunes','19:00'],
+    ['miercoles','17:30'],['miercoles','19:00'],
+  ],
+  Sara: [
+    ['martes','09:00'],['martes','10:30'],['martes','12:00'],
+    ['jueves','09:00'],['jueves','10:30'],['jueves','12:00'],
+  ],
+  Ana: [
+    ['lunes','20:30'],
+    ['miercoles','20:30'],
+    ['viernes','19:00'],
+  ],
+  Eva: [
+    ['martes','17:30'],['martes','18:30'],
+    ['jueves','17:30'],['jueves','18:30'],
+  ],
+}
+
+function classMatchesTeacher(c, teacher) {
+  const slots = TEACHER_CLASSES[teacher] || []
+  const start = (c.horario || '').split('-')[0].trim()
+  const dias  = normStr(c.dia || '').split(/[-\s]+/).filter(Boolean)
+  return slots.some(([d, t]) => dias.includes(d) && t === start)
+}
+
+function classLabel(c) {
+  return c.edad && c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label
+}
+
 function TrendCharts({ data, months, selectedKey, onSelectKey }) {
   const mRange = useMemo(() => monthRange(months), [months])
 
@@ -249,24 +291,32 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
     return histByMonth([selectedClass], mRange)
   }, [selectedClass, mRange])
 
-  const [evolFilter, setEvolFilter] = useState('__all__')
+  const [profesorFilter, setProfesorFilter] = useState('__all__')
+  const [evolFilter,     setEvolFilter    ] = useState('__all__')
+
+  const dataByTeacher = useMemo(() =>
+    profesorFilter === '__all__' ? data : data.filter(c => classMatchesTeacher(c, profesorFilter))
+  , [data, profesorFilter])
+
+  // reset class filter when teacher changes
+  const handleProfesor = p => { setProfesorFilter(p); setEvolFilter('__all__') }
 
   const evolData = useMemo(() => {
-    const classes = evolFilter === '__all__' ? data : data.filter((_, i) => `c${i}` === evolFilter)
+    const classes = evolFilter === '__all__' ? dataByTeacher : dataByTeacher.filter((_, i) => `c${i}` === evolFilter)
     return mRange.map(m => {
       const row = { month: fmtMonth(m) }
-      classes.forEach((c, idx) => {
-        const key = evolFilter === '__all__' ? `c${data.indexOf(c)}` : 'c0'
+      classes.forEach(c => {
+        const key = evolFilter === '__all__' ? `c${dataByTeacher.indexOf(c)}` : 'c0'
         const h = (c.history || []).find(e => e.month === m)
         row[key] = h?.active ?? null
       })
       return row
     })
-  }, [data, mRange, evolFilter])
+  }, [dataByTeacher, mRange, evolFilter])
 
   const evolClasses = useMemo(() =>
-    evolFilter === '__all__' ? data : data.filter((_, i) => `c${i}` === evolFilter)
-  , [data, evolFilter])
+    evolFilter === '__all__' ? dataByTeacher : dataByTeacher.filter((_, i) => `c${i}` === evolFilter)
+  , [dataByTeacher, evolFilter])
 
   const matData = useMemo(() => {
     const mAcc = {}, tAcc = {}
@@ -292,20 +342,29 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
     <>
       <section className="sv-section">
         <h2 className="sv-section-title">Alumnos activos por clase</h2>
-        <select
-          value={evolFilter}
-          onChange={e => setEvolFilter(e.target.value)}
-          className="sv-class-select"
-          style={{ marginBottom: 12 }}
-        >
-          <option value="__all__">Todas las clases</option>
-          {data.map((c, i) => (
-            <option key={i} value={`c${i}`}>
-              {c.edad && c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label}
-            </option>
-          ))}
-        </select>
-        <ResponsiveContainer width="100%" height={260}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <select
+            value={profesorFilter}
+            onChange={e => handleProfesor(e.target.value)}
+            className="sv-class-select"
+          >
+            <option value="__all__">Todos los profes</option>
+            {Object.keys(TEACHER_CLASSES).map(p => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+          <select
+            value={evolFilter}
+            onChange={e => setEvolFilter(e.target.value)}
+            className="sv-class-select"
+          >
+            <option value="__all__">Todas las clases</option>
+            {dataByTeacher.map((c, i) => (
+              <option key={i} value={`c${i}`}>{classLabel(c)}</option>
+            ))}
+          </select>
+        </div>
+        <ResponsiveContainer width="100%" height={780}>
           <LineChart data={evolData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={CHART_STYLE.grid} />
             <XAxis dataKey="month" tick={CHART_STYLE.tick} />
@@ -313,25 +372,26 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
             <Tooltip
               contentStyle={CHART_STYLE.tooltip}
               labelStyle={CHART_STYLE.label}
+              itemSorter={item => -(item.value ?? 0)}
               formatter={(v, name) => {
                 const idx = parseInt(name.slice(1))
-                const c = evolFilter === '__all__' ? data[idx] : evolClasses[0]
-                const lbl = c ? (c.edad && c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label) : name
-                return [v ?? 0, lbl]
+                const c = evolFilter === '__all__' ? dataByTeacher[idx] : evolClasses[0]
+                return [v ?? 0, c ? classLabel(c) : name]
               }}
             />
             {evolFilter === '__all__' && (
               <Legend
                 formatter={name => {
-                  const c = data[parseInt(name.slice(1))]
-                  return c ? (c.edad && c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label) : name
+                  const c = dataByTeacher[parseInt(name.slice(1))]
+                  return c ? classLabel(c) : name
                 }}
                 wrapperStyle={{ fontSize: 10 }}
               />
             )}
-            {evolClasses.map((c, idx) => {
-              const dataKey = evolFilter === '__all__' ? `c${data.indexOf(c)}` : 'c0'
-              const color   = CLASS_COLORS[data.indexOf(c) % CLASS_COLORS.length]
+            {evolClasses.map(c => {
+              const globalIdx = dataByTeacher.indexOf(c)
+              const dataKey   = evolFilter === '__all__' ? `c${globalIdx}` : 'c0'
+              const color     = CLASS_COLORS[data.indexOf(c) % CLASS_COLORS.length]
               return (
                 <Line key={dataKey} type="monotone" dataKey={dataKey}
                   stroke={color} strokeWidth={evolFilter === '__all__' ? 2 : 2.5}
