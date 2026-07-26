@@ -466,6 +466,11 @@ const PL_DATA = {
 
 const PL_YEAR_COLORS = { 2024: '#f5c842', 2025: '#60a5fa', 2026: '#34d399' }
 
+const PL_VENTAS_IVA = {
+  2024: [10735, 17235, 12729, 13948, 15051, 12731, 10687, 2512, 10729, 16204, 15632, 8839],
+  2025: [14032, 12841, 13596, 14277, 13305, 11598, 8496, 3065, 11721, 15515, 12929, 12067],
+}
+
 function fmtPLVal(v) {
   if (v == null) return '—'
   return `${v < 0 ? '-' : ''}${Math.abs(v).toLocaleString('es-ES')}€`
@@ -475,6 +480,7 @@ function PLTab() {
   const { data: expData, loading } = useExpenses(30, 'all', true)
   const [metric, setMetric] = useState('ventas')
   const [view,   setView  ] = useState('comparativa')
+  const [showIva, setShowIva] = useState(false)
 
   const live2026 = useMemo(() => {
     if (!expData) return {}
@@ -513,9 +519,11 @@ function PLTab() {
   const comparativaData = useMemo(() =>
     PL_MONTHS_ABB.map((month, i) => ({
       month,
-      y2024: PL_DATA[metric][2024][i],
-      y2025: PL_DATA[metric][2025][i],
-      y2026: live2026[i + 1]?.[metric] ?? null,
+      y2024:   PL_DATA[metric][2024][i],
+      y2025:   PL_DATA[metric][2025][i],
+      y2026:   live2026[i + 1]?.[metric] ?? null,
+      iva2024: PL_VENTAS_IVA[2024][i],
+      iva2025: PL_VENTAS_IVA[2025][i],
     }))
   , [metric, live2026])
 
@@ -552,7 +560,9 @@ function PLTab() {
   const chartTooltip = {
     contentStyle: { background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 },
     labelStyle:   { color: '#f5c842' },
-    formatter:    (v, name) => [fmtPLVal(v), name.replace('y', '')],
+    formatter:    (v, name) => name.startsWith('iva')
+      ? [fmtPLVal(v), `con IVA ${name.replace('iva', '')}`]
+      : [fmtPLVal(v), name.replace('y', '')],
   }
 
   return (
@@ -565,10 +575,20 @@ function PLTab() {
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
         {[['comparativa', 'Por mes'], ['historico', 'Histórico']].map(([k, l]) => (
           <button key={k} className={`sa-period__btn${view === k ? ' sa-period__btn--active' : ''}`} onClick={() => setView(k)}>{l}</button>
         ))}
+        {view === 'comparativa' && (
+          <button
+            className={`sa-period__btn${showIva ? ' sa-period__btn--active' : ''}`}
+            onClick={() => setShowIva(x => !x)}
+            title="Ingresos históricos con IVA para ver la diferencia de tener el Club"
+            style={{ marginLeft: 8, borderStyle: showIva ? 'solid' : 'dashed' }}
+          >
+            + IVA 2024 y 2025
+          </button>
+        )}
       </div>
 
       <div className="sa-kpis">
@@ -587,6 +607,12 @@ function PLTab() {
             {y}{y === 2026 ? ' (banco)' : ''}
           </span>
         ))}
+        {showIva && view === 'comparativa' && [2024, 2025].map(y => (
+          <span key={`iva${y}`} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.7rem', color: '#aaa', fontWeight: 600 }}>
+            <span style={{ width: 20, height: 0, borderTop: `2px dashed ${PL_YEAR_COLORS[y]}`, display: 'inline-block' }} />
+            {y} con IVA
+          </span>
+        ))}
       </div>
 
       {loading ? <LoadingBlock /> : view === 'comparativa' ? (
@@ -599,6 +625,10 @@ function PLTab() {
             {[2024, 2025, 2026].map(yr => (
               <Line key={yr} type="monotone" dataKey={`y${yr}`} stroke={PL_YEAR_COLORS[yr]} strokeWidth={2}
                 dot={dotRender(yr)} connectNulls={false} />
+            ))}
+            {showIva && [2024, 2025].map(yr => (
+              <Line key={`iva${yr}`} type="monotone" dataKey={`iva${yr}`} stroke={PL_YEAR_COLORS[yr]}
+                strokeWidth={1.5} strokeDasharray="6 3" dot={false} connectNulls />
             ))}
           </LineChart>
         </ResponsiveContainer>
