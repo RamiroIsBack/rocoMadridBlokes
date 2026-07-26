@@ -136,7 +136,18 @@ function ScheduleGrid({ classes, filter }) {
     return t
   }, [grid, timeSlots])
 
-  const grandTotal = dayTotals.reduce((s, n) => s + n, 0)
+  // Row totals: sum c.active once per class (not per day) to avoid double-counting
+  const rowTotals = useMemo(() => {
+    const totals = {}
+    timeSlots.forEach(slot => { totals[slot] = 0 })
+    parsed.forEach(c => {
+      if (totals[c.meta.time] !== undefined) totals[c.meta.time] += c.active
+    })
+    return totals
+  }, [parsed, timeSlots])
+
+  // Grand total: unique students — each class counted once regardless of days
+  const grandTotal = useMemo(() => parsed.reduce((s, c) => s + c.active, 0), [parsed])
 
   if (!timeSlots.length) {
     return (
@@ -167,7 +178,6 @@ function ScheduleGrid({ classes, filter }) {
           <tbody>
             {timeSlots.map(slot => {
               const row = grid[slot]
-              const rowTotal = row.reduce((s, n) => s + n, 0)
               return (
                 <tr key={slot} className="sv-tr">
                   <td className="sv-td-time">{slot}</td>
@@ -176,7 +186,7 @@ function ScheduleGrid({ classes, filter }) {
                       <span className="sv-cell-num">{n > 0 ? n : '—'}</span>
                     </td>
                   ))}
-                  <td className="sv-td-total">{rowTotal || '—'}</td>
+                  <td className="sv-td-total">{rowTotals[slot] || '—'}</td>
                 </tr>
               )
             })}
