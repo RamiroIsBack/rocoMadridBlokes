@@ -2080,6 +2080,9 @@ add_action('rest_api_init', function() {
         'methods'             => 'POST',
         'callback'            => 'blokes_api_initial_placement',
         'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+        'args'                => array(
+            'force' => array('type' => 'boolean', 'default' => false),
+        ),
     ));
 
     // ── Listas de acceso (editable por socios) ───────────────────────────────
@@ -2222,13 +2225,21 @@ function blokes_api_mark_events_seen() {
     return rest_ensure_response(array('ok' => true));
 }
 
-function blokes_api_initial_placement() {
+function blokes_api_initial_placement($request) {
     global $wpdb;
-    $ul = $wpdb->prefix . 'blokes_user_leagues';
-    $l  = $wpdb->prefix . 'blokes_leagues';
+    $ul    = $wpdb->prefix . 'blokes_user_leagues';
+    $l     = $wpdb->prefix . 'blokes_leagues';
+    $ev    = $wpdb->prefix . 'blokes_league_events';
+    $force = (bool) $request->get_param('force');
 
-    if ((int) $wpdb->get_var("SELECT COUNT(*) FROM $ul") > 0)
-        return new WP_Error('already_done', 'Placement already done', array('status' => 409));
+    $existing = (int) $wpdb->get_var("SELECT COUNT(*) FROM $ul");
+    if ($existing > 0 && !$force)
+        return new WP_Error('already_done', 'Placement already done. Use force=true to reset.', array('status' => 409));
+
+    if ($force && $existing > 0) {
+        $wpdb->query("DELETE FROM $ul");
+        $wpdb->query("DELETE FROM $ev WHERE event_type IN ('promoted','demoted')");
+    }
 
     $rows = $wpdb->get_results(
         "SELECT user_id, meta_value FROM {$wpdb->usermeta} WHERE meta_key = '_blokes_completion_log'"
@@ -2248,18 +2259,25 @@ function blokes_api_initial_placement() {
 
     if (empty($user_points)) return rest_ensure_response(array('placed' => 0));
 
+    // Highest scorers first → go to highest tier (Rocklands).
+    // Tier 1 (Pedri) is the overflow: takes everyone not placed in tiers 2–6.
     arsort($user_points);
-    $users   = array_keys($user_points);
-    $total   = count($users);
-    $now     = current_time('mysql');
-    $leagues = $wpdb->get_results("SELECT * FROM $l ORDER BY tier DESC"); // Rocklands primero
-    $size    = (int) ceil($total / 6);
+    $users    = array_keys($user_points);
+    $now      = current_time('mysql');
+    $leagues  = $wpdb->get_results("SELECT * FROM $l ORDER BY tier DESC"); // Rocklands first
+    $n        = count($leagues);
+    $max_tier = 4; // max users per tier for tiers 2–6; Pedri takes the rest
 
     foreach ($leagues as $li => $league) {
-        foreach (array_slice($users, $li * $size, $size) as $rank0 => $uid) {
+        // Last league in the loop = Pedri (tier 1): give it everyone remaining
+        $slice = ($li === $n - 1)
+            ? array_slice($users, $li * $max_tier)
+            : array_slice($users, $li * $max_tier, $max_tier);
+
+        foreach ($slice as $rank0 => $uid) {
             $wpdb->insert($ul, array(
                 'user_id'        => $uid,
-                'league_id'      => $league->id,
+                'league_id'      => (int) $league->id,
                 'total_points'   => $user_points[$uid],
                 'rank_in_league' => $rank0 + 1,
                 'zone'           => 'stay',
@@ -2271,7 +2289,7 @@ function blokes_api_initial_placement() {
 
     foreach ($leagues as $league) blokes_recalculate_league_ranks((int) $league->id);
 
-    return rest_ensure_response(array('placed' => count($user_points), 'totalUsers' => $total));
+    return rest_ensure_response(array('placed' => count($user_points), 'totalUsers' => count($users)));
 }
 
 // ============================================================
