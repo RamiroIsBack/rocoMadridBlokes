@@ -249,14 +249,24 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
     return histByMonth([selectedClass], mRange)
   }, [selectedClass, mRange])
 
-  const allClassesData = useMemo(() => mRange.map(m => {
-    const row = { month: fmtMonth(m) }
-    data.forEach((c, i) => {
-      const h = (c.history || []).find(e => e.month === m)
-      row[`c${i}`] = h?.new ?? null
+  const [evolFilter, setEvolFilter] = useState('__all__')
+
+  const evolData = useMemo(() => {
+    const classes = evolFilter === '__all__' ? data : data.filter((_, i) => `c${i}` === evolFilter)
+    return mRange.map(m => {
+      const row = { month: fmtMonth(m) }
+      classes.forEach((c, idx) => {
+        const key = evolFilter === '__all__' ? `c${data.indexOf(c)}` : 'c0'
+        const h = (c.history || []).find(e => e.month === m)
+        row[key] = h?.active ?? null
+      })
+      return row
     })
-    return row
-  }), [data, mRange])
+  }, [data, mRange, evolFilter])
+
+  const evolClasses = useMemo(() =>
+    evolFilter === '__all__' ? data : data.filter((_, i) => `c${i}` === evolFilter)
+  , [data, evolFilter])
 
   const matData = useMemo(() => {
     const mAcc = {}, tAcc = {}
@@ -281,29 +291,54 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
   return (
     <>
       <section className="sv-section">
-        <h2 className="sv-section-title">Nuevas altas por clase · mensual</h2>
-        <ResponsiveContainer width="100%" height={280}>
-          <LineChart data={allClassesData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <h2 className="sv-section-title">Alumnos activos por clase</h2>
+        <select
+          value={evolFilter}
+          onChange={e => setEvolFilter(e.target.value)}
+          className="sv-class-select"
+          style={{ marginBottom: 12 }}
+        >
+          <option value="__all__">Todas las clases</option>
+          {data.map((c, i) => (
+            <option key={i} value={`c${i}`}>
+              {c.edad && c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label}
+            </option>
+          ))}
+        </select>
+        <ResponsiveContainer width="100%" height={260}>
+          <LineChart data={evolData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={CHART_STYLE.grid} />
             <XAxis dataKey="month" tick={CHART_STYLE.tick} />
             <YAxis allowDecimals={false} tick={CHART_STYLE.tick} width={28} />
             <Tooltip
               contentStyle={CHART_STYLE.tooltip}
               labelStyle={CHART_STYLE.label}
-              formatter={(v, name) => [v ?? 0, data[parseInt(name.slice(1))]?.label || name]}
-            />
-            <Legend
-              formatter={name => {
-                const c = data[parseInt(name.slice(1))]
-                return c ? (c.edad && c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label) : name
+              formatter={(v, name) => {
+                const idx = parseInt(name.slice(1))
+                const c = evolFilter === '__all__' ? data[idx] : evolClasses[0]
+                const lbl = c ? (c.edad && c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label) : name
+                return [v ?? 0, lbl]
               }}
-              wrapperStyle={{ fontSize: 10 }}
             />
-            {data.map((c, i) => (
-              <Line key={i} type="monotone" dataKey={`c${i}`}
-                stroke={CLASS_COLORS[i % CLASS_COLORS.length]} strokeWidth={2}
-                dot={false} connectNulls activeDot={{ r: 4 }} />
-            ))}
+            {evolFilter === '__all__' && (
+              <Legend
+                formatter={name => {
+                  const c = data[parseInt(name.slice(1))]
+                  return c ? (c.edad && c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label) : name
+                }}
+                wrapperStyle={{ fontSize: 10 }}
+              />
+            )}
+            {evolClasses.map((c, idx) => {
+              const dataKey = evolFilter === '__all__' ? `c${data.indexOf(c)}` : 'c0'
+              const color   = CLASS_COLORS[data.indexOf(c) % CLASS_COLORS.length]
+              return (
+                <Line key={dataKey} type="monotone" dataKey={dataKey}
+                  stroke={color} strokeWidth={evolFilter === '__all__' ? 2 : 2.5}
+                  dot={evolFilter !== '__all__' ? { r: 3, fill: color } : false}
+                  connectNulls activeDot={{ r: 4 }} />
+              )
+            })}
           </LineChart>
         </ResponsiveContainer>
       </section>

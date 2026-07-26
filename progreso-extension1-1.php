@@ -1723,16 +1723,23 @@ function superadmin_products($request) {
 }
 
 function superadmin_classes($request) {
-    $months     = max(1, min(60, intval($request->get_param('months'))));
-    $start_date = (new DateTime("-{$months} months"))->format('Y-m-d');
+    $months   = max(1, min(60, intval($request->get_param('months'))));
+    $start_dt = new DateTime("-{$months} months");
+    $start_ym = $start_dt->format('Y-m');
+    $now_ym   = date('Y-m');
+
+    // Build ordered list of months in the requested range
+    $months_range = array();
+    $iter = new DateTime($start_ym . '-01');
+    while ($iter->format('Y-m') <= $now_ym) {
+        $months_range[] = $iter->format('Y-m');
+        $iter->modify('+1 month');
+    }
 
     switch_to_blog(3);
 
-    $classes = array(); // "dia|horario" => [label, dia, horario, active, history by month]
+    $classes = array();
 
-    // Snapshot + histórico en un solo paso usando RocoMadrid_SF_Stats
-    // (los atributos dia/horario/edad solo están disponibles via esta clase,
-    //  no como post_meta en los pedidos WC)
     if (class_exists('RocoMadrid_SF_Stats')) {
         $all = RocoMadrid_SF_Stats::get_all_subscription_data();
         foreach ($all as $sub) {
@@ -1753,17 +1760,38 @@ function superadmin_classes($request) {
             $classes[$class_key]['all']++;
             if ($sub['status'] === 'active') $classes[$class_key]['active']++;
 
-            // Fecha de creación de la suscripción para el histórico
-            if (function_exists('wc_get_order') && !empty($sub['id'])) {
-                $sub_obj = wc_get_order(intval($sub['id']));
-                if ($sub_obj) {
-                    $dt = $sub_obj->get_date_created();
-                    if ($dt && $dt->format('Y-m-d') >= $start_date) {
-                        $month = $dt->format('Y-m');
-                        if (!isset($classes[$class_key]['history'][$month])) {
-                            $classes[$class_key]['history'][$month] = array('month' => $month, 'new' => 0);
+            // Per-month active snapshot using subscription start/end dates
+            if (function_exists('wcs_get_subscription') && !empty($sub['id'])) {
+                $sub_obj = wcs_get_subscription(intval($sub['id']));
+                if (!$sub_obj) continue;
+
+                $dt_created = $sub_obj->get_date_created();
+                if (!$dt_created) continue;
+
+                $sub_start_ym = $dt_created->format('Y-m');
+
+                if ($sub['status'] === 'active') {
+                    $sub_end_ym = $now_ym;
+                } else {
+                    $end_ts     = $sub_obj->get_time('cancelled') ?: $sub_obj->get_time('end');
+                    $sub_end_ym = $end_ts ? date('Y-m', $end_ts) : $sub_start_ym;
+                }
+
+                // New enrollment (if start falls in requested range)
+                if ($sub_start_ym >= $start_ym) {
+                    if (!isset($classes[$class_key]['history'][$sub_start_ym])) {
+                        $classes[$class_key]['history'][$sub_start_ym] = array('month' => $sub_start_ym, 'new' => 0, 'active' => 0);
+                    }
+                    $classes[$class_key]['history'][$sub_start_ym]['new']++;
+                }
+
+                // Active count for every month the subscription overlaps with the range
+                foreach ($months_range as $ym) {
+                    if ($ym >= $sub_start_ym && $ym <= $sub_end_ym) {
+                        if (!isset($classes[$class_key]['history'][$ym])) {
+                            $classes[$class_key]['history'][$ym] = array('month' => $ym, 'new' => 0, 'active' => 0);
                         }
-                        $classes[$class_key]['history'][$month]['new']++;
+                        $classes[$class_key]['history'][$ym]['active']++;
                     }
                 }
             }
