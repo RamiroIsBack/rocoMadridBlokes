@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import { useClasses } from '../hooks/useSuperAdmin'
@@ -213,6 +213,12 @@ const CHART_STYLE = {
   grid:    '#2a2015',
 }
 
+const CLASS_COLORS = [
+  '#f5c842','#60a5fa','#34d399','#f97316','#a78bfa',
+  '#fb7185','#22d3ee','#84cc16','#e879f9','#facc15',
+  '#38bdf8','#4ade80','#fbbf24','#818cf8',
+]
+
 function MonthlyBarChart({ data, bars, height = 160 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -243,6 +249,15 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
     return histByMonth([selectedClass], mRange)
   }, [selectedClass, mRange])
 
+  const allClassesData = useMemo(() => mRange.map(m => {
+    const row = { month: fmtMonth(m) }
+    data.forEach((c, i) => {
+      const h = (c.history || []).find(e => e.month === m)
+      row[`c${i}`] = h?.new ?? null
+    })
+    return row
+  }), [data, mRange])
+
   const matData = useMemo(() => {
     const mAcc = {}, tAcc = {}
     mRange.forEach(m => { mAcc[m] = 0; tAcc[m] = 0 })
@@ -265,6 +280,34 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
 
   return (
     <>
+      <section className="sv-section">
+        <h2 className="sv-section-title">Nuevas altas por clase · mensual</h2>
+        <ResponsiveContainer width="100%" height={280}>
+          <LineChart data={allClassesData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={CHART_STYLE.grid} />
+            <XAxis dataKey="month" tick={CHART_STYLE.tick} />
+            <YAxis allowDecimals={false} tick={CHART_STYLE.tick} width={28} />
+            <Tooltip
+              contentStyle={CHART_STYLE.tooltip}
+              labelStyle={CHART_STYLE.label}
+              formatter={(v, name) => [v ?? 0, data[parseInt(name.slice(1))]?.label || name]}
+            />
+            <Legend
+              formatter={name => {
+                const c = data[parseInt(name.slice(1))]
+                return c ? (c.edad && c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label) : name
+              }}
+              wrapperStyle={{ fontSize: 10 }}
+            />
+            {data.map((c, i) => (
+              <Line key={i} type="monotone" dataKey={`c${i}`}
+                stroke={CLASS_COLORS[i % CLASS_COLORS.length]} strokeWidth={2}
+                dot={false} connectNulls activeDot={{ r: 4 }} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </section>
+
       <section className="sv-section">
         <h2 className="sv-section-title">Evolución por clase</h2>
         <select
