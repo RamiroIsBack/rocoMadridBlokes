@@ -22,7 +22,7 @@ const RATING_ICONS = [
 export default function MiClaseTab() {
   const { isLoggedIn, loginUrl, classData } = useOutletContext()
   const [activeZone, setActiveZone] = useState('lower')
-  const [activeTest, setActiveTest] = useState(1)
+  const [activeTest, setActiveTest] = useState(2)
   const [animated, setAnimated]     = useState(false)
   const [testInfoId, setTestInfoId] = useState(null)
   const data    = classData

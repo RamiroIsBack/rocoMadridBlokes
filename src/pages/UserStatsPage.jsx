@@ -69,7 +69,7 @@ export default function UserStatsPage() {
   const { history: trainingHistory } = useUserTraining(isLoggedIn ? userId : null)
   const trainingSummary = useTrainingSummary()
   const [activeZone, setActiveZone] = useState('lower')
-  const [activeTest, setActiveTest] = useState(1)
+  const [activeTest, setActiveTest] = useState(2)
   const [testInfoId, setTestInfoId] = useState(null)
 
   const [classNotifs, setClassNotifs] = useState([])

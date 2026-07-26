@@ -81,7 +81,7 @@ export default function ProgresoPage() {
   const trainingSummary = useTrainingSummary()
   const comunidadLeagues = useComunidadLeagues()
   const [activeZone, setActiveZone] = useState('lower')
-  const [activeTest, setActiveTest] = useState(1)
+  const [activeTest, setActiveTest] = useState(2)
   const [testInfoId, setTestInfoId] = useState(null)
   const [colorTab, setColorTab] = useState('active')
   const [colorMonth, setColorMonth] = useState(null)
