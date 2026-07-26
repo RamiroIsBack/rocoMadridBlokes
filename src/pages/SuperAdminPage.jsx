@@ -442,7 +442,6 @@ const PL_METRICS_LIST = [
   { key: 'ventas',    label: 'Ventas sin IVA' },
   { key: 'costes',    label: 'Costes Fijos'   },
   { key: 'resultado', label: 'Resultado'      },
-  { key: 'con_iva',   label: 'Con IVA (caja)' },
 ]
 
 const PL_DATA = {
@@ -457,10 +456,6 @@ const PL_DATA = {
   resultado: {
     2024: [1047,4678,1152,1312,3326,1945,533,-5065,781,4436,3183,-1802],
     2025: [2025,612,1614,1524,2358,4525,null,null,null,null,null,null],
-  },
-  con_iva: {
-    2024: [-467,3245,-673,-671,1822,384,-1144,-7189,-917,3102,1531,-3937],
-    2025: [264,-1413,-839,-481,-795,3446,-9026,-6662,121,1021,-637,-109],
   },
 }
 
@@ -478,8 +473,8 @@ function fmtPLVal(v) {
 
 function PLTab() {
   const { data: expData, loading } = useExpenses(30, 'all', true)
-  const [metric, setMetric] = useState('ventas')
-  const [view,   setView  ] = useState('comparativa')
+  const [metric,  setMetric ] = useState('ventas')
+  const [view,    setView   ] = useState('comparativa')
   const [showIva, setShowIva] = useState(false)
 
   const live2026 = useMemo(() => {
@@ -505,7 +500,7 @@ function PLTab() {
     for (let m = 1; m <= 12; m++) {
       if (!acc[m]) continue
       const d = acc[m], resultado = d.ingresos - d.costes
-      res[m] = { ventas: d.ingresos, costes: -d.costes, resultado, con_iva: resultado - (ivaPayments[m] || 0) }
+      res[m] = { ventas: d.ingresos, costes: -d.costes, resultado }
     }
     return res
   }, [expData])
