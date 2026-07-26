@@ -10,6 +10,7 @@ import MiClaseTab from './pages/MiClaseTab'
 import EntrenamientosPage from './pages/EntrenamientosPage'
 import SuperAdminPage from './pages/SuperAdminPage'
 import SupervisionPage from './pages/SupervisionPage'
+import PlaygroundPage from './pages/PlaygroundPage'
 import FichajePage from './pages/FichajePage'
 import TimeOffPage from './pages/TimeOffPage'
 import LeaguesPage from './pages/LeaguesPage'
@@ -32,7 +33,7 @@ const SUBSALA_POSITIONS = {
   '8': { top: '44.5%', right: '18%', transform: 'translateX(50%)' },
 }
 
-const KNOWN_ROUTES = ['/progreso', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas']
+const KNOWN_ROUTES = ['/progreso', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground']
 
 function detectBasename() {
   const injected = window.blokesSiteData?.appBasename
@@ -289,6 +290,11 @@ export default function App() {
                   <NavLink to="/supervision" className="app-nav__link app-nav__link--super">Supervisión</NavLink>
                 </li>
               )}
+              {sd.userRole === 'socio' && (
+                <li className="app-nav__item">
+                  <NavLink to="/playground" className="app-nav__link app-nav__link--super">Playground</NavLink>
+                </li>
+              )}
             </ul>
           </nav>
         </header>
@@ -309,6 +315,7 @@ export default function App() {
             <Route path="/time-off" element={<TimeOffPage />} />
             <Route path="/superadmin" element={<SuperAdminPage />} />
             <Route path="/supervision" element={<SupervisionPage />} />
+            <Route path="/playground" element={<PlaygroundPage />} />
             <Route path="/ligas" element={<LeaguesPage />} />
           </Routes>
         </main>

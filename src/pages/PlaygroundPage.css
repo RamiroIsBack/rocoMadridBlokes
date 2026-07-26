@@ -1,0 +1,316 @@
+.pg-page {
+  padding: 24px 16px 60px;
+  max-width: 1400px;
+  margin: 0 auto;
+  color: #f0e8d5;
+}
+
+.pg-restricted {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 40vh;
+  color: #888;
+  font-size: 14px;
+}
+
+/* ── page header ─────────────────────────────────────────────── */
+
+.pg-page-head {
+  margin-bottom: 28px;
+}
+.pg-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #f5c842;
+  margin: 0 0 4px;
+}
+.pg-subtitle {
+  font-size: 13px;
+  color: #6b5e41;
+  margin: 0;
+}
+
+/* ── KPIs ─────────────────────────────────────────────────────── */
+
+.pg-kpis {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 28px;
+}
+.pg-kpi {
+  background: #2a2015;
+  border: 1px solid #3a3020;
+  border-radius: 8px;
+  padding: 14px 20px;
+  min-width: 140px;
+}
+.pg-kpi__val {
+  font-size: 24px;
+  font-weight: 700;
+  color: #f5c842;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.pg-kpi__lbl {
+  font-size: 11px;
+  color: #6b5e41;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ── professor cards ──────────────────────────────────────────── */
+
+.pg-profs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+.pg-prof-card {
+  background: #2a2015;
+  border: 1px solid #3a3020;
+  border-top: 3px solid;
+  border-radius: 8px;
+  padding: 12px 14px;
+  min-width: 150px;
+  flex: 1;
+}
+.pg-prof-card__header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+.pg-prof-card__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.pg-prof-card__name {
+  font-size: 14px;
+  font-weight: 700;
+}
+.pg-prof-card__stat {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.pg-prof-card__lbl {
+  color: #6b5e41;
+}
+.pg-prof-card__val {
+  font-weight: 600;
+  color: #c8b88a;
+}
+
+/* ── legend ───────────────────────────────────────────────────── */
+
+.pg-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.pg-leg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #8a7a58;
+}
+.pg-leg::before {
+  content: '';
+  display: inline-block;
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+}
+.pg-leg--clase::before    { background: rgba(180,180,180,0.6); }
+.pg-leg--equipar::before  { background: rgba(180,180,180,0.35); }
+.pg-leg--gestion::before  { background: rgba(180,180,180,0.22); }
+.pg-leg--comida::before   { background: rgba(180,180,180,0.1); border: 1px dashed rgba(255,255,255,0.2); }
+
+/* ── schedule matrix ──────────────────────────────────────────── */
+
+.pg-matrix-scroll {
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid #3a3020;
+}
+
+.pg-matrix {
+  display: grid;
+  /* col 1: time axis, col 2: prof labels, cols 3-7: Mon-Fri */
+  grid-template-columns: 44px 100px repeat(5, 1fr);
+  min-width: 680px;
+}
+
+/* corner spacers in the header row */
+.pg-matrix__corner {
+  background: #1f1a0f;
+  border-bottom: 1px solid #3a3020;
+  border-right: 1px solid #3a3020;
+  padding: 0;
+}
+
+/* ── day header cells ─────────────────────────────────────────── */
+
+.pg-day-head {
+  background: #1f1a0f;
+  border-bottom: 1px solid #3a3020;
+  border-right: 1px solid #3a3020;
+  padding: 10px 8px;
+  text-align: center;
+  min-height: 72px;
+}
+.pg-day-head__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f0e8d5;
+  margin-bottom: 2px;
+}
+.pg-day-head__hours {
+  font-size: 11px;
+  color: #6b5e41;
+  margin-bottom: 6px;
+}
+.pg-day-head__ops {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ── time axis cells ──────────────────────────────────────────── */
+
+.pg-time-col {
+  position: relative;
+  background: #1b1710;
+  border-right: 1px solid #3a3020;
+}
+.pg-time-tick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.pg-time-tick__lbl {
+  position: absolute;
+  right: 4px;
+  top: 1px;
+  font-size: 9px;
+  color: #4a3e28;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+/* ── professor label cells ────────────────────────────────────── */
+
+.pg-prof-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 10px 8px;
+  border-left: 3px solid transparent;
+  border-right: 1px solid #3a3020;
+  border-bottom: 1px solid #3a3020;
+  background: #1f1a0f;
+  gap: 4px;
+}
+.pg-prof-cell__name {
+  font-size: 12px;
+  font-weight: 700;
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  line-height: 1;
+}
+.pg-prof-cell__cost {
+  font-size: 9px;
+  color: #4a3e28;
+  writing-mode: vertical-lr;
+  transform: rotate(180deg);
+  line-height: 1;
+}
+
+/* ── day cells (timeline containers) ─────────────────────────── */
+
+.pg-day-cell {
+  position: relative;
+  border-right: 1px solid #3a3020;
+  border-bottom: 1px solid #3a3020;
+  /* hourly grid lines via background */
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 59px,
+    rgba(255,255,255,0.05) 59px,
+    rgba(255,255,255,0.05) 60px
+  );
+}
+.pg-day-cell--empty {
+  background-color: #1a1710;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 59px,
+    rgba(255,255,255,0.03) 59px,
+    rgba(255,255,255,0.03) 60px
+  );
+}
+
+/* ── activity blocks ──────────────────────────────────────────── */
+
+.pg-act {
+  position: absolute;
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-start;
+  padding: 2px 3px;
+  box-sizing: border-box;
+  transition: filter 0.15s;
+}
+.pg-act:hover {
+  filter: brightness(1.15);
+  z-index: 2;
+}
+.pg-act--comida {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    rgba(0,0,0,0.25) 4px,
+    rgba(0,0,0,0.25) 5px
+  );
+}
+.pg-act__txt {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* ── responsive ───────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .pg-profs {
+    flex-direction: column;
+  }
+  .pg-prof-card {
+    min-width: unset;
+  }
+  .pg-kpi__val {
+    font-size: 20px;
+  }
+}
