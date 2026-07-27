@@ -1609,6 +1609,7 @@ function _superadmin_orders_for_blog($start_date) {
         'limit'      => -1,
         'return'     => 'ids',
     ));
+    $cat_cache = array();
     $rows = array();
     foreach ($ids as $oid) {
         $order = wc_get_order($oid);
@@ -1618,10 +1619,21 @@ function _superadmin_orders_for_blog($start_date) {
         $month = $dt->format('Y-m');
         $row   = array('month' => $month, 'total' => floatval($order->get_total()), 'tax' => floatval($order->get_total_tax()), 'items' => array());
         foreach ($order->get_items() as $item) {
+            $cat     = '';
+            $product = $item->get_product();
+            if ($product) {
+                $pid = $product->get_parent_id() ?: $product->get_id();
+                if (!array_key_exists($pid, $cat_cache)) {
+                    $terms = get_the_terms($pid, 'product_cat');
+                    $cat_cache[$pid] = ($terms && !is_wp_error($terms)) ? $terms[0]->name : '';
+                }
+                $cat = $cat_cache[$pid];
+            }
             $row['items'][] = array(
-                'name'    => $item->get_name(),
-                'qty'     => intval($item->get_quantity()),
-                'revenue' => floatval($item->get_subtotal()),
+                'name'     => $item->get_name(),
+                'qty'      => intval($item->get_quantity()),
+                'revenue'  => floatval($item->get_subtotal()),
+                'category' => $cat,
             );
         }
         $rows[] = $row;
@@ -1692,11 +1704,12 @@ function superadmin_products($request) {
                 $key = $blog_id . '|' . $item['name'];
                 if (!isset($products[$key])) {
                     $products[$key] = array(
-                        'name'    => $item['name'],
-                        'store'   => $store_label,
-                        'units'   => 0,
-                        'revenue' => 0.0,
-                        'history' => array(),
+                        'name'     => $item['name'],
+                        'store'    => $store_label,
+                        'category' => $item['category'] ?? '',
+                        'units'    => 0,
+                        'revenue'  => 0.0,
+                        'history'  => array(),
                     );
                 }
                 $products[$key]['units']   += $item['qty'];

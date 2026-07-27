@@ -178,12 +178,108 @@ function normName(s) {
 }
 const isRocodromo = name => normName(name).includes('rocodromo')
 
+function matchesMarginProd(p) {
+  const n = normName(p.name)
+  return (
+    n.includes('recauchut') ||
+    n.includes('magnesio') ||
+    ['bebida', 'agua ', 'refresco', 'cerveza', 'zumo', 'naranjada'].some(k => n.includes(k))
+  )
+}
+
+// ─── Margin calculator ────────────────────────────────────────────────
+function MarginCalculator({ products, months }) {
+  const candidates = useMemo(() => products.filter(matchesMarginProd), [products])
+
+  const [costs, setCosts] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('sa_product_costs') || '{}') } catch { return {} }
+  })
+
+  if (!candidates.length) return null
+
+  const updateCost = (key, val) => {
+    const next = { ...costs, [key]: val }
+    setCosts(next)
+    try { localStorage.setItem('sa_product_costs', JSON.stringify(next)) } catch {}
+  }
+
+  const rows = candidates.map(p => {
+    const key          = `${p.store}|${p.name}`
+    const cost         = parseFloat(costs[key]) || 0
+    const pricePerUnit = p.units > 0 ? p.revenue / p.units : 0
+    const profit       = (pricePerUnit - cost) * p.units
+    const margin       = pricePerUnit > 0 ? ((pricePerUnit - cost) / pricePerUnit) * 100 : null
+    return { p, key, cost, pricePerUnit, profit, margin }
+  })
+
+  const anyHasCost  = rows.some(r => r.cost > 0)
+  const totalProfit = rows.reduce((s, r) => s + r.profit, 0)
+
+  return (
+    <div className="sa-margin-calc">
+      <p className="sa-margin-calc__title">Calculadora de margen · {months}m</p>
+      <div className="sa-margin-table-wrap">
+        <table className="sa-margin-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Uds.</th>
+              <th>Precio/ud</th>
+              <th>Coste/ud</th>
+              <th>Beneficio</th>
+              <th>Margen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ p, key, cost, pricePerUnit, profit, margin }, i) => (
+              <tr key={i}>
+                <td className="sa-mt__name">{p.name}</td>
+                <td className="sa-mt__num">{p.units}</td>
+                <td className="sa-mt__num">{pricePerUnit > 0 ? pricePerUnit.toFixed(2) + '€' : '—'}</td>
+                <td className="sa-mt__cost">
+                  <input
+                    type="number"
+                    className="sa-margin-input"
+                    value={cost || ''}
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    onChange={e => updateCost(key, e.target.value)}
+                  />
+                </td>
+                <td className={`sa-mt__profit${cost > 0 ? profit >= 0 ? ' sa-mt__profit--pos' : ' sa-mt__profit--neg' : ''}`}>
+                  {cost > 0 ? fmtEur(profit) : '—'}
+                </td>
+                <td className={`sa-mt__pct${margin != null && cost > 0 ? margin >= 50 ? ' sa-mt__pct--hi' : margin >= 20 ? ' sa-mt__pct--mid' : ' sa-mt__pct--lo' : ''}`}>
+                  {margin != null && cost > 0 ? `${margin.toFixed(1)}%` : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          {anyHasCost && (
+            <tfoot>
+              <tr>
+                <td colSpan={4} className="sa-mt__total-lbl">Beneficio total</td>
+                <td className={`sa-mt__total${totalProfit >= 0 ? '' : ' sa-mt__total--neg'}`} colSpan={2}>
+                  {fmtEur(totalProfit)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ─── Products section ────────────────────────────────────────────────
 function ProductsSection({ excludeTransfer }) {
-  const [months, setMonths]       = useState(12)
-  const [storeFilter, setStore]   = useState('Todas')
-  const [selected, setSelected]   = useState(null)
-  const { data, loading, error }  = useProducts(months)
+  const [months,      setMonths    ] = useState(12)
+  const [storeFilter, setStore     ] = useState('Todas')
+  const [openCats,    setOpenCats  ] = useState(() => new Set())
+  const [chartCat,    setChartCat  ] = useState('__all__')
+  const [chartProd,   setChartProd ] = useState('__all__')
+  const { data, loading, error }     = useProducts(months)
 
   const stores = useMemo(() => {
     if (!data) return ['Todas']
@@ -197,12 +293,50 @@ function ProductsSection({ excludeTransfer }) {
     return d
   }, [data, storeFilter, excludeTransfer])
 
-  const top10 = filtered.slice(0, 10)
+  const byCategory = useMemo(() => {
+    const groups = {}
+    filtered.forEach(p => {
+      const cat = p.category || 'Sin categoría'
+      if (!groups[cat]) groups[cat] = { name: cat, revenue: 0, products: [] }
+      groups[cat].revenue += p.revenue
+      groups[cat].products.push(p)
+    })
+    return Object.values(groups).sort((a, b) => b.revenue - a.revenue)
+  }, [filtered])
 
-  const histData = useMemo(() => {
-    if (!selected) return []
-    return selected.history.map(h => ({ ...h, month: fmtMonth(h.month) }))
-  }, [selected])
+  const toggleCat = cat => setOpenCats(prev => {
+    const next = new Set(prev)
+    next.has(cat) ? next.delete(cat) : next.add(cat)
+    return next
+  })
+
+  const chartProds = useMemo(() => {
+    if (chartCat === '__all__') return filtered
+    return byCategory.find(g => g.name === chartCat)?.products || []
+  }, [filtered, byCategory, chartCat])
+
+  const selectedProd = useMemo(() =>
+    chartProd === '__all__' ? null : chartProds.find(p => `${p.store}|${p.name}` === chartProd) || null
+  , [chartProds, chartProd])
+
+  const allMonths = useMemo(() => {
+    const s = new Set()
+    filtered.forEach(p => p.history.forEach(h => s.add(h.month)))
+    return [...s].sort()
+  }, [filtered])
+
+  const chartData = useMemo(() => {
+    const prods = selectedProd ? [selectedProd] : chartProds
+    return allMonths.map(m => {
+      const revenue = prods.reduce((s, p) => {
+        const h = p.history.find(e => e.month === m)
+        return s + (h?.revenue ?? 0)
+      }, 0)
+      return { month: fmtMonth(m), revenue: Math.round(revenue * 100) / 100 }
+    })
+  }, [allMonths, chartProds, selectedProd])
+
+  const handleCatChange = cat => { setChartCat(cat); setChartProd('__all__') }
 
   return (
     <section className="sa-section">
@@ -221,53 +355,89 @@ function ProductsSection({ excludeTransfer }) {
               <button
                 key={s}
                 className={`sa-filter-btn${storeFilter === s ? ' sa-filter-btn--active' : ''}`}
-                onClick={() => { setStore(s); setSelected(null) }}
+                onClick={() => setStore(s)}
               >{s}</button>
             ))}
           </div>
 
-          <div className="sa-products-layout">
-            <div className="sa-products-list">
-              {top10.map((p, i) => {
-                const maxRev = top10[0]?.revenue || 1
-                return (
+          {/* Category accordion */}
+          <div className="sa-cat-list">
+            {byCategory.map(cat => {
+              const isOpen = openCats.has(cat.name)
+              const maxRev = cat.products[0]?.revenue || 1
+              return (
+                <div key={cat.name} className="sa-cat-group">
                   <button
-                    key={i}
-                    className={`sa-product-row${selected === p ? ' sa-product-row--active' : ''}`}
-                    onClick={() => setSelected(selected === p ? null : p)}
+                    className={`sa-cat-header${isOpen ? ' sa-cat-header--open' : ''}`}
+                    onClick={() => toggleCat(cat.name)}
                   >
-                    <span className="sa-product-row__pos">#{i + 1}</span>
-                    <span className="sa-product-row__name">{p.name}</span>
-                    <span className="sa-product-row__store">{p.store}</span>
-                    <div className="sa-product-row__bar-wrap">
-                      <div className="sa-product-row__bar" style={{ width: `${(p.revenue / maxRev) * 100}%` }} />
-                    </div>
-                    <span className="sa-product-row__rev">{fmtEur(p.revenue)}</span>
+                    <span className="sa-cat-arrow">{isOpen ? '▼' : '▶'}</span>
+                    <span className="sa-cat-name">{cat.name}</span>
+                    <span className="sa-cat-count">{cat.products.length}</span>
+                    <span className="sa-cat-rev">{fmtEur(cat.revenue)}</span>
                   </button>
-                )
-              })}
-            </div>
-
-            {selected && histData.length > 0 && (
-              <div className="sa-product-detail">
-                <p className="sa-product-detail__title">{selected.name} — histórico</p>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={histData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                    <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
-                    <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={48} />
-                    <Tooltip
-                      contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
-                      labelStyle={{ color: '#f5c842' }}
-                      formatter={(v, name) => [name === 'revenue' ? fmtEur(v) : v, name === 'revenue' ? 'Ingresos' : 'Uds.']}
-                    />
-                    <Bar dataKey="revenue" fill="#f5c842" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="units"   fill="#60a5fa" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
+                  {isOpen && (
+                    <div className="sa-cat-products">
+                      {cat.products.map((p, i) => (
+                        <div key={i} className="sa-product-inner">
+                          <span className="sa-product-inner__pos">#{i + 1}</span>
+                          <span className="sa-product-inner__name">{p.name}</span>
+                          <span className="sa-product-inner__store">{p.store}</span>
+                          <div className="sa-product-inner__bar-wrap">
+                            <div className="sa-product-inner__bar" style={{ width: `${(p.revenue / maxRev) * 100}%` }} />
+                          </div>
+                          <span className="sa-product-inner__units">{p.units} uds</span>
+                          <span className="sa-product-inner__rev">{fmtEur(p.revenue)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
+
+          {/* Monthly trend chart */}
+          <div className="sa-prod-chart">
+            <div className="sa-prod-chart__filters">
+              <select
+                value={chartCat}
+                onChange={e => handleCatChange(e.target.value)}
+                className="sa-chart-select"
+              >
+                <option value="__all__">Todas las categorías</option>
+                {byCategory.map(g => (
+                  <option key={g.name} value={g.name}>{g.name}</option>
+                ))}
+              </select>
+              <select
+                value={chartProd}
+                onChange={e => setChartProd(e.target.value)}
+                className="sa-chart-select"
+                disabled={chartCat === '__all__'}
+              >
+                <option value="__all__">Todos los productos</option>
+                {chartProds.map((p, i) => (
+                  <option key={i} value={`${p.store}|${p.name}`}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
+                <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
+                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={52} />
+                <Tooltip
+                  contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
+                  labelStyle={{ color: '#f5c842' }}
+                  formatter={v => [fmtEur(v), selectedProd ? selectedProd.name : chartCat === '__all__' ? 'Total' : chartCat]}
+                />
+                <Bar dataKey="revenue" fill="#f5c842" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <MarginCalculator products={filtered} months={months} />
         </>
       )}
     </section>
