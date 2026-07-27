@@ -453,11 +453,11 @@ function normForProf(s) {
 
 const PROF_CLASS_SLOTS = {
   Alvaro:  [['lunes','18:00'],['lunes','19:30'],['martes','14:00'],['martes','16:30'],['martes','18:00'],['martes','19:30'],['miercoles','18:00'],['miercoles','19:30'],['jueves','14:00'],['jueves','16:30'],['jueves','18:00'],['jueves','19:30']],
-  Sigurd:  [['martes','17:30'],['martes','19:00'],['martes','20:30'],['jueves','17:30'],['jueves','19:00'],['jueves','20:30']],
+  Sigurd:  [['martes','17:30','adultos'],['martes','19:00'],['martes','20:30'],['jueves','17:30','adultos'],['jueves','19:00'],['jueves','20:30']],
   'Lucía': [['lunes','17:30'],['lunes','19:00'],['miercoles','17:30'],['miercoles','19:00']],
   Sara:    [['martes','09:00'],['martes','10:30'],['martes','12:00'],['jueves','09:00'],['jueves','10:30'],['jueves','12:00']],
   Ana:     [['lunes','20:30'],['viernes','19:00']],
-  Eva:     [['martes','17:30'],['martes','18:30'],['jueves','17:30'],['jueves','18:30'],['viernes','18:00'],['viernes','19:00']],
+  Eva:     [['martes','17:30','menor'],['martes','18:30'],['jueves','17:30','menor'],['jueves','18:30'],['viernes','18:00'],['viernes','19:00']],
 }
 
 const PROF_EUR_H = { Alvaro: 14.12, Sigurd: 18.40, 'Lucía': 12.09, Sara: 12.08, Ana: 13.20, Eva: 16.45 }
@@ -466,8 +466,11 @@ const PROF_COLOR = { Alvaro: '#f5c842', Sigurd: '#60a5fa', 'Lucía': '#34d399', 
 function getProfForClass(c) {
   const start = (c.horario || '').split('-')[0].trim()
   const dias  = normForProf(c.dia || '').split(/[\s\-·,|]+/).filter(Boolean)
+  const edad  = normForProf(c.edad || '')
   return Object.keys(PROF_CLASS_SLOTS).find(prof =>
-    PROF_CLASS_SLOTS[prof].some(([d, t]) => dias.includes(d) && t === start)
+    PROF_CLASS_SLOTS[prof].some(([d, t, e]) =>
+      dias.includes(d) && t === start && (!e || edad.includes(normForProf(e)))
+    )
   ) || null
 }
 

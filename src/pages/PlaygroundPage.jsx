@@ -124,7 +124,7 @@ const BASE = {
     Viernes:   [
       { tipo: 'gestion', start: '15:30', end: '18:00' },
       { tipo: 'clase',   start: '18:00', end: '19:00', label: 'Infantil' },
-      { tipo: 'clase',   start: '19:00', end: '19:30', label: 'Adolescentes' },
+      { tipo: 'clase',   start: '19:00', end: '20:00', label: 'Adolescentes' },
       { tipo: 'gestion', start: '19:30', end: '21:30' },
     ],
   },
