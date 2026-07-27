@@ -179,11 +179,12 @@ function normName(s) {
 const isRocodromo = name => normName(name).includes('rocodromo')
 
 function matchesMarginProd(p) {
-  const n = normName(p.name)
+  const n   = normName(p.name)
+  const cat = normName(p.category || '')
   return (
     n.includes('recauchut') ||
     n.includes('magnesio') ||
-    ['bebida', 'agua ', 'refresco', 'cerveza', 'zumo', 'naranjada'].some(k => n.includes(k))
+    cat.includes('bebida')
   )
 }
 
@@ -499,14 +500,21 @@ function ClassProfitabilitySection() {
 
   const rows = useMemo(() => {
     if (!data) return []
-    // slotMax: max active for each horario|edad across all dia variants
-    const slotMax = {}
+    // comboContrib: students from 2-day combos (e.g. Martes-Jueves) also attend each individual day
+    const comboContrib = {}
     data.forEach(c => {
-      const slot = `${c.horario}|${c.edad}`
+      if (!(c.dia || '').includes('-')) return
       const a = c.active || 0
-      if (a > (slotMax[slot] || 0)) slotMax[slot] = a
+      c.dia.split('-').forEach(day => {
+        const key = `${day.trim()}|${c.horario}|${c.edad}`
+        comboContrib[key] = (comboContrib[key] || 0) + a
+      })
     })
-    const effectiveActive = c => Math.max(c.active || 0, slotMax[`${c.horario}|${c.edad}`] || 0)
+    const effectiveActive = c => {
+      const a = c.active || 0
+      if ((c.dia || '').includes('-')) return a
+      return a + (comboContrib[`${(c.dia || '').trim()}|${c.horario}|${c.edad}`] || 0)
+    }
 
     return data
       .map(c => {

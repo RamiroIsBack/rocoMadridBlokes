@@ -359,26 +359,20 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
   }, [data, mRange])
 
   const classGroups = useMemo(() => {
-    // For each horario|edad slot, compute the max active across ALL dia variants
-    // so a "Martes-Jueves 14:00" subscription contributes to the "Jueves 14:00" slot too
-    const slotMax = {}
+    // Students from 2-day combos (Martes-Jueves) also attend each individual day slot
+    const comboContrib = {}
     data.forEach(c => {
-      const slot = `${c.horario}|${c.edad}`
+      if (!(c.dia || '').includes('-')) return
       const a = c.active || 0
-      if (a > (slotMax[slot] || 0)) slotMax[slot] = a
-      // 2-day combo: also register under each individual day key
-      if ((c.dia || '').includes('-')) {
-        c.dia.split('-').forEach(day => {
-          const dSlot = `${day.trim()}|${c.horario}|${c.edad}`
-          if (a > (slotMax[dSlot] || 0)) slotMax[dSlot] = a
-        })
-      }
+      c.dia.split('-').forEach(day => {
+        const key = `${day.trim()}|${c.horario}|${c.edad}`
+        comboContrib[key] = (comboContrib[key] || 0) + a
+      })
     })
     const effectiveActive = c => {
       const a = c.active || 0
-      const slot = `${c.horario}|${c.edad}`
-      const dSlot = `${(c.dia || '').trim()}|${c.horario}|${c.edad}`
-      return Math.max(a, slotMax[slot] || 0, slotMax[dSlot] || 0)
+      if ((c.dia || '').includes('-')) return a
+      return a + (comboContrib[`${(c.dia || '').trim()}|${c.horario}|${c.edad}`] || 0)
     }
     const kids = [], morning = [], evening = []
     data.forEach(c => {
