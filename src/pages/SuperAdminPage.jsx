@@ -514,11 +514,12 @@ function ClassProfitabilitySection() {
     const combos  = profed.filter(c => (c.dia || '').includes('-'))
     const singles = profed.filter(c => !(c.dia || '').includes('-'))
 
-    // Index: "singleDia|horario|edad" → combo classes that include that day
+    // Index: "singleDia|horario" → combo classes that include that day
+    // (without edad: horario already disambiguates overlapping same-time classes)
     const comboForSingle = {}
     combos.forEach(combo => {
       combo.dia.split('-').forEach(day => {
-        const key = `${day.trim()}|${combo.horario}|${combo.edad}`
+        const key = `${day.trim()}|${combo.horario}`
         ;(comboForSingle[key] = comboForSingle[key] || []).push(combo)
       })
     })
@@ -529,31 +530,36 @@ function ClassProfitabilitySection() {
     combos.forEach(combo => {
       const prof      = getProfForClass(combo)
       const durationH = classDurationH(combo.horario)
-      const costCls   = (PROF_EUR_H[prof] || 0) * durationH
+      // Combo = 2 sessions/week → cost and revenue are weekly totals
+      const costCls   = (PROF_EUR_H[prof] || 0) * durationH * 2
       const comboActive = combo.active || 0
 
-      // Related singles (same horario+edad, one of the combo's days)
+      // Related singles (same horario, one of the combo's days)
       const related = singles.filter(s => {
-        const key = `${s.dia.trim()}|${s.horario}|${s.edad}`
+        const key = `${s.dia.trim()}|${s.horario}`
         return comboForSingle[key]?.includes(combo)
       })
 
       if (comboActive === 0) return // combo empty → singles will show standalone
 
-      related.forEach(s => covered.add(`${s.dia.trim()}|${s.horario}|${s.edad}`))
+      related.forEach(s => covered.add(`${s.dia.trim()}|${s.horario}`))
 
-      const activeSubs = related.filter(s => (s.active || 0) > 0)
+      const activeSubs    = related.filter(s => (s.active || 0) > 0)
       const singlesActive = activeSubs.reduce((t, s) => t + (s.active || 0), 0)
       const singlesRev    = activeSubs.reduce((t, s) => t + (s.active || 0) * classRevPerStudent(s), 0)
       const totalActive   = comboActive + singlesActive
-      const totalRev      = comboActive * classRevPerStudent(combo) + singlesRev
+      // combo students contribute 2 sessions/week at their per-session tariff
+      const totalRev      = comboActive * classRevPerStudent(combo) * 2 + singlesRev
       const benefit       = totalRev - costCls
 
+      const costDay = (PROF_EUR_H[prof] || 0) * durationH  // 1 session, for sub-rows
       const subs = activeSubs.map(s => ({
         c: s,
         active: s.active || 0,
         revPerSt: classRevPerStudent(s),
         revCls: (s.active || 0) * classRevPerStudent(s),
+        costDay,
+        benefit: (s.active || 0) * classRevPerStudent(s) - costDay,
       }))
 
       result.push({ type: 'combo', c: combo, prof, costCls, revCls: totalRev, benefit, ea: totalActive, subs })
@@ -561,7 +567,7 @@ function ClassProfitabilitySection() {
 
     // Standalone singles (not covered by any active combo)
     singles.forEach(s => {
-      if (covered.has(`${s.dia.trim()}|${s.horario}|${s.edad}`)) return
+      if (covered.has(`${s.dia.trim()}|${s.horario}`)) return
       const prof      = getProfForClass(s)
       const durationH = classDurationH(s.horario)
       const costCls   = (PROF_EUR_H[prof] || 0) * durationH
@@ -585,7 +591,7 @@ function ClassProfitabilitySection() {
       {error && <ErrorBlock msg={error} />}
 
       <p className="sa-legend">
-        Coste = €/h del profe × duración de clase. Ingresos = activos × tarifa/sesión (2 días tarde €10.75, mañana €9.63; 1 día tarde €18.50, mañana €17; viernes €19.50; niños 2d €7.13, 1d €11.75). Las filas de 2 días suman los alumnos de día suelto del mismo horario; las sub-filas muestran su aportación individual.
+        Cifras semanales. Clases de 2 días: ingresos = alumnos × tarifa/sesión × 2; coste = €/h × duración × 2 (el profe da 2 sesiones). Clases de 1 día: ingresos y coste por sesión. Tarifas: 2d tarde €10.75/ses, 2d mañana €9.63/ses; 1d tarde €18.50, 1d mañana €17; viernes €19.50; niños 2d €7.13, 1d €11.75. Sub-filas: aportación de alumnos de día suelto (se les descuenta 1 sesión del profe).
       </p>
 
       {!loading && !error && rows.length > 0 && (
@@ -618,11 +624,12 @@ function ClassProfitabilitySection() {
                   </tr>,
                   ...subs.map((sub, j) => (
                     <tr key={`s${i}-${j}`} className="sa-profit-row--sub">
-                      <td className="sa-profit__sub-label">↳ {sub.c.label} solo · {sub.active} al. × {sub.revPerSt.toFixed(2)}€</td>
+                      <td className="sa-profit__sub-label">↳ {sub.c.label} solo · {sub.revPerSt.toFixed(2)}€/sesión</td>
                       <td></td>
                       <td className="sa-profit__num sa-profit__num--dim">{sub.active}</td>
                       <td className="sa-profit__num sa-profit__num--dim">{fmtEur(sub.revCls)}</td>
-                      <td colSpan={2}></td>
+                      <td className="sa-profit__num sa-profit__num--dim">{fmtEur(sub.costDay)}</td>
+                      <td className={`sa-profit__num sa-profit__num--dim${sub.benefit >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>{fmtEur(sub.benefit)}</td>
                     </tr>
                   )),
                 ]
