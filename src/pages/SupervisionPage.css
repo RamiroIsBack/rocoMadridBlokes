@@ -107,8 +107,15 @@
   font-size: 0.92rem;
   font-weight: 700;
   color: #f0ece0;
-  margin: 0 0 16px;
+  margin: 0 0 10px;
   letter-spacing: 0.01em;
+}
+.sv-note {
+  font-size: 0.7rem;
+  color: #555;
+  font-style: italic;
+  line-height: 1.55;
+  margin: 0 0 14px;
 }
 
 /* ── Loading / Error / Empty ── */

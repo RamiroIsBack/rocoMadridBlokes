@@ -632,6 +632,30 @@ details[open] .sa-collapsible__arrow {
   line-height: 1.5;
 }
 
+/* ── Section legend / explanation text ── */
+.sa-legend {
+  font-size: 0.7rem;
+  color: #555;
+  font-style: italic;
+  line-height: 1.55;
+  margin: -6px 0 16px;
+}
+
+/* ── Class profitability sub-rows ── */
+.sa-profit-row--sub td {
+  background: rgba(255,255,255,0.01);
+  font-size: 0.7rem;
+  border-bottom-color: rgba(42,32,21,0.2);
+}
+.sa-profit__sub-label {
+  padding: 4px 10px 4px 26px;
+  color: #666;
+  text-align: left;
+}
+.sa-profit__num--dim {
+  color: #555;
+}
+
 @media (max-width: 600px) {
   .sa-kpi { min-width: 100%; }
   .sa-class-row__label { width: 100px; }

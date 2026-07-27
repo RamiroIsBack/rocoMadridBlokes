@@ -102,6 +102,9 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
           <PeriodSelector value={months} onChange={setMonths} />
         </div>
       </div>
+      <p className="sa-legend">
+        Ingresos netos de WooCommerce sin IVA (get_subtotal), suma de todos los pedidos completados en el período. «Con/Sin uso Rocódromo» excluye la factura de arrendamiento inter-empresa Club → Rocoteca.
+      </p>
 
       {loading && <LoadingBlock />}
       {error && <ErrorBlock msg={error} />}
@@ -345,6 +348,9 @@ function ProductsSection({ excludeTransfer }) {
         <SectionTitle>Productos y suscripciones</SectionTitle>
         <PeriodSelector value={months} onChange={setMonths} />
       </div>
+      <p className="sa-legend">
+        Unidades vendidas e ingresos sin IVA por producto en el período. Gráfico: evolución mensual de la categoría/producto seleccionado. Calculadora de margen: precios y costes siempre sin IVA (bebidas IVA reducido 10%; recauchutes y magnesio IVA general 21%).
+      </p>
 
       {loading && <LoadingBlock />}
       {error && <ErrorBlock msg={error} />}
@@ -503,35 +509,69 @@ function ClassProfitabilitySection() {
 
   const rows = useMemo(() => {
     if (!data) return []
-    // comboContrib: students from 2-day combos (e.g. Martes-Jueves) also attend each individual day
-    const comboContrib = {}
-    data.forEach(c => {
-      if (!(c.dia || '').includes('-')) return
-      const a = c.active || 0
-      c.dia.split('-').forEach(day => {
-        const key = `${day.trim()}|${c.horario}|${c.edad}`
-        comboContrib[key] = (comboContrib[key] || 0) + a
+
+    const profed  = data.filter(c => getProfForClass(c))
+    const combos  = profed.filter(c => (c.dia || '').includes('-'))
+    const singles = profed.filter(c => !(c.dia || '').includes('-'))
+
+    // Index: "singleDia|horario|edad" → combo classes that include that day
+    const comboForSingle = {}
+    combos.forEach(combo => {
+      combo.dia.split('-').forEach(day => {
+        const key = `${day.trim()}|${combo.horario}|${combo.edad}`
+        ;(comboForSingle[key] = comboForSingle[key] || []).push(combo)
       })
     })
-    const effectiveActive = c => {
-      const a = c.active || 0
-      if ((c.dia || '').includes('-')) return a
-      return a + (comboContrib[`${(c.dia || '').trim()}|${c.horario}|${c.edad}`] || 0)
-    }
 
-    return data
-      .map(c => {
-        const prof       = getProfForClass(c)
-        const durationH  = classDurationH(c.horario)
-        const costCls    = prof ? (PROF_EUR_H[prof] || 0) * durationH : null
-        const revPerSt   = classRevPerStudent(c)
-        const ea         = effectiveActive(c)
-        const revCls     = ea * revPerSt
-        const benefit    = costCls != null ? revCls - costCls : null
-        return { c, prof, costCls, revCls, benefit, ea }
+    const covered = new Set()
+    const result  = []
+
+    combos.forEach(combo => {
+      const prof      = getProfForClass(combo)
+      const durationH = classDurationH(combo.horario)
+      const costCls   = (PROF_EUR_H[prof] || 0) * durationH
+      const comboActive = combo.active || 0
+
+      // Related singles (same horario+edad, one of the combo's days)
+      const related = singles.filter(s => {
+        const key = `${s.dia.trim()}|${s.horario}|${s.edad}`
+        return comboForSingle[key]?.includes(combo)
       })
-      .filter(r => r.prof)
-      .sort((a, b) => (b.benefit ?? -Infinity) - (a.benefit ?? -Infinity))
+
+      if (comboActive === 0) return // combo empty → singles will show standalone
+
+      related.forEach(s => covered.add(`${s.dia.trim()}|${s.horario}|${s.edad}`))
+
+      const activeSubs = related.filter(s => (s.active || 0) > 0)
+      const singlesActive = activeSubs.reduce((t, s) => t + (s.active || 0), 0)
+      const singlesRev    = activeSubs.reduce((t, s) => t + (s.active || 0) * classRevPerStudent(s), 0)
+      const totalActive   = comboActive + singlesActive
+      const totalRev      = comboActive * classRevPerStudent(combo) + singlesRev
+      const benefit       = totalRev - costCls
+
+      const subs = activeSubs.map(s => ({
+        c: s,
+        active: s.active || 0,
+        revPerSt: classRevPerStudent(s),
+        revCls: (s.active || 0) * classRevPerStudent(s),
+      }))
+
+      result.push({ type: 'combo', c: combo, prof, costCls, revCls: totalRev, benefit, ea: totalActive, subs })
+    })
+
+    // Standalone singles (not covered by any active combo)
+    singles.forEach(s => {
+      if (covered.has(`${s.dia.trim()}|${s.horario}|${s.edad}`)) return
+      const prof      = getProfForClass(s)
+      const durationH = classDurationH(s.horario)
+      const costCls   = (PROF_EUR_H[prof] || 0) * durationH
+      const ea        = s.active || 0
+      const revCls    = ea * classRevPerStudent(s)
+      result.push({ type: 'single', c: s, prof, costCls, revCls, benefit: revCls - costCls, ea, subs: [] })
+    })
+
+    result.sort((a, b) => (b.benefit ?? -Infinity) - (a.benefit ?? -Infinity))
+    return result
   }, [data])
 
   return (
@@ -543,6 +583,10 @@ function ClassProfitabilitySection() {
 
       {loading && <LoadingBlock />}
       {error && <ErrorBlock msg={error} />}
+
+      <p className="sa-legend">
+        Coste = €/h del profe × duración de clase. Ingresos = activos × tarifa/sesión (2 días tarde €10.75, mañana €9.63; 1 día tarde €18.50, mañana €17; viernes €19.50; niños 2d €7.13, 1d €11.75). Las filas de 2 días suman los alumnos de día suelto del mismo horario; las sub-filas muestran su aportación individual.
+      </p>
 
       {!loading && !error && rows.length > 0 && (
         <div className="sa-profit-wrap">
@@ -558,27 +602,33 @@ function ClassProfitabilitySection() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ c, prof, costCls, revCls, benefit, ea }, i) => {
+              {rows.flatMap(({ c, prof, costCls, revCls, benefit, ea, subs }, i) => {
                 const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
                 const label = isKid ? `${c.label} (${c.edad})` : c.label
-                return (
-                  <tr key={i} className={benefit != null && benefit < 0 ? 'sa-profit-row--loss' : ''}>
+                return [
+                  <tr key={`r${i}`} className={benefit < 0 ? 'sa-profit-row--loss' : ''}>
                     <td className="sa-profit__label">{label}</td>
                     <td className="sa-profit__prof" style={{ color: PROF_COLOR[prof] }}>{prof}</td>
                     <td className="sa-profit__num">{ea}</td>
                     <td className="sa-profit__num">{fmtEur(revCls)}</td>
-                    <td className="sa-profit__num">{costCls != null ? fmtEur(costCls) : '—'}</td>
-                    <td className={`sa-profit__ben${benefit == null ? '' : benefit >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>
-                      {benefit != null ? fmtEur(benefit) : '—'}
+                    <td className="sa-profit__num">{fmtEur(costCls)}</td>
+                    <td className={`sa-profit__ben${benefit >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>
+                      {fmtEur(benefit)}
                     </td>
-                  </tr>
-                )
+                  </tr>,
+                  ...subs.map((sub, j) => (
+                    <tr key={`s${i}-${j}`} className="sa-profit-row--sub">
+                      <td className="sa-profit__sub-label">↳ {sub.c.label} solo · {sub.active} al. × {sub.revPerSt.toFixed(2)}€</td>
+                      <td></td>
+                      <td className="sa-profit__num sa-profit__num--dim">{sub.active}</td>
+                      <td className="sa-profit__num sa-profit__num--dim">{fmtEur(sub.revCls)}</td>
+                      <td colSpan={2}></td>
+                    </tr>
+                  )),
+                ]
               })}
             </tbody>
           </table>
-          <p className="sa-profit-note">
-            Rev/clase estimada: activos × tarifa/sesión (2 días: mañana €9.63, tarde €10.75; 1 día: tarde €18.50, viernes €19.50; niños: €7.13 / €11.75).
-          </p>
         </div>
       )}
     </section>

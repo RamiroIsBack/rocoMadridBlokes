@@ -391,6 +391,7 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
     <>
       <section className="sv-section">
         <h2 className="sv-section-title">Alumnos activos por clase</h2>
+        <p className="sv-note">Evolución mensual de alumnos activos por clase. Las clases de 2 días (ej. Martes-Jueves) se cuentan como entidad independiente de las clases de día suelto.</p>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
           <select
             value={profesorFilter}
@@ -454,6 +455,7 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
 
       <section className="sv-section">
         <h2 className="sv-section-title">Evolución por clase</h2>
+        <p className="sv-note">Histórico mensual de activos en la clase seleccionada. Chips: verde = alta este mes, naranja = sigue activa, rojo = baja o pago pendiente.</p>
         <select
           value={classKey}
           onChange={e => onSelectKey(e.target.value)}
@@ -511,6 +513,7 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
 
       <section className="sv-section">
         <h2 className="sv-section-title">Alumnos en clases por mes</h2>
+        <p className="sv-note">Suma de activos por grupo (niños / mañanas / tardes) cada mes. Los alumnos de 2 días (ej. Martes-Jueves) se suman a los alumnos de día suelto del mismo horario para el total efectivo de cada franja.</p>
         <MonthlyBarChart
           data={combinedData}
           stacked
@@ -625,6 +628,7 @@ function ClasesTab() {
         <>
           <section className="sv-section">
             <h2 className="sv-section-title">Horario por día</h2>
+            <p className="sv-note">Snapshot actual de alumnos activos por franja horaria. Verde intenso = mucha gente; rosa = clase programada pero sin activos; — = sin clase en ese horario.</p>
             <ScheduleGrid classes={data} filter={filter} />
           </section>
 
