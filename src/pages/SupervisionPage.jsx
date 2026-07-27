@@ -95,6 +95,11 @@ function PeriodSelector({ value, onChange }) {
   )
 }
 
+// Slots that must always show in the grid even with 0 students (no plugin data)
+const KNOWN_SLOTS = [
+  { time: '19:00-21:00', day: 4 },  // Ana · Viernes tarde
+]
+
 // ─── Schedule grid ────────────────────────────────────────────────────────────
 function ScheduleGrid({ classes, filter }) {
   const parsed = useMemo(() => {
@@ -110,6 +115,7 @@ function ScheduleGrid({ classes, filter }) {
 
   const timeSlots = useMemo(() => {
     const set = new Set(parsed.map(c => c.meta.time))
+    KNOWN_SLOTS.forEach(s => set.add(s.time))
     return [...set].sort((a, b) => {
       const sA = parseMinutes(a.split('-')[0].trim())
       const sB = parseMinutes(b.split('-')[0].trim())
@@ -133,6 +139,7 @@ function ScheduleGrid({ classes, filter }) {
   const scheduledSlots = useMemo(() => {
     const s = new Set()
     parsed.forEach(c => { c.meta.days.forEach(d => { s.add(`${c.meta.time}|${d}`) }) })
+    KNOWN_SLOTS.forEach(({ time, day }) => s.add(`${time}|${day}`))
     return s
   }, [parsed])
 

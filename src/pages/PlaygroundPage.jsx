@@ -107,7 +107,7 @@ const BASE = {
     Lunes:     [{ tipo: 'clase', start: '20:30', end: '22:00' }],
     Viernes:   [
       { tipo: 'equipar', start: '17:00', end: '19:00' },
-      { tipo: 'clase',   start: '19:00', end: '20:30' },
+      { tipo: 'clase',   start: '19:00', end: '21:00' },
     ],
   },
   Eva: {
