@@ -1748,17 +1748,26 @@ function superadmin_classes($request) {
             if (!$sub['dia'] && !$sub['horario']) continue;
             if (!isset($classes[$class_key])) {
                 $classes[$class_key] = array(
-                    'label'   => ($sub['dia'] ?? '') . ' · ' . ($sub['horario'] ?? ''),
-                    'dia'     => $sub['dia'] ?? '',
-                    'horario' => $sub['horario'] ?? '',
-                    'edad'    => $edad,
-                    'active'  => 0,
-                    'all'     => 0,
-                    'history' => array(),
+                    'label'           => ($sub['dia'] ?? '') . ' · ' . ($sub['horario'] ?? ''),
+                    'dia'             => $sub['dia'] ?? '',
+                    'horario'         => $sub['horario'] ?? '',
+                    'edad'            => $edad,
+                    'active'          => 0,
+                    'all'             => 0,
+                    'history'         => array(),
+                    'members_active'  => array(),
+                    'members_pending' => array(),
+                    'members_lost'    => array(),
                 );
             }
             $classes[$class_key]['all']++;
-            if ($sub['status'] === 'active') $classes[$class_key]['active']++;
+            $member_name = $sub['cliente'] ?? '';
+            if ($sub['status'] === 'active') {
+                $classes[$class_key]['active']++;
+                $classes[$class_key]['members_active'][] = array('name' => $member_name, 'new' => false);
+            } elseif (in_array($sub['status'], array('on-hold', 'pending'))) {
+                $classes[$class_key]['members_pending'][] = array('name' => $member_name);
+            }
 
             // Per-month active snapshot using subscription start/end dates
             if (function_exists('wcs_get_subscription') && !empty($sub['id'])) {
@@ -1772,9 +1781,19 @@ function superadmin_classes($request) {
 
                 if ($sub['status'] === 'active') {
                     $sub_end_ym = $now_ym;
+                    // Mark as new if subscription started this month
+                    if ($sub_start_ym >= $now_ym) {
+                        $idx = count($classes[$class_key]['members_active']) - 1;
+                        if ($idx >= 0) $classes[$class_key]['members_active'][$idx]['new'] = true;
+                    }
                 } else {
                     $end_ts     = $sub_obj->get_time('cancelled') ?: $sub_obj->get_time('end');
                     $sub_end_ym = $end_ts ? date('Y-m', $end_ts) : $sub_start_ym;
+                    // Track recently lost: cancelled within last 2 months
+                    $two_months_ago = date('Y-m', strtotime('-2 months'));
+                    if ($sub_end_ym >= $two_months_ago && !in_array($sub['status'], array('on-hold', 'pending'))) {
+                        $classes[$class_key]['members_lost'][] = array('name' => $member_name);
+                    }
                 }
 
                 // New enrollment (if start falls in requested range)
@@ -1934,6 +1953,7 @@ function blokes_register_top_for_leagues($user_id, $post_id) {
         ));
         $wpdb->query('COMMIT');
         blokes_recalculate_league_ranks((int) $pedri->id);
+        blokes_check_tier_overflow((int) $pedri->id);
         return array('pointsEarned' => $pts, 'newTotal' => $pts, 'leagueChanged' => false);
     }
 
@@ -2022,25 +2042,58 @@ function blokes_evaluate_league_change($user_id, $new_points, $current_league_id
 
 function blokes_recalculate_league_ranks($league_id) {
     global $wpdb;
-    $ul = $wpdb->prefix . 'blokes_user_leagues';
-    $l  = $wpdb->prefix . 'blokes_leagues';
-
-    $league  = $wpdb->get_row($wpdb->prepare("SELECT * FROM $l WHERE id = %d", $league_id));
+    $ul      = $wpdb->prefix . 'blokes_user_leagues';
     $members = $wpdb->get_results($wpdb->prepare(
         "SELECT user_id FROM $ul WHERE league_id = %d ORDER BY total_points DESC", $league_id
     ));
-
-    $total = count($members);
-    if (!$league || $total === 0) return;
-
-    $promo_n    = max(1, (int) ceil($total * (float) $league->promo_pct));
-    $demotion_n = max(1, (int) ceil($total * (float) $league->demotion_pct));
-
     foreach ($members as $i => $m) {
-        $rank = $i + 1;
-        $zone = ($rank <= $promo_n) ? 'promotion' : (($rank > $total - $demotion_n) ? 'demotion' : 'stay');
-        $wpdb->update($ul, array('rank_in_league' => $rank, 'zone' => $zone), array('user_id' => $m->user_id));
+        $wpdb->update($ul, array('rank_in_league' => $i + 1, 'zone' => 'stay'), array('user_id' => $m->user_id));
     }
+}
+
+// Promotes the top user out of a tier when it exceeds max 4.
+// Cascades upward until no tier overflows.
+function blokes_check_tier_overflow($league_id) {
+    global $wpdb;
+    $ul  = $wpdb->prefix . 'blokes_user_leagues';
+    $l   = $wpdb->prefix . 'blokes_leagues';
+    $ev  = $wpdb->prefix . 'blokes_league_events';
+    $max = 4;
+
+    $count = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM $ul WHERE league_id = %d", $league_id));
+    if ($count <= $max) return;
+
+    $league = $wpdb->get_row($wpdb->prepare("SELECT * FROM $l WHERE id = %d", $league_id));
+    if (!$league || (int) $league->tier >= 6) return;
+
+    $next = $wpdb->get_row($wpdb->prepare("SELECT * FROM $l WHERE tier = %d", (int) $league->tier + 1));
+    if (!$next) return;
+
+    while ($count > $max) {
+        $top = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $ul WHERE league_id = %d ORDER BY total_points DESC LIMIT 1", $league_id
+        ));
+        if (!$top) break;
+
+        $now = current_time('mysql');
+        $wpdb->update($ul, array('league_id' => (int) $next->id, 'last_updated' => $now), array('user_id' => $top->user_id));
+        $wpdb->insert($ev, array(
+            'user_id'              => (int) $top->user_id,
+            'event_type'           => 'promoted',
+            'from_league_id'       => (int) $league_id,
+            'to_league_id'         => (int) $next->id,
+            'points_at_event'      => (int) $top->total_points,
+            'triggered_by_user_id' => null,
+            'created_at'           => $now,
+            'seen'                 => 0,
+        ));
+        $count--;
+
+        blokes_recalculate_league_ranks((int) $next->id);
+        blokes_check_tier_overflow((int) $next->id); // cascade upward if next also overflows
+    }
+
+    blokes_recalculate_league_ranks((int) $league_id);
 }
 
 // ── REST endpoints de ligas ───────────────────────────────────
@@ -2259,37 +2312,32 @@ function blokes_api_initial_placement($request) {
 
     if (empty($user_points)) return rest_ensure_response(array('placed' => 0));
 
-    // Highest scorers first → go to highest tier (Rocklands).
-    // Tier 1 (Pedri) is the overflow: takes everyone not placed in tiers 2–6.
-    arsort($user_points);
-    $users    = array_keys($user_points);
-    $now      = current_time('mysql');
-    $leagues  = $wpdb->get_results("SELECT * FROM $l ORDER BY tier DESC"); // Rocklands first
-    $n        = count($leagues);
-    $max_tier = 4; // max users per tier for tiers 2–6; Pedri takes the rest
+    // Place everyone in Pedri, then let blokes_check_tier_overflow cascade
+    // them up to the correct tier (max 4 per tier, best scorers rise first).
+    $pedri = $wpdb->get_row("SELECT * FROM $l WHERE tier = 1");
+    if (!$pedri) return new WP_Error('no_leagues', 'Liga Pedri not found', array('status' => 500));
 
-    foreach ($leagues as $li => $league) {
-        // Last league in the loop = Pedri (tier 1): give it everyone remaining
-        $slice = ($li === $n - 1)
-            ? array_slice($users, $li * $max_tier)
-            : array_slice($users, $li * $max_tier, $max_tier);
-
-        foreach ($slice as $rank0 => $uid) {
-            $wpdb->insert($ul, array(
-                'user_id'        => $uid,
-                'league_id'      => (int) $league->id,
-                'total_points'   => $user_points[$uid],
-                'rank_in_league' => $rank0 + 1,
-                'zone'           => 'stay',
-                'joined_at'      => $now,
-                'last_updated'   => $now,
-            ));
-        }
+    arsort($user_points); // highest first so initial rank is sensible
+    $now  = current_time('mysql');
+    $rank = 1;
+    foreach ($user_points as $uid => $pts) {
+        $wpdb->insert($ul, array(
+            'user_id'        => $uid,
+            'league_id'      => (int) $pedri->id,
+            'total_points'   => $pts,
+            'rank_in_league' => $rank++,
+            'zone'           => 'stay',
+            'joined_at'      => $now,
+            'last_updated'   => $now,
+        ));
     }
 
-    foreach ($leagues as $league) blokes_recalculate_league_ranks((int) $league->id);
+    // Cascade: promotes top scorers up tier by tier until each has ≤ 4 users.
+    blokes_recalculate_league_ranks((int) $pedri->id);
+    blokes_check_tier_overflow((int) $pedri->id);
 
-    return rest_ensure_response(array('placed' => count($user_points), 'totalUsers' => count($users)));
+    $total = count($user_points);
+    return rest_ensure_response(array('placed' => $total, 'totalUsers' => $total));
 }
 
 // ============================================================

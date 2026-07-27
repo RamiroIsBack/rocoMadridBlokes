@@ -130,6 +130,12 @@ function ScheduleGrid({ classes, filter }) {
     return g
   }, [parsed, timeSlots])
 
+  const scheduledSlots = useMemo(() => {
+    const s = new Set()
+    parsed.forEach(c => { c.meta.days.forEach(d => { s.add(`${c.meta.time}|${d}`) }) })
+    return s
+  }, [parsed])
+
   const dayTotals = useMemo(() => {
     const t = [0, 0, 0, 0, 0]
     timeSlots.forEach(slot => grid[slot].forEach((n, i) => { t[i] += n }))
@@ -181,11 +187,15 @@ function ScheduleGrid({ classes, filter }) {
               return (
                 <tr key={slot} className="sv-tr">
                   <td className="sv-td-time">{slot}</td>
-                  {row.map((n, i) => (
-                    <td key={i} className={`sv-td ${occupancyClass(n)}`}>
-                      <span className="sv-cell-num">{n > 0 ? n : '—'}</span>
-                    </td>
-                  ))}
+                  {row.map((n, i) => {
+                    const isScheduled = scheduledSlots.has(`${slot}|${i}`)
+                    const isEmpty = isScheduled && n === 0
+                    return (
+                      <td key={i} className={`sv-td ${isEmpty ? 'sv-cell--sched-empty' : occupancyClass(n)}`}>
+                        <span className="sv-cell-num">{n > 0 ? n : isScheduled ? '0' : '—'}</span>
+                      </td>
+                    )
+                  })}
                   <td className="sv-td-total">{rowTotals[slot] || '—'}</td>
                 </tr>
               )
@@ -345,6 +355,19 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
     return mRange.map(m => ({ month: fmtMonth(m), niños: kidsAcc[m], mañana: mornAcc[m], tarde: tardAcc[m] }))
   }, [data, mRange])
 
+  const classGroups = useMemo(() => {
+    const kids = [], morning = [], evening = []
+    data.forEach(c => {
+      const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
+      const start = (c.horario || '').split('-')[0].trim()
+      if (isKid) kids.push(c)
+      else if (isMañana(start)) morning.push(c)
+      else evening.push(c)
+    })
+    const byActive = arr => [...arr].sort((a, b) => b.active - a.active)
+    return { kids: byActive(kids), morning: byActive(morning), evening: byActive(evening) }
+  }, [data])
+
   return (
     <>
       <section className="sv-section">
@@ -427,6 +450,22 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
           data={classChartData}
           bars={[{ key: 'nuevos', label: 'Nuevas inscripciones', color: '#f5c842' }]}
         />
+        {selectedClass && (
+          <div className="sv-member-list">
+            {(selectedClass.members_active || []).filter(m => m.new).map((m, i) => (
+              <span key={`n-${i}`} className="sv-member sv-member--new">{m.name}</span>
+            ))}
+            {(selectedClass.members_active || []).filter(m => !m.new).map((m, i) => (
+              <span key={`a-${i}`} className="sv-member">{m.name}</span>
+            ))}
+            {(selectedClass.members_pending || []).map((m, i) => (
+              <span key={`p-${i}`} className="sv-member sv-member--lost">{m.name}</span>
+            ))}
+            {(selectedClass.members_lost || []).map((m, i) => (
+              <span key={`l-${i}`} className="sv-member sv-member--lost">{m.name}</span>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="sv-section">
@@ -440,6 +479,56 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
             { key: 'tarde',  label: 'Tardes adultos',  color: '#60a5fa' },
           ]}
         />
+        <div className="sv-group-summary">
+          {[
+            { label: 'Niños',          classes: classGroups.kids,    color: '#34d399' },
+            { label: 'Mañanas adultos', classes: classGroups.morning, color: '#f5c842' },
+            { label: 'Tardes adultos',  classes: classGroups.evening, color: '#60a5fa' },
+          ].map(({ label, classes, color }) => {
+            const nonEmpty = classes.filter(c => c.active > 0)
+            const empty    = classes.filter(c => c.active === 0)
+            const top = nonEmpty.slice(0, 2)
+            const bot = nonEmpty.length >= 3 ? nonEmpty.slice(-2).reverse() : []
+            return (
+              <div key={label} className="sv-group-summary__group">
+                <div className="sv-group-summary__title" style={{ color }}>{label}</div>
+                {top.length > 0 && (
+                  <div className="sv-group-summary__row">
+                    <span className="sv-group-summary__lbl">Mejores:</span>
+                    {top.map((c, i) => (
+                      <span key={i} className="sv-group-summary__chip sv-group-summary__chip--best">
+                        {c.label} ({c.active})
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {bot.length > 0 && (
+                  <div className="sv-group-summary__row">
+                    <span className="sv-group-summary__lbl">Peores:</span>
+                    {bot.map((c, i) => (
+                      <span key={i} className="sv-group-summary__chip sv-group-summary__chip--worst">
+                        {c.label} ({c.active})
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {empty.length > 0 && (
+                  <div className="sv-group-summary__row">
+                    <span className="sv-group-summary__lbl">Vacías:</span>
+                    {empty.map((c, i) => (
+                      <span key={i} className="sv-group-summary__chip sv-group-summary__chip--empty">
+                        {c.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {classes.length === 0 && (
+                  <span className="sv-group-summary__none">Sin clases en este grupo</span>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </section>
     </>
   )
@@ -447,10 +536,8 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
 
 // ─── Clases tab ───────────────────────────────────────────────────────────────
 function ClasesTab() {
-  const [months, setMonths]           = useState(12)
+  const [months, setMonths]           = useState(6)
   const [filter, setFilter]           = useState('todos')
-  const [selected, setSelected]       = useState(null)
-  const [viewMode, setViewMode]       = useState('inscritos')
   const [selectedClassKey, setSelectedClassKey] = useState('')
   const { data, loading, error } = useClasses(months)
 
@@ -466,22 +553,7 @@ function ClasesTab() {
 
   const top12      = filtered.slice(0, 12)
   const hasRevenue = top12.some(c => c.revenue != null)
-  const maxActive  = top12[0]?.active || 1
-  const maxRevenue = Math.max(...top12.map(c => c.revenue || 0), 1)
   const totalRevenue = top12.reduce((s, c) => s + (c.revenue || 0), 0)
-  const mode       = hasRevenue ? viewMode : 'inscritos'
-
-  const histData = useMemo(() => {
-    if (!selected?.history?.length) return []
-    return selected.history.map(h => ({ ...h, month: fmtMonth(h.month) }))
-  }, [selected])
-
-  const chartRows = top12.map(c => ({
-    name: c.label,
-    activos: c.active,
-    total: c.all,
-    ...(hasRevenue && { revenue: c.revenue || 0 }),
-  }))
 
   return (
     <div className="sv-tab-panel">
@@ -496,17 +568,11 @@ function ClasesTab() {
             <button
               key={f.id}
               className={`sv-filter-btn${filter === f.id ? ' sv-filter-btn--active' : ''}`}
-              onClick={() => { setFilter(f.id); setSelected(null) }}
+              onClick={() => setFilter(f.id)}
             >{f.label}</button>
           ))}
         </div>
         <div className="sv-controls-right">
-          {hasRevenue && (
-            <div className="sv-period">
-              <button className={`sv-period__btn${mode === 'inscritos' ? ' sv-period__btn--active' : ''}`} onClick={() => setViewMode('inscritos')}>Inscritos</button>
-              <button className={`sv-period__btn${mode === 'ingresos'  ? ' sv-period__btn--active' : ''}`} onClick={() => setViewMode('ingresos')}>Ingresos</button>
-            </div>
-          )}
           <PeriodSelector value={months} onChange={setMonths} />
         </div>
       </div>
@@ -529,92 +595,6 @@ function ClasesTab() {
               </div>
             </div>
           )}
-
-          <section className="sv-section">
-            <h2 className="sv-section-title">Clases</h2>
-
-            <div className="sv-barchart">
-              <ResponsiveContainer width="100%" height={Math.max(200, top12.length * 26)}>
-                <BarChart data={chartRows} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" horizontal={false} />
-                  <XAxis
-                    type="number"
-                    tick={{ fill: '#888', fontSize: 10 }}
-                    tickFormatter={mode === 'ingresos' ? v => `${v}€` : undefined}
-                  />
-                  <YAxis type="category" dataKey="name" width={150} tick={{ fill: '#ccc', fontSize: 10 }} />
-                  <Tooltip
-                    contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
-                    labelStyle={{ color: '#f5c842' }}
-                    formatter={(v, name) => {
-                      if (name === 'revenue') return [fmtEur(v), 'Ingresos WC']
-                      if (name === 'activos') return [v, 'Activos']
-                      return [v, 'Total histórico']
-                    }}
-                  />
-                  <Legend formatter={k => k === 'revenue' ? 'Ingresos WC' : k === 'activos' ? 'Activos' : 'Histórico'} />
-                  {mode === 'ingresos' ? (
-                    <Bar dataKey="revenue" fill="#34d399" radius={[0, 3, 3, 0]} />
-                  ) : (
-                    <>
-                      <Bar dataKey="total"   fill="#3a3020" radius={[0, 3, 3, 0]} />
-                      <Bar dataKey="activos" fill="#f5c842" radius={[0, 3, 3, 0]} />
-                    </>
-                  )}
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            <div className="sv-class-list">
-              {top12.map((c, i) => {
-                const pct = mode === 'ingresos'
-                  ? ((c.revenue || 0) / maxRevenue) * 100
-                  : (c.active / maxActive) * 100
-                return (
-                  <button
-                    key={i}
-                    className={`sv-class-row${selected === c ? ' sv-class-row--active' : ''}`}
-                    onClick={() => setSelected(selected === c ? null : c)}
-                  >
-                    <span className="sv-class-row__pos">#{i + 1}</span>
-                    <span className="sv-class-row__label">{c.label}</span>
-                    <div className="sv-class-row__bar-wrap">
-                      <div className="sv-class-row__bar" style={{ width: `${pct}%` }} />
-                    </div>
-                    {mode === 'ingresos'
-                      ? <span className="sv-class-row__rev">{fmtEur(c.revenue || 0)}</span>
-                      : <span className="sv-class-row__count">{c.active} activos</span>
-                    }
-                  </button>
-                )
-              })}
-            </div>
-
-            {selected && histData.length > 0 && (
-              <div className="sv-class-detail">
-                <p className="sv-class-detail__title">{selected.label} — histórico</p>
-                <ResponsiveContainer width="100%" height={160}>
-                  <BarChart data={histData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                    <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
-                    <YAxis allowDecimals={false} tick={{ fill: '#888', fontSize: 10 }} width={28} />
-                    <Tooltip
-                      contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
-                      labelStyle={{ color: '#f5c842' }}
-                      formatter={(v, name) => [
-                        name === 'revenue' ? fmtEur(v) : v,
-                        name === 'revenue' ? 'Ingresos WC' : 'Nuevas inscripciones'
-                      ]}
-                    />
-                    <Bar dataKey="new" fill="#34d399" radius={[3, 3, 0, 0]} />
-                    {histData[0]?.revenue != null && (
-                      <Bar dataKey="revenue" fill="#f5c842" radius={[3, 3, 0, 0]} />
-                    )}
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </section>
 
           <TrendCharts data={data} months={months} selectedKey={selectedClassKey} onSelectKey={setSelectedClassKey} />
         </>

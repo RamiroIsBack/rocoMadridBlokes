@@ -200,11 +200,12 @@
   line-height: 1;
 }
 
-.sv-cell--empty .sv-cell-num { color: #2a2a2a; }
-.sv-cell--low   .sv-cell-num { background: #14532d; color: #86efac; }
-.sv-cell--med   .sv-cell-num { background: #713f12; color: #fde68a; }
-.sv-cell--high  .sv-cell-num { background: #7c2d12; color: #fdba74; }
-.sv-cell--full  .sv-cell-num { background: #7f1d1d; color: #fca5a5; }
+.sv-cell--empty      .sv-cell-num { color: #2a2a2a; }
+.sv-cell--sched-empty .sv-cell-num { background: #3d1028; color: #f472b6; }
+.sv-cell--low        .sv-cell-num { background: #14532d; color: #86efac; }
+.sv-cell--med        .sv-cell-num { background: #713f12; color: #fde68a; }
+.sv-cell--high       .sv-cell-num { background: #7c2d12; color: #fdba74; }
+.sv-cell--full       .sv-cell-num { background: #7f1d1d; color: #fca5a5; }
 
 .sv-td-total {
   padding: 7px 12px;
@@ -346,6 +347,81 @@
   border: none;
   display: block;
 }
+
+/* ── Member chips ── */
+.sv-member-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #2a2015;
+}
+.sv-member {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  background: #1e2a1e;
+  color: #86efac;
+  border: 1px solid rgba(134,239,172,0.2);
+}
+.sv-member--new {
+  background: #14532d;
+  color: #34d399;
+  border-color: rgba(52,211,153,0.4);
+}
+.sv-member--lost {
+  background: #2a1a1a;
+  color: #f87171;
+  border-color: rgba(248,113,113,0.2);
+}
+
+/* ── Group summary ── */
+.sv-group-summary {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #2a2015;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sv-group-summary__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sv-group-summary__title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 2px;
+}
+.sv-group-summary__row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.sv-group-summary__lbl {
+  font-size: 0.68rem;
+  color: #555;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  min-width: 52px;
+}
+.sv-group-summary__chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+.sv-group-summary__chip--best  { background: #1a2e1a; color: #86efac; }
+.sv-group-summary__chip--worst { background: #2e1a0d; color: #fdba74; }
+.sv-group-summary__chip--empty { background: #3d1028; color: #f472b6; }
+.sv-group-summary__none { font-size: 0.7rem; color: #444; font-style: italic; }
 
 /* ── Mobile ── */
 @media (max-width: 600px) {
