@@ -307,7 +307,10 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
 
   const classChartData = useMemo(() => {
     if (!selectedClass) return []
-    return histByMonth([selectedClass], mRange)
+    return mRange.map(m => {
+      const h = (selectedClass.history || []).find(e => e.month === m)
+      return { month: fmtMonth(m), activos: h?.active ?? 0 }
+    })
   }, [selectedClass, mRange])
 
   const [profesorFilter, setProfesorFilter] = useState('__all__')
@@ -448,21 +451,33 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
         </select>
         <MonthlyBarChart
           data={classChartData}
-          bars={[{ key: 'nuevos', label: 'Nuevas inscripciones', color: '#f5c842' }]}
+          bars={[{ key: 'activos', label: 'Alumnos activos', color: '#60a5fa' }]}
         />
         {selectedClass && (
           <div className="sv-member-list">
             {(selectedClass.members_active || []).filter(m => m.new).map((m, i) => (
-              <span key={`n-${i}`} className="sv-member sv-member--new">{m.name}</span>
+              <span key={`n-${i}`} className="sv-member sv-member--new">
+                <span className="sv-member__name">{m.name}</span>
+                {m.phone && <span className="sv-member__phone">{m.phone}</span>}
+              </span>
             ))}
             {(selectedClass.members_active || []).filter(m => !m.new).map((m, i) => (
-              <span key={`a-${i}`} className="sv-member">{m.name}</span>
+              <span key={`a-${i}`} className="sv-member sv-member--active">
+                <span className="sv-member__name">{m.name}</span>
+                {m.phone && <span className="sv-member__phone">{m.phone}</span>}
+              </span>
             ))}
             {(selectedClass.members_pending || []).map((m, i) => (
-              <span key={`p-${i}`} className="sv-member sv-member--lost">{m.name}</span>
+              <span key={`p-${i}`} className="sv-member sv-member--lost">
+                <span className="sv-member__name">{m.name}</span>
+                {m.phone && <span className="sv-member__phone">{m.phone}</span>}
+              </span>
             ))}
             {(selectedClass.members_lost || []).map((m, i) => (
-              <span key={`l-${i}`} className="sv-member sv-member--lost">{m.name}</span>
+              <span key={`l-${i}`} className="sv-member sv-member--lost">
+                <span className="sv-member__name">{m.name}</span>
+                {m.phone && <span className="sv-member__phone">{m.phone}</span>}
+              </span>
             ))}
           </div>
         )}

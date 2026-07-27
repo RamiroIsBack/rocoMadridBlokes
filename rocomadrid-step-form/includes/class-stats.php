@@ -515,6 +515,7 @@ class RocoMadrid_SF_Stats {
 				'status' => $subscription->get_status(),
 				'cliente' => $customer ? $customer->display_name : 'N/A',
 				'email' => $customer ? $customer->user_email : 'N/A',
+				'telefono' => $subscription->get_billing_phone(),
 				'producto' => $producto_nombre,
 				'producto_id' => $producto_id,
 				'dia' => $dia_display,

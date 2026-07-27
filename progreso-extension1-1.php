@@ -1774,12 +1774,13 @@ function superadmin_classes($request) {
                 );
             }
             $classes[$class_key]['all']++;
-            $member_name = $sub['cliente'] ?? '';
+            $member_name  = $sub['cliente']  ?? '';
+            $member_phone = $sub['telefono'] ?? '';
             if ($sub['status'] === 'active') {
                 $classes[$class_key]['active']++;
-                $classes[$class_key]['members_active'][] = array('name' => $member_name, 'new' => false);
+                $classes[$class_key]['members_active'][] = array('name' => $member_name, 'phone' => $member_phone, 'new' => false);
             } elseif (in_array($sub['status'], array('on-hold', 'pending'))) {
-                $classes[$class_key]['members_pending'][] = array('name' => $member_name);
+                $classes[$class_key]['members_pending'][] = array('name' => $member_name, 'phone' => $member_phone);
             }
 
             // Per-month active snapshot using subscription start/end dates
@@ -1805,7 +1806,7 @@ function superadmin_classes($request) {
                     // Track recently lost: cancelled within last 2 months
                     $two_months_ago = date('Y-m', strtotime('-2 months'));
                     if ($sub_end_ym >= $two_months_ago && !in_array($sub['status'], array('on-hold', 'pending'))) {
-                        $classes[$class_key]['members_lost'][] = array('name' => $member_name);
+                        $classes[$class_key]['members_lost'][] = array('name' => $member_name, 'phone' => $member_phone);
                     }
                 }
 

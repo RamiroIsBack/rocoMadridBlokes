@@ -358,24 +358,45 @@
   border-top: 1px solid #2a2015;
 }
 .sv-member {
-  font-size: 0.72rem;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
   font-weight: 600;
-  padding: 3px 9px;
-  border-radius: 20px;
+  padding: 4px 9px;
+  border-radius: 10px;
   background: #1e2a1e;
   color: #86efac;
   border: 1px solid rgba(134,239,172,0.2);
+}
+.sv-member__name {
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+.sv-member__phone {
+  font-size: 0.64rem;
+  font-weight: 400;
+  color: rgba(255,255,255,0.45);
+  line-height: 1.2;
+  margin-top: 1px;
 }
 .sv-member--new {
   background: #14532d;
   color: #34d399;
   border-color: rgba(52,211,153,0.4);
 }
+.sv-member--new .sv-member__phone { color: rgba(52,211,153,0.55); }
+.sv-member--active {
+  background: #2a1a0a;
+  color: #fdba74;
+  border-color: rgba(253,186,116,0.25);
+}
+.sv-member--active .sv-member__phone { color: rgba(253,186,116,0.5); }
 .sv-member--lost {
   background: #2a1a1a;
   color: #f87171;
   border-color: rgba(248,113,113,0.2);
 }
+.sv-member--lost .sv-member__phone { color: rgba(248,113,113,0.5); }
 
 /* ── Group summary ── */
 .sv-group-summary {
