@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useRevenue, useProducts, useExpenses } from '../hooks/useSuperAdmin'
+import { useRevenue, useProducts, useExpenses, useClasses } from '../hooks/useSuperAdmin'
 import ExpensesSection from '../components/ExpensesSection'
 import './SuperAdminPage.css'
 
@@ -439,6 +439,126 @@ function ProductsSection({ excludeTransfer }) {
 
           <MarginCalculator products={filtered} months={months} />
         </>
+      )}
+    </section>
+  )
+}
+
+// ─── Class profitability ─────────────────────────────────────────────────────
+
+function normForProf(s) {
+  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+const PROF_CLASS_SLOTS = {
+  Alvaro:  [['lunes','18:00'],['lunes','19:30'],['martes','14:00'],['martes','16:30'],['martes','18:00'],['martes','19:30'],['miercoles','18:00'],['miercoles','19:30'],['jueves','14:00'],['jueves','16:30'],['jueves','18:00'],['jueves','19:30']],
+  Sigurd:  [['martes','17:30'],['martes','19:00'],['martes','20:30'],['jueves','17:30'],['jueves','19:00'],['jueves','20:30']],
+  'Lucía': [['lunes','17:30'],['lunes','19:00'],['miercoles','17:30'],['miercoles','19:00']],
+  Sara:    [['martes','09:00'],['martes','10:30'],['martes','12:00'],['jueves','09:00'],['jueves','10:30'],['jueves','12:00']],
+  Ana:     [['lunes','20:30'],['viernes','19:00']],
+  Eva:     [['martes','17:30'],['martes','18:30'],['jueves','17:30'],['jueves','18:30'],['viernes','18:00'],['viernes','19:00']],
+}
+
+const PROF_EUR_H = { Alvaro: 14.12, Sigurd: 18.40, 'Lucía': 12.09, Sara: 12.08, Ana: 13.20, Eva: 16.45 }
+const PROF_COLOR = { Alvaro: '#f5c842', Sigurd: '#60a5fa', 'Lucía': '#34d399', Sara: '#f97316', Ana: '#a78bfa', Eva: '#fb7185' }
+
+function getProfForClass(c) {
+  const start = (c.horario || '').split('-')[0].trim()
+  const dias  = normForProf(c.dia || '').split(/[\s\-·,|]+/).filter(Boolean)
+  return Object.keys(PROF_CLASS_SLOTS).find(prof =>
+    PROF_CLASS_SLOTS[prof].some(([d, t]) => dias.includes(d) && t === start)
+  ) || null
+}
+
+function classDurationH(horario) {
+  const parts = (horario || '').split('-')
+  if (parts.length < 2) return 1.5
+  const toMin = t => { const [h, m] = t.trim().split(':').map(Number); return h * 60 + (m || 0) }
+  return (toMin(parts[1]) - toMin(parts[0])) / 60
+}
+
+function classRevPerStudent(c) {
+  const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
+  const hourStr = (c.horario || '').split(':')[0]
+  const hour    = parseInt(hourStr, 10)
+  const isMorn  = hour < 16
+  const diaLow  = normForProf(c.dia || '')
+  const is2Day  = (diaLow.includes('lunes') && diaLow.includes('miercoles')) ||
+                  (diaLow.includes('martes') && diaLow.includes('jueves'))
+  const isFri   = diaLow === 'viernes'
+
+  if (isKid) return is2Day ? 57 / 8 : 47 / 4
+  if (isFri) return 78 / 4
+  if (is2Day) return isMorn ? 77 / 8 : 86 / 8
+  return isMorn ? 68 / 4 : 74 / 4
+}
+
+function ClassProfitabilitySection() {
+  const [months, setMonths] = useState(6)
+  const { data, loading, error } = useClasses(months)
+
+  const rows = useMemo(() => {
+    if (!data) return []
+    return data
+      .map(c => {
+        const prof       = getProfForClass(c)
+        const durationH  = classDurationH(c.horario)
+        const costCls    = prof ? (PROF_EUR_H[prof] || 0) * durationH : null
+        const revPerSt   = classRevPerStudent(c)
+        const revCls     = c.active * revPerSt
+        const benefit    = costCls != null ? revCls - costCls : null
+        return { c, prof, costCls, revCls, revPerSt, benefit }
+      })
+      .filter(r => r.prof)
+      .sort((a, b) => (b.benefit ?? -Infinity) - (a.benefit ?? -Infinity))
+  }, [data])
+
+  return (
+    <section className="sa-section">
+      <div className="sa-section__header">
+        <SectionTitle>Rentabilidad de las clases</SectionTitle>
+        <PeriodSelector value={months} onChange={setMonths} />
+      </div>
+
+      {loading && <LoadingBlock />}
+      {error && <ErrorBlock msg={error} />}
+
+      {!loading && !error && rows.length > 0 && (
+        <div className="sa-profit-wrap">
+          <table className="sa-profit-table">
+            <thead>
+              <tr>
+                <th>Clase</th>
+                <th>Profe</th>
+                <th>Al.</th>
+                <th>Rev/clase</th>
+                <th>Coste/clase</th>
+                <th>Beneficio</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ c, prof, costCls, revCls, benefit }, i) => {
+                const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
+                const label = isKid ? `${c.label} (${c.edad})` : c.label
+                return (
+                  <tr key={i} className={benefit != null && benefit < 0 ? 'sa-profit-row--loss' : ''}>
+                    <td className="sa-profit__label">{label}</td>
+                    <td className="sa-profit__prof" style={{ color: PROF_COLOR[prof] }}>{prof}</td>
+                    <td className="sa-profit__num">{c.active}</td>
+                    <td className="sa-profit__num">{fmtEur(revCls)}</td>
+                    <td className="sa-profit__num">{costCls != null ? fmtEur(costCls) : '—'}</td>
+                    <td className={`sa-profit__ben${benefit == null ? '' : benefit >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>
+                      {benefit != null ? fmtEur(benefit) : '—'}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          <p className="sa-profit-note">
+            Rev/clase estimada: activos × tarifa/sesión (2 días: mañana €9.63, tarde €10.75; 1 día: tarde €18.50, viernes €19.50; niños: €7.13 / €11.75).
+          </p>
+        </div>
       )}
     </section>
   )
@@ -931,6 +1051,7 @@ export default function SuperAdminPage() {
         <>
           <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
           <ProductsSection excludeTransfer={excludeTransfer} />
+          <ClassProfitabilitySection />
         </>
       )}
       {saTab === 'gastos'   && <ExpensesSection />}

@@ -12,6 +12,18 @@ const PROF_META = {
   Eva:     { color: '#fb7185', text: '#fff', costoMes: 1424.46, horasSem: 20, clasesSem: 6,  costoHClase: 16.45, equipHSem: 0,   costoHEquipar: null },
 }
 const PROF_ORDER = ['Alvaro', 'Sigurd', 'Lucía', 'Sara', 'Ana', 'Eva']
+
+// Revenue per student per class session based on rocomadrid.com tariffs
+// 2-day tariff (Mon+Wed or Tue+Thu): adults tarde €86/8=10.75, mañana €77/8=9.625
+// 1-day tariff: tarde €74/4=18.5, mañana €68/4=17
+const BREAKEVEN_REV = {
+  Alvaro:  86 / 8,  // tarde 2-day (most classes Mon/Wed/Tue/Thu evenings)
+  Sigurd:  86 / 8,  // tarde 2-day (Tue/Thu evenings)
+  'Lucía': 86 / 8,  // tarde 2-day (Mon/Wed 17:30, 19:00)
+  Sara:    77 / 8,  // mañana 2-day (Tue/Thu mornings 09:00–12:00)
+  Ana:     74 / 4,  // tarde 1-day (standalone Mon 20:30 and Fri 19:00)
+  Eva:     86 / 8,  // tarde 2-day (Tue/Thu classes)
+}
 const DAYS       = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes']
 const DAY_LABEL  = { Lunes: 'Lunes', Martes: 'Martes', Miercoles: 'Miércoles', Jueves: 'Jueves', Viernes: 'Viernes' }
 
@@ -235,6 +247,12 @@ function ProfCard({ name, selected, onSelect }) {
       <div className="pg-prof-card__stat">
         <span className="pg-prof-card__lbl">€/h clase</span>
         <span className="pg-prof-card__val">{m.costoHClase.toFixed(2)}€</span>
+      </div>
+      <div className="pg-prof-card__stat">
+        <span className="pg-prof-card__lbl">Min. alumnos</span>
+        <span className="pg-prof-card__val pg-prof-card__breakeven">
+          {Math.ceil((m.costoHClase * 1.5) / BREAKEVEN_REV[name])} al.
+        </span>
       </div>
       {(m.equipHSem > 0 || m.equipHMes > 0) && (
         <div className="pg-prof-card__stat">

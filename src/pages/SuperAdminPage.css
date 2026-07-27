@@ -592,6 +592,46 @@ details[open] .sa-collapsible__arrow {
 .sa-mt__total     { text-align: right; font-size: 0.88rem; font-weight: 800; color: #34d399; font-variant-numeric: tabular-nums; }
 .sa-mt__total--neg { color: #f87171; }
 
+/* ── Class profitability table ── */
+.sa-profit-wrap { overflow-x: auto; }
+.sa-profit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  min-width: 480px;
+}
+.sa-profit-table th {
+  padding: 6px 10px;
+  text-align: right;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #555;
+  border-bottom: 1px solid #2a2015;
+  white-space: nowrap;
+}
+.sa-profit-table th:first-child,
+.sa-profit-table th:nth-child(2) { text-align: left; }
+.sa-profit-table tbody tr { border-bottom: 1px solid rgba(42,32,21,0.4); transition: background 0.1s; }
+.sa-profit-table tbody tr:hover { background: rgba(255,255,255,0.02); }
+.sa-profit-row--loss { background: rgba(248,113,113,0.03); }
+
+.sa-profit__label { padding: 7px 10px; color: #bbb; text-align: left; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-profit__prof  { padding: 7px 10px; text-align: left; font-weight: 700; font-size: 0.72rem; white-space: nowrap; }
+.sa-profit__num   { padding: 7px 10px; text-align: right; color: #888; font-variant-numeric: tabular-nums; }
+.sa-profit__ben   { padding: 7px 10px; text-align: right; font-weight: 700; color: #666; font-variant-numeric: tabular-nums; }
+.sa-profit__ben--pos { color: #34d399; }
+.sa-profit__ben--neg { color: #f87171; }
+
+.sa-profit-note {
+  font-size: 0.65rem;
+  color: #444;
+  margin-top: 12px;
+  font-style: italic;
+  line-height: 1.5;
+}
+
 @media (max-width: 600px) {
   .sa-kpi { min-width: 100%; }
   .sa-class-row__label { width: 100px; }
