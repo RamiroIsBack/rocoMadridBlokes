@@ -5,10 +5,10 @@ import './PlaygroundPage.css'
 
 const PROF_META = {
   Alvaro:  { color: '#f5c842', text: '#111', costoMes: 1715.60, horasSem: 27, clasesSem: 12, costoHClase: 14.12, equipHSem: 9,   costoHEquipar: 12 },
-  Sigurd:  { color: '#60a5fa', text: '#fff', costoMes: 903,     horasSem: 9,  clasesSem: 6,  costoHClase: 18.40, equipHSem: 0,   costoHEquipar: null },
+  Sigurd:  { color: '#60a5fa', text: '#fff', costoMes: 903,     horasSem: 9,  clasesSem: 6,  costoHClase: 18.40, equipHSem: 0, equipHMes: 10, costoHEquipar: 12 },
   'Lucía': { color: '#34d399', text: '#111', costoMes: 314,     horasSem: 6,  clasesSem: 4,  costoHClase: 12.09, equipHSem: 0,   costoHEquipar: null },
   Sara:    { color: '#f97316', text: '#fff', costoMes: 523,     horasSem: 10, clasesSem: 6,  costoHClase: 12.08, equipHSem: 1,   costoHEquipar: null },
-  Ana:     { color: '#a78bfa', text: '#fff', costoMes: 400,     horasSem: 7,  clasesSem: 3,  costoHClase: 13.20, equipHSem: 2,   costoHEquipar: null },
+  Ana:     { color: '#a78bfa', text: '#fff', costoMes: 400,     horasSem: 7,  clasesSem: 2,  costoHClase: 13.20, equipHSem: 2,   costoHEquipar: null },
   Eva:     { color: '#fb7185', text: '#fff', costoMes: 1424.46, horasSem: 20, clasesSem: 6,  costoHClase: 16.45, equipHSem: 0,   costoHEquipar: null },
 }
 const PROF_ORDER = ['Alvaro', 'Sigurd', 'Lucía', 'Sara', 'Ana', 'Eva']
@@ -28,7 +28,7 @@ const BASE = {
     Lunes:     [
       { tipo: 'equipar', start: '13:00', end: '15:00' },
       { tipo: 'comida',  start: '15:00', end: '16:00' },
-      { tipo: 'equipar', start: '16:00', end: '18:00' },
+      { tipo: 'equipar', start: '16:00', end: '17:30' },
       { tipo: 'clase',   start: '18:00', end: '19:30' },
       { tipo: 'clase',   start: '19:30', end: '21:00' },
     ],
@@ -43,7 +43,7 @@ const BASE = {
     Miercoles: [
       { tipo: 'equipar', start: '13:00', end: '15:00' },
       { tipo: 'comida',  start: '15:00', end: '16:00' },
-      { tipo: 'equipar', start: '16:00', end: '18:00' },
+      { tipo: 'equipar', start: '16:00', end: '17:30' },
       { tipo: 'clase',   start: '18:00', end: '19:30' },
       { tipo: 'clase',   start: '19:30', end: '21:00' },
     ],
@@ -93,7 +93,6 @@ const BASE = {
   },
   Ana: {
     Lunes:     [{ tipo: 'clase', start: '20:30', end: '22:00' }],
-    Miercoles: [{ tipo: 'clase', start: '20:30', end: '22:00' }],
     Viernes:   [
       { tipo: 'equipar', start: '17:00', end: '19:00' },
       { tipo: 'clase',   start: '19:00', end: '20:30' },
@@ -237,10 +236,12 @@ function ProfCard({ name, selected, onSelect }) {
         <span className="pg-prof-card__lbl">€/h clase</span>
         <span className="pg-prof-card__val">{m.costoHClase.toFixed(2)}€</span>
       </div>
-      {m.equipHSem > 0 && (
+      {(m.equipHSem > 0 || m.equipHMes > 0) && (
         <div className="pg-prof-card__stat">
-          <span className="pg-prof-card__lbl">Equip/sem</span>
-          <span className="pg-prof-card__val">{m.equipHSem}h</span>
+          <span className="pg-prof-card__lbl">Equip</span>
+          <span className="pg-prof-card__val">
+            {m.equipHMes ? `${m.equipHMes}h/mes` : `${m.equipHSem}h/sem`}
+          </span>
         </div>
       )}
       {m.costoHEquipar != null && (
@@ -492,7 +493,7 @@ export default function PlaygroundPage() {
               )
             })}
             <TimeColCell />
-            {DAYS.map(d => <DayCell key={d} prof={selectedProf} day={d} />)}
+            {DAYS.map(d => <DayCell key={`${selectedProf}-${d}`} prof={selectedProf} day={d} />)}
           </div>
         </div>
       </div>
