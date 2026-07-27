@@ -499,15 +499,25 @@ function ClassProfitabilitySection() {
 
   const rows = useMemo(() => {
     if (!data) return []
+    // slotMax: max active for each horario|edad across all dia variants
+    const slotMax = {}
+    data.forEach(c => {
+      const slot = `${c.horario}|${c.edad}`
+      const a = c.active || 0
+      if (a > (slotMax[slot] || 0)) slotMax[slot] = a
+    })
+    const effectiveActive = c => Math.max(c.active || 0, slotMax[`${c.horario}|${c.edad}`] || 0)
+
     return data
       .map(c => {
         const prof       = getProfForClass(c)
         const durationH  = classDurationH(c.horario)
         const costCls    = prof ? (PROF_EUR_H[prof] || 0) * durationH : null
         const revPerSt   = classRevPerStudent(c)
-        const revCls     = c.active * revPerSt
+        const ea         = effectiveActive(c)
+        const revCls     = ea * revPerSt
         const benefit    = costCls != null ? revCls - costCls : null
-        return { c, prof, costCls, revCls, revPerSt, benefit }
+        return { c, prof, costCls, revCls, benefit, ea }
       })
       .filter(r => r.prof)
       .sort((a, b) => (b.benefit ?? -Infinity) - (a.benefit ?? -Infinity))
@@ -537,14 +547,14 @@ function ClassProfitabilitySection() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ c, prof, costCls, revCls, benefit }, i) => {
+              {rows.map(({ c, prof, costCls, revCls, benefit, ea }, i) => {
                 const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
                 const label = isKid ? `${c.label} (${c.edad})` : c.label
                 return (
                   <tr key={i} className={benefit != null && benefit < 0 ? 'sa-profit-row--loss' : ''}>
                     <td className="sa-profit__label">{label}</td>
                     <td className="sa-profit__prof" style={{ color: PROF_COLOR[prof] }}>{prof}</td>
-                    <td className="sa-profit__num">{c.active}</td>
+                    <td className="sa-profit__num">{ea}</td>
                     <td className="sa-profit__num">{fmtEur(revCls)}</td>
                     <td className="sa-profit__num">{costCls != null ? fmtEur(costCls) : '—'}</td>
                     <td className={`sa-profit__ben${benefit == null ? '' : benefit >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>
