@@ -349,7 +349,7 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
       const isMorn = isMañana(start)
       ;(c.history || []).forEach(h => {
         if (mornAcc[h.month] === undefined) return
-        const val = h.new || 0
+        const val = h.active || 0
         if (isKid) kidsAcc[h.month] += val
         else if (isMorn) mornAcc[h.month] += val
         else tardAcc[h.month] += val
@@ -359,15 +359,37 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
   }, [data, mRange])
 
   const classGroups = useMemo(() => {
+    // For each horario|edad slot, compute the max active across ALL dia variants
+    // so a "Martes-Jueves 14:00" subscription contributes to the "Jueves 14:00" slot too
+    const slotMax = {}
+    data.forEach(c => {
+      const slot = `${c.horario}|${c.edad}`
+      const a = c.active || 0
+      if (a > (slotMax[slot] || 0)) slotMax[slot] = a
+      // 2-day combo: also register under each individual day key
+      if ((c.dia || '').includes('-')) {
+        c.dia.split('-').forEach(day => {
+          const dSlot = `${day.trim()}|${c.horario}|${c.edad}`
+          if (a > (slotMax[dSlot] || 0)) slotMax[dSlot] = a
+        })
+      }
+    })
+    const effectiveActive = c => {
+      const a = c.active || 0
+      const slot = `${c.horario}|${c.edad}`
+      const dSlot = `${(c.dia || '').trim()}|${c.horario}|${c.edad}`
+      return Math.max(a, slotMax[slot] || 0, slotMax[dSlot] || 0)
+    }
     const kids = [], morning = [], evening = []
     data.forEach(c => {
       const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
       const start = (c.horario || '').split('-')[0].trim()
-      if (isKid) kids.push(c)
-      else if (isMañana(start)) morning.push(c)
-      else evening.push(c)
+      const entry = { ...c, effectiveActive: effectiveActive(c) }
+      if (isKid) kids.push(entry)
+      else if (isMañana(start)) morning.push(entry)
+      else evening.push(entry)
     })
-    const byActive = arr => [...arr].sort((a, b) => b.active - a.active)
+    const byActive = arr => [...arr].sort((a, b) => b.effectiveActive - a.effectiveActive)
     return { kids: byActive(kids), morning: byActive(morning), evening: byActive(evening) }
   }, [data])
 
@@ -494,7 +516,7 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
       </section>
 
       <section className="sv-section">
-        <h2 className="sv-section-title">Nuevas inscripciones por mes</h2>
+        <h2 className="sv-section-title">Alumnos en clases por mes</h2>
         <MonthlyBarChart
           data={combinedData}
           stacked
@@ -506,12 +528,12 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
         />
         <div className="sv-group-summary">
           {[
-            { label: 'Niños',          classes: classGroups.kids,    color: '#34d399' },
+            { label: 'Niños',           classes: classGroups.kids,    color: '#34d399' },
             { label: 'Mañanas adultos', classes: classGroups.morning, color: '#f5c842' },
             { label: 'Tardes adultos',  classes: classGroups.evening, color: '#60a5fa' },
           ].map(({ label, classes, color }) => {
-            const nonEmpty = classes.filter(c => c.active > 0)
-            const empty    = classes.filter(c => c.active === 0)
+            const nonEmpty = classes.filter(c => c.effectiveActive > 0)
+            const empty    = classes.filter(c => c.effectiveActive === 0)
             const top = nonEmpty.slice(0, 2)
             const bot = nonEmpty.length >= 3 ? nonEmpty.slice(-2).reverse() : []
             return (
@@ -522,7 +544,7 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
                     <span className="sv-group-summary__lbl">Mejores:</span>
                     {top.map((c, i) => (
                       <span key={i} className="sv-group-summary__chip sv-group-summary__chip--best">
-                        {c.label} ({c.active})
+                        {c.label} ({c.effectiveActive})
                       </span>
                     ))}
                   </div>
@@ -532,7 +554,7 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
                     <span className="sv-group-summary__lbl">Peores:</span>
                     {bot.map((c, i) => (
                       <span key={i} className="sv-group-summary__chip sv-group-summary__chip--worst">
-                        {c.label} ({c.active})
+                        {c.label} ({c.effectiveActive})
                       </span>
                     ))}
                   </div>
