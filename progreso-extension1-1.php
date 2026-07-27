@@ -1776,17 +1776,21 @@ function superadmin_classes($request) {
             $classes[$class_key]['all']++;
             $member_name  = $sub['cliente']  ?? '';
             $member_phone = $sub['telefono'] ?? '';
-            if ($sub['status'] === 'active') {
-                $classes[$class_key]['active']++;
-                $classes[$class_key]['members_active'][] = array('name' => $member_name, 'phone' => $member_phone, 'new' => false);
-            } elseif (in_array($sub['status'], array('on-hold', 'pending'))) {
-                $classes[$class_key]['members_pending'][] = array('name' => $member_name, 'phone' => $member_phone);
-            }
 
             // Per-month active snapshot using subscription start/end dates
             if (function_exists('wcs_get_subscription') && !empty($sub['id'])) {
                 $sub_obj = wcs_get_subscription(intval($sub['id']));
                 if (!$sub_obj) continue;
+                if (empty($member_phone)) {
+                    $member_phone = $sub_obj->get_billing_phone() ?: '';
+                }
+
+                if ($sub['status'] === 'active') {
+                    $classes[$class_key]['active']++;
+                    $classes[$class_key]['members_active'][] = array('name' => $member_name, 'phone' => $member_phone, 'new' => false);
+                } elseif (in_array($sub['status'], array('on-hold', 'pending'))) {
+                    $classes[$class_key]['members_pending'][] = array('name' => $member_name, 'phone' => $member_phone);
+                }
 
                 $dt_created = $sub_obj->get_date_created();
                 if (!$dt_created) continue;

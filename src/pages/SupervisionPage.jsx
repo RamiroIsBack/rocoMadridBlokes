@@ -454,32 +454,42 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
           bars={[{ key: 'activos', label: 'Alumnos activos', color: '#60a5fa' }]}
         />
         {selectedClass && (
-          <div className="sv-member-list">
-            {(selectedClass.members_active || []).filter(m => m.new).map((m, i) => (
-              <span key={`n-${i}`} className="sv-member sv-member--new">
-                <span className="sv-member__name">{m.name}</span>
-                {m.phone && <span className="sv-member__phone">{m.phone}</span>}
-              </span>
-            ))}
-            {(selectedClass.members_active || []).filter(m => !m.new).map((m, i) => (
-              <span key={`a-${i}`} className="sv-member sv-member--active">
-                <span className="sv-member__name">{m.name}</span>
-                {m.phone && <span className="sv-member__phone">{m.phone}</span>}
-              </span>
-            ))}
-            {(selectedClass.members_pending || []).map((m, i) => (
-              <span key={`p-${i}`} className="sv-member sv-member--lost">
-                <span className="sv-member__name">{m.name}</span>
-                {m.phone && <span className="sv-member__phone">{m.phone}</span>}
-              </span>
-            ))}
-            {(selectedClass.members_lost || []).map((m, i) => (
-              <span key={`l-${i}`} className="sv-member sv-member--lost">
-                <span className="sv-member__name">{m.name}</span>
-                {m.phone && <span className="sv-member__phone">{m.phone}</span>}
-              </span>
-            ))}
-          </div>
+          <>
+            <div className="sv-member-legend">
+              <span className="sv-member-legend__item sv-member-legend__item--new">Nuevo este mes</span>
+              <span className="sv-member-legend__item sv-member-legend__item--active">Se mantiene</span>
+              <span className="sv-member-legend__item sv-member-legend__item--lost">Baja / pendiente pago</span>
+            </div>
+            <div className="sv-member-list">
+              {(selectedClass.members_active || []).filter(m => m.new).map((m, i) => (
+                <span key={`n-${i}`} className="sv-member sv-member--new"
+                  data-tooltip="Contactar: seguimiento de incorporación">
+                  <span className="sv-member__name">{m.name}</span>
+                  {m.phone && <span className="sv-member__phone">{m.phone}</span>}
+                </span>
+              ))}
+              {(selectedClass.members_active || []).filter(m => !m.new).map((m, i) => (
+                <span key={`a-${i}`} className="sv-member sv-member--active">
+                  <span className="sv-member__name">{m.name}</span>
+                  {m.phone && <span className="sv-member__phone">{m.phone}</span>}
+                </span>
+              ))}
+              {(selectedClass.members_pending || []).map((m, i) => (
+                <span key={`p-${i}`} className="sv-member sv-member--lost"
+                  data-tooltip="Contactar: verificar si ha pagado o si se ha dado de baja">
+                  <span className="sv-member__name">{m.name}</span>
+                  {m.phone && <span className="sv-member__phone">{m.phone}</span>}
+                </span>
+              ))}
+              {(selectedClass.members_lost || []).map((m, i) => (
+                <span key={`l-${i}`} className="sv-member sv-member--lost"
+                  data-tooltip="Contactar: verificar si ha pagado o si se ha dado de baja">
+                  <span className="sv-member__name">{m.name}</span>
+                  {m.phone && <span className="sv-member__phone">{m.phone}</span>}
+                </span>
+              ))}
+            </div>
+          </>
         )}
       </section>
 

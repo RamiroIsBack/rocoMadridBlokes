@@ -348,16 +348,42 @@
   display: block;
 }
 
+/* ── Member legend ── */
+.sv-member-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  margin-bottom: 6px;
+}
+.sv-member-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.65rem;
+  color: #6b5e41;
+}
+.sv-member-legend__item::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.sv-member-legend__item--new::before    { background: #34d399; }
+.sv-member-legend__item--active::before { background: #fdba74; }
+.sv-member-legend__item--lost::before   { background: #f87171; }
+
 /* ── Member chips ── */
 .sv-member-list {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  margin-top: 10px;
-  padding-top: 10px;
+  padding-top: 6px;
   border-top: 1px solid #2a2015;
 }
 .sv-member {
+  position: relative;
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
@@ -367,6 +393,7 @@
   background: #1e2a1e;
   color: #86efac;
   border: 1px solid rgba(134,239,172,0.2);
+  cursor: default;
 }
 .sv-member__name {
   font-size: 0.72rem;
@@ -378,6 +405,25 @@
   color: rgba(255,255,255,0.45);
   line-height: 1.2;
   margin-top: 1px;
+}
+/* CSS tooltip via data-tooltip attr */
+.sv-member[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1b1710;
+  border: 1px solid #3a3020;
+  color: #f0e8d5;
+  font-size: 0.65rem;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  z-index: 20;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
 }
 .sv-member--new {
   background: #14532d;
