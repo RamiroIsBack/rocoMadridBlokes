@@ -1,15 +1,15 @@
-import { useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import './PlaygroundPage.css'
 
 // ─── static data ─────────────────────────────────────────────────────────────
 
 const PROF_META = {
-  Alvaro:  { color: '#f5c842', text: '#111', costoMes: 1715.60, horasSem: 27, clasesSem: 12, costoClase: 21.18 },
-  Sigurd:  { color: '#60a5fa', text: '#fff', costoMes: 903,     horasSem: 9,  clasesSem: 6,  costoClase: 27.60 },
-  'Lucía': { color: '#34d399', text: '#111', costoMes: 314,     horasSem: 6,  clasesSem: 4,  costoClase: 18.13 },
-  Sara:    { color: '#f97316', text: '#fff', costoMes: 523,     horasSem: 10, clasesSem: 6,  costoClase: 18.12 },
-  Ana:     { color: '#a78bfa', text: '#fff', costoMes: 400,     horasSem: 7,  clasesSem: 3,  costoClase: 19.80 },
-  Eva:     { color: '#fb7185', text: '#fff', costoMes: 1424.46, horasSem: 20, clasesSem: 4,  costoClase: 24.68 },
+  Alvaro:  { color: '#f5c842', text: '#111', costoMes: 1715.60, horasSem: 27, clasesSem: 12, costoHClase: 14.12, equipHSem: 9,   costoHEquipar: 12 },
+  Sigurd:  { color: '#60a5fa', text: '#fff', costoMes: 903,     horasSem: 9,  clasesSem: 6,  costoHClase: 18.40, equipHSem: 0,   costoHEquipar: null },
+  'Lucía': { color: '#34d399', text: '#111', costoMes: 314,     horasSem: 6,  clasesSem: 4,  costoHClase: 12.09, equipHSem: 0,   costoHEquipar: null },
+  Sara:    { color: '#f97316', text: '#fff', costoMes: 523,     horasSem: 10, clasesSem: 6,  costoHClase: 12.08, equipHSem: 1,   costoHEquipar: null },
+  Ana:     { color: '#a78bfa', text: '#fff', costoMes: 400,     horasSem: 7,  clasesSem: 3,  costoHClase: 13.20, equipHSem: 2,   costoHEquipar: null },
+  Eva:     { color: '#fb7185', text: '#fff', costoMes: 1424.46, horasSem: 20, clasesSem: 6,  costoHClase: 16.45, equipHSem: 0,   costoHEquipar: null },
 }
 const PROF_ORDER = ['Alvaro', 'Sigurd', 'Lucía', 'Sara', 'Ana', 'Eva']
 const DAYS       = ['Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes']
@@ -23,7 +23,6 @@ const SALA = {
   Viernes:   { apertura: '15:30', cierre: '21:30', abre: 'Eva',    cierra: 'Eva' },
 }
 
-// Activities: tipo = 'clase' | 'equipar' | 'gestion' | 'comida'
 const BASE = {
   Alvaro: {
     Lunes:     [
@@ -111,15 +110,20 @@ const BASE = {
       { tipo: 'clase', start: '17:30', end: '19:00' },
       { tipo: 'clase', start: '18:30', end: '20:00' },
     ],
-    Viernes:   [{ tipo: 'gestion', start: '15:30', end: '21:30' }],
+    Viernes:   [
+      { tipo: 'gestion', start: '15:30', end: '18:00' },
+      { tipo: 'clase',   start: '18:00', end: '19:00', label: 'Infantil' },
+      { tipo: 'clase',   start: '19:00', end: '19:30', label: 'Adolescentes' },
+      { tipo: 'gestion', start: '19:30', end: '21:30' },
+    ],
   },
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-const SCALE   = 1      // px per minute
-const H_START = 9      // 09:00
-const H_END   = 22.5   // 22:30
+const SCALE   = 1
+const H_START = 9
+const H_END   = 22.5
 const CELL_H  = (H_END - H_START) * 60 * SCALE  // 810 px
 
 function toMin(t) {
@@ -127,8 +131,8 @@ function toMin(t) {
   return h * 60 + m
 }
 
-function actTop(start)     { return (toMin(start) - H_START * 60) * SCALE }
-function actH(start, end)  { return (toMin(end) - toMin(start)) * SCALE }
+function actTop(start)    { return (toMin(start) - H_START * 60) * SCALE }
+function actH(start, end) { return (toMin(end) - toMin(start)) * SCALE }
 
 function layoutActs(acts) {
   const sorted = [...acts].sort((a, b) => toMin(a.start) - toMin(b.start))
@@ -155,16 +159,17 @@ function ActBlock({ act, lanes, color, textColor }) {
   const lw     = 100 / lanes
   const left   = `calc(${act.lane * lw}% + 2px)`
   const width  = `calc(${lw}% - 4px)`
+  const txt    = act.label || TIPO_LABEL[act.tipo]
 
   return (
     <div
       className={`pg-act pg-act--${act.tipo}`}
       style={{ top, height, left, width, background: color, opacity: TIPO_OPACITY[act.tipo] }}
-      title={`${act.start}–${act.end} · ${TIPO_LABEL[act.tipo]}`}
+      title={`${act.start}–${act.end} · ${txt}`}
     >
       {height >= 18 && (
         <span className="pg-act__txt" style={{ color: textColor }}>
-          {act.start}{height >= 36 ? ` · ${TIPO_LABEL[act.tipo]}` : ''}
+          {act.start}{height >= 36 ? ` · ${txt}` : ''}
         </span>
       )}
     </div>
@@ -186,7 +191,7 @@ function DayCell({ prof, day }) {
   )
 }
 
-function TimeColCell({ showLabels }) {
+function TimeColCell() {
   return (
     <div className="pg-time-col" style={{ height: CELL_H }}>
       {HOURS.map(h => {
@@ -194,11 +199,7 @@ function TimeColCell({ showLabels }) {
         const top = (h - H_START) * 60 * SCALE
         return (
           <div key={h} className="pg-time-tick" style={{ top }}>
-            {showLabels && (
-              <span className="pg-time-tick__lbl">
-                {String(h).padStart(2, '0')}:00
-              </span>
-            )}
+            <span className="pg-time-tick__lbl">{String(h).padStart(2, '0')}:00</span>
           </div>
         )
       })}
@@ -206,10 +207,14 @@ function TimeColCell({ showLabels }) {
   )
 }
 
-function ProfCard({ name }) {
+function ProfCard({ name, selected, onSelect }) {
   const m = PROF_META[name]
   return (
-    <div className="pg-prof-card" style={{ borderTopColor: m.color }}>
+    <div
+      className={`pg-prof-card${selected ? ' pg-prof-card--active' : ''}`}
+      style={{ borderTopColor: m.color }}
+      onClick={() => onSelect(name)}
+    >
       <div className="pg-prof-card__header">
         <span className="pg-prof-card__dot" style={{ background: m.color }} />
         <span className="pg-prof-card__name" style={{ color: m.color }}>{name}</span>
@@ -229,9 +234,178 @@ function ProfCard({ name }) {
         <span className="pg-prof-card__val">{m.clasesSem}</span>
       </div>
       <div className="pg-prof-card__stat">
-        <span className="pg-prof-card__lbl">€/clase</span>
-        <span className="pg-prof-card__val">{m.costoClase.toFixed(2)}€</span>
+        <span className="pg-prof-card__lbl">€/h clase</span>
+        <span className="pg-prof-card__val">{m.costoHClase.toFixed(2)}€</span>
       </div>
+      {m.equipHSem > 0 && (
+        <div className="pg-prof-card__stat">
+          <span className="pg-prof-card__lbl">Equip/sem</span>
+          <span className="pg-prof-card__val">{m.equipHSem}h</span>
+        </div>
+      )}
+      {m.costoHEquipar != null && (
+        <div className="pg-prof-card__stat">
+          <span className="pg-prof-card__lbl">€/h equip</span>
+          <span className="pg-prof-card__val">{m.costoHEquipar.toFixed(2)}€</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Scenario B: reassign a class ────────────────────────────────────────────
+
+function ScenarioB() {
+  const allClasses = useMemo(() => {
+    const list = []
+    DAYS.forEach(day => {
+      PROF_ORDER.forEach(prof => {
+        ;(BASE[prof]?.[day] || [])
+          .filter(a => a.tipo === 'clase')
+          .forEach(a => list.push({ day, prof, start: a.start, end: a.end, label: a.label || null }))
+      })
+    })
+    return list.sort((a, b) =>
+      DAYS.indexOf(a.day) - DAYS.indexOf(b.day) || toMin(a.start) - toMin(b.start)
+    )
+  }, [])
+
+  const [assign, setAssign] = useState({})
+
+  const delta = useMemo(() => {
+    let d = 0
+    allClasses.forEach(cl => {
+      const key = `${cl.day}|${cl.start}`
+      const newP = assign[key]
+      if (!newP) return
+      const hours = (toMin(cl.end) - toMin(cl.start)) / 60
+      d += ((PROF_META[newP]?.costoHClase || 0) - (PROF_META[cl.prof]?.costoHClase || 0)) * hours * 4.33
+    })
+    return d
+  }, [assign, allClasses])
+
+  const hasChanges = Object.values(assign).some(Boolean)
+
+  return (
+    <div className="pg-scenario">
+      <h3 className="pg-scenario__title">B · Reasignar clase</h3>
+      <p className="pg-scenario__desc">Cambia qué profe da cada clase y ve el impacto en el coste mensual.</p>
+      <div className="pg-scenario-table-wrap">
+        <table className="pg-scenario-table">
+          <thead>
+            <tr>
+              <th>Día</th>
+              <th>Hora</th>
+              <th>Clase</th>
+              <th>Profe actual</th>
+              <th>Reasignar a</th>
+            </tr>
+          </thead>
+          <tbody>
+            {allClasses.map(cl => {
+              const key = `${cl.day}|${cl.start}`
+              return (
+                <tr key={key}>
+                  <td>{DAY_LABEL[cl.day]}</td>
+                  <td>{cl.start}–{cl.end}</td>
+                  <td>{cl.label || '—'}</td>
+                  <td style={{ color: PROF_META[cl.prof]?.color }}>{cl.prof}</td>
+                  <td>
+                    <select
+                      value={assign[key] || ''}
+                      onChange={e => setAssign(prev => ({ ...prev, [key]: e.target.value }))}
+                      className="pg-select"
+                    >
+                      <option value="">— sin cambio —</option>
+                      {PROF_ORDER.filter(p => p !== cl.prof).map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {hasChanges && (
+        <div className={`pg-scenario__delta${delta >= 0 ? ' pg-scenario__delta--up' : ' pg-scenario__delta--down'}`}>
+          Impacto mensual estimado: {delta >= 0 ? '+' : ''}{delta.toFixed(2)} €/mes
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Scenario C: add new class hours ─────────────────────────────────────────
+
+function ScenarioC() {
+  const [form, setForm] = useState({ prof: 'Alvaro', day: 'Lunes', start: '18:00', dur: '1.5' })
+  const [added, setAdded] = useState([])
+
+  function addHours() {
+    const hours = parseFloat(form.dur)
+    if (isNaN(hours) || hours <= 0) return
+    const endMin = toMin(form.start) + Math.round(hours * 60)
+    const end = `${String(Math.floor(endMin / 60)).padStart(2, '0')}:${String(endMin % 60).padStart(2, '0')}`
+    setAdded(prev => [...prev, { ...form, end, hours }])
+  }
+
+  const totalDelta = useMemo(
+    () => added.reduce((s, cl) => s + (PROF_META[cl.prof]?.costoHClase || 0) * cl.hours * 4.33, 0),
+    [added]
+  )
+
+  return (
+    <div className="pg-scenario">
+      <h3 className="pg-scenario__title">C · Añadir horas de clase</h3>
+      <p className="pg-scenario__desc">Simula el coste de añadir nuevas sesiones al horario.</p>
+      <div className="pg-scenario-form">
+        <select value={form.prof} onChange={e => setForm(p => ({ ...p, prof: e.target.value }))} className="pg-select">
+          {PROF_ORDER.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <select value={form.day} onChange={e => setForm(p => ({ ...p, day: e.target.value }))} className="pg-select">
+          {DAYS.map(d => <option key={d} value={d}>{DAY_LABEL[d]}</option>)}
+        </select>
+        <input
+          type="time"
+          value={form.start}
+          onChange={e => setForm(p => ({ ...p, start: e.target.value }))}
+          className="pg-input"
+        />
+        <select value={form.dur} onChange={e => setForm(p => ({ ...p, dur: e.target.value }))} className="pg-select">
+          {['0.5', '1', '1.5', '2', '2.5', '3'].map(d => (
+            <option key={d} value={d}>{d}h</option>
+          ))}
+        </select>
+        <button onClick={addHours} className="pg-btn">Añadir</button>
+      </div>
+      {added.length > 0 && (
+        <>
+          <table className="pg-scenario-table">
+            <thead>
+              <tr><th>Profe</th><th>Día</th><th>Hora</th><th>Duración</th><th>Coste/mes</th><th /></tr>
+            </thead>
+            <tbody>
+              {added.map((cl, i) => (
+                <tr key={i}>
+                  <td style={{ color: PROF_META[cl.prof]?.color }}>{cl.prof}</td>
+                  <td>{DAY_LABEL[cl.day]}</td>
+                  <td>{cl.start}–{cl.end}</td>
+                  <td>{cl.hours}h</td>
+                  <td>+{((PROF_META[cl.prof]?.costoHClase || 0) * cl.hours * 4.33).toFixed(2)} €</td>
+                  <td>
+                    <button onClick={() => setAdded(prev => prev.filter((_, j) => j !== i))} className="pg-btn-remove">×</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="pg-scenario__delta pg-scenario__delta--up">
+            Coste adicional total: +{totalDelta.toFixed(2)} €/mes
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -240,6 +414,7 @@ function ProfCard({ name }) {
 
 export default function PlaygroundPage() {
   const sd = window.blokesSiteData || {}
+  const [selectedProf, setSelectedProf] = useState('Alvaro')
 
   if (sd.userRole !== 'socio') {
     return <div className="pg-restricted"><p>Acceso restringido a socios.</p></div>
@@ -247,16 +422,18 @@ export default function PlaygroundPage() {
 
   const totalCost  = Object.values(PROF_META).reduce((s, m) => s + m.costoMes, 0)
   const totalClass = Object.values(PROF_META).reduce((s, m) => s + m.clasesSem, 0)
-  const avgPerSes  = totalCost / (totalClass * 4.33)
+  const totalHClase = Object.values(PROF_META).reduce((s, m) => s + m.clasesSem * 1.5, 0)
+  const avgHClase  = totalCost / (totalHClase * 4.33)
+
+  const selMeta = PROF_META[selectedProf]
 
   return (
     <div className="pg-page">
       <div className="pg-page-head">
-        <h1 className="pg-title">Horarios Playground</h1>
+        <h1 className="pg-title">Horarios Profes</h1>
         <p className="pg-subtitle">Horario base · Marzo 2026</p>
       </div>
 
-      {/* KPIs */}
       <div className="pg-kpis">
         <div className="pg-kpi">
           <div className="pg-kpi__val">
@@ -269,8 +446,8 @@ export default function PlaygroundPage() {
           <div className="pg-kpi__lbl">Clases / semana</div>
         </div>
         <div className="pg-kpi">
-          <div className="pg-kpi__val">{avgPerSes.toFixed(0)}€</div>
-          <div className="pg-kpi__lbl">Coste medio / sesión</div>
+          <div className="pg-kpi__val">{avgHClase.toFixed(0)}€</div>
+          <div className="pg-kpi__lbl">Coste medio €/h clase</div>
         </div>
         <div className="pg-kpi">
           <div className="pg-kpi__val">6</div>
@@ -278,60 +455,50 @@ export default function PlaygroundPage() {
         </div>
       </div>
 
-      {/* Professor cards */}
       <div className="pg-profs">
-        {PROF_ORDER.map(n => <ProfCard key={n} name={n} />)}
+        {PROF_ORDER.map(n => (
+          <ProfCard key={n} name={n} selected={selectedProf === n} onSelect={setSelectedProf} />
+        ))}
       </div>
 
-      {/* Legend */}
       <div className="pg-legend">
         {Object.entries(TIPO_LABEL).map(([tipo, label]) => (
           <span key={tipo} className={`pg-leg pg-leg--${tipo}`}>{label}</span>
         ))}
       </div>
 
-      {/* Schedule matrix */}
-      <div className="pg-matrix-scroll">
-        <div className="pg-matrix">
-
-          {/* ── header row ── */}
-          <div className="pg-matrix__corner" />
-          <div className="pg-matrix__corner" />
-          {DAYS.map(d => {
-            const s  = SALA[d]
-            const ac = PROF_META[s.abre]?.color
-            const cc = PROF_META[s.cierra]?.color
-            return (
-              <div key={d} className="pg-day-head">
-                <div className="pg-day-head__name">{DAY_LABEL[d]}</div>
-                <div className="pg-day-head__hours">{s.apertura} – {s.cierre}</div>
-                <div className="pg-day-head__ops">
-                  <span title="Abre" style={{ color: ac }}>▲ {s.abre}</span>
-                  <span title="Cierra" style={{ color: cc }}>▼ {s.cierra}</span>
+      <div className="pg-schedule-section">
+        <div className="pg-schedule-label" style={{ color: selMeta.color }}>
+          Semana de {selectedProf}
+        </div>
+        <div className="pg-schedule-scroll">
+          <div className="pg-single-grid">
+            <div className="pg-matrix__corner" />
+            {DAYS.map(d => {
+              const s = SALA[d]
+              const isAbre   = s.abre   === selectedProf
+              const isCierra = s.cierra === selectedProf
+              return (
+                <div key={d} className="pg-day-head">
+                  <div className="pg-day-head__name">{DAY_LABEL[d]}</div>
+                  <div className="pg-day-head__hours">{s.apertura} – {s.cierre}</div>
+                  {(isAbre || isCierra) && (
+                    <div className="pg-day-head__ops">
+                      {isAbre   && <span style={{ color: selMeta.color }}>▲ Abre</span>}
+                      {isCierra && <span style={{ color: selMeta.color }}>▼ Cierra</span>}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )
-          })}
-
-          {/* ── professor rows ── */}
-          {PROF_ORDER.map((prof, i) => {
-            const m = PROF_META[prof]
-            return [
-              <TimeColCell key={`time-${prof}`} showLabels={i === 0} />,
-              <div
-                key={`lbl-${prof}`}
-                className="pg-prof-cell"
-                style={{ borderLeftColor: m.color }}
-              >
-                <span className="pg-prof-cell__name" style={{ color: m.color }}>{prof}</span>
-                <span className="pg-prof-cell__cost">{m.costoMes.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 })}/mes</span>
-              </div>,
-              ...DAYS.map(d => <DayCell key={`${prof}-${d}`} prof={prof} day={d} />),
-            ]
-          })}
-
+              )
+            })}
+            <TimeColCell />
+            {DAYS.map(d => <DayCell key={d} prof={selectedProf} day={d} />)}
+          </div>
         </div>
       </div>
+
+      <ScenarioB />
+      <ScenarioC />
     </div>
   )
 }

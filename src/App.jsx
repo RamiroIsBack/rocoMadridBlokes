@@ -292,7 +292,7 @@ export default function App() {
               )}
               {sd.userRole === 'socio' && (
                 <li className="app-nav__item">
-                  <NavLink to="/playground" className="app-nav__link app-nav__link--super">Playground</NavLink>
+                  <NavLink to="/playground" className="app-nav__link app-nav__link--super">Horarios Profes</NavLink>
                 </li>
               )}
             </ul>

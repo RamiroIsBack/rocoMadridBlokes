@@ -16,9 +16,7 @@
 
 /* ── page header ─────────────────────────────────────────────── */
 
-.pg-page-head {
-  margin-bottom: 28px;
-}
+.pg-page-head { margin-bottom: 28px; }
 .pg-title {
   font-size: 22px;
   font-weight: 700;
@@ -74,8 +72,17 @@
   border-top: 3px solid;
   border-radius: 8px;
   padding: 12px 14px;
-  min-width: 150px;
+  min-width: 140px;
   flex: 1;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.pg-prof-card:hover {
+  background: #332810;
+}
+.pg-prof-card--active {
+  background: #352d18;
+  box-shadow: 0 0 0 2px currentColor;
 }
 .pg-prof-card__header {
   display: flex;
@@ -100,13 +107,8 @@
   font-size: 11px;
   margin-bottom: 4px;
 }
-.pg-prof-card__lbl {
-  color: #6b5e41;
-}
-.pg-prof-card__val {
-  font-weight: 600;
-  color: #c8b88a;
-}
+.pg-prof-card__lbl { color: #6b5e41; }
+.pg-prof-card__val { font-weight: 600; color: #c8b88a; }
 
 /* ── legend ───────────────────────────────────────────────────── */
 
@@ -135,27 +137,33 @@
 .pg-leg--gestion::before  { background: rgba(180,180,180,0.22); }
 .pg-leg--comida::before   { background: rgba(180,180,180,0.1); border: 1px dashed rgba(255,255,255,0.2); }
 
-/* ── schedule matrix ──────────────────────────────────────────── */
+/* ── schedule section ─────────────────────────────────────────── */
 
-.pg-matrix-scroll {
+.pg-schedule-section { margin-bottom: 32px; }
+.pg-schedule-label {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+.pg-schedule-scroll {
   overflow-x: auto;
-  border-radius: 8px;
-  border: 1px solid #3a3020;
 }
 
-.pg-matrix {
+/* ── single professor grid ────────────────────────────────────── */
+
+.pg-single-grid {
   display: grid;
-  /* col 1: time axis, col 2: prof labels, cols 3-7: Mon-Fri */
-  grid-template-columns: 44px 100px repeat(5, 1fr);
-  min-width: 680px;
+  grid-template-columns: 44px repeat(5, 1fr);
+  min-width: 480px;
+  border: 1px solid #3a3020;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-/* corner spacers in the header row */
 .pg-matrix__corner {
   background: #1f1a0f;
   border-bottom: 1px solid #3a3020;
   border-right: 1px solid #3a3020;
-  padding: 0;
 }
 
 /* ── day header cells ─────────────────────────────────────────── */
@@ -166,7 +174,7 @@
   border-right: 1px solid #3a3020;
   padding: 10px 8px;
   text-align: center;
-  min-height: 72px;
+  min-height: 60px;
 }
 .pg-day-head__name {
   font-size: 13px;
@@ -177,7 +185,7 @@
 .pg-day-head__hours {
   font-size: 11px;
   color: #6b5e41;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .pg-day-head__ops {
   display: flex;
@@ -210,43 +218,11 @@
   line-height: 1;
 }
 
-/* ── professor label cells ────────────────────────────────────── */
-
-.pg-prof-cell {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-start;
-  padding: 10px 8px;
-  border-left: 3px solid transparent;
-  border-right: 1px solid #3a3020;
-  border-bottom: 1px solid #3a3020;
-  background: #1f1a0f;
-  gap: 4px;
-}
-.pg-prof-cell__name {
-  font-size: 12px;
-  font-weight: 700;
-  writing-mode: vertical-lr;
-  text-orientation: mixed;
-  transform: rotate(180deg);
-  line-height: 1;
-}
-.pg-prof-cell__cost {
-  font-size: 9px;
-  color: #4a3e28;
-  writing-mode: vertical-lr;
-  transform: rotate(180deg);
-  line-height: 1;
-}
-
 /* ── day cells (timeline containers) ─────────────────────────── */
 
 .pg-day-cell {
   position: relative;
   border-right: 1px solid #3a3020;
-  border-bottom: 1px solid #3a3020;
-  /* hourly grid lines via background */
   background-image: repeating-linear-gradient(
     to bottom,
     transparent 0px,
@@ -301,16 +277,104 @@
   pointer-events: none;
 }
 
+/* ── scenarios ────────────────────────────────────────────────── */
+
+.pg-scenario {
+  margin-top: 28px;
+  background: #2a2015;
+  border: 1px solid #3a3020;
+  border-radius: 8px;
+  padding: 20px;
+}
+.pg-scenario__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f5c842;
+  margin: 0 0 4px;
+}
+.pg-scenario__desc {
+  font-size: 12px;
+  color: #6b5e41;
+  margin: 0 0 16px;
+}
+.pg-scenario-form {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  align-items: center;
+}
+.pg-scenario-table-wrap {
+  overflow-x: auto;
+}
+.pg-scenario-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.pg-scenario-table th {
+  text-align: left;
+  padding: 8px 10px;
+  color: #6b5e41;
+  border-bottom: 1px solid #3a3020;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.pg-scenario-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(58,48,32,0.5);
+  color: #c8b88a;
+}
+.pg-scenario__delta {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.pg-scenario__delta--up   { background: rgba(239,68,68,0.15);  color: #ef4444; }
+.pg-scenario__delta--down { background: rgba(52,211,153,0.15); color: #34d399; }
+
+/* ── form controls ────────────────────────────────────────────── */
+
+.pg-select, .pg-input {
+  background: #1b1710;
+  border: 1px solid #3a3020;
+  border-radius: 4px;
+  color: #f0e8d5;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.pg-input { font-family: inherit; }
+.pg-btn {
+  background: #f5c842;
+  color: #111;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.pg-btn:hover { background: #f0bb2d; }
+.pg-btn-remove {
+  background: transparent;
+  border: 1px solid #4a3e28;
+  color: #8a7a58;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pg-btn-remove:hover { color: #ef4444; border-color: #ef4444; }
+
 /* ── responsive ───────────────────────────────────────────────── */
 
 @media (max-width: 600px) {
-  .pg-profs {
-    flex-direction: column;
-  }
-  .pg-prof-card {
-    min-width: unset;
-  }
-  .pg-kpi__val {
-    font-size: 20px;
-  }
+  .pg-profs { flex-direction: column; }
+  .pg-prof-card { min-width: unset; }
+  .pg-kpi__val { font-size: 20px; }
 }

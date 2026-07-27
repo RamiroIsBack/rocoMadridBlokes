@@ -219,7 +219,7 @@ const CLASS_COLORS = [
   '#38bdf8','#4ade80','#fbbf24','#818cf8',
 ]
 
-function MonthlyBarChart({ data, bars, height = 160 }) {
+function MonthlyBarChart({ data, bars, height = 160, stacked = false }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -229,7 +229,16 @@ function MonthlyBarChart({ data, bars, height = 160 }) {
         <Tooltip contentStyle={CHART_STYLE.tooltip} labelStyle={CHART_STYLE.label}
           formatter={(v, name) => [v, bars.find(b => b.key === name)?.label || name]} />
         {bars.length > 1 && <Legend formatter={name => bars.find(b => b.key === name)?.label || name} />}
-        {bars.map(b => <Bar key={b.key} dataKey={b.key} name={b.label} fill={b.color} radius={[3, 3, 0, 0]} />)}
+        {bars.map((b, i) => (
+          <Bar
+            key={b.key}
+            dataKey={b.key}
+            name={b.label}
+            fill={b.color}
+            stackId={stacked ? 'a' : undefined}
+            radius={stacked ? (i === bars.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]) : [3, 3, 0, 0]}
+          />
+        ))}
       </BarChart>
     </ResponsiveContainer>
   )
@@ -318,25 +327,23 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
     evolFilter === '__all__' ? dataByTeacher : dataByTeacher.filter((_, i) => `c${i}` === evolFilter)
   , [dataByTeacher, evolFilter])
 
-  const matData = useMemo(() => {
-    const mAcc = {}, tAcc = {}
-    mRange.forEach(m => { mAcc[m] = 0; tAcc[m] = 0 })
+  const combinedData = useMemo(() => {
+    const mornAcc = {}, tardAcc = {}, kidsAcc = {}
+    mRange.forEach(m => { mornAcc[m] = 0; tardAcc[m] = 0; kidsAcc[m] = 0 })
     data.forEach(c => {
+      const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
       const start = (c.horario || '').split('-')[0].trim()
       const isMorn = isMañana(start)
       ;(c.history || []).forEach(h => {
-        if (mAcc[h.month] !== undefined) {
-          if (isMorn) mAcc[h.month] += h.new || 0
-          else        tAcc[h.month] += h.new || 0
-        }
+        if (mornAcc[h.month] === undefined) return
+        const val = h.new || 0
+        if (isKid) kidsAcc[h.month] += val
+        else if (isMorn) mornAcc[h.month] += val
+        else tardAcc[h.month] += val
       })
     })
-    return mRange.map(m => ({ month: fmtMonth(m), mañana: mAcc[m], tarde: tAcc[m] }))
+    return mRange.map(m => ({ month: fmtMonth(m), niños: kidsAcc[m], mañana: mornAcc[m], tarde: tardAcc[m] }))
   }, [data, mRange])
-
-  const kids  = useMemo(() => data.filter(c => c.edad && c.edad.toLowerCase() !== 'adultos'), [data])
-  const kidsData  = useMemo(() => histByMonth(kids,  mRange), [kids,  mRange])
-  const totalData = useMemo(() => histByMonth(data,  mRange), [data,  mRange])
 
   return (
     <>
@@ -423,31 +430,15 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
       </section>
 
       <section className="sv-section">
-        <h2 className="sv-section-title">Mañanas vs Tardes</h2>
+        <h2 className="sv-section-title">Nuevas inscripciones por mes</h2>
         <MonthlyBarChart
-          data={matData}
+          data={combinedData}
+          stacked
           bars={[
-            { key: 'mañana', label: 'Mañana', color: '#f5c842' },
-            { key: 'tarde',  label: 'Tarde',  color: '#60a5fa' },
+            { key: 'niños',  label: 'Niños',          color: '#34d399' },
+            { key: 'mañana', label: 'Mañanas adultos', color: '#f5c842' },
+            { key: 'tarde',  label: 'Tardes adultos',  color: '#60a5fa' },
           ]}
-        />
-      </section>
-
-      {kids.length > 0 && (
-        <section className="sv-section">
-          <h2 className="sv-section-title">Niños</h2>
-          <MonthlyBarChart
-            data={kidsData}
-            bars={[{ key: 'nuevos', label: 'Nuevas inscripciones', color: '#34d399' }]}
-          />
-        </section>
-      )}
-
-      <section className="sv-section">
-        <h2 className="sv-section-title">Total usuarios</h2>
-        <MonthlyBarChart
-          data={totalData}
-          bars={[{ key: 'nuevos', label: 'Nuevas inscripciones', color: '#34d399' }]}
         />
       </section>
     </>

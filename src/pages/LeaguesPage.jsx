@@ -13,21 +13,7 @@ const TIER_META = {
   6: { color: '#ef4444', emoji: '💎' },
 }
 
-const ZONE_META = {
-  promotion: { label: 'Zona ascenso',    color: '#22c55e', dot: '🟢' },
-  stay:      { label: 'Zona permanencia', color: '#888',    dot: '⚪' },
-  demotion:  { label: 'Zona descenso',   color: '#ef4444', dot: '🔴' },
-}
-
-function ZoneSeparator({ label, color }) {
-  return (
-    <div className="league-zone-sep" style={{ borderColor: color }}>
-      <span style={{ color }}>{label}</span>
-    </div>
-  )
-}
-
-function MemberRow({ member, isZoneStart, zone }) {
+function MemberRow({ member }) {
   const rowRef = useRef(null)
   useEffect(() => {
     if (member.isMe && rowRef.current) {
@@ -36,30 +22,24 @@ function MemberRow({ member, isZoneStart, zone }) {
   }, [member.isMe])
 
   return (
-    <>
-      {isZoneStart && <ZoneSeparator label={ZONE_META[zone].label} color={ZONE_META[zone].color} />}
-      <div
-        ref={rowRef}
-        className={`league-member${member.isMe ? ' league-member--me' : ''}`}
-      >
-        <span className="league-member__rank">#{member.rank}</span>
-        <UserAvatar
-          size="xs"
-          avatarType={member.avatarType || ''}
-          avatarData={member.avatarData || {}}
-          nickname={member.nickname || ''}
-          name={member.name || ''}
-          isMe={member.isMe}
-          showNickname
-          nicknameStyle="right"
-          className="league-member__avatar"
-        />
-        <span className="league-member__zone-dot" title={ZONE_META[member.zone]?.label}>
-          {ZONE_META[member.zone]?.dot}
-        </span>
-        <span className="league-member__pts">{member.totalPoints} pts</span>
-      </div>
-    </>
+    <div
+      ref={rowRef}
+      className={`league-member${member.isMe ? ' league-member--me' : ''}`}
+    >
+      <span className="league-member__rank">#{member.rank}</span>
+      <UserAvatar
+        size="xs"
+        avatarType={member.avatarType || ''}
+        avatarData={member.avatarData || {}}
+        nickname={member.nickname || ''}
+        name={member.name || ''}
+        isMe={member.isMe}
+        showNickname
+        nicknameStyle="right"
+        className="league-member__avatar"
+      />
+      <span className="league-member__pts">{member.totalPoints} pts</span>
+    </div>
   )
 }
 
@@ -93,14 +73,6 @@ export default function LeaguesPage() {
 
   const meta = TIER_META[myLeague.tier] || TIER_META[1]
 
-  // Build leaderboard with zone separators
-  const zones = ['promotion', 'stay', 'demotion']
-  const zoneStarts = new Set()
-  zones.forEach(z => {
-    const first = leaderboard.find(m => m.zone === z)
-    if (first) zoneStarts.add(first.rank)
-  })
-
   return (
     <div className="league-page">
       {/* Promotion / demotion dialogs */}
@@ -115,9 +87,6 @@ export default function LeaguesPage() {
           <div className="league-header__name" style={{ color: meta.color }}>{myLeague.name}</div>
           <div className="league-header__stats">
             Puesto <strong>#{myLeague.rank}</strong> · {myLeague.totalPoints} pts
-            <span className="league-header__zone" style={{ color: ZONE_META[myLeague.zone]?.color }}>
-              {' '}{ZONE_META[myLeague.zone]?.dot} {ZONE_META[myLeague.zone]?.label}
-            </span>
           </div>
         </div>
       </div>
@@ -128,8 +97,6 @@ export default function LeaguesPage() {
           <MemberRow
             key={member.userId}
             member={member}
-            isZoneStart={zoneStarts.has(member.rank)}
-            zone={member.zone}
           />
         ))}
         {leaderboard.length === 0 && (
