@@ -270,8 +270,8 @@ const TEACHER_CLASSES = {
     ['jueves','14:00'],['jueves','16:30'],['jueves','18:00'],['jueves','19:30'],
   ],
   Sigurd: [
-    ['martes','17:30'],['martes','19:00'],['martes','20:30'],
-    ['jueves','17:30'],['jueves','19:00'],['jueves','20:30'],
+    ['martes','17:30','adultos'],['martes','19:00'],['martes','20:30'],
+    ['jueves','17:30','adultos'],['jueves','19:00'],['jueves','20:30'],
   ],
   'Lucía': [
     ['lunes','17:30'],['lunes','19:00'],
@@ -287,8 +287,9 @@ const TEACHER_CLASSES = {
     ['viernes','19:00'],
   ],
   Eva: [
-    ['martes','17:30'],['martes','18:30'],
-    ['jueves','17:30'],['jueves','18:30'],
+    ['martes','17:30','menor'],['martes','18:30'],
+    ['jueves','17:30','menor'],['jueves','18:30'],
+    ['viernes','18:00'],['viernes','19:00'],
   ],
 }
 
@@ -296,7 +297,10 @@ function classMatchesTeacher(c, teacher) {
   const slots = TEACHER_CLASSES[teacher] || []
   const start = (c.horario || '').split('-')[0].trim()
   const dias  = normStr(c.dia || '').split(/[-\s]+/).filter(Boolean)
-  return slots.some(([d, t]) => dias.includes(d) && t === start)
+  const edad  = normStr(c.edad || '')
+  return slots.some(([d, t, e]) =>
+    dias.includes(d) && t === start && (!e || edad.includes(normStr(e)))
+  )
 }
 
 function classLabel(c) {
