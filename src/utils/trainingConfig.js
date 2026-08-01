@@ -1,4 +1,5 @@
 const LS_KEY = 'blokes_ctrl_tests'
+const CONFIG_VERSION = 3  // bump para invalidar localStorage y aplicar nuevos defaults
 
 export const INITIAL_TESTS = [
   { id: 14, name: 'Puente glúteo',       unit: 'reps',   zone: 'lower'   },
@@ -24,31 +25,34 @@ function load() {
 
 function persist(data) {
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(data))
+    localStorage.setItem(LS_KEY, JSON.stringify({ ...data, version: CONFIG_VERSION }))
     window.dispatchEvent(new Event('blokes:tests-updated'))
   } catch {}
 }
 
 const INITIAL_MOCK_VALUES = {
   // ── Tren inferior ──────────────────────────────────────────
-  14: 25,   // Puente glúteo       — ref 25 reps  (accesible, nivel bajo)
-  2:  14,   // Sentadilla en silla — ref 14 reps  (comunidad marketing)
-  9:  8,    // Rodillas al pecho   — ref 8 reps
-  10: 110,  // Apertura caderas    — ref 110 cm
-  11: 6,    // Flex. frontal       — ref 6 cm de suelo
-  12: 75,   // Grant Foot Raise    — ref 75 cm
+  14: 25,    // Puente glúteo       — ref 25 reps
+  2:  14.1,  // Sentadilla en silla — ref 14.1 reps
+  9:  8,     // Rodillas al pecho   — ref 8 reps
+  10: 110,   // Apertura caderas    — ref 110 cm
+  11: 6,     // Flex. frontal       — ref 6 cm de suelo
+  12: 75,    // Grant Foot Raise    — ref 75 cm
   // ── Tren superior ──────────────────────────────────────────
-  3:  4,    // Dominadas           — ref 4 reps   (comunidad marketing)
-  4:  16,   // Flexiones           — ref 16 reps
-  7:  45,   // Campus              — ref 45 cm
-  8:  65,   // Ángulo pared        — ref 65°
+  3:  3.5,   // Dominadas           — ref 3.5 reps
+  4:  16,    // Flexiones           — ref 16 reps
+  7:  45,    // Campus              — ref 45 cm
+  8:  65,    // Ángulo pared        — ref 65°
   // ── Dedos ──────────────────────────────────────────────────
-  5:  4,    // Resis. Flex. Prof.  — ref 4 series (7s on/3s off, 20mm)
-  6:  24,   // Kg Máx dedos        — ref 24 kg    (comunidad marketing)
+  5:  4,     // Resis. Flex. Prof.  — ref 4 series
+  6:  24,    // Kg Máx dedos        — ref 24 kg
 }
 
+const INITIAL_CONFIG = { version: CONFIG_VERSION, tests: INITIAL_TESTS, mockValues: INITIAL_MOCK_VALUES }
+
 export function getConfig() {
-  return load() || { tests: INITIAL_TESTS, mockValues: INITIAL_MOCK_VALUES }
+  const stored = load()
+  return (stored?.version === CONFIG_VERSION) ? stored : INITIAL_CONFIG
 }
 
 export function saveTests(tests) {
@@ -68,15 +72,32 @@ export function clearMockValue(testId) {
   persist({ ...config, mockValues })
 }
 
-function generateMockMonths(referenceValue) {
+// Patrones de variación: fracción del valor de referencia aplicada sobre la tendencia lineal
+// El último elemento es siempre 0 para que el mes final aterrice en el valor de referencia
+const JITTER = {
+  A: [ 0.00, -0.04,  0.03, -0.02,  0.01,  0.00],
+  B: [ 0.00,  0.03, -0.05,  0.02,  0.01,  0.00],
+  C: [ 0.00, -0.02,  0.04, -0.03,  0.02,  0.00],
+  D: [ 0.00,  0.02, -0.03,  0.04, -0.01,  0.00],
+}
+const JITTER_KEY = {
+  14: 'A', 2: 'B',  9: 'C', 10: 'D',
+  11: 'A', 12: 'B', 3: 'C',  4: 'D',
+   7: 'A',  8: 'B', 5: 'C',  6: 'D',
+}
+
+function generateMockMonths(testId, referenceValue) {
   const now = new Date()
   const months = Array.from({ length: 6 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1)
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   })
   const start = referenceValue * 0.88
+  const pattern = JITTER[JITTER_KEY[testId] || 'A']
   return Object.fromEntries(months.map((m, i) => {
-    const val = Math.round((start + (referenceValue - start) * (i / 5)) * 10) / 10
+    const trend  = start + (referenceValue - start) * (i / 5)
+    const jitter = referenceValue * (pattern[i] ?? 0)
+    const val    = Math.round((trend + jitter) * 10) / 10
     return [m, { avg_kg: val }]
   }))
 }
@@ -85,7 +106,7 @@ export function getMockCommunityData() {
   const { mockValues } = getConfig()
   const result = {}
   Object.entries(mockValues).forEach(([tid, val]) => {
-    if (val != null) result[tid] = generateMockMonths(val)
+    if (val != null) result[Number(tid)] = generateMockMonths(Number(tid), val)
   })
   return result
 }
