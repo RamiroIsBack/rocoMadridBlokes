@@ -340,6 +340,126 @@
 .sv-soon__text   { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: #34d399; margin: 0 0 12px; }
 .sv-soon__detail { font-size: 0.78rem; color: #444; margin: 0; }
 
+/* ── CTRL Training Tests ── */
+.sv-ctrl-tests { padding: 4px 0 40px; }
+
+.sv-tests-scroll { overflow-x: auto; margin-bottom: 16px; }
+
+.sv-tests-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.sv-tests-table th {
+  text-align: left;
+  padding: 6px 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #666;
+  border-bottom: 1px solid #2a2015;
+  white-space: nowrap;
+}
+.sv-tests-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid #1a1a0f;
+  vertical-align: middle;
+}
+.sv-tests-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+.sv-tests-input {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 0.78rem;
+  padding: 4px 7px;
+  width: 160px;
+  font-family: inherit;
+}
+.sv-tests-input--unit { width: 70px; }
+.sv-tests-input--num  { width: 80px; }
+.sv-tests-input:focus { outline: none; border-color: #34d399; }
+
+.sv-tests-select {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 0.78rem;
+  padding: 4px 6px;
+  font-family: inherit;
+}
+.sv-tests-select:focus { outline: none; border-color: #34d399; }
+
+.sv-tests-mock-cell { white-space: nowrap; }
+.sv-tests-mock-val  { color: #34d399; font-size: 0.78rem; margin-right: 4px; }
+.sv-tests-none      { color: #444; }
+
+.sv-tests-clear {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0 2px;
+  line-height: 1;
+}
+.sv-tests-clear:hover { color: #f87171; }
+
+.sv-tests-apply {
+  background: #1a3a1a;
+  border: 1px solid #2d5a2d;
+  color: #34d399;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+}
+.sv-tests-apply:hover:not(:disabled) { background: #234a23; }
+.sv-tests-apply:disabled { opacity: 0.35; cursor: default; }
+
+.sv-tests-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.sv-tests-add {
+  background: none;
+  border: 1px dashed #444;
+  color: #888;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.sv-tests-add:hover { border-color: #34d399; color: #34d399; }
+
+.sv-tests-save {
+  background: #1a3a1a;
+  border: 1px solid #2d5a2d;
+  color: #34d399;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 16px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.sv-tests-save:hover { background: #234a23; }
+
+.sv-tests-feedback {
+  font-size: 0.75rem;
+  color: #34d399;
+}
+
 /* ── Fichaje embed ── */
 .sv-embed-wrap {
   width: 100%;

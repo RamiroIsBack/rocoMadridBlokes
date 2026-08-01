@@ -4,6 +4,7 @@ import {
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import { useClasses } from '../hooks/useSuperAdmin'
+import { getConfig, saveTests, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import './SupervisionPage.css'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -659,6 +660,142 @@ function ClasesTab() {
   )
 }
 
+// ─── CTRL Training Tests ──────────────────────────────────────────────────────
+
+function CtrlTestsTab() {
+  const [config, setConfig]     = useState(() => getConfig())
+  const [mockInputs, setMockInputs] = useState({})
+  const [feedback, setFeedback] = useState('')
+
+  function flash(msg) {
+    setFeedback(msg)
+    setTimeout(() => setFeedback(''), 2200)
+  }
+
+  function handleTestChange(index, field, value) {
+    setConfig(prev => ({
+      ...prev,
+      tests: prev.tests.map((t, i) => i === index ? { ...t, [field]: value } : t),
+    }))
+  }
+
+  function handleSaveTests() {
+    saveTests(config.tests)
+    setConfig(getConfig())
+    flash('✓ Nombres guardados')
+  }
+
+  function handleAddTest() {
+    const newId = Date.now()
+    setConfig(prev => ({
+      ...prev,
+      tests: [...prev.tests, { id: newId, name: '', unit: 'reps', zone: 'lower' }],
+    }))
+  }
+
+  function handleApplyMock(testId) {
+    const val = parseFloat(mockInputs[testId])
+    if (isNaN(val) || val <= 0) return
+    setMockValue(testId, val)
+    setMockInputs(prev => ({ ...prev, [testId]: '' }))
+    setConfig(getConfig())
+    flash('✓ Mock aplicado — el chart se actualiza al recargar')
+  }
+
+  function handleClearMock(testId) {
+    clearMockValue(testId)
+    setConfig(getConfig())
+    flash('✓ Mock eliminado')
+  }
+
+  return (
+    <div className="sv-ctrl-tests">
+      <h2 className="sv-section-title">Tests de entrenamiento</h2>
+      <p className="sv-note">Edita nombre, unidad y zona. "Aplicar" genera datos de comunidad para los últimos 6 meses a partir del valor de referencia.</p>
+
+      <div className="sv-tests-scroll">
+        <table className="sv-tests-table">
+          <thead>
+            <tr>
+              <th>Nombre</th>
+              <th>Unidad</th>
+              <th>Zona</th>
+              <th>Mock activo</th>
+              <th>Nuevo valor ref.</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {config.tests.map((t, i) => (
+              <tr key={t.id}>
+                <td>
+                  <input
+                    className="sv-tests-input"
+                    value={t.name}
+                    onChange={e => handleTestChange(i, 'name', e.target.value)}
+                  />
+                </td>
+                <td>
+                  <input
+                    className="sv-tests-input sv-tests-input--unit"
+                    value={t.unit}
+                    onChange={e => handleTestChange(i, 'unit', e.target.value)}
+                  />
+                </td>
+                <td>
+                  <select
+                    className="sv-tests-select"
+                    value={t.zone}
+                    onChange={e => handleTestChange(i, 'zone', e.target.value)}
+                  >
+                    <option value="lower">Inferior</option>
+                    <option value="upper">Superior</option>
+                    <option value="fingers">Dedos</option>
+                  </select>
+                </td>
+                <td className="sv-tests-mock-cell">
+                  {config.mockValues[t.id] != null ? (
+                    <>
+                      <span className="sv-tests-mock-val">{config.mockValues[t.id]} {t.unit}</span>
+                      <button className="sv-tests-clear" onClick={() => handleClearMock(t.id)} title="Eliminar mock">×</button>
+                    </>
+                  ) : (
+                    <span className="sv-tests-none">—</span>
+                  )}
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    className="sv-tests-input sv-tests-input--num"
+                    value={mockInputs[t.id] || ''}
+                    onChange={e => setMockInputs(prev => ({ ...prev, [t.id]: e.target.value }))}
+                    placeholder="ej. 12"
+                  />
+                </td>
+                <td>
+                  <button
+                    className="sv-tests-apply"
+                    disabled={!mockInputs[t.id]}
+                    onClick={() => handleApplyMock(t.id)}
+                  >Aplicar</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="sv-tests-actions">
+        <button className="sv-tests-add" onClick={handleAddTest}>+ Añadir test</button>
+        <button className="sv-tests-save" onClick={handleSaveTests}>Guardar nombres/unidades</button>
+        {feedback && <span className="sv-tests-feedback">{feedback}</span>}
+      </div>
+    </div>
+  )
+}
+
 // ─── Coming soon ──────────────────────────────────────────────────────────────
 
 function ComingSoon({ name, detail }) {
@@ -678,8 +815,9 @@ export default function SupervisionPage() {
   const canAccess     = ['gestion', 'socio'].includes(role)
 
   const TABS = [
-    { id: 'excelmuerte', label: 'ExcelMuerte'  },
-    { id: 'ctrlfichaje', label: 'CTRL Fichaje' },
+    { id: 'excelmuerte', label: 'ExcelMuerte'   },
+    { id: 'ctrltests',   label: 'Tests'          },
+    { id: 'ctrlfichaje', label: 'CTRL Fichaje'  },
     { id: 'timeoff',     label: 'CTRL Time Off' },
   ]
 
@@ -709,6 +847,7 @@ export default function SupervisionPage() {
       </div>
 
       {tab === 'excelmuerte' && <ClasesTab />}
+      {tab === 'ctrltests'   && <CtrlTestsTab />}
       {tab === 'ctrlfichaje' && <ComingSoon name="CTRL Fichaje" detail="Control de fichajes, horas y seguimiento mensual del equipo" />}
       {tab === 'timeoff'     && <ComingSoon name="Time Off"    detail="Gestión de vacaciones y ausencias" />}
     </div>

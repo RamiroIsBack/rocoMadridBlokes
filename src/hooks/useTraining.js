@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { MOCK_COMMUNITY_AVG } from '../utils/mockTrainingData'
+import { getMockCommunityData } from '../utils/trainingConfig'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 
@@ -9,7 +9,13 @@ function getAuthHeaders() {
 }
 
 export function useTrainingSummary() {
-  const [summary, setSummary] = useState(MOCK_COMMUNITY_AVG)
+  const [summary, setSummary] = useState(() => getMockCommunityData())
+
+  useEffect(() => {
+    const refresh = () => setSummary(getMockCommunityData())
+    window.addEventListener('blokes:tests-updated', refresh)
+    return () => window.removeEventListener('blokes:tests-updated', refresh)
+  }, [])
 
   useEffect(() => {
     fetch(`${CLUB_URL}/wp-json/progreso/v1/training/summary`, {
@@ -19,9 +25,10 @@ export function useTrainingSummary() {
       .then(r => r.ok ? r.json() : null)
       .then(json => {
         if (!json?.data?.tests) return
-        const merged = { ...MOCK_COMMUNITY_AVG }
+        const mock = getMockCommunityData()
+        const merged = { ...mock }
         Object.entries(json.data.tests).forEach(([tid, months]) => {
-          merged[tid] = { ...(MOCK_COMMUNITY_AVG[tid] || {}), ...months }
+          merged[tid] = { ...(mock[tid] || {}), ...months }
         })
         setSummary(merged)
       })

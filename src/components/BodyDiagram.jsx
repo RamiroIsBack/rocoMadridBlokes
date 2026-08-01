@@ -1,25 +1,30 @@
+import { getConfig, INITIAL_TESTS } from '../utils/trainingConfig'
 import './BodyDiagram.css'
 
-export const ZONES = {
-  lower:   { label: 'Tren inferior', color: '#3b82f6', tests: [2, 9, 10, 11, 12] },
-  upper:   { label: 'Tren superior', color: '#f97316', tests: [3, 4, 7, 8] },
-  fingers: { label: 'Dedos',         color: '#a855f7', tests: [5, 6, 13] },
+function buildFromConfig() {
+  const { tests } = getConfig()
+  const zones = {
+    lower:   { label: 'Tren inferior', color: '#3b82f6', tests: [] },
+    upper:   { label: 'Tren superior', color: '#f97316', tests: [] },
+    fingers: { label: 'Dedos',         color: '#a855f7', tests: [] },
+  }
+  const testsMap = {}
+  tests.forEach(t => {
+    if (zones[t.zone]) zones[t.zone].tests.push(t.id)
+    testsMap[t.id] = { zone: t.zone, label: t.name, unit: t.unit, desc: '' }
+  })
+  return { zones, testsMap }
 }
 
-export const TESTS = {
-  2:  { zone: 'lower',   label: 'Sentadilla en silla',  unit: 'reps',   desc: 'Nº máximas repeticiones en 30 seg con brazos cruzados en hombros.' },
-  9:  { zone: 'lower',   label: 'Rodillas al pecho',    unit: 'reps',   desc: 'Nº repeticiones colgados en barra subir piernas hasta 90°.' },
-  10: { zone: 'lower',   label: 'Apertura caderas',     unit: 'cm',     desc: 'De pie piernas abiertas al máximo. Medimos distancia entre pies.' },
-  11: { zone: 'lower',   label: 'Flex. frontal',        unit: 'cm',     desc: 'Piernas estiradas y tocar con manos el suelo. Medimos de cóndilo ext. codo a suelo.' },
-  12: { zone: 'lower',   label: 'Grant Foot Raise',     unit: 'cm',     desc: 'De pie mirando pared, pies separados, palmas apoyadas en pared a la altura de hombros. Subimos pie por la pared tocando con los dedos. 3 intentos, medimos distancia al suelo en el mejor.' },
-  3:  { zone: 'upper',   label: 'Dominadas',            unit: 'reps',   desc: 'Nº máximas repeticiones.' },
-  4:  { zone: 'upper',   label: 'Flexiones',            unit: 'reps',   desc: 'Nº máximas repeticiones tocando el suelo con el pecho.' },
-  7:  { zone: 'upper',   label: 'Campus',               unit: 'cm',     desc: '3 intentos, marcar la altura máxima con ambas manos.' },
-  8:  { zone: 'upper',   label: 'Ángel pared',          unit: 'cm',     desc: 'Sentadilla en pared con piernas en 90°, toda la espalda apoyada. Codos en pared en 90°. Llevar muñecas a la pared sin despegar la espalda; subir manos hacia el techo hasta donde se pueda. Medimos cóndilo codo al suelo.' },
-  5:  { zone: 'fingers', label: 'Resis. Flex. Prof.',   unit: 'series', desc: 'Nº series completadas en 7 seg. Suspensión, 3 seg descanso. Regleta 20mm.' },
-  6:  { zone: 'fingers', label: 'Kg Máx Der.',          unit: 'kg',     desc: 'En posición caballero (rodilla derecha en suelo y otra levantada) medimos fuerza máxima de brazo derecho.' },
-  13: { zone: 'fingers', label: 'Kg Máx Izq.',          unit: 'kg',     desc: 'En posición caballero (rodilla izquierda en suelo y otra levantada) medimos fuerza máxima de brazo izquierdo.' },
-}
+const { zones: ZONES_INITIAL, testsMap: TESTS_INITIAL } = buildFromConfig()
+export let ZONES = ZONES_INITIAL
+export let TESTS = TESTS_INITIAL
+
+window.addEventListener('blokes:tests-updated', () => {
+  const { zones, testsMap } = buildFromConfig()
+  Object.assign(ZONES, zones)
+  Object.assign(TESTS, testsMap)
+})
 
 const BODY_IMG = {
   lower:   'https://rocomadrid.com/wp-content/uploads/2026/05/cuerpo-inferior.png',
