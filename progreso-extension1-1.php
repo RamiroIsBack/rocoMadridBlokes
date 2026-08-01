@@ -499,6 +499,12 @@ add_action('rest_api_init', function() {
         'permission_callback' => '__return_true',
     ));
 
+    register_rest_route('progreso/v1', '/training/me', array(
+        'methods'             => 'GET',
+        'callback'            => 'progreso_get_training_me',
+        'permission_callback' => 'is_user_logged_in',
+    ));
+
     register_rest_route('progreso/v1', '/training/(?P<user_id>\d+)', array(
         'methods'             => 'GET',
         'callback'            => 'progreso_get_training',
@@ -1334,6 +1340,27 @@ function progreso_log_training($request) {
     ), array('%d', '%d', '%f', '%s', '%d'));
     if (!$ok) return new WP_Error('db_error', 'Error al guardar.', array('status' => 500));
     return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
+}
+
+function progreso_get_training_me() {
+    global $wpdb;
+    progreso_ensure_training_table();
+    $user_id = get_current_user_id();
+    $rows    = $wpdb->get_results($wpdb->prepare(
+        'SELECT id, test_id, value_kg, logged_at FROM ' . progreso_training_table() .
+        ' WHERE user_id = %d ORDER BY test_id ASC, logged_at ASC',
+        $user_id
+    ), ARRAY_A);
+    $by_test = array();
+    foreach ($rows as $row) {
+        $tid = intval($row['test_id']);
+        $by_test[$tid][] = array(
+            'id'        => intval($row['id']),
+            'value_kg'  => floatval($row['value_kg']),
+            'logged_at' => $row['logged_at'],
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array('user_id' => $user_id, 'tests' => $by_test)));
 }
 
 function progreso_get_training($request) {
