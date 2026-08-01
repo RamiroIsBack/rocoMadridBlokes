@@ -520,6 +520,22 @@ add_action('rest_api_init', function() {
         ),
     ));
 
+    register_rest_route('progreso/v1', '/training/entry/(?P<id>\d+)', array(
+        'methods'             => 'DELETE',
+        'callback'            => 'progreso_delete_training_entry',
+        'permission_callback' => function() {
+            return blokes_can_supervise();
+        },
+    ));
+
+    register_rest_route('progreso/v1', '/training/all', array(
+        'methods'             => 'DELETE',
+        'callback'            => 'progreso_delete_all_training',
+        'permission_callback' => function() {
+            return blokes_can_supervise();
+        },
+    ));
+
     register_rest_route('progreso/v1', '/training/class-progress', array(
         'methods'             => 'GET',
         'callback'            => 'progreso_get_class_progress',
@@ -1376,6 +1392,25 @@ function progreso_update_training($request) {
     );
 
     return rest_ensure_response(array('success' => true, 'id' => $entry_id, 'value_kg' => $value_kg));
+}
+
+function progreso_delete_training_entry($request) {
+    global $wpdb;
+    $id  = intval($request['id']);
+    $row = $wpdb->get_row($wpdb->prepare(
+        'SELECT id FROM ' . progreso_training_table() . ' WHERE id = %d', $id
+    ));
+    if (!$row) {
+        return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
+    }
+    $wpdb->delete(progreso_training_table(), array('id' => $id), array('%d'));
+    return rest_ensure_response(array('success' => true, 'deleted_id' => $id));
+}
+
+function progreso_delete_all_training() {
+    global $wpdb;
+    $wpdb->query('TRUNCATE TABLE ' . progreso_training_table());
+    return rest_ensure_response(array('success' => true, 'message' => 'Todos los registros de entrenamiento eliminados'));
 }
 
 function progreso_training_summary() {

@@ -662,14 +662,42 @@ function ClasesTab() {
 
 // ─── CTRL Training Tests ──────────────────────────────────────────────────────
 
+const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
+
+function getTrainingHeaders() {
+  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
+  return nonce ? { 'X-WP-Nonce': nonce } : {}
+}
+
 function CtrlTestsTab() {
-  const [config, setConfig]     = useState(() => getConfig())
+  const [config, setConfig]       = useState(() => getConfig())
   const [mockInputs, setMockInputs] = useState({})
-  const [feedback, setFeedback] = useState('')
+  const [feedback, setFeedback]   = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [clearing, setClearing]   = useState(false)
 
   function flash(msg) {
     setFeedback(msg)
-    setTimeout(() => setFeedback(''), 2200)
+    setTimeout(() => setFeedback(''), 2800)
+  }
+
+  async function handleClearAllDB() {
+    setClearing(true)
+    setConfirmClear(false)
+    try {
+      const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/training/all`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: getTrainingHeaders(),
+      })
+      const json = await res.json()
+      if (res.ok) flash('✓ BD vaciada — el mock es ahora la única fuente')
+      else flash(`✗ Error: ${json.message || res.status}`)
+    } catch (e) {
+      flash(`✗ Error de red: ${e.message}`)
+    } finally {
+      setClearing(false)
+    }
   }
 
   function handleTestChange(index, field, value) {
@@ -790,6 +818,16 @@ function CtrlTestsTab() {
       <div className="sv-tests-actions">
         <button className="sv-tests-add" onClick={handleAddTest}>+ Añadir test</button>
         <button className="sv-tests-save" onClick={handleSaveTests}>Guardar nombres/unidades</button>
+        {!confirmClear
+          ? <button className="sv-tests-danger" onClick={() => setConfirmClear(true)}>Vaciar BD tests</button>
+          : <>
+              <span className="sv-tests-confirm-msg">¿Seguro? Borra todos los registros</span>
+              <button className="sv-tests-danger sv-tests-danger--confirm" onClick={handleClearAllDB} disabled={clearing}>
+                {clearing ? 'Borrando…' : 'Sí, borrar todo'}
+              </button>
+              <button className="sv-tests-cancel" onClick={() => setConfirmClear(false)}>Cancelar</button>
+            </>
+        }
         {feedback && <span className="sv-tests-feedback">{feedback}</span>}
       </div>
     </div>
