@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { MOCK_COMMUNITY_AVG } from '../utils/mockTrainingData'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 
@@ -8,7 +9,7 @@ function getAuthHeaders() {
 }
 
 export function useTrainingSummary() {
-  const [summary, setSummary] = useState({})
+  const [summary, setSummary] = useState(MOCK_COMMUNITY_AVG)
 
   useEffect(() => {
     fetch(`${CLUB_URL}/wp-json/progreso/v1/training/summary`, {
@@ -16,7 +17,14 @@ export function useTrainingSummary() {
       headers: getAuthHeaders(),
     })
       .then(r => r.ok ? r.json() : null)
-      .then(json => { if (json?.data?.tests) setSummary(json.data.tests) })
+      .then(json => {
+        if (!json?.data?.tests) return
+        const merged = { ...MOCK_COMMUNITY_AVG }
+        Object.entries(json.data.tests).forEach(([tid, months]) => {
+          merged[tid] = { ...(MOCK_COMMUNITY_AVG[tid] || {}), ...months }
+        })
+        setSummary(merged)
+      })
       .catch(() => {})
   }, [])
 
