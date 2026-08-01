@@ -4,7 +4,7 @@ import {
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import { useClasses } from '../hooks/useSuperAdmin'
-import { getConfig, saveTests, setMockValue, clearMockValue } from '../utils/trainingConfig'
+import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import './SupervisionPage.css'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -707,10 +707,12 @@ function CtrlTestsTab() {
     }))
   }
 
-  function handleSaveTests() {
+  async function handleSaveTests() {
     saveTests(config.tests)
     setConfig(getConfig())
-    flash('✓ Nombres guardados')
+    flash('Guardando...')
+    const ok = await saveTestsToServer(config.tests)
+    flash(ok ? '✓ Guardado en servidor' : '✓ Local (sin acceso al servidor)')
   }
 
   function handleAddTest() {

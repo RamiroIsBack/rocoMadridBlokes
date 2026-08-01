@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getMockCommunityData } from '../utils/trainingConfig'
+import { getMockCommunityData, syncTestsFromServer } from '../utils/trainingConfig'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 
@@ -10,6 +10,10 @@ function getAuthHeaders() {
 
 export function useTrainingSummary() {
   const [summary, setSummary] = useState(() => getMockCommunityData())
+
+  useEffect(() => {
+    syncTestsFromServer()
+  }, [])
 
   useEffect(() => {
     const refresh = () => setSummary(getMockCommunityData())

@@ -499,6 +499,18 @@ add_action('rest_api_init', function() {
         'permission_callback' => '__return_true',
     ));
 
+    register_rest_route('progreso/v1', '/training/tests', array(
+        'methods'             => 'GET',
+        'callback'            => 'progreso_get_training_tests',
+        'permission_callback' => '__return_true',
+    ));
+
+    register_rest_route('progreso/v1', '/training/tests', array(
+        'methods'             => 'PUT',
+        'callback'            => 'progreso_save_training_tests',
+        'permission_callback' => function() { return blokes_can_supervise(); },
+    ));
+
     register_rest_route('progreso/v1', '/training/me', array(
         'methods'             => 'GET',
         'callback'            => 'progreso_get_training_me',
@@ -1340,6 +1352,45 @@ function progreso_log_training($request) {
     ), array('%d', '%d', '%f', '%s', '%d'));
     if (!$ok) return new WP_Error('db_error', 'Error al guardar.', array('status' => 500));
     return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
+}
+
+function progreso_get_training_tests() {
+    $default = array(
+        array('id' => 14, 'name' => 'Puente glúteo',       'unit' => 'reps',   'zone' => 'lower'),
+        array('id' => 2,  'name' => 'Sentadilla en silla', 'unit' => 'reps',   'zone' => 'lower'),
+        array('id' => 9,  'name' => 'Rodillas al pecho',   'unit' => 'reps',   'zone' => 'lower'),
+        array('id' => 10, 'name' => 'Apertura caderas',    'unit' => 'cm',     'zone' => 'lower'),
+        array('id' => 11, 'name' => 'Flex. frontal',       'unit' => 'cm',     'zone' => 'lower'),
+        array('id' => 12, 'name' => 'Grant Foot Raise',    'unit' => 'cm',     'zone' => 'lower'),
+        array('id' => 3,  'name' => 'Dominadas',           'unit' => 'reps',   'zone' => 'upper'),
+        array('id' => 4,  'name' => 'Flexiones',           'unit' => 'reps',   'zone' => 'upper'),
+        array('id' => 7,  'name' => 'Campus',              'unit' => 'cm',     'zone' => 'upper'),
+        array('id' => 8,  'name' => 'Ángulo pared',        'unit' => '°',      'zone' => 'upper'),
+        array('id' => 5,  'name' => 'Resis. Flex. Prof.',  'unit' => 'series', 'zone' => 'fingers'),
+        array('id' => 6,  'name' => 'Kg Máx dedos',        'unit' => 'kg',     'zone' => 'fingers'),
+    );
+    $stored = get_option('blokes_training_tests', null);
+    $tests  = ($stored !== null && is_array($stored)) ? $stored : $default;
+    return rest_ensure_response(array('success' => true, 'data' => array('tests' => $tests)));
+}
+
+function progreso_save_training_tests($request) {
+    $tests = $request->get_param('tests');
+    if (!is_array($tests)) {
+        return new WP_Error('invalid_data', 'El parámetro tests debe ser un array.', array('status' => 400));
+    }
+    $sanitized = array();
+    foreach ($tests as $t) {
+        if (!isset($t['id'], $t['name'], $t['unit'], $t['zone'])) continue;
+        $sanitized[] = array(
+            'id'   => intval($t['id']),
+            'name' => sanitize_text_field($t['name']),
+            'unit' => sanitize_text_field($t['unit']),
+            'zone' => sanitize_text_field($t['zone']),
+        );
+    }
+    update_option('blokes_training_tests', $sanitized, false);
+    return rest_ensure_response(array('success' => true, 'data' => array('tests' => $sanitized)));
 }
 
 function progreso_get_training_me() {

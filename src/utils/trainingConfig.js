@@ -1,3 +1,11 @@
+const CLUB_URL = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_CLUB_WORDPRESS_URL) || 'https://rocomadrid.com/club'
+const TESTS_API = `${CLUB_URL}/wp-json/progreso/v1/training/tests`
+
+function getAuthHeaders() {
+  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
+  return nonce ? { 'X-WP-Nonce': nonce } : {}
+}
+
 const LS_KEY = 'blokes_ctrl_tests'
 const CONFIG_VERSION = 3  // bump para invalidar localStorage y aplicar nuevos defaults
 
@@ -100,6 +108,31 @@ function generateMockMonths(testId, referenceValue) {
     const val    = Math.round((trend + jitter) * 10) / 10
     return [m, { avg_kg: val }]
   }))
+}
+
+// Sync test catalog from server — call on app boot; updates localStorage if server differs
+export async function syncTestsFromServer() {
+  try {
+    const res = await fetch(TESTS_API)
+    if (!res.ok) return
+    const json = await res.json()
+    if (!Array.isArray(json?.data?.tests)) return
+    const config = getConfig()
+    persist({ ...config, tests: json.data.tests })
+  } catch {}
+}
+
+// Save test catalog to server — supervisor only
+export async function saveTestsToServer(tests) {
+  try {
+    const res = await fetch(TESTS_API, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tests }),
+    })
+    return res.ok
+  } catch { return false }
 }
 
 export function getMockCommunityData() {
