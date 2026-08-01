@@ -30,9 +30,21 @@ function persist(data) {
 }
 
 const INITIAL_MOCK_VALUES = {
-  2:  14,   // Sentadilla en silla — ref 14 reps
-  3:  4,    // Dominadas           — ref 4 reps
-  6:  24,   // Kg Máx dedos        — ref 24 kg
+  // ── Tren inferior ──────────────────────────────────────────
+  14: 25,   // Puente glúteo       — ref 25 reps  (accesible, nivel bajo)
+  2:  14,   // Sentadilla en silla — ref 14 reps  (comunidad marketing)
+  9:  8,    // Rodillas al pecho   — ref 8 reps
+  10: 110,  // Apertura caderas    — ref 110 cm
+  11: 6,    // Flex. frontal       — ref 6 cm de suelo
+  12: 75,   // Grant Foot Raise    — ref 75 cm
+  // ── Tren superior ──────────────────────────────────────────
+  3:  4,    // Dominadas           — ref 4 reps   (comunidad marketing)
+  4:  16,   // Flexiones           — ref 16 reps
+  7:  45,   // Campus              — ref 45 cm
+  8:  65,   // Ángulo pared        — ref 65°
+  // ── Dedos ──────────────────────────────────────────────────
+  5:  4,    // Resis. Flex. Prof.  — ref 4 series (7s on/3s off, 20mm)
+  6:  24,   // Kg Máx dedos        — ref 24 kg    (comunidad marketing)
 }
 
 export function getConfig() {
