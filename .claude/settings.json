@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:rocomadrid.com)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(node -e \"const pkg = require\\('./package.json'\\); console.log\\(JSON.stringify\\(pkg.dependencies, null, 2\\)\\)\")",
+      "Bash(node -e \"const c = require\\('./node_modules/@dicebear/collection/dist/index.cjs'\\); console.log\\(Object.keys\\(c\\).join\\('\\\\n'\\)\\)\")",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(npm run build *)",
+      "PowerShell(git push *)",
+      "PowerShell(git commit *)",
+      "PowerShell(git add *)",
+      "PowerShell(git status *)"
+    ]
+  }
+}

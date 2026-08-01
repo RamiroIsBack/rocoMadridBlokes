@@ -29,8 +29,14 @@ function persist(data) {
   } catch {}
 }
 
+const INITIAL_MOCK_VALUES = {
+  2:  14,   // Sentadilla en silla — ref 14 reps
+  3:  4,    // Dominadas           — ref 4 reps
+  6:  24,   // Kg Máx dedos        — ref 24 kg
+}
+
 export function getConfig() {
-  return load() || { tests: INITIAL_TESTS, mockValues: {} }
+  return load() || { tests: INITIAL_TESTS, mockValues: INITIAL_MOCK_VALUES }
 }
 
 export function saveTests(tests) {
