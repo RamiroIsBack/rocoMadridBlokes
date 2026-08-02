@@ -511,6 +511,18 @@ add_action('rest_api_init', function() {
         'permission_callback' => function() { return blokes_can_supervise(); },
     ));
 
+    register_rest_route('progreso/v1', '/training/professors', array(
+        'methods'             => 'GET',
+        'callback'            => 'progreso_get_professors',
+        'permission_callback' => '__return_true',
+    ));
+
+    register_rest_route('progreso/v1', '/training/professors/(?P<slug>[a-z0-9-]+)', array(
+        'methods'             => 'GET',
+        'callback'            => 'progreso_get_professor_detail',
+        'permission_callback' => '__return_true',
+    ));
+
     register_rest_route('progreso/v1', '/training/me', array(
         'methods'             => 'GET',
         'callback'            => 'progreso_get_training_me',
@@ -1456,6 +1468,176 @@ function progreso_save_training_tests($request) {
     )));
 }
 
+// ── Professors ────────────────────────────────────────────────────────────
+
+function progreso_get_professors_config() {
+    $default = array(
+        'alvaro' => array(
+            'email'    => 'alvilu2@hotmail.com',
+            'color'    => '#60a5fa',
+            'role'     => 'Instructor',
+            'schedule' => array(
+                array('day'=>'lunes',     'time'=>'18:00'), array('day'=>'lunes',     'time'=>'19:30'),
+                array('day'=>'martes',    'time'=>'14:00'), array('day'=>'martes',    'time'=>'16:30'),
+                array('day'=>'martes',    'time'=>'18:00'), array('day'=>'martes',    'time'=>'19:30'),
+                array('day'=>'miercoles', 'time'=>'18:00'), array('day'=>'miercoles', 'time'=>'19:30'),
+                array('day'=>'jueves',    'time'=>'14:00'), array('day'=>'jueves',    'time'=>'16:30'),
+                array('day'=>'jueves',    'time'=>'18:00'), array('day'=>'jueves',    'time'=>'19:30'),
+            ),
+        ),
+        'sigurd' => array(
+            'email'    => 'sigurdbaum@yahoo.es',
+            'color'    => '#a78bfa',
+            'role'     => 'Instructor',
+            'schedule' => array(
+                array('day'=>'martes', 'time'=>'17:30'), array('day'=>'martes', 'time'=>'19:00'), array('day'=>'martes', 'time'=>'20:30'),
+                array('day'=>'jueves', 'time'=>'17:30'), array('day'=>'jueves', 'time'=>'19:00'), array('day'=>'jueves', 'time'=>'20:30'),
+            ),
+        ),
+        'lucia' => array(
+            'email'    => 'luciapcaas@gmail.com',
+            'color'    => '#f472b6',
+            'role'     => 'Instructora',
+            'schedule' => array(
+                array('day'=>'lunes',     'time'=>'17:30'), array('day'=>'lunes',     'time'=>'19:00'),
+                array('day'=>'miercoles', 'time'=>'17:30'), array('day'=>'miercoles', 'time'=>'19:00'),
+            ),
+        ),
+        'sara' => array(
+            'email'    => 'sara.coronadosanz@gmail.com',
+            'color'    => '#34d399',
+            'role'     => 'Instructora',
+            'schedule' => array(
+                array('day'=>'martes', 'time'=>'09:00'), array('day'=>'martes', 'time'=>'10:30'), array('day'=>'martes', 'time'=>'12:00'),
+                array('day'=>'jueves', 'time'=>'09:00'), array('day'=>'jueves', 'time'=>'10:30'), array('day'=>'jueves', 'time'=>'12:00'),
+            ),
+        ),
+        'ana' => array(
+            'email'    => 'ana.llorenteg03@gmail.com',
+            'color'    => '#fb923c',
+            'role'     => 'Instructora',
+            'schedule' => array(
+                array('day'=>'lunes',     'time'=>'20:30'),
+                array('day'=>'miercoles', 'time'=>'20:30'),
+                array('day'=>'viernes',   'time'=>'19:00'),
+            ),
+        ),
+        'eva' => array(
+            'email'    => 'rocomadridgestion@gmail.com',
+            'color'    => '#f5c842',
+            'role'     => 'Coordinadora',
+            'schedule' => array(
+                array('day'=>'martes', 'time'=>'17:30'), array('day'=>'martes', 'time'=>'18:30'),
+                array('day'=>'jueves', 'time'=>'17:30'), array('day'=>'jueves', 'time'=>'18:30'),
+                array('day'=>'viernes','time'=>'18:00'), array('day'=>'viernes','time'=>'19:00'),
+            ),
+        ),
+    );
+    $stored = get_option('blokes_training_professors', null);
+    return ($stored !== null && is_array($stored)) ? $stored : $default;
+}
+
+function progreso_build_professor_entry($slug, $cfg) {
+    $user  = get_user_by('email', $cfg['email']);
+    $name  = $user ? $user->display_name : ucfirst($slug);
+    $photo = $user ? get_avatar_url($user->ID, array('size' => 400)) : '';
+    $bio   = $user ? $user->description : '';
+    return array(
+        'slug'           => $slug,
+        'name'           => $name,
+        'photo'          => $photo,
+        'bio'            => $bio,
+        'color'          => $cfg['color'],
+        'role'           => $cfg['role'],
+        'classesPerWeek' => count($cfg['schedule']),
+        'schedule'       => $cfg['schedule'],
+    );
+}
+
+function progreso_get_professor_student_ids($schedule) {
+    if (!class_exists('RocoMadrid_SF_Stats')) return array();
+    $day_map = array(
+        'lunes'=>'lunes','martes'=>'martes','miércoles'=>'miercoles','miercoles'=>'miercoles',
+        'jueves'=>'jueves','viernes'=>'viernes','sábado'=>'sabado','sabado'=>'sabado',
+    );
+    $slot_times = array();
+    foreach ($schedule as $slot) {
+        $slot_times[$slot['day']][] = $slot['time'];
+    }
+    $user_ids = array();
+    foreach (RocoMadrid_SF_Stats::get_all_subscription_data() as $sub) {
+        if ($sub['status'] !== 'active') continue;
+        $sub_days  = array_map(function($d) use ($day_map) {
+            return $day_map[mb_strtolower(trim($d))] ?? mb_strtolower(trim($d));
+        }, explode('-', $sub['dia'] ?? ''));
+        $sub_start = trim(explode('-', $sub['horario'] ?? '')[0]);
+        $match = false;
+        foreach ($sub_days as $day) {
+            if (isset($slot_times[$day]) && in_array($sub_start, $slot_times[$day])) {
+                $match = true; break;
+            }
+        }
+        if (!$match) continue;
+        $uid = intval(get_post_meta($sub['id'], '_customer_user', true));
+        if (!$uid && !empty($sub['email'])) { $u = get_user_by('email', $sub['email']); if ($u) $uid = $u->ID; }
+        if ($uid > 0) $user_ids[] = $uid;
+    }
+    return array_values(array_unique($user_ids));
+}
+
+function progreso_get_group_stats($user_ids) {
+    global $wpdb;
+    progreso_ensure_training_table();
+    $by_test = array();
+    if (!empty($user_ids)) {
+        $ids   = array_map('intval', $user_ids);
+        $in_sq = implode(',', $ids);
+        $since = date('Y-m-d', strtotime('-12 months'));
+        $rows  = $wpdb->get_results($wpdb->prepare(
+            "SELECT test_id, DATE_FORMAT(logged_at,'%%Y-%%m') AS month,
+                    AVG(value_kg) AS avg_kg, COUNT(DISTINCT user_id) AS user_count
+             FROM " . progreso_training_table() . "
+             WHERE user_id IN ($in_sq) AND logged_at >= %s
+             GROUP BY test_id, month ORDER BY test_id ASC, month ASC",
+            $since
+        ), ARRAY_A);
+        foreach ($rows as $row) {
+            $tid = intval($row['test_id']);
+            $by_test[$tid][$row['month']] = array(
+                'avg_kg'     => round(floatval($row['avg_kg']), 2),
+                'user_count' => intval($row['user_count']),
+            );
+        }
+    }
+    foreach (progreso_generate_all_mock() as $tid => $mock_months) {
+        foreach ($mock_months as $month => $val) {
+            if (!isset($by_test[$tid][$month])) $by_test[$tid][$month] = $val;
+        }
+    }
+    return $by_test;
+}
+
+function progreso_get_professors() {
+    $config = progreso_get_professors_config();
+    $list   = array();
+    foreach ($config as $slug => $cfg) $list[] = progreso_build_professor_entry($slug, $cfg);
+    return rest_ensure_response(array('success' => true, 'data' => $list));
+}
+
+function progreso_get_professor_detail($request) {
+    $slug   = sanitize_title($request['slug']);
+    $config = progreso_get_professors_config();
+    if (!isset($config[$slug])) return new WP_Error('not_found', 'Profesor no encontrado.', array('status' => 404));
+    $cfg         = $config[$slug];
+    $profile     = progreso_build_professor_entry($slug, $cfg);
+    $student_ids = progreso_get_professor_student_ids($cfg['schedule']);
+    $group_stats = progreso_get_group_stats($student_ids);
+    return rest_ensure_response(array('success' => true, 'data' => array_merge($profile, array(
+        'students'   => array('total' => count($student_ids)),
+        'groupStats' => array('tests' => $group_stats),
+    ))));
+}
+
 function progreso_get_training_me() {
     global $wpdb;
     progreso_ensure_training_table();
@@ -1586,7 +1768,14 @@ function progreso_training_summary() {
         }
     }
 
-    return rest_ensure_response(array('success' => true, 'data' => array('tests' => $by_test)));
+    // testMonths: Dic, Mar, Jun de la temporada actual (Sep–Jun)
+    $sy = (intval(date('n')) >= 9) ? intval(date('Y')) : intval(date('Y')) - 1;
+    $test_months = [ $sy . '-12', ($sy + 1) . '-03', ($sy + 1) . '-06' ];
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'tests'      => $by_test,
+        'testMonths' => $test_months,
+    )));
 }
 
 /**
