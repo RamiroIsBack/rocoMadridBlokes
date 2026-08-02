@@ -118,18 +118,25 @@ export async function syncTestsFromServer() {
     const json = await res.json()
     if (!Array.isArray(json?.data?.tests)) return
     const config = getConfig()
-    persist({ ...config, tests: json.data.tests })
+    const updated = { ...config, tests: json.data.tests }
+    if (json.data.mock_values) {
+      const mv = {}
+      Object.entries(json.data.mock_values).forEach(([k, v]) => { mv[Number(k)] = v })
+      updated.mockValues = mv
+    }
+    persist(updated)
   } catch {}
 }
 
-// Save test catalog to server — supervisor only
-export async function saveTestsToServer(tests) {
+// Save test catalog + mock values to server — supervisor only
+export async function saveTestsToServer() {
+  const { tests, mockValues } = getConfig()
   try {
     const res = await fetch(TESTS_API, {
       method: 'PUT',
       credentials: 'include',
       headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tests }),
+      body: JSON.stringify({ tests, mock_values: mockValues }),
     })
     return res.ok
   } catch { return false }

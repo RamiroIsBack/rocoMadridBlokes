@@ -711,7 +711,7 @@ function CtrlTestsTab() {
     saveTests(config.tests)
     setConfig(getConfig())
     flash('Guardando...')
-    const ok = await saveTestsToServer(config.tests)
+    const ok = await saveTestsToServer()
     flash(ok ? '✓ Guardado en servidor' : '✓ Local (sin acceso al servidor)')
   }
 
@@ -723,13 +723,15 @@ function CtrlTestsTab() {
     }))
   }
 
-  function handleApplyMock(testId) {
+  async function handleApplyMock(testId) {
     const val = parseFloat(mockInputs[testId])
     if (isNaN(val) || val <= 0) return
     setMockValue(testId, val)
     setMockInputs(prev => ({ ...prev, [testId]: '' }))
     setConfig(getConfig())
-    flash('✓ Mock aplicado — el chart se actualiza al recargar')
+    flash('Guardando...')
+    const ok = await saveTestsToServer()
+    flash(ok ? '✓ Mock guardado en servidor' : '✓ Mock aplicado (solo local)')
   }
 
   function handleClearMock(testId) {

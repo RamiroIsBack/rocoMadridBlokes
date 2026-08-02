@@ -1354,6 +1354,54 @@ function progreso_log_training($request) {
     return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
 }
 
+function progreso_get_mock_values() {
+    $defaults = [
+        14 => 25.0,  2 => 14.1,  9 =>  8.0, 10 => 110.0,
+        11 =>  6.0, 12 => 75.0,  3 =>  3.5,  4 =>  16.0,
+         7 => 45.0,  8 => 65.0,  5 =>  4.0,  6 =>  24.0,
+    ];
+    $stored = get_option('blokes_training_mock_values', null);
+    return ($stored !== null && is_array($stored)) ? $stored : $defaults;
+}
+
+function progreso_generate_all_mock() {
+    $jitter_map = [
+        'A' => [0.00, -0.04,  0.03, -0.02,  0.01,  0.02, -0.03,  0.04, -0.01,  0.02, -0.02,  0.01],
+        'B' => [0.00,  0.03, -0.05,  0.02,  0.01, -0.02,  0.04, -0.03,  0.01,  0.02, -0.01,  0.03],
+        'C' => [0.00, -0.02,  0.04, -0.03,  0.02,  0.01, -0.04,  0.03, -0.01, -0.02,  0.03, -0.01],
+        'D' => [0.00,  0.02, -0.03,  0.04, -0.01, -0.01,  0.03, -0.04,  0.02,  0.01, -0.02,  0.03],
+    ];
+    $jitter_key_map = [
+        14 => 'A',  2 => 'B',  9 => 'C', 10 => 'D',
+        11 => 'A', 12 => 'B',  3 => 'C',  4 => 'D',
+         7 => 'A',  8 => 'B',  5 => 'C',  6 => 'D',
+    ];
+    $months = [];
+    $d   = new DateTime('2026-01-01');
+    $end = new DateTime('first day of this month');
+    while ($d <= $end) {
+        $months[] = $d->format('Y-m');
+        $d->modify('+1 month');
+    }
+    $n = count($months);
+    $result = [];
+    foreach (progreso_get_mock_values() as $test_id => $ref) {
+        $tid = intval($test_id);
+        $ref = floatval($ref);
+        $key = $jitter_key_map[$tid] ?? 'A';
+        $pat = $jitter_map[$key];
+        $sv  = $ref * 0.88;
+        $months_data = [];
+        foreach ($months as $i => $month) {
+            $trend  = ($n > 1) ? $sv + ($ref - $sv) * ($i / ($n - 1)) : $ref;
+            $jitter = ($i === $n - 1) ? 0.0 : $ref * ($pat[$i % count($pat)] ?? 0.0);
+            $months_data[$month] = ['avg_kg' => round($trend + $jitter, 1)];
+        }
+        $result[$tid] = $months_data;
+    }
+    return $result;
+}
+
 function progreso_get_training_tests() {
     $default = array(
         array('id' => 14, 'name' => 'Puente glúteo',       'unit' => 'reps',   'zone' => 'lower'),
@@ -1371,7 +1419,10 @@ function progreso_get_training_tests() {
     );
     $stored = get_option('blokes_training_tests', null);
     $tests  = ($stored !== null && is_array($stored)) ? $stored : $default;
-    return rest_ensure_response(array('success' => true, 'data' => array('tests' => $tests)));
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'tests'       => $tests,
+        'mock_values' => progreso_get_mock_values(),
+    )));
 }
 
 function progreso_save_training_tests($request) {
@@ -1390,7 +1441,19 @@ function progreso_save_training_tests($request) {
         );
     }
     update_option('blokes_training_tests', $sanitized, false);
-    return rest_ensure_response(array('success' => true, 'data' => array('tests' => $sanitized)));
+    $raw_mock = $request->get_param('mock_values');
+    if (is_array($raw_mock)) {
+        $sanitized_mock = [];
+        foreach ($raw_mock as $k => $v) {
+            $tid = intval($k);
+            if ($tid > 0) $sanitized_mock[$tid] = floatval($v);
+        }
+        update_option('blokes_training_mock_values', $sanitized_mock, false);
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'tests'       => $sanitized,
+        'mock_values' => progreso_get_mock_values(),
+    )));
 }
 
 function progreso_get_training_me() {
@@ -1514,6 +1577,15 @@ function progreso_training_summary() {
             'user_count' => intval($row['user_count']),
         );
     }
+    // Fill months with no real data using mock (real data wins per month)
+    foreach (progreso_generate_all_mock() as $tid => $mock_months) {
+        foreach ($mock_months as $month => $mock_val) {
+            if (!isset($by_test[$tid][$month])) {
+                $by_test[$tid][$month] = $mock_val;
+            }
+        }
+    }
+
     return rest_ensure_response(array('success' => true, 'data' => array('tests' => $by_test)));
 }
 
