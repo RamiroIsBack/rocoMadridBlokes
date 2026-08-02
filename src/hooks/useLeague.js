@@ -69,3 +69,15 @@ export function useLeaguesList() {
   }, [])
   return leagues
 }
+
+export function useComunidadLeagues() {
+  const [leagues, setLeagues] = useState([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    fetch(`${WP_URL}/wp-json/blokes/v1/comunidad/leagues`, { headers: getHeaders() })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { setLeagues(Array.isArray(data) ? data : []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+  return { leagues, loading }
+}

@@ -132,6 +132,75 @@
   color: #888;
 }
 
+/* ── Other leagues (secondary, collapsible) ── */
+.league-others {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid #1e1e1e;
+}
+
+.league-others__title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #444;
+  margin-bottom: 8px;
+  padding: 0 4px;
+}
+
+.league-other {
+  border: 1px solid #1a1a1a;
+  margin-bottom: 3px;
+}
+
+.league-other__header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  color: inherit;
+  transition: background 0.1s;
+}
+
+.league-other__header:hover { background: rgba(255,255,255,0.02); }
+
+.league-other__header--open { border-bottom: 1px solid #1a1a1a; }
+
+.league-other__emoji { font-size: 1rem; line-height: 1; }
+
+.league-other__name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  flex: 1;
+}
+
+.league-other__count {
+  font-size: 0.72rem;
+  color: #555;
+}
+
+.league-other__chevron {
+  font-size: 0.5rem;
+  color: #444;
+  margin-left: 2px;
+}
+
+.league-other__body {
+  padding: 6px 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.league-other__member { padding: 3px 0; }
+
 .league-login__btn {
   display: inline-block;
   margin-top: 14px;

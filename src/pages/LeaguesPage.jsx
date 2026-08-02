@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { useLeague } from '../hooks/useLeague'
+import { useEffect, useRef, useState } from 'react'
+import { useLeague, useComunidadLeagues } from '../hooks/useLeague'
 import LeaguePromotionDialog from '../components/LeaguePromotionDialog'
 import UserAvatar from '../components/UserAvatar'
 import './LeaguesPage.css'
@@ -39,6 +39,55 @@ function MemberRow({ member }) {
         className="league-member__avatar"
       />
       <span className="league-member__pts">{member.totalPoints} pts</span>
+    </div>
+  )
+}
+
+function OtherLeagues() {
+  const { leagues, loading } = useComunidadLeagues()
+  const [openId, setOpenId] = useState(null)
+
+  const others = leagues.filter(l => !l.isMyLeague)
+  if (loading || others.length === 0) return null
+
+  return (
+    <div className="league-others">
+      <div className="league-others__title">Otras ligas</div>
+      {others.map(league => {
+        const meta = TIER_META[league.tier] || TIER_META[1]
+        const isOpen = openId === league.leagueId
+        return (
+          <div key={league.leagueId} className="league-other">
+            <button
+              className={`league-other__header${isOpen ? ' league-other__header--open' : ''}`}
+              onClick={() => setOpenId(isOpen ? null : league.leagueId)}
+            >
+              <span className="league-other__emoji">{meta.emoji}</span>
+              <span className="league-other__name" style={{ color: meta.color }}>{league.name}</span>
+              <span className="league-other__count">{(league.members || []).length} miembros</span>
+              <span className="league-other__chevron">{isOpen ? '▲' : '▼'}</span>
+            </button>
+            {isOpen && (
+              <div className="league-other__body">
+                {(league.members || []).map(m => (
+                  <div key={m.userId} className="league-other__member">
+                    <UserAvatar
+                      size="xs"
+                      avatarType={m.avatarType || ''}
+                      avatarData={m.avatarData || {}}
+                      nickname={m.nickname || ''}
+                      name={m.nickname || ''}
+                      isMe={m.isMe}
+                      showNickname
+                      nicknameStyle="right"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -94,15 +143,15 @@ export default function LeaguesPage() {
       {/* Leaderboard */}
       <div className="league-leaderboard">
         {leaderboard.map(member => (
-          <MemberRow
-            key={member.userId}
-            member={member}
-          />
+          <MemberRow key={member.userId} member={member} />
         ))}
         {leaderboard.length === 0 && (
           <p className="league-empty__sub">Nadie en esta liga todavía.</p>
         )}
       </div>
+
+      {/* Other leagues — secondary, collapsible */}
+      <OtherLeagues />
     </div>
   )
 }
