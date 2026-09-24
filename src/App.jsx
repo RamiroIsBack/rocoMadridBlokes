@@ -272,12 +272,6 @@ export default function App() {
                   <li className="app-nav__item">
                     <NavLink to="/stats" className="app-nav__link">Estadísticas</NavLink>
                   </li>
-                  <li className="app-nav__item">
-                    <NavLink to="/fichaje" className="app-nav__link">Fichaje</NavLink>
-                  </li>
-                  <li className="app-nav__item">
-                    <NavLink to="/time-off" className="app-nav__link">Time Off</NavLink>
-                  </li>
                 </>
               )}
               {sd.userRole === 'socio' && (
