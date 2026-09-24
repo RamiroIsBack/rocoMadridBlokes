@@ -25,8 +25,9 @@ guía de cómo funciona la app actual.
 
 ## 2. Stack
 
-- **Frontend**: React 18 + Vite 4 (fijado por Node 16 en el hosting — Vite 5+ pide
-  Node 20+) + React Router 7. Sin CSS-in-JS, CSS plano por componente.
+- **Frontend**: React 18 + Vite 4 (se fijó en 4.x cuando la máquina de desarrollo tenía
+  Node 16; hoy es Node 20, pero no hay motivo para subir) + React Router 7. Sin
+  CSS-in-JS, CSS plano por componente.
 - **Backend**: WordPress + WooCommerce, en modo **multisite**. Todo el estado real
   (usuarios, blokes, entrenamientos, ligas, suscripciones) vive en WordPress, expuesto
   vía REST API custom. React no tiene backend propio.
@@ -34,7 +35,9 @@ guía de cómo funciona la app actual.
 
 ## 3. Multisite: dos "sitios" distintos
 
-Hay **dos blogs de WordPress** en juego, y varios hooks pegan a uno u otro:
+Es una instalación **WordPress multisite** (el código usa `switch_to_blog(1)` y
+`switch_to_blog(3)`). En conversaciones y notas antiguas se habla de "dos WordPress
+separados": son los dos sitios de esa red. Los hooks pegan a uno u otro:
 
 - **Blog 1** (`https://rocomadrid.com`, `VITE_WORDPRESS_URL`) — sitio principal: blokes,
   perfiles, ligas, rol de usuario (whitelists de email).
@@ -80,7 +83,7 @@ Páginas protegidas: `/setter`, `/stats`, `/entrenamientos`, `/fichaje`, `/time-
 | `/setter` | `AdminApp` | Crear/editar blokes |
 | `/stats` | `StatsPage` | Panel de analítica/administración de blokes |
 | `/entrenamientos` | `EntrenamientosPage` | Registro de tests físicos |
-| `/fichaje`, `/time-off` | `FichajePage`, `TimeOffPage` | Iframes a URLs externas (hoy vacías → "Próximamente") |
+| `/fichaje`, `/time-off` | `FichajePage`, `TimeOffPage` | Iframes a URLs externas (hoy vacías → "Próximamente"). **Quitados del menú** (24/09/2026): fichaje y vacaciones se gestionarán en una app externa. Rutas y páginas siguen existiendo por URL directa |
 | `/superadmin` | `SuperAdminPage` | Ingresos, productos, clases, gastos |
 | `/supervision` | `SupervisionPage` | Roster de alumnos, catálogo de tests, control fichaje/ausencias |
 | `/playground` | `PlaygroundPage` | Horarios/roster de profesores |
@@ -128,20 +131,71 @@ No hay JWT. Conviven dos mecanismos:
 
 ## 8. Despliegue (`.github/workflows/deploy.yml`)
 
+El proyecto son **dos partes que se despliegan distinto**: el frontend React y el
+plugin PHP (backend). Ambas las sube el mismo workflow por FTP, pero con una diferencia
+crucial: **el workflow NO compila nada**.
+
 Push a `master` → producción (`/blokes/`, secret `SFTP_REMOTE_PATH_PROD`).
-Push a `dev` → entorno de pruebas (`/blokes-dev/`, secret `SFTP_REMOTE_PATH`).
+Push a `dev` → pruebas (`/blokes-dev/`, secret `SFTP_REMOTE_PATH`).
 También se puede lanzar a mano (`workflow_dispatch`).
 
-Sube por FTP, en este orden:
-1. `dist/assets/*` (build de Vite) — borra los assets viejos del servidor primero.
-2. `server-index.php` → `index.php`.
-3. `public/.htaccess`, con el `RewriteBase` sustituido según la rama.
-4. `progreso-extension1-1.php` → carpeta del plugin (`SFTP_PLUGIN_PATH`) — mismo fichero
-   para ambas ramas, no hay versión "dev" separada del plugin.
+### 8.1 Frontend React — hay que compilar y commitear `dist/` ANTES del push
 
-**Importante**: `rocomadrid-step-form/` y `blokes-extension/` NO se despliegan por este
-workflow. Si hay que tocarlos, es edición manual en el servidor (tema `neve-child` /
-plugins vía WP Admin) — no hacer push a `master` esperando que se actualicen solos.
+El workflow solo sube lo que ya está guardado en `dist/` del repositorio. Si haces push
+solo del código fuente (`src/`), el workflow sale en verde pero **el sitio no cambia**.
+(`dist/` está en git a propósito desde el commit `0f6b7a6`, "track dist/ en git,
+workflow solo FTP sin build CI".)
+
+Flujo correcto para un cambio de frontend:
+1. `git pull` de la rama en la que trabajas.
+2. `npm run build` → regenera `dist/` (assets con hash en el nombre).
+3. Commit de `src/` **y** `dist/`, push.
+
+Detalles:
+- El `base` de Vite sale de `VITE_BASE_PATH` y por defecto es `/blokes-dev/`. Para
+  `dev` basta `npm run build`. Para producción hay que compilar con
+  `VITE_BASE_PATH=/blokes/ npm run build`, así que **el `dist/` de `dev` y el de
+  `master` no son intercambiables**: no mergees `dev` → `master` sin recompilar.
+- Los assets llevan hash, así que si dos personas compilan a la vez habrá **conflictos
+  en `dist/`** al hacer merge. Solución: `git pull`, recompilar, commitear el resultado
+  (no intentes resolver los ficheros minificados a mano).
+- El workflow borra todo `assets/` del servidor y sube el contenido de `dist/assets/`.
+  `server-index.php` coge el primer `.js` y el primer `.css` de `assets/`, por eso
+  `dist/assets/` debe contener un solo `.js` y un solo `.css` (lo normal en este build).
+- Se sube también `server-index.php` (como `index.php`) y `public/.htaccess` (con el
+  `RewriteBase` sustituido según la rama). El `dist/index.html` en sí se borra del
+  servidor: la página la genera `server-index.php`.
+
+### 8.2 Plugin PHP (backend) — no necesita build
+
+`progreso-extension1-1.php` se sube tal cual a `SFTP_PLUGIN_PATH`, en cada push a
+`dev` o a `master`. Ojo con esto:
+- Es **el mismo fichero y la misma ruta para las dos ramas** — no existe una versión
+  "dev" del plugin. Un push a `dev` con cambios en el PHP puede afectar a lo que use
+  producción si comparten carpeta de plugins. Tratad los cambios del PHP como si fueran
+  a producción aunque hagáis push a `dev`.
+- Un plugin subido solo tiene efecto en los sitios de WordPress donde **está activado**.
+  Según notas previas del proyecto (no verificables desde el código, confirmar con
+  Ramiro): el plugin nuevo está activo en el sitio "club" (blog 3), y el sitio principal
+  (blog 1, donde vive `/blokes`) sigue con el plugin viejo (`blokes-extension`, que
+  devuelve el rol `'superadmin'` en vez de `'socio'`). Por eso `src/main.jsx` traduce
+  `superadmin → socio` y `admin → gestion` antes de arrancar React.
+- Consecuencia práctica: un cambio en el PHP puede "no verse" en `/blokes-dev/` si la
+  ruta que llama el frontend se sirve desde el sitio donde el plugin nuevo no está
+  activo. Si un endpoint nuevo da 404 en dev, comprobar primero esto.
+
+### 8.3 Lo que NO se despliega automáticamente
+
+`rocomadrid-step-form/` y `blokes-extension/` no pasan por este workflow. Si hay que
+tocarlos, es edición manual en el servidor (tema `neve-child` / plugins vía WP Admin).
+No esperes que un push los actualice.
+
+### 8.4 Drift conocido entre `server-index.php` y el plugin
+
+`server-index.php` y el hook `wp_head` del plugin construyen los dos
+`window.blokesSiteData`, y **no son idénticos**: el `wp_head` del plugin incluye
+`userAvatarType`/`userAvatarData` y `server-index.php` no. Si añades un campo a
+`blokesSiteData`, hay que añadirlo en ambos sitios.
 
 ## 9. Variables de entorno
 
@@ -177,7 +231,53 @@ cp .env.example .env   # y completar con las variables de la §9 según haga fal
 npm run dev
 ```
 
+Para publicar un cambio de frontend, mira la §8.1 (compilar + commitear `dist/`).
+Versión de Node en la máquina de Ramiro: 20.x (notas antiguas decían 16; Vite se
+mantiene en la 4.x, no hay motivo actual para subirlo).
+
 Para probar páginas que dependen del rol de app (`/setter`, `/stats`, etc.) hace falta
 que el email de la cuenta de WordPress con la que pruebas esté en una de las listas
 blancas (`socios`/`gestion`/`profesores`) — pídele a Ramiro que te añada o usa
 `VITE_USE_MOCK=true` para trabajar con datos de ejemplo sin backend real.
+
+## 12. Decisiones y contexto histórico (el "por qué")
+
+- **Roles por email, no por roles de WordPress.** Se hizo así para poder dar permisos de
+  app (profesor, gestión, socio) sin darle a nadie capacidades de WordPress. Se editan
+  desde la propia app (`PUT /blokes/v1/admin/email-lists`, solo `socio`). El plugin
+  *User Role Editor* está instalado en WordPress pero **el código de la app no depende
+  de él**; los únicos permisos nativos que se consultan son `manage_woocommerce` y
+  `manage_options` en el plugin de checkout (capacidades estándar).
+- **Google Sheets → WordPress.** La primera versión leía un Google Form/Sheet con
+  imágenes, texto y categoría. Se migró a WordPress (custom post type `blokes` con
+  campos ACF) para tener usuarios, valoraciones, completados y ligas. El código de
+  Sheets se conserva solo como referencia.
+- **`dist/` en git y workflow sin build.** Decisión del 25/05/2026 (commit `0f6b7a6`):
+  más simple que montar Node en el CI. Coste: hay que compilar antes de cada push de
+  frontend y hay conflictos en `dist/` si se trabaja a la vez. Cowork propuso mover el
+  build al workflow (`npm ci && npm run build`) y sacar `dist/` del repo; **está
+  pendiente de decidir** y tocaría `deploy.yml`.
+- **Dos ramas, dos destinos (18/07/2026).** `dev` → `/blokes-dev/`, `master` → `/blokes/`.
+  Hasta entonces solo había un destino.
+- **Fichaje y Time Off → app externa (24/09/2026).** Se quitaron del menú principal.
+  Las pestañas "CTRL Fichaje" y "CTRL Time Off" de `/supervision` se dejan como
+  placeholders porque es posible que la supervisión de vacaciones y fichaje se linke con
+  el sistema externo (probablemente vía `fichajeEmbedUrl`/`timeOffEmbedUrl` en
+  `blokesSiteData`, hoy vacíos). No hay decisión cerrada; no borrar ese código todavía.
+- **Colaboración.** El repo es `RamiroIsBack/rocoMadridBlokes`. Cualquier push a `dev`
+  despliega automáticamente, lo haga quien lo haga (la cuenta `ClubRocomadrid7a` ya ha
+  desplegado con éxito). El `CLAUDE.md` pide confirmar antes de crear/modificar ficheros
+  cuando se trabaja con Claude Code.
+- **Commits.** Sin línea `Co-Authored-By` de Claude en los mensajes (preferencia de
+  Ramiro).
+
+## 13. Pendientes / cosas por confirmar
+
+- Confirmar en qué sitios de la red está activo cada plugin (`progreso-extension1-1`,
+  `blokes-extension` viejo) y dónde apunta `SFTP_PLUGIN_PATH` (§8.2).
+- Decidir si el build pasa al workflow y `dist/` sale del repo (§12).
+- Rutas REST con `permission_callback => '__return_true'` y el shim de admin automático
+  (§7): deuda de seguridad conocida.
+- Sincronizar `server-index.php` con `blokes_get_email_lists`/avatar del plugin (§8.4).
+- `DEPLOY.md`, `DEPLOYMENT_GUIDE.md`, `LOCAL_TESTING_GUIDE.md` y `.env.example`
+  desactualizados: reescribir o borrar.
