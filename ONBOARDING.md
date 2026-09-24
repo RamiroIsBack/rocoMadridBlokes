@@ -151,6 +151,9 @@ Flujo correcto para un cambio de frontend:
 2. `npm run build` → regenera `dist/` (assets con hash en el nombre).
 3. Commit de `src/` **y** `dist/`, push.
 
+Flujo verificado el 24/09/2026: build + commit de `dist/` + push a `dev` → el cambio se
+ve en `blokes-dev` (hacer Ctrl+F5 para saltarse la caché del navegador).
+
 Detalles:
 - El `base` de Vite sale de `VITE_BASE_PATH` y por defecto es `/blokes-dev/`. Para
   `dev` basta `npm run build`. Para producción hay que compilar con
