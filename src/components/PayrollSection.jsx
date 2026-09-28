@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import {
-  usePayroll, usePayrollHistory, savePayrollConfig, setOvertimeStatus, typeLabel, hasBase, sortByType,
+  usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus,
+  typeLabel, hasBase, sortByType,
 } from '../hooks/useOvertime'
 import { currentMonth, shiftMonth, monthLabel, monthShort, fmtDate, fmtHours, fmtEur } from '../utils/monthFormat'
 
@@ -162,6 +164,248 @@ function PayrollHistory({ history }) {
   )
 }
 
+// ─── Fichas de persona ──────────────────────────────────────────────────────
+const PERSONAL_FIELDS = [
+  { key: 'full_name',  label: 'Nombre y apellidos' },
+  { key: 'dni',        label: 'DNI' },
+  { key: 'birth_date', label: 'Fecha de nacimiento', type: 'date' },
+  { key: 'address',    label: 'Dirección' },
+  { key: 'phone',      label: 'Teléfono', type: 'tel' },
+  { key: 'email',      label: 'Email', type: 'email' },
+]
+
+const fmtPersonal = (field, value) =>
+  !value ? '—' : field.type === 'date' ? fmtDate(value) : value
+
+function PersonCards({ people, rowById, selected, onSelect }) {
+  return (
+    <div className="sa-pay-cards">
+      {people.map(p => {
+        const r = rowById[p.id]
+        const isSel = selected === p.id
+        return (
+          <button
+            key={p.id}
+            className={`sa-pay-card${isSel ? ' sa-pay-card--active' : ''}${p.active ? '' : ' sa-pay-card--inactive'}`}
+            style={{ '--card-color': p.color }}
+            onClick={() => onSelect(isSel ? null : p.id)}
+            aria-pressed={isSel}
+          >
+            <span className="sa-pay-card__head">
+              <span className="sa-pay-dot" style={{ background: p.color }} />
+              <span className="sa-pay-card__name">{p.name}</span>
+            </span>
+            <span className="sa-pay-card__type">{typeLabel(p.type)}{p.active ? '' : ' · inactivo'}</span>
+            <span className="sa-pay-card__stat">
+              <span>Total mes</span>
+              <strong>{r ? fmtEur(r.total) : '—'}</strong>
+            </span>
+            <span className="sa-pay-card__stat">
+              <span>Horas extra</span>
+              <strong>{r && r.hours ? `${fmtHours(r.hours)} h` : '—'}</strong>
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function PersonFile({ person, personal, onSaved }) {
+  const [editing,  setEditing]  = useState(false)
+  const [form,     setForm]     = useState(personal)
+  const [saving,   setSaving]   = useState(false)
+  const [feedback, setFeedback] = useState('')
+
+  useEffect(() => { setForm(personal); setEditing(false) }, [person.id])
+
+  async function handleSave(e) {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await savePayrollPersonal(person.id, form)
+      await onSaved()
+      setEditing(false)
+      setFeedback('✓ Ficha guardada')
+    } catch (err) {
+      setFeedback(`✗ ${err.message}`)
+    } finally {
+      setSaving(false)
+      setTimeout(() => setFeedback(''), 2800)
+    }
+  }
+
+  return (
+    <div className="sa-pay-file" style={{ '--card-color': person.color }}>
+      <div className="sa-pay-file__head">
+        <h3 className="sa-pay-file__title">Ficha de {person.name}</h3>
+        {!editing && (
+          <button className="sa-pay-action" onClick={() => { setForm(personal); setEditing(true) }}>Editar</button>
+        )}
+      </div>
+
+      {editing ? (
+        <form onSubmit={handleSave}>
+          <div className="sa-pay-file__grid">
+            {PERSONAL_FIELDS.map(f => (
+              <label key={f.key} className="sa-pay-file__field">
+                <span>{f.label}</span>
+                <input
+                  type={f.type || 'text'} maxLength={200} className="sa-pay-file__input"
+                  value={form[f.key] || ''}
+                  onChange={e => setForm(v => ({ ...v, [f.key]: e.target.value }))}
+                />
+              </label>
+            ))}
+          </div>
+          <div className="sa-pay-actions">
+            <button type="submit" className="sa-list-save__btn" disabled={saving}>{saving ? 'Guardando…' : 'Guardar ficha'}</button>
+            <button type="button" className="sa-pay-action" onClick={() => setEditing(false)}>Cancelar</button>
+          </div>
+        </form>
+      ) : (
+        <dl className="sa-pay-file__grid">
+          {PERSONAL_FIELDS.map(f => (
+            <div key={f.key} className="sa-pay-file__item">
+              <dt>{f.label}</dt>
+              <dd>{fmtPersonal(f, personal[f.key])}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {feedback && <p className="sa-pay-feedback">{feedback}</p>}
+      <p className="sa-pay-note">Datos personales: solo visibles para socios. No los compartas fuera de la app.</p>
+    </div>
+  )
+}
+
+// ─── Informe para imprimir / guardar como PDF ───────────────────────────────
+// Se monta directamente en <body> y está oculto en pantalla; al imprimir con printReport()
+// es lo único visible (ver SuperAdminPage.css), así no salen páginas en blanco.
+function PayrollReport({ month, person, personal, notes, rows, entries, totals, byId }) {
+  const today = fmtDate(new Date().toISOString().slice(0, 10))
+  const row   = person ? rows[0] : null
+  return createPortal(
+    <div className="pay-report-root" aria-hidden="true"><div className="pay-report">
+      <header className="pay-report__header">
+        <div>
+          <p className="pay-report__org">Rocoteca Madrid</p>
+          <h1>{person ? `Informe de nómina · ${person.name}` : 'Informe de nóminas'}</h1>
+          <p className="pay-report__sub">{monthLabel(month)}</p>
+        </div>
+        <p className="pay-report__date">Generado el {today}</p>
+      </header>
+
+      {person && (
+        <section>
+          <h2>Datos personales</h2>
+          <table className="pay-report__kv">
+            <tbody>
+              {PERSONAL_FIELDS.map(f => (
+                <tr key={f.key}><th>{f.label}</th><td>{fmtPersonal(f, personal[f.key])}</td></tr>
+              ))}
+              <tr><th>Tipo</th><td>{typeLabel(person.type)}</td></tr>
+            </tbody>
+          </table>
+        </section>
+      )}
+
+      <section>
+        <h2>{person ? 'Nómina del mes' : 'Nómina por persona'}</h2>
+        {person && !row ? <p>Sin nómina ni horas extra este mes.</p> : (
+          <table className="pay-report__table">
+            <thead>
+              <tr>
+                {!person && <th>Persona</th>}
+                <th className="num">Nómina base</th>
+                <th className="num">Horas extra</th>
+                <th className="num">€/h extra</th>
+                <th className="num">Extras</th>
+                <th className="num">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id}>
+                  {!person && <td>{r.name}{r.type !== 'profesor' ? ` (${typeLabel(r.type).toLowerCase()})` : ''}</td>}
+                  <td className="num">{hasBase(r.type) ? fmtEur(r.base) : '—'}</td>
+                  <td className="num">{fmtHours(r.hours)}</td>
+                  <td className="num">{r.rate == null ? '—' : fmtEur(r.rate)}</td>
+                  <td className="num">{fmtEur(r.extras)}</td>
+                  <td className="num"><strong>{fmtEur(r.total)}</strong></td>
+                </tr>
+              ))}
+            </tbody>
+            {!person && totals && (
+              <tfoot>
+                <tr>
+                  <td>Total</td>
+                  <td className="num">{fmtEur(totals.base)}</td>
+                  <td className="num">{fmtHours(totals.hours)}</td>
+                  <td />
+                  <td className="num">{fmtEur(totals.extras)}</td>
+                  <td className="num"><strong>{fmtEur(totals.total)}</strong></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        )}
+        {person && notes[person.id] && (
+          <p className="pay-report__note"><strong>Justificación de la base:</strong> {notes[person.id]}</p>
+        )}
+      </section>
+
+      <section>
+        <h2>Detalle de horas extra</h2>
+        {entries.length === 0 ? <p>No hay horas extra registradas este mes.</p> : (
+          <table className="pay-report__table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                {!person && <th>Persona</th>}
+                <th className="num">Horas</th>
+                <th>Motivo</th>
+                <th className="num">€/h</th>
+                <th className="num">Importe</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map(e => (
+                <tr key={e.id}>
+                  <td>{fmtDate(e.date)}</td>
+                  {!person && <td>{byId[e.professor]?.name || e.professor}</td>}
+                  <td className="num">{fmtHours(e.hours)}</td>
+                  <td>{e.reason}</td>
+                  <td className="num">{e.rate == null ? '—' : fmtEur(e.rate)}</td>
+                  <td className="num">{fmtEur(e.amount)}</td>
+                  <td>{e.status === 'pagado' ? 'Pagado' : 'Pendiente'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </div></div>,
+    document.body,
+  )
+}
+
+// Imprime solo el informe: marca el body para el CSS de impresión y pone un título
+// que el navegador usa como nombre del PDF.
+function printReport(filename) {
+  const prevTitle = document.title
+  const cleanup = () => {
+    document.body.classList.remove('pay-printing')
+    document.title = prevTitle
+    window.removeEventListener('afterprint', cleanup)
+  }
+  document.title = filename
+  document.body.classList.add('pay-printing')
+  window.addEventListener('afterprint', cleanup)
+  window.print()
+}
+
 // ─── Pestaña Nóminas ────────────────────────────────────────────────────────
 export default function PayrollSection() {
   const [month,    setMonth]    = useState(currentMonth)
@@ -177,7 +421,21 @@ export default function PayrollSection() {
   const people  = data?.people || []
   const byId    = Object.fromEntries(people.map(p => [p.id, p]))
   const notes   = data?.config?.notes || {}
-  const missingRate = rows.some(r => r.missing_rate)
+  const personal = data?.personal || {}
+
+  // Ficha seleccionada: filtra las tablas a esa persona
+  const [selected, setSelected] = useState(null)
+  const cardPeople   = sortByType(people.filter(p => p.active || rows.some(r => r.id === p.id)))
+  const rowById      = Object.fromEntries(rows.map(r => [r.id, r]))
+  const selPerson    = selected ? byId[selected] : null
+  const shownRows    = selected ? rows.filter(r => r.id === selected) : rows
+  const shownEntries = selected ? entries.filter(e => e.professor === selected) : entries
+  const missingRate  = shownRows.some(r => r.missing_rate)
+
+  function handlePrint() {
+    const who = selPerson ? selPerson.name.replace(/\s+/g, '_') : 'todas'
+    printReport(`Nomina_${who}_${month}`)
+  }
 
   async function run(action, okMsg) {
     setBusy(true)
@@ -201,6 +459,11 @@ export default function PayrollSection() {
         <div className="sa-section__header">
           <h2 className="sa-section-title">Nóminas</h2>
           <div className="sa-header-controls">
+            {data && (
+              <button className="sa-pay-action sa-pay-print" onClick={handlePrint}>
+                ⎙ {selPerson ? `Informe de ${selPerson.name}` : 'Informe del mes'} (PDF)
+              </button>
+            )}
             <button className="sa-period__btn" onClick={() => setMonth(m => shiftMonth(m, -1))} aria-label="Mes anterior">◀</button>
             <span className="sa-pay-month">{monthLabel(month)}</span>
             <button className="sa-period__btn" onClick={() => setMonth(m => shiftMonth(m, 1))} aria-label="Mes siguiente">▶</button>
@@ -231,8 +494,17 @@ export default function PayrollSection() {
                 </div>
               </div>
 
+              {/* ── Fichas ── */}
+              <h3 className="sa-pay-subtitle">Fichas</h3>
+              <PersonCards people={cardPeople} rowById={rowById} selected={selected} onSelect={setSelected} />
+              {selPerson && (
+                <PersonFile person={selPerson} personal={personal[selPerson.id] || {}} onSaved={reload} />
+              )}
+
               {/* ── Nómina por persona ── */}
-              <h3 className="sa-pay-subtitle">Nómina por persona</h3>
+              <h3 className="sa-pay-subtitle">
+                Nómina por persona{selPerson && <span className="sa-pay-filter"> · {selPerson.name} <button className="sa-pay-filter__clear" onClick={() => setSelected(null)} aria-label="Quitar filtro">✕</button></span>}
+              </h3>
               <div className="sa-pay-scroll">
                 <table className="sa-pay-table">
                   <thead>
@@ -248,7 +520,10 @@ export default function PayrollSection() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map(r => {
+                    {shownRows.length === 0 && (
+                      <tr><td colSpan={8} className="sa-pay-muted">Sin nómina ni horas extra este mes.</td></tr>
+                    )}
+                    {shownRows.map(r => {
                       const hasHours = r.pending + r.paid > 0
                       const allPaid  = hasHours && r.pending === 0
                       return (
@@ -291,7 +566,7 @@ export default function PayrollSection() {
                       )
                     })}
                   </tbody>
-                  <tfoot>
+                  {!selected && <tfoot>
                     <tr className="sa-pay-total">
                       <td>Total</td>
                       <td className="sa-pay-num">{fmtEur(totals.base)}</td>
@@ -301,7 +576,7 @@ export default function PayrollSection() {
                       <td className="sa-pay-num">{fmtEur(totals.total)}</td>
                       <td colSpan={2} />
                     </tr>
-                  </tfoot>
+                  </tfoot>}
                 </table>
               </div>
               {missingRate && (
@@ -310,8 +585,8 @@ export default function PayrollSection() {
               {feedback && <p className="sa-pay-feedback">{feedback}</p>}
 
               {/* ── Detalle de horas extra ── */}
-              <h3 className="sa-pay-subtitle">Detalle de horas extra</h3>
-              {entries.length === 0
+              <h3 className="sa-pay-subtitle">Detalle de horas extra{selPerson && <span className="sa-pay-filter"> · {selPerson.name}</span>}</h3>
+              {shownEntries.length === 0
                 ? <p className="sa-pay-muted sa-pay-empty">No hay horas extra registradas este mes.</p>
                 : (
                   <div className="sa-pay-scroll">
@@ -328,7 +603,7 @@ export default function PayrollSection() {
                         </tr>
                       </thead>
                       <tbody>
-                        {entries.map(e => {
+                        {shownEntries.map(e => {
                           const p = byId[e.professor]
                           return (
                             <tr key={e.id}>
@@ -359,6 +634,13 @@ export default function PayrollSection() {
       <PayrollHistory history={history} />
 
       {data && <PayrollConfig people={people} config={data.config} onSaved={refreshAll} />}
+
+      {data && (
+        <PayrollReport
+          month={month} person={selPerson} personal={selPerson ? personal[selPerson.id] || {} : {}}
+          notes={notes} rows={shownRows} entries={shownEntries} totals={totals} byId={byId}
+        />
+      )}
     </>
   )
 }

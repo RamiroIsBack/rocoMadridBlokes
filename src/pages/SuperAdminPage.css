@@ -909,3 +909,137 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-pay-textarea:focus { outline: none; border-color: #f5c842; }
 .sa-pay-info { color: #666; cursor: help; font-size: 0.72rem; }
+
+/* ── Nóminas: fichas ── */
+.sa-pay-print { margin-right: 8px; }
+.sa-pay-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.sa-pay-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid #2a2015;
+  border-top: 3px solid var(--card-color, #f5c842);
+  border-radius: 3px;
+  color: #ccc;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.sa-pay-card:hover { background: rgba(255,255,255,0.04); }
+.sa-pay-card--active {
+  background: rgba(245,200,66,0.06);
+  border-color: var(--card-color, #f5c842);
+}
+.sa-pay-card--inactive { opacity: 0.55; }
+.sa-pay-card__head { display: flex; align-items: center; }
+.sa-pay-card__name { font-size: 0.88rem; font-weight: 700; color: #f0ece0; }
+.sa-pay-card__type { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: #666; }
+.sa-pay-card__stat {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: #777;
+}
+.sa-pay-card__stat strong { color: #ddd; font-variant-numeric: tabular-nums; }
+
+.sa-pay-file {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid #2a2015;
+  border-left: 3px solid var(--card-color, #f5c842);
+  background: rgba(255,255,255,0.02);
+}
+.sa-pay-file__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.sa-pay-file__title { margin: 0; font-size: 0.92rem; font-weight: 700; color: #f0ece0; }
+.sa-pay-file__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px 20px;
+  margin: 0;
+}
+.sa-pay-file__item dt,
+.sa-pay-file__field span {
+  display: block;
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #666;
+  margin-bottom: 3px;
+}
+.sa-pay-file__item dd { margin: 0; font-size: 0.84rem; color: #ddd; word-break: break-word; }
+.sa-pay-file__input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 0.82rem;
+  padding: 5px 8px;
+  font-family: inherit;
+  color-scheme: dark;
+}
+.sa-pay-file__input:focus { outline: none; border-color: #f5c842; }
+
+.sa-pay-filter { color: #f5c842; text-transform: none; letter-spacing: 0; font-size: 0.78rem; }
+.sa-pay-filter__clear {
+  background: none;
+  border: none;
+  color: #777;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0 2px;
+}
+.sa-pay-filter__clear:hover { color: #f87171; }
+
+/* ── Nóminas: informe imprimible (Guardar como PDF) ── */
+.pay-report-root { display: none; }
+
+@media print {
+  body.pay-printing > *:not(.pay-report-root) { display: none !important; }
+  body.pay-printing { background: #fff !important; margin: 0; }
+  body.pay-printing .pay-report-root { display: block; }
+  @page { size: A4; margin: 16mm 14mm; }
+}
+
+.pay-report {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  color: #111;
+  font-size: 10.5pt;
+  line-height: 1.4;
+}
+.pay-report h1 { font-size: 17pt; margin: 2px 0; }
+.pay-report h2 {
+  font-size: 11pt;
+  margin: 18px 0 6px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #999;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pay-report__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 2px solid #111;
+  padding-bottom: 8px;
+}
+.pay-report__org  { margin: 0; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.1em; color: #555; }
+.pay-report__sub  { margin: 0; font-size: 11pt; color: #333; }
+.pay-report__date { margin: 0; font-size: 9pt; color: #555; }
+.pay-report__note { font-size: 9.5pt; margin: 6px 0 0; }
+.pay-report table { width: 100%; border-collapse: collapse; }
+.pay-report th, .pay-report td { padding: 4px 6px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; }
+.pay-report thead th { font-size: 8.5pt; text-transform: uppercase; color: #444; border-bottom: 1px solid #999; }
+.pay-report tfoot td { border-top: 1.5px solid #111; border-bottom: none; font-weight: 700; }
+.pay-report .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pay-report__kv th { width: 34%; font-weight: 600; color: #444; }
+.pay-report tr { break-inside: avoid; }

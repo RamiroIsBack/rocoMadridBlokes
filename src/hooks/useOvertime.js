@@ -70,3 +70,7 @@ export const usePayrollHistory = (to, months = 12) => useRequest(`/payroll-histo
 
 // config: { base: {id: €}, rates: {id: €/h} } — un valor vacío borra ese importe
 export const savePayrollConfig = (config) => request('/payroll-config', 'PUT', config).then(json => json.config)
+
+// Ficha personal (solo socios). fields: { full_name, dni, birth_date, address, phone, email }
+export const savePayrollPersonal = (id, fields) =>
+  request(`/payroll-personal/${id}`, 'PUT', fields).then(json => json.personal || {})

@@ -2982,6 +2982,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'payroll_save_config',
         'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/payroll-personal/(?P<id>[a-z0-9-]+)', array(
+        'methods'             => 'PUT',
+        'callback'            => 'payroll_save_personal',
+        'permission_callback' => $socio_perm,
+    ));
 });
 
 function overtime_get_entries() {
@@ -3409,10 +3414,53 @@ function payroll_get($request) {
         payroll_compute_month($month, $people, $entries, $base, $rates),
         array(
             'entries' => $detail,
-            'people'  => $people,
-            'config'  => payroll_config_response($base, $rates),
+            'people'   => $people,
+            'config'   => payroll_config_response($base, $rates),
+            'personal' => (object) payroll_get_personal(),
         )
     ));
+}
+
+// ── Ficha personal (DNI, dirección…) ──
+// Datos personales: solo se guardan en la BD (nunca en el código, el repo es público)
+// y solo se devuelven a socios, dentro de /payroll.
+function payroll_personal_fields() {
+    return array('full_name', 'dni', 'birth_date', 'address', 'phone', 'email');
+}
+
+function payroll_get_personal() {
+    $stored = get_option('blokes_payroll_personal', array());
+    return is_array($stored) ? $stored : array();
+}
+
+function payroll_save_personal($request) {
+    $id = sanitize_title($request['id']);
+    if (overtime_person_index(overtime_get_people(), $id) < 0) {
+        return new WP_Error('not_found', 'Persona no encontrada', array('status' => 404));
+    }
+    $body  = $request->get_json_params();
+    $clean = array();
+    foreach (payroll_personal_fields() as $f) {
+        $v = mb_substr(trim(sanitize_text_field((string) ($body[$f] ?? ''))), 0, 200);
+        if ($f === 'email' && $v !== '') {
+            $v = sanitize_email($v);
+            if (!is_email($v)) return new WP_Error('invalid_email', 'Email no válido', array('status' => 400));
+        }
+        if ($f === 'birth_date' && $v !== '') {
+            $dt = DateTime::createFromFormat('Y-m-d', $v);
+            if (!$dt || $dt->format('Y-m-d') !== $v) {
+                return new WP_Error('invalid_date', 'Fecha de nacimiento no válida', array('status' => 400));
+            }
+        }
+        if ($v !== '') $clean[$f] = $v;
+    }
+
+    $all = payroll_get_personal();
+    if ($clean) $all[$id] = $clean;
+    else unset($all[$id]);
+    update_option('blokes_payroll_personal', $all, false);
+
+    return rest_ensure_response(array('success' => true, 'personal' => (object) ($all[$id] ?? array())));
 }
 
 // Justificación de la nómina base por persona (texto libre).
