@@ -47,5 +47,9 @@ export const deleteOvertime = (id)         => request(`/overtime/${id}`, 'DELETE
 // target: { id } o { month, professor }
 export const setOvertimeStatus = (target, status) => request('/overtime-status', 'POST', { ...target, status })
 
+// Personas (profesores y externos). Añadir: gestion y socio. Editar/desactivar: solo socio.
+export const addOvertimePerson    = (name, type)   => request('/overtime-people', 'POST', { name, type })
+export const updateOvertimePerson = (id, changes)  => request(`/overtime-people/${id}`, 'PUT', changes)
+
 export const getOvertimeRates  = ()      => request('/overtime-rates').then(json => json.rates || {})
 export const saveOvertimeRates = (rates) => request('/overtime-rates', 'PUT', { rates }).then(json => json.rates || {})

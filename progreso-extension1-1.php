@@ -2943,6 +2943,23 @@ add_action('rest_api_init', function() {
         'callback'            => 'overtime_set_status',
         'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/overtime-people', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'overtime_list_people',
+            'permission_callback' => $ot_perm,
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'overtime_add_person',
+            'permission_callback' => $ot_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/overtime-people/(?P<id>[a-z0-9-]+)', array(
+        'methods'             => 'PUT',
+        'callback'            => 'overtime_update_person',
+        'permission_callback' => $socio_perm,
+    ));
     register_rest_route('superadmin/v1', '/overtime-rates', array(
         array(
             'methods'             => 'GET',
@@ -2971,28 +2988,123 @@ function overtime_get_rates() {
     return is_array($stored) ? $stored : array();
 }
 
-function overtime_professors() {
-    $list = array();
-    foreach (progreso_get_professors_config() as $slug => $cfg) {
-        $user   = get_user_by('email', $cfg['email']);
-        $list[] = array(
-            'slug'  => $slug,
-            'name'  => $user ? $user->display_name : ucfirst($slug),
-            'color' => $cfg['color'] ?? '#888',
+// ── Personas (profesores y externos) ──
+// Lista propia de Horas extra, independiente de la config de profesores de entrenamientos.
+// Se crea la primera vez con la plantilla actual; los ids de los 6 profesores que ya
+// estaban en progreso_get_professors_config() se mantienen para no perder registros.
+
+function overtime_palette() {
+    return array('#60a5fa', '#a78bfa', '#f472b6', '#34d399', '#fb923c', '#f5c842',
+                 '#22d3ee', '#f87171', '#a3e635', '#e879f9', '#94a3b8', '#fbbf24');
+}
+
+function overtime_get_people() {
+    $stored = get_option('blokes_overtime_people', null);
+    if (is_array($stored)) return $stored;
+
+    $config = progreso_get_professors_config();
+    $seed   = array(
+        'lucia' => 'Lucía', 'sara' => 'Sara', 'alvaro' => 'Álvaro', 'sigurd' => 'Sigurd',
+        'eva' => 'Eva', 'carolina' => 'Carolina', 'isa' => 'Isa', 'ana' => 'Ana',
+        'edu' => 'Edu', 'rafa' => 'Rafa',
+    );
+    $palette = overtime_palette();
+    $people  = array();
+    $n       = 0;
+    foreach ($seed as $id => $name) {
+        $people[] = array(
+            'id'     => $id,
+            'name'   => $name,
+            'type'   => 'profesor',
+            'color'  => $config[$id]['color'] ?? $palette[$n % count($palette)],
+            'active' => true,
         );
+        $n++;
     }
-    return $list;
+    update_option('blokes_overtime_people', $people, false);
+    return $people;
+}
+
+function overtime_save_people($people) {
+    update_option('blokes_overtime_people', array_values($people), false);
+}
+
+function overtime_person_index($people, $id) {
+    foreach ($people as $i => $p) {
+        if ($p['id'] === $id) return $i;
+    }
+    return -1;
+}
+
+function overtime_list_people() {
+    return rest_ensure_response(array('success' => true, 'people' => overtime_get_people()));
+}
+
+function overtime_add_person($request) {
+    $body = $request->get_json_params();
+    $name = trim(sanitize_text_field($body['name'] ?? ''));
+    $type = ($body['type'] ?? '') === 'externo' ? 'externo' : 'profesor';
+    if ($name === '') {
+        return new WP_Error('invalid_name', 'Indica el nombre', array('status' => 400));
+    }
+    $name   = mb_substr($name, 0, 60);
+    $people = overtime_get_people();
+    foreach ($people as $p) {
+        if (mb_strtolower($p['name']) === mb_strtolower($name)) {
+            return new WP_Error('duplicate', "Ya existe «{$p['name']}» en la lista", array('status' => 409));
+        }
+    }
+
+    $base = sanitize_title($name) ?: 'persona';
+    $id   = $base;
+    for ($k = 2; overtime_person_index($people, $id) >= 0; $k++) $id = "{$base}-{$k}";
+
+    $palette  = overtime_palette();
+    $person   = array(
+        'id'     => $id,
+        'name'   => $name,
+        'type'   => $type,
+        'color'  => $palette[count($people) % count($palette)],
+        'active' => true,
+    );
+    $people[] = $person;
+    overtime_save_people($people);
+
+    return rest_ensure_response(array('success' => true, 'person' => $person, 'people' => $people));
+}
+
+// Solo socios: renombrar, cambiar tipo o activar/desactivar. No se borra para no
+// dejar registros antiguos sin nombre.
+function overtime_update_person($request) {
+    $people = overtime_get_people();
+    $i      = overtime_person_index($people, $request['id']);
+    if ($i < 0) return new WP_Error('not_found', 'Persona no encontrada', array('status' => 404));
+
+    $body = $request->get_json_params();
+    if (isset($body['name'])) {
+        $name = mb_substr(trim(sanitize_text_field($body['name'])), 0, 60);
+        if ($name === '') return new WP_Error('invalid_name', 'Indica el nombre', array('status' => 400));
+        $people[$i]['name'] = $name;
+    }
+    if (isset($body['type']))   $people[$i]['type']   = $body['type'] === 'externo' ? 'externo' : 'profesor';
+    if (isset($body['active'])) $people[$i]['active'] = (bool) $body['active'];
+    overtime_save_people($people);
+
+    return rest_ensure_response(array('success' => true, 'people' => $people));
 }
 
 // Valida y normaliza los campos editables. Devuelve array o WP_Error.
-function overtime_clean_fields($body) {
+// $current_person: persona que ya tenía el registro (se permite aunque esté inactiva).
+function overtime_clean_fields($body, $current_person = null) {
     $professor = sanitize_title($body['professor'] ?? '');
     $date      = sanitize_text_field($body['date'] ?? '');
     $hours     = round(floatval($body['hours'] ?? 0), 2);
     $reason    = trim(sanitize_textarea_field($body['reason'] ?? ''));
 
-    if (!array_key_exists($professor, progreso_get_professors_config())) {
-        return new WP_Error('invalid_professor', 'Profesor no válido', array('status' => 400));
+    $people = overtime_get_people();
+    $pi     = overtime_person_index($people, $professor);
+    if ($pi < 0 || (!$people[$pi]['active'] && $professor !== $current_person)) {
+        return new WP_Error('invalid_professor', 'Persona no válida o inactiva', array('status' => 400));
     }
     $dt = DateTime::createFromFormat('Y-m-d', $date);
     if (!$dt || $dt->format('Y-m-d') !== $date) {
@@ -3054,7 +3166,7 @@ function overtime_list($request) {
         'success'    => true,
         'month'      => $month,
         'can_manage' => $is_socio,
-        'professors' => overtime_professors(),
+        'people'     => overtime_get_people(),
         'entries'    => $list,
     ));
 }
@@ -3098,7 +3210,7 @@ function overtime_update($request) {
     if (!$is_socio && $entries[$i]['status'] !== 'pendiente') {
         return new WP_Error('locked', 'Solo un socio puede modificar horas ya pagadas', array('status' => 403));
     }
-    $fields = overtime_clean_fields($request->get_json_params());
+    $fields = overtime_clean_fields($request->get_json_params(), $entries[$i]['professor']);
     if (is_wp_error($fields)) return $fields;
 
     $entries[$i] = array_merge($entries[$i], $fields, array('updated_at' => (new DateTime())->format('c')));
@@ -3170,14 +3282,16 @@ function overtime_get_rates_response() {
 function overtime_save_rates($request) {
     $body  = $request->get_json_params();
     $input = is_array($body['rates'] ?? null) ? $body['rates'] : array();
-    $valid = progreso_get_professors_config();
+    $people = overtime_get_people();
 
-    $clean = array();
+    // Solo se tocan las personas enviadas: las inactivas (que no salen en la tabla) conservan su tarifa.
+    $clean = overtime_get_rates();
     foreach ($input as $slug => $rate) {
         $slug = sanitize_title($slug);
-        if (!array_key_exists($slug, $valid) || $rate === '' || $rate === null) continue;
+        if (overtime_person_index($people, $slug) < 0) continue;
         $rate = round(floatval($rate), 2);
         if ($rate > 0) $clean[$slug] = $rate;
+        else unset($clean[$slug]);
     }
     update_option('blokes_overtime_rates', $clean, false);
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import {
   useOvertime, createOvertime, updateOvertime, deleteOvertime,
   setOvertimeStatus, getOvertimeRates, saveOvertimeRates,
+  addOvertimePerson, updateOvertimePerson,
 } from '../hooks/useOvertime'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -44,25 +45,25 @@ const fmtEur   = n => n == null ? '—' : Number(n).toLocaleString('es-ES', { st
 const emptyForm = month => ({ professor: '', date: defaultDate(month), hours: '', reason: '' })
 
 // ─── Tarifas de hora extra (solo socios) ────────────────────────────────────
-function OvertimeRates({ professors, onSaved }) {
+function OvertimeRates({ people, onSaved }) {
   const [rates,    setRates]    = useState(null)
   const [saving,   setSaving]   = useState(false)
   const [feedback, setFeedback] = useState('')
 
-  // Solo recargar si cambia la lista de profesores, no en cada recarga de registros
+  // Solo recargar si cambia la lista de personas, no en cada recarga de registros
   // (si no, se perderían tarifas escritas sin guardar).
-  const profKey = professors.map(p => p.slug).join(',')
+  const peopleKey = people.map(p => p.id).join(',')
   useEffect(() => {
     getOvertimeRates()
-      .then(r => setRates(Object.fromEntries(professors.map(p => [p.slug, r[p.slug] ?? '']))))
+      .then(r => setRates(Object.fromEntries(people.map(p => [p.id, r[p.id] ?? '']))))
       .catch(e => setFeedback(`✗ ${e.message}`))
-  }, [profKey])
+  }, [peopleKey])
 
   async function handleSave() {
     setSaving(true)
     try {
       const saved = await saveOvertimeRates(rates)
-      setRates(Object.fromEntries(professors.map(p => [p.slug, saved[p.slug] ?? ''])))
+      setRates(Object.fromEntries(people.map(p => [p.id, saved[p.id] ?? ''])))
       setFeedback('✓ Tarifas guardadas')
       onSaved()
     } catch (e) {
@@ -75,7 +76,7 @@ function OvertimeRates({ professors, onSaved }) {
 
   return (
     <div className="sv-section">
-      <h3 className="sv-section-title">€/hora extra por profesor</h3>
+      <h3 className="sv-section-title">€/hora extra por persona</h3>
       <p className="sv-note">
         Solo visible para socios. Es independiente del €/h de las clases. Al marcar horas como pagadas
         se guarda el €/h de ese momento, así que cambiar la tarifa no altera lo ya pagado.
@@ -83,15 +84,15 @@ function OvertimeRates({ professors, onSaved }) {
       {!rates ? <p className="sv-loading">Cargando…</p> : (
         <>
           <div className="sv-ot-rates">
-            {professors.map(p => (
-              <label key={p.slug} className="sv-ot-rate">
+            {people.map(p => (
+              <label key={p.id} className="sv-ot-rate">
                 <span className="sv-ot-dot" style={{ background: p.color }} />
                 <span className="sv-ot-rate__name">{p.name}</span>
                 <input
                   type="number" min="0" step="0.01" placeholder="—"
                   className="sv-tests-input sv-tests-input--num"
-                  value={rates[p.slug]}
-                  onChange={e => setRates(r => ({ ...r, [p.slug]: e.target.value }))}
+                  value={rates[p.id]}
+                  onChange={e => setRates(r => ({ ...r, [p.id]: e.target.value }))}
                 />
                 <span className="sv-ot-rate__unit">€/h</span>
               </label>
@@ -109,6 +110,110 @@ function OvertimeRates({ professors, onSaved }) {
   )
 }
 
+// ─── Personas (gestion y socio añaden; solo socio edita/desactiva) ──────────
+const TYPE_LABEL = { profesor: 'Profesor', externo: 'Externo' }
+
+function OvertimePeople({ people, isSocio, onChanged }) {
+  const [name,     setName]     = useState('')
+  const [type,     setType]     = useState('profesor')
+  const [busy,     setBusy]     = useState(false)
+  const [feedback, setFeedback] = useState('')
+
+  async function run(action, okMsg) {
+    setBusy(true)
+    try {
+      await action()
+      await onChanged()
+      setFeedback(okMsg)
+      return true
+    } catch (e) {
+      setFeedback(`✗ ${e.message}`)
+      return false
+    } finally {
+      setBusy(false)
+      setTimeout(() => setFeedback(''), 2800)
+    }
+  }
+
+  async function handleAdd(e) {
+    e.preventDefault()
+    const clean = name.trim()
+    if (!clean) return
+    if (await run(() => addOvertimePerson(clean, type), `✓ ${clean} añadido`)) setName('')
+  }
+
+  function handleRename(p) {
+    const next = window.prompt('Nuevo nombre', p.name)?.trim()
+    if (!next || next === p.name) return
+    run(() => updateOvertimePerson(p.id, { name: next }), '✓ Nombre cambiado')
+  }
+
+  const visible = isSocio ? people : people.filter(p => p.active)
+  const groups  = ['profesor', 'externo']
+    .map(t => [t, visible.filter(p => p.type === t)])
+    .filter(([, list]) => list.length > 0)
+
+  return (
+    <div className="sv-section">
+      <h3 className="sv-section-title">Personas</h3>
+      <p className="sv-note">
+        Profesores y colaboradores externos que pueden tener horas extra.
+        {isSocio
+          ? ' Desactivar a alguien lo quita del desplegable pero conserva sus horas y su nombre en el historial.'
+          : ' Si falta alguien, añádelo aquí. Para quitar o renombrar, pídeselo a un socio.'}
+      </p>
+
+      {groups.map(([t, list]) => (
+        <div key={t} className="sv-ot-people">
+          <span className="sv-ot-people__label">{t === 'externo' ? 'Externos' : 'Profesores'}</span>
+          <ul className="sv-ot-people__list">
+            {list.map(p => (
+              <li key={p.id} className={`sv-ot-person${p.active ? '' : ' sv-ot-person--inactive'}`}>
+                <span className="sv-ot-dot" style={{ background: p.color }} />
+                <span className="sv-ot-person__name">{p.name}</span>
+                {!p.active && <span className="sv-ot-person__tag">inactivo</span>}
+                {isSocio && (
+                  <span className="sv-ot-person__actions">
+                    <button className="sv-ot-action" disabled={busy} onClick={() => handleRename(p)}>Renombrar</button>
+                    <button
+                      className="sv-ot-action" disabled={busy}
+                      onClick={() => run(
+                        () => updateOvertimePerson(p.id, { type: p.type === 'externo' ? 'profesor' : 'externo' }),
+                        '✓ Tipo cambiado',
+                      )}
+                    >→ {p.type === 'externo' ? 'Profesor' : 'Externo'}</button>
+                    <button
+                      className="sv-ot-action" disabled={busy}
+                      onClick={() => run(
+                        () => updateOvertimePerson(p.id, { active: !p.active }),
+                        p.active ? `✓ ${p.name} desactivado` : `✓ ${p.name} activado`,
+                      )}
+                    >{p.active ? 'Desactivar' : 'Activar'}</button>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+
+      <form className="sv-tests-actions sv-ot-people__add" onSubmit={handleAdd}>
+        <input
+          type="text" maxLength={60} placeholder="Nombre"
+          className="sv-tests-input"
+          value={name}
+          onChange={e => setName(e.target.value)}
+        />
+        <select className="sv-tests-select" value={type} onChange={e => setType(e.target.value)}>
+          {Object.entries(TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <button type="submit" className="sv-tests-add" disabled={busy || !name.trim()}>+ Añadir persona</button>
+        {feedback && <span className="sv-tests-feedback">{feedback}</span>}
+      </form>
+    </div>
+  )
+}
+
 // ─── Pestaña Horas extra ────────────────────────────────────────────────────
 export default function OvertimeTab() {
   const [month,    setMonth]    = useState(currentMonth)
@@ -119,9 +224,10 @@ export default function OvertimeTab() {
 
   const { data, loading, error, reload } = useOvertime(month)
   const isSocio    = !!data?.can_manage
-  const professors = data?.professors || []
+  const people     = data?.people || []
   const entries    = data?.entries || []
-  const profBySlug = useMemo(() => Object.fromEntries(professors.map(p => [p.slug, p])), [professors])
+  const personById = useMemo(() => Object.fromEntries(people.map(p => [p.id, p])), [people])
+  const active     = people.filter(p => p.active)
 
   const summary = useMemo(() => {
     const byProf = {}
@@ -133,14 +239,16 @@ export default function OvertimeTab() {
       else s.amount += e.amount
       s[e.status === 'pagado' ? 'paid' : 'pending']++
     }
-    const rows = professors.filter(p => byProf[p.slug]).map(p => ({ ...p, ...byProf[p.slug] }))
+    // Profesores primero, luego externos, en el orden de la lista
+    const ordered = [...people.filter(p => p.type !== 'externo'), ...people.filter(p => p.type === 'externo')]
+    const rows = ordered.filter(p => byProf[p.id]).map(p => ({ ...p, ...byProf[p.id] }))
     return {
       rows,
       hours:  rows.reduce((t, r) => t + r.hours, 0),
       amount: rows.reduce((t, r) => t + r.amount, 0),
       missingRate: rows.some(r => r.missingRate),
     }
-  }, [entries, professors])
+  }, [entries, people])
 
   function flash(msg) {
     setFeedback(msg)
@@ -193,7 +301,7 @@ export default function OvertimeTab() {
   }
 
   function handleDelete(entry) {
-    const who = profBySlug[entry.professor]?.name || entry.professor
+    const who = personById[entry.professor]?.name || entry.professor
     if (!window.confirm(`¿Borrar ${fmtHours(entry.hours)} h de ${who} del ${fmtDate(entry.date)}?`)) return
     if (editing === entry.id) cancelEdit()
     run(() => deleteOvertime(entry.id), '✓ Registro borrado')
@@ -224,7 +332,15 @@ export default function OvertimeTab() {
               onChange={e => setForm(f => ({ ...f, professor: e.target.value }))}
             >
               <option value="" disabled>Elegir…</option>
-              {professors.map(p => <option key={p.slug} value={p.slug}>{p.name}</option>)}
+              {[['profesor', 'Profesores'], ['externo', 'Externos']].map(([type, label]) => {
+                // Al editar un registro de alguien ya inactivo, se sigue mostrando esa persona
+                const opts = people.filter(p => p.type === type && (p.active || p.id === form.professor))
+                return opts.length > 0 && (
+                  <optgroup key={type} label={label}>
+                    {opts.map(p => <option key={p.id} value={p.id}>{p.name}{p.active ? '' : ' (inactivo)'}</option>)}
+                  </optgroup>
+                )
+              })}
             </select>
           </label>
           <label className="sv-ot-field">
@@ -255,7 +371,7 @@ export default function OvertimeTab() {
           </label>
         </div>
         <div className="sv-tests-actions">
-          <button type="submit" className="sv-tests-save" disabled={busy || !professors.length}>
+          <button type="submit" className="sv-tests-save" disabled={busy || !active.length}>
             {editing ? 'Guardar cambios' : '+ Añadir'}
           </button>
           {editing && <button type="button" className="sv-tests-cancel" onClick={cancelEdit}>Cancelar</button>}
@@ -285,7 +401,7 @@ export default function OvertimeTab() {
                 </thead>
                 <tbody>
                   {entries.map(e => {
-                    const prof = profBySlug[e.professor]
+                    const prof = personById[e.professor]
                     return (
                       <tr key={e.id} className={editing === e.id ? 'sv-ot-row--editing' : ''}>
                         <td className="sv-ot-nowrap">{fmtDate(e.date)}</td>
@@ -345,7 +461,7 @@ export default function OvertimeTab() {
                 {summary.rows.map(r => {
                   const allPaid = r.pending === 0
                   return (
-                    <tr key={r.slug}>
+                    <tr key={r.id}>
                       <td className="sv-ot-nowrap"><span className="sv-ot-dot" style={{ background: r.color }} />{r.name}</td>
                       <td className="sv-ot-num">{fmtHours(r.hours)}</td>
                       {isSocio && <td className="sv-ot-num">
@@ -360,7 +476,7 @@ export default function OvertimeTab() {
                         <button
                           className="sv-ot-action" disabled={busy}
                           onClick={() => run(
-                            () => setOvertimeStatus({ month, professor: r.slug }, allPaid ? 'pendiente' : 'pagado'),
+                            () => setOvertimeStatus({ month, professor: r.id }, allPaid ? 'pendiente' : 'pagado'),
                             allPaid ? `✓ ${r.name}: marcado pendiente` : `✓ ${r.name}: marcado pagado`,
                           )}
                         >{allPaid ? 'Marcar pendiente' : 'Marcar todo pagado'}</button>
@@ -385,7 +501,9 @@ export default function OvertimeTab() {
         </div>
       )}
 
-      {isSocio && professors.length > 0 && <OvertimeRates professors={professors} onSaved={reload} />}
+      {data && <OvertimePeople people={people} isSocio={isSocio} onChanged={reload} />}
+
+      {isSocio && active.length > 0 && <OvertimeRates people={active} onSaved={reload} />}
     </div>
   )
 }
