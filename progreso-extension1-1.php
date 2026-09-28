@@ -2902,3 +2902,284 @@ function blokes_api_save_email_lists(WP_REST_Request $request) {
 
     return rest_ensure_response(array('success' => true, 'lists' => blokes_get_email_lists()));
 }
+
+// ============================================================
+//  superadmin/v1 — horas extra de profesores (Supervisión)
+//  gestion: ve y registra horas (solo edita las pendientes), sin importes
+//  socio:   todo + €/h extra por profesor, importes y estado de pago
+// ============================================================
+
+add_action('rest_api_init', function() {
+    $ot_perm    = function() { return in_array(blokes_get_app_role(), array('socio', 'gestion')); };
+    $socio_perm = function() { return blokes_get_app_role() === 'socio'; };
+
+    register_rest_route('superadmin/v1', '/overtime', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'overtime_list',
+            'permission_callback' => $ot_perm,
+            'args'                => array('month' => array('type' => 'string', 'required' => true)),
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'overtime_create',
+            'permission_callback' => $ot_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/overtime/(?P<id>[a-z0-9-]+)', array(
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'overtime_update',
+            'permission_callback' => $ot_perm,
+        ),
+        array(
+            'methods'             => 'DELETE',
+            'callback'            => 'overtime_delete',
+            'permission_callback' => $ot_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/overtime-status', array(
+        'methods'             => 'POST',
+        'callback'            => 'overtime_set_status',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/overtime-rates', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'overtime_get_rates_response',
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'overtime_save_rates',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+});
+
+function overtime_get_entries() {
+    $stored = get_option('blokes_overtime_entries', array());
+    return is_array($stored) ? $stored : array();
+}
+
+function overtime_save_entries($entries) {
+    update_option('blokes_overtime_entries', array_values($entries), false);
+}
+
+function overtime_get_rates() {
+    $stored = get_option('blokes_overtime_rates', array());
+    return is_array($stored) ? $stored : array();
+}
+
+function overtime_professors() {
+    $list = array();
+    foreach (progreso_get_professors_config() as $slug => $cfg) {
+        $user   = get_user_by('email', $cfg['email']);
+        $list[] = array(
+            'slug'  => $slug,
+            'name'  => $user ? $user->display_name : ucfirst($slug),
+            'color' => $cfg['color'] ?? '#888',
+        );
+    }
+    return $list;
+}
+
+// Valida y normaliza los campos editables. Devuelve array o WP_Error.
+function overtime_clean_fields($body) {
+    $professor = sanitize_title($body['professor'] ?? '');
+    $date      = sanitize_text_field($body['date'] ?? '');
+    $hours     = round(floatval($body['hours'] ?? 0), 2);
+    $reason    = trim(sanitize_textarea_field($body['reason'] ?? ''));
+
+    if (!array_key_exists($professor, progreso_get_professors_config())) {
+        return new WP_Error('invalid_professor', 'Profesor no válido', array('status' => 400));
+    }
+    $dt = DateTime::createFromFormat('Y-m-d', $date);
+    if (!$dt || $dt->format('Y-m-d') !== $date) {
+        return new WP_Error('invalid_date', 'Fecha no válida', array('status' => 400));
+    }
+    if ($hours <= 0 || $hours > 24) {
+        return new WP_Error('invalid_hours', 'Las horas deben estar entre 0 y 24', array('status' => 400));
+    }
+    if ($reason === '') {
+        return new WP_Error('invalid_reason', 'Indica el motivo', array('status' => 400));
+    }
+    return array(
+        'professor' => $professor,
+        'date'      => $date,
+        'hours'     => $hours,
+        'reason'    => mb_substr($reason, 0, 500),
+    );
+}
+
+// Quita los datos de dinero salvo para socios.
+function overtime_present($entry, $rates, $is_socio) {
+    $out = array(
+        'id'         => $entry['id'],
+        'professor'  => $entry['professor'],
+        'date'       => $entry['date'],
+        'hours'      => $entry['hours'],
+        'reason'     => $entry['reason'],
+        'status'     => $entry['status'],
+        'created_by' => $entry['created_by'] ?? '',
+    );
+    if ($is_socio) {
+        // Las pagadas conservan el €/h con el que se pagaron.
+        $rate = $entry['status'] === 'pagado' && isset($entry['paid_rate'])
+            ? $entry['paid_rate']
+            : ($rates[$entry['professor']] ?? null);
+        $out['rate']    = $rate;
+        $out['amount']  = $rate !== null ? round($rate * $entry['hours'], 2) : null;
+        $out['paid_at'] = $entry['paid_at'] ?? null;
+    }
+    return $out;
+}
+
+function overtime_list($request) {
+    $month = sanitize_text_field($request->get_param('month'));
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
+    }
+    $is_socio = blokes_get_app_role() === 'socio';
+    $rates    = $is_socio ? overtime_get_rates() : array();
+
+    $list = array();
+    foreach (overtime_get_entries() as $entry) {
+        if (strpos($entry['date'], $month) !== 0) continue;
+        $list[] = overtime_present($entry, $rates, $is_socio);
+    }
+    usort($list, function($a, $b) { return strcmp($a['date'], $b['date']); });
+
+    return rest_ensure_response(array(
+        'success'    => true,
+        'month'      => $month,
+        'can_manage' => $is_socio,
+        'professors' => overtime_professors(),
+        'entries'    => $list,
+    ));
+}
+
+function overtime_create($request) {
+    $fields = overtime_clean_fields($request->get_json_params());
+    if (is_wp_error($fields)) return $fields;
+
+    $now   = (new DateTime())->format('c');
+    $entry = array_merge($fields, array(
+        'id'         => wp_generate_uuid4(),
+        'status'     => 'pendiente',
+        'created_by' => wp_get_current_user()->user_email,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ));
+    $entries   = overtime_get_entries();
+    $entries[] = $entry;
+    overtime_save_entries($entries);
+
+    $is_socio = blokes_get_app_role() === 'socio';
+    return rest_ensure_response(array(
+        'success' => true,
+        'entry'   => overtime_present($entry, $is_socio ? overtime_get_rates() : array(), $is_socio),
+    ));
+}
+
+function overtime_find_index($entries, $id) {
+    foreach ($entries as $i => $entry) {
+        if ($entry['id'] === $id) return $i;
+    }
+    return -1;
+}
+
+function overtime_update($request) {
+    $entries = overtime_get_entries();
+    $i       = overtime_find_index($entries, $request['id']);
+    if ($i < 0) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
+
+    $is_socio = blokes_get_app_role() === 'socio';
+    if (!$is_socio && $entries[$i]['status'] !== 'pendiente') {
+        return new WP_Error('locked', 'Solo un socio puede modificar horas ya pagadas', array('status' => 403));
+    }
+    $fields = overtime_clean_fields($request->get_json_params());
+    if (is_wp_error($fields)) return $fields;
+
+    $entries[$i] = array_merge($entries[$i], $fields, array('updated_at' => (new DateTime())->format('c')));
+    overtime_save_entries($entries);
+
+    return rest_ensure_response(array(
+        'success' => true,
+        'entry'   => overtime_present($entries[$i], $is_socio ? overtime_get_rates() : array(), $is_socio),
+    ));
+}
+
+function overtime_delete($request) {
+    $entries = overtime_get_entries();
+    $i       = overtime_find_index($entries, $request['id']);
+    if ($i < 0) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
+
+    if (blokes_get_app_role() !== 'socio' && $entries[$i]['status'] !== 'pendiente') {
+        return new WP_Error('locked', 'Solo un socio puede borrar horas ya pagadas', array('status' => 403));
+    }
+    array_splice($entries, $i, 1);
+    overtime_save_entries($entries);
+
+    return rest_ensure_response(array('success' => true));
+}
+
+// Cambia el estado de uno (id) o de todos los de un profesor en un mes (month + professor).
+function overtime_set_status($request) {
+    $body   = $request->get_json_params();
+    $status = $body['status'] ?? '';
+    if (!in_array($status, array('pendiente', 'pagado'), true)) {
+        return new WP_Error('invalid_status', 'Estado no válido', array('status' => 400));
+    }
+    $id        = sanitize_text_field($body['id'] ?? '');
+    $month     = sanitize_text_field($body['month'] ?? '');
+    $professor = sanitize_title($body['professor'] ?? '');
+    if ($id === '' && (!preg_match('/^\d{4}-\d{2}$/', $month) || $professor === '')) {
+        return new WP_Error('invalid_target', 'Indica id, o mes y profesor', array('status' => 400));
+    }
+
+    $rates   = overtime_get_rates();
+    $now     = (new DateTime())->format('c');
+    $entries = overtime_get_entries();
+    $changed = 0;
+    foreach ($entries as $i => $entry) {
+        $match = $id !== ''
+            ? $entry['id'] === $id
+            : ($entry['professor'] === $professor && strpos($entry['date'], $month) === 0);
+        if (!$match || $entry['status'] === $status) continue;
+
+        $entries[$i]['status']     = $status;
+        $entries[$i]['updated_at'] = $now;
+        if ($status === 'pagado') {
+            $entries[$i]['paid_at']   = $now;
+            $entries[$i]['paid_rate'] = $rates[$entry['professor']] ?? null;
+        } else {
+            unset($entries[$i]['paid_at'], $entries[$i]['paid_rate']);
+        }
+        $changed++;
+    }
+    overtime_save_entries($entries);
+
+    return rest_ensure_response(array('success' => true, 'changed' => $changed));
+}
+
+function overtime_get_rates_response() {
+    return rest_ensure_response(array('success' => true, 'rates' => (object) overtime_get_rates()));
+}
+
+function overtime_save_rates($request) {
+    $body  = $request->get_json_params();
+    $input = is_array($body['rates'] ?? null) ? $body['rates'] : array();
+    $valid = progreso_get_professors_config();
+
+    $clean = array();
+    foreach ($input as $slug => $rate) {
+        $slug = sanitize_title($slug);
+        if (!array_key_exists($slug, $valid) || $rate === '' || $rate === null) continue;
+        $rate = round(floatval($rate), 2);
+        if ($rate > 0) $clean[$slug] = $rate;
+    }
+    update_option('blokes_overtime_rates', $clean, false);
+
+    return rest_ensure_response(array('success' => true, 'rates' => (object) $clean));
+}

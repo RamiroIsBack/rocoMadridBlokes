@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { useClasses } from '../hooks/useSuperAdmin'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
+import OvertimeTab from './OvertimeTab'
 import './SupervisionPage.css'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -859,6 +860,7 @@ export default function SupervisionPage() {
   const TABS = [
     { id: 'excelmuerte', label: 'ExcelMuerte'   },
     { id: 'ctrltests',   label: 'Tests'          },
+    { id: 'horasextra',  label: 'Horas extra'    },
     { id: 'ctrlfichaje', label: 'CTRL Fichaje'  },
     { id: 'timeoff',     label: 'CTRL Time Off' },
   ]
@@ -890,6 +892,7 @@ export default function SupervisionPage() {
 
       {tab === 'excelmuerte' && <ClasesTab />}
       {tab === 'ctrltests'   && <CtrlTestsTab />}
+      {tab === 'horasextra'  && <OvertimeTab />}
       {tab === 'ctrlfichaje' && <ComingSoon name="CTRL Fichaje" detail="Control de fichajes, horas y seguimiento mensual del equipo" />}
       {tab === 'timeoff'     && <ComingSoon name="Time Off"    detail="Gestión de vacaciones y ausencias" />}
     </div>
