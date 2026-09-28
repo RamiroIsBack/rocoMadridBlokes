@@ -278,41 +278,89 @@ function PersonFile({ person, row, personal, onSaved }) {
 // ─── Informe para imprimir / guardar como PDF ───────────────────────────────
 // Se monta directamente en <body> y está oculto en pantalla; al imprimir con printReport()
 // es lo único visible (ver SuperAdminPage.css), así no salen páginas en blanco.
+const CLUB_NAME = 'Rocoteca Madrid'
+const CLUB_LOGO = 'https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png'
+
+function reportRef(month, person) {
+  return `NOM-${month}-${person ? person.id.toUpperCase() : 'GENERAL'}`
+}
+
 function PayrollReport({ month, person, personal, notes, rows, entries, totals, byId }) {
   const today = fmtDate(new Date().toISOString().slice(0, 10))
   const row   = person ? rows[0] : null
+  // Cifras del informe: las de la persona o las totales del mes
+  const sum = person
+    ? { base: row?.base ?? null, hours: row?.hours ?? 0, extras: row?.extras ?? 0, total: row?.total ?? 0 }
+    : totals || { base: 0, hours: 0, extras: 0, total: 0 }
+  const pendingCount = entries.filter(e => e.status !== 'pagado').length
+
   return createPortal(
     <div className="pay-report-root" aria-hidden="true"><div className="pay-report">
-      <header className="pay-report__header">
-        <div>
-          <p className="pay-report__org">Rocoteca Madrid</p>
-          <h1>{person ? `Informe de nómina · ${person.name}` : 'Informe de nóminas'}</h1>
-          <p className="pay-report__sub">{monthLabel(month)}</p>
+      {/* ── Cabecera corporativa ── */}
+      <header className="pr-header">
+        <div className="pr-header__brand">
+          <img src={CLUB_LOGO} alt="" className="pr-header__logo" />
+          <div>
+            <p className="pr-header__org">{CLUB_NAME}</p>
+            <p className="pr-header__dept">Administración · Nóminas</p>
+          </div>
         </div>
-        <p className="pay-report__date">Generado el {today}</p>
+        <div className="pr-header__doc">
+          <p className="pr-header__kind">{person ? 'Informe de nómina' : 'Informe mensual de nóminas'}</p>
+          <p className="pr-header__period">{monthLabel(month)}</p>
+        </div>
       </header>
 
+      <dl className="pr-meta">
+        <div><dt>{person ? 'Persona' : 'Alcance'}</dt><dd>{person ? (personal.full_name || person.name) : 'Toda la plantilla'}</dd></div>
+        <div><dt>Periodo</dt><dd>{monthLabel(month)}</dd></div>
+        <div><dt>Referencia</dt><dd>{reportRef(month, person)}</dd></div>
+        <div><dt>Fecha de emisión</dt><dd>{today}</dd></div>
+      </dl>
+
+      {/* ── Resumen en cifras ── */}
+      <div className="pr-kpis">
+        <div className="pr-kpi">
+          <span className="pr-kpi__label">Nómina base</span>
+          <span className="pr-kpi__value">{person && !hasBase(person.type) ? '—' : fmtEur(sum.base ?? 0)}</span>
+        </div>
+        <div className="pr-kpi">
+          <span className="pr-kpi__label">Horas extra</span>
+          <span className="pr-kpi__value">{fmtHours(sum.hours)} h</span>
+        </div>
+        <div className="pr-kpi">
+          <span className="pr-kpi__label">Importe extras</span>
+          <span className="pr-kpi__value">{fmtEur(sum.extras)}</span>
+        </div>
+        <div className="pr-kpi pr-kpi--total">
+          <span className="pr-kpi__label">Total a percibir</span>
+          <span className="pr-kpi__value">{fmtEur(sum.total)}</span>
+        </div>
+      </div>
+
+      {/* ── Datos personales ── */}
       {person && (
-        <section>
-          <h2>Datos personales</h2>
-          <table className="pay-report__kv">
+        <section className="pr-section">
+          <h2 className="pr-title">1. Datos de la persona</h2>
+          <table className="pr-kv">
             <tbody>
               {PERSONAL_FIELDS.map(f => (
                 <tr key={f.key}><th>{f.label}</th><td>{fmtPersonal(f, personal[f.key])}</td></tr>
               ))}
-              <tr><th>Tipo</th><td>{typeLabel(person.type)}</td></tr>
+              <tr><th>Vinculación</th><td>{typeLabel(person.type)}</td></tr>
             </tbody>
           </table>
         </section>
       )}
 
-      <section>
-        <h2>{person ? 'Nómina del mes' : 'Nómina por persona'}</h2>
-        {person && !row ? <p>Sin nómina ni horas extra este mes.</p> : (
-          <table className="pay-report__table">
+      {/* ── Nómina ── */}
+      <section className="pr-section">
+        <h2 className="pr-title">{person ? '2. Liquidación del mes' : '1. Nómina por persona'}</h2>
+        {person && !row ? <p className="pr-empty">Sin nómina ni horas extra este mes.</p> : (
+          <table className="pr-table">
             <thead>
               <tr>
-                {!person && <th>Persona</th>}
+                {person ? <th>Concepto</th> : <th>Persona</th>}
                 <th className="num">Nómina base</th>
                 <th className="num">Horas extra</th>
                 <th className="num">€/h extra</th>
@@ -323,7 +371,7 @@ function PayrollReport({ month, person, personal, notes, rows, entries, totals, 
             <tbody>
               {rows.map(r => (
                 <tr key={r.id}>
-                  {!person && <td>{r.name}{r.type !== 'profesor' ? ` (${typeLabel(r.type).toLowerCase()})` : ''}</td>}
+                  <td>{person ? 'Nómina mensual' : <>{r.name}{r.type !== 'profesor' && <span className="pr-tag">{typeLabel(r.type)}</span>}</>}</td>
                   <td className="num">{hasBase(r.type) ? fmtEur(r.base) : '—'}</td>
                   <td className="num">{fmtHours(r.hours)}</td>
                   <td className="num">{r.rate == null ? '—' : fmtEur(r.rate)}</td>
@@ -332,56 +380,79 @@ function PayrollReport({ month, person, personal, notes, rows, entries, totals, 
                 </tr>
               ))}
             </tbody>
-            {!person && totals && (
-              <tfoot>
-                <tr>
-                  <td>Total</td>
-                  <td className="num">{fmtEur(totals.base)}</td>
-                  <td className="num">{fmtHours(totals.hours)}</td>
-                  <td />
-                  <td className="num">{fmtEur(totals.extras)}</td>
-                  <td className="num"><strong>{fmtEur(totals.total)}</strong></td>
-                </tr>
-              </tfoot>
-            )}
+            <tfoot>
+              <tr>
+                <td>Total</td>
+                <td className="num">{person && !hasBase(person.type) ? '—' : fmtEur(sum.base ?? 0)}</td>
+                <td className="num">{fmtHours(sum.hours)}</td>
+                <td />
+                <td className="num">{fmtEur(sum.extras)}</td>
+                <td className="num">{fmtEur(sum.total)}</td>
+              </tr>
+            </tfoot>
           </table>
         )}
         {person && notes[person.id] && (
-          <p className="pay-report__note"><strong>Justificación de la base:</strong> {notes[person.id]}</p>
+          <p className="pr-note"><strong>Justificación de la nómina base:</strong> {notes[person.id]}</p>
         )}
       </section>
 
-      <section>
-        <h2>Detalle de horas extra</h2>
-        {entries.length === 0 ? <p>No hay horas extra registradas este mes.</p> : (
-          <table className="pay-report__table">
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                {!person && <th>Persona</th>}
-                <th className="num">Horas</th>
-                <th>Motivo</th>
-                <th className="num">€/h</th>
-                <th className="num">Importe</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map(e => (
-                <tr key={e.id}>
-                  <td>{fmtDate(e.date)}</td>
-                  {!person && <td>{byId[e.professor]?.name || e.professor}</td>}
-                  <td className="num">{fmtHours(e.hours)}</td>
-                  <td>{e.reason}</td>
-                  <td className="num">{e.rate == null ? '—' : fmtEur(e.rate)}</td>
-                  <td className="num">{fmtEur(e.amount)}</td>
-                  <td>{e.status === 'pagado' ? 'Pagado' : 'Pendiente'}</td>
+      {/* ── Detalle de horas extra ── */}
+      <section className="pr-section">
+        <h2 className="pr-title">{person ? '3.' : '2.'} Detalle de horas extra</h2>
+        {entries.length === 0 ? <p className="pr-empty">No hay horas extra registradas este mes.</p> : (
+          <>
+            <table className="pr-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  {!person && <th>Persona</th>}
+                  <th className="num">Horas</th>
+                  <th>Motivo</th>
+                  <th className="num">€/h</th>
+                  <th className="num">Importe</th>
+                  <th>Estado</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {entries.map(e => (
+                  <tr key={e.id}>
+                    <td className="nowrap">{fmtDate(e.date)}</td>
+                    {!person && <td className="nowrap">{byId[e.professor]?.name || e.professor}</td>}
+                    <td className="num">{fmtHours(e.hours)}</td>
+                    <td>{e.reason}</td>
+                    <td className="num">{e.rate == null ? '—' : fmtEur(e.rate)}</td>
+                    <td className="num">{fmtEur(e.amount)}</td>
+                    <td><span className={`pr-status pr-status--${e.status}`}>{e.status === 'pagado' ? 'Pagado' : 'Pendiente'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="pr-note">
+              {entries.length} registro{entries.length === 1 ? '' : 's'} · {pendingCount === 0 ? 'todos pagados' : `${pendingCount} pendiente${pendingCount === 1 ? '' : 's'} de pago`}.
+            </p>
+          </>
         )}
       </section>
+
+      {/* ── Firmas (informe individual) ── */}
+      {person && (
+        <section className="pr-signatures">
+          <div>
+            <div className="pr-signatures__line" />
+            <p>Por {CLUB_NAME}</p>
+          </div>
+          <div>
+            <div className="pr-signatures__line" />
+            <p>Conforme: {personal.full_name || person.name}</p>
+          </div>
+        </section>
+      )}
+
+      <footer className="pr-footer">
+        <span>{CLUB_NAME} · {reportRef(month, person)}</span>
+        <span>Documento confidencial{person ? ' · contiene datos personales' : ''} · uso interno</span>
+      </footer>
     </div></div>,
     document.body,
   )

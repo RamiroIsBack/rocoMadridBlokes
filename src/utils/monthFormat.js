@@ -34,4 +34,5 @@ export function fmtDate(iso) {
 }
 
 export const fmtHours = h => Number(h).toLocaleString('es-ES', { maximumFractionDigits: 2 })
-export const fmtEur   = n => n == null ? '—' : Number(n).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })
+// useGrouping 'always': en es-ES los importes de 4 cifras no llevan punto de miles por defecto (1600,00 €)
+export const fmtEur   = n => n == null ? '—' : Number(n).toLocaleString('es-ES', { style: 'currency', currency: 'EUR', useGrouping: 'always' })

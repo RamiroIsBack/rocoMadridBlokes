@@ -990,45 +990,163 @@ details[open] .sa-collapsible__arrow {
 .sa-pay-filter__clear:hover { color: #f87171; }
 
 /* ── Nóminas: informe imprimible (Guardar como PDF) ── */
+/* Identidad del club: carbón #1f1f1f y dorado #d19d02 (tokens de index.css) */
 .pay-report-root { display: none; }
 
 @media print {
   body.pay-printing > *:not(.pay-report-root) { display: none !important; }
   body.pay-printing { background: #fff !important; margin: 0; }
   body.pay-printing .pay-report-root { display: block; }
-  @page { size: A4; margin: 16mm 14mm; }
+  @page { size: A4; margin: 14mm 14mm 18mm; }
 }
 
 .pay-report {
+  --pr-ink: #1f1f1f;
+  --pr-gold: #d19d02;
+  --pr-muted: #6b645c;
+  --pr-line: #ddd6c8;
+  --pr-soft: #f6f2e8;
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
-  color: #111;
-  font-size: 10.5pt;
-  line-height: 1.4;
+  color: var(--pr-ink);
+  font-size: 9.5pt;
+  line-height: 1.45;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
-.pay-report h1 { font-size: 17pt; margin: 2px 0; }
-.pay-report h2 {
-  font-size: 11pt;
-  margin: 18px 0 6px;
-  padding-bottom: 3px;
-  border-bottom: 1px solid #999;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.pay-report__header {
+.pay-report p { margin: 0; }
+
+.pr-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  border-bottom: 2px solid #111;
-  padding-bottom: 8px;
+  align-items: center;
+  gap: 16px;
+  background: var(--pr-ink);
+  color: #fff;
+  padding: 12px 16px;
+  border-bottom: 3px solid var(--pr-gold);
 }
-.pay-report__org  { margin: 0; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.1em; color: #555; }
-.pay-report__sub  { margin: 0; font-size: 11pt; color: #333; }
-.pay-report__date { margin: 0; font-size: 9pt; color: #555; }
-.pay-report__note { font-size: 9.5pt; margin: 6px 0 0; }
+.pr-header__brand { display: flex; align-items: center; gap: 12px; }
+.pr-header__logo  { height: 40px; width: auto; }
+.pr-header__org   { font-size: 13pt; font-weight: 800; letter-spacing: 0.02em; }
+.pr-header__dept  { font-size: 8pt; color: #c9c2b4; text-transform: uppercase; letter-spacing: 0.12em; }
+.pr-header__doc   { text-align: right; }
+.pr-header__kind  { font-size: 8pt; color: var(--pr-gold); text-transform: uppercase; letter-spacing: 0.14em; font-weight: 700; }
+.pr-header__period{ font-size: 15pt; font-weight: 800; }
+
+.pr-meta {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1.3fr 1fr;
+  margin: 0;
+  border: 1px solid var(--pr-line);
+  border-top: none;
+}
+.pr-meta > div { padding: 7px 10px; border-left: 1px solid var(--pr-line); }
+.pr-meta > div:first-child { border-left: none; }
+.pr-meta dt { font-size: 7pt; text-transform: uppercase; letter-spacing: 0.1em; color: var(--pr-muted); }
+.pr-meta dd { margin: 1px 0 0; font-weight: 700; }
+
+.pr-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin: 14px 0 4px;
+}
+.pr-kpi {
+  padding: 8px 10px;
+  background: var(--pr-soft);
+  border-top: 2px solid var(--pr-ink);
+}
+.pr-kpi--total { background: var(--pr-ink); color: #fff; border-top-color: var(--pr-gold); }
+.pr-kpi__label { display: block; font-size: 7pt; text-transform: uppercase; letter-spacing: 0.1em; color: var(--pr-muted); }
+.pr-kpi--total .pr-kpi__label { color: var(--pr-gold); }
+.pr-kpi__value { display: block; font-size: 13pt; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+.pr-section { margin-top: 16px; }
+.pr-title {
+  font-size: 9.5pt;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 6px;
+  padding-left: 8px;
+  border-left: 3px solid var(--pr-gold);
+}
+
 .pay-report table { width: 100%; border-collapse: collapse; }
-.pay-report th, .pay-report td { padding: 4px 6px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; }
-.pay-report thead th { font-size: 8.5pt; text-transform: uppercase; color: #444; border-bottom: 1px solid #999; }
-.pay-report tfoot td { border-top: 1.5px solid #111; border-bottom: none; font-weight: 700; }
-.pay-report .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.pay-report__kv th { width: 34%; font-weight: 600; color: #444; }
+.pr-table th {
+  background: var(--pr-ink);
+  color: #fff;
+  font-size: 7.5pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 5px 7px;
+  text-align: left;
+}
+.pr-table td { padding: 5px 7px; border-bottom: 1px solid var(--pr-line); vertical-align: top; }
+.pr-table tbody tr:nth-child(even) td { background: var(--pr-soft); }
+.pr-table tfoot td {
+  font-weight: 800;
+  border-top: 2px solid var(--pr-ink);
+  border-bottom: none;
+  padding-top: 6px;
+}
+.pr-table tfoot td:last-child { color: var(--pr-gold); }
+.pay-report .num    { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pay-report .nowrap { white-space: nowrap; }
 .pay-report tr { break-inside: avoid; }
+
+.pr-kv th {
+  width: 32%;
+  text-align: left;
+  font-weight: 600;
+  color: var(--pr-muted);
+  padding: 5px 8px;
+  background: var(--pr-soft);
+  border-bottom: 1px solid #fff;
+}
+.pr-kv td { padding: 5px 8px; border-bottom: 1px solid var(--pr-line); font-weight: 600; }
+
+.pr-tag {
+  margin-left: 6px;
+  font-size: 7pt;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pr-muted);
+  border: 1px solid var(--pr-line);
+  border-radius: 8px;
+  padding: 0 5px;
+}
+.pr-status {
+  font-size: 7.5pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.pr-status--pagado    { color: #1b7a4b; }
+.pr-status--pendiente { color: #a86b00; }
+
+.pr-note  { margin-top: 6px !important; font-size: 8.5pt; color: var(--pr-muted); }
+.pr-empty { font-style: italic; color: var(--pr-muted); }
+
+.pr-signatures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  margin-top: 36px;
+  break-inside: avoid;
+}
+.pr-signatures__line { height: 44px; border-bottom: 1px solid var(--pr-ink); }
+.pr-signatures p { margin-top: 4px !important; font-size: 8.5pt; color: var(--pr-muted); }
+
+/* Pie al final del informe */
+.pr-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 6px;
+  border-top: 1px solid var(--pr-line);
+  font-size: 7pt;
+  color: var(--pr-muted);
+}
