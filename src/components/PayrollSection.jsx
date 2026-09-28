@@ -71,7 +71,7 @@ function PayrollConfig({ people, config, onSaved }) {
       </div>
       <p className="sa-pay-note">
         Nómina base mensual fija (profesores y voluntarios; los externos cobran solo extras), su justificación y €/h de las horas extra.
-        Los importes base iniciales vienen de los costes mensuales de Playground: revisadlos y actualizadlos.
+        La nómina base es el importe que se paga a la persona cada mes (no el coste de gestoría).
         Al marcar horas como pagadas se guarda el €/h de ese momento, así que cambiarlo no altera lo ya pagado.
       </p>
       <div className="sa-pay-scroll">

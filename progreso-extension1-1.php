@@ -3341,16 +3341,11 @@ function overtime_set_status($request) {
 // ============================================================
 
 // Nómina base mensual por persona (profesores y voluntarios; los externos cobran solo extras).
-// Primera carga con los costes mensuales de PlaygroundPage.jsx — pendientes de revisar.
+// Solo lo configurado en Nóminas → Configuración (lo que se paga a cada persona).
+// No se usan los costes de gestoría de PlaygroundPage.jsx.
 function payroll_get_base() {
-    $stored = get_option('blokes_payroll_base', null);
-    if (is_array($stored)) return $stored;
-    $seed = array(
-        'alvaro' => 1715.60, 'sigurd' => 903.00, 'lucia' => 314.00,
-        'sara'   => 523.00,  'ana'    => 400.00, 'eva'   => 1424.46,
-    );
-    update_option('blokes_payroll_base', $seed, false);
-    return $seed;
+    $stored = get_option('blokes_payroll_base', array());
+    return is_array($stored) ? $stored : array();
 }
 
 // "Sin asistencia": { 'YYYY-MM': [id, ...] }. Ese mes la nómina base de esa persona no se
