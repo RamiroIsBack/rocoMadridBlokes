@@ -2987,6 +2987,17 @@ add_action('rest_api_init', function() {
         'callback'            => 'payroll_import_payments',
         'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/payroll-partials', array(
+        'methods'             => 'POST',
+        'callback'            => 'payroll_add_partial',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/payroll-partials/(?P<id>[a-z0-9-]+)', array(
+        'methods'             => 'DELETE',
+        'callback'            => 'payroll_delete_partial',
+        'permission_callback' => $socio_perm,
+        'args'                => array('month' => array('type' => 'string', 'required' => true)),
+    ));
     register_rest_route('superadmin/v1', '/payroll-cash', array(
         'methods'             => 'POST',
         'callback'            => 'payroll_set_cash',
@@ -3501,7 +3512,8 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
     $rows   = array();
     $payments = payroll_get_payments()[$month] ?? array();
     $totals = array('base' => 0, 'extras' => 0, 'pending_extras' => 0, 'total' => 0, 'hours' => 0,
-                    'paid_bank' => 0, 'outstanding' => 0, 'cash' => 0);
+                    'paid_bank' => 0, 'outstanding' => 0, 'cash' => 0, 'partials' => 0);
+    $partials      = payroll_get_partials()[$month] ?? array();
     $cash_totals   = payroll_get_cash_totals();
     $cash_payments = payroll_get_cash_payments()[$month] ?? array();
     foreach ($ordered as $p) {
@@ -3537,6 +3549,13 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
         $base_due = $p_base ?? 0;
         $cash_total = ($p_base !== null) ? ($cash_totals[$p['id']] ?? null) : null;
 
+        $my_partials = array_values(array_filter($partials, function($x) use ($p) { return $x['person'] === $p['id']; }));
+        $part_nomina = 0; $part_extras = 0;
+        foreach ($my_partials as $x) {
+            if ($x['concept'] === 'extras') $part_extras += $x['amount'];
+            else                            $part_nomina += $x['amount'];
+        }
+
         if ($cash_total !== null) {
             // Pago mixto: banco (nómina) + efectivo = total pactado; las extras van en el efectivo.
             // El efectivo se calcula con lo que pagó realmente el banco (remesa) o, si aún no hay
@@ -3549,20 +3568,36 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
             $row['cash_estimated'] = !($pay && $pay['amount'] !== null);
             $row['cash_paid']      = $cash_paid;
             $row['total']          = round(($absent ? 0 : max($cash_total, $bank_ref)) + $row['extras'], 2);
-            $outstanding = ($pay ? 0 : $base_due) + ($cash_paid ? 0 : $cash_base + $row['pending_extras']);
+            // Los pagos parciales en efectivo descuentan del efectivo pendiente
+            $nomina_out  = $pay ? 0 : $base_due;
+            $extras_out  = $cash_paid ? 0 : max(0, $cash_base + $row['pending_extras'] - $part_nomina - $part_extras);
             // Solo se avisa si el banco paga más que el total pactado
             $row['difference'] = ($pay && $pay['amount'] !== null && $pay['amount'] > $cash_total + 0.01)
                 ? round($pay['amount'] - $cash_total, 2) : null;
             $totals['cash'] += $row['cash_due'];
         } else {
-            if (!$pay)                       $outstanding = $base_due + $row['pending_extras'];
-            elseif ($pay['amount'] === null) $outstanding = $row['pending_extras'];
-            else                             $outstanding = max(0, $base_due + $row['pending_extras'] - $pay['amount']);
+            // Lo pagado por banco cubre primero la nómina; lo que exceda, las extras.
+            // Los pagos parciales en efectivo descuentan de su concepto (nómina o extras).
+            $bank_cover = !$pay ? 0 : ($pay['amount'] === null ? $base_due : $pay['amount']);
+            $nomina_out = max(0, $base_due - $bank_cover - $part_nomina);
+            $excess     = max(0, $bank_cover + $part_nomina - $base_due);
+            $extras_out = max(0, $row['pending_extras'] - $excess - $part_extras);
             // Diferencia entre lo pagado en banco y el total del mes (para detectar bases mal configuradas)
             $row['difference'] = ($pay && $pay['amount'] !== null) ? round($pay['amount'] - $row['total'], 2) : null;
         }
-        $row['payment']     = $pay;
+        $outstanding = $nomina_out + $extras_out;
+        $any_nomina  = $pay || $part_nomina > 0;
+        $row['payment']            = $pay;
+        $row['partials']           = $my_partials;
+        $row['partial_nomina']     = round($part_nomina, 2);
+        $row['partial_extras']     = round($part_extras, 2);
+        $row['nomina_outstanding'] = round($nomina_out, 2);
+        $row['extras_outstanding'] = round($extras_out, 2);
+        // Estado de la nómina (base): pagado / parcial / pendiente
+        $row['nomina_status'] = $base_due <= 0 && !$any_nomina ? null
+            : ($any_nomina && $nomina_out <= 0.01 ? 'pagado' : ($any_nomina ? 'parcial' : 'pendiente'));
         $row['outstanding'] = round($outstanding, 2);
+        $totals['partials'] += $part_nomina + $part_extras;
         $rows[] = $row;
 
         $totals['base']           += $p_base ?? 0;
@@ -3696,6 +3731,74 @@ function payroll_get_cash_payments() {
 
 // Marcar/desmarcar el efectivo del mes como entregado. Al marcarlo, las horas extra del mes
 // (que van en el mismo pago en efectivo) quedan también pagadas.
+// ── Pagos parciales en efectivo ──
+// { 'YYYY-MM': [ { id, person, concept: nomina|extras, amount, method: efectivo, date, note, created_by } ] }
+function payroll_get_partials() {
+    $stored = get_option('blokes_payroll_partials', array());
+    return is_array($stored) ? $stored : array();
+}
+
+function payroll_add_partial($request) {
+    $body    = $request->get_json_params();
+    $month   = sanitize_text_field($body['month'] ?? '');
+    $person  = sanitize_title($body['person'] ?? '');
+    $concept = ($body['concept'] ?? '') === 'extras' ? 'extras' : 'nomina';
+    $amount  = round(floatval($body['amount'] ?? 0), 2);
+    $date    = sanitize_text_field($body['date'] ?? '');
+    $note    = mb_substr(trim(sanitize_textarea_field($body['note'] ?? '')), 0, 300);   // justificación
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
+    }
+    if (overtime_person_index(overtime_get_people(), $person) < 0) {
+        return new WP_Error('not_found', 'Persona no encontrada', array('status' => 404));
+    }
+    if ($amount <= 0) {
+        return new WP_Error('invalid_amount', 'El importe debe ser mayor que 0', array('status' => 400));
+    }
+    if ($note === '') {
+        return new WP_Error('invalid_note', 'Indica la justificación del pago', array('status' => 400));
+    }
+    $dt = DateTime::createFromFormat('Y-m-d', $date);
+    if (!$dt || $dt->format('Y-m-d') !== $date) $date = current_time('Y-m-d');
+
+    $all = payroll_get_partials();
+    $all[$month][] = array(
+        'id'         => wp_generate_uuid4(),
+        'person'     => $person,
+        'concept'    => $concept,
+        'amount'     => $amount,
+        'method'     => 'efectivo',
+        'date'       => $date,
+        'note'       => $note,
+        'created_by' => wp_get_current_user()->user_email,
+    );
+    update_option('blokes_payroll_partials', $all, false);
+
+    // Si con este pago las horas extra del mes quedan cubiertas, se marcan como pagadas
+    if ($concept === 'extras') {
+        $calc = payroll_compute_month($month, overtime_get_people(), overtime_get_entries(), payroll_get_base(), overtime_get_rates());
+        foreach ($calc['rows'] as $r) {
+            if ($r['id'] === $person && $r['pending_extras'] > 0 && $r['extras_outstanding'] <= 0.01) {
+                payroll_mark_extras_paid($month, $person);
+            }
+        }
+    }
+    return rest_ensure_response(array('success' => true));
+}
+
+function payroll_delete_partial($request) {
+    $month = sanitize_text_field($request->get_param('month'));
+    $id    = sanitize_text_field($request['id']);
+    $all   = payroll_get_partials();
+    if (empty($all[$month])) return new WP_Error('not_found', 'Pago no encontrado', array('status' => 404));
+    $before      = count($all[$month]);
+    $all[$month] = array_values(array_filter($all[$month], function($x) use ($id) { return $x['id'] !== $id; }));
+    if (count($all[$month]) === $before) return new WP_Error('not_found', 'Pago no encontrado', array('status' => 404));
+    if (!$all[$month]) unset($all[$month]);
+    update_option('blokes_payroll_partials', $all, false);
+    return rest_ensure_response(array('success' => true));
+}
+
 function payroll_set_cash($request) {
     $body  = $request->get_json_params();
     $month = sanitize_text_field($body['month'] ?? '');

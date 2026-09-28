@@ -89,3 +89,9 @@ export const setPayrollPayment = (month, person, paid) =>
 // Pago mixto: marcar el efectivo del mes como entregado (incluye las horas extra)
 export const setPayrollCash = (month, person, paid, amount) =>
   request('/payroll-cash', 'POST', { month, person, paid, amount })
+
+// Pagos parciales en efectivo (solo socios). concept: 'nomina' | 'extras'; note = justificación (obligatoria)
+export const addPayrollPartial = (month, fields) =>
+  request('/payroll-partials', 'POST', { month, ...fields })
+export const deletePayrollPartial = (month, id) =>
+  request(`/payroll-partials/${id}?month=${month}`, 'DELETE')

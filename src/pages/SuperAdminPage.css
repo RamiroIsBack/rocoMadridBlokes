@@ -1176,3 +1176,16 @@ details[open] .sa-collapsible__arrow {
 .sa-remesa__check { display: flex; align-items: center; gap: 6px; font-size: 0.76rem; color: #999; }
 .sa-pay-status--parcial { background: #2d1a0a; color: #f97316; border-color: #5a2e0f; }
 .sa-pay-cash { margin-top: 4px; }
+
+/* ── Nóminas: pagos parciales en efectivo ── */
+.sa-partial { margin: 0 0 18px; }
+.sa-partial__note { display: block; margin-top: 10px; }
+.sa-pay-partial { margin-top: 3px; font-size: 0.72rem; color: #bbb; white-space: nowrap; }
+.sa-pay-partial__note {
+  color: #777;
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}

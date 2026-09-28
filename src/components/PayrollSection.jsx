@@ -5,10 +5,11 @@ import {
 } from 'recharts'
 import {
   usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence,
-  setPayrollPayment, setPayrollCash,
+  setPayrollPayment, setPayrollCash, deletePayrollPartial,
   typeLabel, hasBase, sortByType,
 } from '../hooks/useOvertime'
 import RemittanceImport from './RemittanceImport'
+import PartialPayment from './PartialPayment'
 import { currentMonth, shiftMonth, monthLabel, monthShort, fmtDate, fmtHours, fmtEur } from '../utils/monthFormat'
 
 const BASE_COLOR  = '#a78bfa'
@@ -427,6 +428,12 @@ function PayrollReport({ month, person, personal, notes, rows, entries, totals, 
               : `Pendiente · ${fmtEur(row.outstanding)}`}
           </p>
         )}
+        {person && row && row.partials?.length > 0 && (
+          <p className="pr-note">
+            <strong>Pagos en efectivo:</strong>{' '}
+            {row.partials.map(x => `${fmtEur(x.amount)} ${x.concept === 'extras' ? 'horas extra' : 'nómina'} el ${fmtDate(x.date)} (${x.note})`).join(' · ')}
+          </p>
+        )}
         {person && row && row.cash_total != null && (
           <p className="pr-note">
             <strong>Pago mixto:</strong> total pactado {fmtEur(row.cash_total)} · banco {fmtEur(row.payment?.amount ?? row.base)}
@@ -532,6 +539,7 @@ export default function PayrollSection() {
   // Ficha seleccionada: filtra las tablas a esa persona
   const [selected, setSelected] = useState(null)
   const [showRemesa, setShowRemesa] = useState(false)
+  const [showPartial, setShowPartial] = useState(false)
   const cardPeople   = sortByType(people.filter(p => p.active || rows.some(r => r.id === p.id)))
   const rowById      = Object.fromEntries(rows.map(r => [r.id, r]))
   const selPerson    = selected ? byId[selected] : null
@@ -575,6 +583,11 @@ export default function PayrollSection() {
   // Pulsar la etiqueta de Nómina: pendiente ↔ pagado. Si el pago viene de una remesa se pide
   // confirmación, porque quitarlo borra el importe y la fecha del banco de ese mes.
   function toggleNomina(r) {
+    // Pagada solo con pagos parciales en efectivo: se deshace borrando el pago parcial
+    if (!r.payment && r.nomina_status === 'pagado') {
+      window.alert('Esta nómina está pagada en efectivo. Para deshacerlo, borra el pago parcial (✕) de la fila.')
+      return
+    }
     if (r.payment?.amount != null && !window.confirm(
       `¿Volver a pendiente la nómina de ${r.name}? Se borrará el pago de la remesa (${fmtEur(r.payment.amount)}) de este mes.`,
     )) return
@@ -606,6 +619,11 @@ export default function PayrollSection() {
             {data && (
               <button className="sa-pay-action sa-pay-print" onClick={() => setShowRemesa(s => !s)}>
                 ⬆ Cargar remesa (PDF)
+              </button>
+            )}
+            {data && (
+              <button className="sa-pay-action sa-pay-print" onClick={() => setShowPartial(s => !s)}>
+                💶 Pago parcial
               </button>
             )}
             {data && (
@@ -648,6 +666,14 @@ export default function PayrollSection() {
                   month={month} people={people} rows={rows} personal={personal}
                   onDone={async msg => { await refreshAll(); setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }}
                   onClose={() => setShowRemesa(false)}
+                />
+              )}
+
+              {showPartial && (
+                <PartialPayment
+                  month={month} rows={rows}
+                  onDone={async msg => { await refreshAll(); setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }}
+                  onClose={() => setShowPartial(false)}
                 />
               )}
 
@@ -701,15 +727,16 @@ export default function PayrollSection() {
                           <td className="sa-pay-num sa-pay-strong">{fmtEur(r.total)}</td>
                           <td className="sa-pay-nowrap">
                             {/* Estado de la nómina: se cambia pulsando la etiqueta */}
-                            {(r.payment || (r.base ?? 0) > 0) ? (
+                            {r.nomina_status ? (
                               <button
-                                className={`sa-pay-status sa-pay-status--btn sa-pay-status--${!r.payment ? 'pendiente' : r.outstanding > 0.01 ? 'parcial' : 'pagado'}`}
+                                className={`sa-pay-status sa-pay-status--btn sa-pay-status--${r.nomina_status}`}
                                 disabled={busy}
-                                title={!r.payment ? 'Pulsa para marcar la nómina como pagada'
-                                  : `${r.payment.ref ? `Remesa: ${r.payment.ref}` : 'Marcado a mano'} · pulsa para volver a pendiente`}
+                                title={r.payment
+                                  ? `${r.payment.ref ? `Remesa: ${r.payment.ref}` : 'Marcado a mano'} · pulsa para quitar el pago`
+                                  : 'Pulsa para marcar la nómina como pagada'}
                                 onClick={() => toggleNomina(r)}
                               >
-                                {!r.payment ? 'Pendiente' : r.outstanding > 0.01 ? 'Parcial' : 'Pagado'}
+                                {{ pagado: 'Pagado', parcial: 'Parcial', pendiente: 'Pendiente' }[r.nomina_status]}
                                 {r.payment?.date ? ` ${fmtDate(r.payment.date).slice(0, 5)}` : ''}
                               </button>
                             ) : r.total > 0 ? (
@@ -719,7 +746,7 @@ export default function PayrollSection() {
                             {r.difference != null && Math.abs(r.difference) > 0.01 && (
                               <span className="sa-pay-warn" title="Pagado en banco − total del mes"> dif. {r.difference > 0 ? '+' : ''}{fmtEur(r.difference)}</span>
                             )}
-                            {r.cash_total == null && r.payment && r.outstanding > 0.01 && (
+                            {r.cash_total == null && (r.payment || r.partials?.length > 0) && r.outstanding > 0.01 && (
                               <span className="sa-pay-warn"> · falta {fmtEur(r.outstanding)}</span>
                             )}
                             {r.cash_total != null && (
@@ -741,12 +768,25 @@ export default function PayrollSection() {
                                 </span>
                               </div>
                             )}
+                            {r.partials?.map(x => (
+                              <div key={x.id} className="sa-pay-partial" title={`Justificación: ${x.note}`}>
+                                💶 {fmtEur(x.amount)} {x.concept === 'extras' ? 'extras' : 'nómina'} · {fmtDate(x.date).slice(0, 5)}
+                                <span className="sa-pay-partial__note"> · {x.note}</span>
+                                <button
+                                  className="sa-pay-filter__clear" disabled={busy} aria-label="Borrar pago parcial"
+                                  onClick={() => {
+                                    if (!window.confirm(`¿Borrar el pago en efectivo de ${fmtEur(x.amount)} de ${r.name}?`)) return
+                                    run(() => deletePayrollPartial(month, x.id), '✓ Pago parcial borrado')
+                                  }}
+                                >✕</button>
+                              </div>
+                            ))}
                           </td>
                           <td>
                             {/* Estado de las horas extra del mes: se cambia pulsando la etiqueta */}
                             {hasHours && (
                               <button
-                                className={`sa-pay-status sa-pay-status--btn sa-pay-status--${allPaid ? 'pagado' : 'pendiente'}`}
+                                className={`sa-pay-status sa-pay-status--btn sa-pay-status--${allPaid ? 'pagado' : r.partial_extras > 0 ? 'parcial' : 'pendiente'}`}
                                 disabled={busy}
                                 title={allPaid ? 'Pulsa para volver a pendiente' : 'Pulsa para marcar las horas extra del mes como pagadas'}
                                 onClick={() => run(
@@ -754,7 +794,9 @@ export default function PayrollSection() {
                                   allPaid ? `✓ ${r.name}: extras pendientes` : `✓ ${r.name}: extras pagados`,
                                 )}
                               >
-                                {allPaid ? 'Pagado' : r.paid ? `${r.pending} pendiente${r.pending > 1 ? 's' : ''}` : 'Pendiente'}
+                                {allPaid ? 'Pagado'
+                                  : r.partial_extras > 0 ? `Parcial · falta ${fmtEur(r.extras_outstanding)}`
+                                  : r.paid ? `${r.pending} pendiente${r.pending > 1 ? 's' : ''}` : 'Pendiente'}
                               </button>
                             )}
                           </td>
