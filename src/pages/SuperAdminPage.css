@@ -1156,3 +1156,21 @@ details[open] .sa-collapsible__arrow {
 .sa-pay-struck      { color: #666; text-decoration: line-through; }
 .sa-pay-row-actions { display: flex; gap: 6px; }
 .sa-pay-action--on  { border-color: #f97316; color: #f97316; }
+
+/* ── Nóminas: pago y remesa ── */
+.sa-pay-paid { font-size: 0.72rem; color: #888; }
+.sa-remesa { margin: 0 0 18px; }
+.sa-remesa__file { margin: 4px 0 10px; color: #aaa; font-size: 0.8rem; }
+.sa-remesa__summary { display: flex; gap: 14px; font-size: 0.82rem; color: #ddd; margin-bottom: 8px; }
+.sa-remesa__ok { color: #34d399; }
+.sa-remesa__row--warn td { background: rgba(249,115,22,0.07); }
+.sa-remesa__select {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 0.78rem;
+  padding: 3px 6px;
+  font-family: inherit;
+}
+.sa-remesa__check { display: flex; align-items: center; gap: 6px; font-size: 0.76rem; color: #999; }

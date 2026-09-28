@@ -5,8 +5,10 @@ import {
 } from 'recharts'
 import {
   usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence,
+  setPayrollPayment,
   typeLabel, hasBase, sortByType,
 } from '../hooks/useOvertime'
+import RemittanceImport from './RemittanceImport'
 import { currentMonth, shiftMonth, monthLabel, monthShort, fmtDate, fmtHours, fmtEur } from '../utils/monthFormat'
 
 const BASE_COLOR  = '#a78bfa'
@@ -402,6 +404,14 @@ function PayrollReport({ month, person, personal, notes, rows, entries, totals, 
         {person && notes[person.id] && (
           <p className="pr-note"><strong>Justificación de la nómina base:</strong> {notes[person.id]}</p>
         )}
+        {person && row && (
+          <p className="pr-note">
+            <strong>Estado del pago:</strong>{' '}
+            {row.payment
+              ? <>Pagado{row.payment.date ? ` el ${fmtDate(row.payment.date)}` : ''}{row.payment.amount != null ? ` · ${fmtEur(row.payment.amount)} por banco` : ' (marcado manualmente)'}{row.outstanding > 0.01 ? ` · pendiente ${fmtEur(row.outstanding)}` : ''}</>
+              : `Pendiente · ${fmtEur(row.outstanding)}`}
+          </p>
+        )}
       </section>
 
       {/* ── Detalle de horas extra ── */}
@@ -499,6 +509,7 @@ export default function PayrollSection() {
 
   // Ficha seleccionada: filtra las tablas a esa persona
   const [selected, setSelected] = useState(null)
+  const [showRemesa, setShowRemesa] = useState(false)
   const cardPeople   = sortByType(people.filter(p => p.active || rows.some(r => r.id === p.id)))
   const rowById      = Object.fromEntries(rows.map(r => [r.id, r]))
   const selPerson    = selected ? byId[selected] : null
@@ -514,6 +525,7 @@ export default function PayrollSection() {
     hours:          selRow?.hours ?? 0,
     total:          selRow?.total ?? 0,
     pending_extras: selRow?.pending_extras ?? 0,
+    outstanding:    selRow?.outstanding ?? 0,
   }
   const kpiWho  = selPerson ? ` · ${selPerson.name}` : ''
 
@@ -558,6 +570,11 @@ export default function PayrollSection() {
           <h2 className="sa-section-title">Nóminas</h2>
           <div className="sa-header-controls">
             {data && (
+              <button className="sa-pay-action sa-pay-print" onClick={() => setShowRemesa(s => !s)}>
+                ⬆ Cargar remesa (PDF)
+              </button>
+            )}
+            {data && (
               <button className="sa-pay-action sa-pay-print" onClick={handlePrint}>
                 ⎙ {selPerson ? `Informe de ${selPerson.name}` : 'Informe del mes'} (PDF)
               </button>
@@ -587,10 +604,18 @@ export default function PayrollSection() {
                   <span className="sa-kpi__label">Total del mes{kpiWho}</span>
                 </div>
                 <div className="sa-kpi" style={{ '--kpi-color': '#f97316' }}>
-                  <span className="sa-kpi__value">{fmtEur(kpi.pending_extras)}</span>
-                  <span className="sa-kpi__label">Extras pendientes de pago{kpiWho}</span>
+                  <span className="sa-kpi__value">{fmtEur(kpi.outstanding)}</span>
+                  <span className="sa-kpi__label">Pendiente de pago{kpiWho}</span>
                 </div>
               </div>
+
+              {showRemesa && (
+                <RemittanceImport
+                  month={month} people={people} rows={rows} personal={personal}
+                  onDone={async msg => { await refreshAll(); setFeedback(msg); setTimeout(() => setFeedback(''), 4000) }}
+                  onClose={() => setShowRemesa(false)}
+                />
+              )}
 
               {/* ── Nómina por persona ── */}
               <h3 className="sa-pay-subtitle">
@@ -606,13 +631,14 @@ export default function PayrollSection() {
                       <th className="sa-pay-num">€/h</th>
                       <th className="sa-pay-num">Extras</th>
                       <th className="sa-pay-num">Total</th>
+                      <th>Nómina</th>
                       <th>Estado extras</th>
                       <th />
                     </tr>
                   </thead>
                   <tbody>
                     {shownRows.length === 0 && (
-                      <tr><td colSpan={8} className="sa-pay-muted">Sin nómina ni horas extra este mes.</td></tr>
+                      <tr><td colSpan={9} className="sa-pay-muted">Sin nómina ni horas extra este mes.</td></tr>
                     )}
                     {shownRows.map(r => {
                       const hasHours = r.pending + r.paid > 0
@@ -638,6 +664,24 @@ export default function PayrollSection() {
                             {r.missing_rate && <span className="sa-pay-warn" title="Hay horas sin €/h configurado"> *</span>}
                           </td>
                           <td className="sa-pay-num sa-pay-strong">{fmtEur(r.total)}</td>
+                          <td className="sa-pay-nowrap">
+                            {r.payment ? (
+                              <>
+                                <span className="sa-pay-status sa-pay-status--pagado" title={r.payment.ref ? `Remesa: ${r.payment.ref}` : 'Marcado a mano'}>
+                                  Pagado{r.payment.date ? ` ${fmtDate(r.payment.date).slice(0, 5)}` : ''}
+                                </span>
+                                {r.payment.amount != null && <span className="sa-pay-paid"> banco {fmtEur(r.payment.amount)}</span>}
+                                {r.difference != null && Math.abs(r.difference) > 0.01 && (
+                                  <span className="sa-pay-warn" title="Pagado en banco − total del mes"> dif. {r.difference > 0 ? '+' : ''}{fmtEur(r.difference)}</span>
+                                )}
+                              </>
+                            ) : r.total > 0 ? (
+                              <span className="sa-pay-status sa-pay-status--pendiente">Pendiente</span>
+                            ) : null}
+                            {r.payment && r.outstanding > 0.01 && (
+                              <span className="sa-pay-warn"> · falta {fmtEur(r.outstanding)}</span>
+                            )}
+                          </td>
                           <td>
                             {hasHours && (
                               <span className={`sa-pay-status sa-pay-status--${allPaid ? 'pagado' : 'pendiente'}`}>
@@ -646,6 +690,16 @@ export default function PayrollSection() {
                             )}
                           </td>
                           <td className="sa-pay-nowrap sa-pay-row-actions">
+                            {(r.payment || (r.base ?? 0) > 0) && (
+                              <button
+                                className="sa-pay-action" disabled={busy}
+                                title={r.payment ? 'Quitar el pago de la nómina de este mes' : 'Marcar la nómina base como pagada (sin remesa)'}
+                                onClick={() => run(
+                                  () => setPayrollPayment(month, r.id, !r.payment),
+                                  r.payment ? `✓ ${r.name}: nómina pendiente` : `✓ ${r.name}: nómina pagada`,
+                                )}
+                              >{r.payment ? 'Desmarcar nómina' : 'Nómina pagada'}</button>
+                            )}
                             {hasHours && (
                               <button
                                 className="sa-pay-action" disabled={busy}
@@ -653,7 +707,7 @@ export default function PayrollSection() {
                                   () => setOvertimeStatus({ month, professor: r.id }, allPaid ? 'pendiente' : 'pagado'),
                                   allPaid ? `✓ ${r.name}: extras pendientes` : `✓ ${r.name}: extras pagados`,
                                 )}
-                              >{allPaid ? 'Marcar pendiente' : 'Marcar pagado'}</button>
+                              >{allPaid ? 'Extras pendientes' : 'Extras pagados'}</button>
                             )}
                             {r.base_nominal != null && (
                               <button
@@ -678,6 +732,7 @@ export default function PayrollSection() {
                       <td />
                       <td className="sa-pay-num">{fmtEur(totals.extras)}</td>
                       <td className="sa-pay-num">{fmtEur(totals.total)}</td>
+                      <td className="sa-pay-nowrap">{totals.paid_bank > 0 && <span className="sa-pay-paid">banco {fmtEur(totals.paid_bank)}</span>}</td>
                       <td colSpan={2} />
                     </tr>
                   </tfoot>}

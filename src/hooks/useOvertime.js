@@ -78,3 +78,10 @@ export const savePayrollPersonal = (id, fields) =>
 // "Sin asistencia": ese mes no se reporta la nómina base de la persona (solo socios)
 export const setPayrollAbsence = (month, person, absent) =>
   request('/payroll-absence', 'POST', { month, person, absent })
+
+// Pago de nóminas (solo socios)
+// payments: [{ person, amount, date }] — ya emparejados en el navegador
+export const importPayrollPayments = (month, ref, payments) =>
+  request('/payroll-payments/import', 'POST', { month, ref, payments })
+export const setPayrollPayment = (month, person, paid) =>
+  request('/payroll-payment', 'POST', { month, person, paid })

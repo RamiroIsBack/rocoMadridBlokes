@@ -2982,6 +2982,16 @@ add_action('rest_api_init', function() {
         'callback'            => 'payroll_save_config',
         'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/payroll-payments/import', array(
+        'methods'             => 'POST',
+        'callback'            => 'payroll_import_payments',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/payroll-payment', array(
+        'methods'             => 'POST',
+        'callback'            => 'payroll_set_payment',
+        'permission_callback' => $socio_perm,
+    ));
     register_rest_route('superadmin/v1', '/payroll-absence', array(
         'methods'             => 'POST',
         'callback'            => 'payroll_set_absence',
@@ -3350,6 +3360,98 @@ function payroll_get_absences() {
     return is_array($stored) ? $stored : array();
 }
 
+// ── Pago de nóminas ──
+// { 'YYYY-MM': { id: { amount (null = manual sin importe), date, source: remesa|manual, ref, paid_at } } }
+function payroll_get_payments() {
+    $stored = get_option('blokes_payroll_payments', array());
+    return is_array($stored) ? $stored : array();
+}
+
+function payroll_save_payments($all) {
+    update_option('blokes_payroll_payments', $all, false);
+}
+
+// Marca como pagadas las horas extra pendientes de una persona en un mes (con el €/h actual).
+function payroll_mark_extras_paid($month, $person_id) {
+    $rates   = overtime_get_rates();
+    $now     = (new DateTime())->format('c');
+    $entries = overtime_get_entries();
+    $changed = 0;
+    foreach ($entries as $i => $e) {
+        if ($e['professor'] !== $person_id || strpos($e['date'], $month) !== 0 || $e['status'] === 'pagado') continue;
+        $entries[$i]['status']     = 'pagado';
+        $entries[$i]['updated_at'] = $now;
+        $entries[$i]['paid_at']    = $now;
+        $entries[$i]['paid_rate']  = $rates[$person_id] ?? null;
+        $changed++;
+    }
+    if ($changed) overtime_save_entries($entries);
+    return $changed;
+}
+
+// Importa una remesa ya leída y emparejada en el navegador: [{ person, amount, date }].
+// Regla: si el importe cubre base + extras pendientes, las extras también quedan pagadas;
+// si no, solo la nómina, y lo que falte se ve como pendiente (y se cambia a mano).
+function payroll_import_payments($request) {
+    $body  = $request->get_json_params();
+    $month = sanitize_text_field($body['month'] ?? '');
+    $ref   = mb_substr(sanitize_text_field($body['ref'] ?? ''), 0, 120);
+    $list  = is_array($body['payments'] ?? null) ? $body['payments'] : array();
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
+    }
+
+    $people = overtime_get_people();
+    $calc   = payroll_compute_month($month, $people, overtime_get_entries(), payroll_get_base(), overtime_get_rates());
+    $rowById = array();
+    foreach ($calc['rows'] as $r) $rowById[$r['id']] = $r;
+
+    $all     = payroll_get_payments();
+    $now     = (new DateTime())->format('c');
+    $results = array();
+    foreach ($list as $pay) {
+        $id     = sanitize_title($pay['person'] ?? '');
+        $amount = round(floatval($pay['amount'] ?? 0), 2);
+        $date   = sanitize_text_field($pay['date'] ?? '');
+        if (overtime_person_index($people, $id) < 0 || $amount <= 0) continue;
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $date = '';
+
+        $all[$month][$id] = array('amount' => $amount, 'date' => $date, 'source' => 'remesa', 'ref' => $ref, 'paid_at' => $now);
+
+        $row   = $rowById[$id] ?? null;
+        $base  = $row ? ($row['base'] ?? 0) : 0;
+        $extra = $row ? $row['pending_extras'] : 0;
+        $extras_paid = 0;
+        if ($extra > 0 && $amount + 0.01 >= $base + $extra) $extras_paid = payroll_mark_extras_paid($month, $id);
+        $results[] = array('person' => $id, 'amount' => $amount, 'extras_marked_paid' => $extras_paid);
+    }
+    payroll_save_payments($all);
+
+    return rest_ensure_response(array('success' => true, 'month' => $month, 'imported' => $results));
+}
+
+// Manual: marcar/desmarcar la nómina de una persona como pagada (sin importe de banco).
+function payroll_set_payment($request) {
+    $body  = $request->get_json_params();
+    $month = sanitize_text_field($body['month'] ?? '');
+    $id    = sanitize_title($body['person'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
+    }
+    if (overtime_person_index(overtime_get_people(), $id) < 0) {
+        return new WP_Error('not_found', 'Persona no encontrada', array('status' => 404));
+    }
+    $all = payroll_get_payments();
+    if (!empty($body['paid'])) {
+        $all[$month][$id] = array('amount' => null, 'date' => current_time('Y-m-d'), 'source' => 'manual', 'ref' => '', 'paid_at' => (new DateTime())->format('c'));
+    } else {
+        unset($all[$month][$id]);
+        if (empty($all[$month])) unset($all[$month]);
+    }
+    payroll_save_payments($all);
+    return rest_ensure_response(array('success' => true));
+}
+
 function payroll_set_absence($request) {
     $body   = $request->get_json_params();
     $month  = sanitize_text_field($body['month'] ?? '');
@@ -3395,7 +3497,9 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
 
     $ordered = overtime_sort_by_type($people);
     $rows   = array();
-    $totals = array('base' => 0, 'extras' => 0, 'pending_extras' => 0, 'total' => 0, 'hours' => 0);
+    $payments = payroll_get_payments()[$month] ?? array();
+    $totals = array('base' => 0, 'extras' => 0, 'pending_extras' => 0, 'total' => 0, 'hours' => 0,
+                    'paid_bank' => 0, 'outstanding' => 0);
     foreach ($ordered as $p) {
         $has_hours = isset($by[$p['id']]);
         $p_base    = (overtime_has_base($p['type']) && $p['active']) ? ($base[$p['id']] ?? null) : null;
@@ -3421,12 +3525,24 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
         ), $h);
         $row['extras'] = round($row['extras'], 2);
         $row['total']  = round(($p_base ?? 0) + $row['extras'], 2);
+
+        // Pago de la nómina (remesa o manual). El importe pagado cubre primero la base;
+        // las horas extra se pagan aparte según su propio estado.
+        $pay      = $payments[$p['id']] ?? null;
+        $base_due = $p_base ?? 0;
+        $base_paid = $pay ? ($pay['amount'] === null ? $base_due : min($pay['amount'], $base_due)) : 0;
+        $row['payment']     = $pay;
+        $row['outstanding'] = round(max(0, $base_due - $base_paid) + $row['pending_extras'], 2);
+        // Diferencia entre lo pagado en banco y el total del mes (para detectar bases mal configuradas)
+        $row['difference']  = ($pay && $pay['amount'] !== null) ? round($pay['amount'] - $row['total'], 2) : null;
         $rows[] = $row;
 
         $totals['base']           += $p_base ?? 0;
         $totals['extras']         += $row['extras'];
         $totals['pending_extras'] += $row['pending_extras'];
         $totals['hours']          += $row['hours'];
+        $totals['outstanding']    += $row['outstanding'];
+        $totals['paid_bank']      += ($pay && $pay['amount'] !== null) ? $pay['amount'] : 0;
     }
     $totals['total'] = $totals['base'] + $totals['extras'];
     foreach ($totals as $k => $v) $totals[$k] = round($v, 2);
