@@ -22,6 +22,7 @@ function PayrollConfig({ people, config, onSaved }) {
   const toForm = cfg => Object.fromEntries(active.map(p => [p.id, {
     base: cfg.base?.[p.id] ?? '',
     rate: cfg.rates?.[p.id] ?? '',
+    note: cfg.notes?.[p.id] ?? '',
   }]))
 
   const [form,     setForm]     = useState(() => toForm(config))
@@ -39,11 +40,13 @@ function PayrollConfig({ people, config, onSaved }) {
     try {
       const base  = {}
       const rates = {}
+      const notes = {}
       for (const p of active) {
         if (p.type === 'profesor') base[p.id] = form[p.id]?.base ?? ''
         rates[p.id] = form[p.id]?.rate ?? ''
+        notes[p.id] = form[p.id]?.note ?? ''
       }
-      const saved = await savePayrollConfig({ base, rates })
+      const saved = await savePayrollConfig({ base, rates, notes })
       setForm(toForm(saved))
       setFeedback('✓ Guardado')
       onSaved()
@@ -61,7 +64,7 @@ function PayrollConfig({ people, config, onSaved }) {
         <h2 className="sa-section-title">Configuración</h2>
       </div>
       <p className="sa-pay-note">
-        Nómina base mensual fija (solo profesores; los externos cobran solo extras) y €/h de las horas extra.
+        Nómina base mensual fija (solo profesores; los externos cobran solo extras), su justificación y €/h de las horas extra.
         Los importes base iniciales vienen de los costes mensuales de Playground: revisadlos y actualizadlos.
         Al marcar horas como pagadas se guarda el €/h de ese momento, así que cambiarlo no altera lo ya pagado.
       </p>
@@ -73,6 +76,7 @@ function PayrollConfig({ people, config, onSaved }) {
               <th>Tipo</th>
               <th className="sa-pay-num">Nómina base / mes</th>
               <th className="sa-pay-num">€/h extra</th>
+              <th>Justificación de la base</th>
             </tr>
           </thead>
           <tbody>
@@ -92,6 +96,13 @@ function PayrollConfig({ people, config, onSaved }) {
                   <input
                     type="number" min="0" step="0.01" placeholder="—" className="sa-pay-input"
                     value={form[p.id]?.rate ?? ''} onChange={e => set(p.id, 'rate', e.target.value)}
+                  />
+                </td>
+                <td className="sa-pay-note-cell">
+                  <textarea
+                    rows={2} maxLength={1000} className="sa-pay-textarea"
+                    placeholder={p.type === 'profesor' ? 'Ej. 20 h/semana, 6 clases + coordinación' : 'Ej. colaborador puntual'}
+                    value={form[p.id]?.note ?? ''} onChange={e => set(p.id, 'note', e.target.value)}
                   />
                 </td>
               </tr>
@@ -163,6 +174,7 @@ export default function PayrollSection() {
   const entries = data?.entries || []
   const people  = data?.people || []
   const byId    = Object.fromEntries(people.map(p => [p.id, p]))
+  const notes   = data?.config?.notes || {}
   const missingRate = rows.some(r => r.missing_rate)
 
   async function run(action, okMsg) {
@@ -244,7 +256,10 @@ export default function PayrollSection() {
                             {r.type === 'externo' && <span className="sa-pay-tag">externo</span>}
                             {!r.active && <span className="sa-pay-tag">inactivo</span>}
                           </td>
-                          <td className="sa-pay-num">{r.type === 'externo' ? <span className="sa-pay-muted">—</span> : fmtEur(r.base)}</td>
+                          <td className="sa-pay-num" title={notes[r.id] || undefined}>
+                            {r.type === 'externo' ? <span className="sa-pay-muted">—</span> : fmtEur(r.base)}
+                            {notes[r.id] && <span className="sa-pay-info"> ⓘ</span>}
+                          </td>
                           <td className="sa-pay-num">{hasHours ? fmtHours(r.hours) : <span className="sa-pay-muted">0</span>}</td>
                           <td className="sa-pay-num">{r.rate == null ? <span className="sa-pay-muted">—</span> : fmtEur(r.rate)}</td>
                           <td className="sa-pay-num">

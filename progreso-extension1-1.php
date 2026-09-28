@@ -3374,9 +3374,19 @@ function payroll_get($request) {
         array(
             'entries' => $detail,
             'people'  => $people,
-            'config'  => array('base' => (object) $base, 'rates' => (object) $rates),
+            'config'  => payroll_config_response($base, $rates),
         )
     ));
+}
+
+// Justificación de la nómina base por persona (texto libre).
+function payroll_get_notes() {
+    $stored = get_option('blokes_payroll_notes', array());
+    return is_array($stored) ? $stored : array();
+}
+
+function payroll_config_response($base, $rates) {
+    return array('base' => (object) $base, 'rates' => (object) $rates, 'notes' => (object) payroll_get_notes());
 }
 
 // Totales de los últimos N meses hasta 'to' (incluido). La base usa los importes actuales.
@@ -3401,7 +3411,7 @@ function payroll_history($request) {
     return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
-// Guarda nómina base y/o €/h extra. Solo se tocan las personas enviadas; un valor vacío o 0 lo borra.
+// Guarda nómina base, €/h extra y/o justificaciones. Solo se tocan las personas enviadas; un valor vacío o 0 lo borra.
 function payroll_save_config($request) {
     $body   = $request->get_json_params();
     $people = overtime_get_people();
@@ -3427,5 +3437,16 @@ function payroll_save_config($request) {
         $rates = $merge($rates, $body['rates']);
         update_option('blokes_overtime_rates', $rates, false);
     }
-    return rest_ensure_response(array('success' => true, 'config' => array('base' => (object) $base, 'rates' => (object) $rates)));
+    if (isset($body['notes']) && is_array($body['notes'])) {
+        $notes = payroll_get_notes();
+        foreach ($body['notes'] as $id => $text) {
+            $id = sanitize_title($id);
+            if (overtime_person_index($people, $id) < 0) continue;
+            $text = mb_substr(trim(sanitize_textarea_field((string) $text)), 0, 1000);
+            if ($text !== '') $notes[$id] = $text;
+            else unset($notes[$id]);
+        }
+        update_option('blokes_payroll_notes', $notes, false);
+    }
+    return rest_ensure_response(array('success' => true, 'config' => payroll_config_response($base, $rates)));
 }
