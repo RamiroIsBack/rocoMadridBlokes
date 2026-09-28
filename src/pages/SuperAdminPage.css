@@ -1228,3 +1228,7 @@ details[open] .sa-collapsible__arrow {
 .sa-pay-person-pay__list { list-style: none; margin: 10px 0 0; padding: 0; font-size: 0.76rem; color: #ccc; }
 .sa-pay-person-pay__list li { padding: 3px 0; }
 .sa-pay-person-pay .sa-pay-warn { font-size: 0.72rem; font-weight: 600; }
+/* Tabla de nóminas: más compacta para que quepan detalle + pagos */
+.sa-pay-table--wide th, .sa-pay-table--wide td { padding-left: 7px; padding-right: 7px; }
+.sa-pay-person-pay__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; } .sa-pay-person-pay__head .sa-pay-person-pay__title { margin: 0; }
+.sa-pay-tags { margin-top: 3px; white-space: nowrap; } .sa-pay-tags .sa-pay-tag:first-child { margin-left: 15px; } .sa-pay-name { white-space: nowrap; }
