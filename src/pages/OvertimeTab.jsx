@@ -1,114 +1,17 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import {
   useOvertime, createOvertime, updateOvertime, deleteOvertime,
-  setOvertimeStatus, getOvertimeRates, saveOvertimeRates,
   addOvertimePerson, updateOvertimePerson,
 } from '../hooks/useOvertime'
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-const MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
-  'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre']
-
-const pad = n => String(n).padStart(2, '0')
-
-function currentMonth() {
-  const d = new Date()
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
-}
-
-function shiftMonth(month, delta) {
-  const [y, m] = month.split('-').map(Number)
-  const d = new Date(y, m - 1 + delta, 1)
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`
-}
-
-function monthLabel(month) {
-  const [y, m] = month.split('-').map(Number)
-  return `${MONTHS[m - 1]} ${y}`
-}
+import { todayISO, currentMonth, shiftMonth, monthLabel, fmtDate, fmtHours } from '../utils/monthFormat'
 
 // Hoy si cae en el mes visible; si no, el día 1 de ese mes.
 function defaultDate(month) {
-  const d = new Date()
-  const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const today = todayISO()
   return today.startsWith(month) ? today : `${month}-01`
 }
 
-function fmtDate(iso) {
-  const [y, m, d] = iso.split('-')
-  return `${d}/${m}/${y}`
-}
-
-const fmtHours = h => Number(h).toLocaleString('es-ES', { maximumFractionDigits: 2 })
-const fmtEur   = n => n == null ? '—' : Number(n).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })
-
 const emptyForm = month => ({ professor: '', date: defaultDate(month), hours: '', reason: '' })
-
-// ─── Tarifas de hora extra (solo socios) ────────────────────────────────────
-function OvertimeRates({ people, onSaved }) {
-  const [rates,    setRates]    = useState(null)
-  const [saving,   setSaving]   = useState(false)
-  const [feedback, setFeedback] = useState('')
-
-  // Solo recargar si cambia la lista de personas, no en cada recarga de registros
-  // (si no, se perderían tarifas escritas sin guardar).
-  const peopleKey = people.map(p => p.id).join(',')
-  useEffect(() => {
-    getOvertimeRates()
-      .then(r => setRates(Object.fromEntries(people.map(p => [p.id, r[p.id] ?? '']))))
-      .catch(e => setFeedback(`✗ ${e.message}`))
-  }, [peopleKey])
-
-  async function handleSave() {
-    setSaving(true)
-    try {
-      const saved = await saveOvertimeRates(rates)
-      setRates(Object.fromEntries(people.map(p => [p.id, saved[p.id] ?? ''])))
-      setFeedback('✓ Tarifas guardadas')
-      onSaved()
-    } catch (e) {
-      setFeedback(`✗ ${e.message}`)
-    } finally {
-      setSaving(false)
-      setTimeout(() => setFeedback(''), 2800)
-    }
-  }
-
-  return (
-    <div className="sv-section">
-      <h3 className="sv-section-title">€/hora extra por persona</h3>
-      <p className="sv-note">
-        Solo visible para socios. Es independiente del €/h de las clases. Al marcar horas como pagadas
-        se guarda el €/h de ese momento, así que cambiar la tarifa no altera lo ya pagado.
-      </p>
-      {!rates ? <p className="sv-loading">Cargando…</p> : (
-        <>
-          <div className="sv-ot-rates">
-            {people.map(p => (
-              <label key={p.id} className="sv-ot-rate">
-                <span className="sv-ot-dot" style={{ background: p.color }} />
-                <span className="sv-ot-rate__name">{p.name}</span>
-                <input
-                  type="number" min="0" step="0.01" placeholder="—"
-                  className="sv-tests-input sv-tests-input--num"
-                  value={rates[p.id]}
-                  onChange={e => setRates(r => ({ ...r, [p.id]: e.target.value }))}
-                />
-                <span className="sv-ot-rate__unit">€/h</span>
-              </label>
-            ))}
-          </div>
-          <div className="sv-tests-actions">
-            <button className="sv-tests-save" onClick={handleSave} disabled={saving}>
-              {saving ? 'Guardando…' : 'Guardar tarifas'}
-            </button>
-            {feedback && <span className="sv-tests-feedback">{feedback}</span>}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
 
 // ─── Personas (gestion y socio añaden; solo socio edita/desactiva) ──────────
 const TYPE_LABEL = { profesor: 'Profesor', externo: 'Externo' }
@@ -232,22 +135,15 @@ export default function OvertimeTab() {
   const summary = useMemo(() => {
     const byProf = {}
     for (const e of entries) {
-      if (!byProf[e.professor]) byProf[e.professor] = { hours: 0, amount: 0, missingRate: false, pending: 0, paid: 0 }
+      if (!byProf[e.professor]) byProf[e.professor] = { hours: 0, pending: 0, paid: 0 }
       const s = byProf[e.professor]
       s.hours += e.hours
-      if (e.amount == null) s.missingRate = true
-      else s.amount += e.amount
       s[e.status === 'pagado' ? 'paid' : 'pending']++
     }
     // Profesores primero, luego externos, en el orden de la lista
     const ordered = [...people.filter(p => p.type !== 'externo'), ...people.filter(p => p.type === 'externo')]
     const rows = ordered.filter(p => byProf[p.id]).map(p => ({ ...p, ...byProf[p.id] }))
-    return {
-      rows,
-      hours:  rows.reduce((t, r) => t + r.hours, 0),
-      amount: rows.reduce((t, r) => t + r.amount, 0),
-      missingRate: rows.some(r => r.missingRate),
-    }
+    return { rows, hours: rows.reduce((t, r) => t + r.hours, 0) }
   }, [entries, people])
 
   function flash(msg) {
@@ -393,8 +289,6 @@ export default function OvertimeTab() {
                     <th>Profesor</th>
                     <th className="sv-ot-num">Horas</th>
                     <th>Motivo</th>
-                    {isSocio && <th className="sv-ot-num">€/h</th>}
-                    {isSocio && <th className="sv-ot-num">Importe</th>}
                     <th>Estado</th>
                     <th />
                   </tr>
@@ -411,21 +305,10 @@ export default function OvertimeTab() {
                         </td>
                         <td className="sv-ot-num">{fmtHours(e.hours)}</td>
                         <td className="sv-ot-reason">{e.reason}</td>
-                        {isSocio && <td className="sv-ot-num">{e.rate == null ? <span className="sv-tests-none">sin precio</span> : fmtEur(e.rate)}</td>}
-                        {isSocio && <td className="sv-ot-num">{fmtEur(e.amount)}</td>}
                         <td>
-                          {isSocio ? (
-                            <button
-                              className={`sv-ot-status sv-ot-status--${e.status} sv-ot-status--btn`}
-                              disabled={busy}
-                              title="Cambiar estado"
-                              onClick={() => run(() => setOvertimeStatus({ id: e.id }, e.status === 'pagado' ? 'pendiente' : 'pagado'))}
-                            >{e.status === 'pagado' ? 'Pagado' : 'Pendiente'}</button>
-                          ) : (
-                            <span className={`sv-ot-status sv-ot-status--${e.status}`}>
-                              {e.status === 'pagado' ? 'Pagado' : 'Pendiente'}
-                            </span>
-                          )}
+                          <span className={`sv-ot-status sv-ot-status--${e.status}`}>
+                            {e.status === 'pagado' ? 'Pagado' : 'Pendiente'}
+                          </span>
                         </td>
                         <td className="sv-ot-nowrap">
                           {canEdit(e) && <>
@@ -445,16 +328,14 @@ export default function OvertimeTab() {
       {/* ── Resumen por profesor ── */}
       {summary.rows.length > 0 && (
         <div className="sv-section">
-          <h3 className="sv-section-title">{isSocio ? 'A pagar este mes' : 'Resumen del mes'}</h3>
+          <h3 className="sv-section-title">Resumen del mes</h3>
           <div className="sv-tests-scroll">
             <table className="sv-tests-table sv-ot-table">
               <thead>
                 <tr>
-                  <th>Profesor</th>
+                  <th>Persona</th>
                   <th className="sv-ot-num">Horas</th>
-                  {isSocio && <th className="sv-ot-num">Importe</th>}
                   <th>Estado</th>
-                  {isSocio && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -464,23 +345,11 @@ export default function OvertimeTab() {
                     <tr key={r.id}>
                       <td className="sv-ot-nowrap"><span className="sv-ot-dot" style={{ background: r.color }} />{r.name}</td>
                       <td className="sv-ot-num">{fmtHours(r.hours)}</td>
-                      {isSocio && <td className="sv-ot-num">
-                        {fmtEur(r.amount)}{r.missingRate && <span className="sv-ot-warn" title="Hay horas sin €/h configurado"> *</span>}
-                      </td>}
                       <td>
                         <span className={`sv-ot-status sv-ot-status--${allPaid ? 'pagado' : 'pendiente'}`}>
                           {allPaid ? 'Pagado' : r.paid ? `${r.pending} pendiente${r.pending > 1 ? 's' : ''}` : 'Pendiente'}
                         </span>
                       </td>
-                      {isSocio && <td>
-                        <button
-                          className="sv-ot-action" disabled={busy}
-                          onClick={() => run(
-                            () => setOvertimeStatus({ month, professor: r.id }, allPaid ? 'pendiente' : 'pagado'),
-                            allPaid ? `✓ ${r.name}: marcado pendiente` : `✓ ${r.name}: marcado pagado`,
-                          )}
-                        >{allPaid ? 'Marcar pendiente' : 'Marcar todo pagado'}</button>
-                      </td>}
                     </tr>
                   )
                 })}
@@ -489,21 +358,18 @@ export default function OvertimeTab() {
                 <tr className="sv-ot-total">
                   <td>Total</td>
                   <td className="sv-ot-num">{fmtHours(summary.hours)}</td>
-                  {isSocio && <td className="sv-ot-num">{fmtEur(summary.amount)}</td>}
-                  <td colSpan={isSocio ? 2 : 1} />
+                  <td />
                 </tr>
               </tfoot>
             </table>
           </div>
-          {isSocio && summary.missingRate && (
-            <p className="sv-note sv-ot-footnote">* Hay horas de profesores sin €/h extra configurado; no se incluyen en el importe.</p>
-          )}
+          <p className="sv-note sv-ot-footnote">
+            Los importes y el estado de pago se gestionan en Superadmin → Nóminas.
+          </p>
         </div>
       )}
 
       {data && <OvertimePeople people={people} isSocio={isSocio} onChanged={reload} />}
-
-      {isSocio && active.length > 0 && <OvertimeRates people={active} onSaved={reload} />}
     </div>
   )
 }

@@ -720,8 +720,6 @@
 }
 .sv-ot-status--pendiente { background: #2a2015; color: #f5c842; border-color: #4a3a15; }
 .sv-ot-status--pagado    { background: #14301f; color: #34d399; border-color: #1f4d33; }
-.sv-ot-status--btn       { cursor: pointer; }
-.sv-ot-status--btn:hover:not(:disabled) { filter: brightness(1.25); }
 
 .sv-ot-action {
   background: none;
@@ -744,23 +742,8 @@
   color: #f0ece0;
   padding-top: 8px;
 }
-.sv-ot-warn     { color: #f97316; font-weight: 700; }
 .sv-ot-footnote { margin: 10px 0 0; }
 
-.sv-ot-rates {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-  gap: 8px 20px;
-}
-.sv-ot-rate {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 0.8rem;
-  color: #ccc;
-}
-.sv-ot-rate__name { flex: 1; }
-.sv-ot-rate__unit { color: #666; font-size: 0.72rem; }
 
 .sv-ot-people { margin-bottom: 14px; }
 .sv-ot-people__label {

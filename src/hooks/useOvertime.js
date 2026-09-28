@@ -20,25 +20,8 @@ async function request(path, method = 'GET', body) {
   return json
 }
 
-// Horas extra de un mes ('YYYY-MM'). Los importes solo llegan si el usuario es socio.
-export function useOvertime(month) {
-  const [data,    setData]    = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState(null)
-
-  const reload = useCallback(() => {
-    setLoading(true)
-    setError(null)
-    return request(`/overtime?month=${month}`)
-      .then(json => setData(json))
-      .catch(e   => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [month])
-
-  useEffect(() => { reload() }, [reload])
-
-  return { data, loading, error, reload }
-}
+// Horas extra de un mes ('YYYY-MM'), sin importes (los importes están en Nóminas).
+export const useOvertime = (month) => useRequest(`/overtime?month=${month}`)
 
 export const createOvertime = (fields)     => request('/overtime', 'POST', fields)
 export const updateOvertime = (id, fields) => request(`/overtime/${id}`, 'PUT', fields)
@@ -51,5 +34,29 @@ export const setOvertimeStatus = (target, status) => request('/overtime-status',
 export const addOvertimePerson    = (name, type)   => request('/overtime-people', 'POST', { name, type })
 export const updateOvertimePerson = (id, changes)  => request(`/overtime-people/${id}`, 'PUT', changes)
 
-export const getOvertimeRates  = ()      => request('/overtime-rates').then(json => json.rates || {})
-export const saveOvertimeRates = (rates) => request('/overtime-rates', 'PUT', { rates }).then(json => json.rates || {})
+// ─── Nóminas (SuperAdmin, solo socios) ──────────────────────────────────────
+function useRequest(path) {
+  const [data,    setData]    = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState(null)
+
+  const reload = useCallback(() => {
+    setLoading(true)
+    setError(null)
+    return request(path)
+      .then(json => setData(json))
+      .catch(e   => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [path])
+
+  useEffect(() => { reload() }, [reload])
+
+  return { data, loading, error, reload }
+}
+
+// Filas por persona (base + extras), totales, detalle de horas y configuración del mes.
+export const usePayroll        = (month)          => useRequest(`/payroll?month=${month}`)
+export const usePayrollHistory = (to, months = 12) => useRequest(`/payroll-history?to=${to}&months=${months}`)
+
+// config: { base: {id: €}, rates: {id: €/h} } — un valor vacío borra ese importe
+export const savePayrollConfig = (config) => request('/payroll-config', 'PUT', config).then(json => json.config)

@@ -2960,17 +2960,27 @@ add_action('rest_api_init', function() {
         'callback'            => 'overtime_update_person',
         'permission_callback' => $socio_perm,
     ));
-    register_rest_route('superadmin/v1', '/overtime-rates', array(
-        array(
-            'methods'             => 'GET',
-            'callback'            => 'overtime_get_rates_response',
-            'permission_callback' => $socio_perm,
+
+    // ── Nóminas (SuperAdmin, solo socios) ──
+    register_rest_route('superadmin/v1', '/payroll', array(
+        'methods'             => 'GET',
+        'callback'            => 'payroll_get',
+        'permission_callback' => $socio_perm,
+        'args'                => array('month' => array('type' => 'string', 'required' => true)),
+    ));
+    register_rest_route('superadmin/v1', '/payroll-history', array(
+        'methods'             => 'GET',
+        'callback'            => 'payroll_history',
+        'permission_callback' => $socio_perm,
+        'args'                => array(
+            'to'     => array('type' => 'string',  'required' => true),
+            'months' => array('type' => 'integer', 'default'  => 12),
         ),
-        array(
-            'methods'             => 'PUT',
-            'callback'            => 'overtime_save_rates',
-            'permission_callback' => $socio_perm,
-        ),
+    ));
+    register_rest_route('superadmin/v1', '/payroll-config', array(
+        'methods'             => 'PUT',
+        'callback'            => 'payroll_save_config',
+        'permission_callback' => $socio_perm,
     ));
 });
 
@@ -3124,8 +3134,14 @@ function overtime_clean_fields($body, $current_person = null) {
     );
 }
 
-// Quita los datos de dinero salvo para socios.
-function overtime_present($entry, $rates, $is_socio) {
+// €/h aplicable: las pagadas conservan el €/h con el que se pagaron.
+function overtime_entry_rate($entry, $rates) {
+    if ($entry['status'] === 'pagado' && isset($entry['paid_rate'])) return $entry['paid_rate'];
+    return $rates[$entry['professor']] ?? null;
+}
+
+// Sin $rates no incluye dinero (Supervisión). Con $rates añade €/h e importe (Nóminas).
+function overtime_present($entry, $rates = null) {
     $out = array(
         'id'         => $entry['id'],
         'professor'  => $entry['professor'],
@@ -3135,11 +3151,8 @@ function overtime_present($entry, $rates, $is_socio) {
         'status'     => $entry['status'],
         'created_by' => $entry['created_by'] ?? '',
     );
-    if ($is_socio) {
-        // Las pagadas conservan el €/h con el que se pagaron.
-        $rate = $entry['status'] === 'pagado' && isset($entry['paid_rate'])
-            ? $entry['paid_rate']
-            : ($rates[$entry['professor']] ?? null);
+    if ($rates !== null) {
+        $rate = overtime_entry_rate($entry, $rates);
         $out['rate']    = $rate;
         $out['amount']  = $rate !== null ? round($rate * $entry['hours'], 2) : null;
         $out['paid_at'] = $entry['paid_at'] ?? null;
@@ -3152,20 +3165,17 @@ function overtime_list($request) {
     if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
         return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
     }
-    $is_socio = blokes_get_app_role() === 'socio';
-    $rates    = $is_socio ? overtime_get_rates() : array();
-
     $list = array();
     foreach (overtime_get_entries() as $entry) {
         if (strpos($entry['date'], $month) !== 0) continue;
-        $list[] = overtime_present($entry, $rates, $is_socio);
+        $list[] = overtime_present($entry);
     }
     usort($list, function($a, $b) { return strcmp($a['date'], $b['date']); });
 
     return rest_ensure_response(array(
         'success'    => true,
         'month'      => $month,
-        'can_manage' => $is_socio,
+        'can_manage' => blokes_get_app_role() === 'socio',
         'people'     => overtime_get_people(),
         'entries'    => $list,
     ));
@@ -3187,11 +3197,7 @@ function overtime_create($request) {
     $entries[] = $entry;
     overtime_save_entries($entries);
 
-    $is_socio = blokes_get_app_role() === 'socio';
-    return rest_ensure_response(array(
-        'success' => true,
-        'entry'   => overtime_present($entry, $is_socio ? overtime_get_rates() : array(), $is_socio),
-    ));
+    return rest_ensure_response(array('success' => true, 'entry' => overtime_present($entry)));
 }
 
 function overtime_find_index($entries, $id) {
@@ -3216,10 +3222,7 @@ function overtime_update($request) {
     $entries[$i] = array_merge($entries[$i], $fields, array('updated_at' => (new DateTime())->format('c')));
     overtime_save_entries($entries);
 
-    return rest_ensure_response(array(
-        'success' => true,
-        'entry'   => overtime_present($entries[$i], $is_socio ? overtime_get_rates() : array(), $is_socio),
-    ));
+    return rest_ensure_response(array('success' => true, 'entry' => overtime_present($entries[$i])));
 }
 
 function overtime_delete($request) {
@@ -3275,25 +3278,154 @@ function overtime_set_status($request) {
     return rest_ensure_response(array('success' => true, 'changed' => $changed));
 }
 
-function overtime_get_rates_response() {
-    return rest_ensure_response(array('success' => true, 'rates' => (object) overtime_get_rates()));
+// ============================================================
+//  superadmin/v1 — Nóminas: nómina base fija mensual + horas extra
+// ============================================================
+
+// Nómina base mensual por persona (solo profesores; los externos cobran solo extras).
+// Primera carga con los costes mensuales de PlaygroundPage.jsx — pendientes de revisar.
+function payroll_get_base() {
+    $stored = get_option('blokes_payroll_base', null);
+    if (is_array($stored)) return $stored;
+    $seed = array(
+        'alvaro' => 1715.60, 'sigurd' => 903.00, 'lucia' => 314.00,
+        'sara'   => 523.00,  'ana'    => 400.00, 'eva'   => 1424.46,
+    );
+    update_option('blokes_payroll_base', $seed, false);
+    return $seed;
 }
 
-function overtime_save_rates($request) {
-    $body  = $request->get_json_params();
-    $input = is_array($body['rates'] ?? null) ? $body['rates'] : array();
+// Filas por persona y totales de un mes ('YYYY-MM').
+function payroll_compute_month($month, $people, $entries, $base, $rates) {
+    $by = array();
+    foreach ($entries as $e) {
+        if (strpos($e['date'], $month) !== 0) continue;
+        $id = $e['professor'];
+        if (!isset($by[$id])) $by[$id] = array('hours' => 0, 'extras' => 0, 'pending_extras' => 0, 'missing_rate' => false, 'pending' => 0, 'paid' => 0);
+        $rate   = overtime_entry_rate($e, $rates);
+        $amount = $rate !== null ? round($rate * $e['hours'], 2) : 0;
+        $by[$id]['hours']  += $e['hours'];
+        $by[$id]['extras'] += $amount;
+        if ($rate === null) $by[$id]['missing_rate'] = true;
+        if ($e['status'] === 'pagado') {
+            $by[$id]['paid']++;
+        } else {
+            $by[$id]['pending']++;
+            $by[$id]['pending_extras'] += $amount;
+        }
+    }
+
+    $ordered = array_merge(
+        array_filter($people, function($p) { return $p['type'] !== 'externo'; }),
+        array_filter($people, function($p) { return $p['type'] === 'externo'; })
+    );
+    $rows   = array();
+    $totals = array('base' => 0, 'extras' => 0, 'pending_extras' => 0, 'total' => 0, 'hours' => 0);
+    foreach ($ordered as $p) {
+        $has_hours = isset($by[$p['id']]);
+        $p_base    = ($p['type'] === 'profesor' && $p['active']) ? ($base[$p['id']] ?? null) : null;
+        // Profesores activos siempre; externos e inactivos solo si tienen horas ese mes.
+        if (!$has_hours && !($p['active'] && $p['type'] === 'profesor')) continue;
+
+        $h   = $has_hours ? $by[$p['id']] : array('hours' => 0, 'extras' => 0, 'pending_extras' => 0, 'missing_rate' => false, 'pending' => 0, 'paid' => 0);
+        $row = array_merge(array(
+            'id'     => $p['id'],
+            'name'   => $p['name'],
+            'type'   => $p['type'],
+            'color'  => $p['color'],
+            'active' => $p['active'],
+            'base'   => $p_base,
+            'rate'   => $rates[$p['id']] ?? null,
+        ), $h);
+        $row['extras'] = round($row['extras'], 2);
+        $row['total']  = round(($p_base ?? 0) + $row['extras'], 2);
+        $rows[] = $row;
+
+        $totals['base']           += $p_base ?? 0;
+        $totals['extras']         += $row['extras'];
+        $totals['pending_extras'] += $row['pending_extras'];
+        $totals['hours']          += $row['hours'];
+    }
+    $totals['total'] = $totals['base'] + $totals['extras'];
+    foreach ($totals as $k => $v) $totals[$k] = round($v, 2);
+
+    return array('rows' => $rows, 'totals' => $totals);
+}
+
+function payroll_get($request) {
+    $month = sanitize_text_field($request->get_param('month'));
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
+    }
+    $people  = overtime_get_people();
+    $entries = overtime_get_entries();
+    $base    = payroll_get_base();
+    $rates   = overtime_get_rates();
+
+    $detail = array();
+    foreach ($entries as $e) {
+        if (strpos($e['date'], $month) === 0) $detail[] = overtime_present($e, $rates);
+    }
+    usort($detail, function($a, $b) { return strcmp($a['date'], $b['date']); });
+
+    return rest_ensure_response(array_merge(
+        array('success' => true, 'month' => $month),
+        payroll_compute_month($month, $people, $entries, $base, $rates),
+        array(
+            'entries' => $detail,
+            'people'  => $people,
+            'config'  => array('base' => (object) $base, 'rates' => (object) $rates),
+        )
+    ));
+}
+
+// Totales de los últimos N meses hasta 'to' (incluido). La base usa los importes actuales.
+function payroll_history($request) {
+    $to     = sanitize_text_field($request->get_param('to'));
+    $months = max(1, min(24, intval($request->get_param('months'))));
+    $end    = DateTime::createFromFormat('Y-m-d', $to . '-01');
+    if (!$end || !preg_match('/^\d{4}-\d{2}$/', $to)) {
+        return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
+    }
+    $people  = overtime_get_people();
+    $entries = overtime_get_entries();
+    $base    = payroll_get_base();
+    $rates   = overtime_get_rates();
+
+    $out = array();
+    for ($k = $months - 1; $k >= 0; $k--) {
+        $m     = (clone $end)->modify("-{$k} months")->format('Y-m');
+        $calc  = payroll_compute_month($m, $people, $entries, $base, $rates);
+        $out[] = array_merge(array('month' => $m), $calc['totals']);
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// Guarda nómina base y/o €/h extra. Solo se tocan las personas enviadas; un valor vacío o 0 lo borra.
+function payroll_save_config($request) {
+    $body   = $request->get_json_params();
     $people = overtime_get_people();
 
-    // Solo se tocan las personas enviadas: las inactivas (que no salen en la tabla) conservan su tarifa.
-    $clean = overtime_get_rates();
-    foreach ($input as $slug => $rate) {
-        $slug = sanitize_title($slug);
-        if (overtime_person_index($people, $slug) < 0) continue;
-        $rate = round(floatval($rate), 2);
-        if ($rate > 0) $clean[$slug] = $rate;
-        else unset($clean[$slug]);
-    }
-    update_option('blokes_overtime_rates', $clean, false);
+    $merge = function($current, $input) use ($people) {
+        foreach ((is_array($input) ? $input : array()) as $id => $value) {
+            $id = sanitize_title($id);
+            if (overtime_person_index($people, $id) < 0) continue;
+            $value = round(floatval($value), 2);
+            if ($value > 0) $current[$id] = $value;
+            else unset($current[$id]);
+        }
+        return $current;
+    };
 
-    return rest_ensure_response(array('success' => true, 'rates' => (object) $clean));
+    $base  = payroll_get_base();
+    $rates = overtime_get_rates();
+    if (isset($body['base'])) {
+        $base = $merge($base, $body['base']);
+        update_option('blokes_payroll_base', $base, false);
+    }
+    if (isset($body['rates'])) {
+        $rates = $merge($rates, $body['rates']);
+        update_option('blokes_overtime_rates', $rates, false);
+    }
+    return rest_ensure_response(array('success' => true, 'config' => array('base' => (object) $base, 'rates' => (object) $rates)));
 }

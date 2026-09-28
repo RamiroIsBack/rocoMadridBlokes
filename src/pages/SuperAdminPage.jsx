@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { useRevenue, useProducts, useExpenses, useClasses } from '../hooks/useSuperAdmin'
 import ExpensesSection from '../components/ExpensesSection'
+import PayrollSection from '../components/PayrollSection'
 import './SuperAdminPage.css'
 
 const PERIOD_OPTIONS = [
@@ -1112,6 +1113,7 @@ export default function SuperAdminPage() {
     { key: 'ingresos', label: 'Ingresos' },
     { key: 'gastos',   label: 'Gastos banco' },
     { key: 'pl',       label: 'P&L' },
+    { key: 'nominas',  label: 'Nóminas' },
     { key: 'acceso',   label: 'Acceso' },
   ]
 
@@ -1134,6 +1136,7 @@ export default function SuperAdminPage() {
       )}
       {saTab === 'gastos'   && <ExpensesSection />}
       {saTab === 'pl'       && <PLTab />}
+      {saTab === 'nominas'  && <PayrollSection />}
       {saTab === 'acceso'   && <ListasSection />}
     </div>
   )
