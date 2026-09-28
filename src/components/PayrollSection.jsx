@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import {
-  usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus,
+  usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence,
   typeLabel, hasBase, sortByType,
 } from '../hooks/useOvertime'
 import { currentMonth, shiftMonth, monthLabel, monthShort, fmtDate, fmtHours, fmtEur } from '../utils/monthFormat'
@@ -238,6 +238,7 @@ function PersonFile({ person, row, personal, onSaved }) {
             {typeLabel(person.type)}{person.active ? '' : ' · inactivo'}
             {' · '}Total mes: <strong>{row ? fmtEur(row.total) : '—'}</strong>
             {' · '}Horas extra: <strong>{row && row.hours ? `${fmtHours(row.hours)} h` : '0 h'}</strong>
+            {row?.absent && <>{' · '}<span className="sa-pay-tag sa-pay-tag--absent">sin asistencia este mes</span></>}
           </p>
         </div>
         {!editing && (
@@ -378,7 +379,7 @@ function PayrollReport({ month, person, personal, notes, rows, entries, totals, 
               {rows.map(r => (
                 <tr key={r.id}>
                   <td>{person ? 'Nómina mensual' : <>{r.name}{r.type !== 'profesor' && <span className="pr-tag">{typeLabel(r.type)}</span>}</>}</td>
-                  <td className="num">{hasBase(r.type) ? fmtEur(r.base) : '—'}</td>
+                  <td className="num">{!hasBase(r.type) ? '—' : r.absent ? 'Sin asistencia' : fmtEur(r.base)}</td>
                   <td className="num">{fmtHours(r.hours)}</td>
                   <td className="num">{r.rate == null ? '—' : fmtEur(r.rate)}</td>
                   <td className="num">{fmtEur(r.extras)}</td>
@@ -622,9 +623,12 @@ export default function PayrollSection() {
                             <span className="sa-pay-dot" style={{ background: r.color }} />{r.name}
                             {r.type !== 'profesor' && <span className="sa-pay-tag">{typeLabel(r.type).toLowerCase()}</span>}
                             {!r.active && <span className="sa-pay-tag">inactivo</span>}
+                            {r.absent && <span className="sa-pay-tag sa-pay-tag--absent">sin asistencia</span>}
                           </td>
                           <td className="sa-pay-num" title={notes[r.id] || undefined}>
-                            {hasBase(r.type) ? fmtEur(r.base) : <span className="sa-pay-muted">—</span>}
+                            {!hasBase(r.type) ? <span className="sa-pay-muted">—</span>
+                              : r.absent ? <span className="sa-pay-struck" title="Sin asistencia: no se reporta este mes">{fmtEur(r.base_nominal)}</span>
+                              : fmtEur(r.base)}
                             {notes[r.id] && <span className="sa-pay-info"> ⓘ</span>}
                           </td>
                           <td className="sa-pay-num">{hasHours ? fmtHours(r.hours) : <span className="sa-pay-muted">0</span>}</td>
@@ -641,7 +645,7 @@ export default function PayrollSection() {
                               </span>
                             )}
                           </td>
-                          <td className="sa-pay-nowrap">
+                          <td className="sa-pay-nowrap sa-pay-row-actions">
                             {hasHours && (
                               <button
                                 className="sa-pay-action" disabled={busy}
@@ -650,6 +654,16 @@ export default function PayrollSection() {
                                   allPaid ? `✓ ${r.name}: extras pendientes` : `✓ ${r.name}: extras pagados`,
                                 )}
                               >{allPaid ? 'Marcar pendiente' : 'Marcar pagado'}</button>
+                            )}
+                            {r.base_nominal != null && (
+                              <button
+                                className={`sa-pay-action${r.absent ? ' sa-pay-action--on' : ''}`} disabled={busy}
+                                title="La nómina base de este mes no se reporta; el mes siguiente vuelve a contar"
+                                onClick={() => run(
+                                  () => setPayrollAbsence(month, r.id, !r.absent),
+                                  r.absent ? `✓ ${r.name}: asistencia restaurada` : `✓ ${r.name}: sin asistencia este mes`,
+                                )}
+                              >{r.absent ? 'Quitar sin asistencia' : 'Sin asistencia'}</button>
                             )}
                           </td>
                         </tr>

@@ -1150,3 +1150,9 @@ details[open] .sa-collapsible__arrow {
   font-size: 7pt;
   color: var(--pr-muted);
 }
+
+/* ── Nóminas: sin asistencia ── */
+.sa-pay-tag--absent { color: #f97316; border-color: #5a2e0f; }
+.sa-pay-struck      { color: #666; text-decoration: line-through; }
+.sa-pay-row-actions { display: flex; gap: 6px; }
+.sa-pay-action--on  { border-color: #f97316; color: #f97316; }

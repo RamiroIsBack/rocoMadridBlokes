@@ -74,3 +74,7 @@ export const savePayrollConfig = (config) => request('/payroll-config', 'PUT', c
 // Ficha personal (solo socios). fields: { full_name, dni, birth_date, address, phone, email }
 export const savePayrollPersonal = (id, fields) =>
   request(`/payroll-personal/${id}`, 'PUT', fields).then(json => json.personal || {})
+
+// "Sin asistencia": ese mes no se reporta la nómina base de la persona (solo socios)
+export const setPayrollAbsence = (month, person, absent) =>
+  request('/payroll-absence', 'POST', { month, person, absent })

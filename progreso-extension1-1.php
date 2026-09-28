@@ -2982,6 +2982,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'payroll_save_config',
         'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/payroll-absence', array(
+        'methods'             => 'POST',
+        'callback'            => 'payroll_set_absence',
+        'permission_callback' => $socio_perm,
+    ));
     register_rest_route('superadmin/v1', '/payroll-personal/(?P<id>[a-z0-9-]+)', array(
         'methods'             => 'PUT',
         'callback'            => 'payroll_save_personal',
@@ -3338,8 +3343,38 @@ function payroll_get_base() {
     return $seed;
 }
 
+// "Sin asistencia": { 'YYYY-MM': [id, ...] }. Ese mes la nómina base de esa persona no se
+// reporta (cuenta 0); la configuración no cambia, así que el mes siguiente vuelve a contar.
+function payroll_get_absences() {
+    $stored = get_option('blokes_payroll_absences', array());
+    return is_array($stored) ? $stored : array();
+}
+
+function payroll_set_absence($request) {
+    $body   = $request->get_json_params();
+    $month  = sanitize_text_field($body['month'] ?? '');
+    $id     = sanitize_title($body['person'] ?? '');
+    $absent = !empty($body['absent']);
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
+    }
+    if (overtime_person_index(overtime_get_people(), $id) < 0) {
+        return new WP_Error('not_found', 'Persona no encontrada', array('status' => 404));
+    }
+    $all  = payroll_get_absences();
+    $list = array_values(array_diff($all[$month] ?? array(), array($id)));
+    if ($absent) $list[] = $id;
+    if ($list) $all[$month] = $list;
+    else unset($all[$month]);
+    update_option('blokes_payroll_absences', $all, false);
+
+    return rest_ensure_response(array('success' => true, 'month' => $month, 'absent' => $list));
+}
+
 // Filas por persona y totales de un mes ('YYYY-MM').
-function payroll_compute_month($month, $people, $entries, $base, $rates) {
+function payroll_compute_month($month, $people, $entries, $base, $rates, $absences = null) {
+    if ($absences === null) $absences = payroll_get_absences();
+    $absent_ids = $absences[$month] ?? array();
     $by = array();
     foreach ($entries as $e) {
         if (strpos($e['date'], $month) !== 0) continue;
@@ -3368,15 +3403,21 @@ function payroll_compute_month($month, $people, $entries, $base, $rates) {
         $always    = $p['active'] && ($p['type'] === 'profesor' || $p_base !== null);
         if (!$has_hours && !$always) continue;
 
+        $absent      = in_array($p['id'], $absent_ids, true);
+        $base_nominal = $p_base;
+        if ($absent && $p_base !== null) $p_base = 0.0;
+
         $h   = $has_hours ? $by[$p['id']] : array('hours' => 0, 'extras' => 0, 'pending_extras' => 0, 'missing_rate' => false, 'pending' => 0, 'paid' => 0);
         $row = array_merge(array(
-            'id'     => $p['id'],
-            'name'   => $p['name'],
-            'type'   => $p['type'],
-            'color'  => $p['color'],
-            'active' => $p['active'],
-            'base'   => $p_base,
-            'rate'   => $rates[$p['id']] ?? null,
+            'id'           => $p['id'],
+            'name'         => $p['name'],
+            'type'         => $p['type'],
+            'color'        => $p['color'],
+            'active'       => $p['active'],
+            'base'         => $p_base,
+            'base_nominal' => $base_nominal,
+            'absent'       => $absent,
+            'rate'         => $rates[$p['id']] ?? null,
         ), $h);
         $row['extras'] = round($row['extras'], 2);
         $row['total']  = round(($p_base ?? 0) + $row['extras'], 2);
@@ -3502,10 +3543,12 @@ function payroll_history($request) {
     $base    = payroll_get_base();
     $rates   = overtime_get_rates();
 
+    $absences = payroll_get_absences();
+
     $out = array();
     for ($k = $months - 1; $k >= 0; $k--) {
         $m     = (clone $end)->modify("-{$k} months")->format('Y-m');
-        $calc  = payroll_compute_month($m, $people, $entries, $base, $rates);
+        $calc  = payroll_compute_month($m, $people, $entries, $base, $rates, $absences);
         $out[] = array_merge(array('month' => $m), $calc['totals']);
     }
     return rest_ensure_response(array('success' => true, 'data' => $out));
