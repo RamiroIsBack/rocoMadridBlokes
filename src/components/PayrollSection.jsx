@@ -177,33 +177,22 @@ const PERSONAL_FIELDS = [
 const fmtPersonal = (field, value) =>
   !value ? '—' : field.type === 'date' ? fmtDate(value) : value
 
-function PersonCards({ people, rowById, selected, onSelect }) {
+function PersonCards({ people, selected, onSelect }) {
   return (
-    <div className="sa-pay-cards">
+    <div className="sa-pay-chips">
       {people.map(p => {
-        const r = rowById[p.id]
         const isSel = selected === p.id
         return (
           <button
             key={p.id}
-            className={`sa-pay-card${isSel ? ' sa-pay-card--active' : ''}${p.active ? '' : ' sa-pay-card--inactive'}`}
+            className={`sa-pay-chip${isSel ? ' sa-pay-chip--active' : ''}${p.active ? '' : ' sa-pay-chip--inactive'}`}
             style={{ '--card-color': p.color }}
             onClick={() => onSelect(isSel ? null : p.id)}
-            aria-pressed={isSel}
+            aria-expanded={isSel}
+            title={`${typeLabel(p.type)}${p.active ? '' : ' · inactivo'}`}
           >
-            <span className="sa-pay-card__head">
-              <span className="sa-pay-dot" style={{ background: p.color }} />
-              <span className="sa-pay-card__name">{p.name}</span>
-            </span>
-            <span className="sa-pay-card__type">{typeLabel(p.type)}{p.active ? '' : ' · inactivo'}</span>
-            <span className="sa-pay-card__stat">
-              <span>Total mes</span>
-              <strong>{r ? fmtEur(r.total) : '—'}</strong>
-            </span>
-            <span className="sa-pay-card__stat">
-              <span>Horas extra</span>
-              <strong>{r && r.hours ? `${fmtHours(r.hours)} h` : '—'}</strong>
-            </span>
+            <span className="sa-pay-dot" style={{ background: p.color }} />
+            {p.name}
           </button>
         )
       })}
@@ -211,7 +200,7 @@ function PersonCards({ people, rowById, selected, onSelect }) {
   )
 }
 
-function PersonFile({ person, personal, onSaved }) {
+function PersonFile({ person, row, personal, onSaved }) {
   const [editing,  setEditing]  = useState(false)
   const [form,     setForm]     = useState(personal)
   const [saving,   setSaving]   = useState(false)
@@ -238,7 +227,14 @@ function PersonFile({ person, personal, onSaved }) {
   return (
     <div className="sa-pay-file" style={{ '--card-color': person.color }}>
       <div className="sa-pay-file__head">
-        <h3 className="sa-pay-file__title">Ficha de {person.name}</h3>
+        <div>
+          <h3 className="sa-pay-file__title">Ficha de {person.name}</h3>
+          <p className="sa-pay-file__meta">
+            {typeLabel(person.type)}{person.active ? '' : ' · inactivo'}
+            {' · '}Total mes: <strong>{row ? fmtEur(row.total) : '—'}</strong>
+            {' · '}Horas extra: <strong>{row && row.hours ? `${fmtHours(row.hours)} h` : '0 h'}</strong>
+          </p>
+        </div>
         {!editing && (
           <button className="sa-pay-action" onClick={() => { setForm(personal); setEditing(true) }}>Editar</button>
         )}
@@ -455,6 +451,19 @@ export default function PayrollSection() {
 
   return (
     <>
+      {/* ── Fichas: solo nombres; al pulsar se despliega la ficha y se filtran las tablas ── */}
+      {data && (
+        <div className="sa-section sa-pay-people">
+          <PersonCards people={cardPeople} selected={selected} onSelect={setSelected} />
+          {selPerson && (
+            <PersonFile
+              person={selPerson} row={rowById[selPerson.id]}
+              personal={personal[selPerson.id] || {}} onSaved={reload}
+            />
+          )}
+        </div>
+      )}
+
       <div className="sa-section">
         <div className="sa-section__header">
           <h2 className="sa-section-title">Nóminas</h2>
@@ -493,13 +502,6 @@ export default function PayrollSection() {
                   <span className="sa-kpi__label">Extras pendientes de pago</span>
                 </div>
               </div>
-
-              {/* ── Fichas ── */}
-              <h3 className="sa-pay-subtitle">Fichas</h3>
-              <PersonCards people={cardPeople} rowById={rowById} selected={selected} onSelect={setSelected} />
-              {selPerson && (
-                <PersonFile person={selPerson} personal={personal[selPerson.id] || {}} onSaved={reload} />
-              )}
 
               {/* ── Nómina por persona ── */}
               <h3 className="sa-pay-subtitle">

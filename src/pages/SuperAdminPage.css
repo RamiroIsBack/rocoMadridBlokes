@@ -912,42 +912,29 @@ details[open] .sa-collapsible__arrow {
 
 /* ── Nóminas: fichas ── */
 .sa-pay-print { margin-right: 8px; }
-.sa-pay-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 8px;
-}
-.sa-pay-card {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 10px 12px;
+.sa-pay-people { margin-bottom: 20px; padding: 14px 16px; }
+.sa-pay-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sa-pay-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
   background: rgba(255,255,255,0.02);
   border: 1px solid #2a2015;
-  border-top: 3px solid var(--card-color, #f5c842);
-  border-radius: 3px;
+  border-radius: 16px;
   color: #ccc;
-  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.sa-pay-card:hover { background: rgba(255,255,255,0.04); }
-.sa-pay-card--active {
-  background: rgba(245,200,66,0.06);
+.sa-pay-chip:hover { background: rgba(255,255,255,0.05); color: #f0ece0; }
+.sa-pay-chip--active {
   border-color: var(--card-color, #f5c842);
+  background: rgba(245,200,66,0.07);
+  color: #f0ece0;
 }
-.sa-pay-card--inactive { opacity: 0.55; }
-.sa-pay-card__head { display: flex; align-items: center; }
-.sa-pay-card__name { font-size: 0.88rem; font-weight: 700; color: #f0ece0; }
-.sa-pay-card__type { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: #666; }
-.sa-pay-card__stat {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.72rem;
-  color: #777;
-}
-.sa-pay-card__stat strong { color: #ddd; font-variant-numeric: tabular-nums; }
+.sa-pay-chip--inactive { opacity: 0.55; }
 
 .sa-pay-file {
   margin-top: 12px;
@@ -958,6 +945,8 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-pay-file__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .sa-pay-file__title { margin: 0; font-size: 0.92rem; font-weight: 700; color: #f0ece0; }
+.sa-pay-file__meta  { margin: 3px 0 0; font-size: 0.74rem; color: #777; }
+.sa-pay-file__meta strong { color: #ddd; font-variant-numeric: tabular-nums; }
 .sa-pay-file__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
