@@ -3425,7 +3425,19 @@ function payroll_get($request) {
 // Datos personales: solo se guardan en la BD (nunca en el código, el repo es público)
 // y solo se devuelven a socios, dentro de /payroll.
 function payroll_personal_fields() {
-    return array('full_name', 'dni', 'birth_date', 'address', 'phone', 'email');
+    return array('full_name', 'dni', 'birth_date', 'address', 'phone', 'email', 'iban');
+}
+
+// IBAN sin espacios y en mayúsculas si es válido (dígito de control mod 97); si no, null.
+function payroll_clean_iban($iban) {
+    $iban = strtoupper(preg_replace('/[\s-]+/', '', $iban));
+    if (!preg_match('/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/', $iban)) return null;
+    $moved = substr($iban, 4) . substr($iban, 0, 4);
+    $digits = '';
+    foreach (str_split($moved) as $ch) $digits .= ctype_alpha($ch) ? (string) (ord($ch) - 55) : $ch;
+    $rem = 0;
+    foreach (str_split($digits, 7) as $chunk) $rem = intval($rem . $chunk) % 97;
+    return $rem === 1 ? $iban : null;
 }
 
 function payroll_get_personal() {
@@ -3445,6 +3457,10 @@ function payroll_save_personal($request) {
         if ($f === 'email' && $v !== '') {
             $v = sanitize_email($v);
             if (!is_email($v)) return new WP_Error('invalid_email', 'Email no válido', array('status' => 400));
+        }
+        if ($f === 'iban' && $v !== '') {
+            $v = payroll_clean_iban($v);
+            if ($v === null) return new WP_Error('invalid_iban', 'IBAN no válido (revisa los dígitos)', array('status' => 400));
         }
         if ($f === 'birth_date' && $v !== '') {
             $dt = DateTime::createFromFormat('Y-m-d', $v);

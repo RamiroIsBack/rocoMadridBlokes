@@ -172,10 +172,15 @@ const PERSONAL_FIELDS = [
   { key: 'address',    label: 'Dirección' },
   { key: 'phone',      label: 'Teléfono', type: 'tel' },
   { key: 'email',      label: 'Email', type: 'email' },
+  { key: 'iban',       label: 'IBAN', placeholder: 'ES00 0000 0000 0000 0000 0000' },
 ]
 
+// El IBAN se guarda sin espacios; se muestra en bloques de 4
 const fmtPersonal = (field, value) =>
-  !value ? '—' : field.type === 'date' ? fmtDate(value) : value
+  !value ? '—'
+    : field.type === 'date' ? fmtDate(value)
+    : field.key === 'iban' ? value.replace(/(.{4})/g, '$1 ').trim()
+    : value
 
 function PersonCards({ people, selected, onSelect }) {
   return (
@@ -248,6 +253,7 @@ function PersonFile({ person, row, personal, onSaved }) {
                 <span>{f.label}</span>
                 <input
                   type={f.type || 'text'} maxLength={200} className="sa-pay-file__input"
+                  placeholder={f.placeholder}
                   value={form[f.key] || ''}
                   onChange={e => setForm(v => ({ ...v, [f.key]: e.target.value }))}
                 />
