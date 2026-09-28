@@ -499,6 +499,17 @@ export default function PayrollSection() {
   const shownEntries = selected ? entries.filter(e => e.professor === selected) : entries
   const missingRate  = shownRows.some(r => r.missing_rate)
 
+  // Resumen: el de la persona seleccionada (ceros si no tiene nómina ni horas este mes) o el del mes
+  const selRow  = selected ? rowById[selected] : null
+  const kpi     = !selected ? totals : {
+    base:           selRow?.base ?? 0,
+    extras:         selRow?.extras ?? 0,
+    hours:          selRow?.hours ?? 0,
+    total:          selRow?.total ?? 0,
+    pending_extras: selRow?.pending_extras ?? 0,
+  }
+  const kpiWho  = selPerson ? ` · ${selPerson.name}` : ''
+
   function handlePrint() {
     const who = selPerson ? selPerson.name.replace(/\s+/g, '_') : 'todas'
     printReport(`Nomina_${who}_${month}`)
@@ -557,20 +568,20 @@ export default function PayrollSection() {
               {/* ── Resumen ── */}
               <div className="sa-kpis">
                 <div className="sa-kpi" style={{ '--kpi-color': BASE_COLOR }}>
-                  <span className="sa-kpi__value">{fmtEur(totals.base)}</span>
-                  <span className="sa-kpi__label">Nóminas base</span>
+                  <span className="sa-kpi__value">{selPerson && !hasBase(selPerson.type) ? '—' : fmtEur(kpi.base)}</span>
+                  <span className="sa-kpi__label">{selPerson ? 'Nómina base' : 'Nóminas base'}{kpiWho}</span>
                 </div>
                 <div className="sa-kpi" style={{ '--kpi-color': EXTRA_COLOR }}>
-                  <span className="sa-kpi__value">{fmtEur(totals.extras)}</span>
-                  <span className="sa-kpi__label">Extras · {fmtHours(totals.hours)} h</span>
+                  <span className="sa-kpi__value">{fmtEur(kpi.extras)}</span>
+                  <span className="sa-kpi__label">Extras · {fmtHours(kpi.hours)} h{kpiWho}</span>
                 </div>
                 <div className="sa-kpi" style={{ '--kpi-color': '#34d399' }}>
-                  <span className="sa-kpi__value">{fmtEur(totals.total)}</span>
-                  <span className="sa-kpi__label">Total del mes</span>
+                  <span className="sa-kpi__value">{fmtEur(kpi.total)}</span>
+                  <span className="sa-kpi__label">Total del mes{kpiWho}</span>
                 </div>
                 <div className="sa-kpi" style={{ '--kpi-color': '#f97316' }}>
-                  <span className="sa-kpi__value">{fmtEur(totals.pending_extras)}</span>
-                  <span className="sa-kpi__label">Extras pendientes de pago</span>
+                  <span className="sa-kpi__value">{fmtEur(kpi.pending_extras)}</span>
+                  <span className="sa-kpi__label">Extras pendientes de pago{kpiWho}</span>
                 </div>
               </div>
 
