@@ -1174,3 +1174,4 @@ details[open] .sa-collapsible__arrow {
   font-family: inherit;
 }
 .sa-remesa__check { display: flex; align-items: center; gap: 6px; font-size: 0.76rem; color: #999; }
+.sa-pay-status--parcial { background: #2d1a0a; color: #f97316; border-color: #5a2e0f; }

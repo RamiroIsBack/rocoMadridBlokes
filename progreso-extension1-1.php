@@ -3521,13 +3521,16 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
         $row['extras'] = round($row['extras'], 2);
         $row['total']  = round(($p_base ?? 0) + $row['extras'], 2);
 
-        // Pago de la nómina (remesa o manual). El importe pagado cubre primero la base;
-        // las horas extra se pagan aparte según su propio estado.
+        // Pago de la nómina (remesa o manual). Pendiente = base + extras aún no pagadas − lo pagado
+        // en banco (un pago de remesa que supera la base también reduce lo que falta de extras).
+        // Marcado a mano sin importe = base pagada; las extras siguen su propio estado.
         $pay      = $payments[$p['id']] ?? null;
         $base_due = $p_base ?? 0;
-        $base_paid = $pay ? ($pay['amount'] === null ? $base_due : min($pay['amount'], $base_due)) : 0;
+        if (!$pay)                    $outstanding = $base_due + $row['pending_extras'];
+        elseif ($pay['amount'] === null) $outstanding = $row['pending_extras'];
+        else                          $outstanding = max(0, $base_due + $row['pending_extras'] - $pay['amount']);
         $row['payment']     = $pay;
-        $row['outstanding'] = round(max(0, $base_due - $base_paid) + $row['pending_extras'], 2);
+        $row['outstanding'] = round($outstanding, 2);
         // Diferencia entre lo pagado en banco y el total del mes (para detectar bases mal configuradas)
         $row['difference']  = ($pay && $pay['amount'] !== null) ? round($pay['amount'] - $row['total'], 2) : null;
         $rows[] = $row;

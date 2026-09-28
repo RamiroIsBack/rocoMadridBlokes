@@ -408,7 +408,7 @@ function PayrollReport({ month, person, personal, notes, rows, entries, totals, 
           <p className="pr-note">
             <strong>Estado del pago:</strong>{' '}
             {row.payment
-              ? <>Pagado{row.payment.date ? ` el ${fmtDate(row.payment.date)}` : ''}{row.payment.amount != null ? ` · ${fmtEur(row.payment.amount)} por banco` : ' (marcado manualmente)'}{row.outstanding > 0.01 ? ` · pendiente ${fmtEur(row.outstanding)}` : ''}</>
+              ? <>{row.outstanding > 0.01 ? 'Pago parcial' : 'Pagado'}{row.payment.date ? ` el ${fmtDate(row.payment.date)}` : ''}{row.payment.amount != null ? ` · ${fmtEur(row.payment.amount)} por banco` : ' (marcado manualmente)'}{row.outstanding > 0.01 ? ` · pendiente ${fmtEur(row.outstanding)}` : ''}</>
               : `Pendiente · ${fmtEur(row.outstanding)}`}
           </p>
         )}
@@ -667,8 +667,11 @@ export default function PayrollSection() {
                           <td className="sa-pay-nowrap">
                             {r.payment ? (
                               <>
-                                <span className="sa-pay-status sa-pay-status--pagado" title={r.payment.ref ? `Remesa: ${r.payment.ref}` : 'Marcado a mano'}>
-                                  Pagado{r.payment.date ? ` ${fmtDate(r.payment.date).slice(0, 5)}` : ''}
+                                <span
+                                  className={`sa-pay-status sa-pay-status--${r.outstanding > 0.01 ? 'parcial' : 'pagado'}`}
+                                  title={r.payment.ref ? `Remesa: ${r.payment.ref}` : 'Marcado a mano'}
+                                >
+                                  {r.outstanding > 0.01 ? 'Parcial' : 'Pagado'}{r.payment.date ? ` ${fmtDate(r.payment.date).slice(0, 5)}` : ''}
                                 </span>
                                 {r.payment.amount != null && <span className="sa-pay-paid"> banco {fmtEur(r.payment.amount)}</span>}
                                 {r.difference != null && Math.abs(r.difference) > 0.01 && (
