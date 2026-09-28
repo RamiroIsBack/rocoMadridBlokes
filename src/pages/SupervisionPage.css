@@ -788,3 +788,6 @@
 .sv-ot-people__add { flex-wrap: wrap; }
 .sv-tests-add:disabled { opacity: 0.4; cursor: default; }
 .sv-ot-type-select { font-size: 0.72rem; padding: 2px 4px; }
+.sv-ot-row--empty td { color: #666; }
+.sv-ot-muted { color: #777 !important; font-size: 0.75rem; }
+.sv-ot-tag--inline { margin-left: 6px; }

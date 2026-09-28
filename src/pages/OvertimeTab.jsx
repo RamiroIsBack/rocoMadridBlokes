@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import {
   useOvertime, createOvertime, updateOvertime, deleteOvertime,
-  addOvertimePerson, updateOvertimePerson, PERSON_TYPES, sortByType,
+  addOvertimePerson, updateOvertimePerson, PERSON_TYPES, sortByType, typeLabel,
 } from '../hooks/useOvertime'
 import { todayISO, currentMonth, shiftMonth, monthLabel, fmtDate, fmtHours } from '../utils/monthFormat'
 
@@ -138,7 +138,11 @@ export default function OvertimeTab() {
       s.hours += e.hours
       s[e.status === 'pagado' ? 'paid' : 'pending']++
     }
-    const rows = sortByType(people).filter(p => byProf[p.id]).map(p => ({ ...p, ...byProf[p.id] }))
+    // Todas las personas activas (aunque tengan 0 h) y las inactivas que tengan horas este mes
+    const empty = { hours: 0, pending: 0, paid: 0 }
+    const rows  = sortByType(people)
+      .filter(p => p.active || byProf[p.id])
+      .map(p => ({ ...p, ...(byProf[p.id] || empty) }))
     return { rows, hours: rows.reduce((t, r) => t + r.hours, 0) }
   }, [entries, people])
 
@@ -322,7 +326,7 @@ export default function OvertimeTab() {
       </div>
 
       {/* ── Resumen por profesor ── */}
-      {summary.rows.length > 0 && (
+      {data && (
         <div className="sv-section">
           <h3 className="sv-section-title">Resumen del mes</h3>
           <div className="sv-tests-scroll">
@@ -330,21 +334,27 @@ export default function OvertimeTab() {
               <thead>
                 <tr>
                   <th>Persona</th>
+                  <th>Tipo</th>
                   <th className="sv-ot-num">Horas</th>
                   <th>Estado</th>
                 </tr>
               </thead>
               <tbody>
                 {summary.rows.map(r => {
-                  const allPaid = r.pending === 0
+                  const hasHours = r.pending + r.paid > 0
+                  const allPaid  = hasHours && r.pending === 0
                   return (
-                    <tr key={r.id}>
-                      <td className="sv-ot-nowrap"><span className="sv-ot-dot" style={{ background: r.color }} />{r.name}</td>
+                    <tr key={r.id} className={hasHours ? '' : 'sv-ot-row--empty'}>
+                      <td className="sv-ot-nowrap">
+                        <span className="sv-ot-dot" style={{ background: r.color }} />{r.name}
+                        {!r.active && <span className="sv-ot-person__tag sv-ot-tag--inline">inactivo</span>}
+                      </td>
+                      <td className="sv-ot-muted">{typeLabel(r.type)}</td>
                       <td className="sv-ot-num">{fmtHours(r.hours)}</td>
                       <td>
-                        <span className={`sv-ot-status sv-ot-status--${allPaid ? 'pagado' : 'pendiente'}`}>
+                        {hasHours && <span className={`sv-ot-status sv-ot-status--${allPaid ? 'pagado' : 'pendiente'}`}>
                           {allPaid ? 'Pagado' : r.paid ? `${r.pending} pendiente${r.pending > 1 ? 's' : ''}` : 'Pendiente'}
-                        </span>
+                        </span>}
                       </td>
                     </tr>
                   )
@@ -353,6 +363,7 @@ export default function OvertimeTab() {
               <tfoot>
                 <tr className="sv-ot-total">
                   <td>Total</td>
+                  <td />
                   <td className="sv-ot-num">{fmtHours(summary.hours)}</td>
                   <td />
                 </tr>
