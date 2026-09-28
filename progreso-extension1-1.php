@@ -3512,7 +3512,8 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
     $rows   = array();
     $payments = payroll_get_payments()[$month] ?? array();
     $totals = array('base' => 0, 'extras' => 0, 'pending_extras' => 0, 'total' => 0, 'hours' => 0,
-                    'paid_bank' => 0, 'outstanding' => 0, 'cash' => 0, 'partials' => 0);
+                    'paid_bank' => 0, 'outstanding' => 0, 'cash' => 0, 'partials' => 0,
+                    'bank' => 0, 'cash_paid' => 0);
     $partials      = payroll_get_partials()[$month] ?? array();
     $cash_totals   = payroll_get_cash_totals();
     $cash_payments = payroll_get_cash_payments()[$month] ?? array();
@@ -3549,6 +3550,7 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
         $base_due = $p_base ?? 0;
         $cash_total = ($p_base !== null) ? ($cash_totals[$p['id']] ?? null) : null;
 
+        $cash_paid   = null;
         $my_partials = array_values(array_filter($partials, function($x) use ($p) { return $x['person'] === $p['id']; }));
         $part_nomina = 0; $part_extras = 0;
         foreach ($my_partials as $x) {
@@ -3598,6 +3600,19 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
             : ($any_nomina && $nomina_out <= 0.01 ? 'pagado' : ($any_nomina ? 'parcial' : 'pendiente'));
         $row['outstanding'] = round($outstanding, 2);
         $totals['partials'] += $part_nomina + $part_extras;
+
+        // Resumen de dinero del mes: A pagar = Banco + Efectivo + Manual + Pendiente.
+        // "Manual" = lo marcado como pagado sin importe (p. ej. extras marcadas a mano).
+        $bank_amt = !$pay ? 0 : ($pay['amount'] === null ? $base_due : $pay['amount']);
+        $cash_amt = $part_nomina + $part_extras + (($cash_total !== null && $cash_paid) ? $cash_paid['amount'] : 0);
+        $row['to_pay'] = $row['total'];
+        $row['bank']   = round($bank_amt, 2);
+        $row['cash']   = round($cash_amt, 2);
+        $row['manual'] = round(max(0, $row['total'] - $bank_amt - $cash_amt - $outstanding), 2);
+        $row['status'] = $row['total'] <= 0 && $bank_amt + $cash_amt <= 0 ? null
+            : ($outstanding <= 0.01 ? 'pagado' : ($bank_amt + $cash_amt + $row['manual'] > 0 ? 'parcial' : 'pendiente'));
+        $totals['bank']      += $row['bank'];
+        $totals['cash_paid'] += $row['cash'];
         $rows[] = $row;
 
         $totals['base']           += $p_base ?? 0;

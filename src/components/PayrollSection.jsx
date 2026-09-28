@@ -5,12 +5,12 @@ import {
 } from 'recharts'
 import {
   usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence,
-  setPayrollPayment, setPayrollCash, deletePayrollPartial,
+  setPayrollPayment, setPayrollCash, deletePayrollPartial, addPayrollPartial,
   typeLabel, hasBase, sortByType,
 } from '../hooks/useOvertime'
 import RemittanceImport from './RemittanceImport'
 import PartialPayment from './PartialPayment'
-import { currentMonth, shiftMonth, monthLabel, monthShort, fmtDate, fmtHours, fmtEur } from '../utils/monthFormat'
+import { todayISO, currentMonth, shiftMonth, monthLabel, monthShort, fmtDate, fmtHours, fmtEur } from '../utils/monthFormat'
 
 const BASE_COLOR  = '#a78bfa'
 const EXTRA_COLOR = '#f5c842'
@@ -300,6 +300,92 @@ function PersonFile({ person, row, personal, onSaved }) {
   )
 }
 
+// ─── Pagos del mes de una persona (en la ficha desplegada) ──────────────────
+// Controles finos: nómina, horas extra, efectivo del pago mixto y pagos parciales (con ✕).
+function PersonPayments({ row, month, busy, run, onToggleNomina }) {
+  const hasHours = row.pending + row.paid > 0
+  const allPaid  = hasHours && row.pending === 0
+  return (
+    <div className="sa-pay-person-pay">
+      <h4 className="sa-pay-person-pay__title">Pagos de {monthLabel(month).toLowerCase()}</h4>
+      <div className="sa-pay-person-pay__grid">
+        {row.nomina_status && (
+          <div>
+            <span className="sa-pay-person-pay__label">Nómina {fmtEur(row.base)}</span>
+            <button
+              className={`sa-pay-status sa-pay-status--btn sa-pay-status--${row.nomina_status}`} disabled={busy}
+              title={row.payment ? 'Pulsa para quitar el pago' : 'Pulsa para marcar la nómina como pagada'}
+              onClick={() => onToggleNomina(row)}
+            >{{ pagado: 'Pagado', parcial: 'Parcial', pendiente: 'Pendiente' }[row.nomina_status]}</button>
+            {row.payment && (
+              <span className="sa-pay-paid">
+                {' '}{row.payment.amount != null ? `banco ${fmtEur(row.payment.amount)}` : 'marcado a mano'}
+                {row.payment.date ? ` · ${fmtDate(row.payment.date)}` : ''}
+              </span>
+            )}
+            {row.difference != null && Math.abs(row.difference) > 0.01 && (
+              <span className="sa-pay-warn"> · dif. {row.difference > 0 ? '+' : ''}{fmtEur(row.difference)}</span>
+            )}
+          </div>
+        )}
+        {hasHours && (
+          <div>
+            <span className="sa-pay-person-pay__label">Horas extra {fmtEur(row.extras)} · {fmtHours(row.hours)} h</span>
+            <button
+              className={`sa-pay-status sa-pay-status--btn sa-pay-status--${allPaid ? 'pagado' : row.partial_extras > 0 ? 'parcial' : 'pendiente'}`}
+              disabled={busy}
+              onClick={() => run(
+                () => setOvertimeStatus({ month, professor: row.id }, allPaid ? 'pendiente' : 'pagado'),
+                allPaid ? `✓ ${row.name}: extras pendientes` : `✓ ${row.name}: extras pagados`,
+              )}
+            >{allPaid ? 'Pagado' : row.partial_extras > 0 ? `Parcial · falta ${fmtEur(row.extras_outstanding)}` : 'Pendiente'}</button>
+          </div>
+        )}
+        {row.cash_total != null && (
+          <div>
+            <span className="sa-pay-person-pay__label">
+              Efectivo pactado {fmtEur(row.cash_paid ? row.cash_paid.amount : row.cash_due)}
+              {!row.cash_paid && row.cash_estimated ? ' (estimado)' : ''}
+            </span>
+            <button
+              className={`sa-pay-status sa-pay-status--btn sa-pay-status--${row.cash_paid ? 'pagado' : 'pendiente'}`}
+              disabled={busy || (!row.cash_paid && row.cash_due <= 0)}
+              onClick={() => run(
+                () => setPayrollCash(month, row.id, !row.cash_paid, row.cash_due),
+                row.cash_paid ? `✓ ${row.name}: efectivo pendiente` : `✓ ${row.name}: efectivo entregado`,
+              )}
+            >{row.cash_paid ? `Entregado ${fmtDate(row.cash_paid.date).slice(0, 5)}` : 'Pendiente'}</button>
+          </div>
+        )}
+      </div>
+      {row.partials?.length > 0 && (
+        <ul className="sa-pay-person-pay__list">
+          {row.partials.map(x => (
+            <li key={x.id}>
+              💶 {fmtEur(x.amount)} · {x.concept === 'extras' ? 'horas extra' : 'nómina'} · {fmtDate(x.date)}
+              <span className="sa-pay-muted"> · {x.note}</span>
+              <button
+                className="sa-pay-filter__clear" disabled={busy} aria-label="Borrar pago parcial"
+                onClick={() => {
+                  if (!window.confirm(`¿Borrar el pago en efectivo de ${fmtEur(x.amount)} de ${row.name}?`)) return
+                  run(() => deletePayrollPartial(month, x.id), '✓ Pago parcial borrado')
+                }}
+              >✕</button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// Texto del desglose del efectivo (para el tooltip de la tabla)
+function cashDetail(r) {
+  const parts = (r.partials || []).map(x => `${fmtEur(x.amount)} ${x.concept === 'extras' ? 'extras' : 'nómina'} ${fmtDate(x.date)} — ${x.note}`)
+  if (r.cash_paid) parts.unshift(`${fmtEur(r.cash_paid.amount)} efectivo pactado ${fmtDate(r.cash_paid.date)}`)
+  return parts.join('\n')
+}
+
 // ─── Informe para imprimir / guardar como PDF ───────────────────────────────
 // Se monta directamente en <body> y está oculto en pantalla; al imprimir con printReport()
 // es lo único visible (ver SuperAdminPage.css), así no salen páginas en blanco.
@@ -543,7 +629,13 @@ export default function PayrollSection() {
   const cardPeople   = sortByType(people.filter(p => p.active || rows.some(r => r.id === p.id)))
   const rowById      = Object.fromEntries(rows.map(r => [r.id, r]))
   const selPerson    = selected ? byId[selected] : null
-  const shownRows    = selected ? rows.filter(r => r.id === selected) : rows
+  const [payFilter, setPayFilter] = useState('all')   // all | pending | paid
+  const isPending    = r => r.outstanding > 0.01
+  const isPaid       = r => r.status === 'pagado'
+  const counts       = { all: rows.length, pending: rows.filter(isPending).length, paid: rows.filter(isPaid).length }
+  const shownRows    = rows
+    .filter(r => !selected || r.id === selected)
+    .filter(r => payFilter === 'all' || (payFilter === 'pending' ? isPending(r) : isPaid(r)))
   const shownEntries = selected ? entries.filter(e => e.professor === selected) : entries
   const missingRate  = shownRows.some(r => r.missing_rate)
 
@@ -597,6 +689,39 @@ export default function PayrollSection() {
     )
   }
 
+  // Pulsar el estado de la fila. Pendiente/Parcial → marcar pagado todo lo que falta
+  // (nómina a mano si no hay remesa, efectivo pactado, horas extra; si la remesa se quedó corta,
+  // el resto se registra como pago en efectivo con justificación). Pagado → volver a pendiente.
+  function toggleAll(r) {
+    if (r.status === 'pagado') {
+      if (!window.confirm(`¿Volver a pendiente el mes de ${r.name}?${r.payment?.amount != null ? `\nSe borrará el pago de la remesa (${fmtEur(r.payment.amount)}).` : ''}${r.partials?.length ? '\nLos pagos en efectivo registrados se mantienen (bórralos desde la ficha).' : ''}`)) return
+      run(async () => {
+        if (r.payment) await setPayrollPayment(month, r.id, false)
+        if (r.cash_paid) await setPayrollCash(month, r.id, false)
+        if (r.paid > 0) await setOvertimeStatus({ month, professor: r.id }, 'pendiente')
+      }, `✓ ${r.name}: vuelve a pendiente`)
+      return
+    }
+    let note = null
+    const shortBank = r.cash_total == null && r.payment && r.nomina_outstanding > 0.01
+    if (shortBank) {
+      note = window.prompt(`La remesa no cubre la nómina de ${r.name}: faltan ${fmtEur(r.nomina_outstanding)}.\nSe registrará como pago en efectivo. Justificación:`)
+      if (!note || !note.trim()) return
+    } else if (!window.confirm(`¿Marcar como pagado todo lo pendiente de ${r.name} (${fmtEur(r.outstanding)})?`)) return
+    run(async () => {
+      if (r.cash_total != null) {
+        if (!r.payment) await setPayrollPayment(month, r.id, true)
+        if (!r.cash_paid) await setPayrollCash(month, r.id, true, r.cash_due)
+      } else {
+        if (!r.payment && r.nomina_outstanding > 0.01 && !(r.partial_nomina > 0)) await setPayrollPayment(month, r.id, true)
+        if (shortBank || (r.partial_nomina > 0 && r.nomina_outstanding > 0.01)) {
+          await addPayrollPartial(month, { person: r.id, concept: 'nomina', amount: r.nomina_outstanding, date: todayISO(), note: note || 'Resto de nómina' })
+        }
+        if (r.pending > 0) await setOvertimeStatus({ month, professor: r.id }, 'pagado')
+      }
+    }, `✓ ${r.name}: pagado`)
+  }
+
   return (
     <>
       {/* ── Fichas: solo nombres; al pulsar se despliega la ficha y se filtran las tablas ── */}
@@ -608,6 +733,9 @@ export default function PayrollSection() {
               person={selPerson} row={rowById[selPerson.id]}
               personal={personal[selPerson.id] || {}} onSaved={reload}
             />
+          )}
+          {selPerson && rowById[selPerson.id] && (
+            <PersonPayments row={rowById[selPerson.id]} month={month} busy={busy} run={run} onToggleNomina={toggleNomina} />
           )}
         </div>
       )}
@@ -655,7 +783,11 @@ export default function PayrollSection() {
                   <span className="sa-kpi__value">{fmtEur(kpi.total)}</span>
                   <span className="sa-kpi__label">Total del mes{kpiWho}</span>
                 </div>
-                <div className="sa-kpi" style={{ '--kpi-color': '#f97316' }}>
+                <div
+                  className="sa-kpi sa-kpi--click" style={{ '--kpi-color': '#f97316' }} role="button" tabIndex={0}
+                  title="Ver solo lo pendiente de pago"
+                  onClick={() => setPayFilter('pending')} onKeyDown={e => e.key === 'Enter' && setPayFilter('pending')}
+                >
                   <span className="sa-kpi__value">{fmtEur(kpi.outstanding)}</span>
                   <span className="sa-kpi__label">Pendiente de pago{kpiWho}</span>
                 </div>
@@ -677,159 +809,117 @@ export default function PayrollSection() {
                 />
               )}
 
-              {/* ── Nómina por persona ── */}
-              <h3 className="sa-pay-subtitle">
-                Nómina por persona{selPerson && <span className="sa-pay-filter"> · {selPerson.name} <button className="sa-pay-filter__clear" onClick={() => setSelected(null)} aria-label="Quitar filtro">✕</button></span>}
-              </h3>
+              {/* ── Nómina por persona: A pagar = Banco + Efectivo + Pendiente ── */}
+              <div className="sa-pay-table-head">
+                <h3 className="sa-pay-subtitle">
+                  Nómina por persona{selPerson && <span className="sa-pay-filter"> · {selPerson.name} <button className="sa-pay-filter__clear" onClick={() => setSelected(null)} aria-label="Quitar filtro">✕</button></span>}
+                </h3>
+                <div className="sa-filters sa-pay-filters">
+                  {[['all', 'Todos'], ['pending', 'Con pendiente'], ['paid', 'Pagados']].map(([k, l]) => (
+                    <button key={k} className={`sa-filter-btn${payFilter === k ? ' sa-filter-btn--active' : ''}`} onClick={() => setPayFilter(k)}>
+                      {l} ({counts[k]})
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="sa-pay-scroll">
                 <table className="sa-pay-table">
                   <thead>
                     <tr>
                       <th>Persona</th>
-                      <th className="sa-pay-num">Base</th>
-                      <th className="sa-pay-num">Horas extra</th>
-                      <th className="sa-pay-num">€/h</th>
-                      <th className="sa-pay-num">Extras</th>
-                      <th className="sa-pay-num">Total</th>
-                      <th>Nómina</th>
-                      <th>Estado extras</th>
+                      <th className="sa-pay-num">A pagar</th>
+                      <th className="sa-pay-num">Banco</th>
+                      <th className="sa-pay-num">Efectivo</th>
+                      <th className="sa-pay-num">Pendiente</th>
+                      <th>Estado</th>
                       <th />
                     </tr>
                   </thead>
                   <tbody>
                     {shownRows.length === 0 && (
-                      <tr><td colSpan={9} className="sa-pay-muted">Sin nómina ni horas extra este mes.</td></tr>
+                      <tr><td colSpan={7} className="sa-pay-muted">
+                        {payFilter === 'pending' ? 'No queda nada pendiente de pago este mes.' : payFilter === 'paid' ? 'Todavía no hay nadie pagado este mes.' : 'Sin nómina ni horas extra este mes.'}
+                      </td></tr>
                     )}
                     {shownRows.map(r => {
-                      const hasHours = r.pending + r.paid > 0
-                      const allPaid  = hasHours && r.pending === 0
+                      const breakdown = [
+                        hasBase(r.type) ? `Nómina ${r.absent ? '0 € (sin asistencia)' : fmtEur(r.base)}` : null,
+                        r.cash_total != null ? `Total pactado ${fmtEur(r.cash_total)}` : null,
+                        r.hours ? `Horas extra ${fmtEur(r.extras)} (${fmtHours(r.hours)} h × ${r.rate == null ? '—' : fmtEur(r.rate)})` : null,
+                        notes[r.id] ? `Justificación: ${notes[r.id]}` : null,
+                      ].filter(Boolean).join('\n')
                       return (
-                        <tr key={r.id}>
+                        <tr key={r.id} className={r.status === 'pagado' ? 'sa-pay-row--paid' : ''}>
                           <td className="sa-pay-nowrap">
-                            <span className="sa-pay-dot" style={{ background: r.color }} />{r.name}
+                            <button className="sa-pay-name" onClick={() => setSelected(s => s === r.id ? null : r.id)} title="Ver ficha y pagos">
+                              <span className="sa-pay-dot" style={{ background: r.color }} />{r.name}
+                            </button>
                             {r.type !== 'profesor' && <span className="sa-pay-tag">{typeLabel(r.type).toLowerCase()}</span>}
                             {!r.active && <span className="sa-pay-tag">inactivo</span>}
                             {r.absent && <span className="sa-pay-tag sa-pay-tag--absent">sin asistencia</span>}
+                            {r.cash_total != null && <span className="sa-pay-tag" title="Banco + efectivo">mixto</span>}
                           </td>
-                          <td className="sa-pay-num" title={notes[r.id] || undefined}>
-                            {!hasBase(r.type) ? <span className="sa-pay-muted">—</span>
-                              : r.absent ? <span className="sa-pay-struck" title="Sin asistencia: no se reporta este mes">{fmtEur(r.base_nominal)}</span>
-                              : fmtEur(r.base)}
-                            {notes[r.id] && <span className="sa-pay-info"> ⓘ</span>}
-                            {r.cash_total != null && <div className="sa-pay-paid" title="Total pactado banco + efectivo">de {fmtEur(r.cash_total)}</div>}
-                          </td>
-                          <td className="sa-pay-num">{hasHours ? fmtHours(r.hours) : <span className="sa-pay-muted">0</span>}</td>
-                          <td className="sa-pay-num">{r.rate == null ? <span className="sa-pay-muted">—</span> : fmtEur(r.rate)}</td>
-                          <td className="sa-pay-num">
-                            {hasHours ? fmtEur(r.extras) : <span className="sa-pay-muted">—</span>}
+                          <td className="sa-pay-num" title={breakdown}>
+                            {fmtEur(r.to_pay)}{breakdown && <span className="sa-pay-info"> ⓘ</span>}
                             {r.missing_rate && <span className="sa-pay-warn" title="Hay horas sin €/h configurado"> *</span>}
                           </td>
-                          <td className="sa-pay-num sa-pay-strong">{fmtEur(r.total)}</td>
-                          <td className="sa-pay-nowrap">
-                            {/* Estado de la nómina: se cambia pulsando la etiqueta */}
-                            {r.nomina_status ? (
-                              <button
-                                className={`sa-pay-status sa-pay-status--btn sa-pay-status--${r.nomina_status}`}
-                                disabled={busy}
-                                title={r.payment
-                                  ? `${r.payment.ref ? `Remesa: ${r.payment.ref}` : 'Marcado a mano'} · pulsa para quitar el pago`
-                                  : 'Pulsa para marcar la nómina como pagada'}
-                                onClick={() => toggleNomina(r)}
-                              >
-                                {{ pagado: 'Pagado', parcial: 'Parcial', pendiente: 'Pendiente' }[r.nomina_status]}
-                                {r.payment?.date ? ` ${fmtDate(r.payment.date).slice(0, 5)}` : ''}
-                              </button>
-                            ) : r.total > 0 ? (
-                              <span className="sa-pay-muted">—</span>
-                            ) : null}
-                            {r.payment?.amount != null && <span className="sa-pay-paid"> banco {fmtEur(r.payment.amount)}</span>}
+                          <td className="sa-pay-num" title={r.payment ? (r.payment.ref ? `Remesa: ${r.payment.ref}` : 'Marcado a mano') : undefined}>
+                            {r.bank > 0 ? fmtEur(r.bank) : <span className="sa-pay-muted">—</span>}
+                            {r.payment && r.payment.amount == null && <span className="sa-pay-paid"> (a mano)</span>}
                             {r.difference != null && Math.abs(r.difference) > 0.01 && (
-                              <span className="sa-pay-warn" title="Pagado en banco − total del mes"> dif. {r.difference > 0 ? '+' : ''}{fmtEur(r.difference)}</span>
+                              <span className="sa-pay-warn" title={`Diferencia con lo configurado: ${r.difference > 0 ? '+' : ''}${fmtEur(r.difference)}`}> ⚠</span>
                             )}
-                            {r.cash_total == null && (r.payment || r.partials?.length > 0) && r.outstanding > 0.01 && (
-                              <span className="sa-pay-warn"> · falta {fmtEur(r.outstanding)}</span>
+                          </td>
+                          <td className="sa-pay-num" title={cashDetail(r) || undefined}>
+                            {r.cash > 0 ? <>{fmtEur(r.cash)}<span className="sa-pay-info"> ⓘ</span></> : <span className="sa-pay-muted">—</span>}
+                            {r.cash_total != null && !r.cash_paid && r.cash_due > 0 && (
+                              <div className="sa-pay-paid">a entregar {fmtEur(r.cash_due)}{r.cash_estimated ? ' (est.)' : ''}</div>
                             )}
-                            {r.cash_total != null && (
-                              <div className="sa-pay-cash">
-                                <button
-                                  className={`sa-pay-status sa-pay-status--btn sa-pay-status--${r.cash_paid ? 'pagado' : 'pendiente'}`}
-                                  disabled={busy || (!r.cash_paid && r.cash_due <= 0)}
-                                  title={r.cash_paid ? 'Pulsa para volver a pendiente' : 'Pulsa cuando se entregue el efectivo (incluye las horas extra)'}
-                                  onClick={() => run(
-                                    () => setPayrollCash(month, r.id, !r.cash_paid, r.cash_due),
-                                    r.cash_paid ? `✓ ${r.name}: efectivo pendiente` : `✓ ${r.name}: efectivo entregado`,
-                                  )}
-                                >
-                                  Efectivo {r.cash_paid ? `pagado ${fmtDate(r.cash_paid.date).slice(0, 5)}` : 'pendiente'}
-                                </button>
-                                <span className="sa-pay-paid">
-                                  {' '}{fmtEur(r.cash_paid ? r.cash_paid.amount : r.cash_due)}
-                                  {!r.cash_paid && r.cash_estimated && <span title="Sin remesa cargada: se calcula con la base configurada"> (estimado)</span>}
-                                </span>
-                              </div>
-                            )}
-                            {r.partials?.map(x => (
-                              <div key={x.id} className="sa-pay-partial" title={`Justificación: ${x.note}`}>
-                                💶 {fmtEur(x.amount)} {x.concept === 'extras' ? 'extras' : 'nómina'} · {fmtDate(x.date).slice(0, 5)}
-                                <span className="sa-pay-partial__note"> · {x.note}</span>
-                                <button
-                                  className="sa-pay-filter__clear" disabled={busy} aria-label="Borrar pago parcial"
-                                  onClick={() => {
-                                    if (!window.confirm(`¿Borrar el pago en efectivo de ${fmtEur(x.amount)} de ${r.name}?`)) return
-                                    run(() => deletePayrollPartial(month, x.id), '✓ Pago parcial borrado')
-                                  }}
-                                >✕</button>
-                              </div>
-                            ))}
+                          </td>
+                          <td className={`sa-pay-num sa-pay-strong${r.outstanding > 0.01 ? ' sa-pay-pending' : ''}`}>
+                            {r.outstanding > 0.01 ? fmtEur(r.outstanding) : <span className="sa-pay-ok">0,00 €</span>}
+                            {r.manual > 0.01 && <div className="sa-pay-paid" title="Marcado como pagado sin importe registrado">a mano {fmtEur(r.manual)}</div>}
                           </td>
                           <td>
-                            {/* Estado de las horas extra del mes: se cambia pulsando la etiqueta */}
-                            {hasHours && (
+                            {r.status && (
                               <button
-                                className={`sa-pay-status sa-pay-status--btn sa-pay-status--${allPaid ? 'pagado' : r.partial_extras > 0 ? 'parcial' : 'pendiente'}`}
-                                disabled={busy}
-                                title={allPaid ? 'Pulsa para volver a pendiente' : 'Pulsa para marcar las horas extra del mes como pagadas'}
-                                onClick={() => run(
-                                  () => setOvertimeStatus({ month, professor: r.id }, allPaid ? 'pendiente' : 'pagado'),
-                                  allPaid ? `✓ ${r.name}: extras pendientes` : `✓ ${r.name}: extras pagados`,
-                                )}
-                              >
-                                {allPaid ? 'Pagado'
-                                  : r.partial_extras > 0 ? `Parcial · falta ${fmtEur(r.extras_outstanding)}`
-                                  : r.paid ? `${r.pending} pendiente${r.pending > 1 ? 's' : ''}` : 'Pendiente'}
-                              </button>
+                                className={`sa-pay-status sa-pay-status--btn sa-pay-status--${r.status}`} disabled={busy}
+                                title={r.status === 'pagado' ? 'Pulsa para volver a pendiente' : 'Pulsa para marcar como pagado lo que falta'}
+                                onClick={() => toggleAll(r)}
+                              >{{ pagado: 'Pagado', parcial: 'Parcial', pendiente: 'Pendiente' }[r.status]}</button>
                             )}
                           </td>
                           <td className="sa-pay-nowrap sa-pay-row-actions">
                             {r.base_nominal != null && (
                               <button
                                 className={`sa-pay-action${r.absent ? ' sa-pay-action--on' : ''}`} disabled={busy}
-                                title="La nómina base de este mes no se reporta; el mes siguiente vuelve a contar"
+                                title={r.absent ? 'Marcado sin asistencia: pulsa para quitarlo' : 'La nómina base de este mes no se reporta; el mes siguiente vuelve a contar'}
                                 onClick={() => run(
                                   () => setPayrollAbsence(month, r.id, !r.absent),
                                   r.absent ? `✓ ${r.name}: asistencia restaurada` : `✓ ${r.name}: sin asistencia este mes`,
                                 )}
-                              >{r.absent ? 'Quitar sin asistencia' : 'Sin asistencia'}</button>
+                              >Sin asistencia{r.absent ? ' ✓' : ''}</button>
                             )}
                           </td>
                         </tr>
                       )
                     })}
                   </tbody>
-                  {!selected && <tfoot>
+                  {!selected && payFilter === 'all' && <tfoot>
                     <tr className="sa-pay-total">
                       <td>Total</td>
-                      <td className="sa-pay-num">{fmtEur(totals.base)}</td>
-                      <td className="sa-pay-num">{fmtHours(totals.hours)}</td>
-                      <td />
-                      <td className="sa-pay-num">{fmtEur(totals.extras)}</td>
                       <td className="sa-pay-num">{fmtEur(totals.total)}</td>
-                      <td className="sa-pay-nowrap">{totals.paid_bank > 0 && <span className="sa-pay-paid">banco {fmtEur(totals.paid_bank)}</span>}</td>
+                      <td className="sa-pay-num">{fmtEur(totals.bank)}</td>
+                      <td className="sa-pay-num">{fmtEur(totals.cash_paid)}</td>
+                      <td className={`sa-pay-num${totals.outstanding > 0.01 ? ' sa-pay-pending' : ''}`}>{fmtEur(totals.outstanding)}</td>
                       <td colSpan={2} />
                     </tr>
                   </tfoot>}
                 </table>
               </div>
+              <p className="sa-pay-note">
+                Pulsa el nombre para ver la ficha y los pagos por concepto (nómina, horas extra, efectivo). ⓘ = pasa el ratón para ver el desglose.
+              </p>
               {missingRate && (
                 <p className="sa-pay-note">* Hay horas extra sin €/h configurado: no se incluyen en el importe. Añádelo en Configuración.</p>
               )}
