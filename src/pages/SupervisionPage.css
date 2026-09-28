@@ -787,3 +787,4 @@
 .sv-ot-person__actions .sv-ot-action { margin-right: 0; }
 .sv-ot-people__add { flex-wrap: wrap; }
 .sv-tests-add:disabled { opacity: 0.4; cursor: default; }
+.sv-ot-type-select { font-size: 0.72rem; padding: 2px 4px; }

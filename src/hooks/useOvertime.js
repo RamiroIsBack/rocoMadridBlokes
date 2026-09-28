@@ -30,7 +30,17 @@ export const deleteOvertime = (id)         => request(`/overtime/${id}`, 'DELETE
 // target: { id } o { month, professor }
 export const setOvertimeStatus = (target, status) => request('/overtime-status', 'POST', { ...target, status })
 
-// Personas (profesores y externos). Añadir: gestion y socio. Editar/desactivar: solo socio.
+// Tipos de persona en orden de listado. Profesores y voluntarios pueden tener nómina base; externos solo extras.
+export const PERSON_TYPES = [
+  { id: 'profesor',   label: 'Profesor',   plural: 'Profesores' },
+  { id: 'voluntario', label: 'Voluntario', plural: 'Voluntarios' },
+  { id: 'externo',    label: 'Externo',    plural: 'Externos' },
+]
+export const typeLabel = id => PERSON_TYPES.find(t => t.id === id)?.label || id
+export const hasBase   = type => type !== 'externo'
+export const sortByType = people => PERSON_TYPES.flatMap(t => people.filter(p => p.type === t.id))
+
+// Personas (profesores, voluntarios y externos). Añadir: gestion y socio. Editar/desactivar: solo socio.
 export const addOvertimePerson    = (name, type)   => request('/overtime-people', 'POST', { name, type })
 export const updateOvertimePerson = (id, changes)  => request(`/overtime-people/${id}`, 'PUT', changes)
 

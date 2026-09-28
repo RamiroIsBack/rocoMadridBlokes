@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import {
   useOvertime, createOvertime, updateOvertime, deleteOvertime,
-  addOvertimePerson, updateOvertimePerson,
+  addOvertimePerson, updateOvertimePerson, PERSON_TYPES, sortByType,
 } from '../hooks/useOvertime'
 import { todayISO, currentMonth, shiftMonth, monthLabel, fmtDate, fmtHours } from '../utils/monthFormat'
 
@@ -14,8 +14,6 @@ function defaultDate(month) {
 const emptyForm = month => ({ professor: '', date: defaultDate(month), hours: '', reason: '' })
 
 // ─── Personas (gestion y socio añaden; solo socio edita/desactiva) ──────────
-const TYPE_LABEL = { profesor: 'Profesor', externo: 'Externo' }
-
 function OvertimePeople({ people, isSocio, onChanged }) {
   const [name,     setName]     = useState('')
   const [type,     setType]     = useState('profesor')
@@ -52,23 +50,23 @@ function OvertimePeople({ people, isSocio, onChanged }) {
   }
 
   const visible = isSocio ? people : people.filter(p => p.active)
-  const groups  = ['profesor', 'externo']
-    .map(t => [t, visible.filter(p => p.type === t)])
+  const groups  = PERSON_TYPES
+    .map(t => [t, visible.filter(p => p.type === t.id)])
     .filter(([, list]) => list.length > 0)
 
   return (
     <div className="sv-section">
       <h3 className="sv-section-title">Personas</h3>
       <p className="sv-note">
-        Profesores y colaboradores externos que pueden tener horas extra.
+        Profesores, voluntarios y colaboradores externos que pueden tener horas extra.
         {isSocio
           ? ' Desactivar a alguien lo quita del desplegable pero conserva sus horas y su nombre en el historial.'
           : ' Si falta alguien, añádelo aquí. Para quitar o renombrar, pídeselo a un socio.'}
       </p>
 
       {groups.map(([t, list]) => (
-        <div key={t} className="sv-ot-people">
-          <span className="sv-ot-people__label">{t === 'externo' ? 'Externos' : 'Profesores'}</span>
+        <div key={t.id} className="sv-ot-people">
+          <span className="sv-ot-people__label">{t.plural}</span>
           <ul className="sv-ot-people__list">
             {list.map(p => (
               <li key={p.id} className={`sv-ot-person${p.active ? '' : ' sv-ot-person--inactive'}`}>
@@ -78,13 +76,13 @@ function OvertimePeople({ people, isSocio, onChanged }) {
                 {isSocio && (
                   <span className="sv-ot-person__actions">
                     <button className="sv-ot-action" disabled={busy} onClick={() => handleRename(p)}>Renombrar</button>
-                    <button
-                      className="sv-ot-action" disabled={busy}
-                      onClick={() => run(
-                        () => updateOvertimePerson(p.id, { type: p.type === 'externo' ? 'profesor' : 'externo' }),
-                        '✓ Tipo cambiado',
-                      )}
-                    >→ {p.type === 'externo' ? 'Profesor' : 'Externo'}</button>
+                    <select
+                      className="sv-tests-select sv-ot-type-select" disabled={busy} value={p.type}
+                      aria-label={`Tipo de ${p.name}`}
+                      onChange={e => run(() => updateOvertimePerson(p.id, { type: e.target.value }), '✓ Tipo cambiado')}
+                    >
+                      {PERSON_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                    </select>
                     <button
                       className="sv-ot-action" disabled={busy}
                       onClick={() => run(
@@ -108,7 +106,7 @@ function OvertimePeople({ people, isSocio, onChanged }) {
           onChange={e => setName(e.target.value)}
         />
         <select className="sv-tests-select" value={type} onChange={e => setType(e.target.value)}>
-          {Object.entries(TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          {PERSON_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
         <button type="submit" className="sv-tests-add" disabled={busy || !name.trim()}>+ Añadir persona</button>
         {feedback && <span className="sv-tests-feedback">{feedback}</span>}
@@ -140,9 +138,7 @@ export default function OvertimeTab() {
       s.hours += e.hours
       s[e.status === 'pagado' ? 'paid' : 'pending']++
     }
-    // Profesores primero, luego externos, en el orden de la lista
-    const ordered = [...people.filter(p => p.type !== 'externo'), ...people.filter(p => p.type === 'externo')]
-    const rows = ordered.filter(p => byProf[p.id]).map(p => ({ ...p, ...byProf[p.id] }))
+    const rows = sortByType(people).filter(p => byProf[p.id]).map(p => ({ ...p, ...byProf[p.id] }))
     return { rows, hours: rows.reduce((t, r) => t + r.hours, 0) }
   }, [entries, people])
 
@@ -228,11 +224,11 @@ export default function OvertimeTab() {
               onChange={e => setForm(f => ({ ...f, professor: e.target.value }))}
             >
               <option value="" disabled>Elegir…</option>
-              {[['profesor', 'Profesores'], ['externo', 'Externos']].map(([type, label]) => {
+              {PERSON_TYPES.map(t => {
                 // Al editar un registro de alguien ya inactivo, se sigue mostrando esa persona
-                const opts = people.filter(p => p.type === type && (p.active || p.id === form.professor))
+                const opts = people.filter(p => p.type === t.id && (p.active || p.id === form.professor))
                 return opts.length > 0 && (
-                  <optgroup key={type} label={label}>
+                  <optgroup key={t.id} label={t.plural}>
                     {opts.map(p => <option key={p.id} value={p.id}>{p.name}{p.active ? '' : ' (inactivo)'}</option>)}
                   </optgroup>
                 )

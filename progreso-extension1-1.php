@@ -2998,10 +2998,33 @@ function overtime_get_rates() {
     return is_array($stored) ? $stored : array();
 }
 
-// ── Personas (profesores y externos) ──
+// ── Personas (profesores, voluntarios y externos) ──
 // Lista propia de Horas extra, independiente de la config de profesores de entrenamientos.
 // Se crea la primera vez con la plantilla actual; los ids de los 6 profesores que ya
 // estaban en progreso_get_professors_config() se mantienen para no perder registros.
+
+// Tipos de persona, en el orden en que se listan. Profesores y voluntarios pueden tener
+// nómina base; los externos cobran solo extras.
+function overtime_types() {
+    return array('profesor', 'voluntario', 'externo');
+}
+
+function overtime_clean_type($type) {
+    return in_array($type, overtime_types(), true) ? $type : 'profesor';
+}
+
+function overtime_has_base($type) {
+    return $type !== 'externo';
+}
+
+// Orden estable: por tipo y, dentro de cada tipo, el orden de la lista.
+function overtime_sort_by_type($people) {
+    $out = array();
+    foreach (overtime_types() as $type) {
+        foreach ($people as $p) if ($p['type'] === $type) $out[] = $p;
+    }
+    return $out;
+}
 
 function overtime_palette() {
     return array('#60a5fa', '#a78bfa', '#f472b6', '#34d399', '#fb923c', '#f5c842',
@@ -3010,7 +3033,7 @@ function overtime_palette() {
 
 function overtime_get_people() {
     $stored = get_option('blokes_overtime_people', null);
-    if (is_array($stored)) return $stored;
+    if (is_array($stored)) return overtime_migrate_people($stored);
 
     $config = progreso_get_professors_config();
     $seed   = array(
@@ -3035,6 +3058,21 @@ function overtime_get_people() {
     return $people;
 }
 
+// Migraciones de datos de una sola vez (cada una marcada con su propia opción).
+function overtime_migrate_people($people) {
+    // 2026-09: Ana, Carolina, Rafa, Edu e Isa pasan de profesor a voluntario.
+    if (!get_option('blokes_overtime_mig_voluntarios')) {
+        foreach ($people as $i => $p) {
+            if (in_array($p['id'], array('ana', 'carolina', 'rafa', 'edu', 'isa'), true)) {
+                $people[$i]['type'] = 'voluntario';
+            }
+        }
+        overtime_save_people($people);
+        update_option('blokes_overtime_mig_voluntarios', 1, false);
+    }
+    return $people;
+}
+
 function overtime_save_people($people) {
     update_option('blokes_overtime_people', array_values($people), false);
 }
@@ -3053,7 +3091,7 @@ function overtime_list_people() {
 function overtime_add_person($request) {
     $body = $request->get_json_params();
     $name = trim(sanitize_text_field($body['name'] ?? ''));
-    $type = ($body['type'] ?? '') === 'externo' ? 'externo' : 'profesor';
+    $type = overtime_clean_type($body['type'] ?? '');
     if ($name === '') {
         return new WP_Error('invalid_name', 'Indica el nombre', array('status' => 400));
     }
@@ -3096,7 +3134,7 @@ function overtime_update_person($request) {
         if ($name === '') return new WP_Error('invalid_name', 'Indica el nombre', array('status' => 400));
         $people[$i]['name'] = $name;
     }
-    if (isset($body['type']))   $people[$i]['type']   = $body['type'] === 'externo' ? 'externo' : 'profesor';
+    if (isset($body['type']))   $people[$i]['type']   = overtime_clean_type($body['type']);
     if (isset($body['active'])) $people[$i]['active'] = (bool) $body['active'];
     overtime_save_people($people);
 
@@ -3282,7 +3320,7 @@ function overtime_set_status($request) {
 //  superadmin/v1 — Nóminas: nómina base fija mensual + horas extra
 // ============================================================
 
-// Nómina base mensual por persona (solo profesores; los externos cobran solo extras).
+// Nómina base mensual por persona (profesores y voluntarios; los externos cobran solo extras).
 // Primera carga con los costes mensuales de PlaygroundPage.jsx — pendientes de revisar.
 function payroll_get_base() {
     $stored = get_option('blokes_payroll_base', null);
@@ -3315,17 +3353,15 @@ function payroll_compute_month($month, $people, $entries, $base, $rates) {
         }
     }
 
-    $ordered = array_merge(
-        array_filter($people, function($p) { return $p['type'] !== 'externo'; }),
-        array_filter($people, function($p) { return $p['type'] === 'externo'; })
-    );
+    $ordered = overtime_sort_by_type($people);
     $rows   = array();
     $totals = array('base' => 0, 'extras' => 0, 'pending_extras' => 0, 'total' => 0, 'hours' => 0);
     foreach ($ordered as $p) {
         $has_hours = isset($by[$p['id']]);
-        $p_base    = ($p['type'] === 'profesor' && $p['active']) ? ($base[$p['id']] ?? null) : null;
-        // Profesores activos siempre; externos e inactivos solo si tienen horas ese mes.
-        if (!$has_hours && !($p['active'] && $p['type'] === 'profesor')) continue;
+        $p_base    = (overtime_has_base($p['type']) && $p['active']) ? ($base[$p['id']] ?? null) : null;
+        // Profesores activos siempre; voluntarios si tienen base; externos e inactivos solo con horas ese mes.
+        $always    = $p['active'] && ($p['type'] === 'profesor' || $p_base !== null);
+        if (!$has_hours && !$always) continue;
 
         $h   = $has_hours ? $by[$p['id']] : array('hours' => 0, 'extras' => 0, 'pending_extras' => 0, 'missing_rate' => false, 'pending' => 0, 'paid' => 0);
         $row = array_merge(array(

@@ -2,7 +2,9 @@ import { useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import { usePayroll, usePayrollHistory, savePayrollConfig, setOvertimeStatus } from '../hooks/useOvertime'
+import {
+  usePayroll, usePayrollHistory, savePayrollConfig, setOvertimeStatus, typeLabel, hasBase, sortByType,
+} from '../hooks/useOvertime'
 import { currentMonth, shiftMonth, monthLabel, monthShort, fmtDate, fmtHours, fmtEur } from '../utils/monthFormat'
 
 const BASE_COLOR  = '#a78bfa'
@@ -18,7 +20,7 @@ function StatusBadge({ status, onClick, disabled }) {
 
 // ─── Configuración: nómina base + €/h extra ─────────────────────────────────
 function PayrollConfig({ people, config, onSaved }) {
-  const active = people.filter(p => p.active)
+  const active = sortByType(people.filter(p => p.active))
   const toForm = cfg => Object.fromEntries(active.map(p => [p.id, {
     base: cfg.base?.[p.id] ?? '',
     rate: cfg.rates?.[p.id] ?? '',
@@ -42,7 +44,7 @@ function PayrollConfig({ people, config, onSaved }) {
       const rates = {}
       const notes = {}
       for (const p of active) {
-        if (p.type === 'profesor') base[p.id] = form[p.id]?.base ?? ''
+        if (hasBase(p.type)) base[p.id] = form[p.id]?.base ?? ''
         rates[p.id] = form[p.id]?.rate ?? ''
         notes[p.id] = form[p.id]?.note ?? ''
       }
@@ -64,7 +66,7 @@ function PayrollConfig({ people, config, onSaved }) {
         <h2 className="sa-section-title">Configuración</h2>
       </div>
       <p className="sa-pay-note">
-        Nómina base mensual fija (solo profesores; los externos cobran solo extras), su justificación y €/h de las horas extra.
+        Nómina base mensual fija (profesores y voluntarios; los externos cobran solo extras), su justificación y €/h de las horas extra.
         Los importes base iniciales vienen de los costes mensuales de Playground: revisadlos y actualizadlos.
         Al marcar horas como pagadas se guarda el €/h de ese momento, así que cambiarlo no altera lo ya pagado.
       </p>
@@ -83,9 +85,9 @@ function PayrollConfig({ people, config, onSaved }) {
             {active.map(p => (
               <tr key={p.id}>
                 <td className="sa-pay-nowrap"><span className="sa-pay-dot" style={{ background: p.color }} />{p.name}</td>
-                <td className="sa-pay-muted">{p.type === 'externo' ? 'Externo' : 'Profesor'}</td>
+                <td className="sa-pay-muted">{typeLabel(p.type)}</td>
                 <td className="sa-pay-num">
-                  {p.type === 'profesor'
+                  {hasBase(p.type)
                     ? <input
                         type="number" min="0" step="0.01" placeholder="—" className="sa-pay-input"
                         value={form[p.id]?.base ?? ''} onChange={e => set(p.id, 'base', e.target.value)}
@@ -101,7 +103,7 @@ function PayrollConfig({ people, config, onSaved }) {
                 <td className="sa-pay-note-cell">
                   <textarea
                     rows={2} maxLength={1000} className="sa-pay-textarea"
-                    placeholder={p.type === 'profesor' ? 'Ej. 20 h/semana, 6 clases + coordinación' : 'Ej. colaborador puntual'}
+                    placeholder={hasBase(p.type) ? 'Ej. 20 h/semana, 6 clases + coordinación' : 'Ej. colaborador puntual'}
                     value={form[p.id]?.note ?? ''} onChange={e => set(p.id, 'note', e.target.value)}
                   />
                 </td>
@@ -253,11 +255,11 @@ export default function PayrollSection() {
                         <tr key={r.id}>
                           <td className="sa-pay-nowrap">
                             <span className="sa-pay-dot" style={{ background: r.color }} />{r.name}
-                            {r.type === 'externo' && <span className="sa-pay-tag">externo</span>}
+                            {r.type !== 'profesor' && <span className="sa-pay-tag">{typeLabel(r.type).toLowerCase()}</span>}
                             {!r.active && <span className="sa-pay-tag">inactivo</span>}
                           </td>
                           <td className="sa-pay-num" title={notes[r.id] || undefined}>
-                            {r.type === 'externo' ? <span className="sa-pay-muted">—</span> : fmtEur(r.base)}
+                            {hasBase(r.type) ? fmtEur(r.base) : <span className="sa-pay-muted">—</span>}
                             {notes[r.id] && <span className="sa-pay-info"> ⓘ</span>}
                           </td>
                           <td className="sa-pay-num">{hasHours ? fmtHours(r.hours) : <span className="sa-pay-muted">0</span>}</td>
