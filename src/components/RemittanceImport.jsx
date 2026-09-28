@@ -110,7 +110,10 @@ export default function RemittanceImport({ month, people, rows, personal, onDone
               <tbody>
                 {lines.map((l, i) => {
                   const r    = l.person ? rowById[l.person] : null
-                  const diff = r ? Math.round((l.amount - r.total) * 100) / 100 : null
+                  // Pago mixto: el resto hasta el total pactado (+ extras) va en efectivo, no es una diferencia
+                  const mixed = r && r.cash_total != null
+                  const cash  = mixed ? Math.max(0, r.cash_total - l.amount) + r.extras : null
+                  const diff  = r && !mixed ? Math.round((l.amount - r.total) * 100) / 100 : null
                   return (
                     <tr key={i} className={!l.person || dupes.has(l.person) ? 'sa-remesa__row--warn' : ''}>
                       <td>{l.name}</td>
@@ -127,7 +130,8 @@ export default function RemittanceImport({ month, people, rows, personal, onDone
                       </td>
                       <td className="sa-pay-num">{r ? fmtEur(r.total) : '—'}</td>
                       <td className={`sa-pay-num${diff && Math.abs(diff) > 0.01 ? ' sa-pay-warn' : ''}`}>
-                        {diff == null ? '—' : Math.abs(diff) <= 0.01 ? '✓' : `${diff > 0 ? '+' : ''}${fmtEur(diff)}`}
+                        {mixed ? <span className="sa-pay-paid">efectivo {fmtEur(cash)}</span>
+                          : diff == null ? '—' : Math.abs(diff) <= 0.01 ? '✓' : `${diff > 0 ? '+' : ''}${fmtEur(diff)}`}
                       </td>
                     </tr>
                   )

@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import {
   usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence,
-  setPayrollPayment,
+  setPayrollPayment, setPayrollCash,
   typeLabel, hasBase, sortByType,
 } from '../hooks/useOvertime'
 import RemittanceImport from './RemittanceImport'
@@ -29,6 +29,7 @@ function PayrollConfig({ people, config, onSaved }) {
     base: cfg.base?.[p.id] ?? '',
     rate: cfg.rates?.[p.id] ?? '',
     note: cfg.notes?.[p.id] ?? '',
+    cash: cfg.cash_total?.[p.id] ?? '',
   }]))
 
   const [form,     setForm]     = useState(() => toForm(config))
@@ -47,12 +48,14 @@ function PayrollConfig({ people, config, onSaved }) {
       const base  = {}
       const rates = {}
       const notes = {}
+      const cash  = {}
       for (const p of active) {
         if (hasBase(p.type)) base[p.id] = form[p.id]?.base ?? ''
+        if (hasBase(p.type)) cash[p.id] = form[p.id]?.cash ?? ''
         rates[p.id] = form[p.id]?.rate ?? ''
         notes[p.id] = form[p.id]?.note ?? ''
       }
-      const saved = await savePayrollConfig({ base, rates, notes })
+      const saved = await savePayrollConfig({ base, rates, notes, cash_total: cash })
       setForm(toForm(saved))
       setFeedback('✓ Guardado')
       onSaved()
@@ -72,6 +75,8 @@ function PayrollConfig({ people, config, onSaved }) {
       <p className="sa-pay-note">
         Nómina base mensual fija (profesores y voluntarios; los externos cobran solo extras), su justificación y €/h de las horas extra.
         La nómina base es el importe que se paga a la persona cada mes (no el coste de gestoría).
+        "Total pactado" solo para quien cobra parte en efectivo: el banco paga la nómina y el resto
+        hasta el total pactado, más las horas extra, se entrega en efectivo (si el banco paga menos, el efectivo sube).
         Al marcar horas como pagadas se guarda el €/h de ese momento, así que cambiarlo no altera lo ya pagado.
       </p>
       <div className="sa-pay-scroll">
@@ -81,6 +86,7 @@ function PayrollConfig({ people, config, onSaved }) {
               <th>Persona</th>
               <th>Tipo</th>
               <th className="sa-pay-num">Nómina base / mes</th>
+              <th className="sa-pay-num" title="Solo si cobra parte en efectivo">Total pactado</th>
               <th className="sa-pay-num">€/h extra</th>
               <th>Justificación de la base</th>
             </tr>
@@ -95,6 +101,15 @@ function PayrollConfig({ people, config, onSaved }) {
                     ? <input
                         type="number" min="0" step="0.01" placeholder="—" className="sa-pay-input"
                         value={form[p.id]?.base ?? ''} onChange={e => set(p.id, 'base', e.target.value)}
+                      />
+                    : <span className="sa-pay-muted">—</span>}
+                </td>
+                <td className="sa-pay-num">
+                  {hasBase(p.type)
+                    ? <input
+                        type="number" min="0" step="0.01" placeholder="—" className="sa-pay-input"
+                        title="Banco + efectivo. Déjalo vacío si cobra todo por banco"
+                        value={form[p.id]?.cash ?? ''} onChange={e => set(p.id, 'cash', e.target.value)}
                       />
                     : <span className="sa-pay-muted">—</span>}
                 </td>
@@ -412,6 +427,13 @@ function PayrollReport({ month, person, personal, notes, rows, entries, totals, 
               : `Pendiente · ${fmtEur(row.outstanding)}`}
           </p>
         )}
+        {person && row && row.cash_total != null && (
+          <p className="pr-note">
+            <strong>Pago mixto:</strong> total pactado {fmtEur(row.cash_total)} · banco {fmtEur(row.payment?.amount ?? row.base)}
+            {row.payment?.amount == null ? ' (previsto)' : ''} · efectivo {fmtEur(row.cash_paid ? row.cash_paid.amount : row.cash_due)}
+            {' '}(incluye horas extra){row.cash_paid ? ` · entregado el ${fmtDate(row.cash_paid.date)}` : ' · pendiente de entregar'}
+          </p>
+        )}
       </section>
 
       {/* ── Detalle de horas extra ── */}
@@ -668,6 +690,7 @@ export default function PayrollSection() {
                               : r.absent ? <span className="sa-pay-struck" title="Sin asistencia: no se reporta este mes">{fmtEur(r.base_nominal)}</span>
                               : fmtEur(r.base)}
                             {notes[r.id] && <span className="sa-pay-info"> ⓘ</span>}
+                            {r.cash_total != null && <div className="sa-pay-paid" title="Total pactado banco + efectivo">de {fmtEur(r.cash_total)}</div>}
                           </td>
                           <td className="sa-pay-num">{hasHours ? fmtHours(r.hours) : <span className="sa-pay-muted">0</span>}</td>
                           <td className="sa-pay-num">{r.rate == null ? <span className="sa-pay-muted">—</span> : fmtEur(r.rate)}</td>
@@ -696,8 +719,27 @@ export default function PayrollSection() {
                             {r.difference != null && Math.abs(r.difference) > 0.01 && (
                               <span className="sa-pay-warn" title="Pagado en banco − total del mes"> dif. {r.difference > 0 ? '+' : ''}{fmtEur(r.difference)}</span>
                             )}
-                            {r.payment && r.outstanding > 0.01 && (
+                            {r.cash_total == null && r.payment && r.outstanding > 0.01 && (
                               <span className="sa-pay-warn"> · falta {fmtEur(r.outstanding)}</span>
+                            )}
+                            {r.cash_total != null && (
+                              <div className="sa-pay-cash">
+                                <button
+                                  className={`sa-pay-status sa-pay-status--btn sa-pay-status--${r.cash_paid ? 'pagado' : 'pendiente'}`}
+                                  disabled={busy || (!r.cash_paid && r.cash_due <= 0)}
+                                  title={r.cash_paid ? 'Pulsa para volver a pendiente' : 'Pulsa cuando se entregue el efectivo (incluye las horas extra)'}
+                                  onClick={() => run(
+                                    () => setPayrollCash(month, r.id, !r.cash_paid, r.cash_due),
+                                    r.cash_paid ? `✓ ${r.name}: efectivo pendiente` : `✓ ${r.name}: efectivo entregado`,
+                                  )}
+                                >
+                                  Efectivo {r.cash_paid ? `pagado ${fmtDate(r.cash_paid.date).slice(0, 5)}` : 'pendiente'}
+                                </button>
+                                <span className="sa-pay-paid">
+                                  {' '}{fmtEur(r.cash_paid ? r.cash_paid.amount : r.cash_due)}
+                                  {!r.cash_paid && r.cash_estimated && <span title="Sin remesa cargada: se calcula con la base configurada"> (estimado)</span>}
+                                </span>
+                              </div>
                             )}
                           </td>
                           <td>

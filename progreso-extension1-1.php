@@ -2987,6 +2987,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'payroll_import_payments',
         'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/payroll-cash', array(
+        'methods'             => 'POST',
+        'callback'            => 'payroll_set_cash',
+        'permission_callback' => $socio_perm,
+    ));
     register_rest_route('superadmin/v1', '/payroll-payment', array(
         'methods'             => 'POST',
         'callback'            => 'payroll_set_payment',
@@ -3417,7 +3422,9 @@ function payroll_import_payments($request) {
         $base  = $row ? ($row['base'] ?? 0) : 0;
         $extra = $row ? $row['pending_extras'] : 0;
         $extras_paid = 0;
-        if ($extra > 0 && $amount + 0.01 >= $base + $extra) $extras_paid = payroll_mark_extras_paid($month, $id);
+        // Con pago mixto las extras van en el efectivo, no en la remesa
+        $mixed = isset(payroll_get_cash_totals()[$id]);
+        if (!$mixed && $extra > 0 && $amount + 0.01 >= $base + $extra) $extras_paid = payroll_mark_extras_paid($month, $id);
         $results[] = array('person' => $id, 'amount' => $amount, 'extras_marked_paid' => $extras_paid);
     }
     payroll_save_payments($all);
@@ -3494,7 +3501,9 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
     $rows   = array();
     $payments = payroll_get_payments()[$month] ?? array();
     $totals = array('base' => 0, 'extras' => 0, 'pending_extras' => 0, 'total' => 0, 'hours' => 0,
-                    'paid_bank' => 0, 'outstanding' => 0);
+                    'paid_bank' => 0, 'outstanding' => 0, 'cash' => 0);
+    $cash_totals   = payroll_get_cash_totals();
+    $cash_payments = payroll_get_cash_payments()[$month] ?? array();
     foreach ($ordered as $p) {
         $has_hours = isset($by[$p['id']]);
         $p_base    = (overtime_has_base($p['type']) && $p['active']) ? ($base[$p['id']] ?? null) : null;
@@ -3526,13 +3535,34 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
         // Marcado a mano sin importe = base pagada; las extras siguen su propio estado.
         $pay      = $payments[$p['id']] ?? null;
         $base_due = $p_base ?? 0;
-        if (!$pay)                    $outstanding = $base_due + $row['pending_extras'];
-        elseif ($pay['amount'] === null) $outstanding = $row['pending_extras'];
-        else                          $outstanding = max(0, $base_due + $row['pending_extras'] - $pay['amount']);
+        $cash_total = ($p_base !== null) ? ($cash_totals[$p['id']] ?? null) : null;
+
+        if ($cash_total !== null) {
+            // Pago mixto: banco (nómina) + efectivo = total pactado; las extras van en el efectivo.
+            // El efectivo se calcula con lo que pagó realmente el banco (remesa) o, si aún no hay
+            // remesa, con la base configurada (estimado). "Sin asistencia" = no se paga nada.
+            $bank_ref  = ($pay && $pay['amount'] !== null) ? $pay['amount'] : $base_due;
+            $cash_base = $absent ? 0 : max(0, $cash_total - $bank_ref);
+            $cash_paid = $cash_payments[$p['id']] ?? null;
+            $row['cash_total']     = $cash_total;
+            $row['cash_due']       = round($cash_base + $row['extras'], 2);
+            $row['cash_estimated'] = !($pay && $pay['amount'] !== null);
+            $row['cash_paid']      = $cash_paid;
+            $row['total']          = round(($absent ? 0 : max($cash_total, $bank_ref)) + $row['extras'], 2);
+            $outstanding = ($pay ? 0 : $base_due) + ($cash_paid ? 0 : $cash_base + $row['pending_extras']);
+            // Solo se avisa si el banco paga más que el total pactado
+            $row['difference'] = ($pay && $pay['amount'] !== null && $pay['amount'] > $cash_total + 0.01)
+                ? round($pay['amount'] - $cash_total, 2) : null;
+            $totals['cash'] += $row['cash_due'];
+        } else {
+            if (!$pay)                       $outstanding = $base_due + $row['pending_extras'];
+            elseif ($pay['amount'] === null) $outstanding = $row['pending_extras'];
+            else                             $outstanding = max(0, $base_due + $row['pending_extras'] - $pay['amount']);
+            // Diferencia entre lo pagado en banco y el total del mes (para detectar bases mal configuradas)
+            $row['difference'] = ($pay && $pay['amount'] !== null) ? round($pay['amount'] - $row['total'], 2) : null;
+        }
         $row['payment']     = $pay;
         $row['outstanding'] = round($outstanding, 2);
-        // Diferencia entre lo pagado en banco y el total del mes (para detectar bases mal configuradas)
-        $row['difference']  = ($pay && $pay['amount'] !== null) ? round($pay['amount'] - $row['total'], 2) : null;
         $rows[] = $row;
 
         $totals['base']           += $p_base ?? 0;
@@ -3541,8 +3571,8 @@ function payroll_compute_month($month, $people, $entries, $base, $rates, $absenc
         $totals['hours']          += $row['hours'];
         $totals['outstanding']    += $row['outstanding'];
         $totals['paid_bank']      += ($pay && $pay['amount'] !== null) ? $pay['amount'] : 0;
+        $totals['total']          += $row['total'];
     }
-    $totals['total'] = $totals['base'] + $totals['extras'];
     foreach ($totals as $k => $v) $totals[$k] = round($v, 2);
 
     return array('rows' => $rows, 'totals' => $totals);
@@ -3641,7 +3671,54 @@ function payroll_get_notes() {
 }
 
 function payroll_config_response($base, $rates) {
-    return array('base' => (object) $base, 'rates' => (object) $rates, 'notes' => (object) payroll_get_notes());
+    return array(
+        'base'       => (object) $base,
+        'rates'      => (object) $rates,
+        'notes'      => (object) payroll_get_notes(),
+        'cash_total' => (object) payroll_get_cash_totals(),
+    );
+}
+
+// ── Pago mixto banco + efectivo ──
+// "Total pactado" por persona (p. ej. 600 €): el banco paga la nómina (base) y el resto hasta el
+// total pactado, más las horas extra, se entrega en efectivo. Si el banco paga menos (baja), el
+// efectivo sube. { id: importe }
+function payroll_get_cash_totals() {
+    $stored = get_option('blokes_payroll_cash_total', array());
+    return is_array($stored) ? $stored : array();
+}
+
+// Entregas en efectivo: { 'YYYY-MM': { id: { amount, date } } }
+function payroll_get_cash_payments() {
+    $stored = get_option('blokes_payroll_cash_payments', array());
+    return is_array($stored) ? $stored : array();
+}
+
+// Marcar/desmarcar el efectivo del mes como entregado. Al marcarlo, las horas extra del mes
+// (que van en el mismo pago en efectivo) quedan también pagadas.
+function payroll_set_cash($request) {
+    $body  = $request->get_json_params();
+    $month = sanitize_text_field($body['month'] ?? '');
+    $id    = sanitize_title($body['person'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+        return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
+    }
+    if (overtime_person_index(overtime_get_people(), $id) < 0) {
+        return new WP_Error('not_found', 'Persona no encontrada', array('status' => 404));
+    }
+    $all = payroll_get_cash_payments();
+    if (!empty($body['paid'])) {
+        $all[$month][$id] = array(
+            'amount' => round(floatval($body['amount'] ?? 0), 2),
+            'date'   => current_time('Y-m-d'),
+        );
+        payroll_mark_extras_paid($month, $id);
+    } else {
+        unset($all[$month][$id]);
+        if (empty($all[$month])) unset($all[$month]);
+    }
+    update_option('blokes_payroll_cash_payments', $all, false);
+    return rest_ensure_response(array('success' => true));
 }
 
 // Totales de los últimos N meses hasta 'to' (incluido). La base usa los importes actuales.
@@ -3693,6 +3770,9 @@ function payroll_save_config($request) {
     if (isset($body['rates'])) {
         $rates = $merge($rates, $body['rates']);
         update_option('blokes_overtime_rates', $rates, false);
+    }
+    if (isset($body['cash_total'])) {
+        update_option('blokes_payroll_cash_total', $merge(payroll_get_cash_totals(), $body['cash_total']), false);
     }
     if (isset($body['notes']) && is_array($body['notes'])) {
         $notes = payroll_get_notes();

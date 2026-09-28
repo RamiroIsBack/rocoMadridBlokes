@@ -85,3 +85,7 @@ export const importPayrollPayments = (month, ref, payments) =>
   request('/payroll-payments/import', 'POST', { month, ref, payments })
 export const setPayrollPayment = (month, person, paid) =>
   request('/payroll-payment', 'POST', { month, person, paid })
+
+// Pago mixto: marcar el efectivo del mes como entregado (incluye las horas extra)
+export const setPayrollCash = (month, person, paid, amount) =>
+  request('/payroll-cash', 'POST', { month, person, paid, amount })
