@@ -380,7 +380,24 @@
 }
 .sv-tests-input--unit { width: 70px; }
 .sv-tests-input--num  { width: 80px; }
-.sv-tests-input:focus { outline: none; border-color: #34d399; }
+.sv-tests-input--desc {
+  width: 260px;
+  resize: vertical;
+  line-height: 1.35;
+}
+.sv-tests-input:focus,
+.sv-tests-input--desc:focus { outline: none; border-color: #34d399; }
+
+.sv-tests-remove {
+  background: none;
+  border: 1px solid #7f1d1d;
+  color: #f87171;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 4px 8px;
+}
+.sv-tests-remove:hover { background: #2d0a0a; }
 
 .sv-tests-select {
   background: #111;

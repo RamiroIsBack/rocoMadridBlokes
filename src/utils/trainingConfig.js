@@ -10,18 +10,26 @@ const LS_KEY = 'blokes_ctrl_tests'
 const CONFIG_VERSION = 3  // bump para invalidar localStorage y aplicar nuevos defaults
 
 export const INITIAL_TESTS = [
-  { id: 14, name: 'Puente glúteo',       unit: 'reps',   zone: 'lower'   },
-  { id: 2,  name: 'Sentadilla en silla', unit: 'reps',   zone: 'lower'   },
-  { id: 9,  name: 'Rodillas al pecho',   unit: 'reps',   zone: 'lower'   },
-  { id: 10, name: 'Apertura caderas',    unit: 'cm',     zone: 'lower'   },
-  { id: 11, name: 'Flex. frontal',       unit: 'cm',     zone: 'lower'   },
-  { id: 12, name: 'Grant Foot Raise',    unit: 'cm',     zone: 'lower'   },
-  { id: 3,  name: 'Dominadas',           unit: 'reps',   zone: 'upper'   },
-  { id: 4,  name: 'Flexiones',           unit: 'reps',   zone: 'upper'   },
-  { id: 7,  name: 'Campus',              unit: 'cm',     zone: 'upper'   },
-  { id: 8,  name: 'Ángulo pared',        unit: '°',      zone: 'upper'   },
-  { id: 5,  name: 'Resis. Flex. Prof.',  unit: 'series', zone: 'fingers' },
-  { id: 6,  name: 'Kg Máx dedos',        unit: 'kg',     zone: 'fingers' },
+  { id: 2,  name: 'Sentadilla en silla', unit: 'reps',   zone: 'lower',
+    desc: 'Nº máximas repeticiones en 30 seg con brazos cruzados en hombros.' },
+  { id: 9,  name: 'Rodillas al pecho',   unit: 'reps',   zone: 'lower',
+    desc: 'Nº repeticiones colgados en barra subiendo las piernas hasta 90º.' },
+  { id: 10, name: 'Apertura caderas',    unit: 'cm',     zone: 'lower',
+    desc: 'De pie, piernas abiertas al máximo. Medimos distancia entre pies.' },
+  { id: 12, name: 'Grant Foot Raise',    unit: 'cm',     zone: 'lower',
+    desc: 'De pie mirando a la pared, pies separados de ella y palmas apoyadas a la altura de los hombros. Subimos un pie por la línea de la pared tocando con los dedos. 3 intentos, medimos la distancia al suelo en el mejor.' },
+  { id: 3,  name: 'Dominadas',           unit: 'reps',   zone: 'upper',
+    desc: 'Nº máximas repeticiones.' },
+  { id: 4,  name: 'Flexiones',           unit: 'reps',   zone: 'upper',
+    desc: 'Nº máximas repeticiones tocando el suelo con el pecho.' },
+  { id: 7,  name: 'Campus',              unit: 'cm',     zone: 'upper',
+    desc: '3 intentos, marcamos la altura máxima alcanzada con ambas manos.' },
+  { id: 5,  name: 'Resis. Flex. Prof.',  unit: 'series', zone: 'fingers',
+    desc: 'Nº series completadas en 7 seg. de suspensión, 3 seg. de descanso. Regleta 20mm. Postura estandarizada: brazo extendido por encima de la cabeza, hombro activo, medio-crimp, pulgar fuera de la regleta.' },
+  { id: 6,  name: 'Kg Max Derecha',      unit: 'kg',     zone: 'fingers',
+    desc: 'En posición caballero (una rodilla en el suelo, la otra levantada) medimos la fuerza máxima del brazo homolateral a la rodilla apoyada en el suelo.' },
+  { id: 13, name: 'Kg Max Izquierda',    unit: 'kg',     zone: 'fingers',
+    desc: 'Igual que Kg Max Derecha, invirtiendo la postura (la otra rodilla apoyada) para medir el brazo contrario.' },
 ]
 
 function load() {
@@ -40,20 +48,18 @@ function persist(data) {
 
 const INITIAL_MOCK_VALUES = {
   // ── Tren inferior ──────────────────────────────────────────
-  14: 25,    // Puente glúteo       — ref 25 reps
   2:  14.1,  // Sentadilla en silla — ref 14.1 reps
   9:  8,     // Rodillas al pecho   — ref 8 reps
   10: 110,   // Apertura caderas    — ref 110 cm
-  11: 6,     // Flex. frontal       — ref 6 cm de suelo
   12: 75,    // Grant Foot Raise    — ref 75 cm
   // ── Tren superior ──────────────────────────────────────────
   3:  3.5,   // Dominadas           — ref 3.5 reps
   4:  16,    // Flexiones           — ref 16 reps
   7:  45,    // Campus              — ref 45 cm
-  8:  65,    // Ángulo pared        — ref 65°
   // ── Dedos ──────────────────────────────────────────────────
   5:  4,     // Resis. Flex. Prof.  — ref 4 series
-  6:  24,    // Kg Máx dedos        — ref 24 kg
+  6:  24,    // Kg Max Derecha      — ref 24 kg
+  13: 24,    // Kg Max Izquierda    — ref 24 kg
 }
 
 const INITIAL_CONFIG = { version: CONFIG_VERSION, tests: INITIAL_TESTS, mockValues: INITIAL_MOCK_VALUES }
@@ -89,9 +95,9 @@ const JITTER = {
   D: [ 0.00,  0.02, -0.03,  0.04, -0.01,  0.00],
 }
 const JITTER_KEY = {
-  14: 'A', 2: 'B',  9: 'C', 10: 'D',
-  11: 'A', 12: 'B', 3: 'C',  4: 'D',
-   7: 'A',  8: 'B', 5: 'C',  6: 'D',
+  2: 'B',  9: 'C', 10: 'D', 12: 'B',
+  3: 'C',  4: 'D',  7: 'A',
+  5: 'C',  6: 'D', 13: 'A',
 }
 
 function generateMockMonths(testId, referenceValue) {

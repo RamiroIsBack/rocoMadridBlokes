@@ -1368,9 +1368,9 @@ function progreso_log_training($request) {
 
 function progreso_get_mock_values() {
     $defaults = [
-        14 => 25.0,  2 => 14.1,  9 =>  8.0, 10 => 110.0,
-        11 =>  6.0, 12 => 75.0,  3 =>  3.5,  4 =>  16.0,
-         7 => 45.0,  8 => 65.0,  5 =>  4.0,  6 =>  24.0,
+         2 => 14.1,  9 =>  8.0, 10 => 110.0, 12 => 75.0,
+         3 =>  3.5,  4 => 16.0,  7 => 45.0,
+         5 =>  4.0,  6 => 24.0, 13 => 24.0,
     ];
     $stored = get_option('blokes_training_mock_values', null);
     return ($stored !== null && is_array($stored)) ? $stored : $defaults;
@@ -1384,9 +1384,9 @@ function progreso_generate_all_mock() {
         'D' => [0.00,  0.02, -0.03,  0.04, -0.01, -0.01,  0.03, -0.04,  0.02,  0.01, -0.02,  0.03],
     ];
     $jitter_key_map = [
-        14 => 'A',  2 => 'B',  9 => 'C', 10 => 'D',
-        11 => 'A', 12 => 'B',  3 => 'C',  4 => 'D',
-         7 => 'A',  8 => 'B',  5 => 'C',  6 => 'D',
+         2 => 'B',  9 => 'C', 10 => 'D', 12 => 'B',
+         3 => 'C',  4 => 'D',  7 => 'A',
+         5 => 'C',  6 => 'D', 13 => 'A',
     ];
     $months = [];
     $d   = new DateTime('2026-01-01');
@@ -1416,18 +1416,26 @@ function progreso_generate_all_mock() {
 
 function progreso_get_training_tests() {
     $default = array(
-        array('id' => 14, 'name' => 'Puente glúteo',       'unit' => 'reps',   'zone' => 'lower'),
-        array('id' => 2,  'name' => 'Sentadilla en silla', 'unit' => 'reps',   'zone' => 'lower'),
-        array('id' => 9,  'name' => 'Rodillas al pecho',   'unit' => 'reps',   'zone' => 'lower'),
-        array('id' => 10, 'name' => 'Apertura caderas',    'unit' => 'cm',     'zone' => 'lower'),
-        array('id' => 11, 'name' => 'Flex. frontal',       'unit' => 'cm',     'zone' => 'lower'),
-        array('id' => 12, 'name' => 'Grant Foot Raise',    'unit' => 'cm',     'zone' => 'lower'),
-        array('id' => 3,  'name' => 'Dominadas',           'unit' => 'reps',   'zone' => 'upper'),
-        array('id' => 4,  'name' => 'Flexiones',           'unit' => 'reps',   'zone' => 'upper'),
-        array('id' => 7,  'name' => 'Campus',              'unit' => 'cm',     'zone' => 'upper'),
-        array('id' => 8,  'name' => 'Ángulo pared',        'unit' => '°',      'zone' => 'upper'),
-        array('id' => 5,  'name' => 'Resis. Flex. Prof.',  'unit' => 'series', 'zone' => 'fingers'),
-        array('id' => 6,  'name' => 'Kg Máx dedos',        'unit' => 'kg',     'zone' => 'fingers'),
+        array('id' => 2,  'name' => 'Sentadilla en silla', 'unit' => 'reps',   'zone' => 'lower',
+              'desc' => 'Nº máximas repeticiones en 30 seg con brazos cruzados en hombros.'),
+        array('id' => 9,  'name' => 'Rodillas al pecho',   'unit' => 'reps',   'zone' => 'lower',
+              'desc' => 'Nº repeticiones colgados en barra subiendo las piernas hasta 90º.'),
+        array('id' => 10, 'name' => 'Apertura caderas',    'unit' => 'cm',     'zone' => 'lower',
+              'desc' => 'De pie, piernas abiertas al máximo. Medimos distancia entre pies.'),
+        array('id' => 12, 'name' => 'Grant Foot Raise',    'unit' => 'cm',     'zone' => 'lower',
+              'desc' => 'De pie mirando a la pared, pies separados de ella y palmas apoyadas a la altura de los hombros. Subimos un pie por la línea de la pared tocando con los dedos. 3 intentos, medimos la distancia al suelo en el mejor.'),
+        array('id' => 3,  'name' => 'Dominadas',           'unit' => 'reps',   'zone' => 'upper',
+              'desc' => 'Nº máximas repeticiones.'),
+        array('id' => 4,  'name' => 'Flexiones',           'unit' => 'reps',   'zone' => 'upper',
+              'desc' => 'Nº máximas repeticiones tocando el suelo con el pecho.'),
+        array('id' => 7,  'name' => 'Campus',              'unit' => 'cm',     'zone' => 'upper',
+              'desc' => '3 intentos, marcamos la altura máxima alcanzada con ambas manos.'),
+        array('id' => 5,  'name' => 'Resis. Flex. Prof.',  'unit' => 'series', 'zone' => 'fingers',
+              'desc' => 'Nº series completadas en 7 seg. de suspensión, 3 seg. de descanso. Regleta 20mm. Postura estandarizada: brazo extendido por encima de la cabeza, hombro activo, medio-crimp, pulgar fuera de la regleta.'),
+        array('id' => 6,  'name' => 'Kg Max Derecha',      'unit' => 'kg',     'zone' => 'fingers',
+              'desc' => 'En posición caballero (una rodilla en el suelo, la otra levantada) medimos la fuerza máxima del brazo homolateral a la rodilla apoyada en el suelo.'),
+        array('id' => 13, 'name' => 'Kg Max Izquierda',    'unit' => 'kg',     'zone' => 'fingers',
+              'desc' => 'Igual que Kg Max Derecha, invirtiendo la postura (la otra rodilla apoyada) para medir el brazo contrario.'),
     );
     $stored = get_option('blokes_training_tests', null);
     $tests  = ($stored !== null && is_array($stored)) ? $stored : $default;
@@ -1450,6 +1458,7 @@ function progreso_save_training_tests($request) {
             'name' => sanitize_text_field($t['name']),
             'unit' => sanitize_text_field($t['unit']),
             'zone' => sanitize_text_field($t['zone']),
+            'desc' => isset($t['desc']) ? sanitize_textarea_field($t['desc']) : '',
         );
     }
     update_option('blokes_training_tests', $sanitized, false);
