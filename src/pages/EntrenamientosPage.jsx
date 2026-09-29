@@ -269,6 +269,11 @@ export default function EntrenamientosPage() {
           })}
         </div>
       )}
+      {viewMode === 'test' && TEST_MAP[selectedTest]?.desc && (
+        <p className="entrena__test-desc">
+          <strong>{TEST_MAP[selectedTest].label}:</strong> {TEST_MAP[selectedTest].desc}
+        </p>
+      )}
 
       {/* Filters */}
       <div className="entrena__filters">

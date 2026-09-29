@@ -300,6 +300,18 @@
   letter-spacing: 0.05em;
 }
 
+.entrena__test-desc {
+  background: #fff;
+  border: 1px solid #e5ddc8;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 16px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+.entrena__test-desc strong { color: #2a2015; }
+
 /* ── Definiciones ── */
 .entrena__defs-zone { margin-bottom: 28px; }
 .entrena__defs-zone-title {
