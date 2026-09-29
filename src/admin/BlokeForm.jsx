@@ -94,6 +94,7 @@ const EQUIPADORES = [
   { value: 'ana', label: 'Ana' },
   { value: 'javi', label: 'Javi' },
   { value: 'ramiro', label: 'Ramiro' },
+  { value: 'edu', label: 'Edu' },
   { value: 'invitado', label: 'Invitado' },
 ]
 

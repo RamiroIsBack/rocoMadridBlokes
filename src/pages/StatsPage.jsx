@@ -554,6 +554,7 @@ export default function StatsPage() {
                   <option value="ana">Ana</option>
                   <option value="javi">Javi</option>
                   <option value="ramiro">Ramiro</option>
+                  <option value="edu">Edu</option>
                   <option value="invitado">Invitado</option>
                 </select>
               </div>
@@ -1009,6 +1010,7 @@ export default function StatsPage() {
                   <option value="ana">Ana</option>
                   <option value="javi">Javi</option>
                   <option value="ramiro">Ramiro</option>
+                  <option value="edu">Edu</option>
                   <option value="invitado">Invitado</option>
                 </select>
               </div>
