@@ -276,6 +276,7 @@ blancas (`socios`/`gestion`/`profesores`) — pídele a Ramiro que te añada o u
 
 ## 13. Pendientes / cosas por confirmar
 
+- Confirmar la fila de `gestion` en la tabla de QA de roles (§14) con la cuenta de Eva.
 - Confirmar en qué sitios de la red está activo cada plugin (`progreso-extension1-1`,
   `blokes-extension` viejo) y dónde apunta `SFTP_PLUGIN_PATH` (§8.2).
 - Decidir si el build pasa al workflow y `dist/` sale del repo (§12).
@@ -284,3 +285,66 @@ blancas (`socios`/`gestion`/`profesores`) — pídele a Ramiro que te añada o u
 - Sincronizar `server-index.php` con `blokes_get_email_lists`/avatar del plugin (§8.4).
 - `DEPLOY.md`, `DEPLOYMENT_GUIDE.md`, `LOCAL_TESTING_GUIDE.md` y `.env.example`
   desactualizados: reescribir o borrar.
+
+## 14. QA de roles antes de subir a producción
+
+Antes de mergear `dev` → `master` (o de dar por bueno un cambio grande en `dev`), se
+hace esta comprobación. Nació el 29/09/2026 al revisar el pull con los cambios de
+nómina/horas extra de Valentina, y **es el proceso que se repite en cada subida a
+producción**, no algo puntual.
+
+### Por qué no vale con `npm run dev` en local
+
+`window.blokesSiteData` (rol, nonce, `canSupervise`, etc.) lo inyecta **WordPress** al
+servir la página (hook `wp_head` del plugin, o `server-index.php`) — el servidor de
+Vite en local (`localhost:5173`) nunca lo tiene. Si pruebas rutas protegidas en local
+verás siempre el mensaje de "acceso restringido / inicia sesión", **da igual con qué
+usuario creas estar probando**, porque `sd = window.blokesSiteData || {}` cae al
+objeto vacío. Eso solo demuestra que la app no rompe sin datos — no prueba nada sobre
+roles. Las pruebas de rol reales tienen que hacerse contra el sitio ya desplegado
+(`https://rocomadrid.com/blokes-dev/` o `/blokes/`).
+
+### Por qué probar solo con la cuenta de socio no es suficiente
+
+La jerarquía es `socio > gestion > profesor`. Cualquier candado del tipo
+`['profesor','gestion','socio'].includes(role)` lo abre un socio pase lo que pase, así
+que esa cuenta nunca puede demostrar que a un profesor o a gestión **no** les falta ni
+les sobra acceso. Hay que loguearse con una cuenta de cada nivel.
+
+### Cómo se hace
+
+1. Instalar Chromium de Playwright una vez por máquina: `npx playwright install chromium`.
+2. Pedir a Ramiro (o a quien gestione las cuentas) las credenciales de una cuenta de
+   cada rol — **nunca se guardan en el repo ni en este documento**; se piden cada vez.
+   Idealmente una Application Password de WordPress en vez de la contraseña real,
+   porque se puede revocar luego sin cambiar la contraseña de la cuenta.
+3. Ejecutar, una vez por rol:
+   ```
+   node scripts/qa-role-check.js <usuario> <password> <etiqueta>          # contra blokes-dev
+   node scripts/qa-role-check.js <usuario> <password> <etiqueta> --prod   # contra blokes (producción)
+   ```
+   El script inicia sesión de verdad en `wp-login.php`, lee `window.blokesSiteData` y
+   recorre las rutas protegidas anotando si cada una sale ACCESIBLE o RESTRINGIDO, más
+   cualquier error de consola.
+
+### Qué debe salir en cada rol (verificado el 29/09/2026 en `blokes-dev`)
+
+| Ruta | profesor | gestion | socio |
+|---|---|---|---|
+| `/`, `/progreso`, `/ligas` | Accesible | Accesible | Accesible |
+| `/entrenamientos`, `/setter`, `/stats` | Accesible | Accesible | Accesible |
+| `/supervision` | 🔒 Restringido | Accesible | Accesible |
+| `/superadmin`, `/playground` | 🔒 Restringido | 🔒 Restringido | Accesible |
+| `emailLists` en `blokesSiteData` | `null` | `null` | objeto con las 3 listas |
+
+(La fila de `gestion` está sin verificar en vivo todavía — confirmar con la cuenta de
+Eva la próxima vez que se repita este proceso, y actualizar esta tabla si cambia algo.)
+
+Si algo no coincide con esta tabla, o si `emailLists` se filtra a un rol que no es
+`socio`, o si aparece cualquier error de consola nuevo en una ruta que antes no lo
+tenía: no mergear a `master` sin entender por qué.
+
+### Verificación adicional de build
+
+Antes de lo anterior, comprobar que compila sin errores: `npm run build` (§8.1). Si el
+build falla, ni merece la pena probar roles.
