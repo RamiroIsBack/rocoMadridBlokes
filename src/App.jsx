@@ -267,11 +267,9 @@ export default function App() {
               <li className="app-nav__item">
                 <NavLink to="/progreso" className="app-nav__link">Progreso</NavLink>
               </li>
-              {sd.isLoggedIn && (
-                <li className="app-nav__item">
-                  <NavLink to="/ligas" className="app-nav__link">Ligas</NavLink>
-                </li>
-              )}
+              <li className="app-nav__item">
+                <NavLink to="/ligas" className="app-nav__link">Ligas</NavLink>
+              </li>
               {['profesor', 'gestion', 'socio'].includes(sd.userRole) && (
                 <>
                   <li className="app-nav__item">
