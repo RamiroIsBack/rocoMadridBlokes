@@ -1,4 +1,5 @@
 import { useState, useRef, useLayoutEffect } from 'react'
+import { createPortal } from 'react-dom'
 import ImageGallery from './ImageGallery'
 import UserAvatar from './UserAvatar'
 import './EventCard.css'
@@ -156,7 +157,7 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
             >
               <span className="event-card__done-tops">tops</span>
               <span>{completionCount}</span>
-              {showCompleters && completionCount > 0 && popoverPos && (
+              {showCompleters && completionCount > 0 && popoverPos && createPortal(
                 <div
                   className="event-card__completers"
                   style={{ top: popoverPos.top, left: popoverPos.left }}
@@ -189,7 +190,8 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
                       )}
                     </>
                   )}
-                </div>
+                </div>,
+                document.body
               )}
             </div>
           ) : (
