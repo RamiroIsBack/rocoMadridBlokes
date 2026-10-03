@@ -230,7 +230,7 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
       )}
       {firstAscent?.name && (
         <div className={`event-card__fa-badge${isMyFirstAscent ? ' event-card__fa-badge--mine' : ''}`} title="Primer TOP del gym">
-          🏴 {firstAscent.name}
+          🏴 {firstAscent.name} — ¡primero en hacer top!
         </div>
       )}
       <div className="event-card__body">
