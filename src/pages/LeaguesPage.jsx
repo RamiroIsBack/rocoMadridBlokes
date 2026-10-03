@@ -1,8 +1,32 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLeague, useComunidadLeagues } from '../hooks/useLeague'
+import { useClassProgress } from '../hooks/useClassProgress'
 import LeaguePromotionDialog from '../components/LeaguePromotionDialog'
+import OnboardingTutorial, { tutorialSeen } from '../components/OnboardingTutorial'
 import UserAvatar from '../components/UserAvatar'
 import './LeaguesPage.css'
+
+const LIGAS_TUTORIAL_KEY = 'blokes_tutorial_seen_ligas'
+const LIGAS_SLIDES = [
+  { icon: '🏆', title: '¿Qué son las ligas?', text: 'Compite de forma amistosa con el resto de la comunidad según los blokes que vayas completando.' },
+  { icon: '🚀', title: '¿Cómo entro?', text: 'En cuanto marques tu primer bloke como hecho, entras automáticamente en Liga Pedri.' },
+]
+
+function ClassmateTag() {
+  const [show, setShow] = useState(false)
+  return (
+    <span
+      className="league-classmate-tag"
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+      onClick={e => { e.stopPropagation(); setShow(s => !s) }}
+      title="Está en tu clase"
+    >
+      ●
+      {show && <span className="league-classmate-tooltip">Está en tu clase</span>}
+    </span>
+  )
+}
 
 const TIER_META = {
   1: { color: '#6b7280', emoji: '⛰️' },
@@ -13,7 +37,7 @@ const TIER_META = {
   6: { color: '#ef4444', emoji: '💎' },
 }
 
-function MemberRow({ member }) {
+function MemberRow({ member, isClassmate }) {
   const rowRef = useRef(null)
   useEffect(() => {
     if (member.isMe && rowRef.current) {
@@ -38,12 +62,13 @@ function MemberRow({ member }) {
         nicknameStyle="right"
         className="league-member__avatar"
       />
+      {isClassmate && <ClassmateTag />}
       <span className="league-member__pts">{member.totalPoints} pts</span>
     </div>
   )
 }
 
-function OtherLeagues() {
+function OtherLeagues({ classmateIds }) {
   const { leagues, loading } = useComunidadLeagues()
   const [openId, setOpenId] = useState(null)
 
@@ -81,6 +106,7 @@ function OtherLeagues() {
                       showNickname
                       nicknameStyle="right"
                     />
+                    {classmateIds?.has(m.userId) && <ClassmateTag />}
                   </div>
                 ))}
               </div>
@@ -94,7 +120,17 @@ function OtherLeagues() {
 
 export default function LeaguesPage() {
   const { myLeague, leaderboard, unseen, loading, error, markSeen } = useLeague()
+  const { data: classData } = useClassProgress()
   const sd = window.blokesSiteData || {}
+  const [showLigasTutorial, setShowLigasTutorial] = useState(() => !tutorialSeen(LIGAS_TUTORIAL_KEY))
+
+  const classmateIds = useMemo(() => {
+    const ids = new Set()
+    for (const m of classData?.members || []) {
+      if (!m.is_me && m.user_id) ids.add(m.user_id)
+    }
+    return ids
+  }, [classData])
 
   if (!sd.isLoggedIn) {
     return (
@@ -107,15 +143,21 @@ export default function LeaguesPage() {
 
   if (loading) return <div className="league-loading">Cargando liga...</div>
 
-  if (error && !myLeague) {
-    return <div className="league-empty"><p>{error}</p></div>
-  }
-
-  if (!myLeague) {
+  if ((error && !myLeague) || !myLeague) {
     return (
-      <div className="league-empty">
-        <p>Aún no estás en ninguna liga.</p>
-        <p className="league-empty__sub">Completa tu primer bloke para entrar en Liga Pedri.</p>
+      <div className="league-page">
+        {showLigasTutorial && (
+          <OnboardingTutorial
+            storageKey={LIGAS_TUTORIAL_KEY}
+            slides={LIGAS_SLIDES}
+            onClose={() => setShowLigasTutorial(false)}
+          />
+        )}
+        <div className="league-empty">
+          <p>{error || 'Aún no estás en ninguna liga.'}</p>
+          {!error && <p className="league-empty__sub">Completa tu primer bloke para entrar en Liga Pedri.</p>}
+        </div>
+        <OtherLeagues classmateIds={classmateIds} />
       </div>
     )
   }
@@ -143,7 +185,7 @@ export default function LeaguesPage() {
       {/* Leaderboard */}
       <div className="league-leaderboard">
         {leaderboard.map(member => (
-          <MemberRow key={member.userId} member={member} />
+          <MemberRow key={member.userId} member={member} isClassmate={classmateIds.has(member.userId)} />
         ))}
         {leaderboard.length === 0 && (
           <p className="league-empty__sub">Nadie en esta liga todavía.</p>
@@ -151,7 +193,7 @@ export default function LeaguesPage() {
       </div>
 
       {/* Other leagues — secondary, collapsible */}
-      <OtherLeagues />
+      <OtherLeagues classmateIds={classmateIds} />
     </div>
   )
 }

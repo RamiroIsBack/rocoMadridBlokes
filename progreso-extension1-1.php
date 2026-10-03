@@ -1915,6 +1915,7 @@ function progreso_get_class_progress() {
 
         $members[] = array(
             'is_me'          => ($uid === $me),
+            'user_id'        => $uid,
             'name'           => $name,
             'tests'          => $tests,
             'bloke_total'    => count($bloke_log),
@@ -2561,6 +2562,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'blokes_api_get_user_avatar_endpoint',
         'permission_callback' => '__return_true',
     ));
+    register_rest_route('blokes/v1', '/completers/(?P<id>\d+)', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_get_completers',
+        'permission_callback' => '__return_true',
+    ));
     register_rest_route('blokes/v1', '/profile/upload-avatar', array(
         'methods'             => 'POST',
         'callback'            => 'blokes_api_upload_avatar',
@@ -2809,6 +2815,41 @@ function blokes_api_check_nickname($request) {
 function blokes_api_get_user_avatar_endpoint($request) {
     $av = blokes_get_user_avatar(intval($request['id']));
     return rest_ensure_response($av);
+}
+
+function blokes_api_get_completers($request) {
+    global $wpdb;
+    $post_id = intval($request['id']);
+    if ($post_id <= 0) {
+        return rest_ensure_response(array('success' => true, 'data' => array('users' => array(), 'total' => 0)));
+    }
+
+    $like = '%i:' . $post_id . ';%';
+    $user_ids = $wpdb->get_col($wpdb->prepare(
+        "SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = '_blokes_completed' AND meta_value LIKE %s",
+        $like
+    ));
+    $user_ids = array_values(array_unique(array_map('intval', $user_ids)));
+    $total    = count($user_ids);
+
+    $users = array();
+    foreach (array_slice($user_ids, 0, 30) as $uid) {
+        $u = get_userdata($uid);
+        if (!$u) continue;
+        $nickname = get_user_meta($uid, '_blokes_nickname', true) ?: '';
+        $avatar   = blokes_get_user_avatar($uid);
+        $first    = trim((string) ($u->first_name ?? ''));
+        $name     = $first ?: (explode(' ', trim((string) $u->display_name))[0] ?? $u->display_name);
+        $users[]  = array(
+            'user_id'    => $uid,
+            'name'       => $name,
+            'nickname'   => $nickname,
+            'avatarType' => $avatar['type'],
+            'avatarData' => $avatar['data'],
+        );
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array('users' => $users, 'total' => $total)));
 }
 
 function blokes_api_upload_avatar($request) {

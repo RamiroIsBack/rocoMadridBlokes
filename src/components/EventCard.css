@@ -25,6 +25,7 @@
 }
 
 .event-card__done-count {
+  position: relative;
   font-size: 12px;
   font-weight: 700;
   color: #374151;
@@ -39,6 +40,35 @@
   flex-direction: column;
   align-items: center;
   gap: 0;
+  cursor: pointer;
+}
+
+.event-card__completers {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  background: #1e1e1e;
+  border-radius: 10px;
+  padding: 8px;
+  min-width: 150px;
+  max-width: 220px;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+  cursor: default;
+}
+
+.event-card__completer-row {
+  padding: 4px 2px;
+}
+
+.event-card__completers-loading,
+.event-card__completers-more {
+  color: #999;
+  font-size: 0.72rem;
+  margin: 4px 2px;
+  text-align: center;
 }
 
 .event-card__done-tops {

@@ -5,6 +5,14 @@ import FilterBar from '../components/FilterBar'
 import EventCard from '../components/EventCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import CelebrationDialog from '../components/CelebrationDialog'
+import OnboardingTutorial, { tutorialSeen } from '../components/OnboardingTutorial'
+
+const COLECCION_TUTORIAL_KEY = 'blokes_tutorial_seen_coleccion'
+const COLECCION_SLIDES = [
+  { icon: '🧗', title: '¡Bienvenido a Colección!', text: 'Aquí están todos los blokes del rocódromo. Filtra por sala o color y descubre los problemas de cada zona.' },
+  { icon: '✓',  title: 'Marca lo que has hecho', text: 'Toca el ✓ de una tarjeta para marcarla como completada. Así vas construyendo tu progreso.' },
+  { icon: '⭐', title: 'Valora tus favoritos', text: 'Toca la estrella para destacar los blokes que más te hayan gustado.' },
+]
 
 function MainPage() {
   const { cards, loading, error } = useWordPressPosts()
@@ -13,6 +21,7 @@ function MainPage() {
   const [activeColor, setActiveColor] = useState('TODOS')
   const [sortMode, setSortMode] = useState('newest')
   const [celebration, setCelebration] = useState(null)
+  const [showTutorial, setShowTutorial] = useState(() => !tutorialSeen(COLECCION_TUTORIAL_KEY))
 
   const handleToggleDone = useCallback(async (card) => {
     const currentCount = countOverrides[card.postId] ?? card.completionCount ?? 0
@@ -49,6 +58,13 @@ function MainPage() {
 
   return (
     <div className="app">
+      {showTutorial && (
+        <OnboardingTutorial
+          storageKey={COLECCION_TUTORIAL_KEY}
+          slides={COLECCION_SLIDES}
+          onClose={() => setShowTutorial(false)}
+        />
+      )}
       {celebration && (
         <CelebrationDialog
           title={celebration.title}

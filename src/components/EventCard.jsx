@@ -1,5 +1,9 @@
+import { useState, useRef } from 'react'
 import ImageGallery from './ImageGallery'
+import UserAvatar from './UserAvatar'
 import './EventCard.css'
+
+const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
 
 const COLOR_MAP = {
   green: { name: 'Verde', class: 'event-card__color--green' },
@@ -56,6 +60,28 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
   const isIntro = tipo === 'intro'
   const isTrave = tipo === 'trave' || color === 'blanco'
 
+  const [showCompleters, setShowCompleters] = useState(false)
+  const [completers, setCompleters] = useState(null)
+  const [loadingCompleters, setLoadingCompleters] = useState(false)
+  const fetchedRef = useRef(false)
+
+  const loadCompleters = () => {
+    if (fetchedRef.current || loadingCompleters) return
+    fetchedRef.current = true
+    setLoadingCompleters(true)
+    fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/completers/${postId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(json => setCompleters(json?.data || { users: [], total: 0 }))
+      .catch(() => setCompleters({ users: [], total: 0 }))
+      .finally(() => setLoadingCompleters(false))
+  }
+
+  const openCompleters = () => {
+    if (completionCount <= 0) return
+    loadCompleters()
+    setShowCompleters(true)
+  }
+
   const handleDoneClick = () => {
     if (!isLoggedIn) {
       window.location.href = loginUrl
@@ -103,9 +129,46 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
         </div>
         <div className="event-card__done-wrap">
           {isLoggedIn ? (
-            <div className="event-card__done-count" title={`${completionCount} TOPs`}>
+            <div
+              className="event-card__done-count"
+              title={`${completionCount} TOPs`}
+              onMouseEnter={openCompleters}
+              onMouseLeave={() => setShowCompleters(false)}
+              onClick={() => (showCompleters ? setShowCompleters(false) : openCompleters())}
+            >
               <span className="event-card__done-tops">tops</span>
               <span>{completionCount}</span>
+              {showCompleters && completionCount > 0 && (
+                <div className="event-card__completers" onClick={e => e.stopPropagation()}>
+                  {loadingCompleters && !completers ? (
+                    <p className="event-card__completers-loading">Cargando...</p>
+                  ) : (
+                    <>
+                      {(completers?.users || []).map(u => (
+                        <div key={u.user_id} className="event-card__completer-row">
+                          <UserAvatar
+                            size="xs"
+                            avatarType={u.avatarType || ''}
+                            avatarData={u.avatarData || {}}
+                            nickname={u.nickname || ''}
+                            name={u.name || ''}
+                            showNickname
+                            nicknameStyle="right"
+                          />
+                        </div>
+                      ))}
+                      {completers && completers.total > completers.users.length && (
+                        <p className="event-card__completers-more">
+                          +{completers.total - completers.users.length} más
+                        </p>
+                      )}
+                      {completers && completers.total === 0 && (
+                        <p className="event-card__completers-loading">Sin datos</p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           ) : (
             <div

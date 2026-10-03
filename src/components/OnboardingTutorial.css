@@ -1,0 +1,90 @@
+.onb-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 16px;
+}
+
+.onb-card {
+  background: #2a2a2a;
+  border-radius: 18px;
+  padding: 36px 24px 24px;
+  max-width: 360px;
+  width: 100%;
+  position: relative;
+  text-align: center;
+  animation: onb-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes onb-pop {
+  from { transform: scale(0.78); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+.onb-skip {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 4px;
+}
+.onb-skip:hover { color: #ccc; }
+
+.onb-icon {
+  font-size: 3rem;
+  line-height: 1;
+  margin-bottom: 14px;
+}
+
+.onb-title {
+  color: #f5f5f5;
+  font-size: 1.15rem;
+  font-weight: 800;
+  margin: 0 0 10px;
+}
+
+.onb-text {
+  color: #bbb;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: 0 0 22px;
+}
+
+.onb-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+.onb-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4a4a4a;
+  transition: background 0.2s, transform 0.2s;
+}
+.onb-dot--active {
+  background: #f5c842;
+  transform: scale(1.2);
+}
+
+.onb-next {
+  width: 100%;
+  background: #f5c842;
+  color: #0a0a00;
+  border: none;
+  border-radius: 10px;
+  padding: 13px;
+  font-size: 0.88rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+.onb-next:hover { opacity: 0.88; }
