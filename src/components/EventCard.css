@@ -124,6 +124,46 @@
   background: #16a34a;
 }
 
+/* Primer TOP del gym */
+.event-card__fa-badge {
+    position: absolute;
+    top: 16px;
+    left: 12px;
+    z-index: 15;
+    max-width: calc(100% - 24px);
+    background: #1a1412;
+    color: #f5c842;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    padding: 3px 9px;
+    border-radius: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.event-card__fa-badge--mine {
+    background: #f5c842;
+    color: #1a1412;
+}
+
+/* Hall of Fame */
+.event-card .event-card__hof-badge {
+    position: absolute;
+    top: -7px;
+    right: 12px;
+    z-index: 20;
+    background: #1a1412;
+    color: #f5c842;
+    font-size: 9px;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 2px;
+}
+
 /* NUEVO glow badge */
 .event-card .event-card__new-badge {
     position: absolute;

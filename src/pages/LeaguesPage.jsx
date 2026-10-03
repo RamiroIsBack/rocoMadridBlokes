@@ -120,7 +120,7 @@ function OtherLeagues({ classmateIds }) {
 
 export default function LeaguesPage() {
   const { myLeague, leaderboard, unseen, loading, error, markSeen } = useLeague()
-  const { data: classData } = useClassProgress()
+  const { data: classData } = useClassProgress(!!window.blokesSiteData?.isLoggedIn)
   const sd = window.blokesSiteData || {}
   const [showLigasTutorial, setShowLigasTutorial] = useState(() => !tutorialSeen(LIGAS_TUTORIAL_KEY))
 
@@ -132,18 +132,9 @@ export default function LeaguesPage() {
     return ids
   }, [classData])
 
-  if (!sd.isLoggedIn) {
-    return (
-      <div className="league-login">
-        <p>Inicia sesión para ver tu liga.</p>
-        {sd.loginUrl && <a href={sd.loginUrl} className="league-login__btn">Iniciar sesión</a>}
-      </div>
-    )
-  }
+  if (sd.isLoggedIn && loading) return <div className="league-loading">Cargando liga...</div>
 
-  if (loading) return <div className="league-loading">Cargando liga...</div>
-
-  if ((error && !myLeague) || !myLeague) {
+  if (!sd.isLoggedIn || (error && !myLeague) || !myLeague) {
     return (
       <div className="league-page">
         {showLigasTutorial && (
@@ -154,8 +145,16 @@ export default function LeaguesPage() {
           />
         )}
         <div className="league-empty">
-          <p>{error || 'Aún no estás en ninguna liga.'}</p>
-          {!error && <p className="league-empty__sub">Completa tu primer bloke para entrar en Liga Pedri.</p>}
+          <p>
+            {!sd.isLoggedIn
+              ? 'Inicia sesión y completa tu primer bloke para entrar en Liga Pedri.'
+              : (error || 'Aún no estás en ninguna liga.')}
+          </p>
+          {!sd.isLoggedIn ? (
+            sd.loginUrl && <a href={sd.loginUrl} className="league-login__btn">Iniciar sesión</a>
+          ) : (
+            !error && <p className="league-empty__sub">Completa tu primer bloke para entrar en Liga Pedri.</p>
+          )}
         </div>
         <OtherLeagues classmateIds={classmateIds} />
       </div>

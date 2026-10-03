@@ -202,6 +202,11 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
             ✓
           </button>
         </div>
+        {firstAscent?.name && (
+          <div className={`event-card__fa-badge${isMyFirstAscent ? ' event-card__fa-badge--mine' : ''}`} title="Primer TOP del gym">
+            🏴 {firstAscent.name}
+          </div>
+        )}
       </div>
       {isNew && (
         <div className="event-card__new-badge" aria-label="Nuevo">
@@ -211,11 +216,6 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
       {isHof && (
         <div className="event-card__hof-badge" aria-label="Hall of Fame">
           🏆 Hall of Fame
-        </div>
-      )}
-      {firstAscent?.name && (
-        <div className={`event-card__fa-badge${isMyFirstAscent ? ' event-card__fa-badge--mine' : ''}`} title="Primer TOP del gym">
-          🏴 {firstAscent.name}
         </div>
       )}
       <div className="event-card__body">
