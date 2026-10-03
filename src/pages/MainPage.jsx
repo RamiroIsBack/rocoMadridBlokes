@@ -10,8 +10,8 @@ import OnboardingTutorial, { tutorialSeen } from '../components/OnboardingTutori
 const COLECCION_TUTORIAL_KEY = 'blokes_tutorial_seen_coleccion'
 const COLECCION_SLIDES = [
   { icon: '🧗', title: '¡Bienvenido a Colección!', text: 'Aquí están todos los blokes del rocódromo. Filtra por sala o color y descubre los problemas de cada zona.' },
-  { icon: '✓',  title: 'Marca lo que has hecho', text: 'Toca el ✓ de una tarjeta para marcarla como completada. Así vas construyendo tu progreso.' },
-  { icon: '⭐', title: 'Valora tus favoritos', text: 'Toca la estrella para destacar los blokes que más te hayan gustado.' },
+  { title: 'Marca lo que has hecho', text: 'Toca aquí para marcar este bloke como completado. Así vas construyendo tu progreso.', target: '[data-tutorial="done-btn"]' },
+  { title: 'Valora tus favoritos', text: 'Toca la estrella para destacar los blokes que más te hayan gustado.', target: '[data-tutorial="star-btn"]' },
 ]
 
 function MainPage() {
@@ -58,7 +58,7 @@ function MainPage() {
 
   return (
     <div className="app">
-      {showTutorial && (
+      {showTutorial && !loading && filteredCards.length > 0 && (
         <OnboardingTutorial
           storageKey={COLECCION_TUTORIAL_KEY}
           slides={COLECCION_SLIDES}
@@ -99,7 +99,7 @@ function MainPage() {
 
         {!loading && !error && filteredCards.length > 0 && (
           <div className="cards-grid">
-            {filteredCards.map((card) => (
+            {filteredCards.map((card, index) => (
               <EventCard
                 key={card.id}
                 card={card}
@@ -113,6 +113,7 @@ function MainPage() {
                 myRating={myRatings[String(card.postId)] || null}
                 ratingCounts={ratingCountOverrides[card.postId] ?? card.interactions}
                 onRate={(type) => rateBloke(card.postId, type, ratingCountOverrides[card.postId] ?? card.interactions)}
+                tutorialTarget={index === 0}
               />
             ))}
           </div>

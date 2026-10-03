@@ -1913,10 +1913,14 @@ function progreso_get_class_progress() {
             if (array_key_exists($type, $rating_by_type)) $rating_by_type[$type]++;
         }
 
+        $avatar = blokes_get_user_avatar($uid);
         $members[] = array(
             'is_me'          => ($uid === $me),
             'user_id'        => $uid,
             'name'           => $name,
+            'nickname'       => get_user_meta($uid, '_blokes_nickname', true) ?: '',
+            'avatarType'     => $avatar['type'],
+            'avatarData'     => $avatar['data'],
             'tests'          => $tests,
             'bloke_total'    => count($bloke_log),
             'bloke_by_color' => $bloke_by_color,

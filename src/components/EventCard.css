@@ -44,10 +44,8 @@
 }
 
 .event-card__completers {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 20;
+  position: fixed;
+  z-index: 9999;
   background: #1e1e1e;
   border-radius: 10px;
   padding: 8px;

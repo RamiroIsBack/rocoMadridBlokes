@@ -1,8 +1,53 @@
-import { useState, useEffect } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
+import UserAvatar from '../components/UserAvatar'
 import './MiClaseTab.css'
 import '../components/GatePreview.css'
+
+function ClassmatesList({ members }) {
+  const [show, setShow] = useState(false)
+  const [pos, setPos] = useState(null)
+  const anchorRef = useRef(null)
+
+  const open = () => {
+    if (anchorRef.current) {
+      const rect = anchorRef.current.getBoundingClientRect()
+      setPos({ top: rect.bottom + 6, left: rect.left })
+    }
+    setShow(true)
+  }
+
+  return (
+    <span
+      ref={anchorRef}
+      className="mi-clase__alumnos-trigger"
+      onMouseEnter={open}
+      onMouseLeave={() => setShow(false)}
+      onClick={() => (show ? setShow(false) : open())}
+    >
+      {members.length} {members.length === 1 ? 'alumno' : 'alumnos'}
+      {show && pos && (
+        <div className="mi-clase__alumnos-pop" style={{ top: pos.top, left: pos.left }} onClick={e => e.stopPropagation()}>
+          {members.map(m => (
+            <div key={m.user_id ?? m.name} className="mi-clase__alumnos-pop-row">
+              <UserAvatar
+                size="xs"
+                avatarType={m.avatarType || ''}
+                avatarData={m.avatarData || {}}
+                nickname={m.nickname || ''}
+                name={m.is_me ? 'Tú' : (m.name || '')}
+                isMe={m.is_me}
+                showNickname
+                nicknameStyle="right"
+              />
+            </div>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
 
 const CLUB_URL = 'https://rocomadrid.com/club/actividades-para-socios'
 
@@ -138,7 +183,7 @@ export default function MiClaseTab() {
       <div className="mi-clase__header">
         <div>
           <h2 className="mi-clase__title">Tu clase</h2>
-          <p className="mi-clase__subtitle">{cls.dia} · {cls.horario} · {members.length} alumnos</p>
+          <p className="mi-clase__subtitle">{cls.dia} · {cls.horario} · <ClassmatesList members={members} /></p>
         </div>
         {withData > 0 && (
           <div className="mi-clase__stat-pill">

@@ -51,7 +51,7 @@ const RATING_ICONS = [
   { id: 'star_1', emoji: '⭐', title: '¡Blokazo!', type: 'star' },
 ]
 
-export default function EventCard({ card, isNew = false, isHof = false, isDone = false, isMyFirstAscent = false, completionCount = 0, onToggleDone, isLoggedIn = false, loginUrl = '/wp-login.php', myRating = null, ratingCounts, onRate }) {
+export default function EventCard({ card, isNew = false, isHof = false, isDone = false, isMyFirstAscent = false, completionCount = 0, onToggleDone, isLoggedIn = false, loginUrl = '/wp-login.php', myRating = null, ratingCounts, onRate, tutorialTarget = false }) {
   const { images, title, description, color, sala, tipo, postId, colorPresa, ratings: cardRatings = {}, firstAscent } = card
   const ratings = ratingCounts || cardRatings
   const colorInfo = COLOR_MAP[color] || COLOR_MAP.green
@@ -63,7 +63,9 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
   const [showCompleters, setShowCompleters] = useState(false)
   const [completers, setCompleters] = useState(null)
   const [loadingCompleters, setLoadingCompleters] = useState(false)
+  const [popoverPos, setPopoverPos] = useState(null)
   const fetchedRef = useRef(false)
+  const badgeRef = useRef(null)
 
   const loadCompleters = () => {
     if (fetchedRef.current || loadingCompleters) return
@@ -78,6 +80,10 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
 
   const openCompleters = () => {
     if (completionCount <= 0) return
+    if (badgeRef.current) {
+      const rect = badgeRef.current.getBoundingClientRect()
+      setPopoverPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right })
+    }
     loadCompleters()
     setShowCompleters(true)
   }
@@ -114,6 +120,7 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
                 onClick={() => handleRateClick(icon.id)}
                 title={icon.title}
                 aria-label={icon.title}
+                {...(tutorialTarget && icon.type === 'star' ? { 'data-tutorial': 'star-btn' } : {})}
               >
                 <span className={`event-card__rating-emoji${!isActive ? ' event-card__rating-emoji--inactive' : ''}`}>
                   {icon.emoji}
@@ -130,6 +137,7 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
         <div className="event-card__done-wrap">
           {isLoggedIn ? (
             <div
+              ref={badgeRef}
               className="event-card__done-count"
               title={`${completionCount} TOPs`}
               onMouseEnter={openCompleters}
@@ -138,8 +146,12 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
             >
               <span className="event-card__done-tops">tops</span>
               <span>{completionCount}</span>
-              {showCompleters && completionCount > 0 && (
-                <div className="event-card__completers" onClick={e => e.stopPropagation()}>
+              {showCompleters && completionCount > 0 && popoverPos && (
+                <div
+                  className="event-card__completers"
+                  style={{ top: popoverPos.top, right: popoverPos.right }}
+                  onClick={e => e.stopPropagation()}
+                >
                   {loadingCompleters && !completers ? (
                     <p className="event-card__completers-loading">Cargando...</p>
                   ) : (
@@ -185,6 +197,7 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
             onClick={handleDoneClick}
             title={isDone ? 'Marcar como no completado' : isLoggedIn ? 'Marcar como completado' : 'Inicia sesión para marcarlo como completado'}
             aria-label={isDone ? 'Marcar como no completado' : 'Marcar como completado'}
+            {...(tutorialTarget ? { 'data-tutorial': 'done-btn' } : {})}
           >
             ✓
           </button>

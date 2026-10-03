@@ -88,3 +88,63 @@
   cursor: pointer;
 }
 .onb-next:hover { opacity: 0.88; }
+
+/* ── Spotlight / coachmark mode ── */
+
+.onb-dim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 1300;
+}
+
+.onb-hole {
+  position: fixed;
+  border-radius: 14px;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.72);
+  pointer-events: none;
+  z-index: 1301;
+  transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease;
+}
+
+.onb-coach {
+  position: fixed;
+  width: 260px;
+  background: #2a2a2a;
+  border-radius: 14px;
+  padding: 16px 18px 18px;
+  z-index: 1302;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  animation: onb-pop 0.2s ease;
+}
+
+.onb-coach-arrow {
+  position: absolute;
+  top: -8px;
+  width: 14px;
+  height: 14px;
+  background: #2a2a2a;
+  transform: rotate(45deg);
+}
+.onb-coach-arrow--down {
+  top: auto;
+  bottom: -8px;
+}
+
+.onb-coach-title {
+  color: #f5f5f5;
+  font-size: 1rem;
+  font-weight: 800;
+  margin: 2px 0 8px;
+}
+
+.onb-coach-text {
+  color: #bbb;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: 0 0 16px;
+}
+
+.onb-coach .onb-dots { margin-bottom: 14px; justify-content: flex-start; }
+.onb-coach .onb-next { padding: 10px; font-size: 0.82rem; }
+.onb-coach .onb-skip { top: 10px; right: 12px; }
