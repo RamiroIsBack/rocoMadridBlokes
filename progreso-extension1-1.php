@@ -2905,10 +2905,8 @@ function blokes_api_get_comunidad_leagues() {
                 'isMe'       => ($uid === $my_uid),
                 'avatarType' => $av['type'],
                 'avatarData' => $av['data'],
+                'nickname'   => blokes_get_user_nickname($uid) ?: 'Usuario',
             );
-            if ($is_auth) {
-                $entry['nickname'] = blokes_get_user_nickname($uid) ?: 'Usuario';
-            }
             if ($is_my_league) {
                 $entry['totalPoints'] = (int) $m->total_points;
                 $entry['rank']        = (int) $m->rank_in_league;
