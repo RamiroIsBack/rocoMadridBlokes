@@ -91,12 +91,15 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
   useLayoutEffect(() => {
     if (!showCompleters || !badgeRef.current) return
     const POPOVER_WIDTH = 150
+    const POPOVER_EST_HEIGHT = 90
     const rect = badgeRef.current.getBoundingClientRect()
     const left = Math.min(
       Math.max(rect.right - POPOVER_WIDTH, 8),
       window.innerWidth - POPOVER_WIDTH - 8
     )
-    setPopoverPos({ top: rect.bottom + 6, left })
+    const fitsBelow = rect.bottom + 6 + POPOVER_EST_HEIGHT <= window.innerHeight
+    const top = fitsBelow ? rect.bottom + 6 : Math.max(rect.top - 6 - POPOVER_EST_HEIGHT, 8)
+    setPopoverPos({ top, left })
   }, [showCompleters])
 
   const handleDoneClick = () => {
