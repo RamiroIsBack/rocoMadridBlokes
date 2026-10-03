@@ -257,6 +257,13 @@
 .ps-nick-row:focus-within { border-color: #555; }
 .ps-nick-row--ok  { border-color: #22c55e; }
 .ps-nick-row--err { border-color: #f97316; }
+.ps-nick-row--empty { animation: ps-nick-blink 1.1s ease-in-out infinite; }
+.ps-nick-row--empty:focus-within { animation: none; border-color: #555; }
+
+@keyframes ps-nick-blink {
+  0%, 100% { border-color: #3a3a3a; box-shadow: none; }
+  50%      { border-color: #f5c842; box-shadow: 0 0 0 3px rgba(245, 200, 66, 0.2); }
+}
 
 .ps-nick-at {
   color: #444;
