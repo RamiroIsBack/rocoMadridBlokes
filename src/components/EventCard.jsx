@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useLayoutEffect } from 'react'
 import ImageGallery from './ImageGallery'
 import UserAvatar from './UserAvatar'
 import './EventCard.css'
@@ -80,13 +80,23 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
 
   const openCompleters = () => {
     if (completionCount <= 0) return
-    if (badgeRef.current) {
-      const rect = badgeRef.current.getBoundingClientRect()
-      setPopoverPos({ top: rect.bottom + 6, right: window.innerWidth - rect.right })
-    }
     loadCompleters()
     setShowCompleters(true)
   }
+
+  // Recompute the popover position fresh, synchronously after layout, every
+  // time it opens — reading the rect inside the click/hover handler could
+  // race with pending layout (e.g. images loading) and produce a stale box.
+  useLayoutEffect(() => {
+    if (!showCompleters || !badgeRef.current) return
+    const POPOVER_WIDTH = 150
+    const rect = badgeRef.current.getBoundingClientRect()
+    const left = Math.min(
+      Math.max(rect.right - POPOVER_WIDTH, 8),
+      window.innerWidth - POPOVER_WIDTH - 8
+    )
+    setPopoverPos({ top: rect.bottom + 6, left })
+  }, [showCompleters])
 
   const handleDoneClick = () => {
     if (!isLoggedIn) {
@@ -149,7 +159,7 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
               {showCompleters && completionCount > 0 && popoverPos && (
                 <div
                   className="event-card__completers"
-                  style={{ top: popoverPos.top, right: popoverPos.right }}
+                  style={{ top: popoverPos.top, left: popoverPos.left }}
                   onClick={e => e.stopPropagation()}
                 >
                   {loadingCompleters && !completers ? (
