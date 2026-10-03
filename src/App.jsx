@@ -217,8 +217,19 @@ export default function App() {
             )}
             <div className="app-header__links">
               <div className="app-header__link-wrap">
-                <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
-                <a href="https://rocomadrid.com/club" className="app-header__link app-header__link--cta">Apúntate a clases</a>
+                {sd.subscription?.status === 'active' ? (
+                  <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta">
+                    Apúntate al curso de tecnificación
+                  </a>
+                ) : (
+                  <>
+                    <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
+                    <a href="https://rocomadrid.com/club" className="app-header__link app-header__link--cta">Apúntate a clases</a>
+                    <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta app-header__link--small">
+                      Tecnificación
+                    </a>
+                  </>
+                )}
               </div>
             </div>
           </div>

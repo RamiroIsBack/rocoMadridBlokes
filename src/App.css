@@ -325,6 +325,11 @@
   gap: 3px;
 }
 
+.app-header__link--small {
+  padding: 2px 8px;
+  font-size: 9px;
+}
+
 .app-header__link-hint {
   font-size: 9px;
   color: #777;
