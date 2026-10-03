@@ -80,6 +80,15 @@
     margin: 0;
 }
 
+.user-stats__no-test-data {
+    color: var(--color-text-secondary);
+    font-style: italic;
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 24px 16px;
+    margin: 0;
+}
+
 /* Sections */
 .user-stats__section {
     margin-bottom: 32px;

@@ -69,6 +69,28 @@
 .training-panel__test-zone {
   font-size: 0.7rem;
   color: #9ca3af;
+  margin-left: auto;
+}
+
+.training-panel__info-btn {
+  background: none;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+  line-height: 1;
+}
+.training-panel__info-btn:hover { color: var(--zone-color); }
+
+.training-panel__desc {
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #9ca3af;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
 }
 
 .training-panel__last-row {

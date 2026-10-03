@@ -11,7 +11,7 @@ function buildFromConfig() {
   const testsMap = {}
   tests.forEach(t => {
     if (zones[t.zone]) zones[t.zone].tests.push(t.id)
-    testsMap[t.id] = { zone: t.zone, label: t.name, unit: t.unit, desc: '' }
+    testsMap[t.id] = { zone: t.zone, label: t.name, unit: t.unit, desc: t.desc || '' }
   })
   return { zones, testsMap }
 }

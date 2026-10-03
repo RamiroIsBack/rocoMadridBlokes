@@ -300,6 +300,66 @@
   letter-spacing: 0.05em;
 }
 
+.entrena__test-desc {
+  background: #fff;
+  border: 1px solid #e5ddc8;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 16px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+.entrena__test-desc strong { color: #2a2015; }
+
+/* ── Definiciones ── */
+.entrena__defs-zone { margin-bottom: 28px; }
+.entrena__defs-zone-title {
+  font-family: var(--font-serif);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--zone-color, #2a2015);
+  margin: 0 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 1.5px solid var(--zone-color, #c8bc9a);
+}
+.entrena__defs-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.entrena__defs-item {
+  background: #fff;
+  border: 1px solid #e5ddc8;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+.entrena__defs-item__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.entrena__defs-item__name {
+  font-weight: 700;
+  color: #2a2015;
+  font-size: 0.92rem;
+}
+.entrena__defs-item__unit {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+}
+.entrena__defs-item__desc {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
 /* ── Inline panel row (alumno mode) ── */
 .entrena__inline-panel td {
   padding: 0 !important;

@@ -259,7 +259,7 @@ export default function ProfileSetupModal({
                 </div>
               ) : (
                 <>
-                  <div className={`ps-nick-row${nickStatus === 'ok' ? ' ps-nick-row--ok' : (nickStatus === 'taken' || nickStatus === 'short' || nickStatus === 'long' || nickStatus === 'chars') ? ' ps-nick-row--err' : ''}`}>
+                  <div className={`ps-nick-row${nickStatus === 'ok' ? ' ps-nick-row--ok' : (nickStatus === 'taken' || nickStatus === 'short' || nickStatus === 'long' || nickStatus === 'chars') ? ' ps-nick-row--err' : nickStatus === 'idle' ? ' ps-nick-row--empty' : ''}`}>
                     <span className="ps-nick-at">@</span>
                     <input
                       className="ps-nick-input"

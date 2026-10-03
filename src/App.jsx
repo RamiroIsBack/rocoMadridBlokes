@@ -217,8 +217,19 @@ export default function App() {
             )}
             <div className="app-header__links">
               <div className="app-header__link-wrap">
-                <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
-                <a href="https://rocomadrid.com/club" className="app-header__link app-header__link--cta">Apúntate a clases</a>
+                {sd.subscription?.status === 'active' ? (
+                  <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta">
+                    Apúntate al curso de tecnificación
+                  </a>
+                ) : (
+                  <>
+                    <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
+                    <a href="https://rocomadrid.com/club" className="app-header__link app-header__link--cta">Apúntate a clases</a>
+                    <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta app-header__link--small">
+                      Tecnificación
+                    </a>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -256,11 +267,9 @@ export default function App() {
               <li className="app-nav__item">
                 <NavLink to="/progreso" className="app-nav__link">Progreso</NavLink>
               </li>
-              {sd.isLoggedIn && (
-                <li className="app-nav__item">
-                  <NavLink to="/ligas" className="app-nav__link">Ligas</NavLink>
-                </li>
-              )}
+              <li className="app-nav__item">
+                <NavLink to="/ligas" className="app-nav__link">Ligas</NavLink>
+              </li>
               {['profesor', 'gestion', 'socio'].includes(sd.userRole) && (
                 <>
                   <li className="app-nav__item">

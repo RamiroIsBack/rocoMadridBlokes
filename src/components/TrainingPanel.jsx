@@ -30,6 +30,7 @@ export default function TrainingPanel({ alumno, onClose }) {
   const [saving, setSaving]     = useState({})
   const [saved, setSaved]       = useState({})
   const [errors, setErrors]     = useState({})
+  const [showDesc, setShowDesc] = useState({})
 
   useEffect(() => {
     const init = {}
@@ -96,8 +97,20 @@ export default function TrainingPanel({ alumno, onClose }) {
                   <div key={id} className="training-panel__test" style={{ '--zone-color': zone.color }}>
                     <div className="training-panel__test-head">
                       <span className="training-panel__test-num">{test.label}</span>
+                      {test.desc && (
+                        <button
+                          type="button"
+                          className="training-panel__info-btn"
+                          title="Cómo se mide"
+                          onClick={() => setShowDesc(s => ({ ...s, [id]: !s[id] }))}
+                        >ⓘ</button>
+                      )}
                       <span className="training-panel__test-zone">{test.unit}</span>
                     </div>
+
+                    {showDesc[id] && test.desc && (
+                      <p className="training-panel__desc">{test.desc}</p>
+                    )}
 
                     {last && (
                       <div className="training-panel__last-row">

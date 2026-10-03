@@ -36,6 +36,28 @@
 .mi-clase__stat-num { font-size: 1.2rem; font-weight: 800; color: #2a2015; line-height: 1; }
 .mi-clase__stat-lbl { font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: #9ca3af; }
 
+.mi-clase__alumnos-trigger {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.mi-clase__alumnos-pop {
+  position: fixed;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid #e5ddc8;
+  border-radius: 10px;
+  padding: 8px;
+  min-width: 160px;
+  max-width: 220px;
+  max-height: 260px;
+  overflow-y: auto;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.18);
+}
+
+.mi-clase__alumnos-pop-row { padding: 4px 4px; }
+
 /* ── Sections ── */
 .mi-clase__section {
   margin-bottom: 32px;

@@ -708,6 +708,13 @@ function CtrlTestsTab() {
     }))
   }
 
+  function handleRemoveTest(index) {
+    setConfig(prev => ({
+      ...prev,
+      tests: prev.tests.filter((_, i) => i !== index),
+    }))
+  }
+
   async function handleSaveTests() {
     saveTests(config.tests)
     setConfig(getConfig())
@@ -720,7 +727,7 @@ function CtrlTestsTab() {
     const newId = Date.now()
     setConfig(prev => ({
       ...prev,
-      tests: [...prev.tests, { id: newId, name: '', unit: 'reps', zone: 'lower' }],
+      tests: [...prev.tests, { id: newId, name: '', unit: 'reps', zone: 'lower', desc: '' }],
     }))
   }
 
@@ -751,10 +758,12 @@ function CtrlTestsTab() {
           <thead>
             <tr>
               <th>Nombre</th>
+              <th>Descripción</th>
               <th>Unidad</th>
               <th>Zona</th>
               <th>Mock activo</th>
               <th>Nuevo valor ref.</th>
+              <th></th>
               <th></th>
             </tr>
           </thead>
@@ -766,6 +775,15 @@ function CtrlTestsTab() {
                     className="sv-tests-input"
                     value={t.name}
                     onChange={e => handleTestChange(i, 'name', e.target.value)}
+                  />
+                </td>
+                <td>
+                  <textarea
+                    className="sv-tests-input sv-tests-input--desc"
+                    value={t.desc || ''}
+                    onChange={e => handleTestChange(i, 'desc', e.target.value)}
+                    placeholder="Cómo se mide este test"
+                    rows={2}
                   />
                 </td>
                 <td>
@@ -813,6 +831,13 @@ function CtrlTestsTab() {
                     disabled={!mockInputs[t.id]}
                     onClick={() => handleApplyMock(t.id)}
                   >Aplicar</button>
+                </td>
+                <td>
+                  <button
+                    className="sv-tests-remove"
+                    onClick={() => handleRemoveTest(i)}
+                    title="Borrar test"
+                  >🗑</button>
                 </td>
               </tr>
             ))}

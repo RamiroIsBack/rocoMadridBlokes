@@ -5,6 +5,14 @@ import FilterBar from '../components/FilterBar'
 import EventCard from '../components/EventCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import CelebrationDialog from '../components/CelebrationDialog'
+import OnboardingTutorial, { tutorialSeen } from '../components/OnboardingTutorial'
+
+const COLECCION_TUTORIAL_KEY = 'blokes_tutorial_seen_coleccion'
+const COLECCION_SLIDES = [
+  { icon: '🧗', title: '¡Bienvenido a Colección!', text: 'Aquí están todos los blokes del rocódromo. Filtra por sala o color y descubre los problemas de cada zona.' },
+  { title: 'Marca lo que has hecho', text: 'Toca aquí para marcar este bloke como completado. Así vas construyendo tu progreso.', target: '[data-tutorial="done-btn"]' },
+  { title: 'Valora tus favoritos', text: 'Toca la estrella para destacar los blokes que más te hayan gustado.', target: '[data-tutorial="star-btn"]' },
+]
 
 function MainPage() {
   const { cards, loading, error } = useWordPressPosts()
@@ -13,6 +21,7 @@ function MainPage() {
   const [activeColor, setActiveColor] = useState('TODOS')
   const [sortMode, setSortMode] = useState('newest')
   const [celebration, setCelebration] = useState(null)
+  const [showTutorial, setShowTutorial] = useState(() => !tutorialSeen(COLECCION_TUTORIAL_KEY))
 
   const handleToggleDone = useCallback(async (card) => {
     const currentCount = countOverrides[card.postId] ?? card.completionCount ?? 0
@@ -49,6 +58,13 @@ function MainPage() {
 
   return (
     <div className="app">
+      {showTutorial && !loading && filteredCards.length > 0 && (
+        <OnboardingTutorial
+          storageKey={COLECCION_TUTORIAL_KEY}
+          slides={COLECCION_SLIDES}
+          onClose={() => setShowTutorial(false)}
+        />
+      )}
       {celebration && (
         <CelebrationDialog
           title={celebration.title}
@@ -83,7 +99,7 @@ function MainPage() {
 
         {!loading && !error && filteredCards.length > 0 && (
           <div className="cards-grid">
-            {filteredCards.map((card) => (
+            {filteredCards.map((card, index) => (
               <EventCard
                 key={card.id}
                 card={card}
@@ -97,6 +113,7 @@ function MainPage() {
                 myRating={myRatings[String(card.postId)] || null}
                 ratingCounts={ratingCountOverrides[card.postId] ?? card.interactions}
                 onRate={(type) => rateBloke(card.postId, type, ratingCountOverrides[card.postId] ?? card.interactions)}
+                tutorialTarget={index === 0}
               />
             ))}
           </div>

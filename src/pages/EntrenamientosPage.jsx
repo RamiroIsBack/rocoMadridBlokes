@@ -122,10 +122,38 @@ function TestModeRow({ alumno, testId }) {
   )
 }
 
+// ─── Definiciones de los tests ─────────────────────────────────────
+function DefinicionesList() {
+  return (
+    <div className="entrena__defs">
+      {Object.entries(ZONES).map(([zoneKey, zone]) => (
+        <div key={zoneKey} className="entrena__defs-zone">
+          <h2 className="entrena__defs-zone-title" style={{ '--zone-color': zone.color }}>{zone.label}</h2>
+          <div className="entrena__defs-list">
+            {zone.tests.map(tid => {
+              const t = TEST_MAP[tid]
+              if (!t) return null
+              return (
+                <div key={tid} className="entrena__defs-item">
+                  <div className="entrena__defs-item__head">
+                    <span className="entrena__defs-item__name">{t.label}</span>
+                    <span className="entrena__defs-item__unit">{t.unit}</span>
+                  </div>
+                  <p className="entrena__defs-item__desc">{t.desc || 'Sin descripción todavía.'}</p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ─── Main page ───────────────────────────────────────────────────────
 export default function EntrenamientosPage() {
   const isAuthenticated = ['profesor', 'gestion', 'socio'].includes(window.blokesSiteData?.userRole)
-  const [viewMode, setViewMode]         = useState('alumno') // 'alumno' | 'test'
+  const [viewMode, setViewMode]         = useState('alumno') // 'alumno' | 'test' | 'definiciones'
   const [filters, setFilters]           = useState(EMPTY_FILTERS)
   const [allClases, setAllClases]       = useState([])
   const [selectedAlumno, setSelectedAlumno] = useState(null)
@@ -211,7 +239,15 @@ export default function EntrenamientosPage() {
           className={`entrena__mode-btn${viewMode === 'test' ? ' entrena__mode-btn--active' : ''}`}
           onClick={() => setViewMode('test')}
         >Por test</button>
+        <button
+          className={`entrena__mode-btn${viewMode === 'definiciones' ? ' entrena__mode-btn--active' : ''}`}
+          onClick={() => setViewMode('definiciones')}
+        >Definiciones</button>
       </div>
+
+      {viewMode === 'definiciones' && <DefinicionesList />}
+
+      {viewMode !== 'definiciones' && (<>
 
       {/* Test selector (only in test mode) */}
       {viewMode === 'test' && (
@@ -232,6 +268,11 @@ export default function EntrenamientosPage() {
             )
           })}
         </div>
+      )}
+      {viewMode === 'test' && TEST_MAP[selectedTest]?.desc && (
+        <p className="entrena__test-desc">
+          <strong>{TEST_MAP[selectedTest].label}:</strong> {TEST_MAP[selectedTest].desc}
+        </p>
       )}
 
       {/* Filters */}
@@ -365,6 +406,8 @@ export default function EntrenamientosPage() {
           </table>
         </div>
       )}
+
+      </>)}
     </div>
   )
 }

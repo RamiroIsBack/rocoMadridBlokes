@@ -435,12 +435,18 @@ export default function UserStatsPage() {
               unit={TESTS[activeTest].unit}
             />
             <div className="training-bottom">
-              <ProgressGauge
-                userEntries={trainingHistory[activeTest] || []}
-                communitySummary={trainingSummary[activeTest] || {}}
-                color={ZONES[activeZone].color}
-                unit={TESTS[activeTest].unit}
-              />
+              {(trainingHistory[activeTest] || []).length > 0 ? (
+                <ProgressGauge
+                  userEntries={trainingHistory[activeTest]}
+                  communitySummary={trainingSummary[activeTest] || {}}
+                  color={ZONES[activeZone].color}
+                  unit={TESTS[activeTest].unit}
+                />
+              ) : (
+                <p className="user-stats__no-test-data">
+                  Aún no tienes resultados en {TESTS[activeTest].label}. Tu profesor los registrará en tu próxima clase.
+                </p>
+              )}
               {(() => {
                 const sorted = (classData?.members || [])
                   .filter(m => m.tests?.[activeTest] !== undefined)
