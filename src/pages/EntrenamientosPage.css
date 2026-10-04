@@ -28,6 +28,29 @@
   white-space: nowrap;
 }
 .entrena__add-manual-btn:hover { background: #40331f; }
+
+.entrena__search {
+  margin-bottom: 20px;
+}
+.entrena__search-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 2px solid #2a2015;
+  background: #fff;
+  padding: 12px 14px;
+  font-size: 1rem;
+  color: #2a2015;
+  font-family: inherit;
+}
+.entrena__search-input:focus {
+  outline: 2px solid #c8961e;
+  outline-offset: 1px;
+}
+.entrena__search-hint {
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  margin: 6px 0 0;
+}
 .entrena__add-manual-btn:disabled { opacity: 0.6; cursor: default; }
 
 .entrena__manual-tag {

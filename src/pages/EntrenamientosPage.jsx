@@ -7,7 +7,7 @@ import './EntrenamientosPage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 
-const EMPTY_FILTERS = { frecuencia: '', dia: '', turno: '', edad: '', horario: '', status: 'active' }
+const EMPTY_FILTERS = { frecuencia: '', dia: '', turno: '', edad: '', horario: '', status: 'all' }
 const FRECUENCIA_LABEL = { single: '1 día/semana', classes: '2 días/semana' }
 const ORDEN_DIAS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Lunes-Miércoles','Martes-Jueves']
 
@@ -169,6 +169,7 @@ export default function EntrenamientosPage() {
   const [manualForm, setManualForm]     = useState({ nombre: '', dia: '', horario: '', edad: '', turno: '' })
   const [manualSaving, setManualSaving] = useState(false)
   const [manualError, setManualError]   = useState(null)
+  const [search, setSearch]             = useState('')
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -260,6 +261,11 @@ export default function EntrenamientosPage() {
   const manualEdadOptions    = distinct(applyClaseFilters(allClases, manualForm, 'edad'), 'edad').sort()
   const manualHorarioOptions = distinct(applyClaseFilters(allClases, manualForm, 'horario'), 'horario').sort()
 
+  const searchNorm = search.trim().toLowerCase()
+  const visibleAlumnos = searchNorm
+    ? alumnos.filter(a => (a.cliente || a.nombre || '').toLowerCase().includes(searchNorm))
+    : alumnos
+
   if (!isAuthenticated) {
     const sd = window.blokesSiteData || {}
     return (
@@ -280,9 +286,26 @@ export default function EntrenamientosPage() {
       <div className="entrena__header">
         <div>
           <h1>Entrenamientos</h1>
-          {!loading && <p className="entrena__subtitle">{total} alumno{total !== 1 ? 's' : ''}</p>}
+          {!loading && (
+            <p className="entrena__subtitle">
+              {searchNorm ? `${visibleAlumnos.length} de ${total} alumnos` : `${total} alumno${total !== 1 ? 's' : ''}`}
+            </p>
+          )}
         </div>
         <button className="entrena__add-manual-btn" onClick={openAddManual}>+ Añadir alumno</button>
+      </div>
+
+      <div className="entrena__search">
+        <input
+          type="text"
+          placeholder="Buscar alumno por nombre..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="entrena__search-input"
+        />
+        <p className="entrena__search-hint">
+          Busca aquí antes de añadir un alumno nuevo: casi siempre ya está en el sistema, aunque no tenga la suscripción activa.
+        </p>
       </div>
 
       {showAddManual && (
@@ -442,6 +465,11 @@ export default function EntrenamientosPage() {
           <p className="entrena__empty-title">Sin alumnos registrados</p>
           <p className="entrena__empty-hint">Cuando un alumno contrate una suscripción activa aparecerá aquí.</p>
         </div>
+      ) : visibleAlumnos.length === 0 ? (
+        <div className="entrena__empty">
+          <p className="entrena__empty-title">Nadie coincide con "{search.trim()}"</p>
+          <p className="entrena__empty-hint">Revisa los filtros o el nombre. Si de verdad no está, usa "+ Añadir alumno".</p>
+        </div>
       ) : viewMode === 'test' ? (
 
         /* ── TEST MODE ── */
@@ -456,7 +484,7 @@ export default function EntrenamientosPage() {
               </tr>
             </thead>
             <tbody>
-              {alumnos
+              {visibleAlumnos
                 .filter(a => a.user_id || a.placeholder_id)
                 .map((a, i) => <TestModeRow key={a.placeholder_id ? `ph-${a.placeholder_id}` : (a.id ?? i)} alumno={a} testId={selectedTest} />)
               }
@@ -478,7 +506,7 @@ export default function EntrenamientosPage() {
               </tr>
             </thead>
             <tbody>
-              {alumnos.map((a, i) => {
+              {visibleAlumnos.map((a, i) => {
                 const rowKey   = a.placeholder_id ? `ph-${a.placeholder_id}` : (a.id ?? i)
                 const isSelected = a.placeholder_id
                   ? selectedAlumno?.placeholder_id === a.placeholder_id
