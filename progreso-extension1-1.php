@@ -1658,8 +1658,13 @@ function progreso_training_table() {
 
 function progreso_ensure_training_table() {
     global $wpdb;
+    // dbDelta() also ALTERs an existing table to match this definition (e.g. a
+    // newly added column), so it must run whenever the schema version changes —
+    // not just the first time the table is created. The version is cached in an
+    // option so normal requests pay only one cheap get_option() call.
+    $version = '2';
+    if (get_option('blokes_training_table_version') === $version) return;
     $table = progreso_training_table();
-    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
     $charset = $wpdb->get_charset_collate();
     $sql = "CREATE TABLE {$table} (
         id             bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -1676,6 +1681,7 @@ function progreso_ensure_training_table() {
     ) {$charset};";
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta($sql);
+    update_option('blokes_training_table_version', $version);
 }
 
 function progreso_log_training($request) {
