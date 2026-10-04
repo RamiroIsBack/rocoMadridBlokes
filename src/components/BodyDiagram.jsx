@@ -10,6 +10,7 @@ function buildFromConfig() {
   }
   const testsMap = {}
   tests.forEach(t => {
+    if (t.visible === false) return
     if (zones[t.zone]) zones[t.zone].tests.push(t.id)
     testsMap[t.id] = { zone: t.zone, label: t.name, unit: t.unit, desc: t.desc || '' }
   })

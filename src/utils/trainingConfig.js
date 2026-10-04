@@ -7,28 +7,28 @@ function getAuthHeaders() {
 }
 
 const LS_KEY = 'blokes_ctrl_tests'
-const CONFIG_VERSION = 3  // bump para invalidar localStorage y aplicar nuevos defaults
+const CONFIG_VERSION = 4  // bump para invalidar localStorage y aplicar nuevos defaults
 
 export const INITIAL_TESTS = [
-  { id: 2,  name: 'Sentadilla en silla', unit: 'reps',   zone: 'lower',
+  { id: 2,  name: 'Sentadilla en silla', unit: 'reps',   zone: 'lower',   visible: false,
     desc: 'Nº máximas repeticiones en 30 seg con brazos cruzados en hombros.' },
-  { id: 9,  name: 'Rodillas al pecho',   unit: 'reps',   zone: 'lower',
+  { id: 9,  name: 'Rodillas al pecho',   unit: 'reps',   zone: 'lower',   visible: false,
     desc: 'Nº repeticiones colgados en barra subiendo las piernas hasta 90º.' },
-  { id: 10, name: 'Apertura caderas',    unit: 'cm',     zone: 'lower',
+  { id: 10, name: 'Apertura caderas',    unit: 'cm',     zone: 'lower',   visible: true,
     desc: 'De pie, piernas abiertas al máximo. Medimos distancia entre pies.' },
-  { id: 12, name: 'Grant Foot Raise',    unit: 'cm',     zone: 'lower',
+  { id: 12, name: 'Grant Foot Raise',    unit: 'cm',     zone: 'lower',   visible: true,
     desc: 'De pie mirando a la pared, pies separados de ella y palmas apoyadas a la altura de los hombros. Subimos un pie por la línea de la pared tocando con los dedos. 3 intentos, medimos la distancia al suelo en el mejor.' },
-  { id: 3,  name: 'Dominadas',           unit: 'reps',   zone: 'upper',
+  { id: 3,  name: 'Dominadas',           unit: 'reps',   zone: 'upper',   visible: true,
     desc: 'Nº máximas repeticiones.' },
-  { id: 4,  name: 'Flexiones',           unit: 'reps',   zone: 'upper',
+  { id: 4,  name: 'Flexiones',           unit: 'reps',   zone: 'upper',   visible: false,
     desc: 'Nº máximas repeticiones tocando el suelo con el pecho.' },
-  { id: 7,  name: 'Campus',              unit: 'cm',     zone: 'upper',
+  { id: 7,  name: 'Campus',              unit: 'cm',     zone: 'upper',   visible: true,
     desc: '3 intentos, marcamos la altura máxima alcanzada con ambas manos.' },
-  { id: 5,  name: 'Resis. Flex. Prof.',  unit: 'series', zone: 'fingers',
+  { id: 5,  name: 'Resis. Flex. Prof.',  unit: 'series', zone: 'fingers', visible: true,
     desc: 'Nº series completadas en 7 seg. de suspensión, 3 seg. de descanso. Regleta 20mm. Postura estandarizada: brazo extendido por encima de la cabeza, hombro activo, medio-crimp, pulgar fuera de la regleta.' },
-  { id: 6,  name: 'Kg Max Derecha',      unit: 'kg',     zone: 'fingers',
+  { id: 6,  name: 'Kg Max Derecha',      unit: 'kg',     zone: 'fingers', visible: true,
     desc: 'En posición caballero (una rodilla en el suelo, la otra levantada) medimos la fuerza máxima del brazo homolateral a la rodilla apoyada en el suelo.' },
-  { id: 13, name: 'Kg Max Izquierda',    unit: 'kg',     zone: 'fingers',
+  { id: 13, name: 'Kg Max Izquierda',    unit: 'kg',     zone: 'fingers', visible: true,
     desc: 'Igual que Kg Max Derecha, invirtiendo la postura (la otra rodilla apoyada) para medir el brazo contrario.' },
 ]
 

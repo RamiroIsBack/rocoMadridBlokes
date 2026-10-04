@@ -1768,25 +1768,25 @@ function progreso_generate_all_mock() {
 
 function progreso_get_training_tests() {
     $default = array(
-        array('id' => 2,  'name' => 'Sentadilla en silla', 'unit' => 'reps',   'zone' => 'lower',
+        array('id' => 2,  'name' => 'Sentadilla en silla', 'unit' => 'reps',   'zone' => 'lower',   'visible' => false,
               'desc' => 'Nº máximas repeticiones en 30 seg con brazos cruzados en hombros.'),
-        array('id' => 9,  'name' => 'Rodillas al pecho',   'unit' => 'reps',   'zone' => 'lower',
+        array('id' => 9,  'name' => 'Rodillas al pecho',   'unit' => 'reps',   'zone' => 'lower',   'visible' => false,
               'desc' => 'Nº repeticiones colgados en barra subiendo las piernas hasta 90º.'),
-        array('id' => 10, 'name' => 'Apertura caderas',    'unit' => 'cm',     'zone' => 'lower',
+        array('id' => 10, 'name' => 'Apertura caderas',    'unit' => 'cm',     'zone' => 'lower',   'visible' => true,
               'desc' => 'De pie, piernas abiertas al máximo. Medimos distancia entre pies.'),
-        array('id' => 12, 'name' => 'Grant Foot Raise',    'unit' => 'cm',     'zone' => 'lower',
+        array('id' => 12, 'name' => 'Grant Foot Raise',    'unit' => 'cm',     'zone' => 'lower',   'visible' => true,
               'desc' => 'De pie mirando a la pared, pies separados de ella y palmas apoyadas a la altura de los hombros. Subimos un pie por la línea de la pared tocando con los dedos. 3 intentos, medimos la distancia al suelo en el mejor.'),
-        array('id' => 3,  'name' => 'Dominadas',           'unit' => 'reps',   'zone' => 'upper',
+        array('id' => 3,  'name' => 'Dominadas',           'unit' => 'reps',   'zone' => 'upper',   'visible' => true,
               'desc' => 'Nº máximas repeticiones.'),
-        array('id' => 4,  'name' => 'Flexiones',           'unit' => 'reps',   'zone' => 'upper',
+        array('id' => 4,  'name' => 'Flexiones',           'unit' => 'reps',   'zone' => 'upper',   'visible' => false,
               'desc' => 'Nº máximas repeticiones tocando el suelo con el pecho.'),
-        array('id' => 7,  'name' => 'Campus',              'unit' => 'cm',     'zone' => 'upper',
+        array('id' => 7,  'name' => 'Campus',              'unit' => 'cm',     'zone' => 'upper',   'visible' => true,
               'desc' => '3 intentos, marcamos la altura máxima alcanzada con ambas manos.'),
-        array('id' => 5,  'name' => 'Resis. Flex. Prof.',  'unit' => 'series', 'zone' => 'fingers',
+        array('id' => 5,  'name' => 'Resis. Flex. Prof.',  'unit' => 'series', 'zone' => 'fingers', 'visible' => true,
               'desc' => 'Nº series completadas en 7 seg. de suspensión, 3 seg. de descanso. Regleta 20mm. Postura estandarizada: brazo extendido por encima de la cabeza, hombro activo, medio-crimp, pulgar fuera de la regleta.'),
-        array('id' => 6,  'name' => 'Kg Max Derecha',      'unit' => 'kg',     'zone' => 'fingers',
+        array('id' => 6,  'name' => 'Kg Max Derecha',      'unit' => 'kg',     'zone' => 'fingers', 'visible' => true,
               'desc' => 'En posición caballero (una rodilla en el suelo, la otra levantada) medimos la fuerza máxima del brazo homolateral a la rodilla apoyada en el suelo.'),
-        array('id' => 13, 'name' => 'Kg Max Izquierda',    'unit' => 'kg',     'zone' => 'fingers',
+        array('id' => 13, 'name' => 'Kg Max Izquierda',    'unit' => 'kg',     'zone' => 'fingers', 'visible' => true,
               'desc' => 'Igual que Kg Max Derecha, invirtiendo la postura (la otra rodilla apoyada) para medir el brazo contrario.'),
     );
     $stored = get_option('blokes_training_tests', null);
@@ -1806,11 +1806,12 @@ function progreso_save_training_tests($request) {
     foreach ($tests as $t) {
         if (!isset($t['id'], $t['name'], $t['unit'], $t['zone'])) continue;
         $sanitized[] = array(
-            'id'   => intval($t['id']),
-            'name' => sanitize_text_field($t['name']),
-            'unit' => sanitize_text_field($t['unit']),
-            'zone' => sanitize_text_field($t['zone']),
-            'desc' => isset($t['desc']) ? sanitize_textarea_field($t['desc']) : '',
+            'id'      => intval($t['id']),
+            'name'    => sanitize_text_field($t['name']),
+            'unit'    => sanitize_text_field($t['unit']),
+            'zone'    => sanitize_text_field($t['zone']),
+            'desc'    => isset($t['desc']) ? sanitize_textarea_field($t['desc']) : '',
+            'visible' => isset($t['visible']) ? (bool) $t['visible'] : true,
         );
     }
     update_option('blokes_training_tests', $sanitized, false);
