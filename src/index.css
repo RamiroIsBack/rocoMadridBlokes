@@ -71,7 +71,8 @@ body {
   background-color: var(--color-bg);
   color: var(--color-text-primary);
   line-height: 1.6;
-  min-height: 100vh;
+  min-height: 100vh; /* fallback for browsers without dvh support */
+  min-height: 100dvh;
   overscroll-behavior-y: contain;
 }
 
