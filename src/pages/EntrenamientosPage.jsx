@@ -320,17 +320,14 @@ export default function EntrenamientosPage() {
   return (
     <div className="entrena">
       <div className="entrena__header">
-        <div>
-          <h1>Entrenamientos</h1>
-          {!loading && (
-            <p className="entrena__subtitle">
-              {searchNorm
-                ? `${visibleAlumnos.length} de ${consolidatedAlumnos.length} alumnos`
-                : `${consolidatedAlumnos.length} alumno${consolidatedAlumnos.length !== 1 ? 's' : ''}`}
-            </p>
-          )}
-        </div>
-        <button className="entrena__add-manual-btn" onClick={openAddManual}>+ Añadir alumno</button>
+        <h1>Entrenamientos</h1>
+        {!loading && (
+          <p className="entrena__subtitle">
+            {searchNorm
+              ? `${visibleAlumnos.length} de ${consolidatedAlumnos.length} alumnos`
+              : `${consolidatedAlumnos.length} alumno${consolidatedAlumnos.length !== 1 ? 's' : ''}`}
+          </p>
+        )}
       </div>
 
       <div className="entrena__search">
@@ -490,6 +487,8 @@ export default function EntrenamientosPage() {
         </div>
         <button className="entrena__reset" onClick={resetFilters}>Limpiar filtros</button>
       </div>
+
+      <button className="entrena__add-manual-btn entrena__add-manual-btn--block" onClick={openAddManual}>+ Añadir alumno</button>
 
       {error && <p className="entrena__error">Error: {error}</p>}
 
