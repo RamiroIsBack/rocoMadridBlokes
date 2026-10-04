@@ -1564,6 +1564,13 @@ function blokes_get_placeholder_alumnos($status = 'pending') {
         $status
     ), ARRAY_A);
     return array_map(function($row) {
+        // The alumno has no real subscription to read a producto from, so
+        // frecuencia (and the "producto" filter match) has to be inferred
+        // from the día itself: a combined day ("Martes-Jueves") is a 2x/week
+        // class, a single day is 1x/week. Without a día there's no way to
+        // know, so it's left blank and simply won't match a frecuencia filter.
+        $dia = $row['dia'];
+        $producto = $dia === '' ? '' : (strpos($dia, '-') !== false ? 'Classes' : 'Single Days');
         return array(
             'id'            => 0,
             'placeholder_id'=> intval($row['id']),
@@ -1571,9 +1578,9 @@ function blokes_get_placeholder_alumnos($status = 'pending') {
             'status'        => 'active',
             'cliente'       => $row['nombre'],
             'email'         => '',
-            'producto'      => '',
+            'producto'      => $producto,
             'frecuencia'    => '',
-            'dia'           => $row['dia'],
+            'dia'           => $dia,
             'horario'       => $row['horario'],
             'edad'          => $row['edad'],
             'turno'         => $row['turno'],
