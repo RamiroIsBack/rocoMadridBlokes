@@ -87,3 +87,57 @@ export function useUserTraining(userId) {
 
   return { history, loading, reload, logTraining, updateTraining }
 }
+
+// Like useUserTraining, but also works for "alumnos manuales" (placeholders
+// without a WordPress account yet) — picks the right endpoint based on
+// alumno.is_placeholder instead of always assuming a real user_id.
+export function useAlumnoTraining(alumno) {
+  const isPlaceholder = !!alumno?.is_placeholder
+  const subjectId = isPlaceholder ? alumno?.placeholder_id : alumno?.user_id
+  const [history, setHistory] = useState({})
+  const [loading, setLoading] = useState(false)
+
+  const reload = useCallback(() => {
+    if (!subjectId) return
+    setLoading(true)
+    const url = isPlaceholder
+      ? `${CLUB_URL}/wp-json/progreso/v1/training/placeholder/${subjectId}`
+      : `${CLUB_URL}/wp-json/progreso/v1/training/${subjectId}`
+    fetch(url, { credentials: 'include', headers: getAuthHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(json => { if (json?.data?.tests) setHistory(json.data.tests) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [subjectId, isPlaceholder])
+
+  useEffect(() => { reload() }, [reload])
+
+  const logTraining = useCallback(async (testId, valueKg) => {
+    const body = isPlaceholder
+      ? { placeholder_id: subjectId, test_id: testId, value_kg: valueKg }
+      : { user_id: subjectId, test_id: testId, value_kg: valueKg }
+    const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/training`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.message || 'Error al guardar')
+    return json
+  }, [subjectId, isPlaceholder])
+
+  const updateTraining = useCallback(async (entryId, valueKg) => {
+    const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/training/entry/${entryId}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value_kg: valueKg }),
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.message || 'Error al actualizar')
+    return json
+  }, [])
+
+  return { history, loading, reload, logTraining, updateTraining }
+}

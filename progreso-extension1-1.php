@@ -487,9 +487,38 @@ add_action('rest_api_init', function() {
             return blokes_can_supervise();
         },
         'args' => array(
-            'user_id'  => array('required' => true,  'type' => 'integer'),
-            'test_id'  => array('required' => true,  'type' => 'integer'),
-            'value_kg' => array('required' => true,  'type' => 'number'),
+            'user_id'        => array('required' => false, 'type' => 'integer'),
+            'placeholder_id' => array('required' => false, 'type' => 'integer'),
+            'test_id'        => array('required' => true,  'type' => 'integer'),
+            'value_kg'       => array('required' => true,  'type' => 'number'),
+        ),
+    ));
+
+    register_rest_route('progreso/v1', '/alumnos/manual', array(
+        'methods'             => 'POST',
+        'callback'            => 'progreso_create_alumno_manual',
+        'permission_callback' => function() { return blokes_can_supervise(); },
+        'args' => array(
+            'nombre'  => array('required' => true, 'type' => 'string'),
+            'dia'     => array('required' => false, 'type' => 'string'),
+            'horario' => array('required' => false, 'type' => 'string'),
+            'edad'    => array('required' => false, 'type' => 'string'),
+            'turno'   => array('required' => false, 'type' => 'string'),
+        ),
+    ));
+
+    register_rest_route('progreso/v1', '/alumnos/manual/(?P<id>\d+)', array(
+        'methods'             => 'DELETE',
+        'callback'            => 'progreso_delete_alumno_manual',
+        'permission_callback' => function() { return blokes_can_supervise(); },
+    ));
+
+    register_rest_route('progreso/v1', '/alumnos/manual/(?P<id>\d+)/link', array(
+        'methods'             => 'POST',
+        'callback'            => 'progreso_link_alumno_manual',
+        'permission_callback' => function() { return blokes_can_supervise(); },
+        'args' => array(
+            'email' => array('required' => true, 'type' => 'string'),
         ),
     ));
 
@@ -537,6 +566,12 @@ add_action('rest_api_init', function() {
             return blokes_can_supervise() ||
                    get_current_user_id() === intval($request['user_id']);
         },
+    ));
+
+    register_rest_route('progreso/v1', '/training/placeholder/(?P<placeholder_id>\d+)', array(
+        'methods'             => 'GET',
+        'callback'            => 'progreso_get_training_placeholder',
+        'permission_callback' => function() { return blokes_can_supervise(); },
     ));
 
     register_rest_route('progreso/v1', '/training/entry/(?P<id>\d+)', array(
@@ -1337,7 +1372,7 @@ function progreso_get_alumnos($request) {
         'status'   => $request->get_param('status') ?: 'active',
     );
 
-    $all_data = blokes_get_all_subscription_data();
+    $all_data = array_merge(blokes_get_all_subscription_data(), blokes_get_placeholder_alumnos('pending'));
 
     $filtered = array_values(array_filter($all_data, function($sub) use ($filtros) {
         if ($filtros['status'] !== 'all' && $sub['status'] !== $filtros['status']) return false;
@@ -1485,6 +1520,134 @@ function progreso_get_clases($request) {
 }
 
 // ============================================================
+//  Alumnos manuales (placeholders) — gente en clase sin suscripción
+//  todavía (nuevos, pago pendiente...). Viven en tabla propia, nunca
+//  como usuarios de WordPress, para no mezclarlos con socios reales.
+//  Cuando se hacen socios de verdad, se vinculan por email y su
+//  historial de mediciones se migra al user_id real.
+// ============================================================
+
+function blokes_placeholder_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_placeholder_alumnos';
+}
+
+function blokes_ensure_placeholder_table() {
+    global $wpdb;
+    $table = blokes_placeholder_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        id              bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        nombre          varchar(190)        NOT NULL,
+        dia             varchar(100)        NOT NULL DEFAULT '',
+        horario         varchar(50)         NOT NULL DEFAULT '',
+        edad            varchar(50)         NOT NULL DEFAULT '',
+        turno           varchar(20)         NOT NULL DEFAULT '',
+        status          varchar(20)         NOT NULL DEFAULT 'pending',
+        linked_user_id  bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        linked_at       datetime            NULL,
+        created_by      bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        created_at      datetime            NOT NULL,
+        PRIMARY KEY (id),
+        KEY status (status)
+    ) {$charset};";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+
+function blokes_get_placeholder_alumnos($status = 'pending') {
+    global $wpdb;
+    blokes_ensure_placeholder_table();
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . blokes_placeholder_table() . " WHERE status = %s ORDER BY created_at DESC",
+        $status
+    ), ARRAY_A);
+    return array_map(function($row) {
+        return array(
+            'id'            => 0,
+            'placeholder_id'=> intval($row['id']),
+            'is_placeholder'=> true,
+            'status'        => 'active',
+            'cliente'       => $row['nombre'],
+            'email'         => '',
+            'producto'      => '',
+            'frecuencia'    => '',
+            'dia'           => $row['dia'],
+            'horario'       => $row['horario'],
+            'edad'          => $row['edad'],
+            'turno'         => $row['turno'],
+            'user_id'       => 0,
+        );
+    }, $rows);
+}
+
+function progreso_create_alumno_manual($request) {
+    $nombre = trim((string) $request->get_param('nombre'));
+    if ($nombre === '') {
+        return new WP_Error('invalid_data', 'El nombre es obligatorio.', array('status' => 400));
+    }
+    global $wpdb;
+    blokes_ensure_placeholder_table();
+    $wpdb->insert(blokes_placeholder_table(), array(
+        'nombre'     => sanitize_text_field($nombre),
+        'dia'        => sanitize_text_field((string) $request->get_param('dia')),
+        'horario'    => sanitize_text_field((string) $request->get_param('horario')),
+        'edad'       => sanitize_text_field((string) $request->get_param('edad')),
+        'turno'      => sanitize_text_field((string) $request->get_param('turno')),
+        'status'     => 'pending',
+        'created_by' => get_current_user_id(),
+        'created_at' => current_time('mysql'),
+    ), array('%s', '%s', '%s', '%s', '%s', '%s', '%d', '%s'));
+    if (!$wpdb->insert_id) return new WP_Error('db_error', 'Error al crear el alumno.', array('status' => 500));
+    return rest_ensure_response(array('success' => true, 'placeholder_id' => $wpdb->insert_id));
+}
+
+function progreso_delete_alumno_manual($request) {
+    global $wpdb;
+    blokes_ensure_placeholder_table();
+    $id = intval($request['id']);
+    $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_placeholder_table() . ' WHERE id = %d', $id), ARRAY_A);
+    if (!$row) return new WP_Error('not_found', 'No encontrado.', array('status' => 404));
+    if ($row['status'] !== 'pending') {
+        return new WP_Error('already_linked', 'Ya está vinculado a un usuario, no se puede borrar.', array('status' => 400));
+    }
+    $wpdb->delete(blokes_placeholder_table(), array('id' => $id), array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+function progreso_link_alumno_manual($request) {
+    global $wpdb;
+    blokes_ensure_placeholder_table();
+    $id    = intval($request['id']);
+    $email = sanitize_email((string) $request->get_param('email'));
+    if ($email === '') return new WP_Error('invalid_data', 'Falta el email.', array('status' => 400));
+
+    $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_placeholder_table() . ' WHERE id = %d', $id), ARRAY_A);
+    if (!$row) return new WP_Error('not_found', 'No encontrado.', array('status' => 404));
+    if ($row['status'] !== 'pending') {
+        return new WP_Error('already_linked', 'Ya estaba vinculado.', array('status' => 400));
+    }
+
+    $user = get_user_by('email', $email);
+    if (!$user) return new WP_Error('user_not_found', 'No existe ninguna cuenta con ese email.', array('status' => 404));
+
+    progreso_ensure_training_table();
+    $wpdb->update(progreso_training_table(),
+        array('user_id' => $user->ID, 'placeholder_id' => 0),
+        array('placeholder_id' => $id),
+        array('%d', '%d'), array('%d')
+    );
+    $wpdb->update(blokes_placeholder_table(), array(
+        'status'         => 'linked',
+        'linked_user_id' => $user->ID,
+        'linked_at'      => current_time('mysql'),
+    ), array('id' => $id), array('%s', '%d', '%s'), array('%d'));
+
+    return rest_ensure_response(array('success' => true, 'user_id' => $user->ID));
+}
+
+// ============================================================
 //  Training log helpers + callbacks
 // ============================================================
 
@@ -1499,14 +1662,16 @@ function progreso_ensure_training_table() {
     if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
     $charset = $wpdb->get_charset_collate();
     $sql = "CREATE TABLE {$table} (
-        id        bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-        user_id   bigint(20) UNSIGNED NOT NULL,
-        test_id   tinyint(2)          NOT NULL,
-        value_kg  decimal(6,2)        NOT NULL,
-        logged_at datetime            NOT NULL,
-        logged_by bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        id             bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        user_id        bigint(20) UNSIGNED NOT NULL,
+        placeholder_id bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        test_id        tinyint(2)          NOT NULL,
+        value_kg       decimal(6,2)        NOT NULL,
+        logged_at      datetime            NOT NULL,
+        logged_by      bigint(20) UNSIGNED NOT NULL DEFAULT 0,
         PRIMARY KEY (id),
         KEY user_test (user_id, test_id),
+        KEY placeholder_test (placeholder_id, test_id),
         KEY logged_at (logged_at)
     ) {$charset};";
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -1516,21 +1681,24 @@ function progreso_ensure_training_table() {
 function progreso_log_training($request) {
     global $wpdb;
     progreso_ensure_training_table();
-    $user_id  = intval($request->get_param('user_id'));
-    $test_id  = intval($request->get_param('test_id'));
-    $value_kg = floatval($request->get_param('value_kg'));
-    if ($user_id <= 0 || $test_id < 2 || $test_id > 13 || $value_kg < 0) {
+    $user_id        = intval($request->get_param('user_id'));
+    $placeholder_id = intval($request->get_param('placeholder_id'));
+    $test_id        = intval($request->get_param('test_id'));
+    $value_kg       = floatval($request->get_param('value_kg'));
+    $has_subject    = ($user_id > 0) xor ($placeholder_id > 0);
+    if (!$has_subject || $test_id < 2 || $test_id > 13 || $value_kg < 0) {
         return new WP_Error('invalid_data',
-            "Datos inválidos. user_id={$user_id} test_id={$test_id} value_kg={$value_kg}",
+            "Datos inválidos. user_id={$user_id} placeholder_id={$placeholder_id} test_id={$test_id} value_kg={$value_kg}",
             array('status' => 400));
     }
     $ok = $wpdb->insert(progreso_training_table(), array(
-        'user_id'   => $user_id,
-        'test_id'   => $test_id,
-        'value_kg'  => $value_kg,
-        'logged_at' => current_time('mysql'),
-        'logged_by' => get_current_user_id(),
-    ), array('%d', '%d', '%f', '%s', '%d'));
+        'user_id'        => $user_id,
+        'placeholder_id' => $placeholder_id,
+        'test_id'        => $test_id,
+        'value_kg'       => $value_kg,
+        'logged_at'      => current_time('mysql'),
+        'logged_by'      => get_current_user_id(),
+    ), array('%d', '%d', '%d', '%f', '%s', '%d'));
     if (!$ok) return new WP_Error('db_error', 'Error al guardar.', array('status' => 500));
     return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
 }
@@ -1837,14 +2005,13 @@ function progreso_get_training_me() {
     return rest_ensure_response(array('success' => true, 'data' => array('user_id' => $user_id, 'tests' => $by_test)));
 }
 
-function progreso_get_training($request) {
+function blokes_training_history($column, $id) {
     global $wpdb;
     progreso_ensure_training_table();
-    $user_id = intval($request['user_id']);
-    $rows    = $wpdb->get_results($wpdb->prepare(
-        'SELECT id, test_id, value_kg, logged_at FROM ' . progreso_training_table() .
-        ' WHERE user_id = %d ORDER BY test_id ASC, logged_at ASC',
-        $user_id
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT id, test_id, value_kg, logged_at FROM " . progreso_training_table() .
+        " WHERE {$column} = %d ORDER BY test_id ASC, logged_at ASC",
+        $id
     ), ARRAY_A);
     $by_test = array();
     foreach ($rows as $row) {
@@ -1855,7 +2022,19 @@ function progreso_get_training($request) {
             'logged_at' => $row['logged_at'],
         );
     }
+    return $by_test;
+}
+
+function progreso_get_training($request) {
+    $user_id = intval($request['user_id']);
+    $by_test = blokes_training_history('user_id', $user_id);
     return rest_ensure_response(array('success' => true, 'data' => array('user_id' => $user_id, 'tests' => $by_test)));
+}
+
+function progreso_get_training_placeholder($request) {
+    $placeholder_id = intval($request['placeholder_id']);
+    $by_test = blokes_training_history('placeholder_id', $placeholder_id);
+    return rest_ensure_response(array('success' => true, 'data' => array('placeholder_id' => $placeholder_id, 'tests' => $by_test)));
 }
 
 function progreso_update_training($request) {

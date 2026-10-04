@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, Fragment } from 'react'
 import TrainingPanel from '../components/TrainingPanel'
-import { useUserTraining } from '../hooks/useTraining'
+import { useAlumnoTraining } from '../hooks/useTraining'
 import { ZONES, TESTS as TEST_MAP } from '../components/BodyDiagram'
 import '../admin/AdminLogin.css'
 import './EntrenamientosPage.css'
@@ -59,7 +59,7 @@ function formatDate(dt) {
 
 // ─── Per-student row in Test mode ───────────────────────────────────
 function TestModeRow({ alumno, testId }) {
-  const { history, loading, logTraining, updateTraining, reload } = useUserTraining(alumno.user_id)
+  const { history, loading, logTraining, updateTraining, reload } = useAlumnoTraining(alumno)
   const [value, setValue]   = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved]   = useState(false)
@@ -81,7 +81,7 @@ function TestModeRow({ alumno, testId }) {
       if (last && editable) {
         await updateTraining(last.id, val)
       } else {
-        await logTraining(alumno.user_id, testId, val)
+        await logTraining(testId, val)
       }
       setSaved(true); setTimeout(() => setSaved(false), 2000); reload()
     } catch (e) { setErr(e.message || 'Error') }
@@ -90,7 +90,10 @@ function TestModeRow({ alumno, testId }) {
 
   return (
     <tr className="entrena__test-row">
-      <td className="entrena__test-row__name">{alumno.cliente || alumno.nombre || '—'}</td>
+      <td className="entrena__test-row__name">
+        {alumno.cliente || alumno.nombre || '—'}
+        {alumno.is_placeholder && <span className="entrena__manual-tag" title="Alumno manual, sin cuenta vinculada">manual</span>}
+      </td>
       <td className="entrena__test-row__meta">{alumno.dia} · {alumno.horario}</td>
       <td className="entrena__test-row__last">
         {loading ? <span className="entrena__test-loading">…</span>
@@ -162,6 +165,10 @@ export default function EntrenamientosPage() {
   const [total, setTotal]               = useState(0)
   const [loading, setLoading]           = useState(false)
   const [error, setError]               = useState(null)
+  const [showAddManual, setShowAddManual] = useState(false)
+  const [manualForm, setManualForm]     = useState({ nombre: '', dia: '', horario: '', edad: '', turno: '' })
+  const [manualSaving, setManualSaving] = useState(false)
+  const [manualError, setManualError]   = useState(null)
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -202,6 +209,33 @@ export default function EntrenamientosPage() {
   }
   const resetFilters = () => { setFilters(EMPTY_FILTERS); fetchAlumnos(EMPTY_FILTERS) }
 
+  const openAddManual = () => {
+    setManualForm({ nombre: '', dia: filters.dia, horario: filters.horario, edad: filters.edad, turno: filters.turno })
+    setManualError(null)
+    setShowAddManual(true)
+  }
+
+  const submitAddManual = async () => {
+    if (!manualForm.nombre.trim()) { setManualError('Escribe un nombre'); return }
+    setManualSaving(true); setManualError(null)
+    try {
+      const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/alumnos/manual`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify(manualForm),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.message || 'Error al crear el alumno')
+      setShowAddManual(false)
+      fetchAlumnos(filters)
+    } catch (e) {
+      setManualError(e.message || 'Error al crear el alumno')
+    } finally {
+      setManualSaving(false)
+    }
+  }
+
   const diaOptions     = sortDias(distinct(applyClaseFilters(allClases, filters, 'dia'), 'dia'))
   const turnoOptions   = distinct(applyClaseFilters(allClases, filters, 'turno'), 'turno').sort()
   const edadOptions    = distinct(applyClaseFilters(allClases, filters, 'edad'), 'edad').sort()
@@ -225,9 +259,58 @@ export default function EntrenamientosPage() {
   return (
     <div className="entrena">
       <div className="entrena__header">
-        <h1>Entrenamientos</h1>
-        {!loading && <p className="entrena__subtitle">{total} alumno{total !== 1 ? 's' : ''}</p>}
+        <div>
+          <h1>Entrenamientos</h1>
+          {!loading && <p className="entrena__subtitle">{total} alumno{total !== 1 ? 's' : ''}</p>}
+        </div>
+        <button className="entrena__add-manual-btn" onClick={openAddManual}>+ Añadir alumno</button>
       </div>
+
+      {showAddManual && (
+        <div className="entrena__modal-overlay" onClick={() => setShowAddManual(false)}>
+          <div className="entrena__modal" onClick={e => e.stopPropagation()}>
+            <h2>Añadir alumno manual</h2>
+            <p className="entrena__modal-hint">
+              Para alguien que está en clase pero todavía no tiene suscripción (nuevo, pago pendiente...).
+              Cuando se haga socio podrás vincular su historial a su cuenta real.
+            </p>
+            <label>Nombre</label>
+            <input
+              type="text"
+              value={manualForm.nombre}
+              onChange={e => setManualForm(f => ({ ...f, nombre: e.target.value }))}
+              autoFocus
+            />
+            <label>Día</label>
+            <select value={manualForm.dia} onChange={e => setManualForm(f => ({ ...f, dia: e.target.value }))}>
+              <option value="">Sin especificar</option>
+              {diaOptions.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <label>Horario</label>
+            <select value={manualForm.horario} onChange={e => setManualForm(f => ({ ...f, horario: e.target.value }))}>
+              <option value="">Sin especificar</option>
+              {horarioOptions.map(h => <option key={h} value={h}>{h}</option>)}
+            </select>
+            <label>Edad</label>
+            <select value={manualForm.edad} onChange={e => setManualForm(f => ({ ...f, edad: e.target.value }))}>
+              <option value="">Sin especificar</option>
+              {edadOptions.map(e => <option key={e} value={e}>{e}</option>)}
+            </select>
+            <label>Turno</label>
+            <select value={manualForm.turno} onChange={e => setManualForm(f => ({ ...f, turno: e.target.value }))}>
+              <option value="">Sin especificar</option>
+              {turnoOptions.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            {manualError && <p className="entrena__error">{manualError}</p>}
+            <div className="entrena__modal-actions">
+              <button className="entrena__reset" onClick={() => setShowAddManual(false)}>Cancelar</button>
+              <button className="entrena__add-manual-btn" onClick={submitAddManual} disabled={manualSaving}>
+                {manualSaving ? 'Creando...' : 'Crear'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* View mode toggle */}
       <div className="entrena__mode-toggle">
@@ -355,8 +438,8 @@ export default function EntrenamientosPage() {
             </thead>
             <tbody>
               {alumnos
-                .filter(a => a.user_id)
-                .map((a, i) => <TestModeRow key={a.id ?? i} alumno={a} testId={selectedTest} />)
+                .filter(a => a.user_id || a.placeholder_id)
+                .map((a, i) => <TestModeRow key={a.placeholder_id ? `ph-${a.placeholder_id}` : (a.id ?? i)} alumno={a} testId={selectedTest} />)
               }
             </tbody>
           </table>
@@ -377,14 +460,20 @@ export default function EntrenamientosPage() {
             </thead>
             <tbody>
               {alumnos.map((a, i) => {
-                const isSelected = selectedAlumno?.id === a.id
+                const rowKey   = a.placeholder_id ? `ph-${a.placeholder_id}` : (a.id ?? i)
+                const isSelected = a.placeholder_id
+                  ? selectedAlumno?.placeholder_id === a.placeholder_id
+                  : (selectedAlumno?.id === a.id && !selectedAlumno?.placeholder_id)
                 return (
-                  <Fragment key={a.id ?? i}>
+                  <Fragment key={rowKey}>
                     <tr
                       className={`entrena__row${isSelected ? ' entrena__row--active' : ''}`}
                       onClick={() => setSelectedAlumno(isSelected ? null : a)}
                     >
-                      <td>{a.cliente || a.nombre || '—'}</td>
+                      <td>
+                        {a.cliente || a.nombre || '—'}
+                        {a.is_placeholder && <span className="entrena__manual-tag" title="Alumno manual, sin cuenta vinculada">manual</span>}
+                      </td>
                       <td>{FRECUENCIA_LABEL[a.frecuencia] || a.producto || '—'}</td>
                       <td>{a.dia || '—'}</td>
                       <td>{a.horario || '—'}</td>
@@ -395,6 +484,7 @@ export default function EntrenamientosPage() {
                           <TrainingPanel
                             alumno={a}
                             onClose={() => setSelectedAlumno(null)}
+                            onLinked={() => { setSelectedAlumno(null); fetchAlumnos(filters) }}
                           />
                         </td>
                       </tr>

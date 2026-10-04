@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useUserTraining } from '../hooks/useTraining'
+import { useAlumnoTraining } from '../hooks/useTraining'
 import { ZONES, TESTS } from './BodyDiagram'
 import './TrainingPanel.css'
 
@@ -21,9 +21,15 @@ function inputStep(unit) {
   return unit === 'reps' || unit === 'series' ? '1' : '0.5'
 }
 
-export default function TrainingPanel({ alumno, onClose }) {
-  const userId = alumno.user_id
-  const { history, loading, logTraining, updateTraining, reload } = useUserTraining(userId)
+const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
+
+function getAuthHeaders() {
+  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
+  return nonce ? { 'X-WP-Nonce': nonce } : {}
+}
+
+export default function TrainingPanel({ alumno, onClose, onLinked }) {
+  const { history, loading, logTraining, updateTraining, reload } = useAlumnoTraining(alumno)
 
   const [editMode, setEditMode] = useState({})
   const [values, setValues]     = useState({})
@@ -31,6 +37,30 @@ export default function TrainingPanel({ alumno, onClose }) {
   const [saved, setSaved]       = useState({})
   const [errors, setErrors]     = useState({})
   const [showDesc, setShowDesc] = useState({})
+
+  const [linkEmail, setLinkEmail]     = useState('')
+  const [linking, setLinking]         = useState(false)
+  const [linkError, setLinkError]     = useState(null)
+
+  const handleLink = async () => {
+    if (!linkEmail.trim()) { setLinkError('Escribe el email de la cuenta'); return }
+    setLinking(true); setLinkError(null)
+    try {
+      const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/alumnos/manual/${alumno.placeholder_id}/link`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: linkEmail.trim() }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.message || 'Error al vincular')
+      if (onLinked) onLinked()
+    } catch (e) {
+      setLinkError(e.message || 'Error al vincular')
+    } finally {
+      setLinking(false)
+    }
+  }
 
   useEffect(() => {
     const init = {}
@@ -56,7 +86,7 @@ export default function TrainingPanel({ alumno, onClose }) {
       if (last && isThisMonth(last.logged_at)) {
         await updateTraining(last.id, val)
       } else {
-        await logTraining(userId, testId, val)
+        await logTraining(testId, val)
       }
       setSaved(s => ({ ...s, [testId]: true }))
       setEditMode(m => ({ ...m, [testId]: false }))
@@ -78,6 +108,28 @@ export default function TrainingPanel({ alumno, onClose }) {
         </div>
         <button className="training-panel__close" onClick={onClose}>✕</button>
       </div>
+
+      {alumno.is_placeholder && (
+        <div className="training-panel__link-box">
+          <p className="training-panel__link-hint">
+            Alumno manual, sin cuenta todavía. Cuando se haga socio, vincula su email para pasarle este historial.
+          </p>
+          <div className="training-panel__input-row">
+            <input
+              type="email"
+              placeholder="email@ejemplo.com"
+              value={linkEmail}
+              onChange={e => setLinkEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleLink()}
+              className="training-panel__input"
+            />
+            <button className="training-panel__btn" onClick={handleLink} disabled={linking}>
+              {linking ? '…' : 'Vincular'}
+            </button>
+          </div>
+          {linkError && <p className="training-panel__err">{linkError}</p>}
+        </div>
+      )}
 
       {loading ? (
         <p className="training-panel__loading">Cargando historial...</p>

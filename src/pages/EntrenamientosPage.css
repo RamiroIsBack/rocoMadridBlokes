@@ -8,6 +8,98 @@
 
 .entrena__header {
   margin-bottom: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.entrena__add-manual-btn {
+  background: #2a2015;
+  color: #fdf7e6;
+  border: none;
+  padding: 10px 16px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.entrena__add-manual-btn:hover { background: #40331f; }
+.entrena__add-manual-btn:disabled { opacity: 0.6; cursor: default; }
+
+.entrena__manual-tag {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9a5b13;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 3px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
+.entrena__modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.entrena__modal {
+  background: #fdf7e6;
+  border: 1.5px solid #c8bc9a;
+  padding: 24px;
+  max-width: 400px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.entrena__modal h2 {
+  font-family: var(--font-serif);
+  font-size: 1.3rem;
+  margin: 0 0 4px;
+  color: #2a2015;
+}
+.entrena__modal-hint {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+  margin: 0 0 12px;
+}
+.entrena__modal label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-text-secondary);
+}
+.entrena__modal input,
+.entrena__modal select {
+  border: 1.5px solid #c8bc9a;
+  background: #fff;
+  padding: 8px;
+  font-size: 0.9rem;
+  color: #2a2015;
+  font-family: inherit;
+}
+.entrena__modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
 }
 
 .entrena__header h1 {

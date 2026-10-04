@@ -33,6 +33,19 @@
 }
 .training-panel__close:hover { color: #374151; }
 
+.training-panel__link-box {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}
+.training-panel__link-hint {
+  font-size: 0.8rem;
+  color: #9a5b13;
+  margin: 0 0 8px;
+}
+
 .training-panel__loading {
   color: #9ca3af;
   font-size: 0.9rem;
