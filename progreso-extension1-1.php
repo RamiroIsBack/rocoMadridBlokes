@@ -1612,6 +1612,8 @@ function progreso_delete_alumno_manual($request) {
     if ($row['status'] !== 'pending') {
         return new WP_Error('already_linked', 'Ya está vinculado a un usuario, no se puede borrar.', array('status' => 400));
     }
+    progreso_ensure_training_table();
+    $wpdb->delete(progreso_training_table(), array('placeholder_id' => $id), array('%d'));
     $wpdb->delete(blokes_placeholder_table(), array('id' => $id), array('%d'));
     return rest_ensure_response(array('success' => true));
 }

@@ -215,6 +215,20 @@ export default function EntrenamientosPage() {
     setShowAddManual(true)
   }
 
+  // Same cascade as handleFilterChange, but scoped to the modal's own
+  // selections — otherwise it's easy to pick a día/horario combo that
+  // doesn't match any real class (e.g. "Jueves" + the "Martes-Jueves" slot).
+  const handleManualFieldChange = (key, value) => {
+    let next = { ...manualForm, [key]: value }
+    const cascadeKeys = ['dia', 'turno', 'edad', 'horario']
+    cascadeKeys.forEach(field => {
+      if (!next[field] || field === key) return
+      const available = distinct(applyClaseFilters(allClases, next, field), field)
+      if (!available.includes(next[field])) next = { ...next, [field]: '' }
+    })
+    setManualForm(next)
+  }
+
   const submitAddManual = async () => {
     if (!manualForm.nombre.trim()) { setManualError('Escribe un nombre'); return }
     setManualSaving(true); setManualError(null)
@@ -240,6 +254,11 @@ export default function EntrenamientosPage() {
   const turnoOptions   = distinct(applyClaseFilters(allClases, filters, 'turno'), 'turno').sort()
   const edadOptions    = distinct(applyClaseFilters(allClases, filters, 'edad'), 'edad').sort()
   const horarioOptions = distinct(applyClaseFilters(allClases, filters, 'horario'), 'horario').sort()
+
+  const manualDiaOptions     = sortDias(distinct(applyClaseFilters(allClases, manualForm, 'dia'), 'dia'))
+  const manualTurnoOptions   = distinct(applyClaseFilters(allClases, manualForm, 'turno'), 'turno').sort()
+  const manualEdadOptions    = distinct(applyClaseFilters(allClases, manualForm, 'edad'), 'edad').sort()
+  const manualHorarioOptions = distinct(applyClaseFilters(allClases, manualForm, 'horario'), 'horario').sort()
 
   if (!isAuthenticated) {
     const sd = window.blokesSiteData || {}
@@ -282,24 +301,24 @@ export default function EntrenamientosPage() {
               autoFocus
             />
             <label>Día</label>
-            <select value={manualForm.dia} onChange={e => setManualForm(f => ({ ...f, dia: e.target.value }))}>
+            <select value={manualForm.dia} onChange={e => handleManualFieldChange('dia', e.target.value)}>
               <option value="">Sin especificar</option>
-              {diaOptions.map(d => <option key={d} value={d}>{d}</option>)}
+              {manualDiaOptions.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
             <label>Horario</label>
-            <select value={manualForm.horario} onChange={e => setManualForm(f => ({ ...f, horario: e.target.value }))}>
+            <select value={manualForm.horario} onChange={e => handleManualFieldChange('horario', e.target.value)}>
               <option value="">Sin especificar</option>
-              {horarioOptions.map(h => <option key={h} value={h}>{h}</option>)}
+              {manualHorarioOptions.map(h => <option key={h} value={h}>{h}</option>)}
             </select>
             <label>Edad</label>
-            <select value={manualForm.edad} onChange={e => setManualForm(f => ({ ...f, edad: e.target.value }))}>
+            <select value={manualForm.edad} onChange={e => handleManualFieldChange('edad', e.target.value)}>
               <option value="">Sin especificar</option>
-              {edadOptions.map(e => <option key={e} value={e}>{e}</option>)}
+              {manualEdadOptions.map(e => <option key={e} value={e}>{e}</option>)}
             </select>
             <label>Turno</label>
-            <select value={manualForm.turno} onChange={e => setManualForm(f => ({ ...f, turno: e.target.value }))}>
+            <select value={manualForm.turno} onChange={e => handleManualFieldChange('turno', e.target.value)}>
               <option value="">Sin especificar</option>
-              {turnoOptions.map(t => <option key={t} value={t}>{t}</option>)}
+              {manualTurnoOptions.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             {manualError && <p className="entrena__error">{manualError}</p>}
             <div className="entrena__modal-actions">
@@ -485,6 +504,7 @@ export default function EntrenamientosPage() {
                             alumno={a}
                             onClose={() => setSelectedAlumno(null)}
                             onLinked={() => { setSelectedAlumno(null); fetchAlumnos(filters) }}
+                            onDeleted={() => { setSelectedAlumno(null); fetchAlumnos(filters) }}
                           />
                         </td>
                       </tr>

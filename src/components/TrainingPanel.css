@@ -45,6 +45,17 @@
   color: #9a5b13;
   margin: 0 0 8px;
 }
+.training-panel__delete-btn {
+  background: none;
+  border: none;
+  color: #b91c1c;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 8px 0 0;
+}
+.training-panel__delete-btn:disabled { opacity: 0.6; cursor: default; }
 
 .training-panel__loading {
   color: #9ca3af;

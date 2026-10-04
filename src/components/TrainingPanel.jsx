@@ -28,7 +28,7 @@ function getAuthHeaders() {
   return nonce ? { 'X-WP-Nonce': nonce } : {}
 }
 
-export default function TrainingPanel({ alumno, onClose, onLinked }) {
+export default function TrainingPanel({ alumno, onClose, onLinked, onDeleted }) {
   const { history, loading, logTraining, updateTraining, reload } = useAlumnoTraining(alumno)
 
   const [editMode, setEditMode] = useState({})
@@ -41,6 +41,7 @@ export default function TrainingPanel({ alumno, onClose, onLinked }) {
   const [linkEmail, setLinkEmail]     = useState('')
   const [linking, setLinking]         = useState(false)
   const [linkError, setLinkError]     = useState(null)
+  const [deleting, setDeleting]       = useState(false)
 
   const handleLink = async () => {
     if (!linkEmail.trim()) { setLinkError('Escribe el email de la cuenta'); return }
@@ -59,6 +60,25 @@ export default function TrainingPanel({ alumno, onClose, onLinked }) {
       setLinkError(e.message || 'Error al vincular')
     } finally {
       setLinking(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!window.confirm(`¿Borrar a "${alumno.cliente}"? Se perderán sus mediciones.`)) return
+    setDeleting(true); setLinkError(null)
+    try {
+      const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/alumnos/manual/${alumno.placeholder_id}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: getAuthHeaders(),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.message || 'Error al borrar')
+      if (onDeleted) onDeleted()
+    } catch (e) {
+      setLinkError(e.message || 'Error al borrar')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -128,6 +148,9 @@ export default function TrainingPanel({ alumno, onClose, onLinked }) {
             </button>
           </div>
           {linkError && <p className="training-panel__err">{linkError}</p>}
+          <button className="training-panel__delete-btn" onClick={handleDelete} disabled={deleting}>
+            {deleting ? 'Borrando...' : 'Borrar alumno'}
+          </button>
         </div>
       )}
 
