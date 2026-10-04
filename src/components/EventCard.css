@@ -123,23 +123,23 @@
   background: #16a34a;
 }
 
-/* Primer TOP del gym */
+/* Primer TOP del gym — batch redondo, el nombre sale en hover/tap */
 .event-card .event-card__fa-badge {
     position: absolute;
     bottom: 8px;
     right: 12px;
     z-index: 20;
-    max-width: calc(100% - 24px);
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: #0f1a0f;
     color: #86efac;
-    font-size: 9px;
-    font-weight: 900;
-    letter-spacing: 0.08em;
-    padding: 3px 9px;
-    border-radius: 2px;
-    text-align: right;
+    font-size: 13px;
+    border-radius: 50%;
     box-shadow: 0 0 6px rgba(134, 239, 172, 0.5), 0 0 14px rgba(134, 239, 172, 0.2);
-    pointer-events: none;
+    cursor: pointer;
     user-select: none;
 }
 .event-card .event-card__fa-badge--mine {
@@ -151,6 +151,25 @@
 @keyframes fa-pulse {
     0%, 100% { box-shadow: 0 0 8px rgba(74, 222, 128, 0.7), 0 0 20px rgba(74, 222, 128, 0.3); }
     50%       { box-shadow: 0 0 12px rgba(74, 222, 128, 1),   0 0 28px rgba(74, 222, 128, 0.5); }
+}
+
+/* Popover con el nombre, en portal porque .event-card:hover tiene transform
+   (rompe position:fixed de los descendientes si no se saca al body) */
+.event-card__fa-popover {
+    position: fixed;
+    z-index: 9999;
+    max-width: 190px;
+    background: #0f1a0f;
+    color: #86efac;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    padding: 6px 10px;
+    border-radius: 4px;
+    text-align: right;
+    box-shadow: 0 0 6px rgba(134, 239, 172, 0.5), 0 0 14px rgba(134, 239, 172, 0.2);
+    pointer-events: none;
+    user-select: none;
 }
 
 /* Hall of Fame */

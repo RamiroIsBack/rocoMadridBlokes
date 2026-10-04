@@ -68,6 +68,10 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
   const fetchedRef = useRef(false)
   const badgeRef = useRef(null)
 
+  const [showFaInfo, setShowFaInfo] = useState(false)
+  const [faPopoverPos, setFaPopoverPos] = useState(null)
+  const faBadgeRef = useRef(null)
+
   const loadCompleters = () => {
     if (fetchedRef.current || loadingCompleters) return
     fetchedRef.current = true
@@ -101,6 +105,20 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
     const top = fitsBelow ? rect.bottom + 6 : Math.max(rect.top - 6 - POPOVER_EST_HEIGHT, 8)
     setPopoverPos({ top, left })
   }, [showCompleters])
+
+  useLayoutEffect(() => {
+    if (!showFaInfo || !faBadgeRef.current) return
+    const POPOVER_WIDTH = 190
+    const POPOVER_EST_HEIGHT = 50
+    const rect = faBadgeRef.current.getBoundingClientRect()
+    const left = Math.min(
+      Math.max(rect.right - POPOVER_WIDTH, 8),
+      window.innerWidth - POPOVER_WIDTH - 8
+    )
+    const fitsBelow = rect.bottom + 6 + POPOVER_EST_HEIGHT <= window.innerHeight
+    const top = fitsBelow ? rect.bottom + 6 : Math.max(rect.top - 6 - POPOVER_EST_HEIGHT, 8)
+    setFaPopoverPos({ top, left })
+  }, [showFaInfo])
 
   const handleDoneClick = () => {
     if (!isLoggedIn) {
@@ -229,8 +247,25 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
         </div>
       )}
       {firstAscent?.name && (
-        <div className={`event-card__fa-badge${isMyFirstAscent ? ' event-card__fa-badge--mine' : ''}`} title="Primer TOP del gym">
-          🏴 {firstAscent.name} — ¡primero en hacer top!
+        <div
+          ref={faBadgeRef}
+          className={`event-card__fa-badge${isMyFirstAscent ? ' event-card__fa-badge--mine' : ''}`}
+          title="Primer TOP del gym"
+          onMouseEnter={() => setShowFaInfo(true)}
+          onMouseLeave={() => setShowFaInfo(false)}
+          onClick={() => setShowFaInfo(v => !v)}
+        >
+          🏴
+          {showFaInfo && faPopoverPos && createPortal(
+            <div
+              className="event-card__fa-popover"
+              style={{ top: faPopoverPos.top, left: faPopoverPos.left }}
+              onClick={e => e.stopPropagation()}
+            >
+              🏴 {firstAscent.name} — ¡primero en hacer top!
+            </div>,
+            document.body
+          )}
         </div>
       )}
       <div className="event-card__body">

@@ -223,7 +223,7 @@ add_action('wp_head', function() {
     $subscription = null;
     if (is_user_logged_in() && class_exists('RocoMadrid_SF_Stats')) {
         $me  = get_current_user_id();
-        $all = RocoMadrid_SF_Stats::get_all_subscription_data();
+        $all = blokes_get_all_subscription_data();
         $active_sub = null;
         $any_sub    = null;
         foreach ($all as $sub) {
@@ -1152,6 +1152,175 @@ function progreso_frecuencia_to_producto($frecuencia) {
     return '';
 }
 
+// ============================================================
+//  Suscripciones "pending-cancel" — leídas directamente de WooCommerce
+// ============================================================
+// RocoMadrid_SF_Stats::get_all_subscription_data() (plugin de terceros,
+// rocomadrid-step-form, no es nuestro y no lo tocamos) solo pide a WC los
+// estados active/pending/on-hold/cancelled. "pending-cancel" (el cliente
+// ha cancelado pero sigue con acceso hasta que acabe el periodo ya
+// pagado) se queda fuera por completo — ni se trae, así que esos alumnos
+// desaparecen de todas partes. Lo compensamos leyendo esas suscripciones
+// aparte, directamente de WooCommerce Subscriptions, con un parseo
+// equivalente al del plugin de terceros (normalizar_dia/horario/edad son
+// privados ahí, así que se replican aquí).
+
+function blokes_normalizar_dia($dia) {
+    if (empty($dia)) return '';
+    $map = array(
+        'lunes-miercoles' => 'Lunes-Miércoles', 'lunes-miércoles' => 'Lunes-Miércoles',
+        'monday-wednesday' => 'Lunes-Miércoles', 'monday + wednesday' => 'Lunes-Miércoles', 'l-x' => 'Lunes-Miércoles',
+        'martes-jueves' => 'Martes-Jueves', 'martes-juves' => 'Martes-Jueves',
+        'tuesday-thursday' => 'Martes-Jueves', 'tuesday + thursday' => 'Martes-Jueves', 'm-j' => 'Martes-Jueves',
+        'lunes' => 'Lunes', 'monday' => 'Lunes',
+        'martes' => 'Martes', 'tuesday' => 'Martes',
+        'miercoles' => 'Miércoles', 'miércoles' => 'Miércoles', 'wednesday' => 'Miércoles',
+        'jueves' => 'Jueves', 'thursday' => 'Jueves',
+        'viernes' => 'Viernes', 'friday' => 'Viernes',
+        'sabado' => 'Sábado', 'sábado' => 'Sábado', 'saturday' => 'Sábado',
+    );
+    $dia_lower = strtolower($dia);
+    return isset($map[$dia_lower]) ? $map[$dia_lower] : ucfirst($dia);
+}
+
+function blokes_normalizar_horario($horario) {
+    if (empty($horario)) return '';
+    if (preg_match('/^\d{2}:\d{2}/', $horario)) return $horario;
+    if (preg_match('/^(\d{2})(\d{2})-(\d{2})(\d{2})$/', $horario, $m)) {
+        return $m[1] . ':' . $m[2] . '-' . $m[3] . ':' . $m[4];
+    }
+    return $horario;
+}
+
+function blokes_normalizar_edad($edad) {
+    if (empty($edad)) return 'Adultos';
+    $map = array(
+        'adultos' => 'Adultos', 'adulto' => 'Adultos', 'adults' => 'Adultos',
+        'menores (6-12 años)' => 'Menores (6-12 años)', 'menores' => 'Menores (6-12 años)',
+        'infantil' => 'Menores (6-12 años)', 'children' => 'Menores (6-12 años)',
+        'children (6-12 years)' => 'Menores (6-12 años)',
+        'adolescentes (12-18 años)' => 'Adolescentes (12-18 años)', 'adolescentes' => 'Adolescentes (12-18 años)',
+        'adolescente' => 'Adolescentes (12-18 años)', 'teenagers' => 'Adolescentes (12-18 años)',
+        'teenagers (12-18 years)' => 'Adolescentes (12-18 años)',
+    );
+    $edad_lower = strtolower($edad);
+    return isset($map[$edad_lower]) ? $map[$edad_lower] : ucfirst($edad);
+}
+
+function blokes_get_pending_cancel_alumnos() {
+    if (!function_exists('wcs_get_subscriptions') || !class_exists('RocoMadrid_Step_Form')) return array();
+
+    $product_dias_sueltos = RocoMadrid_Step_Form::product_dias_sueltos_id();
+    $product_tarifas      = RocoMadrid_Step_Form::product_tarifas_id();
+    $product_pilates      = intval(get_option('rocomadrid_product_pilates', 0));
+    $product_yoga         = intval(get_option('rocomadrid_product_yoga', 0));
+    $product_ids = array_values(array_filter(array($product_dias_sueltos, $product_tarifas, $product_pilates, $product_yoga)));
+
+    $subscriptions = wcs_get_subscriptions(array(
+        'subscriptions_per_page' => -1,
+        'subscription_status'    => array('pending-cancel'),
+    ));
+
+    $data = array();
+    foreach ($subscriptions as $subscription) {
+        $items = $subscription->get_items();
+        $es_rocomadrid = false;
+        $producto_id = 0; $producto_nombre = ''; $dia = ''; $horario = ''; $edad = ''; $plan = 'monthly';
+
+        foreach ($items as $item) {
+            $pid = $item->get_product_id();
+            if (!in_array($pid, $product_ids)) continue;
+            $es_rocomadrid = true;
+            $producto_id = $pid;
+            $es_dias_sueltos = ($pid == $product_dias_sueltos);
+            $producto_nombre = ($pid === $product_pilates) ? 'Pilates' : (($pid === $product_yoga) ? 'Yoga' : ($es_dias_sueltos ? 'Single Days' : 'Classes'));
+            $es_extra = ($pid === $product_pilates || $pid === $product_yoga);
+
+            $step_selections = $es_extra ? array() : $item->get_meta('_step_form_selections', true);
+            if (!empty($step_selections) && is_array($step_selections)) {
+                if ($es_dias_sueltos) {
+                    $dia     = $step_selections['pa_dia-suelto'] ?? '';
+                    $horario = $step_selections['pa_horario'] ?? ($step_selections['pa_horario-dias-sueltos'] ?? '');
+                    $edad    = $step_selections['edad_addon'] ?? '';
+                } else {
+                    $dia     = $step_selections['pa_dias'] ?? '';
+                    $horario = $step_selections['pa_horario'] ?? '';
+                    $edad    = $step_selections['pa_edad'] ?? '';
+                }
+                if (isset($step_selections['plan_pago'])) $plan = strtolower($step_selections['plan_pago']);
+            }
+
+            if (empty($dia) || empty($horario)) {
+                $variation = wc_get_product($item->get_variation_id());
+                if ($variation) {
+                    foreach ($variation->get_variation_attributes() as $key => $value) {
+                        $key_lower = strtolower($key);
+                        if (empty($dia) && (strpos($key_lower, 'dia-suelto') !== false || strpos($key_lower, 'pa_dias') !== false || substr($key_lower, -4) === 'dias')) {
+                            $dia = $value;
+                        }
+                        if (empty($horario) && strpos($key_lower, 'horario') !== false) $horario = $value;
+                        if (empty($edad) && strpos($key_lower, 'edad') !== false) $edad = $value;
+                    }
+                }
+            }
+
+            foreach ($item->get_meta_data() as $meta) {
+                $key = strtolower($meta->key);
+                if (strpos($key, 'plan') !== false && $plan === 'monthly') $plan = strtolower($meta->value);
+                if ($key === 'edad del alumno' && empty($edad)) $edad = $meta->value;
+            }
+            break;
+        }
+
+        if (!$es_rocomadrid) continue;
+
+        $dia_display     = blokes_normalizar_dia($dia);
+        $horario_display = blokes_normalizar_horario($horario);
+        $edad_display    = blokes_normalizar_edad($edad);
+
+        $turno = 'Afternoon';
+        if (!empty($horario)) {
+            preg_match('/^(\d{2})(\d{2})?/', preg_replace('/[^0-9]/', '', $horario), $matches);
+            if (!empty($matches[1]) && intval($matches[1]) < 16) $turno = 'Morning';
+        }
+
+        $customer   = $subscription->get_user();
+        $start_date = $subscription->get_date('date_created');
+
+        $data[] = array(
+            'id'           => $subscription->get_id(),
+            'status'       => 'active',
+            'status_raw'   => 'pending-cancel',
+            'cliente'      => $customer ? $customer->display_name : 'N/A',
+            'email'        => $customer ? $customer->user_email : 'N/A',
+            'telefono'     => $subscription->get_billing_phone(),
+            'producto'     => $producto_nombre,
+            'producto_id'  => $producto_id,
+            'dia'          => $dia_display,
+            'horario'      => $horario_display,
+            'edad'         => $edad_display ?: 'Adultos',
+            'turno'        => $turno,
+            'plan'         => $plan,
+            'total'        => floatval($subscription->get_total()),
+            'period'       => $subscription->get_billing_period(),
+            'interval'     => $subscription->get_billing_interval(),
+            'fecha_inicio' => $start_date ? date_i18n('d/m/Y', strtotime($start_date)) : 'N/A',
+        );
+    }
+    return $data;
+}
+
+/**
+ * Wrapper sobre RocoMadrid_SF_Stats::get_all_subscription_data() (plugin de
+ * terceros) que además incluye las suscripciones pending-cancel, leídas
+ * directamente de WooCommerce. Usar esta función en vez de llamar al plugin
+ * de terceros directamente en todo lo nuevo que toquemos.
+ */
+function blokes_get_all_subscription_data() {
+    $base = class_exists('RocoMadrid_SF_Stats') ? RocoMadrid_SF_Stats::get_all_subscription_data() : array();
+    return array_merge($base, blokes_get_pending_cancel_alumnos());
+}
+
 function progreso_get_alumnos($request) {
     if (!class_exists('RocoMadrid_SF_Stats')) {
         return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats not available. Call this endpoint on the club subsite.', array('status' => 503));
@@ -1168,7 +1337,7 @@ function progreso_get_alumnos($request) {
         'status'   => $request->get_param('status') ?: 'active',
     );
 
-    $all_data = RocoMadrid_SF_Stats::get_all_subscription_data();
+    $all_data = blokes_get_all_subscription_data();
 
     $filtered = array_values(array_filter($all_data, function($sub) use ($filtros) {
         if ($filtros['status'] !== 'all' && $sub['status'] !== $filtros['status']) return false;
@@ -1219,7 +1388,7 @@ function progreso_get_clases($request) {
     // Build subscriber counts per class (dia|horario|edad) from active subscriptions
     $sub_counts = array();
     if (class_exists('RocoMadrid_SF_Stats')) {
-        foreach (RocoMadrid_SF_Stats::get_all_subscription_data() as $sub) {
+        foreach (blokes_get_all_subscription_data() as $sub) {
             if ($sub['status'] !== 'active') continue;
             $key = $sub['dia'] . '|' . $sub['horario'] . '|' . ($sub['edad'] ?: 'Adultos');
             $sub_counts[$key] = isset($sub_counts[$key]) ? $sub_counts[$key] + 1 : 1;
@@ -1574,7 +1743,7 @@ function progreso_get_professor_student_ids($schedule) {
         $slot_times[$slot['day']][] = $slot['time'];
     }
     $user_ids = array();
-    foreach (RocoMadrid_SF_Stats::get_all_subscription_data() as $sub) {
+    foreach (blokes_get_all_subscription_data() as $sub) {
         if ($sub['status'] !== 'active') continue;
         $sub_days  = array_map(function($d) use ($day_map) {
             return $day_map[mb_strtolower(trim($d))] ?? mb_strtolower(trim($d));
@@ -1816,7 +1985,7 @@ function progreso_get_class_progress() {
         return rest_ensure_response(array('data' => array('class' => null, 'members' => array())));
     }
 
-    $all = RocoMadrid_SF_Stats::get_all_subscription_data();
+    $all = blokes_get_all_subscription_data();
 
     // Find my active subscription to determine my class
     $my_class = null;
@@ -2142,7 +2311,7 @@ function superadmin_classes($request) {
     $classes = array();
 
     if (class_exists('RocoMadrid_SF_Stats')) {
-        $all = RocoMadrid_SF_Stats::get_all_subscription_data();
+        $all = blokes_get_all_subscription_data();
         foreach ($all as $sub) {
             $edad      = sanitize_text_field($sub['edad'] ?? '') ?: 'Adultos';
             $class_key = ($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '') . '|' . $edad;
