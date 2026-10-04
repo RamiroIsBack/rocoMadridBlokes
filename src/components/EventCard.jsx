@@ -259,8 +259,8 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
           ref={faBadgeRef}
           className={`event-card__fa-badge${isMyFirstAscent ? ' event-card__fa-badge--mine' : ''}`}
           title="Primer TOP del gym"
-          onMouseEnter={() => setShowFaInfo(true)}
-          onMouseLeave={() => setShowFaInfo(false)}
+          onPointerEnter={e => { if (e.pointerType === 'mouse') setShowFaInfo(true) }}
+          onPointerLeave={e => { if (e.pointerType === 'mouse') setShowFaInfo(false) }}
           onClick={e => { e.stopPropagation(); setShowFaInfo(true) }}
         >
           🏴
