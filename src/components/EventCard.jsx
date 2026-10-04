@@ -120,6 +120,14 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
     setFaPopoverPos({ top, left })
   }, [showFaInfo])
 
+  // On touch devices there is no mouseleave, so close on any tap elsewhere.
+  useLayoutEffect(() => {
+    if (!showFaInfo) return
+    const closeIfOutside = () => setShowFaInfo(false)
+    document.addEventListener('click', closeIfOutside)
+    return () => document.removeEventListener('click', closeIfOutside)
+  }, [showFaInfo])
+
   const handleDoneClick = () => {
     if (!isLoggedIn) {
       window.location.href = loginUrl
@@ -253,7 +261,7 @@ export default function EventCard({ card, isNew = false, isHof = false, isDone =
           title="Primer TOP del gym"
           onMouseEnter={() => setShowFaInfo(true)}
           onMouseLeave={() => setShowFaInfo(false)}
-          onClick={() => setShowFaInfo(v => !v)}
+          onClick={e => { e.stopPropagation(); setShowFaInfo(true) }}
         >
           🏴
           {showFaInfo && faPopoverPos && createPortal(
