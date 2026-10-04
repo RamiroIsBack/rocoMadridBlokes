@@ -1594,14 +1594,29 @@ function progreso_create_alumno_manual($request) {
     if ($nombre === '') {
         return new WP_Error('invalid_data', 'El nombre es obligatorio.', array('status' => 400));
     }
+    $horario = sanitize_text_field((string) $request->get_param('horario'));
+    $turno   = sanitize_text_field((string) $request->get_param('turno'));
+    $edad    = sanitize_text_field((string) $request->get_param('edad'));
+
+    // Turno is derivable from horario — don't make it a second manual field
+    // the profesor has to remember to set (a blank turno silently fails to
+    // match the Turno filter, which is how an alumno "disappears"). Edad has
+    // no reliable default except the overwhelming common case.
+    if ($turno === '' && $horario !== '') {
+        $afternoon_hour = class_exists('RocoMadrid_SF_Settings') ? intval(RocoMadrid_SF_Settings::get_afternoon_hour()) : 16;
+        $hora = intval(substr($horario, 0, 2));
+        $turno = ($hora < $afternoon_hour) ? 'Morning' : 'Afternoon';
+    }
+    if ($edad === '') $edad = 'Adultos';
+
     global $wpdb;
     blokes_ensure_placeholder_table();
     $wpdb->insert(blokes_placeholder_table(), array(
         'nombre'     => sanitize_text_field($nombre),
         'dia'        => sanitize_text_field((string) $request->get_param('dia')),
-        'horario'    => sanitize_text_field((string) $request->get_param('horario')),
-        'edad'       => sanitize_text_field((string) $request->get_param('edad')),
-        'turno'      => sanitize_text_field((string) $request->get_param('turno')),
+        'horario'    => $horario,
+        'edad'       => $edad,
+        'turno'      => $turno,
         'status'     => 'pending',
         'created_by' => get_current_user_id(),
         'created_at' => current_time('mysql'),
