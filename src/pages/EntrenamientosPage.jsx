@@ -11,7 +11,7 @@ const EMPTY_FILTERS = { frecuencia: '', dia: '', turno: '', edad: '', horario: '
 const FRECUENCIA_LABEL = { single: '1 día/semana', classes: '2 días/semana' }
 const ORDEN_DIAS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Lunes-Miércoles','Martes-Jueves']
 
-const TESTS_LIST = Object.values(ZONES).flatMap(z => z.tests)
+const TESTS_LIST = Object.values(ZONES).flatMap(z => z.tests).filter(tid => TEST_MAP[tid]?.visible !== false)
 
 function getAuthHeaders() {
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
@@ -159,11 +159,13 @@ function DefinicionesList() {
             {zone.tests.map(tid => {
               const t = TEST_MAP[tid]
               if (!t) return null
+              const hidden = t.visible === false
               return (
-                <div key={tid} className="entrena__defs-item">
+                <div key={tid} className={`entrena__defs-item${hidden ? ' entrena__defs-item--hidden' : ''}`}>
                   <div className="entrena__defs-item__head">
                     <span className="entrena__defs-item__name">{t.label}</span>
                     <span className="entrena__defs-item__unit">{t.unit}</span>
+                    {hidden && <span className="entrena__defs-item__soon">valorar para próximamente</span>}
                   </div>
                   <p className="entrena__defs-item__desc">{t.desc || 'Sin descripción todavía.'}</p>
                 </div>

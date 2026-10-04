@@ -161,7 +161,7 @@ export default function TrainingPanel({ alumno, onClose, onLinked, onDeleted }) 
           <div key={zoneKey} className="training-panel__zone">
             <p className="training-panel__zone-title" style={{ color: zone.color }}>{zone.label}</p>
             <div className="training-panel__grid">
-              {zone.tests.map(id => {
+              {zone.tests.filter(id => TESTS[id]?.visible !== false).map(id => {
                 const test      = TESTS[id]
                 const entries   = history[id] || []
                 const last      = entries[entries.length - 1]

@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
 import { useOutletContext } from 'react-router-dom'
-import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
+import BodyDiagram, { ZONES, TESTS, visibleZoneTests } from '../components/BodyDiagram'
 import UserAvatar from '../components/UserAvatar'
 import './MiClaseTab.css'
 import '../components/GatePreview.css'
@@ -67,7 +67,7 @@ const RATING_ICONS = [
 export default function MiClaseTab() {
   const { isLoggedIn, loginUrl, classData } = useOutletContext()
   const [activeZone, setActiveZone] = useState('lower')
-  const [activeTest, setActiveTest] = useState(2)
+  const [activeTest, setActiveTest] = useState(10)
   const [animated, setAnimated]     = useState(false)
   const [testInfoId, setTestInfoId] = useState(null)
   const data    = classData
@@ -225,7 +225,7 @@ export default function MiClaseTab() {
             activeZone={activeZone}
             onSelectZone={zone => {
               setActiveZone(zone)
-              setActiveTest(ZONES[zone].tests[0])
+              setActiveTest(visibleZoneTests(zone)[0])
             }}
           />
           <div className="training-select-row">
@@ -234,7 +234,7 @@ export default function MiClaseTab() {
               onChange={e => setActiveTest(Number(e.target.value))}
               className="training-test-select"
             >
-              {ZONES[activeZone].tests.map(tid => (
+              {visibleZoneTests(activeZone).map(tid => (
                 <option key={tid} value={tid}>{TESTS[tid].label} ({TESTS[tid].unit})</option>
               ))}
             </select>

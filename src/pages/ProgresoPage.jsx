@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useWordPressPosts } from '../hooks/useWordPressPosts'
 import { useTrainingSummary } from '../hooks/useTraining'
-import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
+import BodyDiagram, { ZONES, TESTS, visibleZoneTests } from '../components/BodyDiagram'
 import TrainingChart, { ProgressGauge } from '../components/TrainingChart'
 import EventCard from '../components/EventCard'
 import UserAvatar from '../components/UserAvatar'
@@ -81,7 +81,7 @@ export default function ProgresoPage() {
   const trainingSummary = useTrainingSummary()
   const comunidadLeagues = useComunidadLeagues()
   const [activeZone, setActiveZone] = useState('lower')
-  const [activeTest, setActiveTest] = useState(2)
+  const [activeTest, setActiveTest] = useState(10)
   const [testInfoId, setTestInfoId] = useState(null)
   const [colorTab, setColorTab] = useState('active')
   const [colorMonth, setColorMonth] = useState(null)
@@ -164,7 +164,7 @@ export default function ProgresoPage() {
             activeZone={activeZone}
             onSelectZone={(zone) => {
               setActiveZone(zone)
-              setActiveTest(ZONES[zone].tests[0])
+              setActiveTest(visibleZoneTests(zone)[0])
             }}
           />
           <div className="training-select-row">
@@ -173,7 +173,7 @@ export default function ProgresoPage() {
               onChange={e => setActiveTest(Number(e.target.value))}
               className="training-test-select"
             >
-              {ZONES[activeZone].tests.map(tid => (
+              {visibleZoneTests(activeZone).map(tid => (
                 <option key={tid} value={tid}>{TESTS[tid].label} ({TESTS[tid].unit})</option>
               ))}
             </select>

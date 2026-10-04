@@ -464,11 +464,18 @@
   border-radius: 8px;
   padding: 12px 14px;
 }
+.entrena__defs-item--hidden {
+  background: #f4f2eb;
+  border-color: #e5ddc8;
+  filter: grayscale(0.6);
+  opacity: 0.65;
+}
 .entrena__defs-item__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px 8px;
   margin-bottom: 6px;
 }
 .entrena__defs-item__name {
@@ -482,6 +489,14 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--color-text-secondary);
+}
+.entrena__defs-item__soon {
+  flex-basis: 100%;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9a5b13;
 }
 .entrena__defs-item__desc {
   margin: 0;

@@ -10,9 +10,12 @@ function buildFromConfig() {
   }
   const testsMap = {}
   tests.forEach(t => {
-    if (t.visible === false) return
+    // Kept in ZONES/TESTS even when hidden — Definiciones still lists them
+    // (grayed out). Anything that lets you actually SELECT/measure a test
+    // (the "Por test" pills, a per-alumno measurement grid) must filter on
+    // `visible` itself, since this map is the one shared source for both.
     if (zones[t.zone]) zones[t.zone].tests.push(t.id)
-    testsMap[t.id] = { zone: t.zone, label: t.name, unit: t.unit, desc: t.desc || '' }
+    testsMap[t.id] = { zone: t.zone, label: t.name, unit: t.unit, desc: t.desc || '', visible: t.visible !== false }
   })
   return { zones, testsMap }
 }
@@ -20,6 +23,13 @@ function buildFromConfig() {
 const { zones: ZONES_INITIAL, testsMap: TESTS_INITIAL } = buildFromConfig()
 export let ZONES = ZONES_INITIAL
 export let TESTS = TESTS_INITIAL
+
+// Tests kept out of active use (visible:false) still live in ZONES/TESTS so
+// Definiciones can list them grayed out — anywhere a test is actually
+// selectable (a zone's test picker) should use this instead of ZONES[zone].tests.
+export function visibleZoneTests(zoneKey) {
+  return (ZONES[zoneKey]?.tests || []).filter(id => TESTS[id]?.visible !== false)
+}
 
 window.addEventListener('blokes:tests-updated', () => {
   const { zones, testsMap } = buildFromConfig()

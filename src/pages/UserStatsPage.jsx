@@ -6,7 +6,7 @@ import { useWordPressPosts } from '../hooks/useWordPressPosts'
 import { useUserTraining, useTrainingSummary } from '../hooks/useTraining'
 import { computeAchievements, computeClassmateAchievements } from '../hooks/useAchievements'
 import { useLeague } from '../hooks/useLeague'
-import BodyDiagram, { ZONES, TESTS } from '../components/BodyDiagram'
+import BodyDiagram, { ZONES, TESTS, visibleZoneTests } from '../components/BodyDiagram'
 import TrainingChart, { ProgressGauge } from '../components/TrainingChart'
 import Achievements from '../components/Achievements'
 import UserAvatar from '../components/UserAvatar'
@@ -69,7 +69,7 @@ export default function UserStatsPage() {
   const { history: trainingHistory } = useUserTraining(isLoggedIn ? userId : null)
   const trainingSummary = useTrainingSummary()
   const [activeZone, setActiveZone] = useState('lower')
-  const [activeTest, setActiveTest] = useState(2)
+  const [activeTest, setActiveTest] = useState(10)
   const [testInfoId, setTestInfoId] = useState(null)
 
   const [classNotifs, setClassNotifs] = useState([])
@@ -413,7 +413,7 @@ export default function UserStatsPage() {
               activeZone={activeZone}
               onSelectZone={(zone) => {
                 setActiveZone(zone)
-                setActiveTest(ZONES[zone].tests[0])
+                setActiveTest(visibleZoneTests(zone)[0])
               }}
             />
             <div className="training-select-row">
@@ -422,7 +422,7 @@ export default function UserStatsPage() {
                 onChange={e => setActiveTest(Number(e.target.value))}
                 className="training-test-select"
               >
-                {ZONES[activeZone].tests.map(tid => (
+                {visibleZoneTests(activeZone).map(tid => (
                   <option key={tid} value={tid}>{TESTS[tid].label} ({TESTS[tid].unit})</option>
                 ))}
               </select>
