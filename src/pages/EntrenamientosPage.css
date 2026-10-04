@@ -53,6 +53,21 @@
 }
 .entrena__add-manual-btn:disabled { opacity: 0.6; cursor: default; }
 
+.entrena__active-tag {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #166534;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 3px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
 .entrena__manual-tag {
   display: inline-block;
   margin-left: 8px;

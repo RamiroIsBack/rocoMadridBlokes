@@ -111,12 +111,22 @@ export default function App() {
 
   useEffect(() => {
     const THRESHOLD = 180
+    const MIN_DELTA = 10 // ignore mobile overscroll/rubber-band jitter
     const onScroll = () => {
-      const y = window.scrollY
-      const goingUp = y < lastScrollY.current
+      const y = Math.max(0, window.scrollY) // iOS reports negative y during bounce
+      const delta = y - lastScrollY.current
+      const atBottom = y + window.innerHeight >= document.documentElement.scrollHeight - 2
       if (y > THRESHOLD) {
         setNavFloating(true)
-        setNavVisible(goingUp)
+        if (atBottom) {
+          // Bouncing at the very bottom can report a tiny upward delta;
+          // showing the fixed nav here is what causes the scroll position
+          // to visibly jump back up, so never trigger it from this edge.
+        } else if (delta <= -MIN_DELTA) {
+          setNavVisible(true)
+        } else if (delta >= MIN_DELTA) {
+          setNavVisible(false)
+        }
       } else {
         setNavFloating(false)
         setNavVisible(false)

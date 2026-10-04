@@ -48,6 +48,28 @@ function sortDias(dias) {
     return (pa === -1 ? 999 : pa) - (pb === -1 ? 999 : pb)
   })
 }
+// Same user_id can show up more than once (several subscriptions — e.g. an
+// old on-hold one plus the current active one): collapse those into a single
+// row, preferring the active subscription as the one shown. Different real
+// people who just happen to share a name are NOT merged — placeholder_id
+// rows (manual alumnos) are never merged into anything either.
+function consolidateAlumnos(list) {
+  const byUser = new Map()
+  const result = []
+  for (const a of list) {
+    if (!a.user_id || a.placeholder_id) { result.push(a); continue }
+    const existing = byUser.get(a.user_id)
+    if (!existing) {
+      byUser.set(a.user_id, a)
+      result.push(a)
+    } else if (a.status === 'active' && existing.status !== 'active') {
+      result[result.indexOf(existing)] = a
+      byUser.set(a.user_id, a)
+    }
+  }
+  return result
+}
+
 function currentMonth() {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -58,7 +80,7 @@ function formatDate(dt) {
 }
 
 // ─── Per-student row in Test mode ───────────────────────────────────
-function TestModeRow({ alumno, testId }) {
+function TestModeRow({ alumno, testId, ambiguousActive }) {
   const { history, loading, logTraining, updateTraining, reload } = useAlumnoTraining(alumno)
   const [value, setValue]   = useState('')
   const [saving, setSaving] = useState(false)
@@ -92,6 +114,7 @@ function TestModeRow({ alumno, testId }) {
     <tr className="entrena__test-row">
       <td className="entrena__test-row__name">
         {alumno.cliente || alumno.nombre || '—'}
+        {ambiguousActive && <span className="entrena__active-tag" title="Hay varias personas con este nombre — esta es la que tiene suscripción activa">activo ahora</span>}
         {alumno.is_placeholder && <span className="entrena__manual-tag" title="Alumno manual, sin cuenta vinculada">manual</span>}
       </td>
       <td className="entrena__test-row__meta">{alumno.dia} · {alumno.horario}</td>
@@ -162,7 +185,6 @@ export default function EntrenamientosPage() {
   const [selectedAlumno, setSelectedAlumno] = useState(null)
   const [selectedTest, setSelectedTest] = useState(TESTS_LIST[0])
   const [alumnos, setAlumnos]           = useState([])
-  const [total, setTotal]               = useState(0)
   const [loading, setLoading]           = useState(false)
   const [error, setError]               = useState(null)
   const [showAddManual, setShowAddManual] = useState(false)
@@ -191,7 +213,6 @@ export default function EntrenamientosPage() {
       const json = await res.json()
       const data = json.data || json
       setAlumnos(data.alumnos || [])
-      setTotal(data.total ?? (data.alumnos?.length ?? 0))
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
   }, [])
@@ -262,9 +283,22 @@ export default function EntrenamientosPage() {
   const manualHorarioOptions = distinct(applyClaseFilters(allClases, manualForm, 'horario'), 'horario').sort()
 
   const searchNorm = search.trim().toLowerCase()
+  const consolidatedAlumnos = consolidateAlumnos(alumnos)
   const visibleAlumnos = searchNorm
-    ? alumnos.filter(a => (a.cliente || a.nombre || '').toLowerCase().includes(searchNorm))
-    : alumnos
+    ? consolidatedAlumnos.filter(a => (a.cliente || a.nombre || '').toLowerCase().includes(searchNorm))
+    : consolidatedAlumnos
+
+  // Different real people can share a name — highlight whichever is active
+  // so the profesor can tell them apart at a glance.
+  const nameCounts = {}
+  visibleAlumnos.forEach(a => {
+    const n = (a.cliente || a.nombre || '').trim().toLowerCase()
+    if (n) nameCounts[n] = (nameCounts[n] || 0) + 1
+  })
+  const isAmbiguousActive = a => {
+    const n = (a.cliente || a.nombre || '').trim().toLowerCase()
+    return n && nameCounts[n] > 1 && a.status === 'active'
+  }
 
   if (!isAuthenticated) {
     const sd = window.blokesSiteData || {}
@@ -288,7 +322,9 @@ export default function EntrenamientosPage() {
           <h1>Entrenamientos</h1>
           {!loading && (
             <p className="entrena__subtitle">
-              {searchNorm ? `${visibleAlumnos.length} de ${total} alumnos` : `${total} alumno${total !== 1 ? 's' : ''}`}
+              {searchNorm
+                ? `${visibleAlumnos.length} de ${consolidatedAlumnos.length} alumnos`
+                : `${consolidatedAlumnos.length} alumno${consolidatedAlumnos.length !== 1 ? 's' : ''}`}
             </p>
           )}
         </div>
@@ -486,7 +522,7 @@ export default function EntrenamientosPage() {
             <tbody>
               {visibleAlumnos
                 .filter(a => a.user_id || a.placeholder_id)
-                .map((a, i) => <TestModeRow key={a.placeholder_id ? `ph-${a.placeholder_id}` : (a.id ?? i)} alumno={a} testId={selectedTest} />)
+                .map((a, i) => <TestModeRow key={a.placeholder_id ? `ph-${a.placeholder_id}` : (a.id ?? i)} alumno={a} testId={selectedTest} ambiguousActive={isAmbiguousActive(a)} />)
               }
             </tbody>
           </table>
@@ -519,6 +555,7 @@ export default function EntrenamientosPage() {
                     >
                       <td>
                         {a.cliente || a.nombre || '—'}
+                        {isAmbiguousActive(a) && <span className="entrena__active-tag" title="Hay varias personas con este nombre — esta es la que tiene suscripción activa">activo ahora</span>}
                         {a.is_placeholder && <span className="entrena__manual-tag" title="Alumno manual, sin cuenta vinculada">manual</span>}
                       </td>
                       <td>{FRECUENCIA_LABEL[a.frecuencia] || a.producto || '—'}</td>
