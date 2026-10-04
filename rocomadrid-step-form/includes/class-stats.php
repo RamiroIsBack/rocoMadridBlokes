@@ -392,7 +392,7 @@ class RocoMadrid_SF_Stats {
 
 		$subscriptions = wcs_get_subscriptions( array(
 			'subscriptions_per_page' => -1,
-			'subscription_status' => array( 'active', 'pending', 'on-hold', 'cancelled', 'pending-cancel' ),
+			'subscription_status' => array( 'active', 'pending', 'on-hold', 'cancelled' ),
 		) );
 
 		foreach ( $subscriptions as $subscription ) {
@@ -510,14 +510,9 @@ class RocoMadrid_SF_Stats {
 			$customer = $subscription->get_user();
 			$start_date = $subscription->get_date( 'date_created' );
 
-			// "pending-cancel": el cliente ha cancelado pero sigue con acceso hasta
-			// que acabe el periodo ya pagado — a efectos de alumnado/listas/stats
-			// cuenta como activo. El estado real sigue disponible en 'status_raw'.
-			$raw_status = $subscription->get_status();
 			$data[] = array(
 				'id' => $subscription->get_id(),
-				'status' => ( $raw_status === 'pending-cancel' ) ? 'active' : $raw_status,
-				'status_raw' => $raw_status,
+				'status' => $subscription->get_status(),
 				'cliente' => $customer ? $customer->display_name : 'N/A',
 				'email' => $customer ? $customer->user_email : 'N/A',
 				'telefono' => $subscription->get_billing_phone(),
