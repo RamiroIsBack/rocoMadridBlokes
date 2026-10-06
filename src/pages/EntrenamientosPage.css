@@ -557,3 +557,46 @@
 .entrena__test-save--ok  { background: #16a34a; color: #fff; }
 .entrena__test-save:disabled { opacity: 0.6; cursor: default; }
 .entrena__test-err { font-size: 0.72rem; color: #ef4444; margin: 3px 0 0; }
+
+/* ── Sugerencias de alumno parecido (modal Añadir alumno) ── */
+.entrena__suggest {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  background: #fdf7e6;
+  border: 1px dashed #c8961e;
+}
+.entrena__suggest-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #7a5a10;
+  margin: 0 0 6px;
+}
+.entrena__suggest-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 0.9rem;
+  color: #2a2015;
+}
+.entrena__suggest-row small {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+}
+.entrena__suggest-btn {
+  background: none;
+  border: 1px solid #2a2015;
+  padding: 4px 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #2a2015;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.entrena__suggest-btn:hover { background: #2a2015; color: #fdf7e6; }

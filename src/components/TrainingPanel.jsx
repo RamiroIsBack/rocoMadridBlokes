@@ -29,7 +29,7 @@ function getAuthHeaders() {
 }
 
 export default function TrainingPanel({ alumno, onClose, onLinked, onDeleted }) {
-  const { history, loading, logTraining, updateTraining, reload } = useAlumnoTraining(alumno)
+  const { history, loading, logTraining, logTrainingConfirmed, updateTraining, reload } = useAlumnoTraining(alumno)
 
   const [editMode, setEditMode] = useState({})
   const [values, setValues]     = useState({})
@@ -103,10 +103,12 @@ export default function TrainingPanel({ alumno, onClose, onLinked, onDeleted }) 
     try {
       const entries = history[testId] || []
       const last    = entries[entries.length - 1]
+      const unit    = TESTS[testId]?.unit || ''
       if (last && isThisMonth(last.logged_at)) {
+        if (val !== last.value_kg && !window.confirm(`Ya hay un registro de este test este mes: ${last.value_kg} ${unit}.\n\n¿Sobreescribirlo con ${val} ${unit}?`)) return
         await updateTraining(last.id, val)
       } else {
-        await logTraining(testId, val)
+        if ((await logTrainingConfirmed(testId, val, unit)) === null) return
       }
       setSaved(s => ({ ...s, [testId]: true }))
       setEditMode(m => ({ ...m, [testId]: false }))

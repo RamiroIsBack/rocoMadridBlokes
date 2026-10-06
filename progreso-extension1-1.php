@@ -1589,11 +1589,55 @@ function blokes_get_placeholder_alumnos($status = 'pending') {
     }, $rows);
 }
 
+// "Ramiro" matches "Ramiro Santamaria" (every token of the shorter name appears
+// in the longer one), ignoring case and accents. Used only to suggest possible
+// duplicates — it never merges anything by itself.
+function blokes_name_tokens($s) {
+    $s = remove_accents(wp_strtolower(trim((string) $s)));
+    return array_values(array_filter(preg_split('/\s+/', $s), 'strlen'));
+}
+function blokes_names_match($a, $b) {
+    $ta = blokes_name_tokens($a);
+    $tb = blokes_name_tokens($b);
+    if (!$ta || !$tb) return false;
+    if (count($ta) > count($tb)) { $tmp = $ta; $ta = $tb; $tb = $tmp; }
+    foreach ($ta as $t) {
+        if (!in_array($t, $tb, true)) return false;
+    }
+    return true;
+}
+
 function progreso_create_alumno_manual($request) {
     $nombre = trim((string) $request->get_param('nombre'));
     if ($nombre === '') {
         return new WP_Error('invalid_data', 'El nombre es obligatorio.', array('status' => 400));
     }
+
+    // Before creating, surface pending manual alumnos with a similar name so the
+    // profesor can pick the existing one instead. Confirmed creation sends force.
+    if (!filter_var($request->get_param('force'), FILTER_VALIDATE_BOOLEAN)) {
+        global $wpdb;
+        blokes_ensure_placeholder_table();
+        $pending    = $wpdb->get_results("SELECT id, nombre, dia, horario FROM " . blokes_placeholder_table() . " WHERE status = 'pending'", ARRAY_A);
+        $candidates = array();
+        foreach ($pending as $p) {
+            if (blokes_names_match($nombre, $p['nombre'])) {
+                $candidates[] = array(
+                    'placeholder_id' => intval($p['id']),
+                    'nombre'         => $p['nombre'],
+                    'dia'            => $p['dia'],
+                    'horario'        => $p['horario'],
+                );
+            }
+        }
+        if ($candidates) {
+            return new WP_Error('duplicate_candidates', 'Ya hay alumnos manuales con un nombre parecido.', array(
+                'status'     => 409,
+                'candidates' => $candidates,
+            ));
+        }
+    }
+
     $horario = sanitize_text_field((string) $request->get_param('horario'));
     $turno   = sanitize_text_field((string) $request->get_param('turno'));
     $edad    = sanitize_text_field((string) $request->get_param('edad'));
@@ -1721,6 +1765,36 @@ function progreso_log_training($request) {
             "Datos inválidos. user_id={$user_id} placeholder_id={$placeholder_id} test_id={$test_id} value_kg={$value_kg}",
             array('status' => 400));
     }
+
+    // One value per subject/test/month: if one already exists this month, don't
+    // silently add a second row (two profes can hit this at the same time). Tell
+    // the caller what's there; only overwrite when they confirm with force.
+    $force       = filter_var($request->get_param('force'), FILTER_VALIDATE_BOOLEAN);
+    $subject_col = $user_id > 0 ? 'user_id' : 'placeholder_id';
+    $subject_val = $user_id > 0 ? $user_id : $placeholder_id;
+    $existing = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, value_kg, logged_at FROM " . progreso_training_table() .
+        " WHERE $subject_col = %d AND test_id = %d AND logged_at LIKE %s ORDER BY logged_at DESC, id DESC LIMIT 1",
+        $subject_val, $test_id, current_time('Y-m') . '%'
+    ), ARRAY_A);
+    if ($existing) {
+        if (!$force) {
+            return new WP_Error('existing_value', 'Ya hay un registro de este test este mes.', array(
+                'status'   => 409,
+                'existing' => array(
+                    'id'        => intval($existing['id']),
+                    'value_kg'  => floatval($existing['value_kg']),
+                    'logged_at' => $existing['logged_at'],
+                ),
+            ));
+        }
+        $wpdb->update(progreso_training_table(),
+            array('value_kg' => $value_kg, 'logged_by' => get_current_user_id()),
+            array('id' => intval($existing['id'])),
+            array('%f', '%d'), array('%d'));
+        return rest_ensure_response(array('success' => true, 'id' => intval($existing['id']), 'updated' => true));
+    }
+
     $ok = $wpdb->insert(progreso_training_table(), array(
         'user_id'        => $user_id,
         'placeholder_id' => $placeholder_id,

@@ -70,6 +70,18 @@ function consolidateAlumnos(list) {
   return result
 }
 
+// Mirrors blokes_names_match() on the server: every word of the shorter name
+// must appear in the longer one, ignoring case and accents.
+function normNameTokens(s) {
+  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().split(/\s+/).filter(Boolean)
+}
+function namesMatch(a, b) {
+  let ta = normNameTokens(a), tb = normNameTokens(b)
+  if (!ta.length || !tb.length) return false
+  if (ta.length > tb.length) [ta, tb] = [tb, ta]
+  return ta.every(t => tb.includes(t))
+}
+
 function currentMonth() {
   const now = new Date()
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -81,7 +93,7 @@ function formatDate(dt) {
 
 // ─── Per-student row in Test mode ───────────────────────────────────
 function TestModeRow({ alumno, testId, ambiguousActive }) {
-  const { history, loading, logTraining, updateTraining, reload } = useAlumnoTraining(alumno)
+  const { history, loading, logTraining, logTrainingConfirmed, updateTraining, reload } = useAlumnoTraining(alumno)
   const [value, setValue]   = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved]   = useState(false)
@@ -100,10 +112,12 @@ function TestModeRow({ alumno, testId, ambiguousActive }) {
     if (isNaN(val) || val < 0) { setErr('Introduce un valor'); return }
     setErr(null); setSaving(true)
     try {
+      const unit = TEST_MAP[testId]?.unit || ''
       if (last && editable) {
+        if (val !== last.value_kg && !window.confirm(`Ya hay un registro de este test este mes: ${last.value_kg} ${unit}.\n\n¿Sobreescribirlo con ${val} ${unit}?`)) return
         await updateTraining(last.id, val)
       } else {
-        await logTraining(testId, val)
+        if ((await logTrainingConfirmed(testId, val, unit)) === null) return
       }
       setSaved(true); setTimeout(() => setSaved(false), 2000); reload()
     } catch (e) { setErr(e.message || 'Error') }
@@ -193,6 +207,7 @@ export default function EntrenamientosPage() {
   const [manualForm, setManualForm]     = useState({ nombre: '', dia: '', horario: '', edad: '', turno: '' })
   const [manualSaving, setManualSaving] = useState(false)
   const [manualError, setManualError]   = useState(null)
+  const [manualDupes, setManualDupes]   = useState(null) // candidates the server returned for this name
   const [search, setSearch]             = useState('')
 
   useEffect(() => {
@@ -236,6 +251,7 @@ export default function EntrenamientosPage() {
   const openAddManual = () => {
     setManualForm({ nombre: '', dia: filters.dia, horario: filters.horario, edad: filters.edad, turno: filters.turno })
     setManualError(null)
+    setManualDupes(null)
     setShowAddManual(true)
   }
 
@@ -253,7 +269,7 @@ export default function EntrenamientosPage() {
     setManualForm(next)
   }
 
-  const submitAddManual = async () => {
+  const submitAddManual = async (force = false) => {
     if (!manualForm.nombre.trim()) { setManualError('Escribe un nombre'); return }
     setManualSaving(true); setManualError(null)
     try {
@@ -261,10 +277,16 @@ export default function EntrenamientosPage() {
         method: 'POST',
         credentials: 'include',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify(manualForm),
+        body: JSON.stringify({ ...manualForm, force }),
       })
       const json = await res.json()
-      if (!res.ok) throw new Error(json.message || 'Error al crear el alumno')
+      if (!res.ok) {
+        if (json.code === 'duplicate_candidates') {
+          setManualDupes(json.data?.candidates || [])
+          return
+        }
+        throw new Error(json.message || 'Error al crear el alumno')
+      }
       setShowAddManual(false)
       fetchAlumnos(filters)
     } catch (e) {
@@ -301,6 +323,19 @@ export default function EntrenamientosPage() {
     const n = (a.cliente || a.nombre || '').trim().toLowerCase()
     return n && nameCounts[n] > 1 && a.status === 'active'
   }
+
+  // Live suggestions from the list already on screen, shown while typing the name.
+  const manualLiveSuggest = manualForm.nombre.trim().length >= 2
+    ? consolidatedAlumnos
+        .filter(a => namesMatch(manualForm.nombre, a.cliente || a.nombre))
+        .slice(0, 5)
+        .map(a => ({ name: a.cliente || a.nombre, dia: a.dia, horario: a.horario }))
+    : []
+  // After a server-side duplicate check (someone may have created one meanwhile),
+  // its candidates replace the live ones.
+  const manualSuggestions = manualDupes
+    ? manualDupes.map(c => ({ name: c.nombre, dia: c.dia, horario: c.horario }))
+    : manualLiveSuggest
 
   if (!isAuthenticated) {
     const sd = window.blokesSiteData || {}
@@ -355,9 +390,26 @@ export default function EntrenamientosPage() {
             <input
               type="text"
               value={manualForm.nombre}
-              onChange={e => setManualForm(f => ({ ...f, nombre: e.target.value }))}
+              onChange={e => { setManualForm(f => ({ ...f, nombre: e.target.value })); setManualDupes(null) }}
               autoFocus
             />
+            {manualSuggestions.length > 0 && (
+              <div className="entrena__suggest">
+                <p className="entrena__suggest-title">
+                  {manualDupes ? 'Ya hay alguien parecido (creado hace poco):' : '¿Ya está en la lista?'}
+                </p>
+                {manualSuggestions.map((s, i) => (
+                  <div key={i} className="entrena__suggest-row">
+                    <span>{s.name}<small>{s.dia || 'Sin día'} · {s.horario || 'Sin horario'}</small></span>
+                    <button
+                      type="button"
+                      className="entrena__suggest-btn"
+                      onClick={() => { setSearch(s.name); setShowAddManual(false) }}
+                    >Es este</button>
+                  </div>
+                ))}
+              </div>
+            )}
             <label>Día</label>
             <select value={manualForm.dia} onChange={e => handleManualFieldChange('dia', e.target.value)}>
               <option value="">Sin especificar</option>
@@ -381,8 +433,8 @@ export default function EntrenamientosPage() {
             {manualError && <p className="entrena__error">{manualError}</p>}
             <div className="entrena__modal-actions">
               <button className="entrena__reset" onClick={() => setShowAddManual(false)}>Cancelar</button>
-              <button className="entrena__add-manual-btn" onClick={submitAddManual} disabled={manualSaving}>
-                {manualSaving ? 'Creando...' : 'Crear'}
+              <button className="entrena__add-manual-btn" onClick={() => submitAddManual(!!manualDupes)} disabled={manualSaving}>
+                {manualSaving ? 'Creando...' : manualDupes ? 'Crear de todos modos' : 'Crear'}
               </button>
             </div>
           </div>

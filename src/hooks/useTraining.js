@@ -8,6 +8,15 @@ function getAuthHeaders() {
   return nonce ? { 'X-WP-Nonce': nonce } : {}
 }
 
+// Keeps the REST error code and data (e.g. the existing value) so callers can
+// react to specific cases like "existing_value" instead of only showing text.
+function apiError(json, fallback) {
+  const err = new Error(json?.message || fallback)
+  err.code = json?.code
+  err.data = json?.data
+  return err
+}
+
 export function useTrainingSummary() {
   const [summary, setSummary] = useState(() => getMockCommunityData())
 
@@ -112,10 +121,11 @@ export function useAlumnoTraining(alumno) {
 
   useEffect(() => { reload() }, [reload])
 
-  const logTraining = useCallback(async (testId, valueKg) => {
+  const logTraining = useCallback(async (testId, valueKg, force = false) => {
     const body = isPlaceholder
       ? { placeholder_id: subjectId, test_id: testId, value_kg: valueKg }
       : { user_id: subjectId, test_id: testId, value_kg: valueKg }
+    if (force) body.force = true
     const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/training`, {
       method: 'POST',
       credentials: 'include',
@@ -123,9 +133,25 @@ export function useAlumnoTraining(alumno) {
       body: JSON.stringify(body),
     })
     const json = await res.json()
-    if (!res.ok) throw new Error(json.message || 'Error al guardar')
+    if (!res.ok) throw apiError(json, 'Error al guardar')
     return json
   }, [subjectId, isPlaceholder])
+
+  // Saves a new value; if this month already has one, asks before overwriting
+  // it and reports what it replaces. Resolves to null when the profesor declines.
+  const logTrainingConfirmed = useCallback(async (testId, valueKg, unit = '') => {
+    try {
+      return await logTraining(testId, valueKg)
+    } catch (e) {
+      if (e.code !== 'existing_value') throw e
+      const ex = e.data?.existing
+      const when = ex?.logged_at ? new Date(ex.logged_at.replace(' ', 'T')).toLocaleDateString('es-ES') : ''
+      const ok = window.confirm(
+        `Ya hay un registro de este test este mes: ${ex?.value_kg} ${unit}${when ? ` (${when})` : ''}.\n\n¿Sobreescribirlo con ${valueKg} ${unit}?`
+      )
+      return ok ? logTraining(testId, valueKg, true) : null
+    }
+  }, [logTraining])
 
   const updateTraining = useCallback(async (entryId, valueKg) => {
     const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/training/entry/${entryId}`, {
@@ -139,5 +165,5 @@ export function useAlumnoTraining(alumno) {
     return json
   }, [])
 
-  return { history, loading, reload, logTraining, updateTraining }
+  return { history, loading, reload, logTraining, logTrainingConfirmed, updateTraining }
 }
