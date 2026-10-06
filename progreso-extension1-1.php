@@ -1764,7 +1764,7 @@ function progreso_log_training($request) {
     $test_id        = intval($request->get_param('test_id'));
     $value_kg       = floatval($request->get_param('value_kg'));
     $has_subject    = ($user_id > 0) !== ($placeholder_id > 0);
-    if (!$has_subject || $test_id < 2 || $test_id > 13 || $value_kg < 0) {
+    if (!$has_subject || $test_id < 2 || $test_id > 14 || $value_kg < 0) {
         return new WP_Error('invalid_data',
             "Datos inválidos. user_id={$user_id} placeholder_id={$placeholder_id} test_id={$test_id} value_kg={$value_kg}",
             array('status' => 400));
@@ -1813,7 +1813,7 @@ function progreso_log_training($request) {
 
 function progreso_get_mock_values() {
     $defaults = [
-         2 => 14.1,  9 =>  8.0, 10 => 110.0, 12 => 75.0,
+         2 => 14.1,  9 =>  8.0, 10 => 110.0, 12 => 75.0, 14 => 75.0,
          3 =>  3.5,  4 => 16.0,  7 => 45.0,
          5 =>  4.0,  6 => 24.0, 13 => 24.0,
     ];
@@ -1829,7 +1829,7 @@ function progreso_generate_all_mock() {
         'D' => [0.00,  0.02, -0.03,  0.04, -0.01, -0.01,  0.03, -0.04,  0.02,  0.01, -0.02,  0.03],
     ];
     $jitter_key_map = [
-         2 => 'B',  9 => 'C', 10 => 'D', 12 => 'B',
+         2 => 'B',  9 => 'C', 10 => 'D', 12 => 'B', 14 => 'B',
          3 => 'C',  4 => 'D',  7 => 'A',
          5 => 'C',  6 => 'D', 13 => 'A',
     ];
@@ -1867,8 +1867,10 @@ function progreso_get_training_tests() {
               'desc' => 'Nº repeticiones colgados en barra subiendo las piernas hasta 90º.'),
         array('id' => 10, 'name' => 'Apertura caderas',    'unit' => 'cm',     'zone' => 'lower',   'visible' => true,
               'desc' => 'De pie, piernas abiertas al máximo. Medimos distancia entre pies.'),
-        array('id' => 12, 'name' => 'Grant Foot Raise',    'unit' => 'cm',     'zone' => 'lower',   'visible' => true,
-              'desc' => 'De pie mirando a la pared, pies separados de ella y palmas apoyadas a la altura de los hombros. Subimos un pie por la línea de la pared tocando con los dedos. 3 intentos, medimos la distancia al suelo en el mejor.'),
+        array('id' => 12, 'name' => 'Grant Foot Raise Derecha',   'unit' => 'cm', 'zone' => 'lower', 'visible' => true,
+              'desc' => 'De pie mirando a la pared, pies separados de ella y palmas apoyadas a la altura de los hombros. Subimos el pie derecho por la línea de la pared tocando con los dedos. 3 intentos, medimos la distancia al suelo en el mejor.'),
+        array('id' => 14, 'name' => 'Grant Foot Raise Izquierda', 'unit' => 'cm', 'zone' => 'lower', 'visible' => true,
+              'desc' => 'De pie mirando a la pared, pies separados de ella y palmas apoyadas a la altura de los hombros. Subimos el pie izquierdo por la línea de la pared tocando con los dedos. 3 intentos, medimos la distancia al suelo en el mejor.'),
         array('id' => 3,  'name' => 'Dominadas',           'unit' => 'reps',   'zone' => 'upper',   'visible' => true,
               'desc' => 'Nº máximas repeticiones.'),
         array('id' => 4,  'name' => 'Flexiones',           'unit' => 'reps',   'zone' => 'upper',   'visible' => false,

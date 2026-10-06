@@ -7,7 +7,7 @@ function getAuthHeaders() {
 }
 
 const LS_KEY = 'blokes_ctrl_tests'
-const CONFIG_VERSION = 4  // bump para invalidar localStorage y aplicar nuevos defaults
+const CONFIG_VERSION = 5  // bump para invalidar localStorage y aplicar nuevos defaults
 
 export const INITIAL_TESTS = [
   { id: 2,  name: 'Sentadilla en silla', unit: 'reps',   zone: 'lower',   visible: false,
@@ -16,8 +16,10 @@ export const INITIAL_TESTS = [
     desc: 'Nº repeticiones colgados en barra subiendo las piernas hasta 90º.' },
   { id: 10, name: 'Apertura caderas',    unit: 'cm',     zone: 'lower',   visible: true,
     desc: 'De pie, piernas abiertas al máximo. Medimos distancia entre pies.' },
-  { id: 12, name: 'Grant Foot Raise',    unit: 'cm',     zone: 'lower',   visible: true,
-    desc: 'De pie mirando a la pared, pies separados de ella y palmas apoyadas a la altura de los hombros. Subimos un pie por la línea de la pared tocando con los dedos. 3 intentos, medimos la distancia al suelo en el mejor.' },
+  { id: 12, name: 'Grant Foot Raise Derecha',   unit: 'cm', zone: 'lower', visible: true,
+    desc: 'De pie mirando a la pared, pies separados de ella y palmas apoyadas a la altura de los hombros. Subimos el pie derecho por la línea de la pared tocando con los dedos. 3 intentos, medimos la distancia al suelo en el mejor.' },
+  { id: 14, name: 'Grant Foot Raise Izquierda', unit: 'cm', zone: 'lower', visible: true,
+    desc: 'De pie mirando a la pared, pies separados de ella y palmas apoyadas a la altura de los hombros. Subimos el pie izquierdo por la línea de la pared tocando con los dedos. 3 intentos, medimos la distancia al suelo en el mejor.' },
   { id: 3,  name: 'Dominadas',           unit: 'reps',   zone: 'upper',   visible: true,
     desc: 'Nº máximas repeticiones.' },
   { id: 4,  name: 'Flexiones',           unit: 'reps',   zone: 'upper',   visible: false,
@@ -51,7 +53,8 @@ const INITIAL_MOCK_VALUES = {
   2:  14.1,  // Sentadilla en silla — ref 14.1 reps
   9:  8,     // Rodillas al pecho   — ref 8 reps
   10: 110,   // Apertura caderas    — ref 110 cm
-  12: 75,    // Grant Foot Raise    — ref 75 cm
+  12: 75,    // Grant Foot Raise Derecha   — ref 75 cm
+  14: 75,    // Grant Foot Raise Izquierda — ref 75 cm
   // ── Tren superior ──────────────────────────────────────────
   3:  3.5,   // Dominadas           — ref 3.5 reps
   4:  16,    // Flexiones           — ref 16 reps
@@ -95,7 +98,7 @@ const JITTER = {
   D: [ 0.00,  0.02, -0.03,  0.04, -0.01,  0.00],
 }
 const JITTER_KEY = {
-  2: 'B',  9: 'C', 10: 'D', 12: 'B',
+  2: 'B',  9: 'C', 10: 'D', 12: 'B', 14: 'B',
   3: 'C',  4: 'D',  7: 'A',
   5: 'C',  6: 'D', 13: 'A',
 }
