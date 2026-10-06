@@ -70,16 +70,8 @@ function consolidateAlumnos(list) {
   return result
 }
 
-// Mirrors blokes_names_match() on the server: every word of the shorter name
-// must appear in the longer one, ignoring case and accents.
-function normNameTokens(s) {
-  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().split(/\s+/).filter(Boolean)
-}
-function namesMatch(a, b) {
-  let ta = normNameTokens(a), tb = normNameTokens(b)
-  if (!ta.length || !tb.length) return false
-  if (ta.length > tb.length) [ta, tb] = [tb, ta]
-  return ta.every(t => tb.includes(t))
+const SUGGEST_STATUS = {
+  active: 'activo', cancelled: 'cancelado', 'on-hold': 'en pausa', pending: 'manual',
 }
 
 function currentMonth() {
@@ -324,18 +316,9 @@ export default function EntrenamientosPage() {
     return n && nameCounts[n] > 1 && a.status === 'active'
   }
 
-  // Live suggestions from the list already on screen, shown while typing the name.
-  const manualLiveSuggest = manualForm.nombre.trim().length >= 2
-    ? consolidatedAlumnos
-        .filter(a => namesMatch(manualForm.nombre, a.cliente || a.nombre))
-        .slice(0, 5)
-        .map(a => ({ name: a.cliente || a.nombre, dia: a.dia, horario: a.horario }))
-    : []
-  // After a server-side duplicate check (someone may have created one meanwhile),
-  // its candidates replace the live ones.
-  const manualSuggestions = manualDupes
-    ? manualDupes.map(c => ({ name: c.nombre, dia: c.dia, horario: c.horario }))
-    : manualLiveSuggest
+  // Candidates come from the server when "Crear" is pressed (it sees every
+  // subscription, not just the filtered list on screen).
+  const manualSuggestions = manualDupes || []
 
   if (!isAuthenticated) {
     const sd = window.blokesSiteData || {}
@@ -395,16 +378,17 @@ export default function EntrenamientosPage() {
             />
             {manualSuggestions.length > 0 && (
               <div className="entrena__suggest">
-                <p className="entrena__suggest-title">
-                  {manualDupes ? 'Ya hay alguien parecido (creado hace poco):' : '¿Ya está en la lista?'}
-                </p>
+                <p className="entrena__suggest-title">Ya hay alguien con un nombre parecido. ¿Es alguno de estos?</p>
                 {manualSuggestions.map((s, i) => (
                   <div key={i} className="entrena__suggest-row">
-                    <span>{s.name}<small>{s.dia || 'Sin día'} · {s.horario || 'Sin horario'}</small></span>
+                    <span>
+                      {s.nombre}
+                      <small>{SUGGEST_STATUS[s.status] || s.status || 'sin estado'} · {s.dia || 'Sin día'} · {s.horario || 'Sin horario'}</small>
+                    </span>
                     <button
                       type="button"
                       className="entrena__suggest-btn"
-                      onClick={() => { setSearch(s.name); setShowAddManual(false) }}
+                      onClick={() => { setSearch(s.nombre); setShowAddManual(false) }}
                     >Es este</button>
                   </div>
                 ))}

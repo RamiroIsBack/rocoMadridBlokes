@@ -1613,25 +1613,29 @@ function progreso_create_alumno_manual($request) {
         return new WP_Error('invalid_data', 'El nombre es obligatorio.', array('status' => 400));
     }
 
-    // Before creating, surface pending manual alumnos with a similar name so the
-    // profesor can pick the existing one instead. Confirmed creation sends force.
+    // Before creating, look for anyone with a similar name — real subscriptions
+    // (any status) and pending manual alumnos — so the profesor can pick the
+    // existing one. Confirmed creation sends force.
     if (!filter_var($request->get_param('force'), FILTER_VALIDATE_BOOLEAN)) {
-        global $wpdb;
         blokes_ensure_placeholder_table();
-        $pending    = $wpdb->get_results("SELECT id, nombre, dia, horario FROM " . blokes_placeholder_table() . " WHERE status = 'pending'", ARRAY_A);
+        $sources = blokes_get_placeholder_alumnos('pending');
+        if (class_exists('RocoMadrid_SF_Stats')) {
+            $sources = array_merge(blokes_get_all_subscription_data(), $sources);
+        }
         $candidates = array();
-        foreach ($pending as $p) {
-            if (blokes_names_match($nombre, $p['nombre'])) {
-                $candidates[] = array(
-                    'placeholder_id' => intval($p['id']),
-                    'nombre'         => $p['nombre'],
-                    'dia'            => $p['dia'],
-                    'horario'        => $p['horario'],
-                );
-            }
+        foreach ($sources as $s) {
+            if (!blokes_names_match($nombre, $s['cliente'] ?? '')) continue;
+            $candidates[] = array(
+                'nombre'         => $s['cliente'],
+                'status'         => $s['status'] ?? '',
+                'dia'            => $s['dia'] ?? '',
+                'horario'        => $s['horario'] ?? '',
+                'is_placeholder' => !empty($s['is_placeholder']),
+            );
+            if (count($candidates) >= 10) break;
         }
         if ($candidates) {
-            return new WP_Error('duplicate_candidates', 'Ya hay alumnos manuales con un nombre parecido.', array(
+            return new WP_Error('duplicate_candidates', 'Ya hay alumnos con un nombre parecido.', array(
                 'status'     => 409,
                 'candidates' => $candidates,
             ));
