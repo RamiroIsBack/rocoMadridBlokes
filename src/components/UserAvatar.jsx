@@ -106,7 +106,7 @@ export default function UserAvatar({
     <div className={`ua-wrap ua-wrap--${nicknameStyle}`}>
       {avatarEl}
       <span className={`ua-nick ua-nick--${size}${isMe ? ' ua-nick--me' : ''}`}>
-        {nickname ? `@${nickname}` : displayLabel}
+        {nickname ? `@${nickname}` : (isMe ? displayLabel : `${displayLabel} climb`)}
       </span>
     </div>
   )

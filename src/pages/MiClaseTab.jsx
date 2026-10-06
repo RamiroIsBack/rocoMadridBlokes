@@ -254,7 +254,18 @@ export default function MiClaseTab() {
                     style={{ '--zone-color': ZONES[activeZone].color, animationDelay: `${i * 55}ms` }}
                   >
                     <span className="mi-clase__pos">#{i + 1}</span>
-                    <span className="mi-clase__name">{m.is_me ? 'Tú' : m.name}</span>
+                    <span className="mi-clase__name">
+                      <UserAvatar
+                        size="xs"
+                        avatarType={m.avatarType || ''}
+                        avatarData={m.avatarData || {}}
+                        nickname={m.nickname || ''}
+                        name={m.is_me ? 'Tú' : (m.name || '')}
+                        isMe={m.is_me}
+                        showNickname
+                        nicknameStyle="right"
+                      />
+                    </span>
                     <div className="mi-clase__bar-wrap">
                       <div
                         className="mi-clase__bar"
