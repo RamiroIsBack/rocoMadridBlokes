@@ -1593,7 +1593,7 @@ function blokes_get_placeholder_alumnos($status = 'pending') {
 // in the longer one), ignoring case and accents. Used only to suggest possible
 // duplicates — it never merges anything by itself.
 function blokes_name_tokens($s) {
-    $s = remove_accents(wp_strtolower(trim((string) $s)));
+    $s = remove_accents(mb_strtolower(trim((string) $s)));
     return array_values(array_filter(preg_split('/\s+/', $s), 'strlen'));
 }
 function blokes_names_match($a, $b) {
