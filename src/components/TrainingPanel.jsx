@@ -37,6 +37,7 @@ export default function TrainingPanel({ alumno, onClose, onLinked, onDeleted }) 
   const [saved, setSaved]       = useState({})
   const [errors, setErrors]     = useState({})
   const [showDesc, setShowDesc] = useState({})
+  const [notes, setNotes]       = useState({})
 
   const [linkEmail, setLinkEmail]     = useState('')
   const [linking, setLinking]         = useState(false)
@@ -104,11 +105,12 @@ export default function TrainingPanel({ alumno, onClose, onLinked, onDeleted }) 
       const entries = history[testId] || []
       const last    = entries[entries.length - 1]
       const unit    = TESTS[testId]?.unit || ''
+      const note    = notes[testId] ?? last?.note ?? ''
       if (last && isThisMonth(last.logged_at)) {
         if (val !== last.value_kg && !window.confirm(`Ya hay un registro de este test este mes: ${last.value_kg} ${unit}.\n\n¿Sobreescribirlo con ${val} ${unit}?`)) return
-        await updateTraining(last.id, val)
+        await updateTraining(last.id, val, note)
       } else {
-        if ((await logTrainingConfirmed(testId, val, unit)) === null) return
+        if ((await logTrainingConfirmed(testId, val, unit, note)) === null) return
       }
       setSaved(s => ({ ...s, [testId]: true }))
       setEditMode(m => ({ ...m, [testId]: false }))
@@ -207,6 +209,7 @@ export default function TrainingPanel({ alumno, onClose, onLinked, onDeleted }) 
                             {!editable && ' · histórico'}
                           </span>
                         </p>
+                        {last.note && <p className="training-panel__note">📝 {last.note}</p>}
                       </div>
                     )}
 
@@ -240,6 +243,14 @@ export default function TrainingPanel({ alumno, onClose, onLinked, onDeleted }) 
                             </button>
                           )}
                         </div>
+                        <input
+                          type="text"
+                          value={notes[id] ?? last?.note ?? ''}
+                          onChange={e => setNotes(n => ({ ...n, [id]: e.target.value }))}
+                          placeholder="Nota: lesión, variante…"
+                          maxLength={300}
+                          className="training-panel__note-input"
+                        />
                         {errors[id] && <p className="training-panel__err">{errors[id]}</p>}
                       </>
                     )}

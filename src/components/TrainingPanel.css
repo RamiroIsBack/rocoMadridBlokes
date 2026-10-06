@@ -216,3 +216,7 @@
   letter-spacing: 0.06em;
   margin: 0 0 8px;
 }
+
+/* ── Notas para profesores ── */
+.training-panel__note { margin: 4px 0 0; font-size: 0.78rem; font-style: italic; color: #7a5a10; }
+.training-panel__note-input { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 6px 8px; font-size: 0.85rem; border: 1px solid #cfc9b8; background: #fff; }

@@ -121,11 +121,12 @@ export function useAlumnoTraining(alumno) {
 
   useEffect(() => { reload() }, [reload])
 
-  const logTraining = useCallback(async (testId, valueKg, force = false) => {
+  const logTraining = useCallback(async (testId, valueKg, force = false, note) => {
     const body = isPlaceholder
       ? { placeholder_id: subjectId, test_id: testId, value_kg: valueKg }
       : { user_id: subjectId, test_id: testId, value_kg: valueKg }
     if (force) body.force = true
+    if (note !== undefined) body.note = note
     const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/training`, {
       method: 'POST',
       credentials: 'include',
@@ -139,9 +140,9 @@ export function useAlumnoTraining(alumno) {
 
   // Saves a new value; if this month already has one, asks before overwriting
   // it and reports what it replaces. Resolves to null when the profesor declines.
-  const logTrainingConfirmed = useCallback(async (testId, valueKg, unit = '') => {
+  const logTrainingConfirmed = useCallback(async (testId, valueKg, unit = '', note) => {
     try {
-      return await logTraining(testId, valueKg)
+      return await logTraining(testId, valueKg, false, note)
     } catch (e) {
       if (e.code !== 'existing_value') throw e
       const ex = e.data?.existing
@@ -149,16 +150,16 @@ export function useAlumnoTraining(alumno) {
       const ok = window.confirm(
         `Ya hay un registro de este test este mes: ${ex?.value_kg} ${unit}${when ? ` (${when})` : ''}.\n\n¿Sobreescribirlo con ${valueKg} ${unit}?`
       )
-      return ok ? logTraining(testId, valueKg, true) : null
+      return ok ? logTraining(testId, valueKg, true, note) : null
     }
   }, [logTraining])
 
-  const updateTraining = useCallback(async (entryId, valueKg) => {
+  const updateTraining = useCallback(async (entryId, valueKg, note) => {
     const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/training/entry/${entryId}`, {
       method: 'PUT',
       credentials: 'include',
       headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value_kg: valueKg }),
+      body: JSON.stringify(note !== undefined ? { value_kg: valueKg, note } : { value_kg: valueKg }),
     })
     const json = await res.json()
     if (!res.ok) throw new Error(json.message || 'Error al actualizar')

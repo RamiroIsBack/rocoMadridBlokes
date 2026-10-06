@@ -87,6 +87,7 @@ function formatDate(dt) {
 function TestModeRow({ alumno, testId, ambiguousActive }) {
   const { history, loading, logTraining, logTrainingConfirmed, updateTraining, reload } = useAlumnoTraining(alumno)
   const [value, setValue]   = useState('')
+  const [note, setNote]     = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved]   = useState(false)
   const [err, setErr]       = useState(null)
@@ -99,6 +100,10 @@ function TestModeRow({ alumno, testId, ambiguousActive }) {
     if (last?.value_kg != null) setValue(String(last.value_kg))
   }, [last?.value_kg])
 
+  useEffect(() => {
+    setNote(last?.note || '')
+  }, [last?.note])
+
   const handleSave = async () => {
     const val = parseFloat(value)
     if (isNaN(val) || val < 0) { setErr('Introduce un valor'); return }
@@ -107,9 +112,9 @@ function TestModeRow({ alumno, testId, ambiguousActive }) {
       const unit = TEST_MAP[testId]?.unit || ''
       if (last && editable) {
         if (val !== last.value_kg && !window.confirm(`Ya hay un registro de este test este mes: ${last.value_kg} ${unit}.\n\n¿Sobreescribirlo con ${val} ${unit}?`)) return
-        await updateTraining(last.id, val)
+        await updateTraining(last.id, val, note)
       } else {
-        if ((await logTrainingConfirmed(testId, val, unit)) === null) return
+        if ((await logTrainingConfirmed(testId, val, unit, note)) === null) return
       }
       setSaved(true); setTimeout(() => setSaved(false), 2000); reload()
     } catch (e) { setErr(e.message || 'Error') }
@@ -129,6 +134,7 @@ function TestModeRow({ alumno, testId, ambiguousActive }) {
           : last ? <span title={formatDate(last.logged_at)}>{last.value_kg} {TEST_MAP[testId]?.unit || 'kg'}{editable ? '' : ' ·hist'}</span>
           : <span className="entrena__test-empty">—</span>
         }
+        {last?.note && <div className="entrena__test-note">📝 {last.note}</div>}
       </td>
       <td className="entrena__test-row__input">
         <div className="entrena__test-input-wrap">
@@ -147,6 +153,14 @@ function TestModeRow({ alumno, testId, ambiguousActive }) {
             onClick={handleSave}
             disabled={saving}
           >{saving ? '…' : saved ? '✓' : 'OK'}</button>
+          <input
+            type="text"
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="nota"
+            maxLength={300}
+            className="entrena__test-note-input"
+          />
         </div>
         {err && <p className="entrena__test-err">{err}</p>}
       </td>

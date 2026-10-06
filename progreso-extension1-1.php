@@ -1734,7 +1734,7 @@ function progreso_ensure_training_table() {
     // newly added column), so it must run whenever the schema version changes —
     // not just the first time the table is created. The version is cached in an
     // option so normal requests pay only one cheap get_option() call.
-    $version = '2';
+    $version = '3';
     if (get_option('blokes_training_table_version') === $version) return;
     $table = progreso_training_table();
     $charset = $wpdb->get_charset_collate();
@@ -1746,6 +1746,7 @@ function progreso_ensure_training_table() {
         value_kg       decimal(6,2)        NOT NULL,
         logged_at      datetime            NOT NULL,
         logged_by      bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        note           text                NULL,
         PRIMARY KEY (id),
         KEY user_test (user_id, test_id),
         KEY placeholder_test (placeholder_id, test_id),
@@ -1754,6 +1755,11 @@ function progreso_ensure_training_table() {
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta($sql);
     update_option('blokes_training_table_version', $version);
+}
+
+// Notas para profesores (lesiones, variantes...). Una por test y mes.
+function progreso_clean_note($raw) {
+    return mb_substr(sanitize_textarea_field((string) $raw), 0, 300);
 }
 
 function progreso_log_training($request) {
@@ -1774,6 +1780,7 @@ function progreso_log_training($request) {
     // silently add a second row (two profes can hit this at the same time). Tell
     // the caller what's there; only overwrite when they confirm with force.
     $force       = filter_var($request->get_param('force'), FILTER_VALIDATE_BOOLEAN);
+    $note        = $request->has_param('note') ? progreso_clean_note($request->get_param('note')) : null;
     $subject_col = $user_id > 0 ? 'user_id' : 'placeholder_id';
     $subject_val = $user_id > 0 ? $user_id : $placeholder_id;
     $existing = $wpdb->get_row($wpdb->prepare(
@@ -1792,10 +1799,10 @@ function progreso_log_training($request) {
                 ),
             ));
         }
-        $wpdb->update(progreso_training_table(),
-            array('value_kg' => $value_kg, 'logged_by' => get_current_user_id()),
-            array('id' => intval($existing['id'])),
-            array('%f', '%d'), array('%d'));
+        $upd = array('value_kg' => $value_kg, 'logged_by' => get_current_user_id());
+        $fmt = array('%f', '%d');
+        if ($note !== null) { $upd['note'] = $note; $fmt[] = '%s'; }
+        $wpdb->update(progreso_training_table(), $upd, array('id' => intval($existing['id'])), $fmt, array('%d'));
         return rest_ensure_response(array('success' => true, 'id' => intval($existing['id']), 'updated' => true));
     }
 
@@ -1806,7 +1813,8 @@ function progreso_log_training($request) {
         'value_kg'       => $value_kg,
         'logged_at'      => current_time('mysql'),
         'logged_by'      => get_current_user_id(),
-    ), array('%d', '%d', '%d', '%f', '%s', '%d'));
+        'note'           => $note ?? '',
+    ), array('%d', '%d', '%d', '%f', '%s', '%d', '%s'));
     if (!$ok) return new WP_Error('db_error', 'Error al guardar.', array('status' => 500));
     return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
 }
@@ -2119,19 +2127,22 @@ function progreso_get_training_me() {
 function blokes_training_history($column, $id) {
     global $wpdb;
     progreso_ensure_training_table();
+    $supervisor = blokes_can_supervise(); // notes are for profesores only
     $rows = $wpdb->get_results($wpdb->prepare(
-        "SELECT id, test_id, value_kg, logged_at FROM " . progreso_training_table() .
+        "SELECT id, test_id, value_kg, logged_at, note FROM " . progreso_training_table() .
         " WHERE {$column} = %d ORDER BY test_id ASC, logged_at ASC",
         $id
     ), ARRAY_A);
     $by_test = array();
     foreach ($rows as $row) {
         $tid = intval($row['test_id']);
-        $by_test[$tid][] = array(
+        $entry = array(
             'id'        => intval($row['id']),
             'value_kg'  => floatval($row['value_kg']),
             'logged_at' => $row['logged_at'],
         );
+        if ($supervisor) $entry['note'] = (string) ($row['note'] ?? '');
+        $by_test[$tid][] = $entry;
     }
     return $by_test;
 }
@@ -2174,13 +2185,10 @@ function progreso_update_training($request) {
         return new WP_Error('locked', 'Solo se pueden editar entradas del mes actual.', array('status' => 403));
     }
 
-    $wpdb->update(
-        progreso_training_table(),
-        array('value_kg' => $value_kg),
-        array('id' => $entry_id),
-        array('%f'),
-        array('%d')
-    );
+    $upd = array('value_kg' => $value_kg);
+    $fmt = array('%f');
+    if ($request->has_param('note')) { $upd['note'] = progreso_clean_note($request->get_param('note')); $fmt[] = '%s'; }
+    $wpdb->update(progreso_training_table(), $upd, array('id' => $entry_id), $fmt, array('%d'));
 
     return rest_ensure_response(array('success' => true, 'id' => $entry_id, 'value_kg' => $value_kg));
 }
