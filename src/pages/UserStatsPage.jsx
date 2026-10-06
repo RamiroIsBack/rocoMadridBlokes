@@ -374,6 +374,7 @@ export default function UserStatsPage() {
 
       {hasClases && classData?.members?.length > 0 && (() => {
         const sorted = [...classData.members]
+          .filter(m => (m.bloke_total ?? 0) > 0 || m.is_me)
           .sort((a, b) => (b.bloke_total ?? 0) - (a.bloke_total ?? 0))
         if (sorted.every(m => !m.bloke_total)) return null
         const maxTotal = Math.max(1, ...sorted.map(m => m.bloke_total ?? 0))
@@ -392,7 +393,18 @@ export default function UserStatsPage() {
                 return (
                   <div key={i} className={`user-stats__class-row ${m.is_me ? 'user-stats__class-row--me' : ''}`}>
                     <span className="user-stats__class-pos">#{i + 1}</span>
-                    <span className="user-stats__class-name">{m.is_me ? 'Tú' : m.name}</span>
+                    <span className="user-stats__class-name">
+                      <UserAvatar
+                        size="xs"
+                        avatarType={m.avatarType || ''}
+                        avatarData={m.avatarData || {}}
+                        nickname={m.nickname || ''}
+                        name={m.is_me ? 'Tú' : (m.name || '')}
+                        isMe={m.is_me}
+                        showNickname
+                        nicknameStyle="right"
+                      />
+                    </span>
                     <div className="user-stats__class-bar-wrap">
                       <div className="user-stats__class-bar" style={{ width: `${(tot / maxTotal) * 100}%` }} />
                     </div>
