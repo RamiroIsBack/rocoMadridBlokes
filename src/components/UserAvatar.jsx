@@ -59,7 +59,10 @@ export default function UserAvatar({
 }) {
   const px = SIZES[size] || 32
 
-  const displayLabel = nickname || name
+  // Without a nickname: "<primer nombre>_climb" (no spaces, the avatar seed
+  // can't handle them). The current user keeps their own name ("Tú").
+  const firstName = (name || '').trim().split(/\s+/)[0] || ''
+  const displayLabel = nickname || (showNickname && !isMe && firstName ? `${firstName}_climb` : name)
 
   // Always generate a deterministic avatar from name/nickname as seed fallback.
   // Returns a data URI so the SVG is isolated — prevents gradient ID clashes
@@ -106,7 +109,7 @@ export default function UserAvatar({
     <div className={`ua-wrap ua-wrap--${nicknameStyle}`}>
       {avatarEl}
       <span className={`ua-nick ua-nick--${size}${isMe ? ' ua-nick--me' : ''}`}>
-        {nickname ? `@${nickname}` : (isMe ? displayLabel : `${displayLabel} climb`)}
+        {nickname ? `@${nickname}` : displayLabel}
       </span>
     </div>
   )

@@ -168,7 +168,9 @@ export default function MiClaseTab() {
   const withData = members.filter(m => Object.keys(m.tests).length > 0).length
 
   // ── Blokes ──
-  const blokeSorted = [...members].sort((a, b) => (b.bloke_total ?? 0) - (a.bloke_total ?? 0))
+  const blokeSorted = [...members]
+    .filter(m => (m.bloke_total ?? 0) > 0 || m.is_me)
+    .sort((a, b) => (b.bloke_total ?? 0) - (a.bloke_total ?? 0))
   const hasBlokes   = blokeSorted.some(m => (m.bloke_total ?? 0) > 0)
 
   // ── Ratings ──
@@ -301,7 +303,18 @@ export default function MiClaseTab() {
                   style={{ animationDelay: `${i * 55}ms` }}
                 >
                   <span className="mi-clase__bloke-pos">#{i + 1}</span>
-                  <span className="mi-clase__bloke-name">{m.is_me ? 'Tú' : m.name}</span>
+                  <span className="mi-clase__bloke-name">
+                    <UserAvatar
+                      size="xs"
+                      avatarType={m.avatarType || ''}
+                      avatarData={m.avatarData || {}}
+                      nickname={m.nickname || ''}
+                      name={m.is_me ? 'Tú' : (m.name || '')}
+                      isMe={m.is_me}
+                      showNickname
+                      nicknameStyle="right"
+                    />
+                  </span>
                   <div className="mi-clase__color-bar">
                     {Object.entries(COLOR_INFO).map(([key, info]) => {
                       const cnt = byColor[key] ?? 0
@@ -373,7 +386,18 @@ export default function MiClaseTab() {
                 className={`mi-clase__rating-row${m.is_me ? ' mi-clase__rating-row--me' : ''}`}
                 style={{ animationDelay: `${i * 55}ms` }}
               >
-                <span className="mi-clase__rating-name">{m.is_me ? 'Tú' : m.name}</span>
+                <span className="mi-clase__rating-name">
+                  <UserAvatar
+                    size="xs"
+                    avatarType={m.avatarType || ''}
+                    avatarData={m.avatarData || {}}
+                    nickname={m.nickname || ''}
+                    name={m.is_me ? 'Tú' : (m.name || '')}
+                    isMe={m.is_me}
+                    showNickname
+                    nicknameStyle="right"
+                  />
+                </span>
                 <div className="mi-clase__rating-chips">
                   {RATING_ICONS.map(({ id, emoji, label }) => {
                     const r = m.rating_by_type || {}
