@@ -1770,7 +1770,7 @@ function progreso_log_training($request) {
     $test_id        = intval($request->get_param('test_id'));
     $value_kg       = floatval($request->get_param('value_kg'));
     $has_subject    = ($user_id > 0) !== ($placeholder_id > 0);
-    if (!$has_subject || $test_id < 2 || $test_id > 14 || $value_kg < 0) {
+    if (!$has_subject || $test_id < 2 || $test_id > 15 || $value_kg < 0) {
         return new WP_Error('invalid_data',
             "Datos inválidos. user_id={$user_id} placeholder_id={$placeholder_id} test_id={$test_id} value_kg={$value_kg}",
             array('status' => 400));
@@ -1821,7 +1821,7 @@ function progreso_log_training($request) {
 
 function progreso_get_mock_values() {
     $defaults = [
-         2 => 14.1,  9 =>  8.0, 10 => 110.0, 12 => 75.0, 14 => 75.0,
+         2 => 14.1,  9 =>  8.0, 10 => 110.0, 12 => 75.0, 14 => 75.0, 15 => 45.0,
          3 =>  3.5,  4 => 16.0,  7 => 45.0,
          5 =>  4.0,  6 => 24.0, 13 => 24.0,
     ];
@@ -1837,7 +1837,7 @@ function progreso_generate_all_mock() {
         'D' => [0.00,  0.02, -0.03,  0.04, -0.01, -0.01,  0.03, -0.04,  0.02,  0.01, -0.02,  0.03],
     ];
     $jitter_key_map = [
-         2 => 'B',  9 => 'C', 10 => 'D', 12 => 'B', 14 => 'B',
+         2 => 'B',  9 => 'C', 10 => 'D', 12 => 'B', 14 => 'B', 15 => 'A',
          3 => 'C',  4 => 'D',  7 => 'A',
          5 => 'C',  6 => 'D', 13 => 'A',
     ];
@@ -1883,8 +1883,10 @@ function progreso_get_training_tests() {
               'desc' => 'Nº máximas repeticiones.'),
         array('id' => 4,  'name' => 'Flexiones',           'unit' => 'reps',   'zone' => 'upper',   'visible' => false,
               'desc' => 'Nº máximas repeticiones tocando el suelo con el pecho.'),
-        array('id' => 7,  'name' => 'Campus',              'unit' => 'cm',     'zone' => 'upper',   'visible' => true,
-              'desc' => '3 intentos, marcamos la altura máxima alcanzada con ambas manos.'),
+        array('id' => 7,  'name' => 'Campus Derecha',   'unit' => 'cm', 'zone' => 'upper', 'visible' => true,
+              'desc' => '3 intentos con la mano derecha, marcamos la altura máxima alcanzada.'),
+        array('id' => 15, 'name' => 'Campus Izquierda', 'unit' => 'cm', 'zone' => 'upper', 'visible' => true,
+              'desc' => '3 intentos con la mano izquierda, marcamos la altura máxima alcanzada.'),
         array('id' => 5,  'name' => 'Resis. Flex. Prof.',  'unit' => 'series', 'zone' => 'fingers', 'visible' => true,
               'desc' => 'Nº series completadas en 7 seg. de suspensión, 3 seg. de descanso. Regleta 20mm. Postura estandarizada: brazo extendido por encima de la cabeza, hombro activo, medio-crimp, pulgar fuera de la regleta.'),
         array('id' => 6,  'name' => 'Kg Max Derecha',      'unit' => 'kg',     'zone' => 'fingers', 'visible' => true,

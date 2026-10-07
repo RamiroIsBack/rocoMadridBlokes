@@ -7,7 +7,7 @@ function getAuthHeaders() {
 }
 
 const LS_KEY = 'blokes_ctrl_tests'
-const CONFIG_VERSION = 5  // bump para invalidar localStorage y aplicar nuevos defaults
+const CONFIG_VERSION = 6  // bump para invalidar localStorage y aplicar nuevos defaults
 
 export const INITIAL_TESTS = [
   { id: 2,  name: 'Sentadilla en silla', unit: 'reps',   zone: 'lower',   visible: false,
@@ -24,8 +24,10 @@ export const INITIAL_TESTS = [
     desc: 'Nº máximas repeticiones.' },
   { id: 4,  name: 'Flexiones',           unit: 'reps',   zone: 'upper',   visible: false,
     desc: 'Nº máximas repeticiones tocando el suelo con el pecho.' },
-  { id: 7,  name: 'Campus',              unit: 'cm',     zone: 'upper',   visible: true,
-    desc: '3 intentos, marcamos la altura máxima alcanzada con ambas manos.' },
+  { id: 7,  name: 'Campus Derecha',   unit: 'cm', zone: 'upper', visible: true,
+    desc: '3 intentos con la mano derecha, marcamos la altura máxima alcanzada.' },
+  { id: 15, name: 'Campus Izquierda', unit: 'cm', zone: 'upper', visible: true,
+    desc: '3 intentos con la mano izquierda, marcamos la altura máxima alcanzada.' },
   { id: 5,  name: 'Resis. Flex. Prof.',  unit: 'series', zone: 'fingers', visible: true,
     desc: 'Nº series completadas en 7 seg. de suspensión, 3 seg. de descanso. Regleta 20mm. Postura estandarizada: brazo extendido por encima de la cabeza, hombro activo, medio-crimp, pulgar fuera de la regleta.' },
   { id: 6,  name: 'Kg Max Derecha',      unit: 'kg',     zone: 'fingers', visible: true,
@@ -58,7 +60,8 @@ const INITIAL_MOCK_VALUES = {
   // ── Tren superior ──────────────────────────────────────────
   3:  3.5,   // Dominadas           — ref 3.5 reps
   4:  16,    // Flexiones           — ref 16 reps
-  7:  45,    // Campus              — ref 45 cm
+  7:  45,    // Campus Derecha      — ref 45 cm
+  15: 45,    // Campus Izquierda    — ref 45 cm
   // ── Dedos ──────────────────────────────────────────────────
   5:  4,     // Resis. Flex. Prof.  — ref 4 series
   6:  24,    // Kg Max Derecha      — ref 24 kg
@@ -98,7 +101,7 @@ const JITTER = {
   D: [ 0.00,  0.02, -0.03,  0.04, -0.01,  0.00],
 }
 const JITTER_KEY = {
-  2: 'B',  9: 'C', 10: 'D', 12: 'B', 14: 'B',
+  2: 'B',  9: 'C', 10: 'D', 12: 'B', 14: 'B', 15: 'A',
   3: 'C',  4: 'D',  7: 'A',
   5: 'C',  6: 'D', 13: 'A',
 }
