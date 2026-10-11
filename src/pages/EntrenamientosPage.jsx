@@ -48,6 +48,11 @@ function sortDias(dias) {
     return (pa === -1 ? 999 : pa) - (pb === -1 ? 999 : pb)
   })
 }
+// Tildes/mayúsculas no deben decidir si hay coincidencia: "Jose" tiene que
+// encontrar a "José" y viceversa, sea cual sea cómo esté escrito cada lado.
+function normalizeName(s) {
+  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+}
 // Same user_id can show up more than once (several subscriptions — e.g. an
 // old on-hold one plus the current active one): collapse those into a single
 // row, preferring the active subscription as the one shown. Different real
@@ -312,21 +317,21 @@ export default function EntrenamientosPage() {
   const manualEdadOptions    = distinct(applyClaseFilters(allClases, manualForm, 'edad'), 'edad').sort()
   const manualHorarioOptions = distinct(applyClaseFilters(allClases, manualForm, 'horario'), 'horario').sort()
 
-  const searchNorm = search.trim().toLowerCase()
+  const searchNorm = normalizeName(search)
   const consolidatedAlumnos = consolidateAlumnos(alumnos)
   const visibleAlumnos = searchNorm
-    ? consolidatedAlumnos.filter(a => (a.cliente || a.nombre || '').toLowerCase().includes(searchNorm))
+    ? consolidatedAlumnos.filter(a => normalizeName(a.cliente || a.nombre).includes(searchNorm))
     : consolidatedAlumnos
 
   // Different real people can share a name — highlight whichever is active
   // so the profesor can tell them apart at a glance.
   const nameCounts = {}
   visibleAlumnos.forEach(a => {
-    const n = (a.cliente || a.nombre || '').trim().toLowerCase()
+    const n = normalizeName(a.cliente || a.nombre)
     if (n) nameCounts[n] = (nameCounts[n] || 0) + 1
   })
   const isAmbiguousActive = a => {
-    const n = (a.cliente || a.nombre || '').trim().toLowerCase()
+    const n = normalizeName(a.cliente || a.nombre)
     return n && nameCounts[n] > 1 && a.status === 'active'
   }
 
