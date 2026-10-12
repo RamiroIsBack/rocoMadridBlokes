@@ -3252,7 +3252,9 @@ add_action('rest_api_init', function() {
     register_rest_route('blokes/v1', '/leagues/user/(?P<user_id>\d+)', array(
         'methods'             => 'DELETE',
         'callback'            => 'blokes_api_remove_from_league',
-        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+        // Una fila, no un rebuild total (eso sigue siendo solo socio) —
+        // mismo nivel que borrar un alumno manual.
+        'permission_callback' => function() { return blokes_can_supervise(); },
     ));
 
     // ── Listas de acceso (editable por socios) ───────────────────────────────
