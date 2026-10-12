@@ -146,11 +146,13 @@ export default function LeaguesPage() {
         )}
         <div className="league-empty">
           <p>
-            {!sd.isLoggedIn
+            {sd.userRole === 'tablet'
+              ? 'Hasta que no tengas un usuario con email y contraseña vinculado a tu cuenta no podrás aparecer en las ligas, si no apareces pregunta en el mostrador.'
+              : !sd.isLoggedIn
               ? 'Inicia sesión y completa tu primer bloke para entrar en Liga Pedri.'
               : (error || 'Aún no estás en ninguna liga.')}
           </p>
-          {!sd.isLoggedIn ? (
+          {sd.userRole === 'tablet' ? null : !sd.isLoggedIn ? (
             sd.loginUrl && <a href={sd.loginUrl} className="league-login__btn">Iniciar sesión</a>
           ) : (
             !error && <p className="league-empty__sub">Completa tu primer bloke para entrar en Liga Pedri.</p>

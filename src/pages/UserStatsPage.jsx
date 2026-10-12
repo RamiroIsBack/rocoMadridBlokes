@@ -10,6 +10,7 @@ import BodyDiagram, { ZONES, TESTS, visibleZoneTests } from '../components/BodyD
 import TrainingChart, { ProgressGauge } from '../components/TrainingChart'
 import Achievements from '../components/Achievements'
 import UserAvatar from '../components/UserAvatar'
+import TabletYoView from '../components/TabletYoView'
 import './UserStatsPage.css'
 import '../components/GatePreview.css'
 
@@ -158,6 +159,12 @@ export default function UserStatsPage() {
 
   const totalRatings = Object.values(ratingCounts).reduce((a, b) => a + b, 0)
   const total = completedByMe.size
+
+  // No "me" on a shared tablet — nothing shows until someone picks who they
+  // are, from a view that doesn't reuse any of the self-only hooks above.
+  if (window.blokesSiteData?.userRole === 'tablet') {
+    return <TabletYoView />
+  }
 
   if (!isLoggedIn) {
     return (

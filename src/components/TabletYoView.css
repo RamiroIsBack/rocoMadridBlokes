@@ -1,0 +1,96 @@
+.tablet-yo {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px 60px;
+}
+
+.tablet-yo--empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  min-height: 60vh;
+  text-align: center;
+}
+
+.tablet-yo__profile-btn {
+  padding: 18px 40px;
+  background: #2a2015;
+  color: #f5c842;
+  border: none;
+  font-weight: 700;
+  font-size: 1.1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.tablet-yo__profile-btn:hover { background: #3d3020; }
+
+.tablet-yo__signup-btn {
+  display: inline-block;
+  padding: 16px 32px;
+  background: #c8961e;
+  color: #2a2015;
+  font-weight: 700;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-decoration: none;
+}
+.tablet-yo__signup-btn:hover { background: #b3850f; }
+
+.tablet-yo__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.tablet-yo__name {
+  font-family: var(--font-serif);
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: #2a2015;
+  margin: 0;
+}
+.tablet-yo__change-btn {
+  background: none;
+  border: 1.5px solid #2a2015;
+  color: #2a2015;
+  padding: 8px 14px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.tablet-yo__bloke-total {
+  font-size: 1.1rem;
+  color: #2a2015;
+  margin: 0 0 24px;
+}
+.tablet-yo__bloke-total strong {
+  font-family: var(--font-serif);
+  font-size: 1.6rem;
+  color: #c8961e;
+}
+
+.tablet-yo__class-info {
+  font-size: 0.95rem;
+  color: var(--color-text-secondary);
+}
+
+.tablet-yo__no-class {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.tablet-yo__no-class p {
+  font-size: 0.95rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+}

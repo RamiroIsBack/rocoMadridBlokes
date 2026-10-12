@@ -7,7 +7,10 @@ function getAuthHeaders() {
   return nonce ? { 'X-WP-Nonce': nonce } : {}
 }
 
-export function useClassProgress(enabled = true) {
+// targetUserId: from the tablet, viewing someone else's class instead of
+// "mi clase" — needs profe/gestión/tablet permission, same as the rest of
+// the "act on behalf of" tooling.
+export function useClassProgress(enabled = true, targetUserId = 0) {
   const [data, setData]       = useState(null)   // { class: {dia,horario}, members: [...] }
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState(null)
@@ -15,7 +18,8 @@ export function useClassProgress(enabled = true) {
   useEffect(() => {
     if (!enabled) return
     setLoading(true)
-    fetch(`${CLUB_URL}/wp-json/progreso/v1/training/class-progress`, {
+    const qs = targetUserId ? `?target_user_id=${targetUserId}` : ''
+    fetch(`${CLUB_URL}/wp-json/progreso/v1/training/class-progress${qs}`, {
       credentials: 'include',
       headers: getAuthHeaders(),
     })
@@ -23,7 +27,7 @@ export function useClassProgress(enabled = true) {
       .then(json => { if (json?.data) setData(json.data) })
       .catch(e => setError(e))
       .finally(() => setLoading(false))
-  }, [enabled])
+  }, [enabled, targetUserId])
 
   return { data, loading, error }
 }

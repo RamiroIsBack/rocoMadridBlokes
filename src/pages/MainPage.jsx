@@ -6,6 +6,9 @@ import EventCard from '../components/EventCard'
 import LoadingSpinner from '../components/LoadingSpinner'
 import CelebrationDialog from '../components/CelebrationDialog'
 import OnboardingTutorial, { tutorialSeen } from '../components/OnboardingTutorial'
+import IdentityPicker from '../components/IdentityPicker'
+
+const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
 
 const COLECCION_TUTORIAL_KEY = 'blokes_tutorial_seen_coleccion'
 const COLECCION_SLIDES = [
@@ -22,14 +25,42 @@ function MainPage() {
   const [sortMode, setSortMode] = useState('newest')
   const [celebration, setCelebration] = useState(null)
   const [showTutorial, setShowTutorial] = useState(() => !tutorialSeen(COLECCION_TUTORIAL_KEY))
+  const isTablet = window.blokesSiteData?.userRole === 'tablet'
+  const [pickerCard, setPickerCard] = useState(null)
 
   const handleToggleDone = useCallback(async (card) => {
+    // The tablet has no "me" of its own — every tap attributes the top to
+    // whoever picks themselves, instead of toggling the tablet account's
+    // own (meaningless) completion state.
+    if (isTablet) { setPickerCard(card); return }
     const currentCount = countOverrides[card.postId] ?? card.completionCount ?? 0
     const result = await toggleCompletion(card.postId, currentCount)
     if (result?.completed) {
       setCelebration({ title: card.title, count: result.count, firstAscent: result.first_ascent === true })
     }
-  }, [toggleCompletion, countOverrides])
+  }, [toggleCompletion, countOverrides, isTablet])
+
+  const completeForIdentity = useCallback(async (identity) => {
+    const card = pickerCard
+    setPickerCard(null)
+    if (!card) return
+    try {
+      const nonce = window.blokesSiteData?.nonce
+      const body = identity.kind === 'ph' ? { target_placeholder_id: identity.placeholder_id } : { target_user_id: identity.user_id }
+      const res = await fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/completions/${card.postId}/toggle`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'X-WP-Nonce': nonce, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json()
+      if (res.ok && data.completed) {
+        setCelebration({ title: `${card.title} — ${identity.name}`, count: data.count, firstAscent: data.first_ascent === true })
+      }
+    } catch (e) {
+      console.error('Tablet completion failed:', e)
+    }
+  }, [pickerCard])
 
   const newCardIds = useMemo(() => {
     const sorted = [...cards].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
@@ -63,6 +94,13 @@ function MainPage() {
           storageKey={COLECCION_TUTORIAL_KEY}
           slides={COLECCION_SLIDES}
           onClose={() => setShowTutorial(false)}
+        />
+      )}
+      {pickerCard && (
+        <IdentityPicker
+          title={`¿Quién completó "${pickerCard.title}"?`}
+          onPick={completeForIdentity}
+          onClose={() => setPickerCard(null)}
         />
       )}
       {celebration && (

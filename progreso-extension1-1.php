@@ -439,6 +439,14 @@ add_action('rest_api_init', function() {
         'permission_callback' => function() { return is_user_logged_in(); },
     ));
 
+    // Blokes totals for someone else — the tablet's "Yo" needs this for
+    // whoever was picked, real user or manual alumno.
+    register_rest_route('blokes/v1', '/completions/subject', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_get_subject_completions',
+        'permission_callback' => function() { return blokes_can_supervise(); },
+    ));
+
     register_rest_route('blokes/v1', '/delete/(?P<id>\d+)', array(
         'methods'             => 'DELETE',
         'callback'            => 'blokes_delete_with_media',
@@ -1123,6 +1131,36 @@ function blokes_toggle_completion_placeholder($placeholder_id, $post_id) {
         'first_ascent' => $first_ascent,
         'league'       => null,
     );
+}
+
+function blokes_api_get_subject_completions($request) {
+    $user_id        = intval($request->get_param('user_id'));
+    $placeholder_id = intval($request->get_param('placeholder_id'));
+
+    if ($placeholder_id > 0) {
+        global $wpdb;
+        blokes_ensure_placeholder_completions_table();
+        $table = blokes_placeholder_completions_table();
+        $rows  = $wpdb->get_results($wpdb->prepare(
+            "SELECT post_id, color FROM {$table} WHERE placeholder_id = %d", $placeholder_id
+        ), ARRAY_A);
+        $by_color = array();
+        foreach ($rows as $r) { $by_color[$r['color']] = ($by_color[$r['color']] ?? 0) + 1; }
+        return rest_ensure_response(array('total' => count($rows), 'by_color' => $by_color));
+    }
+
+    if ($user_id > 0) {
+        $log = get_user_meta($user_id, '_blokes_completion_log', true);
+        $log = is_array($log) ? $log : array();
+        $by_color = array();
+        foreach ($log as $entry) {
+            $color = sanitize_text_field($entry['color'] ?? 'green');
+            $by_color[$color] = ($by_color[$color] ?? 0) + 1;
+        }
+        return rest_ensure_response(array('total' => count($log), 'by_color' => $by_color));
+    }
+
+    return new WP_Error('invalid_data', 'Falta user_id o placeholder_id.', array('status' => 400));
 }
 
 function blokes_rate_bloke($request) {
