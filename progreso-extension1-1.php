@@ -44,6 +44,8 @@ $GLOBALS['blokes_profesores_emails'] = array(
     'alobo@ymail.com',
     'luciapcaas@gmail.com',
 );
+// Cuenta(s) de las tablets compartidas del gimnasio — ver Superadmin → Tablet.
+$GLOBALS['blokes_tablets_emails'] = array();
 // Aliases para compatibilidad con plugins del club que referencian los nombres anteriores
 $GLOBALS['blokes_superadmin_emails'] = $GLOBALS['blokes_socios_emails'];
 $GLOBALS['blokes_admin_emails']      = array_merge(
@@ -60,6 +62,7 @@ function blokes_get_email_lists() {
         'socios'     => (is_array($saved) && !empty($saved['socios']))     ? $saved['socios']     : $GLOBALS['blokes_socios_emails'],
         'gestion'    => (is_array($saved) && !empty($saved['gestion']))    ? $saved['gestion']    : $GLOBALS['blokes_gestion_emails'],
         'profesores' => (is_array($saved) && !empty($saved['profesores'])) ? $saved['profesores'] : $GLOBALS['blokes_profesores_emails'],
+        'tablets'    => (is_array($saved) && !empty($saved['tablets']))    ? $saved['tablets']    : $GLOBALS['blokes_tablets_emails'],
     );
 }
 
@@ -69,6 +72,9 @@ function blokes_get_email_lists() {
  *   'socio'    → acceso total + Superadmin
  *   'gestion'  → acceso profesor + ExcelMuerte (Supervisión)
  *   'profesor' → Setter, Stats, Entrenamientos, Supervisión (Fichaje/TimeOff)
+ *   'tablet'   → cuenta compartida de una tablet del gimnasio: Colección,
+ *                Progreso y Ligas sin login personal; puede completar un
+ *                bloke o crear un alumno manual en nombre de quien elija
  *   'member'   → usuario logueado sin permisos de gestión
  *   'guest'    → no logueado
  */
@@ -79,11 +85,15 @@ function blokes_get_app_role() {
     if (in_array($email, array_map('strtolower', $lists['socios'])))     return 'socio';
     if (in_array($email, array_map('strtolower', $lists['gestion'])))    return 'gestion';
     if (in_array($email, array_map('strtolower', $lists['profesores']))) return 'profesor';
+    if (in_array($email, array_map('strtolower', $lists['tablets'])))    return 'tablet';
     return 'member';
 }
 
+// "Puede actuar en nombre de un alumno": medir, crear manuales, y ahora
+// también completar un bloke o ver el progreso de otra persona desde la
+// tablet. 'tablet' se suma aquí a propósito — es justo lo que necesita.
 function blokes_can_supervise() {
-    return in_array(blokes_get_app_role(), array('profesor', 'gestion', 'socio'));
+    return in_array(blokes_get_app_role(), array('profesor', 'gestion', 'socio', 'tablet'));
 }
 
 // ── Profile helpers ──────────────────────────────────────────────────────────
@@ -971,15 +981,30 @@ function blokes_get_my_completions($request) {
 }
 
 function blokes_toggle_completion($request) {
-    $post_id = intval($request['id']);
-    $user_id = get_current_user_id();
+    $post_id               = intval($request['id']);
+    $target_user_id        = intval($request->get_param('target_user_id'));
+    $target_placeholder_id = intval($request->get_param('target_placeholder_id'));
+    $acting_for_other      = ($target_user_id > 0) || ($target_placeholder_id > 0);
+
+    // Marking a top for someone else — a profe, gestión, or the shared
+    // tablet attributing it to whoever they picked — needs the same
+    // permission as the rest of the "act on behalf of an alumno" tooling.
+    if ($acting_for_other && !blokes_can_supervise()) {
+        return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
+    }
 
     $post = get_post($post_id);
     if (!$post || $post->post_type !== 'blokes') {
         return new WP_Error('invalid_bloke', 'Invalid bloke ID', array('status' => 404));
     }
 
-    if (!blokes_is_profile_complete($user_id)) {
+    if ($target_placeholder_id > 0) {
+        return blokes_toggle_completion_placeholder($target_placeholder_id, $post_id);
+    }
+
+    $user_id = $target_user_id > 0 ? $target_user_id : get_current_user_id();
+
+    if (!$acting_for_other && !blokes_is_profile_complete($user_id)) {
         return new WP_Error('profile_incomplete', 'Completa tu perfil antes de registrar un top.', array('status' => 403));
     }
 
@@ -1041,6 +1066,62 @@ function blokes_toggle_completion($request) {
         'count'        => $count,
         'first_ascent' => isset($first_ascent) ? $first_ascent : false,
         'league'       => $league_update,
+    );
+}
+
+// Same toggle semantics as blokes_toggle_completion, but for a manual alumno
+// with no WordPress account yet — stored in its own table instead of
+// usermeta, since usermeta needs a real wp_user row. No leagues here: a
+// placeholder only enters leagues once linked to a real account.
+function blokes_toggle_completion_placeholder($placeholder_id, $post_id) {
+    global $wpdb;
+    blokes_ensure_placeholder_completions_table();
+    $table = blokes_placeholder_completions_table();
+
+    $existing = $wpdb->get_row($wpdb->prepare(
+        "SELECT id FROM {$table} WHERE placeholder_id = %d AND post_id = %d", $placeholder_id, $post_id
+    ));
+
+    $first_ascent = false;
+    if ($existing) {
+        $wpdb->delete($table, array('id' => $existing->id), array('%d'));
+        $completed = false;
+        $count     = max(0, (int) get_post_meta($post_id, '_bloke_completion_count', true) - 1);
+    } else {
+        $color = sanitize_text_field(get_field('bloke_color', $post_id) ?: 'green');
+        $sala  = sanitize_text_field(get_field('bloke_sala',  $post_id) ?: 'entrada');
+        $wpdb->insert($table, array(
+            'placeholder_id' => $placeholder_id,
+            'post_id'        => $post_id,
+            'color'          => $color,
+            'sala'           => $sala,
+            'completed_at'   => current_time('mysql'),
+            'logged_by'      => get_current_user_id(),
+        ), array('%d', '%d', '%s', '%s', '%s', '%d'));
+        $completed = true;
+        $count     = (int) get_post_meta($post_id, '_bloke_completion_count', true) + 1;
+
+        if ($count === 1) {
+            $nombre = $wpdb->get_var($wpdb->prepare(
+                "SELECT nombre FROM " . blokes_placeholder_table() . " WHERE id = %d", $placeholder_id
+            ));
+            $first_name = $nombre ? explode(' ', trim($nombre))[0] : '';
+            update_post_meta($post_id, '_bloke_first_ascent', array(
+                'placeholder_id' => $placeholder_id,
+                'name'           => $first_name ?: $nombre,
+                'timestamp'      => current_time('c'),
+            ));
+            $first_ascent = true;
+        }
+    }
+
+    update_post_meta($post_id, '_bloke_completion_count', $count);
+
+    return array(
+        'completed'    => $completed,
+        'count'        => $count,
+        'first_ascent' => $first_ascent,
+        'league'       => null,
     );
 }
 
@@ -1556,6 +1637,37 @@ function blokes_ensure_placeholder_table() {
     dbDelta($sql);
 }
 
+// Completados de un alumno manual — el equivalente de _blokes_completed /
+// _blokes_completion_log para alguien sin cuenta de WordPress (esos usermeta
+// no aplican a un placeholder). Al vincular, se traspasan y se borran de aquí.
+function blokes_placeholder_completions_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_placeholder_completions';
+}
+
+function blokes_ensure_placeholder_completions_table() {
+    global $wpdb;
+    $version = '1';
+    if (get_option('blokes_placeholder_completions_version') === $version) return;
+    $table = blokes_placeholder_completions_table();
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        id             bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        placeholder_id bigint(20) UNSIGNED NOT NULL,
+        post_id        bigint(20) UNSIGNED NOT NULL,
+        color          varchar(20)         NOT NULL DEFAULT 'green',
+        sala           varchar(20)         NOT NULL DEFAULT 'entrada',
+        completed_at   datetime            NOT NULL,
+        logged_by      bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        PRIMARY KEY (id),
+        UNIQUE KEY placeholder_post (placeholder_id, post_id),
+        KEY post_id (post_id)
+    ) {$charset};";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+    update_option('blokes_placeholder_completions_version', $version);
+}
+
 function blokes_get_placeholder_alumnos($status = 'pending') {
     global $wpdb;
     blokes_ensure_placeholder_table();
@@ -1710,6 +1822,41 @@ function progreso_link_alumno_manual($request) {
         array('placeholder_id' => $id),
         array('%d', '%d'), array('%d')
     );
+
+    // Completados del alumno manual (marcados desde la tablet o Entrenamientos)
+    // pasan a la cuenta real, y ahí sí entra en ligas por primera vez con los
+    // puntos que le correspondan por lo ya hecho.
+    blokes_ensure_placeholder_completions_table();
+    $pc_table = blokes_placeholder_completions_table();
+    $ph_completions = $wpdb->get_results($wpdb->prepare(
+        "SELECT post_id, color, sala, completed_at FROM {$pc_table} WHERE placeholder_id = %d ORDER BY completed_at ASC", $id
+    ), ARRAY_A);
+    if ($ph_completions) {
+        $completed_ids = get_user_meta($user->ID, '_blokes_completed', true);
+        $completed_ids = is_array($completed_ids) ? array_map('intval', $completed_ids) : array();
+        $log = get_user_meta($user->ID, '_blokes_completion_log', true);
+        $log = is_array($log) ? $log : array();
+        $newly_completed = array();
+        foreach ($ph_completions as $pc_row) {
+            $pid = intval($pc_row['post_id']);
+            if (in_array($pid, $completed_ids, true)) continue; // ya lo tenía de verdad, no duplicar
+            $completed_ids[] = $pid;
+            $log[] = array(
+                'postId'    => $pid,
+                'color'     => $pc_row['color'],
+                'sala'      => $pc_row['sala'],
+                'timestamp' => date('c', strtotime($pc_row['completed_at'])),
+            );
+            $newly_completed[] = $pid;
+        }
+        update_user_meta($user->ID, '_blokes_completed', $completed_ids);
+        update_user_meta($user->ID, '_blokes_completion_log', $log);
+        foreach ($newly_completed as $pid) {
+            blokes_register_top_for_leagues($user->ID, $pid);
+        }
+        $wpdb->delete($pc_table, array('placeholder_id' => $id), array('%d'));
+    }
+
     $wpdb->update(blokes_placeholder_table(), array(
         'status'         => 'linked',
         'linked_user_id' => $user->ID,
@@ -2278,9 +2425,14 @@ function progreso_completions_by_color() {
     return rest_ensure_response($by_color);
 }
 
-function progreso_get_class_progress() {
+function progreso_get_class_progress($request) {
     global $wpdb;
-    $me = get_current_user_id();
+    // Normally "mi clase"; from the tablet (viewing someone else's progress)
+    // a supervisor can ask for another real user's class instead. Manual
+    // alumnos never have a class of their own here — they have no real
+    // subscription to read día/horario from — so there's no target_placeholder_id.
+    $target_user_id = intval($request->get_param('target_user_id'));
+    $me = ($target_user_id > 0 && blokes_can_supervise()) ? $target_user_id : get_current_user_id();
     if (!$me || !class_exists('RocoMadrid_SF_Stats')) {
         return rest_ensure_response(array('data' => array('class' => null, 'members' => array())));
     }
@@ -2331,7 +2483,17 @@ function progreso_get_class_progress() {
         }
     }
 
-    if (empty($uid_to_name)) {
+    // Manual alumnos (no real subscription yet) sharing the same día/horario
+    // are classmates too — same overlap rule as above.
+    $ph_to_name = array();
+    foreach (blokes_get_placeholder_alumnos('pending') as $ph) {
+        if (($ph['horario'] ?? '') !== $horario) continue;
+        $ph_days = array_map('trim', explode('-', $ph['dia'] ?? ''));
+        if (empty(array_intersect($my_days, $ph_days))) continue;
+        $ph_to_name[intval($ph['placeholder_id'])] = $ph['cliente'] ?: 'Compañero';
+    }
+
+    if (empty($uid_to_name) && empty($ph_to_name)) {
         return rest_ensure_response(array('data' => array(
             'class'   => array('dia' => $dia, 'horario' => $horario),
             'members' => array(),
@@ -2340,27 +2502,56 @@ function progreso_get_class_progress() {
 
     progreso_ensure_training_table();
     $table = progreso_training_table();
-    $uids  = array_keys($uid_to_name);
-    $ph    = implode(',', array_fill(0, count($uids), '%d'));
+    $by_subject = array(); // keyed "u<id>" / "p<id>" so the two id spaces never collide
 
-    $rows = $wpdb->get_results(
-        $wpdb->prepare(
-            "SELECT user_id, test_id, value_kg, logged_at FROM {$table} WHERE user_id IN ({$ph}) ORDER BY user_id, test_id, logged_at ASC",
+    if (!empty($uid_to_name)) {
+        $uids = array_keys($uid_to_name);
+        $ph_marks = implode(',', array_fill(0, count($uids), '%d'));
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT user_id, test_id, value_kg, logged_at FROM {$table} WHERE user_id IN ({$ph_marks}) ORDER BY user_id, test_id, logged_at ASC",
             ...$uids
-        ),
-        ARRAY_A
-    );
+        ), ARRAY_A);
+        foreach ($rows as $row) {
+            $key = 'u' . intval($row['user_id']); $tid = intval($row['test_id']);
+            $by_subject[$key][$tid][] = array('v' => floatval($row['value_kg']), 'm' => substr($row['logged_at'], 0, 7));
+        }
+    }
+    if (!empty($ph_to_name)) {
+        $phids = array_keys($ph_to_name);
+        $ph_marks = implode(',', array_fill(0, count($phids), '%d'));
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT placeholder_id, test_id, value_kg, logged_at FROM {$table} WHERE placeholder_id IN ({$ph_marks}) ORDER BY placeholder_id, test_id, logged_at ASC",
+            ...$phids
+        ), ARRAY_A);
+        foreach ($rows as $row) {
+            $key = 'p' . intval($row['placeholder_id']); $tid = intval($row['test_id']);
+            $by_subject[$key][$tid][] = array('v' => floatval($row['value_kg']), 'm' => substr($row['logged_at'], 0, 7));
+        }
+    }
 
-    $by_user = array();
-    foreach ($rows as $row) {
-        $uid = intval($row['user_id']); $tid = intval($row['test_id']);
-        $by_user[$uid][$tid][] = array('v' => floatval($row['value_kg']), 'm' => substr($row['logged_at'], 0, 7));
+    // Placeholder completions, fetched once and grouped so the loop below
+    // doesn't hit the DB per classmate.
+    $ph_logs = array();
+    if (!empty($ph_to_name)) {
+        blokes_ensure_placeholder_completions_table();
+        $pc_table = blokes_placeholder_completions_table();
+        $phids    = array_keys($ph_to_name);
+        $ph_marks = implode(',', array_fill(0, count($phids), '%d'));
+        $pc_rows  = $wpdb->get_results($wpdb->prepare(
+            "SELECT placeholder_id, post_id, color, completed_at FROM {$pc_table} WHERE placeholder_id IN ({$ph_marks}) ORDER BY completed_at ASC",
+            ...$phids
+        ), ARRAY_A);
+        foreach ($pc_rows as $row) {
+            $ph_logs[intval($row['placeholder_id'])][] = array(
+                'postId' => intval($row['post_id']), 'color' => $row['color'], 'timestamp' => $row['completed_at'],
+            );
+        }
     }
 
     $members = array();
     foreach ($uid_to_name as $uid => $name) {
         $tests = array();
-        foreach ($by_user[$uid] ?? array() as $tid => $entries) {
+        foreach ($by_subject['u' . $uid] ?? array() as $tid => $entries) {
             $baseline = $entries[0]['v']; $latest = $entries[count($entries) - 1]['v'];
             $pct = $baseline > 0 ? (($latest - $baseline) / $baseline) * 100 : 0;
             $months = count(array_unique(array_column($entries, 'm')));
@@ -2397,6 +2588,37 @@ function progreso_get_class_progress() {
             'rating_by_type' => $rating_by_type,
         );
     }
+    // Manual alumnos: same shape, no account yet so no nick/avatar/ratings —
+    // UserAvatar already falls back to "nombre_climb" when nickname is blank.
+    foreach ($ph_to_name as $phid => $name) {
+        $tests = array();
+        foreach ($by_subject['p' . $phid] ?? array() as $tid => $entries) {
+            $baseline = $entries[0]['v']; $latest = $entries[count($entries) - 1]['v'];
+            $pct = $baseline > 0 ? (($latest - $baseline) / $baseline) * 100 : 0;
+            $months = count(array_unique(array_column($entries, 'm')));
+            $tests[$tid] = array('pct' => round($pct, 1), 'months' => $months);
+        }
+        $log = $ph_logs[$phid] ?? array();
+        $bloke_by_color = array();
+        foreach ($log as $entry) {
+            $bloke_by_color[$entry['color']] = ($bloke_by_color[$entry['color']] ?? 0) + 1;
+        }
+        $members[] = array(
+            'is_me'          => false,
+            'user_id'        => 0,
+            'placeholder_id' => $phid,
+            'is_placeholder' => true,
+            'name'           => $name,
+            'nickname'       => '',
+            'avatarType'     => '',
+            'avatarData'     => new stdClass(),
+            'tests'          => $tests,
+            'bloke_total'    => count($log),
+            'bloke_by_color' => $bloke_by_color,
+            'rating_total'   => 0,
+            'rating_by_type' => array('star_1' => 0, 'star_2' => 0, 'star_3' => 0, 'skull' => 0),
+        );
+    }
 
     // Top blokes: aggregate completions across all classmates
     $bloke_counts = array();
@@ -2406,6 +2628,11 @@ function progreso_get_class_progress() {
         foreach ($log as $entry) {
             $pid = intval($entry['postId'] ?? 0);
             if ($pid > 0) $bloke_counts[$pid] = ($bloke_counts[$pid] ?? 0) + 1;
+        }
+    }
+    foreach ($ph_logs as $log) {
+        foreach ($log as $entry) {
+            $bloke_counts[$entry['postId']] = ($bloke_counts[$entry['postId']] ?? 0) + 1;
         }
     }
     arsort($bloke_counts);
@@ -2422,6 +2649,13 @@ function progreso_get_class_progress() {
             if (!$ts || $ts < $cutoff) continue;
             $pid = intval($entry['postId'] ?? 0);
             if ($pid > 0) $recent_counts[$pid] = ($recent_counts[$pid] ?? 0) + 1;
+        }
+    }
+    foreach ($ph_logs as $log) {
+        foreach ($log as $entry) {
+            $ts = strtotime($entry['timestamp'] ?? '');
+            if (!$ts || $ts < $cutoff) continue;
+            $recent_counts[$entry['postId']] = ($recent_counts[$entry['postId']] ?? 0) + 1;
         }
     }
     arsort($recent_counts);
@@ -3402,7 +3636,7 @@ function blokes_api_get_comunidad_leagues() {
 
 function blokes_api_save_email_lists(WP_REST_Request $request) {
     $body    = $request->get_json_params();
-    $allowed = array('socios', 'gestion', 'profesores');
+    $allowed = array('socios', 'gestion', 'profesores', 'tablets');
 
     switch_to_blog(1);
     $existing = get_option('blokes_email_lists', array());

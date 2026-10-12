@@ -1147,6 +1147,7 @@ const LISTA_CONFIG = [
   { key: 'socios',     label: 'Socios',     color: '#a78bfa', acceso: 'Todo + Superadmin' },
   { key: 'gestion',    label: 'Gestión',    color: '#34d399', acceso: 'Todo de profesores + ExcelMuerte (Supervisión)' },
   { key: 'profesores', label: 'Profesores', color: '#f5c842', acceso: 'Setter · Estadísticas · Entrenamientos · Fichaje · TimeOff' },
+  { key: 'tablets',    label: 'Tablet',     color: '#60a5fa', acceso: 'Colección, Progreso y Ligas en modo tablet, sin login personal' },
 ]
 
 const WP_URL = window.location.origin
