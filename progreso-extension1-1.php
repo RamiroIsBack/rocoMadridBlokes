@@ -3247,6 +3247,14 @@ add_action('rest_api_init', function() {
         ),
     ));
 
+    // Saca a un usuario de su liga sin tocar a nadie más — p. ej. revertir
+    // una colocación de prueba. Recalcula el ranking de esa liga después.
+    register_rest_route('blokes/v1', '/leagues/user/(?P<user_id>\d+)', array(
+        'methods'             => 'DELETE',
+        'callback'            => 'blokes_api_remove_from_league',
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+    ));
+
     // ── Listas de acceso (editable por socios) ───────────────────────────────
     register_rest_route('blokes/v1', '/admin/email-lists', array(
         'methods'             => 'PUT',
@@ -3390,6 +3398,17 @@ function blokes_api_mark_events_seen() {
     $uid = get_current_user_id();
     $wpdb->update("{$wpdb->prefix}blokes_league_events", array('seen' => 1), array('user_id' => $uid, 'seen' => 0));
     return rest_ensure_response(array('ok' => true));
+}
+
+function blokes_api_remove_from_league($request) {
+    global $wpdb;
+    $ul      = $wpdb->prefix . 'blokes_user_leagues';
+    $user_id = intval($request['user_id']);
+    $row     = $wpdb->get_row($wpdb->prepare("SELECT league_id FROM $ul WHERE user_id = %d", $user_id));
+    if (!$row) return new WP_Error('not_in_league', 'Ese usuario no está en ninguna liga.', array('status' => 404));
+    $wpdb->delete($ul, array('user_id' => $user_id), array('%d'));
+    blokes_recalculate_league_ranks((int) $row->league_id);
+    return rest_ensure_response(array('success' => true, 'removed_from_league_id' => (int) $row->league_id));
 }
 
 function blokes_api_initial_placement($request) {
