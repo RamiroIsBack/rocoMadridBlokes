@@ -272,9 +272,11 @@
   margin: 0;
 }
 
-/* Table */
+/* Table — scrolls horizontally instead of cutting off whatever doesn't fit
+   (a wide row, like the test input + note, can be wider than a phone) */
 .entrena__table-wrap {
-  overflow-x: hidden;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .entrena__table {

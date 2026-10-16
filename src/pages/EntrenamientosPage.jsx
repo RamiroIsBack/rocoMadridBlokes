@@ -135,15 +135,15 @@ function TestModeRow({ alumno, testId, ambiguousActive }) {
             onClick={handleSave}
             disabled={saving}
           >{saving ? '…' : saved ? '✓' : 'OK'}</button>
-          <input
-            type="text"
-            value={note}
-            onChange={e => setNote(e.target.value)}
-            placeholder="nota"
-            maxLength={300}
-            className="entrena__test-note-input"
-          />
         </div>
+        <input
+          type="text"
+          value={note}
+          onChange={e => setNote(e.target.value)}
+          placeholder="nota"
+          maxLength={300}
+          className="entrena__test-note-input"
+        />
         {err && <p className="entrena__test-err">{err}</p>}
       </td>
     </tr>

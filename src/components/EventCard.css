@@ -517,6 +517,15 @@
         height: 32px;
     }
 
+    /* These two carry a text label, not just a dot — the generic 32x32
+       circle above is too small for their content and clips it. */
+    .event-card__color--blanco,
+    .event-card__color--intro {
+        width: 56px;
+        height: 28px;
+        font-size: 0.7rem;
+    }
+
     .event-card__title-row {
         gap: 8px;
     }
