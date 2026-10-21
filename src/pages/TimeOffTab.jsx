@@ -6,6 +6,8 @@ import {
   diasDevengados, minimoVerano, MESES_DISCONTINUO, DISP_VERANO, CIERRE_VERANO, isClosed, disponible,
   campDates, vacationDates,
 } from '../utils/coverage'
+import { useExpenses, useRevenue } from '../hooks/useSuperAdmin'
+import { autoCategory } from '../utils/expensesParser'
 
 const STORAGE_KEY = 'blokes.timeoff.v2'
 const DIAS_ANUALES = 23
@@ -157,6 +159,121 @@ function Normas() {
         <li>Los <strong>fijos discontinuos</strong> no trabajan en julio y agosto (cobran el paro). Les corresponden unos {diasDevengados(DIAS_ANUALES, true)} días ({MESES_DISCONTINUO} meses de {DIAS_ANUALES}), que cogen fuera del verano.</li>
         <li>Si la sala <strong>cierra</strong> en verano, los días de cierre son vacaciones de todos los que trabajan ese mes (salvo quien lleve el campamento).</li>
       </ul>
+    </div>
+  )
+}
+
+// ─── Histórico de julio y agosto (mismos datos que Superadmin) ───────────────
+
+// Gastos que dejan de pagarse con la sala cerrada; alquiler, nóminas, SS e
+// impuestos se pagan igual.
+const CATS_AHORRABLES = ['electricidad', 'gas', 'bar', 'comisiones_banco', 'devoluciones_tpv']
+const MESES_HISTORICO = 60
+
+function fmtMes(m) {
+  const [y, mo] = m.split('-')
+  return new Date(+y, +mo - 1).toLocaleString('es-ES', { month: 'short', year: 'numeric' })
+}
+
+function HistoricoVerano({ onApply }) {
+  const exp = useExpenses(MESES_HISTORICO, 'all', true)
+  const rev = useRevenue(MESES_HISTORICO, true)
+
+  const months = useMemo(() => {
+    const acc = {}
+    const row = m => (acc[m] ||= { month: m, ingresos: 0, costes: 0, personal: 0, ahorrable: 0, web: 0, banco: false })
+    ;(exp.data || []).forEach(r => {
+      const x = row(r.month)
+      x.banco = true
+      x.ingresos += Math.abs(r.total_ingresos || 0)
+      x.costes   += Math.abs(r.total_costes || 0)
+      x.personal += Math.abs(r.nominas || 0)
+      Object.entries(r.by_concepto || {}).forEach(([k, v]) => {
+        const cat = autoCategory(k, false)
+        if (cat === 'ss') x.personal += v
+        if (CATS_AHORRABLES.includes(cat)) x.ahorrable += v
+      })
+    })
+    ;(rev.data || []).forEach(r => { row(r.month).web += r.total || 0 })
+    return Object.values(acc).sort((a, b) => a.month.localeCompare(b.month))
+  }, [exp.data, rev.data])
+
+  const isVer = m => ['07', '08'].includes(m.month.slice(5))
+  const conBanco = months.filter(m => m.banco)
+  const verano = conBanco.filter(isVer)
+  const resto  = conBanco.filter(m => !isVer(m))
+  const media = (arr, k) => (arr.length ? arr.reduce((n, m) => n + m[k], 0) / arr.length : 0)
+  const restoAnio = y => resto.filter(m => m.month.startsWith(y))
+  const veranoWeb = months.filter(isVer).filter(m => m.web > 0)
+
+  const sugerido = {
+    ingresos:  Math.round(media(verano, 'ingresos') || media(veranoWeb, 'web')),
+    ahorrable: Math.round(media(verano, 'ahorrable')),
+  }
+
+  return (
+    <div className="sv-section">
+      <h3 className="sv-section-title">Histórico de julio y agosto</h3>
+      <p className="sv-note">
+        Movimientos del banco subidos en Superadmin › Gastos (sin movimientos internos) y ventas de la web sin el uso del
+        rocódromo. Solo salen los meses con extracto subido. «Ahorrable» es lo que dejaría de pagarse con la sala cerrada
+        (luz, gas, bar, comisiones y devoluciones TPV); alquiler, nóminas, Seguridad Social e impuestos se pagan igual.
+      </p>
+      {(exp.loading || rev.loading) && <p className="sv-loading">Cargando histórico…</p>}
+      {exp.error && <p className="sv-error">No se pudo cargar el banco: {exp.error}</p>}
+      {!exp.loading && !exp.error && !months.some(isVer) && <p className="sv-empty">Aún no hay datos de julio ni agosto.</p>}
+      {months.some(isVer) && (
+        <>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr>
+                  <th>Mes</th><th>Ingresos banco</th><th>Ventas web</th><th>Gastos</th><th>Personal</th>
+                  <th>Ahorrable</th><th>Resultado</th><th>Resultado medio resto del año</th>
+                </tr>
+              </thead>
+              <tbody>
+                {months.filter(isVer).map(m => {
+                  const net = m.ingresos - m.costes
+                  const ra = restoAnio(m.month.slice(0, 4))
+                  const netResto = ra.length ? media(ra, 'ingresos') - media(ra, 'costes') : null
+                  return (
+                    <tr key={m.month}>
+                      <td style={{ textTransform: 'capitalize' }}>{fmtMes(m.month)}</td>
+                      <td>{m.banco ? eur(m.ingresos) : '—'}</td>
+                      <td>{m.web ? eur(m.web) : '—'}</td>
+                      <td>{m.banco ? eur(m.costes) : '—'}</td>
+                      <td>{m.banco ? eur(m.personal) : '—'}</td>
+                      <td>{m.banco ? eur(m.ahorrable) : '—'}</td>
+                      <td className={m.banco && net < 0 ? 'sv-to-bad' : ''}>{m.banco ? eur(net) : '—'}</td>
+                      <td className="sv-ot-muted">{netResto === null ? '—' : `${eur(netResto)} (${ra.length} meses)`}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          {verano.length > 0 && (
+            <div className="sv-kpis">
+              <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }}>
+                <span className="sv-kpi__value">{eur(media(verano, 'ingresos'))}</span>
+                <span className="sv-kpi__label">Ingresos medios jul/ago ({verano.length} meses) · resto {eur(media(resto, 'ingresos'))}</span>
+              </div>
+              <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }}>
+                <span className="sv-kpi__value">{eur(media(verano, 'costes'))}</span>
+                <span className="sv-kpi__label">Gastos medios jul/ago · ahorrables {eur(sugerido.ahorrable)}</span>
+              </div>
+              <div className="sv-kpi" style={{ '--kpi-color': media(verano, 'ingresos') - media(verano, 'costes') < 0 ? '#f87171' : '#34d399' }}>
+                <span className="sv-kpi__value">{eur(media(verano, 'ingresos') - media(verano, 'costes'))}</span>
+                <span className="sv-kpi__label">Resultado medio jul/ago · resto {eur(media(resto, 'ingresos') - media(resto, 'costes'))}</span>
+              </div>
+            </div>
+          )}
+          <button className="sv-tests-add" onClick={() => onApply(sugerido)}>
+            Usar en la calculadora: se pierden {eur(sugerido.ingresos)}/mes de ingresos, se ahorran {eur(sugerido.ahorrable)}/mes de gastos
+          </button>
+        </>
+      )}
     </div>
   )
 }
@@ -692,6 +809,7 @@ export default function TimeOffTab() {
   return (
     <div className="sv-tab-panel">
       <Normas />
+      <HistoricoVerano onApply={h => setState(s => ({ ...s, ingresosSala: h.ingresos, gastosSala: h.ahorrable }))} />
       <ConflictMatrix keys={state.keys} ctx={ctx} />
       <Calculadora state={state} setState={setState} />
     </div>
