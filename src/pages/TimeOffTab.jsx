@@ -3,16 +3,18 @@ import { PROF_META, PROF_ORDER, DAYS, DAY_LABEL } from '../data/staffSchedule'
 import {
   KEY_HOLDERS_DEFAULT, VERANO_APERTURA, COMODIN_VERANO, veranoSlots, pairConflict, simulatePlan,
   laborablesBetween, laborablesFrom, expandPeriods, isSummer, weekdayOf, fmtShort, monthOf,
-  diasDevengados, minimoVerano, MESES_DISCONTINUO, DISP_VERANO, CIERRE_VERANO, isClosed, disponible,
+  diasDevengados, minimoVerano, PARO_VERANO, PARO_MESES, combinacionesParo, CIERRE_VERANO, isClosed, disponible,
   campDates, vacationDates,
 } from '../utils/coverage'
 import { useExpenses } from '../hooks/useSuperAdmin'
 import { autoCategory } from '../utils/expensesParser'
 import { PL_DATA } from '../data/plHistorico'
 
-const STORAGE_KEY = 'blokes.timeoff.v3'
+const STORAGE_KEY = 'blokes.timeoff.v4'
 const DIAS_ANUALES = 23
-const HOY_DISCONTINUOS = ['Sigurd']
+// Situación actual: Sigurd fijo discontinuo; Ana no trabaja en agosto
+const HOY_PARO = { Sigurd: 'verano', Ana: 'agosto' }
+const PARO_CORTO = { no: '—', verano: 'Jul + ago', agosto: 'Ago', julio: 'Jul' }
 const LABORABLES_MES = 21.75
 
 const LEVEL_LABEL = { rojo: 'No coincidir', ambar: 'Evitar', verde: 'Posible' }
@@ -35,7 +37,7 @@ function daysUntil(iso) {
 
 const eur = n => `${Math.round(n).toLocaleString('es-ES')} €`
 
-// Quién no está en un mes de verano (discontinuos y no disponibles)
+// Quién no está en un mes de verano (en paro ese mes)
 function inactivosMes(mes, ctx) {
   const iso = `${temporada() + 1}-0${mes}-15`
   return PROF_ORDER.filter(p => !disponible(p, iso, ctx))
@@ -57,13 +59,13 @@ function presetPlan(kind) {
     period('Eva',    `${y + 1}-01-04`, 4),
     period('Sara',   `${y + 1}-01-04`, 4),
   ]
-  const base = { disp: { Ana: 'julio' }, cierre: 'abierto', camp: { ...CAMP_OFF, start: `${v}-07-01` } }
+  const base = { paro: { ...HOY_PARO }, cierre: 'abierto', camp: { ...CAMP_OFF, start: `${v}-07-01` } }
 
   switch (kind) {
     case 'discontinuas':
       return {
         ...base,
-        discontinuos: ['Sigurd', 'Sara', 'Lucía'],
+        paro: { ...HOY_PARO, Sara: 'verano', 'Lucía': 'verano' },
         periods: [...navidad, period('Alvaro', `${v}-07-01`, 12), period('Eva', `${v}-07-19`, 12)],
       }
     case 'cierreAgosto':
@@ -71,24 +73,29 @@ function presetPlan(kind) {
       return {
         ...base,
         cierre: 'agosto',
-        discontinuos: [...HOY_DISCONTINUOS],
         periods: [period('Sigurd', `${y}-12-21`, 4), period('Ana', `${y}-12-21`, 4)],
       }
     case 'cierreVerano':
       return {
         ...base,
         cierre: 'verano',
-        discontinuos: [...HOY_DISCONTINUOS],
         camp: { ...CAMP_OFF, activo: true, start: `${v}-07-01`, staff: [COMODIN_VERANO, 'Ana'] },
         periods: [period('Sigurd', `${y}-12-21`, 4)],
       }
     case 'todosDiscontinuos':
       // Sala cerrada julio y agosto y toda la plantilla en paro esos meses
-      return { ...base, cierre: 'verano', discontinuos: [...PROF_ORDER], periods: navidad }
+      return { ...base, cierre: 'verano', paro: Object.fromEntries(PROF_ORDER.map(p => [p, 'verano'])), periods: navidad }
+    case 'agostoParo':
+      // Agosto cerrado y todos en paro ese mes (Sigurd sigue en julio y agosto)
+      return {
+        ...base,
+        cierre: 'agosto',
+        paro: { ...Object.fromEntries(PROF_ORDER.map(p => [p, 'agosto'])), Sigurd: 'verano' },
+        periods: navidad,
+      }
     default:
       return {
         ...base,
-        discontinuos: [...HOY_DISCONTINUOS],
         periods: [
           ...navidad,
           period('Alvaro', `${v}-07-01`, 12),
@@ -101,9 +108,10 @@ function presetPlan(kind) {
 }
 
 const PRESETS = [
-  ['hoy',          'Hoy (Sigurd discontinuo)'],
+  ['hoy',          'Hoy (Sigurd jul–ago, Ana ago)'],
   ['discontinuas', 'Sara y Lucía fijas discontinuas'],
   ['cierreAgosto', 'Cerrar agosto'],
+  ['agostoParo',   'Cerrar agosto, todos en paro en agosto'],
   ['cierreVerano', 'Cerrar julio y agosto + campamento'],
   ['todosDiscontinuos', 'Cerrar julio y agosto, todos discontinuos'],
 ]
@@ -158,7 +166,7 @@ function Normas() {
         <li>En verano se abre solo por la tarde, desde las <strong>{VERANO_APERTURA}</strong>: todos los días de julio y agosto tiene que haber alguien con llave para abrir.</li>
         <li>En verano se unifican los grupos: clases de 1,5 h <strong>una detrás de otra</strong>, desde las {VERANO_APERTURA} hasta el cierre ({CLASES_VERANO} clases a la semana).</li>
         <li>En verano {COMODIN_VERANO} está en recepción y es el <strong>comodín</strong>: solo da clase si falta un profe. Hacen falta <strong>2 profes + {COMODIN_VERANO}</strong> cada mes para que puedan turnarse las vacaciones.</li>
-        <li>Los <strong>fijos discontinuos</strong> no trabajan en julio y agosto (cobran el paro). Les corresponden unos {diasDevengados(DIAS_ANUALES, true)} días ({MESES_DISCONTINUO} meses de {DIAS_ANUALES}), que cogen fuera del verano.</li>
+        <li>Los <strong>fijos discontinuos</strong> no trabajan julio, agosto o los dos (cobran el paro). Las vacaciones se devengan por meses trabajados: {diasDevengados(DIAS_ANUALES, 1)} días si paran un mes y {diasDevengados(DIAS_ANUALES, 2)} si paran los dos, que cogen cuando trabajan.</li>
         <li>Si la sala <strong>cierra</strong> en verano, los días de cierre son vacaciones de todos los que trabajan ese mes (salvo quien lleve el campamento).</li>
       </ul>
     </div>
@@ -387,6 +395,61 @@ function ConflictMatrix({ keys, ctx }) {
   )
 }
 
+// ─── Explorador de combinaciones de paro ─────────────────────────────────────
+function ExploradorParo({ paro, cierre, keys, onApply }) {
+  const [verTodas, setVerTodas] = useState(false)
+  const combos = useMemo(() => combinacionesParo({
+    cierre, keys, hoy: HOY_PARO, coste: Object.fromEntries(PROF_ORDER.map(p => [p, PROF_META[p].costoMes])),
+  }), [cierre, keys])
+  const actual = combos.findIndex(c => PROF_ORDER.every(p => c.paro[p] === (paro[p] || 'no')))
+  const lista = combos.slice(0, verTodas ? 60 : 10)
+
+  return (
+    <>
+      <h4 className="sv-to-subtitle">Todas las combinaciones de paro</h4>
+      <p className="sv-note">
+        Se prueban las {(4 ** PROF_ORDER.length).toLocaleString('es-ES')} combinaciones (4 opciones por persona) y se quedan
+        las {combos.length.toLocaleString('es-ES')} que dejan cada mes abierto con al menos 2 profes + {COMODIN_VERANO} y
+        alguien con llave, ordenadas por ahorro frente a hoy. {actual >= 0
+          ? `La combinación actual es la n.º ${actual + 1}.`
+          : 'La combinación actual no cumple el mínimo de 2 profes + Eva.'} Al aplicar una, revisa los avisos: el reparto
+        de vacaciones (periodos) no se cambia solo.
+      </p>
+      <div className="sv-tests-scroll">
+        <table className="sv-tests-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              {PROF_ORDER.map(p => <th key={p} style={{ color: PROF_META[p].color }}>{p}</th>)}
+              <th>Ahorro/año</th><th>Cambios</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {lista.map((c, i) => (
+              <tr key={i} className={i === actual ? 'sv-to-row--sel' : ''}>
+                <td className="sv-ot-muted">{i + 1}</td>
+                {PROF_ORDER.map(p => (
+                  <td key={p} className={c.paro[p] !== (HOY_PARO[p] || 'no') ? 'sv-to-warn-txt' : 'sv-ot-muted'}>{PARO_CORTO[c.paro[p]]}</td>
+                ))}
+                <td className={c.ahorro > 0 ? 'sv-to-good' : c.ahorro < 0 ? 'sv-to-bad' : ''}>{eur(c.ahorro)}</td>
+                <td>{c.cambios}</td>
+                <td>{i === actual ? <span className="sv-ot-muted">actual</span> : (
+                  <button className="sv-filter-btn" onClick={() => onApply({ ...c.paro })}>Aplicar</button>
+                )}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {combos.length > 10 && (
+        <button className="sv-filter-btn" onClick={() => setVerTodas(v => !v)}>
+          {verTodas ? 'Ver solo las 10 mejores' : `Ver más (${Math.min(60, combos.length)})`}
+        </button>
+      )}
+    </>
+  )
+}
+
 // ─── Calculadora ─────────────────────────────────────────────────────────────
 function Calculadora({ state, setState }) {
   const y = temporada()
@@ -397,9 +460,9 @@ function Calculadora({ state, setState }) {
   }
   const [win, setWin] = useState('verano')
   const [selDate, setSelDate] = useState(null)
-  const { discontinuos, keys, dias, periods, disp, cierre, camp, gastosSala, ingresosSala } = state
-  const ctx  = { periods, discontinuos, disp, cierre, camp, keys }
-  const deps = [periods, discontinuos, disp, cierre, camp, keys]
+  const { paro, keys, dias, periods, cierre, camp, gastosSala, ingresosSala } = state
+  const ctx  = { periods, paro, cierre, camp, keys }
+  const deps = [periods, paro, cierre, camp, keys]
 
   // Nivel de cada pareja: horario normal, julio y agosto
   const pairLevels = useMemo(() => {
@@ -435,14 +498,16 @@ function Calculadora({ state, setState }) {
 
   // Resumen por persona (toda la temporada)
   const rows = PROF_ORDER.map(p => {
-    const isDisc = discontinuos.includes(p)
+    const op     = paro[p] || 'no'
+    const nParo  = PARO_MESES[op].length
     const vac    = vacationDates(p, temporadaDates, ctx)
     const verano = vac.filter(isSummer).length
-    const dev    = diasDevengados(dias[p], isDisc)
+    const dev    = diasDevengados(dias[p], nParo)
     const cierreDias = vac.filter(d => isClosed(d, cierre)).length
     return {
-      p, disc: isDisc, dev, usados: vac.length, verano, cierreDias,
-      min: minimoVerano(dias[p], isDisc, disp[p]), restan: dev - vac.length,
+      p, op, disc: op === 'verano', dev, usados: vac.length, verano, cierreDias,
+      min: minimoVerano(dias[p], nParo), restan: dev - vac.length,
+      ahorro: (nParo - PARO_MESES[HOY_PARO[p] || 'no'].length) * PROF_META[p].costoMes,
     }
   })
 
@@ -493,8 +558,7 @@ function Calculadora({ state, setState }) {
   const mesesCerradosList = [7, 8].filter(m => isClosed(`${y + 1}-0${m}-15`, cierre))
   const mesesCerrados = mesesCerradosList.length
   const eco = {
-    personal: discontinuos.filter(p => !HOY_DISCONTINUOS.includes(p)).reduce((s, p) => s + PROF_META[p].costoMes * 2, 0)
-            - HOY_DISCONTINUOS.filter(p => !discontinuos.includes(p)).reduce((s, p) => s + PROF_META[p].costoMes * 2, 0),
+    personal: rows.reduce((s, r) => s + r.ahorro, 0),
     sala:     mesesCerradosList.reduce((n, m) => n + (gastosSala[m] || 0) - (ingresosSala[m] || 0), 0),
     camp:     camp.activo ? Math.round(campSet.size / 5) * camp.plazas * camp.precio : 0,
     ociosos:  rows.filter(r => r.restan < 0 && r.cierreDias > 0)
@@ -628,8 +692,8 @@ function Calculadora({ state, setState }) {
         <table className="sv-tests-table">
           <thead>
             <tr>
-              <th>Persona</th><th>Fijo discontinuo</th><th>Llave</th><th>En verano</th><th>Días/año</th><th>Le tocan</th>
-              <th>Jul–ago (mín.)</th><th>Vacaciones</th><th>Le quedan</th><th>€/mes</th>
+              <th>Persona</th><th>Paro en verano</th><th>Llave</th><th>Días/año</th><th>Le tocan</th>
+              <th>Jul–ago (mín.)</th><th>Vacaciones</th><th>Le quedan</th><th>€/mes</th><th>Ahorro/año frente a hoy</th>
             </tr>
           </thead>
           <tbody>
@@ -638,16 +702,13 @@ function Calculadora({ state, setState }) {
                 <td style={{ color: PROF_META[r.p].color, fontWeight: 700 }}>
                   {r.p}{r.p === COMODIN_VERANO && <span className="sv-ot-muted"> · recepción</span>}
                 </td>
-                <td><input type="checkbox" checked={r.disc} onChange={() => update({ discontinuos: toggle(discontinuos, r.p) })} /></td>
-                <td><input type="checkbox" checked={keys.includes(r.p)} onChange={() => update({ keys: toggle(keys, r.p) })} /></td>
                 <td>
-                  {r.disc ? <span className="sv-ot-muted">Fuera (paro)</span> : (
-                    <select className="sv-tests-select" value={disp[r.p] || 'ambos'}
-                      onChange={e => update({ disp: { ...disp, [r.p]: e.target.value } })}>
-                      {Object.entries(DISP_VERANO).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                    </select>
-                  )}
+                  <select className="sv-tests-select" value={r.op}
+                    onChange={e => update({ paro: { ...paro, [r.p]: e.target.value } })}>
+                    {Object.entries(PARO_VERANO).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                  </select>
                 </td>
+                <td><input type="checkbox" checked={keys.includes(r.p)} onChange={() => update({ keys: toggle(keys, r.p) })} /></td>
                 <td>
                   <input className="sv-tests-input sv-tests-input--unit" type="number" min="0" max="40" value={dias[r.p]}
                     onChange={e => update({ dias: { ...dias, [r.p]: num(e.target.value) } })} />
@@ -657,11 +718,14 @@ function Calculadora({ state, setState }) {
                 <td>{r.usados}{r.cierreDias > 0 && <span className="sv-ot-muted"> ({r.cierreDias} cierre)</span>}</td>
                 <td className={r.restan < 0 ? 'sv-to-bad' : ''}>{r.restan}</td>
                 <td>{PROF_META[r.p].costoMes.toLocaleString('es-ES')}</td>
+                <td className={r.ahorro > 0 ? 'sv-to-good' : r.ahorro < 0 ? 'sv-to-bad' : 'sv-ot-muted'}>{r.ahorro ? eur(r.ahorro) : '—'}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <ExploradorParo paro={paro} cierre={cierre} keys={keys} onApply={p => update({ paro: p })} />
 
       <h4 className="sv-to-subtitle">Periodos de vacaciones</h4>
       <div className="sv-tests-scroll">
@@ -805,7 +869,7 @@ function Calculadora({ state, setState }) {
       <p className="sv-note">
         Pasar a fijo discontinuo requiere que la persona firme el cambio de contrato. El paro en julio y agosto depende de lo
         que haya cotizado (con jornada parcial la prestación es proporcional): confirmarlo con la gestoría antes de proponerlo.
-        "Verano frente a hoy" suma el coste empresa de julio y agosto que se ahorra con los discontinuos, los gastos de sala
+        "Verano frente a hoy" suma el coste empresa de los meses de paro que se ahorran frente a hoy, los gastos de sala
         ahorrados menos los ingresos perdidos por cerrar, y los ingresos del campamento (sin descontar sus gastos).
       </p>
     </div>
@@ -822,7 +886,7 @@ export default function TimeOffTab() {
     } catch { /* sin almacenamiento: la calculadora funciona igual */ }
   }, [state])
 
-  const ctx = { discontinuos: state.discontinuos, disp: state.disp, cierre: state.cierre }
+  const ctx = { paro: state.paro, cierre: state.cierre }
 
   return (
     <div className="sv-tab-panel">

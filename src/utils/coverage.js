@@ -215,15 +215,14 @@ export function fmtShort(iso) {
 // Días laborables de vacaciones al año y parte obligatoria en julio/agosto.
 // Un fijo discontinuo sin actividad en julio/agosto devenga la parte
 // proporcional de 10 meses y la disfruta durante la temporada.
-export const MESES_DISCONTINUO = 10
+// Paro en verano (fijo discontinuo): qué meses de julio/agosto no trabaja
+export const PARO_VERANO = { no: 'No', verano: 'Julio y agosto', agosto: 'Solo agosto', julio: 'Solo julio' }
+export const PARO_MESES  = { no: [], verano: [7, 8], agosto: [8], julio: [7] }
 
-export function diasDevengados(diasAnuales, discontinuo) {
-  return discontinuo ? Math.round(diasAnuales * MESES_DISCONTINUO / 12) : diasAnuales
+// Las vacaciones se devengan por los meses trabajados
+export function diasDevengados(diasAnuales, mesesParo = 0) {
+  return Math.round(diasAnuales * (12 - mesesParo) / 12)
 }
-
-// Disponibilidad en verano: 'ambos' | 'julio' | 'agosto'. Los fijos
-// discontinuos no están ningún mes de verano.
-export const DISP_VERANO = { ambos: 'Julio y agosto', julio: 'Solo julio', agosto: 'Solo agosto' }
 
 // Modo de verano: abierto, cerrado en agosto o cerrado julio y agosto
 export const CIERRE_VERANO = { abierto: 'Abierto', agosto: 'Cerrado en agosto', verano: 'Cerrado julio y agosto' }
@@ -237,16 +236,41 @@ export function isClosed(iso, cierre = 'abierto') {
   return MESES_CIERRE[cierre].includes(monthOf(iso))
 }
 
-export function disponible(prof, iso, { discontinuos = [], disp = {} }) {
+export function disponible(prof, iso, { paro = {} }) {
   if (!isSummer(iso)) return true
-  if (discontinuos.includes(prof)) return false
-  const d = disp[prof] || 'ambos'
-  return d === 'ambos' || (d === 'julio' ? monthOf(iso) === 7 : monthOf(iso) === 8)
+  return !PARO_MESES[paro[prof] || 'no'].includes(monthOf(iso))
 }
 
-// Quien solo está un mes de verano ya no trabaja el otro: no se le exige el 50 %
-export function minimoVerano(diasAnuales, discontinuo, disp = 'ambos') {
-  return discontinuo || disp !== 'ambos' ? 0 : Math.ceil(diasAnuales / 2)
+// Quien para algún mes de verano ya no trabaja ese mes: no se le exige el 50 %
+export function minimoVerano(diasAnuales, mesesParo = 0) {
+  return mesesParo ? 0 : Math.ceil(diasAnuales / 2)
+}
+
+// Todas las combinaciones de paro (4 opciones por persona) que dejan cada mes
+// abierto con al menos 2 profes + el comodín y alguien con llave. Se ordenan
+// por ahorro frente a `hoy` y, a igualdad, por menos cambios.
+export function combinacionesParo({ cierre = 'abierto', keys = KEY_HOLDERS_DEFAULT, hoy = {}, coste = {}, minProfes = 2 }) {
+  const opciones = Object.keys(PARO_MESES)
+  const abiertos = [7, 8].filter(m => !MESES_CIERRE[cierre].includes(m))
+  const res = []
+  const total = opciones.length ** PROF_ORDER.length
+  for (let i = 0; i < total; i++) {
+    const paro = {}
+    let n = i
+    PROF_ORDER.forEach(p => { paro[p] = opciones[n % opciones.length]; n = Math.floor(n / opciones.length) })
+    const ok = abiertos.every(m => {
+      const activos = PROF_ORDER.filter(p => !PARO_MESES[paro[p]].includes(m))
+      return activos.includes(COMODIN_VERANO)
+        && activos.filter(p => p !== COMODIN_VERANO).length >= minProfes
+        && activos.some(p => keys.includes(p))
+    })
+    if (!ok) continue
+    const ahorro = PROF_ORDER.reduce((sum, p) =>
+      sum + (PARO_MESES[paro[p]].length - PARO_MESES[hoy[p] || 'no'].length) * (coste[p] || 0), 0)
+    const cambios = PROF_ORDER.filter(p => paro[p] !== (hoy[p] || 'no')).length
+    res.push({ paro, ahorro, cambios })
+  }
+  return res.sort((x, y) => y.ahorro - x.ahorro || x.cambios - y.cambios)
 }
 
 // Días de campamento: semanas laborables desde `start`, solo dentro del cierre
@@ -268,7 +292,7 @@ export function expandPeriods(periods) {
 
 // Simula cada día laborable de `dates` con el plan dado. Los días de cierre no
 // necesitan cobertura; en verano no cuenta quien no está disponible ese mes.
-export function simulatePlan(dates, { periods, discontinuos = [], disp = {}, cierre = 'abierto', camp, keys }) {
+export function simulatePlan(dates, { periods, paro = {}, cierre = 'abierto', camp, keys }) {
   const off = expandPeriods(periods)
   const campSet = campDates(camp, cierre)
   return dates.map(date => {
@@ -279,7 +303,7 @@ export function simulatePlan(dates, { periods, discontinuos = [], disp = {}, cie
       }
     }
     const summer = isSummer(date)
-    const inactive = PROF_ORDER.filter(p => !disponible(p, date, { discontinuos, disp }))
+    const inactive = PROF_ORDER.filter(p => !disponible(p, date, { paro }))
     const out = PROF_ORDER.filter(p => off[p]?.has(date) && !inactive.includes(p))
     const r = simulateDay(weekdayOf(date), {
       out,
@@ -293,10 +317,10 @@ export function simulatePlan(dates, { periods, discontinuos = [], disp = {}, cie
 
 // Días de vacaciones de cada persona en `dates`: los que pide más los de cierre,
 // salvo los que no trabaja (no disponible) o trabaja en el campamento.
-export function vacationDates(prof, dates, { periods, discontinuos = [], disp = {}, cierre = 'abierto', camp }) {
+export function vacationDates(prof, dates, { periods, paro = {}, cierre = 'abierto', camp }) {
   const off = expandPeriods(periods)[prof] || new Set()
   const campSet = camp?.staff?.includes(prof) ? campDates(camp, cierre) : new Set()
-  return dates.filter(d => disponible(prof, d, { discontinuos, disp })
+  return dates.filter(d => disponible(prof, d, { paro })
     && !campSet.has(d)
     && (off.has(d) || isClosed(d, cierre)))
 }

@@ -947,3 +947,5 @@
 }
 .sv-to-tl-cell--camp   { background: #f0ece0; }
 .sv-to-tl-cell--closed { background: #1e1b14; }
+.sv-to-good { color: #34d399 !important; font-weight: 700; }
+.sv-to-row--sel td { background: rgba(245,200,66,0.06); }
