@@ -5,6 +5,7 @@ import {
 } from 'recharts'
 import { useRevenue, useProducts, useExpenses, useClasses } from '../hooks/useSuperAdmin'
 import ExpensesSection from '../components/ExpensesSection'
+import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
 import PayrollSection from '../components/PayrollSection'
 import './SuperAdminPage.css'
 
@@ -813,27 +814,8 @@ const PL_METRICS_LIST = [
   { key: 'resultado', label: 'Resultado'      },
 ]
 
-const PL_DATA = {
-  ventas: {
-    2024: [8872,14244,10520,11527,12439,10521,8832,2076,8867,13391,12919,7305],
-    2025: [11596,10612,11236,11799,10996,9585,7022,2533,9687,12823,10685,9973],
-  },
-  costes: {
-    2024: [-9340,-10999,-11193,-12198,-10617,-10138,-9977,-9266,-9784,-10289,-11388,-11242],
-    2025: [-11332,-12025,-12076,-12280,-11791,-6138,-16048,-9195,-9566,-11802,-11322,-10082],
-  },
-  resultado: {
-    2024: [1047,4678,1152,1312,3326,1945,533,-5065,781,4436,3183,-1802],
-    2025: [2025,612,1614,1524,2358,4525,null,null,null,null,null,null],
-  },
-}
-
 const PL_YEAR_COLORS = { 2024: '#f5c842', 2025: '#60a5fa', 2026: '#34d399' }
 
-const PL_VENTAS_IVA = {
-  2024: [10735, 17235, 12729, 13948, 15051, 12731, 10687, 2512, 10729, 16204, 15632, 8839],
-  2025: [14032, 12841, 13596, 14277, 13305, 11598, 8496, 3065, 11721, 15515, 12929, 12067],
-}
 
 function fmtPLVal(v) {
   if (v == null) return '—'

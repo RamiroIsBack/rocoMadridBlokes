@@ -6,10 +6,11 @@ import {
   diasDevengados, minimoVerano, MESES_DISCONTINUO, DISP_VERANO, CIERRE_VERANO, isClosed, disponible,
   campDates, vacationDates,
 } from '../utils/coverage'
-import { useExpenses, useRevenue } from '../hooks/useSuperAdmin'
+import { useExpenses } from '../hooks/useSuperAdmin'
 import { autoCategory } from '../utils/expensesParser'
+import { PL_DATA } from '../data/plHistorico'
 
-const STORAGE_KEY = 'blokes.timeoff.v2'
+const STORAGE_KEY = 'blokes.timeoff.v3'
 const DIAS_ANUALES = 23
 const HOY_DISCONTINUOS = ['Sigurd']
 const LABORABLES_MES = 21.75
@@ -112,8 +113,9 @@ function defaultState() {
     ...presetPlan('hoy'),
     keys: [...KEY_HOLDERS_DEFAULT],
     dias: Object.fromEntries(PROF_ORDER.map(p => [p, DIAS_ANUALES])),
-    gastosSala: 0,
-    ingresosSala: 0,
+    // €/mes por mes de verano (7 = julio, 8 = agosto)
+    gastosSala:   { 7: 0, 8: 0 },
+    ingresosSala: { 7: 0, 8: 0 },
   }
 }
 
@@ -175,105 +177,119 @@ function fmtMes(m) {
   return new Date(+y, +mo - 1).toLocaleString('es-ES', { month: 'short', year: 'numeric' })
 }
 
-function HistoricoVerano({ onApply }) {
+// Una fila por mes: 2024–2025 del Excel (PL_DATA), desde 2026 del banco
+function useHistoricoMeses() {
   const exp = useExpenses(MESES_HISTORICO, 'all', true)
-  const rev = useRevenue(MESES_HISTORICO, true)
 
   const months = useMemo(() => {
     const acc = {}
-    const row = m => (acc[m] ||= { month: m, ingresos: 0, costes: 0, personal: 0, ahorrable: 0, web: 0, banco: false })
-    ;(exp.data || []).forEach(r => {
-      const x = row(r.month)
-      x.banco = true
-      x.ingresos += Math.abs(r.total_ingresos || 0)
-      x.costes   += Math.abs(r.total_costes || 0)
-      x.personal += Math.abs(r.nominas || 0)
-      Object.entries(r.by_concepto || {}).forEach(([k, v]) => {
-        const cat = autoCategory(k, false)
-        if (cat === 'ss') x.personal += v
-        if (CATS_AHORRABLES.includes(cat)) x.ahorrable += v
+    Object.keys(PL_DATA.ventas).forEach(yr => {
+      PL_DATA.ventas[yr].forEach((v, i) => {
+        if (v == null) return
+        const m = `${yr}-${String(i + 1).padStart(2, '0')}`
+        acc[m] = {
+          month: m, fuente: 'Excel', ventas: v, costes: -(PL_DATA.costes[yr][i] || 0),
+          resultado: PL_DATA.resultado[yr][i], ahorrable: null,
+        }
       })
     })
-    ;(rev.data || []).forEach(r => { row(r.month).web += r.total || 0 })
-    return Object.values(acc).sort((a, b) => a.month.localeCompare(b.month))
-  }, [exp.data, rev.data])
+    ;(exp.data || []).forEach(r => {
+      if (acc[r.month]?.fuente === 'Excel') return
+      const x = (acc[r.month] ||= { month: r.month, fuente: 'Banco', ventas: 0, costes: 0, resultado: null, ahorrable: 0 })
+      x.ventas += Math.abs(r.total_ingresos || 0)
+      x.costes += Math.abs(r.total_costes || 0)
+      Object.entries(r.by_concepto || {}).forEach(([k, v]) => {
+        if (CATS_AHORRABLES.includes(autoCategory(k, false))) x.ahorrable += v
+      })
+    })
+    return Object.values(acc)
+      .map(x => (x.fuente === 'Banco' ? { ...x, resultado: x.ventas - x.costes } : x))
+      .sort((p, q) => p.month.localeCompare(q.month))
+  }, [exp.data])
 
-  const isVer = m => ['07', '08'].includes(m.month.slice(5))
-  const conBanco = months.filter(m => m.banco)
-  const verano = conBanco.filter(isVer)
-  const resto  = conBanco.filter(m => !isVer(m))
-  const media = (arr, k) => (arr.length ? arr.reduce((n, m) => n + m[k], 0) / arr.length : 0)
-  const restoAnio = y => resto.filter(m => m.month.startsWith(y))
-  const veranoWeb = months.filter(isVer).filter(m => m.web > 0)
+  return { months, loading: exp.loading, error: exp.error }
+}
+
+function HistoricoVerano({ onApply }) {
+  const { months, loading, error } = useHistoricoMeses()
+
+  const mesNum = m => Number(m.month.slice(5))
+  const isVer  = m => mesNum(m) === 7 || mesNum(m) === 8
+  const media  = (arr, k) => {
+    const v = arr.map(x => x[k]).filter(x => x != null)
+    return v.length ? v.reduce((n, x) => n + x, 0) / v.length : null
+  }
+  const delMes = mes => months.filter(m => mesNum(m) === mes)
+  const resto  = months.filter(m => !isVer(m))
+  const restoAnio = yr => resto.filter(m => m.month.startsWith(yr))
 
   const sugerido = {
-    ingresos:  Math.round(media(verano, 'ingresos') || media(veranoWeb, 'web')),
-    ahorrable: Math.round(media(verano, 'ahorrable')),
+    ingresos:  { 7: Math.round(media(delMes(7), 'ventas') || 0),    8: Math.round(media(delMes(8), 'ventas') || 0) },
+    ahorrable: { 7: Math.round(media(delMes(7), 'ahorrable') || 0), 8: Math.round(media(delMes(8), 'ahorrable') || 0) },
   }
 
   return (
     <div className="sv-section">
       <h3 className="sv-section-title">Histórico de julio y agosto</h3>
       <p className="sv-note">
-        Movimientos del banco subidos en Superadmin › Gastos (sin movimientos internos) y ventas de la web sin el uso del
-        rocódromo. Solo salen los meses con extracto subido. «Ahorrable» es lo que dejaría de pagarse con la sala cerrada
-        (luz, gas, bar, comisiones y devoluciones TPV); alquiler, nóminas, Seguridad Social e impuestos se pagan igual.
+        Los mismos datos que Superadmin › P&amp;L: 2024 y 2025 del Excel de cuentas (ventas sin IVA y costes fijos), y desde
+        2026 los extractos del banco subidos en Superadmin › Gastos. «Ahorrable» es lo que dejaría de pagarse con la sala
+        cerrada (luz, gas, bar, comisiones y devoluciones TPV); solo sale con el banco, el Excel no lo desglosa.
       </p>
-      {(exp.loading || rev.loading) && <p className="sv-loading">Cargando histórico…</p>}
-      {exp.error && <p className="sv-error">No se pudo cargar el banco: {exp.error}</p>}
-      {!exp.loading && !exp.error && !months.some(isVer) && <p className="sv-empty">Aún no hay datos de julio ni agosto.</p>}
-      {months.some(isVer) && (
-        <>
-          <div className="sv-tests-scroll">
-            <table className="sv-tests-table">
-              <thead>
-                <tr>
-                  <th>Mes</th><th>Ingresos banco</th><th>Ventas web</th><th>Gastos</th><th>Personal</th>
-                  <th>Ahorrable</th><th>Resultado</th><th>Resultado medio resto del año</th>
+      {loading && <p className="sv-loading">Cargando el banco…</p>}
+      {error && <p className="sv-error">No se pudo cargar el banco ({error}); se muestran solo los datos del Excel.</p>}
+      <div className="sv-tests-scroll">
+        <table className="sv-tests-table">
+          <thead>
+            <tr>
+              <th>Mes</th><th>Fuente</th><th>Ventas</th><th>Costes</th><th>Resultado</th>
+              <th>Ahorrable</th><th>Ventas medias resto del año</th>
+            </tr>
+          </thead>
+          <tbody>
+            {months.filter(isVer).map(m => {
+              const ra = restoAnio(m.month.slice(0, 4))
+              const vr = media(ra, 'ventas')
+              return (
+                <tr key={m.month}>
+                  <td style={{ textTransform: 'capitalize' }}>{fmtMes(m.month)}</td>
+                  <td className="sv-ot-muted">{m.fuente}</td>
+                  <td>{eur(m.ventas)}{vr ? <span className="sv-ot-muted"> ({Math.round(m.ventas / vr * 100)} %)</span> : null}</td>
+                  <td>{eur(m.costes)}</td>
+                  <td className={m.resultado != null && m.resultado < 0 ? 'sv-to-bad' : ''}>
+                    {m.resultado != null ? eur(m.resultado) : <span className="sv-ot-muted" title="El Excel no tiene el resultado de este mes">—</span>}
+                  </td>
+                  <td>{m.ahorrable != null ? eur(m.ahorrable) : '—'}</td>
+                  <td className="sv-ot-muted">{vr ? `${eur(vr)} (${ra.length} meses)` : '—'}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {months.filter(isVer).map(m => {
-                  const net = m.ingresos - m.costes
-                  const ra = restoAnio(m.month.slice(0, 4))
-                  const netResto = ra.length ? media(ra, 'ingresos') - media(ra, 'costes') : null
-                  return (
-                    <tr key={m.month}>
-                      <td style={{ textTransform: 'capitalize' }}>{fmtMes(m.month)}</td>
-                      <td>{m.banco ? eur(m.ingresos) : '—'}</td>
-                      <td>{m.web ? eur(m.web) : '—'}</td>
-                      <td>{m.banco ? eur(m.costes) : '—'}</td>
-                      <td>{m.banco ? eur(m.personal) : '—'}</td>
-                      <td>{m.banco ? eur(m.ahorrable) : '—'}</td>
-                      <td className={m.banco && net < 0 ? 'sv-to-bad' : ''}>{m.banco ? eur(net) : '—'}</td>
-                      <td className="sv-ot-muted">{netResto === null ? '—' : `${eur(netResto)} (${ra.length} meses)`}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          {verano.length > 0 && (
-            <div className="sv-kpis">
-              <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }}>
-                <span className="sv-kpi__value">{eur(media(verano, 'ingresos'))}</span>
-                <span className="sv-kpi__label">Ingresos medios jul/ago ({verano.length} meses) · resto {eur(media(resto, 'ingresos'))}</span>
-              </div>
-              <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }}>
-                <span className="sv-kpi__value">{eur(media(verano, 'costes'))}</span>
-                <span className="sv-kpi__label">Gastos medios jul/ago · ahorrables {eur(sugerido.ahorrable)}</span>
-              </div>
-              <div className="sv-kpi" style={{ '--kpi-color': media(verano, 'ingresos') - media(verano, 'costes') < 0 ? '#f87171' : '#34d399' }}>
-                <span className="sv-kpi__value">{eur(media(verano, 'ingresos') - media(verano, 'costes'))}</span>
-                <span className="sv-kpi__label">Resultado medio jul/ago · resto {eur(media(resto, 'ingresos') - media(resto, 'costes'))}</span>
-              </div>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="sv-kpis">
+        {[7, 8].map(mes => {
+          const arr = delMes(mes)
+          const res = media(arr, 'resultado')
+          return (
+            <div key={mes} className="sv-kpi" style={{ '--kpi-color': res != null && res < 0 ? '#f87171' : '#60a5fa' }}>
+              <span className="sv-kpi__value">{eur(media(arr, 'ventas') || 0)}</span>
+              <span className="sv-kpi__label">
+                Ventas medias de {MES_LABEL[mes].toLowerCase()} ({arr.length} años) · costes {eur(media(arr, 'costes') || 0)}
+                {res != null && <> · resultado {eur(res)}</>}
+              </span>
             </div>
-          )}
-          <button className="sv-tests-add" onClick={() => onApply(sugerido)}>
-            Usar en la calculadora: se pierden {eur(sugerido.ingresos)}/mes de ingresos, se ahorran {eur(sugerido.ahorrable)}/mes de gastos
-          </button>
-        </>
-      )}
+          )
+        })}
+        <div className="sv-kpi" style={{ '--kpi-color': '#888' }}>
+          <span className="sv-kpi__value">{eur(media(resto, 'ventas') || 0)}</span>
+          <span className="sv-kpi__label">Ventas medias del resto de meses ({resto.length})</span>
+        </div>
+      </div>
+      <button className="sv-tests-add" onClick={() => onApply(sugerido)}>
+        Usar en la calculadora · julio: se pierden {eur(sugerido.ingresos[7])}, se ahorran {eur(sugerido.ahorrable[7])} ·
+        agosto: se pierden {eur(sugerido.ingresos[8])}, se ahorran {eur(sugerido.ahorrable[8])}
+      </button>
     </div>
   )
 }
@@ -474,11 +490,12 @@ function Calculadora({ state, setState }) {
   if (choqueTxt.length) warnings.push({ lvl: 'bad', text: `Coinciden parejas que no deberían: ${choqueTxt.join(', ')} (${choques.length} días).` })
 
   // Números del verano
-  const mesesCerrados = [7, 8].filter(m => isClosed(`${y + 1}-0${m}-15`, cierre)).length
+  const mesesCerradosList = [7, 8].filter(m => isClosed(`${y + 1}-0${m}-15`, cierre))
+  const mesesCerrados = mesesCerradosList.length
   const eco = {
     personal: discontinuos.filter(p => !HOY_DISCONTINUOS.includes(p)).reduce((s, p) => s + PROF_META[p].costoMes * 2, 0)
             - HOY_DISCONTINUOS.filter(p => !discontinuos.includes(p)).reduce((s, p) => s + PROF_META[p].costoMes * 2, 0),
-    sala:     (gastosSala - ingresosSala) * mesesCerrados,
+    sala:     mesesCerradosList.reduce((n, m) => n + (gastosSala[m] || 0) - (ingresosSala[m] || 0), 0),
     camp:     camp.activo ? Math.round(campSet.size / 5) * camp.plazas * camp.precio : 0,
     ociosos:  rows.filter(r => r.restan < 0 && r.cierreDias > 0)
                   .reduce((s, r) => s + -r.restan * PROF_META[r.p].costoMes / LABORABLES_MES, 0),
@@ -521,16 +538,17 @@ function Calculadora({ state, setState }) {
         </label>
         {cierre !== 'abierto' && (
           <>
-            <label className="sv-to-inline">
-              Gastos de la sala que se ahorran (€/mes)
-              <input className="sv-tests-input sv-tests-input--num" type="number" min="0" value={gastosSala}
-                onChange={e => update({ gastosSala: num(e.target.value) })} />
-            </label>
-            <label className="sv-to-inline">
-              Ingresos de la sala que se pierden (€/mes)
-              <input className="sv-tests-input sv-tests-input--num" type="number" min="0" value={ingresosSala}
-                onChange={e => update({ ingresosSala: num(e.target.value) })} />
-            </label>
+            {mesesCerradosList.map(m => (
+              <span key={m} className="sv-to-inline">
+                {MES_LABEL[m]}: se pierden
+                <input className="sv-tests-input sv-tests-input--num" type="number" min="0" value={ingresosSala[m] || 0}
+                  onChange={e => update({ ingresosSala: { ...ingresosSala, [m]: num(e.target.value) } })} />
+                € de ingresos, se ahorran
+                <input className="sv-tests-input sv-tests-input--num" type="number" min="0" value={gastosSala[m] || 0}
+                  onChange={e => update({ gastosSala: { ...gastosSala, [m]: num(e.target.value) } })} />
+                € de gastos
+              </span>
+            ))}
             <label className="sv-to-inline">
               <input type="checkbox" checked={camp.activo} onChange={() => setCamp({ activo: !camp.activo })} />
               Campamento
