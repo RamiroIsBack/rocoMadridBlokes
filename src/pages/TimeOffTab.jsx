@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { PROF_META, PROF_ORDER, DAYS, DAY_LABEL } from '../data/staffSchedule'
 import {
-  KEY_HOLDERS_DEFAULT, VERANO_APERTURA, actsFor, veranoSlots, pairConflict, simulatePlan,
+  KEY_HOLDERS_DEFAULT, VERANO_APERTURA, COMODIN_VERANO, MAX_CLASES_DIA, veranoSlots, pairConflict, simulatePlan,
   laborablesBetween, laborablesFrom, expandPeriods, isSummer, weekdayOf, fmtShort,
   diasDevengados, minimoVerano, MESES_DISCONTINUO,
 } from '../utils/coverage'
@@ -23,15 +23,6 @@ function daysUntil(iso) {
   const [y, m, d] = iso.split('-').map(Number)
   const today = new Date(); today.setHours(0, 0, 0, 0)
   return Math.round((new Date(y, m - 1, d) - today) / 86400000)
-}
-
-function clasesSem(prof) {
-  return DAYS.reduce((n, d) => n + actsFor(prof, d, 'invierno').filter(a => a.tipo === 'clase').length, 0)
-}
-
-// Tardes de verano en las que la persona está en la sala con su horario actual
-function tardesVerano(prof) {
-  return DAYS.filter(d => actsFor(prof, d, 'verano').length > 0).length
 }
 
 const CLASES_VERANO = DAYS.reduce((n, d) => n + veranoSlots(d).length, 0)
@@ -71,6 +62,7 @@ function defaultState() {
   return {
     ...presetPlan('hoy'),
     keys: [...KEY_HOLDERS_DEFAULT],
+    maxDia: MAX_CLASES_DIA,
     dias: Object.fromEntries(PROF_ORDER.map(p => [p, DIAS_ANUALES])),
   }
 }
@@ -112,7 +104,8 @@ function Normas() {
         <li><strong>{DIAS_ANUALES} días laborables</strong> al año. Al menos el 50 % (<strong>{Math.ceil(DIAS_ANUALES / 2)} días</strong>) en julio y agosto.</li>
         <li>El resto, durante el año, siempre que no coincida con alguien con quien haya conflicto (tabla de abajo).</li>
         <li>En verano se abre solo por la tarde, desde las <strong>{VERANO_APERTURA}</strong>: todos los días de julio y agosto tiene que haber alguien con llave para abrir.</li>
-        <li>En verano se unifican los grupos: <strong>una sola clase a la vez</strong>, seguidas desde las {VERANO_APERTURA} hasta el cierre ({CLASES_VERANO} clases a la semana). Las da cualquiera de los que estén esa tarde.</li>
+        <li>En verano se unifican los grupos: clases de 1,5 h <strong>una detrás de otra</strong>, desde las {VERANO_APERTURA} hasta el cierre ({CLASES_VERANO} clases a la semana).</li>
+        <li>En verano {COMODIN_VERANO} está en recepción y es el <strong>comodín</strong>: solo da clase si falta un profe. Hacen falta <strong>2 profes + {COMODIN_VERANO}</strong> para que puedan turnarse las vacaciones.</li>
         <li>Los <strong>fijos discontinuos</strong> no trabajan en julio y agosto (cobran el paro). Les corresponden unos {diasDevengados(DIAS_ANUALES, true)} días ({MESES_DISCONTINUO} meses de {DIAS_ANUALES}), que cogen fuera del verano.</li>
       </ul>
     </div>
@@ -120,7 +113,7 @@ function Normas() {
 }
 
 // ─── Matriz de conflictos ────────────────────────────────────────────────────
-function ConflictMatrix({ keys, discontinuos }) {
+function ConflictMatrix({ keys, discontinuos, maxDia }) {
   const [season, setSeason] = useState('invierno')
   const inactive = season === 'verano' ? discontinuos : []
 
@@ -128,12 +121,12 @@ function ConflictMatrix({ keys, discontinuos }) {
     const res = {}
     PROF_ORDER.forEach((a, i) => PROF_ORDER.slice(i + 1).forEach(b => {
       if (inactive.includes(a) || inactive.includes(b)) return
-      const r = pairConflict(a, b, { keys, season, inactive })
+      const r = pairConflict(a, b, { keys, season, inactive, maxDia })
       res[`${a}|${b}`] = r
       res[`${b}|${a}`] = r
     }))
     return res
-  }, [keys, season, inactive.join()])
+  }, [keys, season, inactive.join(), maxDia])
 
   const ranked = [...new Set(Object.values(pairs))]
     .filter(r => r.level !== 'verde')
@@ -144,7 +137,9 @@ function ConflictMatrix({ keys, discontinuos }) {
       <h3 className="sv-section-title">Quién no debería irse a la vez</h3>
       <p className="sv-note">
         Se simula una semana con las dos personas fuera. Solo sustituye quien ya trabaja ese día, está libre a esa hora
-        y alarga su turno como mucho una clase (90 min). El número es el de clases semanales sin nadie que las dé (en verano, de las {CLASES_VERANO} clases unificadas).
+        y alarga su turno como mucho una clase (90 min). El número es el de clases semanales sin nadie que las dé. En verano cuenta sobre las {CLASES_VERANO} clases
+        seguidas, con un máximo de {maxDia} clases por persona y día, y {COMODIN_VERANO} solo entra si no llega ningún profe:
+        una pareja es <strong>Evitar</strong> si obliga a {COMODIN_VERANO} a dejar recepción más que si faltara uno solo.
         <strong> No coincidir</strong>: la pareja deja días sin abrir o sin cerrar, o pierde 12 clases o más.
       </p>
       <div className="sv-period" style={{ marginBottom: 12 }}>
@@ -209,29 +204,34 @@ function Calculadora({ state, setState }) {
   }
   const [win, setWin] = useState('verano')
   const [selDate, setSelDate] = useState(null)
-  const { discontinuos, keys, dias, periods } = state
+  const { discontinuos, keys, dias, periods, maxDia } = state
 
+  // Nivel de cada pareja con horario normal y en verano (sin los discontinuos)
   const pairLevels = useMemo(() => {
-    const res = {}
+    const res = { invierno: {}, verano: {} }
     PROF_ORDER.forEach((a, i) => PROF_ORDER.slice(i + 1).forEach(b => {
-      res[`${a}|${b}`] = pairConflict(a, b, { keys }).level
+      res.invierno[`${a}|${b}`] = pairConflict(a, b, { keys }).level
+      if (!discontinuos.includes(a) && !discontinuos.includes(b)) {
+        res.verano[`${a}|${b}`] = pairConflict(a, b, { keys, season: 'verano', inactive: discontinuos, maxDia }).level
+      }
     }))
     return res
-  }, [keys])
+  }, [keys, discontinuos, maxDia])
 
   const dates = useMemo(() => laborablesBetween(WINDOWS[win].from, WINDOWS[win].to), [win, y])
-  const sim   = useMemo(() => simulatePlan(dates, { periods, discontinuos, keys }), [dates, periods, discontinuos, keys])
+  const sim   = useMemo(() => simulatePlan(dates, { periods, discontinuos, keys, maxDia }), [dates, periods, discontinuos, keys, maxDia])
   const allSim = useMemo(
-    () => simulatePlan(laborablesBetween(WINDOWS.temporada.from, WINDOWS.temporada.to), { periods, discontinuos, keys }),
-    [periods, discontinuos, keys, y],
+    () => simulatePlan(laborablesBetween(WINDOWS.temporada.from, WINDOWS.temporada.to), { periods, discontinuos, keys, maxDia }),
+    [periods, discontinuos, keys, maxDia, y],
   )
   const off = useMemo(() => expandPeriods(periods), [periods])
 
   const conflictsOf = day => {
     const res = []
     day.out.forEach((a, i) => day.out.slice(i + 1).forEach(b => {
-      const k = pairLevels[`${a}|${b}`] || pairLevels[`${b}|${a}`]
-      if (k === 'rojo' || (k === 'ambar' && !isSummer(day.date))) res.push({ a, b, level: k })
+      const levels = pairLevels[isSummer(day.date) ? 'verano' : 'invierno']
+      const k = levels[`${a}|${b}`] || levels[`${b}|${a}`]
+      if (k === 'rojo' || k === 'ambar') res.push({ a, b, level: k })
     }))
     return res
   }
@@ -245,7 +245,7 @@ function Calculadora({ state, setState }) {
     const dev   = diasDevengados(dias[p], disc)
     return {
       p, disc, dev, usados, verano: sum.length, min: minimoVerano(dias[p], disc),
-      restan: dev - usados, tardes: tardesVerano(p), clasesInv: clasesSem(p),
+      restan: dev - usados,
     }
   })
 
@@ -260,6 +260,10 @@ function Calculadora({ state, setState }) {
   if (sinAbrirVer.length) warnings.push({ lvl: 'bad', text: `Verano: ${sinAbrirVer.length} días sin nadie con llave para abrir a las ${VERANO_APERTURA} (${sinAbrirVer.slice(0, 6).map(d => fmtShort(d.date)).join(', ')}${sinAbrirVer.length > 6 ? '…' : ''}).` })
   const sinCerrar = allSim.filter(d => d.sinCerrar && d.out.length)
   if (sinCerrar.length) warnings.push({ lvl: 'warn', text: `${sinCerrar.length} días sin nadie con llave para cerrar (${sinCerrar.slice(0, 6).map(d => `${DAY_SHORT[weekdayOf(d.date)]} ${fmtShort(d.date)}`).join(', ')}${sinCerrar.length > 6 ? '…' : ''}). Hay que alargar el turno de alguien.` })
+  const profesVerano = PROF_ORDER.filter(p => p !== COMODIN_VERANO && !discontinuos.includes(p))
+  if (profesVerano.length < 2) warnings.push({ lvl: 'bad', text: `En verano solo queda${profesVerano.length === 1 ? '' : 'n'} ${profesVerano.length} profe${profesVerano.length === 1 ? '' : 's'} además de ${COMODIN_VERANO} (${profesVerano.join(', ') || 'ninguno'}): hacen falta 2 para poder turnarse las vacaciones.` })
+  const diasComodin = allSim.filter(d => isSummer(d.date) && d.comodin > 0)
+  if (diasComodin.length) warnings.push({ lvl: 'warn', text: `Verano: ${diasComodin.length} días en los que ${COMODIN_VERANO} deja recepción para dar clase (${diasComodin.reduce((n, d) => n + d.comodin, 0)} clases).` })
   const choques = allSim.flatMap(d => conflictsOf(d).filter(c => c.level === 'rojo').map(c => ({ ...c, date: d.date })))
   const choqueTxt = [...new Set(choques.map(c => `${c.a} + ${c.b}`))]
   if (choqueTxt.length) warnings.push({ lvl: 'bad', text: `Coinciden parejas que no deberían: ${choqueTxt.join(', ')} (${choques.length} días).` })
@@ -268,6 +272,7 @@ function Calculadora({ state, setState }) {
     sinAbrir:  allSim.filter(d => d.sinAbrir && d.out.length).length,
     perdidas:  allSim.reduce((n, d) => n + d.lost.length, 0),
     perdVer:   allSim.filter(d => isSummer(d.date)).reduce((n, d) => n + d.lost.length, 0),
+    comodin:   diasComodin.length,
     ahorro:    discontinuos.filter(p => !HOY_DISCONTINUOS.includes(p)).reduce((s, p) => s + PROF_META[p].costoMes * 2, 0)
              - HOY_DISCONTINUOS.filter(p => !discontinuos.includes(p)).reduce((s, p) => s + PROF_META[p].costoMes * 2, 0),
   }
@@ -287,6 +292,11 @@ function Calculadora({ state, setState }) {
           <button className="sv-filter-btn" onClick={() => update({ ...presetPlan('discontinuas') })}>Sara y Lucía fijas discontinuas</button>
           <button className="sv-filter-btn" onClick={() => setState(defaultState())}>Reiniciar</button>
         </div>
+        <label className="sv-to-inline">
+          Máx. clases por persona y día en verano
+          <input className="sv-tests-input sv-tests-input--unit" type="number" min="1" max="4" value={maxDia}
+            onChange={e => update({ maxDia: Math.min(4, Math.max(1, Number(e.target.value) || 1)) })} />
+        </label>
       </div>
 
       <div className="sv-kpis">
@@ -310,6 +320,10 @@ function Calculadora({ state, setState }) {
           <span className="sv-kpi__value">{kpi.perdVer}</span>
           <span className="sv-kpi__label">Clases de verano sin profe</span>
         </div>
+        <div className="sv-kpi" style={{ '--kpi-color': kpi.comodin ? '#f5c842' : '#34d399' }}>
+          <span className="sv-kpi__value">{kpi.comodin}</span>
+          <span className="sv-kpi__label">Días de verano con {COMODIN_VERANO} dando clase</span>
+        </div>
       </div>
 
       {warnings.length > 0 && (
@@ -323,7 +337,7 @@ function Calculadora({ state, setState }) {
           <thead>
             <tr>
               <th>Persona</th><th>Fijo discontinuo</th><th>Llave</th><th>Días/año</th><th>Le tocan</th>
-              <th>Jul–ago (mín.)</th><th>Planificados</th><th>Le quedan</th><th>Tardes en verano</th><th>€/mes</th>
+              <th>Jul–ago (mín.)</th><th>Planificados</th><th>Le quedan</th><th>En verano</th><th>€/mes</th>
             </tr>
           </thead>
           <tbody>
@@ -340,8 +354,8 @@ function Calculadora({ state, setState }) {
                 <td className={!r.disc && r.verano < r.min ? 'sv-to-bad' : ''}>{r.disc ? 'No trabaja' : `${r.verano} (${r.min})`}</td>
                 <td>{r.usados}</td>
                 <td className={r.restan < 0 ? 'sv-to-bad' : ''}>{r.restan}</td>
-                <td className={!r.disc && r.tardes === 0 ? 'sv-to-warn-txt' : ''}>
-                  {r.disc ? '—' : `${r.tardes} de 5`}
+                <td className={r.disc ? 'sv-ot-muted' : ''}>
+                  {r.disc ? 'Fuera (paro)' : r.p === COMODIN_VERANO ? 'Recepción · comodín' : 'Profe'}
                 </td>
                 <td>{PROF_META[r.p].costoMes.toLocaleString('es-ES')}</td>
               </tr>
@@ -349,12 +363,6 @@ function Calculadora({ state, setState }) {
           </tbody>
         </table>
       </div>
-      {rows.some(r => !r.disc && r.tardes === 0 && r.clasesInv > 0) && (
-        <p className="sv-note">
-          {rows.filter(r => !r.disc && r.tardes === 0 && r.clasesInv > 0).map(r => r.p).join(', ')}: ninguna tarde en verano
-          con el horario actual (todo su trabajo es de mañana). Cobra julio y agosto sin tener tareas asignadas.
-        </p>
-      )}
 
       <h4 className="sv-to-subtitle">Periodos de vacaciones</h4>
       <div className="sv-tests-scroll">
@@ -441,6 +449,14 @@ function Calculadora({ state, setState }) {
               ))}
             </tr>
             <tr>
+              <th className="sv-to-tl-head">{COMODIN_VERANO} da clase</th>
+              {sim.map(d => (
+                <td key={d.date} className={`sv-to-tl-cell sv-to-tl-num${d.comodin ? ' sv-to-tl-num--bad' : ''}`}>
+                  {d.comodin || ''}
+                </td>
+              ))}
+            </tr>
+            <tr>
               <th className="sv-to-tl-head">Choque</th>
               {sim.map(d => {
                 const c = conflictsOf(d)
@@ -465,7 +481,9 @@ function Calculadora({ state, setState }) {
             <li>Fuera: {selDay.out.length ? selDay.out.join(', ') : 'nadie'}</li>
             <li>Abre: {selDay.opener || <span className="sv-to-bad">nadie con llave</span>} · Cierra: {selDay.closer || <span className="sv-to-bad">nadie con llave</span>}</li>
             {selDay.covered.map((c, i) => (
-              <li key={`c${i}`}>{c.from ? `Clase de ${c.from} (${c.start})` : `Clase ${c.start}`} → la da {c.to}</li>
+              <li key={`c${i}`} className={c.comodin ? 'sv-to-warn-txt' : ''}>
+                {c.from ? `Clase de ${c.from} (${c.start})` : `Clase ${c.start}`} → la da {c.to}{c.comodin ? ' (comodín, deja recepción)' : ''}
+              </li>
             ))}
             {selDay.lost.map((c, i) => (
               <li key={`l${i}`} className="sv-to-bad">{c.prof ? `Clase de ${c.prof} (${c.start})` : `Clase ${c.start}`} sin nadie que la dé</li>
@@ -498,7 +516,7 @@ export default function TimeOffTab() {
   return (
     <div className="sv-tab-panel">
       <Normas />
-      <ConflictMatrix keys={state.keys} discontinuos={state.discontinuos} />
+      <ConflictMatrix keys={state.keys} discontinuos={state.discontinuos} maxDia={state.maxDia} />
       <Calculadora state={state} setState={setState} />
     </div>
   )

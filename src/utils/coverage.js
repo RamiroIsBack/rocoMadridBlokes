@@ -18,21 +18,8 @@ export function toMin(t) {
   return h * 60 + m
 }
 
-// Verano: solo tarde a partir de las 16:30. Lo anterior desaparece; lo que
-// cruza las 16:30 (equipar, gestión) se recorta. Sirve para saber quién está
-// en la sala cada tarde; las clases de verano son las de `veranoSlots`.
-export function actsFor(prof, day, season) {
-  const acts = BASE[prof]?.[day] || []
-  if (season !== 'verano') return acts
-  const open = toMin(VERANO_APERTURA)
-  return acts
-    .filter(a => a.tipo === 'clase' ? toMin(a.start) >= open : toMin(a.end) > open)
-    .map(a => (toMin(a.start) < open ? { ...a, start: VERANO_APERTURA } : a))
-}
-
-export function salaFor(day, season) {
-  if (season !== 'verano') return SALA[day]
-  return { ...SALA[day], apertura: VERANO_APERTURA }
+export function actsFor(prof, day) {
+  return BASE[prof]?.[day] || []
 }
 
 // En verano hay poca gente y se unifican los grupos: una sola clase a la vez,
@@ -48,35 +35,40 @@ function hhmm(n) {
   return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`
 }
 
-// Verano: cada clase la da cualquiera de los presentes que esté esa tarde en la
-// sala (con la misma regla de alargar 90 min). Primero quien ya está a esa hora.
-function assignVerano(day, present, span) {
-  const busy = Object.fromEntries(present.map(p => [p, []]))
+// Verano: el horario se rehace, así que cualquier profe presente puede dar
+// cualquier tarde, hasta `maxDia` clases. Eva está en recepción y solo da clase
+// como comodín cuando no llega ningún profe.
+export const COMODIN_VERANO = 'Eva'
+export const MAX_CLASES_DIA = 3
+
+function assignVerano(day, present, maxDia) {
+  const profes = present.filter(p => p !== COMODIN_VERANO)
+  const order  = present.includes(COMODIN_VERANO) ? [...profes, COMODIN_VERANO] : profes
+  const count  = Object.fromEntries(order.map(p => [p, 0]))
   const lost = []
   const covered = []
-  veranoSlots(day).forEach(([s, e]) => {
-    const free = q => span[q] && busy[q].every(([x, y]) => y <= s || x >= e)
-    const sub = present.find(q => free(q) && s >= span[q][0] && e <= span[q][1])
-      || present.find(q => free(q) && s >= span[q][0] - EXTENSION_MIN && e <= span[q][1] + EXTENSION_MIN)
+  veranoSlots(day).forEach(([s]) => {
+    // Repartir: el profe con menos clases ese día; Eva solo si no queda nadie
+    const sub = profes.filter(p => count[p] < maxDia).sort((x, y) => count[x] - count[y])[0]
+      || (order.includes(COMODIN_VERANO) && count[COMODIN_VERANO] < maxDia ? COMODIN_VERANO : null)
     if (sub) {
-      busy[sub].push([s, e])
-      span[sub] = [Math.min(span[sub][0], s), Math.max(span[sub][1], e)]
-      covered.push({ day, start: hhmm(s), from: null, to: sub })
+      count[sub]++
+      covered.push({ day, start: hhmm(s), from: null, to: sub, comodin: sub === COMODIN_VERANO })
     } else {
       lost.push({ day, start: hhmm(s), prof: null })
     }
   })
-  return { lost, covered }
+  return { lost, covered, profes: profes.length, comodin: covered.filter(c => c.comodin).length }
 }
 
 // Resto del año: cada grupo de quien falta busca sustituto. Lo que no se cubre
 // de un inactivo (fijo discontinuo) queda suspendido, no perdido.
-function assignInvierno(day, { out, absent, present, busy, span, season }) {
+function assignInvierno(day, { out, absent, present, busy, span }) {
   const lost = []
   const covered = []
   const suspended = []
   absent.forEach(p => {
-    actsFor(p, day, season).filter(a => a.tipo === 'clase').forEach(a => {
+    actsFor(p, day).filter(a => a.tipo === 'clase').forEach(a => {
       const s = toMin(a.start), e = toMin(a.end)
       const sub = present.find(q => span[q]
         && s >= span[q][0] - EXTENSION_MIN && e <= span[q][1] + EXTENSION_MIN
@@ -95,25 +87,32 @@ function assignInvierno(day, { out, absent, present, busy, span, season }) {
 
 // Simula un día de la semana. `out` = de vacaciones; `inactive` = fijos
 // discontinuos fuera de temporada (en verano simplemente no están).
-export function simulateDay(day, { out, inactive = [], season = 'invierno', keys = KEY_HOLDERS_DEFAULT }) {
+export function simulateDay(day, { out, inactive = [], season = 'invierno', keys = KEY_HOLDERS_DEFAULT, maxDia = MAX_CLASES_DIA }) {
   const absent  = [...out, ...inactive.filter(p => !out.includes(p))]
   const present = PROF_ORDER.filter(p => !absent.includes(p))
+
+  if (season === 'verano') {
+    const r = assignVerano(day, present, maxDia)
+    // Abre y cierra quien tenga llave de los que están (primero recepción)
+    const withKey = present.filter(p => keys.includes(p))
+    const opener = withKey.includes(COMODIN_VERANO) ? COMODIN_VERANO : withKey[0]
+    return {
+      day, total: veranoSlots(day).length, ...r, suspended: [],
+      opener, closer: opener, sinAbrir: !opener, sinCerrar: !opener,
+    }
+  }
+
   const busy = {}
   const span = {}
   present.forEach(p => {
-    const acts = actsFor(p, day, season)
+    const acts = actsFor(p, day)
     busy[p] = acts.filter(a => a.tipo === 'clase').map(a => [toMin(a.start), toMin(a.end)])
     if (acts.length) span[p] = [Math.min(...acts.map(a => toMin(a.start))), Math.max(...acts.map(a => toMin(a.end)))]
   })
+  const total = PROF_ORDER.reduce((n, p) => n + actsFor(p, day).filter(a => a.tipo === 'clase').length, 0)
+  const { lost, covered, suspended } = assignInvierno(day, { out, absent, present, busy, span })
 
-  const total = season === 'verano'
-    ? veranoSlots(day).length
-    : PROF_ORDER.reduce((n, p) => n + actsFor(p, day, season).filter(a => a.tipo === 'clase').length, 0)
-  const { lost, covered, suspended } = season === 'verano'
-    ? { ...assignVerano(day, present, span), suspended: [] }
-    : assignInvierno(day, { out, absent, present, busy, span, season })
-
-  const sala = salaFor(day, season)
+  const sala = SALA[day]
   const ap = toMin(sala.apertura), ci = toMin(sala.cierre)
   const withKey = present.filter(p => keys.includes(p) && span[p])
   const opener = withKey.find(p => span[p][0] - EXTENSION_MIN <= ap)
@@ -131,6 +130,7 @@ export function simulateWeek(opts) {
     suspended: days.flatMap(d => d.suspended),
     sinAbrir:  days.filter(d => d.sinAbrir).map(d => d.day),
     sinCerrar: days.filter(d => d.sinCerrar).map(d => d.day),
+    comodin:   days.reduce((n, d) => n + (d.comodin || 0), 0),
   }
 }
 
@@ -144,10 +144,11 @@ export function pairConflict(a, b, opts = {}) {
   const gapDays = r => new Set([...r.sinAbrir.map(d => `a${d}`), ...r.sinCerrar.map(d => `c${d}`)])
   const single = new Set([...gapDays(onlyA), ...gapDays(onlyB)])
   const extraGaps = [...gapDays(both)].filter(g => !single.has(g)).length
+  const extraComodin = both.comodin - Math.max(onlyA.comodin, onlyB.comodin)
   let level = 'verde'
-  if (extraGaps > 0 || both.lost.length >= 12) level = 'rojo'
-  else if (extraLost > 0 || both.lost.length >= 8) level = 'ambar'
-  return { a, b, lost: both.lost.length, extraLost, extraGaps, sinAbrir: both.sinAbrir, sinCerrar: both.sinCerrar, level }
+  if (extraGaps > 0 || both.lost.length >= 12 || (opts.season === 'verano' && both.lost.length > 0)) level = 'rojo'
+  else if (extraLost > 0 || both.lost.length >= 8 || extraComodin > 0) level = 'ambar'
+  return { a, b, lost: both.lost.length, comodin: both.comodin, extraLost, extraGaps, sinAbrir: both.sinAbrir, sinCerrar: both.sinCerrar, level }
 }
 
 // ─── Calendario ──────────────────────────────────────────────────────────────
@@ -238,7 +239,7 @@ export function expandPeriods(periods) {
 }
 
 // Simula cada día laborable de `dates` con el plan dado.
-export function simulatePlan(dates, { periods, discontinuos = [], keys }) {
+export function simulatePlan(dates, { periods, discontinuos = [], keys, maxDia }) {
   const off = expandPeriods(periods)
   return dates.map(date => {
     const summer = isSummer(date)
@@ -248,6 +249,7 @@ export function simulatePlan(dates, { periods, discontinuos = [], keys }) {
       inactive: summer ? discontinuos : [],
       season:   summer ? 'verano' : 'invierno',
       keys,
+      maxDia,
     })
     return { ...r, date, out }
   })

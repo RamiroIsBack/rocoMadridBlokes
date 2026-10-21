@@ -923,3 +923,10 @@
 .sv-to-tl--sel { outline: 1px solid #f5c842; outline-offset: -1px; }
 
 .sv-to-detail { margin: 0; padding-left: 18px; font-size: 0.78rem; color: #aaa; line-height: 1.7; }
+.sv-to-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: #888;
+}
