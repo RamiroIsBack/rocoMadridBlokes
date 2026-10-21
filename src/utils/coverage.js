@@ -36,23 +36,21 @@ function hhmm(n) {
 }
 
 // Verano: el horario se rehace, así que cualquier profe presente puede dar
-// cualquier tarde, hasta `maxDia` clases. Eva está en recepción y solo da clase
-// como comodín cuando no llega ningún profe.
+// cualquier tarde y dar todas las clases que quepan. Eva está en recepción y
+// solo da clase como comodín cuando ese día no hay ningún profe.
 export const COMODIN_VERANO = 'Eva'
-export const MAX_CLASES_DIA = 3
 
-function assignVerano(day, present, maxDia) {
+function assignVerano(day, present) {
   const profes = present.filter(p => p !== COMODIN_VERANO)
-  const order  = present.includes(COMODIN_VERANO) ? [...profes, COMODIN_VERANO] : profes
-  const count  = Object.fromEntries(order.map(p => [p, 0]))
+  const count  = Object.fromEntries(profes.map(p => [p, 0]))
   const lost = []
   const covered = []
   veranoSlots(day).forEach(([s]) => {
-    // Repartir: el profe con menos clases ese día; Eva solo si no queda nadie
-    const sub = profes.filter(p => count[p] < maxDia).sort((x, y) => count[x] - count[y])[0]
-      || (order.includes(COMODIN_VERANO) && count[COMODIN_VERANO] < maxDia ? COMODIN_VERANO : null)
+    // Repartir entre los profes (el que menos lleva); Eva solo si no hay ninguno
+    const sub = profes.sort((x, y) => count[x] - count[y])[0]
+      || (present.includes(COMODIN_VERANO) ? COMODIN_VERANO : null)
     if (sub) {
-      count[sub]++
+      if (sub in count) count[sub]++
       covered.push({ day, start: hhmm(s), from: null, to: sub, comodin: sub === COMODIN_VERANO })
     } else {
       lost.push({ day, start: hhmm(s), prof: null })
@@ -87,12 +85,12 @@ function assignInvierno(day, { out, absent, present, busy, span }) {
 
 // Simula un día de la semana. `out` = de vacaciones; `inactive` = fijos
 // discontinuos fuera de temporada (en verano simplemente no están).
-export function simulateDay(day, { out, inactive = [], season = 'invierno', keys = KEY_HOLDERS_DEFAULT, maxDia = MAX_CLASES_DIA }) {
+export function simulateDay(day, { out, inactive = [], season = 'invierno', keys = KEY_HOLDERS_DEFAULT }) {
   const absent  = [...out, ...inactive.filter(p => !out.includes(p))]
   const present = PROF_ORDER.filter(p => !absent.includes(p))
 
   if (season === 'verano') {
-    const r = assignVerano(day, present, maxDia)
+    const r = assignVerano(day, present)
     // Abre y cierra quien tenga llave de los que están (primero recepción)
     const withKey = present.filter(p => keys.includes(p))
     const opener = withKey.includes(COMODIN_VERANO) ? COMODIN_VERANO : withKey[0]
@@ -270,7 +268,7 @@ export function expandPeriods(periods) {
 
 // Simula cada día laborable de `dates` con el plan dado. Los días de cierre no
 // necesitan cobertura; en verano no cuenta quien no está disponible ese mes.
-export function simulatePlan(dates, { periods, discontinuos = [], disp = {}, cierre = 'abierto', camp, keys, maxDia }) {
+export function simulatePlan(dates, { periods, discontinuos = [], disp = {}, cierre = 'abierto', camp, keys }) {
   const off = expandPeriods(periods)
   const campSet = campDates(camp, cierre)
   return dates.map(date => {
@@ -288,7 +286,6 @@ export function simulatePlan(dates, { periods, discontinuos = [], disp = {}, cie
       inactive,
       season: summer ? 'verano' : 'invierno',
       keys,
-      maxDia,
     })
     return { ...r, date, out }
   })

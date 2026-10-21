@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { PROF_META, PROF_ORDER, DAYS, DAY_LABEL } from '../data/staffSchedule'
 import {
-  KEY_HOLDERS_DEFAULT, VERANO_APERTURA, COMODIN_VERANO, MAX_CLASES_DIA, veranoSlots, pairConflict, simulatePlan,
+  KEY_HOLDERS_DEFAULT, VERANO_APERTURA, COMODIN_VERANO, veranoSlots, pairConflict, simulatePlan,
   laborablesBetween, laborablesFrom, expandPeriods, isSummer, weekdayOf, fmtShort, monthOf,
   diasDevengados, minimoVerano, MESES_DISCONTINUO, DISP_VERANO, CIERRE_VERANO, isClosed, disponible,
   campDates, vacationDates,
@@ -79,6 +79,9 @@ function presetPlan(kind) {
         camp: { ...CAMP_OFF, activo: true, start: `${v}-07-01`, staff: [COMODIN_VERANO, 'Ana'] },
         periods: [period('Sigurd', `${y}-12-21`, 4)],
       }
+    case 'todosDiscontinuos':
+      // Sala cerrada julio y agosto y toda la plantilla en paro esos meses
+      return { ...base, cierre: 'verano', discontinuos: [...PROF_ORDER], periods: navidad }
     default:
       return {
         ...base,
@@ -99,13 +102,13 @@ const PRESETS = [
   ['discontinuas', 'Sara y Lucía fijas discontinuas'],
   ['cierreAgosto', 'Cerrar agosto'],
   ['cierreVerano', 'Cerrar julio y agosto + campamento'],
+  ['todosDiscontinuos', 'Cerrar julio y agosto, todos discontinuos'],
 ]
 
 function defaultState() {
   return {
     ...presetPlan('hoy'),
     keys: [...KEY_HOLDERS_DEFAULT],
-    maxDia: MAX_CLASES_DIA,
     dias: Object.fromEntries(PROF_ORDER.map(p => [p, DIAS_ANUALES])),
     gastosSala: 0,
     ingresosSala: 0,
@@ -159,7 +162,7 @@ function Normas() {
 }
 
 // ─── Matriz de conflictos ────────────────────────────────────────────────────
-function ConflictMatrix({ keys, maxDia, ctx }) {
+function ConflictMatrix({ keys, ctx }) {
   const [season, setSeason] = useState('invierno')
   const mes = season === 'invierno' ? null : Number(season)
   const closed = mes && isClosed(`${temporada() + 1}-0${mes}-15`, ctx.cierre)
@@ -170,12 +173,12 @@ function ConflictMatrix({ keys, maxDia, ctx }) {
     if (closed) return res
     PROF_ORDER.forEach((a, i) => PROF_ORDER.slice(i + 1).forEach(b => {
       if (inactive.includes(a) || inactive.includes(b)) return
-      const r = pairConflict(a, b, { keys, season: mes ? 'verano' : 'invierno', inactive, maxDia })
+      const r = pairConflict(a, b, { keys, season: mes ? 'verano' : 'invierno', inactive })
       res[`${a}|${b}`] = r
       res[`${b}|${a}`] = r
     }))
     return res
-  }, [keys, season, inactive.join(), maxDia, closed])
+  }, [keys, season, inactive.join(), closed])
 
   const ranked = [...new Set(Object.values(pairs))]
     .filter(r => r.level !== 'verde')
@@ -187,8 +190,8 @@ function ConflictMatrix({ keys, maxDia, ctx }) {
       <p className="sv-note">
         Se simula una semana con las dos personas fuera. Solo sustituye quien ya trabaja ese día, está libre a esa hora
         y alarga su turno como mucho una clase (90 min). El número es el de clases semanales sin nadie que las dé.
-        En verano cuenta sobre las {CLASES_VERANO} clases seguidas, con un máximo de {maxDia} clases por persona y día,
-        y {COMODIN_VERANO} solo entra si no llega ningún profe: una pareja es <strong>Evitar</strong> si obliga
+        En verano cuenta sobre las {CLASES_VERANO} clases seguidas: un profe puede dar toda la tarde
+        y {COMODIN_VERANO} solo entra si ese día no hay ningún profe. Una pareja es <strong>Evitar</strong> si obliga
         a {COMODIN_VERANO} a dejar recepción más que si faltara uno solo.
         <strong> No coincidir</strong>: la pareja deja días sin abrir o sin cerrar, o pierde 12 clases o más (en verano, cualquiera).
       </p>
@@ -261,9 +264,9 @@ function Calculadora({ state, setState }) {
   }
   const [win, setWin] = useState('verano')
   const [selDate, setSelDate] = useState(null)
-  const { discontinuos, keys, dias, periods, maxDia, disp, cierre, camp, gastosSala, ingresosSala } = state
-  const ctx  = { periods, discontinuos, disp, cierre, camp, keys, maxDia }
-  const deps = [periods, discontinuos, disp, cierre, camp, keys, maxDia]
+  const { discontinuos, keys, dias, periods, disp, cierre, camp, gastosSala, ingresosSala } = state
+  const ctx  = { periods, discontinuos, disp, cierre, camp, keys }
+  const deps = [periods, discontinuos, disp, cierre, camp, keys]
 
   // Nivel de cada pareja: horario normal, julio y agosto
   const pairLevels = useMemo(() => {
@@ -273,7 +276,7 @@ function Calculadora({ state, setState }) {
       ;[7, 8].forEach(m => {
         const inactive = inactivosMes(m, ctx)
         if (inactive.includes(a) || inactive.includes(b)) return
-        res[m][`${a}|${b}`] = pairConflict(a, b, { keys, season: 'verano', inactive, maxDia }).level
+        res[m][`${a}|${b}`] = pairConflict(a, b, { keys, season: 'verano', inactive }).level
       })
     }))
     return res
@@ -399,13 +402,7 @@ function Calculadora({ state, setState }) {
             {Object.entries(CIERRE_VERANO).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
         </label>
-        {cierre === 'abierto' ? (
-          <label className="sv-to-inline">
-            Máx. clases por persona y día
-            <input className="sv-tests-input sv-tests-input--unit" type="number" min="1" max="4" value={maxDia}
-              onChange={e => update({ maxDia: Math.min(4, num(e.target.value, 1)) })} />
-          </label>
-        ) : (
+        {cierre !== 'abierto' && (
           <>
             <label className="sv-to-inline">
               Gastos de la sala que se ahorran (€/mes)
@@ -695,7 +692,7 @@ export default function TimeOffTab() {
   return (
     <div className="sv-tab-panel">
       <Normas />
-      <ConflictMatrix keys={state.keys} maxDia={state.maxDia} ctx={ctx} />
+      <ConflictMatrix keys={state.keys} ctx={ctx} />
       <Calculadora state={state} setState={setState} />
     </div>
   )
