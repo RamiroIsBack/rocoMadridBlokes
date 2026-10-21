@@ -19,7 +19,8 @@ export function toMin(t) {
 }
 
 // Verano: solo tarde a partir de las 16:30. Lo anterior desaparece; lo que
-// cruza las 16:30 (equipar, gestión) se recorta.
+// cruza las 16:30 (equipar, gestión) se recorta. Sirve para saber quién está
+// en la sala cada tarde; las clases de verano son las de `veranoSlots`.
 export function actsFor(prof, day, season) {
   const acts = BASE[prof]?.[day] || []
   if (season !== 'verano') return acts
@@ -34,27 +35,46 @@ export function salaFor(day, season) {
   return { ...SALA[day], apertura: VERANO_APERTURA }
 }
 
-// Simula un día de la semana. `out` = de vacaciones; `inactive` = fijos
-// discontinuos fuera de temporada. Primero se buscan sustitutos para los grupos
-// de quien está de vacaciones; lo que no se cubre de los inactivos queda
-// "suspendido" (no es un fallo de las vacaciones, es decisión de temporada).
-export function simulateDay(day, { out, inactive = [], season = 'invierno', keys = KEY_HOLDERS_DEFAULT }) {
-  const absent  = [...out, ...inactive.filter(p => !out.includes(p))]
-  const present = PROF_ORDER.filter(p => !absent.includes(p))
-  const busy = {}
-  const span = {}
-  present.forEach(p => {
-    const acts = actsFor(p, day, season)
-    busy[p] = acts.filter(a => a.tipo === 'clase').map(a => [toMin(a.start), toMin(a.end)])
-    if (acts.length) span[p] = [Math.min(...acts.map(a => toMin(a.start))), Math.max(...acts.map(a => toMin(a.end)))]
-  })
+// En verano hay poca gente y se unifican los grupos: una sola clase a la vez,
+// seguidas desde las 16:30 hasta el cierre (L–J 16:30, 18:00, 19:30, 21:00; V hasta 19:30).
+export function veranoSlots(day) {
+  const ci = toMin(SALA[day].cierre)
+  const res = []
+  for (let s = toMin(VERANO_APERTURA); s + 90 <= ci; s += 90) res.push([s, s + 90])
+  return res
+}
 
+function hhmm(n) {
+  return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`
+}
+
+// Verano: cada clase la da cualquiera de los presentes que esté esa tarde en la
+// sala (con la misma regla de alargar 90 min). Primero quien ya está a esa hora.
+function assignVerano(day, present, span) {
+  const busy = Object.fromEntries(present.map(p => [p, []]))
   const lost = []
-  const suspended = []
   const covered = []
-  let total = 0
-  PROF_ORDER.forEach(p => actsFor(p, day, season).forEach(a => { if (a.tipo === 'clase') total++ }))
+  veranoSlots(day).forEach(([s, e]) => {
+    const free = q => span[q] && busy[q].every(([x, y]) => y <= s || x >= e)
+    const sub = present.find(q => free(q) && s >= span[q][0] && e <= span[q][1])
+      || present.find(q => free(q) && s >= span[q][0] - EXTENSION_MIN && e <= span[q][1] + EXTENSION_MIN)
+    if (sub) {
+      busy[sub].push([s, e])
+      span[sub] = [Math.min(span[sub][0], s), Math.max(span[sub][1], e)]
+      covered.push({ day, start: hhmm(s), from: null, to: sub })
+    } else {
+      lost.push({ day, start: hhmm(s), prof: null })
+    }
+  })
+  return { lost, covered }
+}
 
+// Resto del año: cada grupo de quien falta busca sustituto. Lo que no se cubre
+// de un inactivo (fijo discontinuo) queda suspendido, no perdido.
+function assignInvierno(day, { out, absent, present, busy, span, season }) {
+  const lost = []
+  const covered = []
+  const suspended = []
   absent.forEach(p => {
     actsFor(p, day, season).filter(a => a.tipo === 'clase').forEach(a => {
       const s = toMin(a.start), e = toMin(a.end)
@@ -70,6 +90,28 @@ export function simulateDay(day, { out, inactive = [], season = 'invierno', keys
       }
     })
   })
+  return { lost, covered, suspended }
+}
+
+// Simula un día de la semana. `out` = de vacaciones; `inactive` = fijos
+// discontinuos fuera de temporada (en verano simplemente no están).
+export function simulateDay(day, { out, inactive = [], season = 'invierno', keys = KEY_HOLDERS_DEFAULT }) {
+  const absent  = [...out, ...inactive.filter(p => !out.includes(p))]
+  const present = PROF_ORDER.filter(p => !absent.includes(p))
+  const busy = {}
+  const span = {}
+  present.forEach(p => {
+    const acts = actsFor(p, day, season)
+    busy[p] = acts.filter(a => a.tipo === 'clase').map(a => [toMin(a.start), toMin(a.end)])
+    if (acts.length) span[p] = [Math.min(...acts.map(a => toMin(a.start))), Math.max(...acts.map(a => toMin(a.end)))]
+  })
+
+  const total = season === 'verano'
+    ? veranoSlots(day).length
+    : PROF_ORDER.reduce((n, p) => n + actsFor(p, day, season).filter(a => a.tipo === 'clase').length, 0)
+  const { lost, covered, suspended } = season === 'verano'
+    ? { ...assignVerano(day, present, span), suspended: [] }
+    : assignInvierno(day, { out, absent, present, busy, span, season })
 
   const sala = salaFor(day, season)
   const ap = toMin(sala.apertura), ci = toMin(sala.cierre)

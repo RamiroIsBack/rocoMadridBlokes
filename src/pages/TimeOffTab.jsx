@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { PROF_META, PROF_ORDER, DAYS, DAY_LABEL } from '../data/staffSchedule'
 import {
-  KEY_HOLDERS_DEFAULT, VERANO_APERTURA, actsFor, pairConflict, simulatePlan,
+  KEY_HOLDERS_DEFAULT, VERANO_APERTURA, actsFor, veranoSlots, pairConflict, simulatePlan,
   laborablesBetween, laborablesFrom, expandPeriods, isSummer, weekdayOf, fmtShort,
   diasDevengados, minimoVerano, MESES_DISCONTINUO,
 } from '../utils/coverage'
@@ -25,9 +25,16 @@ function daysUntil(iso) {
   return Math.round((new Date(y, m - 1, d) - today) / 86400000)
 }
 
-function clasesSem(prof, season) {
-  return DAYS.reduce((n, d) => n + actsFor(prof, d, season).filter(a => a.tipo === 'clase').length, 0)
+function clasesSem(prof) {
+  return DAYS.reduce((n, d) => n + actsFor(prof, d, 'invierno').filter(a => a.tipo === 'clase').length, 0)
 }
+
+// Tardes de verano en las que la persona está en la sala con su horario actual
+function tardesVerano(prof) {
+  return DAYS.filter(d => actsFor(prof, d, 'verano').length > 0).length
+}
+
+const CLASES_VERANO = DAYS.reduce((n, d) => n + veranoSlots(d).length, 0)
 
 let nextId = 1
 const period = (prof, start, n) => ({ id: nextId++, prof, start, n })
@@ -105,6 +112,7 @@ function Normas() {
         <li><strong>{DIAS_ANUALES} días laborables</strong> al año. Al menos el 50 % (<strong>{Math.ceil(DIAS_ANUALES / 2)} días</strong>) en julio y agosto.</li>
         <li>El resto, durante el año, siempre que no coincida con alguien con quien haya conflicto (tabla de abajo).</li>
         <li>En verano se abre solo por la tarde, desde las <strong>{VERANO_APERTURA}</strong>: todos los días de julio y agosto tiene que haber alguien con llave para abrir.</li>
+        <li>En verano se unifican los grupos: <strong>una sola clase a la vez</strong>, seguidas desde las {VERANO_APERTURA} hasta el cierre ({CLASES_VERANO} clases a la semana). Las da cualquiera de los que estén esa tarde.</li>
         <li>Los <strong>fijos discontinuos</strong> no trabajan en julio y agosto (cobran el paro). Les corresponden unos {diasDevengados(DIAS_ANUALES, true)} días ({MESES_DISCONTINUO} meses de {DIAS_ANUALES}), que cogen fuera del verano.</li>
       </ul>
     </div>
@@ -136,7 +144,7 @@ function ConflictMatrix({ keys, discontinuos }) {
       <h3 className="sv-section-title">Quién no debería irse a la vez</h3>
       <p className="sv-note">
         Se simula una semana con las dos personas fuera. Solo sustituye quien ya trabaja ese día, está libre a esa hora
-        y alarga su turno como mucho una clase (90 min). El número es el de clases semanales sin nadie que las dé.
+        y alarga su turno como mucho una clase (90 min). El número es el de clases semanales sin nadie que las dé (en verano, de las {CLASES_VERANO} clases unificadas).
         <strong> No coincidir</strong>: la pareja deja días sin abrir o sin cerrar, o pierde 12 clases o más.
       </p>
       <div className="sv-period" style={{ marginBottom: 12 }}>
@@ -237,7 +245,7 @@ function Calculadora({ state, setState }) {
     const dev   = diasDevengados(dias[p], disc)
     return {
       p, disc, dev, usados, verano: sum.length, min: minimoVerano(dias[p], disc),
-      restan: dev - usados, clasesVer: clasesSem(p, 'verano'), clasesInv: clasesSem(p, 'invierno'),
+      restan: dev - usados, tardes: tardesVerano(p), clasesInv: clasesSem(p),
     }
   })
 
@@ -259,7 +267,7 @@ function Calculadora({ state, setState }) {
   const kpi = {
     sinAbrir:  allSim.filter(d => d.sinAbrir && d.out.length).length,
     perdidas:  allSim.reduce((n, d) => n + d.lost.length, 0),
-    suspend:   allSim.reduce((n, d) => n + d.suspended.length, 0),
+    perdVer:   allSim.filter(d => isSummer(d.date)).reduce((n, d) => n + d.lost.length, 0),
     ahorro:    discontinuos.filter(p => !HOY_DISCONTINUOS.includes(p)).reduce((s, p) => s + PROF_META[p].costoMes * 2, 0)
              - HOY_DISCONTINUOS.filter(p => !discontinuos.includes(p)).reduce((s, p) => s + PROF_META[p].costoMes * 2, 0),
   }
@@ -295,12 +303,12 @@ function Calculadora({ state, setState }) {
           <span className="sv-kpi__label">Días de la temporada sin apertura</span>
         </div>
         <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }}>
-          <span className="sv-kpi__value">{kpi.perdidas}</span>
-          <span className="sv-kpi__label">Clases sin cubrir por vacaciones</span>
+          <span className="sv-kpi__value">{kpi.perdidas - kpi.perdVer}</span>
+          <span className="sv-kpi__label">Clases sin cubrir por vacaciones (resto del año)</span>
         </div>
-        <div className="sv-kpi" style={{ '--kpi-color': '#888' }}>
-          <span className="sv-kpi__value">{kpi.suspend}</span>
-          <span className="sv-kpi__label">Clases suspendidas en verano (discontinuos)</span>
+        <div className="sv-kpi" style={{ '--kpi-color': kpi.perdVer ? '#f87171' : '#34d399' }}>
+          <span className="sv-kpi__value">{kpi.perdVer}</span>
+          <span className="sv-kpi__label">Clases de verano sin profe</span>
         </div>
       </div>
 
@@ -315,7 +323,7 @@ function Calculadora({ state, setState }) {
           <thead>
             <tr>
               <th>Persona</th><th>Fijo discontinuo</th><th>Llave</th><th>Días/año</th><th>Le tocan</th>
-              <th>Jul–ago (mín.)</th><th>Planificados</th><th>Le quedan</th><th>Clases/sem verano</th><th>€/mes</th>
+              <th>Jul–ago (mín.)</th><th>Planificados</th><th>Le quedan</th><th>Tardes en verano</th><th>€/mes</th>
             </tr>
           </thead>
           <tbody>
@@ -332,8 +340,8 @@ function Calculadora({ state, setState }) {
                 <td className={!r.disc && r.verano < r.min ? 'sv-to-bad' : ''}>{r.disc ? 'No trabaja' : `${r.verano} (${r.min})`}</td>
                 <td>{r.usados}</td>
                 <td className={r.restan < 0 ? 'sv-to-bad' : ''}>{r.restan}</td>
-                <td className={!r.disc && r.clasesVer === 0 ? 'sv-to-warn-txt' : ''}>
-                  {r.disc ? '—' : `${r.clasesVer} de ${r.clasesInv}`}
+                <td className={!r.disc && r.tardes === 0 ? 'sv-to-warn-txt' : ''}>
+                  {r.disc ? '—' : `${r.tardes} de 5`}
                 </td>
                 <td>{PROF_META[r.p].costoMes.toLocaleString('es-ES')}</td>
               </tr>
@@ -341,10 +349,10 @@ function Calculadora({ state, setState }) {
           </tbody>
         </table>
       </div>
-      {rows.some(r => !r.disc && r.clasesVer === 0 && r.clasesInv > 0) && (
+      {rows.some(r => !r.disc && r.tardes === 0 && r.clasesInv > 0) && (
         <p className="sv-note">
-          {rows.filter(r => !r.disc && r.clasesVer === 0 && r.clasesInv > 0).map(r => r.p).join(', ')}: sin clases en verano
-          con el horario actual (todas son de mañana). Cobra julio y agosto sin tener tareas asignadas.
+          {rows.filter(r => !r.disc && r.tardes === 0 && r.clasesInv > 0).map(r => r.p).join(', ')}: ninguna tarde en verano
+          con el horario actual (todo su trabajo es de mañana). Cobra julio y agosto sin tener tareas asignadas.
         </p>
       )}
 
@@ -456,8 +464,12 @@ function Calculadora({ state, setState }) {
           <ul className="sv-to-detail">
             <li>Fuera: {selDay.out.length ? selDay.out.join(', ') : 'nadie'}</li>
             <li>Abre: {selDay.opener || <span className="sv-to-bad">nadie con llave</span>} · Cierra: {selDay.closer || <span className="sv-to-bad">nadie con llave</span>}</li>
-            {selDay.covered.map((c, i) => <li key={`c${i}`}>Clase de {c.from} ({c.start}) → la da {c.to}</li>)}
-            {selDay.lost.map((c, i) => <li key={`l${i}`} className="sv-to-bad">Clase de {c.prof} ({c.start}) sin cubrir</li>)}
+            {selDay.covered.map((c, i) => (
+              <li key={`c${i}`}>{c.from ? `Clase de ${c.from} (${c.start})` : `Clase ${c.start}`} → la da {c.to}</li>
+            ))}
+            {selDay.lost.map((c, i) => (
+              <li key={`l${i}`} className="sv-to-bad">{c.prof ? `Clase de ${c.prof} (${c.start})` : `Clase ${c.start}`} sin nadie que la dé</li>
+            ))}
             {selDay.suspended.map((c, i) => <li key={`s${i}`} className="sv-ot-muted">Clase de {c.prof} ({c.start}) suspendida (discontinuo)</li>)}
             {conflictsOf(selDay).map((c, i) => <li key={`x${i}`} className={c.level === 'rojo' ? 'sv-to-bad' : 'sv-to-warn-txt'}>{c.a} + {c.b}: {LEVEL_LABEL[c.level].toLowerCase()}</li>)}
           </ul>
@@ -467,7 +479,7 @@ function Calculadora({ state, setState }) {
       <p className="sv-note">
         Pasar a fijo discontinuo requiere que la persona firme el cambio de contrato. El paro en julio y agosto depende de lo
         que haya cotizado (con jornada parcial la prestación es proporcional): confirmarlo con la gestoría antes de proponerlo.
-        El ahorro solo cuenta el coste empresa de julio y agosto; no incluye quién cubre sus clases.
+        El ahorro solo cuenta el coste empresa de julio y agosto; si sus clases de verano las cubren otros, es dinero que se ahorra de verdad.
       </p>
     </div>
   )

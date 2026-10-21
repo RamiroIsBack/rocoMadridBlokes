@@ -6,7 +6,7 @@ export const PROF_META = {
   Sigurd:  { color: '#60a5fa', text: '#fff', costoMes: 903,     horasSem: 9,  clasesSem: 6,  costoHClase: 18.40, equipHSem: 0, equipHMes: 10, costoHEquipar: 12 },
   'Lucía': { color: '#34d399', text: '#111', costoMes: 314,     horasSem: 6,  clasesSem: 4,  costoHClase: 12.09, equipHSem: 0,   costoHEquipar: null },
   Sara:    { color: '#f97316', text: '#fff', costoMes: 523,     horasSem: 10, clasesSem: 6,  costoHClase: 12.08, equipHSem: 1,   costoHEquipar: null },
-  Ana:     { color: '#a78bfa', text: '#fff', costoMes: 400,     horasSem: 7,  clasesSem: 2,  costoHClase: 13.20, equipHSem: 2,   costoHEquipar: null },
+  Ana:     { color: '#a78bfa', text: '#fff', costoMes: 400,     horasSem: 7,  clasesSem: 3,  costoHClase: 13.20, equipHSem: 2,   costoHEquipar: null },
   Eva:     { color: '#fb7185', text: '#fff', costoMes: 1424.46, horasSem: 20, clasesSem: 6,  costoHClase: 16.45, equipHSem: 0,   costoHEquipar: null },
 }
 export const PROF_ORDER = ['Alvaro', 'Sigurd', 'Lucía', 'Sara', 'Ana', 'Eva']
@@ -92,6 +92,7 @@ export const BASE = {
   },
   Ana: {
     Lunes:     [{ tipo: 'clase', start: '20:30', end: '22:00' }],
+    Miercoles: [{ tipo: 'clase', start: '20:30', end: '22:00' }],
     Viernes:   [
       { tipo: 'equipar', start: '17:00', end: '19:00' },
       { tipo: 'clase',   start: '19:00', end: '21:00' },
