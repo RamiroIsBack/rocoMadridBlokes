@@ -632,6 +632,25 @@ add_action('rest_api_init', function() {
         'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_block', 'permission_callback' => $equip_perm,
     ));
 
+    register_rest_route('progreso/v1', '/equipacion/competitions', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_competitions', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/competitions', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_competition', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_competition_detail', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)', array(
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_competition', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)', array(
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_competition', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)', array(
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_comp_block', 'permission_callback' => $equip_perm,
+    ));
+
     register_rest_route('progreso/v1', '/training/me', array(
         'methods'             => 'GET',
         'callback'            => 'progreso_get_training_me',
@@ -4857,7 +4876,7 @@ function progreso_equip_table($name) {
 
 function progreso_equip_ensure_tables() {
     global $wpdb;
-    $version = '1';
+    $version = '2'; // v2: + competitions, comp_blocks
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -4928,6 +4947,31 @@ function progreso_equip_ensure_tables() {
         created_at      datetime            NOT NULL,
         PRIMARY KEY (id),
         KEY assignment_id (assignment_id)
+    ) {$charset};");
+
+    dbDelta("CREATE TABLE " . progreso_equip_table('competitions') . " (
+        id         bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        name       varchar(190)        NOT NULL,
+        comp_date  date                NOT NULL,
+        lead_weeks tinyint(3)          NOT NULL DEFAULT 3,
+        created_at datetime            NOT NULL,
+        PRIMARY KEY (id)
+    ) {$charset};");
+
+    // Posición en el mapa guardada como % (x_pct/y_pct, 0-100) para que
+    // funcione con la imagen a cualquier tamaño de pantalla. NULL = todavía
+    // sin colocar en el mapa.
+    dbDelta("CREATE TABLE " . progreso_equip_table('comp_blocks') . " (
+        id             bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        competition_id bigint(20) UNSIGNED NOT NULL,
+        number         tinyint(3)          NOT NULL,
+        x_pct          decimal(5,2)        NULL,
+        y_pct          decimal(5,2)        NULL,
+        grade_color    varchar(20)         NOT NULL DEFAULT '',
+        hold_set_ids   varchar(100)        NOT NULL DEFAULT '',
+        status         varchar(20)         NOT NULL DEFAULT 'planeado',
+        PRIMARY KEY (id),
+        KEY competition_id (competition_id)
     ) {$charset};");
 
     update_option('blokes_equip_tables_version', $version);
@@ -5356,5 +5400,124 @@ function progreso_equip_update_block($request) {
 function progreso_equip_delete_block($request) {
     global $wpdb;
     $wpdb->delete(progreso_equip_table('blocks'), array('id' => intval($request['id'])), array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+// ── Compe ── organización de una competición: fecha, con cuántas semanas
+// de antelación empiezan las tareas de equipación, y dónde va cada uno de
+// los bloques en el mapa del rocódromo (burbujas arrastrables, § reglas
+// adicionales las va dando el usuario sobre la marcha).
+const PROGRESO_EQUIP_COMP_BLOCK_COUNT = 16;
+
+function progreso_equip_get_competitions() {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $rows = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('competitions') . " ORDER BY comp_date DESC", ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
+        return array(
+            'id' => intval($r['id']), 'name' => $r['name'], 'compDate' => $r['comp_date'],
+            'leadWeeks' => intval($r['lead_weeks']),
+            'tasksStartDate' => date('Y-m-d', strtotime($r['comp_date']) - intval($r['lead_weeks']) * 7 * 86400),
+        );
+    }, $rows)));
+}
+
+function progreso_equip_create_competition($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $name = trim((string) $request->get_param('name')) ?: 'Competición';
+    $comp_date = sanitize_text_field((string) $request->get_param('compDate'));
+    if (!$comp_date || !strtotime($comp_date)) {
+        return new WP_Error('invalid_data', 'Falta la fecha de la competición.', array('status' => 400));
+    }
+    $lead_weeks = intval($request->get_param('leadWeeks')) ?: 3;
+
+    $wpdb->insert(progreso_equip_table('competitions'), array(
+        'name' => sanitize_text_field($name),
+        'comp_date' => date('Y-m-d', strtotime($comp_date)),
+        'lead_weeks' => $lead_weeks,
+        'created_at' => current_time('mysql'),
+    ), array('%s', '%s', '%d', '%s'));
+    $comp_id = $wpdb->insert_id;
+
+    // 16 burbujas numeradas, sin colocar todavía — se arrastran al mapa.
+    for ($i = 1; $i <= PROGRESO_EQUIP_COMP_BLOCK_COUNT; $i++) {
+        $wpdb->insert(progreso_equip_table('comp_blocks'), array(
+            'competition_id' => $comp_id, 'number' => $i, 'status' => 'planeado',
+        ), array('%d', '%d', '%s'));
+    }
+
+    return rest_ensure_response(array('success' => true, 'id' => $comp_id));
+}
+
+function progreso_equip_get_competition_detail($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $id), ARRAY_A);
+    if (!$comp) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+
+    $blocks = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $id
+    ), ARRAY_A);
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'id' => intval($comp['id']), 'name' => $comp['name'], 'compDate' => $comp['comp_date'],
+        'leadWeeks' => intval($comp['lead_weeks']),
+        'tasksStartDate' => date('Y-m-d', strtotime($comp['comp_date']) - intval($comp['lead_weeks']) * 7 * 86400),
+        'blocks' => array_map(function($b) {
+            return array(
+                'id' => intval($b['id']), 'number' => intval($b['number']),
+                'xPct' => $b['x_pct'] !== null ? floatval($b['x_pct']) : null,
+                'yPct' => $b['y_pct'] !== null ? floatval($b['y_pct']) : null,
+                'grade' => $b['grade_color'],
+                'holdSetIds' => array_values(array_filter(array_map('intval', explode(',', $b['hold_set_ids'])))),
+                'status' => $b['status'],
+            );
+        }, $blocks),
+    )));
+}
+
+function progreso_equip_update_competition($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $upd = array(); $fmt = array();
+    if ($request->get_param('name') !== null)      { $upd['name']      = sanitize_text_field($request->get_param('name'));             $fmt[] = '%s'; }
+    if ($request->get_param('compDate') !== null)  { $upd['comp_date'] = date('Y-m-d', strtotime($request->get_param('compDate')));     $fmt[] = '%s'; }
+    if ($request->get_param('leadWeeks') !== null)  { $upd['lead_weeks'] = intval($request->get_param('leadWeeks'));                     $fmt[] = '%d'; }
+    if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    $wpdb->update(progreso_equip_table('competitions'), $upd, array('id' => $id), $fmt, array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+function progreso_equip_delete_competition($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $wpdb->delete(progreso_equip_table('comp_blocks'), array('competition_id' => $id), array('%d'));
+    $wpdb->delete(progreso_equip_table('competitions'), array('id' => $id), array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+function progreso_equip_update_comp_block($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $upd = array(); $fmt = array();
+    if ($request->get_param('unplace')) {
+        // Quitar la burbuja del mapa — vuelve a la bandeja de "sin colocar".
+        $wpdb->query($wpdb->prepare(
+            "UPDATE " . progreso_equip_table('comp_blocks') . " SET x_pct = NULL, y_pct = NULL WHERE id = %d", $id
+        ));
+        return rest_ensure_response(array('success' => true));
+    }
+    if ($request->get_param('xPct') !== null) { $upd['x_pct'] = floatval($request->get_param('xPct')); $fmt[] = '%f'; }
+    if ($request->get_param('yPct') !== null) { $upd['y_pct'] = floatval($request->get_param('yPct')); $fmt[] = '%f'; }
+    if ($request->get_param('grade') !== null) { $upd['grade_color'] = sanitize_text_field($request->get_param('grade')); $fmt[] = '%s'; }
+    if ($request->get_param('holdSetIds') !== null) {
+        $ids = $request->get_param('holdSetIds');
+        $upd['hold_set_ids'] = is_array($ids) ? implode(',', array_map('intval', $ids)) : '';
+        $fmt[] = '%s';
+    }
+    if ($request->get_param('status') !== null) { $upd['status'] = sanitize_text_field($request->get_param('status')); $fmt[] = '%s'; }
+    if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    $wpdb->update(progreso_equip_table('comp_blocks'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
 }

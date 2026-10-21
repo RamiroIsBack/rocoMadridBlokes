@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import mapaEquipacion from '../assets/mapa-equipacion.jpg'
 import './OrganizacionPage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -38,10 +39,14 @@ export default function OrganizacionPage() {
   const [config, setConfig] = useState(null)
   const [workers, setWorkers] = useState([])
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState('hoy') // 'hoy' | 'semana' | 'normas'
+  const [view, setView] = useState('hoy') // 'hoy' | 'semana' | 'normas' | 'compe'
   const [workerId, setWorkerId] = useState(() => {
     try { return Number(localStorage.getItem(WHOAMI_KEY)) || null } catch { return null }
   })
+
+  const reloadWorkers = useCallback(() => {
+    return api('GET', '/equipacion/workers').then(r => setWorkers(r.data || [])).catch(() => {})
+  }, [])
 
   useEffect(() => {
     Promise.all([api('GET', '/equipacion/config'), api('GET', '/equipacion/workers')])
@@ -66,6 +71,7 @@ export default function OrganizacionPage() {
         <button className={`org__switch-btn${view === 'hoy' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('hoy')}>Hoy</button>
         <button className={`org__switch-btn${view === 'semana' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('semana')}>Semana</button>
         <button className={`org__switch-btn${view === 'normas' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('normas')}>Normas</button>
+        <button className={`org__switch-btn${view === 'compe' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('compe')}>Compe</button>
       </div>
 
       {view === 'hoy' && (
@@ -74,8 +80,9 @@ export default function OrganizacionPage() {
           workerId={workerId} onChooseWorker={chooseWorker}
         />
       )}
-      {view === 'semana' && <SemanaView config={config} workers={workers} />}
+      {view === 'semana' && <SemanaView config={config} workers={workers} onWorkersChanged={reloadWorkers} />}
       {view === 'normas' && <NormasView config={config} />}
+      {view === 'compe' && <CompeView />}
     </div>
   )
 }
@@ -276,10 +283,11 @@ function AddBlockForm({ config, assignmentId, onDone, onCancel }) {
 }
 
 // ─── Semana ───────────────────────────────────────────────────────────
-function SemanaView({ config, workers }) {
+function SemanaView({ config, workers, onWorkersChanged }) {
   const [weeks, setWeeks] = useState([])
   const [detail, setDetail] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [showWorkers, setShowWorkers] = useState(false)
 
   const reloadWeeks = useCallback(() => {
     api('GET', '/equipacion/weeks').then(r => setWeeks(r.data || [])).catch(() => {})
@@ -307,7 +315,13 @@ function SemanaView({ config, workers }) {
 
   return (
     <div>
-      {!showCreate && <button className="org__add-btn" onClick={() => setShowCreate(true)}>+ Crear semana nueva</button>}
+      <div className="org__semana-actions">
+        {!showCreate && <button className="org__add-btn" onClick={() => setShowCreate(true)}>+ Crear semana nueva</button>}
+        <button className="org__link-btn" onClick={() => setShowWorkers(s => !s)}>
+          {showWorkers ? 'Ocultar personas' : 'Gestionar personas'}
+        </button>
+      </div>
+      {showWorkers && <WorkersAdmin workers={workers} onChanged={onWorkersChanged} />}
       {showCreate && (
         <CreateWeekForm
           config={config} workers={workers}
@@ -323,6 +337,89 @@ function SemanaView({ config, workers }) {
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+// Crear/editar/borrar personas — "a veces participa más gente en las tareas".
+function WorkersAdmin({ workers, onChanged }) {
+  const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  const [showAdd, setShowAdd] = useState(false)
+  const [name, setName] = useState('')
+  const [days, setDays] = useState(['mon', 'tue', 'wed', 'thu', 'fri'])
+  const [blocksMin, setBlocksMin] = useState(1)
+  const [blocksMax, setBlocksMax] = useState(2)
+  const [isLead, setIsLead] = useState(false)
+  const [error, setError] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  const toggleDay = d => setDays(cur => cur.includes(d) ? cur.filter(x => x !== d) : [...cur, d])
+
+  const submit = async () => {
+    if (!name.trim()) { setError('Escribe un nombre'); return }
+    setSaving(true); setError(null)
+    try {
+      await api('POST', '/equipacion/workers', { name: name.trim(), workDays: days, blocksMin, blocksMax, isLead })
+      setName(''); setDays(['mon', 'tue', 'wed', 'thu', 'fri']); setBlocksMin(1); setBlocksMax(2); setIsLead(false)
+      setShowAdd(false)
+      onChanged()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const remove = async w => {
+    if (!window.confirm(`¿Quitar a ${w.name} del equipo? (no borra sus semanas ya creadas)`)) return
+    await api('DELETE', `/equipacion/workers/${w.id}`)
+    onChanged()
+  }
+
+  return (
+    <div className="org__workers-admin">
+      <ul className="org__worker-list">
+        {workers.map(w => (
+          <li key={w.id} className="org__worker-row">
+            <span className="org__worker-name">{w.name}{w.isLead ? ' · responsable' : ''}</span>
+            <span className="org__worker-meta">{w.workDays.map(d => DAY_LABEL[d]).join('/')} · {w.blocksMin}-{w.blocksMax} bloques</span>
+            <button className="org__remove-btn" onClick={() => remove(w)}>✕</button>
+          </li>
+        ))}
+      </ul>
+      {!showAdd && <button className="org__add-btn" onClick={() => setShowAdd(true)}>+ Añadir persona</button>}
+      {showAdd && (
+        <div className="org__add-form">
+          <div className="org__add-row">
+            <label>Nombre</label>
+            <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Nombre" />
+          </div>
+          <div className="org__add-row">
+            <label>Días que trabaja</label>
+            <div className="org__holdset-chips">
+              {ALL_DAYS.map(d => (
+                <button key={d} type="button" className={`org__holdset-chip${days.includes(d) ? ' org__holdset-chip--on' : ''}`} onClick={() => toggleDay(d)}>{DAY_LABEL[d]}</button>
+              ))}
+            </div>
+          </div>
+          <div className="org__add-row">
+            <label>Bloques objetivo por semana (mín-máx)</label>
+            <div className="org__blocks-range">
+              <input type="number" min="0" max="20" value={blocksMin} onChange={e => setBlocksMin(Number(e.target.value))} />
+              <span>–</span>
+              <input type="number" min="0" max="20" value={blocksMax} onChange={e => setBlocksMax(Number(e.target.value))} />
+            </div>
+          </div>
+          <div className="org__add-row">
+            <label><input type="checkbox" checked={isLead} onChange={e => setIsLead(e.target.checked)} /> Es responsable (prepara las semanas)</label>
+          </div>
+          {error && <p className="org__error">{error}</p>}
+          <div className="org__add-actions">
+            <button className="org__btn org__btn--ghost" onClick={() => setShowAdd(false)} disabled={saving}>Cancelar</button>
+            <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Guardando...' : 'Guardar persona'}</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -415,6 +512,188 @@ function NormasView({ config }) {
           ))}
         </ul>
       </section>
+    </div>
+  )
+}
+
+// ─── Compe ────────────────────────────────────────────────────────────
+// Organización de una competición: fecha, semanas de antelación para las
+// tareas de equipación, y dónde va cada uno de los 16 bloques en el mapa.
+// Más reglas (categorías, puntuación...) se añaden sobre la marcha.
+function CompeView() {
+  const [competitions, setCompetitions] = useState([])
+  const [current, setCurrent] = useState(null)
+  const [showCreate, setShowCreate] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  const reload = useCallback(() => {
+    return api('GET', '/equipacion/competitions').then(r => setCompetitions(r.data || [])).catch(() => {})
+  }, [])
+  useEffect(() => { reload().finally(() => setLoading(false)) }, [reload])
+
+  const openComp = id => api('GET', `/equipacion/competitions/${id}`).then(r => setCurrent(r.data)).catch(() => {})
+
+  if (current) {
+    return (
+      <CompeMapEditor
+        comp={current}
+        onBack={() => { setCurrent(null); reload() }}
+        onRefresh={() => openComp(current.id)}
+      />
+    )
+  }
+
+  if (loading) return <p className="org__hint">Cargando...</p>
+
+  return (
+    <div>
+      {!showCreate && <button className="org__add-btn" onClick={() => setShowCreate(true)}>+ Nueva competición</button>}
+      {showCreate && (
+        <CreateCompForm
+          onDone={id => { setShowCreate(false); reload(); openComp(id) }}
+          onCancel={() => setShowCreate(false)}
+        />
+      )}
+      <ul className="org__week-list">
+        {competitions.map(c => (
+          <li key={c.id} className="org__week-row" onClick={() => openComp(c.id)}>
+            <span>{c.name} — {c.compDate}</span>
+            <span className="org__week-subzones">tareas desde {c.tasksStartDate}</span>
+          </li>
+        ))}
+        {competitions.length === 0 && <p className="org__hint">Sin competiciones todavía.</p>}
+      </ul>
+    </div>
+  )
+}
+
+function CreateCompForm({ onDone, onCancel }) {
+  const [name, setName] = useState('Competición')
+  const [compDate, setCompDate] = useState('2026-11-30')
+  const [leadWeeks, setLeadWeeks] = useState(3)
+  const [error, setError] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    setSaving(true); setError(null)
+    try {
+      const res = await api('POST', '/equipacion/competitions', { name, compDate, leadWeeks })
+      onDone(res.id)
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="org__add-form">
+      <div className="org__add-row"><label>Nombre</label><input type="text" value={name} onChange={e => setName(e.target.value)} /></div>
+      <div className="org__add-row"><label>Fecha de la competición</label><input type="date" value={compDate} onChange={e => setCompDate(e.target.value)} /></div>
+      <div className="org__add-row"><label>Semanas de antelación para las tareas</label><input type="number" min="1" max="12" value={leadWeeks} onChange={e => setLeadWeeks(Number(e.target.value))} /></div>
+      {error && <p className="org__error">{error}</p>}
+      <div className="org__add-actions">
+        <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
+        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Creando...' : 'Crear (16 bloques)'}</button>
+      </div>
+    </div>
+  )
+}
+
+// Arrastra una burbuja ya colocada para moverla, o toca un número sin
+// colocar y luego el sitio del mapa — pensado para funcionar igual con
+// ratón que con el dedo en la tablet.
+function CompeMapEditor({ comp, onBack }) {
+  const wrapRef = useRef(null)
+  const [blocks, setBlocks] = useState(comp.blocks)
+  const [selectedToPlace, setSelectedToPlace] = useState(null)
+  const dragIdRef = useRef(null)
+
+  useEffect(() => { setBlocks(comp.blocks) }, [comp])
+
+  const clampPct = v => Math.max(2, Math.min(98, v))
+  const posFromClient = (clientX, clientY) => {
+    const rect = wrapRef.current.getBoundingClientRect()
+    return {
+      x: clampPct(((clientX - rect.left) / rect.width) * 100),
+      y: clampPct(((clientY - rect.top) / rect.height) * 100),
+    }
+  }
+
+  const startDrag = id => e => {
+    e.preventDefault()
+    dragIdRef.current = id
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+  const onWrapMove = e => {
+    if (dragIdRef.current == null) return
+    const { x, y } = posFromClient(e.clientX, e.clientY)
+    setBlocks(cur => cur.map(b => b.id === dragIdRef.current ? { ...b, xPct: x, yPct: y } : b))
+  }
+  const onWrapUp = async () => {
+    const id = dragIdRef.current
+    dragIdRef.current = null
+    if (id == null) return
+    const b = blocks.find(x => x.id === id)
+    if (b) { try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: b.xPct, yPct: b.yPct }) } catch {} }
+  }
+  const onWrapClick = async e => {
+    if (dragIdRef.current != null || !selectedToPlace) return
+    const { x, y } = posFromClient(e.clientX, e.clientY)
+    const id = selectedToPlace
+    setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: x, yPct: y } : b))
+    setSelectedToPlace(null)
+    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: x, yPct: y }) } catch {}
+  }
+  const unplace = async id => {
+    setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: null, yPct: null } : b))
+    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { unplace: true }) } catch {}
+  }
+
+  const unplaced = blocks.filter(b => b.xPct == null)
+  const placed = blocks.filter(b => b.xPct != null)
+
+  return (
+    <div>
+      <button className="org__link-btn" onClick={onBack}>← Volver a competiciones</button>
+      <h3 className="org__section-title">{comp.name} — {comp.compDate}</h3>
+      <p className="org__hint">Las tareas de equipación para esta compe empiezan el {comp.tasksStartDate}.</p>
+
+      {unplaced.length > 0 && (
+        <div className="org__comp-tray">
+          <p className="org__hint">Toca un número y luego el sitio del mapa:</p>
+          <div className="org__comp-tray-chips">
+            {unplaced.map(b => (
+              <button
+                key={b.id}
+                className={`org__comp-chip${selectedToPlace === b.id ? ' org__comp-chip--selected' : ''}`}
+                onClick={() => setSelectedToPlace(cur => cur === b.id ? null : b.id)}
+              >{b.number}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div
+        className="org__comp-map-wrap"
+        ref={wrapRef}
+        onPointerMove={onWrapMove}
+        onPointerUp={onWrapUp}
+        onClick={onWrapClick}
+      >
+        <img src={mapaEquipacion} alt="Mapa del rocódromo" className="org__comp-map-img" draggable={false} />
+        {placed.map(b => (
+          <div
+            key={b.id}
+            className="org__comp-bubble"
+            style={{ left: `${b.xPct}%`, top: `${b.yPct}%` }}
+            onPointerDown={startDrag(b.id)}
+            onDoubleClick={() => unplace(b.id)}
+            title="Arrastra para mover, doble clic para quitar del mapa"
+          >{b.number}</div>
+        ))}
+      </div>
+      <p className="org__hint">{placed.length} de {blocks.length} bloques colocados. Doble clic en una burbuja para quitarla del mapa.</p>
     </div>
   )
 }
