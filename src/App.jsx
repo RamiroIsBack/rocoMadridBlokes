@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Link, NavLink, Navigate } from 'react-rou
 import MainPage from './pages/MainPage'
 import AdminApp from './admin/AdminApp'
 import StatsPage from './pages/StatsPage'
+import TareasIndexPage from './pages/TareasIndexPage'
+import OrganizacionPage from './pages/OrganizacionPage'
 import UserStatsPage from './pages/UserStatsPage'
 import ProgresoPage from './pages/ProgresoPage'
 import ProgresoIndexPage from './pages/ProgresoIndexPage'
@@ -33,7 +35,7 @@ const SUBSALA_POSITIONS = {
   '8': { top: '44.5%', right: '18%', transform: 'translateX(50%)' },
 }
 
-const KNOWN_ROUTES = ['/progreso', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground']
+const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground']
 
 function detectBasename() {
   const injected = window.blokesSiteData?.appBasename
@@ -286,10 +288,7 @@ export default function App() {
                     <NavLink to="/entrenamientos" className="app-nav__link">Entrenamientos</NavLink>
                   </li>
                   <li className="app-nav__item">
-                    <NavLink to="/setter" className="app-nav__link">Setter</NavLink>
-                  </li>
-                  <li className="app-nav__item">
-                    <NavLink to="/stats" className="app-nav__link">Estadísticas</NavLink>
+                    <NavLink to="/tareas" className="app-nav__link">Tareas y setter</NavLink>
                   </li>
                 </>
               )}
@@ -321,8 +320,13 @@ export default function App() {
               <Route path="yo" element={<UserStatsPage />} />
             </Route>
             <Route path="/mis-blokes" element={<Navigate to="/progreso/yo" replace />} />
-            <Route path="/setter" element={<AdminApp />} />
-            <Route path="/stats" element={<StatsPage />} />
+            <Route path="/tareas" element={<TareasIndexPage />}>
+              <Route path="crear-bloke" element={<AdminApp />} />
+              <Route path="organizacion" element={<OrganizacionPage />} />
+              <Route path="estadisticas" element={<StatsPage />} />
+            </Route>
+            <Route path="/setter" element={<Navigate to="/tareas/crear-bloke" replace />} />
+            <Route path="/stats" element={<Navigate to="/tareas/estadisticas" replace />} />
             <Route path="/entrenamientos" element={<EntrenamientosPage />} />
             <Route path="/fichaje" element={<FichajePage />} />
             <Route path="/time-off" element={<TimeOffPage />} />

@@ -570,6 +570,68 @@ add_action('rest_api_init', function() {
         'permission_callback' => '__return_true',
     ));
 
+    // ── Organización (equipación / route-setting) ── visible solo a
+    // profesor/gestión/socio, igual que el resto de "Tareas y setter".
+    $equip_perm = function() { return in_array(blokes_get_app_role(), array('profesor', 'gestion', 'socio')); };
+
+    register_rest_route('progreso/v1', '/equipacion/config', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_config', 'permission_callback' => $equip_perm,
+    ));
+
+    register_rest_route('progreso/v1', '/equipacion/workers', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_workers', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/workers', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_worker', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/workers/(?P<id>\d+)', array(
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_worker', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/workers/(?P<id>\d+)', array(
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_worker', 'permission_callback' => $equip_perm,
+    ));
+
+    register_rest_route('progreso/v1', '/equipacion/holdsets', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_holdsets', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/holdsets', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_holdset', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/holdsets/(?P<id>\d+)', array(
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_holdset', 'permission_callback' => $equip_perm,
+    ));
+
+    register_rest_route('progreso/v1', '/equipacion/weeks', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_weeks', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/weeks', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_week', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_week_detail', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_week', 'permission_callback' => $equip_perm,
+    ));
+
+    register_rest_route('progreso/v1', '/equipacion/today', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_today', 'permission_callback' => $equip_perm,
+    ));
+
+    register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)', array(
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_task', 'permission_callback' => $equip_perm,
+    ));
+
+    register_rest_route('progreso/v1', '/equipacion/blocks', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_block', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/blocks/(?P<id>\d+)', array(
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_block', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/blocks/(?P<id>\d+)', array(
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_block', 'permission_callback' => $equip_perm,
+    ));
+
     register_rest_route('progreso/v1', '/training/me', array(
         'methods'             => 'GET',
         'callback'            => 'progreso_get_training_me',
@@ -4718,4 +4780,581 @@ function payroll_save_config($request) {
         update_option('blokes_payroll_notes', $notes, false);
     }
     return rest_ensure_response(array('success' => true, 'config' => payroll_config_response($base, $rates)));
+}
+
+// ============================================================
+//  Organización — equipación / route-setting (planificación diaria)
+//  Reemplaza el "Calendario de Equipacion" semanal de Notion: cada
+//  trabajador recibe un plan por día concreto, no solo por semana.
+// ============================================================
+
+function progreso_equip_subzones() {
+    return array(1, 2, 3, 4, 5, 6, 7, 8);
+}
+
+function progreso_equip_grades() {
+    return array(
+        array('color' => 'INTRO',    'range' => 'III',      'order' => 0, 'planificado' => false),
+        array('color' => 'VERDE',    'range' => 'IV/V',     'order' => 1, 'planificado' => true),
+        array('color' => 'AZUL',     'range' => 'V+/6A',    'order' => 2, 'planificado' => true),
+        array('color' => 'AMARILLO', 'range' => '6A+/6B+',  'order' => 3, 'planificado' => true, 'aviso' => 'Están quedando muy duros'),
+        array('color' => 'ROJO',     'range' => '6C/7A',    'order' => 4, 'planificado' => true),
+        array('color' => 'NEGRO',    'range' => '7A+/7B',   'order' => 5, 'planificado' => true),
+        array('color' => 'BLANCO',   'range' => '7B+/7C',   'order' => 6, 'planificado' => false, 'nota' => 'compes'),
+    );
+}
+
+// Orden de trabajo natural: quitar → volúmenes → bloques → densidad/travesías
+// → limpiar/ordenar/regar → subir webapp. El reparto por días sigue este orden.
+function progreso_equip_task_types() {
+    return array(
+        array('id' => 'balizar',          'name' => 'Balizar zona de equipación',             'params' => array('subzona'),          'lead_only' => false),
+        array('id' => 'quitar_bloques',    'name' => 'Quitar bloques',                         'params' => array('subzona', 'notas'), 'lead_only' => false),
+        array('id' => 'quitar_densidad',   'name' => 'Quitar densidad',                        'params' => array('subzona'),          'lead_only' => false),
+        array('id' => 'quitar_volumenes',  'name' => 'Quitar volúmenes',                       'params' => array('subzona'),          'lead_only' => false),
+        array('id' => 'poner_volumenes',   'name' => 'Poner volúmenes',                        'params' => array('subzona'),          'lead_only' => false),
+        array('id' => 'poner_bloques',     'name' => 'Poner bloques',                          'params' => array('subzona', 'objetivo'), 'lead_only' => false),
+        array('id' => 'poner_densidad',    'name' => 'Poner densidad',                         'params' => array('colores'),          'lead_only' => false),
+        array('id' => 'poner_travesias',   'name' => 'Poner travesías',                        'params' => array('subzona', 'color'), 'lead_only' => false),
+        array('id' => 'limpiar',           'name' => 'Limpiar presas / volúmenes',             'params' => array(),                   'lead_only' => false),
+        array('id' => 'ordenar',           'name' => 'Ordenar (tornillos, presas, volúmenes)', 'params' => array(),                   'lead_only' => false),
+        array('id' => 'regar',             'name' => 'Regar',                                  'params' => array(),                   'lead_only' => false),
+        array('id' => 'subir_webapp',      'name' => 'Subir bloques a la webapp',              'params' => array(),                   'lead_only' => false),
+        array('id' => 'organizar_semanas', 'name' => 'Organizar próximas semanas (RouteSetting)', 'params' => array(),                'lead_only' => true),
+    );
+}
+
+function progreso_equip_rules() {
+    return array(
+        array('kind' => 'validation', 'text' => 'No usar el mismo color de presas en 2 bloques del mismo panel.'),
+        array('kind' => 'warning',    'text' => 'No mezclar juegos de colores parecidos en el mismo bloque.'),
+        array('kind' => 'info',       'text' => 'Separar los tornillos de las presas y volúmenes.'),
+        array('kind' => 'info',       'text' => 'Tornillos del tamaño adecuado para cada presa; poner siempre antigiros del tamaño apropiado.'),
+        array('kind' => 'info',       'text' => 'Ojo con presas puestas solo con antigiros.'),
+        array('kind' => 'info',       'text' => 'Tirafondos con arandelas en todos los volúmenes.'),
+        array('kind' => 'info',       'text' => 'Balizar la zona de equipación.'),
+        array('kind' => 'info',       'text' => 'Registrar las tareas y subir los bloques a la webapp.'),
+        array('kind' => 'warning',    'text' => 'Bloques amarillos están quedando muy duros.'),
+        array('kind' => 'info',       'text' => 'Limpiar las presas con cuidado para que no se rompan y que queden limpias.'),
+        array('kind' => 'info',       'text' => 'Las travesías no pueden quedar incompletas (modificarlas si hace falta) y solo deben ocupar el espacio de la zona a equipar.'),
+        array('kind' => 'info',       'text' => 'Orden de la terraza: expuertas, valdes, escaleras; volúmenes; presas.'),
+    );
+}
+
+function progreso_equip_get_config() {
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'subzones'  => progreso_equip_subzones(),
+        'grades'    => progreso_equip_grades(),
+        'taskTypes' => progreso_equip_task_types(),
+        'rules'     => progreso_equip_rules(),
+    )));
+}
+
+function progreso_equip_table($name) {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_equip_' . $name;
+}
+
+function progreso_equip_ensure_tables() {
+    global $wpdb;
+    $version = '1';
+    if (get_option('blokes_equip_tables_version') === $version) return;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+    dbDelta("CREATE TABLE " . progreso_equip_table('workers') . " (
+        id         bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        name       varchar(100)        NOT NULL,
+        email      varchar(190)        NOT NULL DEFAULT '',
+        work_days  varchar(50)         NOT NULL DEFAULT '',
+        blocks_min tinyint(3)          NOT NULL DEFAULT 1,
+        blocks_max tinyint(3)          NOT NULL DEFAULT 2,
+        is_lead    tinyint(1)          NOT NULL DEFAULT 0,
+        active     tinyint(1)          NOT NULL DEFAULT 1,
+        PRIMARY KEY (id)
+    ) {$charset};");
+
+    dbDelta("CREATE TABLE " . progreso_equip_table('holdsets') . " (
+        id   bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        name varchar(100)        NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY name (name)
+    ) {$charset};");
+
+    dbDelta("CREATE TABLE " . progreso_equip_table('weeks') . " (
+        id         bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        start_date date                NOT NULL,
+        subzones   varchar(50)         NOT NULL DEFAULT '',
+        notes      text                NULL,
+        created_at datetime            NOT NULL,
+        PRIMARY KEY (id)
+    ) {$charset};");
+
+    dbDelta("CREATE TABLE " . progreso_equip_table('assignments') . " (
+        id         bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        week_id    bigint(20) UNSIGNED NOT NULL,
+        worker_id  bigint(20) UNSIGNED NOT NULL,
+        subzones   varchar(50)         NOT NULL DEFAULT '',
+        blocks_min tinyint(3)          NOT NULL DEFAULT 1,
+        blocks_max tinyint(3)          NOT NULL DEFAULT 2,
+        status     varchar(20)         NOT NULL DEFAULT 'pendiente',
+        PRIMARY KEY (id),
+        KEY week_id (week_id),
+        KEY worker_id (worker_id)
+    ) {$charset};");
+
+    dbDelta("CREATE TABLE " . progreso_equip_table('tasks') . " (
+        id            bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        assignment_id bigint(20) UNSIGNED NOT NULL,
+        task_type_id  varchar(40)         NOT NULL,
+        task_date     date                NOT NULL,
+        params        text                NULL,
+        done          tinyint(1)          NOT NULL DEFAULT 0,
+        done_at       datetime            NULL,
+        PRIMARY KEY (id),
+        KEY assignment_id (assignment_id),
+        KEY task_date (task_date)
+    ) {$charset};");
+
+    dbDelta("CREATE TABLE " . progreso_equip_table('blocks') . " (
+        id              bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        assignment_id   bigint(20) UNSIGNED NOT NULL,
+        subzone         tinyint(3)          NOT NULL,
+        grade_color     varchar(20)         NOT NULL,
+        hold_set_ids    varchar(100)        NOT NULL DEFAULT '',
+        is_traverse     tinyint(1)          NOT NULL DEFAULT 0,
+        done            tinyint(1)          NOT NULL DEFAULT 0,
+        uploaded_webapp tinyint(1)          NOT NULL DEFAULT 0,
+        created_at      datetime            NOT NULL,
+        PRIMARY KEY (id),
+        KEY assignment_id (assignment_id)
+    ) {$charset};");
+
+    update_option('blokes_equip_tables_version', $version);
+    progreso_equip_seed_if_empty();
+}
+
+// Semilla inicial (trabajadores y catálogo de presas actuales) — solo si
+// las tablas están recién creadas y vacías, nunca sobrescribe datos reales.
+function progreso_equip_seed_if_empty() {
+    global $wpdb;
+    $workers_table = progreso_equip_table('workers');
+    if ((int) $wpdb->get_var("SELECT COUNT(*) FROM $workers_table") > 0) return;
+
+    $seed_workers = array(
+        array('name' => 'Álvaro', 'work_days' => 'mon,tue,wed,thu',     'blocks_min' => 4, 'blocks_max' => 5, 'is_lead' => 1),
+        array('name' => 'Ana',    'work_days' => 'mon,tue,wed,thu,fri', 'blocks_min' => 1, 'blocks_max' => 2, 'is_lead' => 0),
+        array('name' => 'Edu',    'work_days' => 'mon,tue,wed,thu,fri', 'blocks_min' => 1, 'blocks_max' => 2, 'is_lead' => 0),
+        array('name' => 'Sara',   'work_days' => 'tue,wed,thu',         'blocks_min' => 1, 'blocks_max' => 2, 'is_lead' => 0),
+    );
+    foreach ($seed_workers as $w) {
+        $wpdb->insert($workers_table, array(
+            'name' => $w['name'], 'email' => '', 'work_days' => $w['work_days'],
+            'blocks_min' => $w['blocks_min'], 'blocks_max' => $w['blocks_max'],
+            'is_lead' => $w['is_lead'], 'active' => 1,
+        ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d'));
+    }
+
+    $seed_holdsets = array(
+        'Moradas/Amarillas', 'Naranjas BS', 'Volúmenes turquesa/negro', 'Chorreras azules BS', 'Salmón',
+        'Grises', 'Cazos amarillos', 'Volúmenes amarillos', 'Negras Eclipse', 'Burbujas rosas',
+        'Romos azules plástico', 'Grises resina', 'Moradas BS', 'Romos verdes', 'Azules P',
+        'Verdes claras lunas/conchas', 'Amarillas', 'Old orange', 'Blancas', 'Tel rosas',
+        'Azules K', 'Blancas hueso', 'Amarillas K', 'Grises minivols', 'Verdes',
+        'Moradas', 'Azules', 'Negras nuevas', 'Bolas amarillas', 'Turquesas',
+        'Moradas P', 'Negras', 'Rosas', 'CR', 'Amarillas mostaza',
+        'Lunas verdes', 'Granito Pedri', 'Azules BS', 'Bolas rosas', 'Verdes plástico',
+        'Naranjas', 'Rojas bidedos', 'Listones madera',
+    );
+    $holdsets_table = progreso_equip_table('holdsets');
+    foreach ($seed_holdsets as $name) {
+        $wpdb->insert($holdsets_table, array('name' => $name), array('%s'));
+    }
+}
+
+function progreso_equip_get_workers() {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $rows = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('workers') . " ORDER BY is_lead DESC, name ASC", ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
+        return array(
+            'id' => intval($r['id']), 'name' => $r['name'], 'email' => $r['email'],
+            'workDays' => array_values(array_filter(explode(',', $r['work_days']))),
+            'blocksMin' => intval($r['blocks_min']), 'blocksMax' => intval($r['blocks_max']),
+            'isLead' => (bool) $r['is_lead'], 'active' => (bool) $r['active'],
+        );
+    }, $rows)));
+}
+
+function progreso_equip_create_worker($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $name = trim((string) $request->get_param('name'));
+    if ($name === '') return new WP_Error('invalid_data', 'Falta el nombre.', array('status' => 400));
+    $work_days = $request->get_param('workDays');
+    $work_days = is_array($work_days) ? implode(',', array_map('sanitize_text_field', $work_days)) : '';
+    $wpdb->insert(progreso_equip_table('workers'), array(
+        'name'       => sanitize_text_field($name),
+        'email'      => sanitize_email((string) $request->get_param('email')),
+        'work_days'  => $work_days,
+        'blocks_min' => intval($request->get_param('blocksMin')) ?: 1,
+        'blocks_max' => intval($request->get_param('blocksMax')) ?: 2,
+        'is_lead'    => $request->get_param('isLead') ? 1 : 0,
+        'active'     => 1,
+    ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d'));
+    return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
+}
+
+function progreso_equip_update_worker($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $upd = array(); $fmt = array();
+    if ($request->get_param('name') !== null)  { $upd['name']  = sanitize_text_field($request->get_param('name'));  $fmt[] = '%s'; }
+    if ($request->get_param('email') !== null) { $upd['email'] = sanitize_email($request->get_param('email'));      $fmt[] = '%s'; }
+    if ($request->get_param('workDays') !== null) {
+        $wd = $request->get_param('workDays');
+        $upd['work_days'] = is_array($wd) ? implode(',', array_map('sanitize_text_field', $wd)) : '';
+        $fmt[] = '%s';
+    }
+    if ($request->get_param('blocksMin') !== null) { $upd['blocks_min'] = intval($request->get_param('blocksMin')); $fmt[] = '%d'; }
+    if ($request->get_param('blocksMax') !== null) { $upd['blocks_max'] = intval($request->get_param('blocksMax')); $fmt[] = '%d'; }
+    if ($request->get_param('isLead') !== null)    { $upd['is_lead']    = $request->get_param('isLead') ? 1 : 0;    $fmt[] = '%d'; }
+    if ($request->get_param('active') !== null)    { $upd['active']     = $request->get_param('active') ? 1 : 0;    $fmt[] = '%d'; }
+    if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    $wpdb->update(progreso_equip_table('workers'), $upd, array('id' => $id), $fmt, array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+function progreso_equip_delete_worker($request) {
+    global $wpdb;
+    $wpdb->delete(progreso_equip_table('workers'), array('id' => intval($request['id'])), array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+function progreso_equip_get_holdsets() {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $rows = $wpdb->get_results("SELECT id, name FROM " . progreso_equip_table('holdsets') . " ORDER BY name ASC", ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
+        return array('id' => intval($r['id']), 'name' => $r['name']);
+    }, $rows)));
+}
+
+function progreso_equip_create_holdset($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $name = trim((string) $request->get_param('name'));
+    if ($name === '') return new WP_Error('invalid_data', 'Falta el nombre.', array('status' => 400));
+    $existing = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('holdsets') . " WHERE name = %s", $name));
+    if ($existing) return new WP_Error('duplicate', 'Ese juego de presas ya existe.', array('status' => 409));
+    $wpdb->insert(progreso_equip_table('holdsets'), array('name' => sanitize_text_field($name)), array('%s'));
+    return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
+}
+
+function progreso_equip_delete_holdset($request) {
+    global $wpdb;
+    $wpdb->delete(progreso_equip_table('holdsets'), array('id' => intval($request['id'])), array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+function progreso_equip_get_weeks() {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $rows = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('weeks') . " ORDER BY start_date DESC LIMIT 20", ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
+        return array(
+            'id' => intval($r['id']), 'startDate' => $r['start_date'],
+            'subzones' => array_values(array_filter(array_map('intval', explode(',', $r['subzones'])))),
+            'notes' => $r['notes'],
+        );
+    }, $rows)));
+}
+
+// Crea la semana y, para cada trabajador asignado, reparte el catálogo de
+// tareas entre sus días de trabajo reales esa semana — así nadie se queda
+// un día sin plan, que es justo el hueco que tenía el sistema de Notion.
+function progreso_equip_create_week($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $start_date = sanitize_text_field((string) $request->get_param('startDate'));
+    if (!$start_date || !strtotime($start_date)) {
+        return new WP_Error('invalid_data', 'Falta la fecha de inicio (lunes de la semana).', array('status' => 400));
+    }
+    $subzones = $request->get_param('subzones');
+    $subzones = is_array($subzones) ? array_map('intval', $subzones) : array();
+    $notes = sanitize_textarea_field((string) $request->get_param('notes'));
+    $assignments_in = $request->get_param('assignments');
+    if (!is_array($assignments_in) || empty($assignments_in)) {
+        return new WP_Error('invalid_data', 'Falta al menos una asignación de trabajador.', array('status' => 400));
+    }
+
+    $wpdb->insert(progreso_equip_table('weeks'), array(
+        'start_date' => date('Y-m-d', strtotime($start_date)),
+        'subzones'   => implode(',', $subzones),
+        'notes'      => $notes,
+        'created_at' => current_time('mysql'),
+    ), array('%s', '%s', '%s', '%s'));
+    $week_id = $wpdb->insert_id;
+
+    $day_offset        = array('mon' => 0, 'tue' => 1, 'wed' => 2, 'thu' => 3, 'fri' => 4, 'sat' => 5, 'sun' => 6);
+    $task_types        = progreso_equip_task_types();
+    $assignments_table  = progreso_equip_table('assignments');
+    $tasks_table        = progreso_equip_table('tasks');
+    $created_assignments = array();
+
+    foreach ($assignments_in as $a) {
+        $worker_id = intval($a['workerId'] ?? 0);
+        if ($worker_id <= 0) continue;
+        $worker = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM " . progreso_equip_table('workers') . " WHERE id = %d", $worker_id
+        ), ARRAY_A);
+        if (!$worker) continue;
+
+        $a_subzones = is_array($a['subzones'] ?? null) ? array_map('intval', $a['subzones']) : $subzones;
+        $blocks_min = intval($a['blocksMin'] ?? $worker['blocks_min']);
+        $blocks_max = intval($a['blocksMax'] ?? $worker['blocks_max']);
+
+        $wpdb->insert($assignments_table, array(
+            'week_id'    => $week_id,
+            'worker_id'  => $worker_id,
+            'subzones'   => implode(',', $a_subzones),
+            'blocks_min' => $blocks_min,
+            'blocks_max' => $blocks_max,
+            'status'     => 'pendiente',
+        ), array('%d', '%d', '%s', '%d', '%d', '%s'));
+        $assignment_id = $wpdb->insert_id;
+        $created_assignments[] = $assignment_id;
+
+        $work_days = array_filter(explode(',', $worker['work_days']));
+        $dates = array();
+        foreach ($work_days as $wd) {
+            if (!isset($day_offset[$wd])) continue;
+            $dates[] = date('Y-m-d', strtotime($start_date) + $day_offset[$wd] * 86400);
+        }
+        sort($dates);
+        if (empty($dates)) continue;
+        $n = count($dates);
+
+        $types = array_values(array_filter($task_types, function($t) use ($worker) {
+            return !$t['lead_only'] || $worker['is_lead'];
+        }));
+        foreach ($types as $i => $type) {
+            $date = $dates[$i % $n];
+            $default_params = array();
+            if (in_array('subzona', $type['params'], true))  $default_params['subzona']  = $a_subzones[0] ?? null;
+            if (in_array('objetivo', $type['params'], true)) $default_params['objetivo'] = "{$blocks_min}-{$blocks_max}";
+            $wpdb->insert($tasks_table, array(
+                'assignment_id' => $assignment_id,
+                'task_type_id'  => $type['id'],
+                'task_date'     => $date,
+                'params'        => wp_json_encode($default_params),
+                'done'          => 0,
+            ), array('%d', '%s', '%s', '%s', '%d'));
+        }
+    }
+
+    return rest_ensure_response(array('success' => true, 'week_id' => $week_id, 'assignment_ids' => $created_assignments));
+}
+
+function progreso_equip_get_week_detail($request) {
+    global $wpdb;
+    $week_id = intval($request['id']);
+    $week = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $week_id), ARRAY_A);
+    if (!$week) return new WP_Error('not_found', 'Semana no encontrada.', array('status' => 404));
+
+    $assignments = $wpdb->get_results($wpdb->prepare(
+        "SELECT a.*, w.name as worker_name, w.is_lead FROM " . progreso_equip_table('assignments') . " a
+         JOIN " . progreso_equip_table('workers') . " w ON w.id = a.worker_id
+         WHERE a.week_id = %d ORDER BY w.is_lead DESC, w.name ASC", $week_id
+    ), ARRAY_A);
+
+    $assignment_ids = array_map(function($a) { return intval($a['id']); }, $assignments);
+    $tasks_by_assignment  = array();
+    $blocks_by_assignment = array();
+    if ($assignment_ids) {
+        $ph = implode(',', array_fill(0, count($assignment_ids), '%d'));
+        $tasks = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM " . progreso_equip_table('tasks') . " WHERE assignment_id IN ($ph) ORDER BY task_date ASC, id ASC",
+            ...$assignment_ids
+        ), ARRAY_A);
+        foreach ($tasks as $t) {
+            $tasks_by_assignment[intval($t['assignment_id'])][] = array(
+                'id' => intval($t['id']), 'taskTypeId' => $t['task_type_id'], 'date' => $t['task_date'],
+                'params' => json_decode($t['params'], true) ?: new stdClass(),
+                'done' => (bool) $t['done'], 'doneAt' => $t['done_at'],
+            );
+        }
+        $blocks = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM " . progreso_equip_table('blocks') . " WHERE assignment_id IN ($ph) ORDER BY id ASC",
+            ...$assignment_ids
+        ), ARRAY_A);
+        foreach ($blocks as $b) {
+            $blocks_by_assignment[intval($b['assignment_id'])][] = array(
+                'id' => intval($b['id']), 'subzone' => intval($b['subzone']), 'grade' => $b['grade_color'],
+                'holdSetIds' => array_values(array_filter(array_map('intval', explode(',', $b['hold_set_ids'])))),
+                'isTraverse' => (bool) $b['is_traverse'], 'done' => (bool) $b['done'], 'uploadedWebapp' => (bool) $b['uploaded_webapp'],
+            );
+        }
+    }
+
+    $out_assignments = array_map(function($a) use ($tasks_by_assignment, $blocks_by_assignment) {
+        $id = intval($a['id']);
+        return array(
+            'id' => $id, 'workerId' => intval($a['worker_id']), 'workerName' => $a['worker_name'], 'isLead' => (bool) $a['is_lead'],
+            'subzones' => array_values(array_filter(array_map('intval', explode(',', $a['subzones'])))),
+            'blocksMin' => intval($a['blocks_min']), 'blocksMax' => intval($a['blocks_max']), 'status' => $a['status'],
+            'tasks' => $tasks_by_assignment[$id] ?? array(), 'blocks' => $blocks_by_assignment[$id] ?? array(),
+        );
+    }, $assignments);
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'id' => intval($week['id']), 'startDate' => $week['start_date'],
+        'subzones' => array_values(array_filter(array_map('intval', explode(',', $week['subzones'])))),
+        'notes' => $week['notes'], 'assignments' => $out_assignments,
+    )));
+}
+
+function progreso_equip_delete_week($request) {
+    global $wpdb;
+    $week_id = intval($request['id']);
+    $assignment_ids = $wpdb->get_col($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d", $week_id
+    ));
+    if ($assignment_ids) {
+        $ph = implode(',', array_fill(0, count($assignment_ids), '%d'));
+        $wpdb->query($wpdb->prepare("DELETE FROM " . progreso_equip_table('tasks')  . " WHERE assignment_id IN ($ph)", ...$assignment_ids));
+        $wpdb->query($wpdb->prepare("DELETE FROM " . progreso_equip_table('blocks') . " WHERE assignment_id IN ($ph)", ...$assignment_ids));
+    }
+    $wpdb->delete(progreso_equip_table('assignments'), array('week_id' => $week_id), array('%d'));
+    $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+function progreso_equip_get_today($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $worker_id = intval($request->get_param('workerId'));
+    $date = sanitize_text_field((string) $request->get_param('date'));
+    if (!$date) $date = current_time('Y-m-d');
+    if (!$worker_id) return new WP_Error('invalid_data', 'Falta workerId.', array('status' => 400));
+
+    $tasks = $wpdb->get_results($wpdb->prepare(
+        "SELECT t.*, a.id as assignment_id FROM " . progreso_equip_table('tasks') . " t
+         JOIN " . progreso_equip_table('assignments') . " a ON a.id = t.assignment_id
+         WHERE a.worker_id = %d AND t.task_date = %s ORDER BY t.id ASC",
+        $worker_id, $date
+    ), ARRAY_A);
+
+    $assignment_id = $tasks ? intval($tasks[0]['assignment_id']) : 0;
+    if (!$assignment_id) {
+        // Sin tareas hoy (fin de semana, día libre...): usa igualmente la
+        // asignación más reciente para poder seguir registrando bloques.
+        $assignment_id = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT a.id FROM " . progreso_equip_table('assignments') . " a
+             JOIN " . progreso_equip_table('weeks') . " wk ON wk.id = a.week_id
+             WHERE a.worker_id = %d AND wk.start_date <= %s ORDER BY wk.start_date DESC LIMIT 1",
+            $worker_id, $date
+        ));
+    }
+
+    $blocks = array();
+    if ($assignment_id) {
+        $blocks = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM " . progreso_equip_table('blocks') . " WHERE assignment_id = %d ORDER BY id ASC", $assignment_id
+        ), ARRAY_A);
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'date' => $date,
+        'assignmentId' => $assignment_id ?: null,
+        'tasks' => array_map(function($t) {
+            return array(
+                'id' => intval($t['id']), 'taskTypeId' => $t['task_type_id'],
+                'params' => json_decode($t['params'], true) ?: new stdClass(),
+                'done' => (bool) $t['done'],
+            );
+        }, $tasks),
+        'blocks' => array_map(function($b) {
+            return array(
+                'id' => intval($b['id']), 'subzone' => intval($b['subzone']), 'grade' => $b['grade_color'],
+                'holdSetIds' => array_values(array_filter(array_map('intval', explode(',', $b['hold_set_ids'])))),
+                'isTraverse' => (bool) $b['is_traverse'], 'done' => (bool) $b['done'], 'uploadedWebapp' => (bool) $b['uploaded_webapp'],
+            );
+        }, $blocks),
+    )));
+}
+
+function progreso_equip_update_task($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $upd = array(); $fmt = array();
+    if ($request->get_param('done') !== null) {
+        $done = (bool) $request->get_param('done');
+        $upd['done']    = $done ? 1 : 0;                        $fmt[] = '%d';
+        $upd['done_at'] = $done ? current_time('mysql') : null; $fmt[] = '%s';
+    }
+    if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    $wpdb->update(progreso_equip_table('tasks'), $upd, array('id' => $id), $fmt, array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+function progreso_equip_create_block($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $assignment_id = intval($request->get_param('assignmentId'));
+    $subzone       = intval($request->get_param('subzone'));
+    $grade         = sanitize_text_field((string) $request->get_param('grade'));
+    $hold_set_ids  = $request->get_param('holdSetIds');
+    $hold_set_ids  = is_array($hold_set_ids) ? array_map('intval', $hold_set_ids) : array();
+    $is_traverse   = (bool) $request->get_param('isTraverse');
+
+    if (!$assignment_id || !$subzone || !$grade) {
+        return new WP_Error('invalid_data', 'Faltan datos del bloque.', array('status' => 400));
+    }
+
+    // Aviso (no bloqueante): mismo juego de presas repetido en la misma subzona.
+    $warning = null;
+    if ($hold_set_ids) {
+        $existing = $wpdb->get_results($wpdb->prepare(
+            "SELECT hold_set_ids FROM " . progreso_equip_table('blocks') . " WHERE assignment_id = %d AND subzone = %d",
+            $assignment_id, $subzone
+        ), ARRAY_A);
+        foreach ($existing as $e) {
+            $other_ids = array_values(array_filter(array_map('intval', explode(',', $e['hold_set_ids']))));
+            if (array_intersect($hold_set_ids, $other_ids)) {
+                $warning = 'Ya hay otro bloque en esta subzona con el mismo juego de presas.';
+                break;
+            }
+        }
+    }
+
+    $wpdb->insert(progreso_equip_table('blocks'), array(
+        'assignment_id'   => $assignment_id,
+        'subzone'         => $subzone,
+        'grade_color'     => $grade,
+        'hold_set_ids'    => implode(',', $hold_set_ids),
+        'is_traverse'     => $is_traverse ? 1 : 0,
+        'done'            => 1,
+        'uploaded_webapp' => 0,
+        'created_at'      => current_time('mysql'),
+    ), array('%d', '%d', '%s', '%s', '%d', '%d', '%d', '%s'));
+
+    return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id, 'warning' => $warning));
+}
+
+function progreso_equip_update_block($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $upd = array(); $fmt = array();
+    if ($request->get_param('uploadedWebapp') !== null) { $upd['uploaded_webapp'] = $request->get_param('uploadedWebapp') ? 1 : 0; $fmt[] = '%d'; }
+    if ($request->get_param('done') !== null)           { $upd['done']            = $request->get_param('done') ? 1 : 0;           $fmt[] = '%d'; }
+    if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    $wpdb->update(progreso_equip_table('blocks'), $upd, array('id' => $id), $fmt, array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+function progreso_equip_delete_block($request) {
+    global $wpdb;
+    $wpdb->delete(progreso_equip_table('blocks'), array('id' => intval($request['id'])), array('%d'));
+    return rest_ensure_response(array('success' => true));
 }

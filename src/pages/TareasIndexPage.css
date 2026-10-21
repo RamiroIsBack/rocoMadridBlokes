@@ -1,0 +1,68 @@
+/* TareasIndexPage — tab wrapper (Crear bloke / Organización / Estadísticas) */
+
+.tareas-idx {
+  min-height: 60vh;
+}
+
+.tareas-idx__tabs {
+  display: flex;
+  border-bottom: 2px solid #e5e7eb;
+  background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.tareas-idx__tabs::-webkit-scrollbar { display: none; }
+
+.tareas-idx__tab {
+  flex: 1;
+  min-width: max-content;
+  padding: 14px 12px;
+  min-height: 48px;
+  text-align: center;
+  text-decoration: none;
+  color: #9ca3af;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+@media (max-width: 400px) {
+  .tareas-idx__tab {
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    padding: 14px 8px;
+  }
+}
+
+.tareas-idx__tab:hover { color: #4b5563; }
+
+.tareas-idx__tab.active {
+  color: #2a2015;
+  border-bottom-color: #2a2015;
+}
+
+.tareas-idx__tab--locked {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.tareas-idx__tab-lock {
+  font-size: 0.7rem;
+}
+
+.tareas-idx__content {
+  /* each tab page handles its own max-width and padding */
+}
