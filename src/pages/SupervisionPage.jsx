@@ -6,6 +6,7 @@ import {
 import { useClasses } from '../hooks/useSuperAdmin'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import OvertimeTab from './OvertimeTab'
+import TimeOffTab from './TimeOffTab'
 import './SupervisionPage.css'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -864,19 +865,6 @@ function CtrlTestsTab() {
   )
 }
 
-// ─── Coming soon ──────────────────────────────────────────────────────────────
-
-function ComingSoon({ name, detail }) {
-  return (
-    <div className="sv-soon">
-      <div className="sv-soon__icon">🔧</div>
-      <p className="sv-soon__name">{name}</p>
-      <p className="sv-soon__text">Próximamente</p>
-      {detail && <p className="sv-soon__detail">{detail}</p>}
-    </div>
-  )
-}
-
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SupervisionPage() {
   const role          = window.blokesSiteData?.userRole
@@ -886,7 +874,6 @@ export default function SupervisionPage() {
     { id: 'excelmuerte', label: 'ExcelMuerte'   },
     { id: 'ctrltests',   label: 'Tests'          },
     { id: 'horasextra',  label: 'Horas extra'    },
-    { id: 'ctrlfichaje', label: 'CTRL Fichaje'  },
     { id: 'timeoff',     label: 'CTRL Time Off' },
   ]
 
@@ -918,8 +905,7 @@ export default function SupervisionPage() {
       {tab === 'excelmuerte' && <ClasesTab />}
       {tab === 'ctrltests'   && <CtrlTestsTab />}
       {tab === 'horasextra'  && <OvertimeTab />}
-      {tab === 'ctrlfichaje' && <ComingSoon name="CTRL Fichaje" detail="Control de fichajes, horas y seguimiento mensual del equipo" />}
-      {tab === 'timeoff'     && <ComingSoon name="Time Off"    detail="Gestión de vacaciones y ausencias" />}
+      {tab === 'timeoff'     && <TimeOffTab />}
     </div>
   )
 }

@@ -85,7 +85,7 @@ Páginas protegidas: `/setter`, `/stats`, `/entrenamientos`, `/fichaje`, `/time-
 | `/entrenamientos` | `EntrenamientosPage` | Registro de tests físicos |
 | `/fichaje`, `/time-off` | `FichajePage`, `TimeOffPage` | Iframes a URLs externas (hoy vacías → "Próximamente"). **Quitados del menú** (24/09/2026): fichaje y vacaciones se gestionarán en una app externa. Rutas y páginas siguen existiendo por URL directa |
 | `/superadmin` | `SuperAdminPage` | Ingresos, productos, clases, gastos |
-| `/supervision` | `SupervisionPage` | Roster de alumnos, catálogo de tests, control fichaje/ausencias |
+| `/supervision` | `SupervisionPage` | Roster de alumnos, catálogo de tests, horas extra, planificador de vacaciones (CTRL Time Off) |
 | `/playground` | `PlaygroundPage` | Horarios/roster de profesores |
 | `/ligas` | `LeaguesPage` | Liga propia + leaderboard + resto de ligas como secciones colapsables |
 
@@ -263,10 +263,15 @@ blancas (`socios`/`gestion`/`profesores`) — pídele a Ramiro que te añada o u
 - **Dos ramas, dos destinos (18/07/2026).** `dev` → `/blokes-dev/`, `master` → `/blokes/`.
   Hasta entonces solo había un destino.
 - **Fichaje y Time Off → app externa (24/09/2026).** Se quitaron del menú principal.
-  Las pestañas "CTRL Fichaje" y "CTRL Time Off" de `/supervision` se dejan como
-  placeholders porque es posible que la supervisión de vacaciones y fichaje se linke con
-  el sistema externo (probablemente vía `fichajeEmbedUrl`/`timeOffEmbedUrl` en
-  `blokesSiteData`, hoy vacíos). No hay decisión cerrada; no borrar ese código todavía.
+  Las páginas `FichajePage`/`TimeOffPage` siguen existiendo por URL directa
+  (`fichajeEmbedUrl`/`timeOffEmbedUrl` en `blokesSiteData`, hoy vacíos).
+- **Supervisión: fuera "CTRL Fichaje", "CTRL Time Off" = planificador (21/10/2026).**
+  La pestaña de fichaje se quitó. "CTRL Time Off" (`TimeOffTab.jsx`) muestra normas y
+  plazos (aviso de Navidad a principios de noviembre, de verano a principios de marzo;
+  23 laborables, ≥50 % en julio/agosto), la matriz de parejas que no deben coincidir y una
+  calculadora de supuestos (fijos discontinuos, llaves, periodos, calendario). El motor está
+  en `src/utils/coverage.js` y los horarios en `src/data/staffSchedule.js`, compartidos con
+  el Playground. Es solo una calculadora: el plan se guarda en `localStorage` del navegador.
 - **Colaboración.** El repo es `RamiroIsBack/rocoMadridBlokes`. Cualquier push a `dev`
   despliega automáticamente, lo haga quien lo haga (la cuenta `ClubRocomadrid7a` ya ha
   desplegado con éxito). El `CLAUDE.md` pide confirmar antes de crear/modificar ficheros
