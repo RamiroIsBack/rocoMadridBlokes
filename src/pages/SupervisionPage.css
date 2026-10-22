@@ -1018,7 +1018,8 @@
 .sv-to-root .sv-note { font-style: normal; }
 .sv-to-root .sv-to-cell--off { color: var(--to-text-3); }
 .sv-to-root .sv-period__btn--active { color: #f5c842; }
-.sv-to-root .sv-filter-btn--active,
+.sv-to-root .sv-filter-btn--active { color: #34d399; }
+.sv-to-root .sv-to-tl-num--bad { color: #fde68a; }
 .sv-to-root .sv-tests-add:hover,
 .sv-to-root .sv-filter-btn:hover,
 .sv-to-root .sv-period__btn:hover { color: #f0ece0; }
