@@ -1,47 +1,34 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { PROF_META, PROF_ORDER, DAYS, DAY_LABEL } from '../data/staffSchedule'
 import {
   KEY_HOLDERS_DEFAULT, VERANO_APERTURA, COMODIN_VERANO, veranoSlots, pairConflict, simulatePlan,
-  laborablesBetween, laborablesFrom, expandPeriods, isSummer, weekdayOf, fmtShort, monthOf,
-  diasDevengados, minimoVerano, PARO_VERANO, PARO_MESES, combinacionesParo, CIERRE_VERANO, isClosed, disponible,
-  campDates, vacationDates,
+  laborablesBetween, laborablesFrom, isSummer, weekdayOf, fmtShort,
+  diasDevengados, PARO_VERANO, combinacionesParo, CIERRE_VERANO, isClosed, disponible,
 } from '../utils/coverage'
 import { useExpenses } from '../hooks/useSuperAdmin'
 import { usePayroll } from '../hooks/useOvertime'
 import { autoCategory } from '../utils/expensesParser'
 import { PL_DATA } from '../data/plHistorico'
+import {
+  DIAS_ANUALES, HOY_PARO, MES_LABEL, eur, temporada, inactivosMes, evaluarPlan,
+} from '../utils/timeoffPlan'
+import { useTimeOffData, savePlan } from '../hooks/useTimeOff'
+import TimeOffRequests from './TimeOffRequests'
+import { PrevisionVerano, Escenarios } from './TimeOffPlanning'
 
-const STORAGE_KEY = 'blokes.timeoff.v4'
-const DIAS_ANUALES = 23
-// Situación actual: Sigurd fijo discontinuo; Ana no trabaja en agosto
-const HOY_PARO = { Sigurd: 'verano', Ana: 'agosto' }
+// Antes el plan vivía en el navegador; se importa una vez si el servidor no tiene plan
+const LEGACY_STORAGE_KEY = 'blokes.timeoff.v4'
 const PARO_CORTO = { no: '—', verano: 'Jul + ago', agosto: 'Ago', julio: 'Jul' }
-const LABORABLES_MES = 21.75
 
 const LEVEL_LABEL = { rojo: 'No coincidir', ambar: 'Evitar', verde: 'Posible' }
 const DAY_SHORT   = { Lunes: 'L', Martes: 'M', Miercoles: 'X', Jueves: 'J', Viernes: 'V' }
-const MES_LABEL   = { 7: 'Julio', 8: 'Agosto' }
 
 const CLASES_VERANO = DAYS.reduce((n, d) => n + veranoSlots(d).length, 0)
-
-// Temporada sep→ago: la Navidad de este año y el verano del siguiente
-function temporada() {
-  const now = new Date()
-  return now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1
-}
 
 function daysUntil(iso) {
   const [y, m, d] = iso.split('-').map(Number)
   const today = new Date(); today.setHours(0, 0, 0, 0)
   return Math.round((new Date(y, m - 1, d) - today) / 86400000)
-}
-
-const eur = n => `${Math.round(n).toLocaleString('es-ES')} €`
-
-// Quién no está en un mes de verano (en paro ese mes)
-function inactivosMes(mes, ctx) {
-  const iso = `${temporada() + 1}-0${mes}-15`
-  return PROF_ORDER.filter(p => !disponible(p, iso, ctx))
 }
 
 // ─── Coste empresa por persona ───────────────────────────────────────────────
@@ -158,25 +145,58 @@ function defaultState() {
   }
 }
 
-function loadState() {
+// Plan guardado (sin ids) → estado de la calculadora
+function hydrate(plain) {
+  const st = { ...defaultState(), ...plain }
+  st.periods = (plain.periods || []).map(p => ({ ...p, id: nextId++ }))
+  return st
+}
+
+// Estado → lo que se guarda (los ids de los periodos son solo de la sesión)
+function toPlain(state) {
+  return { ...state, periods: state.periods.map(({ id, ...p }) => p) }
+}
+
+function legacyLocalPlan() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return defaultState()
-    const s = JSON.parse(raw)
-    s.periods.forEach(p => { p.id = nextId++ })
-    return { ...defaultState(), ...s }
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY)
+    return raw ? JSON.parse(raw) : null
   } catch {
-    return defaultState()
+    return null
   }
 }
 
 // ─── Normas y plazos ─────────────────────────────────────────────────────────
-function Normas() {
+// Recordatorio del próximo plazo: quién ha pedido ya vacaciones para ese periodo
+function Recordatorio({ plazo, requests, paro }) {
+  const deben = PROF_ORDER.filter(p => !plazo.soloQuienTrabaja || (paro[p] || 'no') !== 'verano')
+  const pide = p => requests.some(r => r.person === p && r.status !== 'rechazada' && r.from <= plazo.to && r.to >= plazo.from)
+  const han = deben.filter(pide)
+  const faltan = deben.filter(p => !pide(p))
+  const pendientes = requests.filter(r => r.status === 'pendiente' && r.from <= plazo.to && r.to >= plazo.from).length
+  const n = daysUntil(plazo.date)
+  return (
+    <div className={`sv-to-reminder${n <= 15 && faltan.length ? ' sv-to-reminder--urgent' : ''}`}>
+      <strong>Recordatorio · {plazo.label.toLowerCase()}:</strong> {n === 0 ? 'hoy' : `faltan ${n} días`} (hasta el {fmtShort(plazo.date)}).
+      {' '}{faltan.length
+        ? <>Faltan por pedir: <strong>{faltan.join(', ')}</strong>.</>
+        : <span className="sv-to-good">Ya han pedido todos.</span>}
+      {han.length > 0 && <> Han pedido: {han.join(', ')}.</>}
+      {pendientes > 0 && <> {pendientes} {pendientes === 1 ? 'solicitud pendiente' : 'solicitudes pendientes'} de responder.</>}
+      <div className="sv-ot-muted">Avisarles por correo o WhatsApp desde la app queda para una fase siguiente.</div>
+    </div>
+  )
+}
+
+function Normas({ requests, paro }) {
   const y = temporada()
   const plazos = [
-    { label: 'Avisar vacaciones de Navidad', date: `${y}-11-01`, detail: `Navidad ${y}/${String(y + 1).slice(2)}` },
-    { label: 'Avisar vacaciones de verano',  date: `${y + 1}-03-01`, detail: `Julio y agosto ${y + 1}` },
+    { label: 'Avisar vacaciones de Navidad', date: `${y}-11-01`, detail: `Navidad ${y}/${String(y + 1).slice(2)}`,
+      from: `${y}-12-01`, to: `${y + 1}-01-15`, soloQuienTrabaja: false },
+    { label: 'Avisar vacaciones de verano',  date: `${y + 1}-03-01`, detail: `Julio y agosto ${y + 1}`,
+      from: `${y + 1}-07-01`, to: `${y + 1}-08-31`, soloQuienTrabaja: true },
   ]
+  const proximo = plazos.find(p => daysUntil(p.date) >= 0)
   return (
     <div className="sv-section">
       <h3 className="sv-section-title">Normas</h3>
@@ -191,6 +211,7 @@ function Normas() {
           )
         })}
       </div>
+      {proximo && <Recordatorio plazo={proximo} requests={requests} paro={paro} />}
       <ul className="sv-to-rules">
         <li><strong>{DIAS_ANUALES} días laborables</strong> al año. Al menos el 50 % (<strong>{Math.ceil(DIAS_ANUALES / 2)} días</strong>) en julio y agosto.</li>
         <li>El resto, durante el año, siempre que no coincida con alguien con quien haya conflicto (tabla de abajo).</li>
@@ -249,8 +270,8 @@ function useHistoricoMeses() {
   return { months, loading: exp.loading, error: exp.error }
 }
 
-function HistoricoVerano({ onApply }) {
-  const { months, loading, error } = useHistoricoMeses()
+function HistoricoVerano({ hist, onApply }) {
+  const { months, loading, error } = hist
 
   const mesNum = m => Number(m.month.slice(5))
   const isVer  = m => mesNum(m) === 7 || mesNum(m) === 8
@@ -482,7 +503,7 @@ function ExploradorParo({ paro, cierre, keys, coste, onApply }) {
 }
 
 // ─── Calculadora ─────────────────────────────────────────────────────────────
-function Calculadora({ state, setState, costes }) {
+function Calculadora({ state, setState, costes, ev }) {
   const y = temporada()
   const WINDOWS = {
     navidad:   { label: `Navidad ${y}/${String(y + 1).slice(2)}`, from: `${y}-12-14`, to: `${y + 1}-01-10` },
@@ -492,116 +513,14 @@ function Calculadora({ state, setState, costes }) {
   const [win, setWin] = useState('verano')
   const [selDate, setSelDate] = useState(null)
   const { paro, keys, dias, periods, cierre, camp, gastosSala, ingresosSala } = state
-  const ctx  = { periods, paro, cierre, camp, keys }
-  const deps = [periods, paro, cierre, camp, keys]
 
-  // Nivel de cada pareja: horario normal, julio y agosto
-  const pairLevels = useMemo(() => {
-    const res = { invierno: {}, 7: {}, 8: {} }
-    PROF_ORDER.forEach((a, i) => PROF_ORDER.slice(i + 1).forEach(b => {
-      res.invierno[`${a}|${b}`] = pairConflict(a, b, { keys }).level
-      ;[7, 8].forEach(m => {
-        const inactive = inactivosMes(m, ctx)
-        if (inactive.includes(a) || inactive.includes(b)) return
-        res[m][`${a}|${b}`] = pairConflict(a, b, { keys, season: 'verano', inactive }).level
-      })
-    }))
-    return res
-  }, deps)
-
-  const temporadaDates = useMemo(() => laborablesBetween(WINDOWS.temporada.from, WINDOWS.temporada.to), [y])
-  const dates  = useMemo(() => laborablesBetween(WINDOWS[win].from, WINDOWS[win].to), [win, y])
-  const sim    = useMemo(() => simulatePlan(dates, ctx), [dates, ...deps])
-  const allSim = useMemo(() => simulatePlan(temporadaDates, ctx), [temporadaDates, ...deps])
-  const off    = useMemo(() => expandPeriods(periods), [periods])
-  const campSet = useMemo(() => campDates(camp, cierre), [camp, cierre])
-
-  const conflictsOf = day => {
-    if (day.closed) return []
-    const levels = pairLevels[isSummer(day.date) ? monthOf(day.date) : 'invierno']
-    const res = []
-    day.out.forEach((a, i) => day.out.slice(i + 1).forEach(b => {
-      const k = levels[`${a}|${b}`] || levels[`${b}|${a}`]
-      if (k === 'rojo' || k === 'ambar') res.push({ a, b, level: k })
-    }))
-    return res
-  }
-
-  // Resumen por persona (toda la temporada)
-  const rows = PROF_ORDER.map(p => {
-    const op     = paro[p] || 'no'
-    const nParo  = PARO_MESES[op].length
-    const vac    = vacationDates(p, temporadaDates, ctx)
-    const verano = vac.filter(isSummer).length
-    const dev    = diasDevengados(dias[p], nParo)
-    const cierreDias = vac.filter(d => isClosed(d, cierre)).length
-    return {
-      p, op, disc: op === 'verano', dev, usados: vac.length, verano, cierreDias,
-      min: minimoVerano(dias[p], nParo), restan: dev - vac.length,
-      ahorro: (nParo - PARO_MESES[HOY_PARO[p] || 'no'].length) * costes.mes[p],
-    }
-  })
-
-  // Avisos
-  const warnings = []
-  const listDates = (arr, fmt = d => fmtShort(d.date)) => `${arr.slice(0, 6).map(fmt).join(', ')}${arr.length > 6 ? '…' : ''}`
-  ;[7, 8].forEach(m => {
-    if (isClosed(`${y + 1}-0${m}-15`, cierre)) return
-    const profes = PROF_ORDER.filter(p => p !== COMODIN_VERANO && !inactivosMes(m, ctx).includes(p))
-    if (profes.length < 2) {
-      warnings.push({ lvl: 'bad', text: `${MES_LABEL[m]}: solo ${profes.length === 1 ? 'queda 1 profe' : `quedan ${profes.length} profes`} además de ${COMODIN_VERANO} (${profes.join(', ') || 'ninguno'}). Hacen falta 2 para turnarse las vacaciones.` })
-    }
-  })
-  rows.forEach(r => {
-    if (!r.disc && r.verano < r.min) warnings.push({ lvl: 'warn', text: `${r.p}: ${r.verano} de ${r.min} días obligatorios en julio y agosto.` })
-    if (r.restan < 0 && r.cierreDias > 0) {
-      warnings.push({ lvl: 'bad', text: `${r.p}: el cierre le da ${r.cierreDias} días y le tocan ${r.dev}. Sobran ${-r.restan} días pagados sin trabajar (≈ ${eur(-r.restan * costes.mes[r.p] / LABORABLES_MES)}), salvo que pase a fijo discontinuo.` })
-    } else if (r.restan < 0) {
-      warnings.push({ lvl: 'bad', text: `${r.p}: planifica ${r.usados} días y le corresponden ${r.dev}.` })
-    }
-    const ignorados = [...(off[r.p] || [])].filter(d => isSummer(d) && !disponible(r.p, d, ctx))
-    if (ignorados.length) warnings.push({ lvl: 'warn', text: `${r.p}: ${ignorados.length} días pedidos en verano en un mes que no trabaja; no cuentan.` })
-  })
-  if (camp.activo) {
-    if (!campSet.size) warnings.push({ lvl: 'warn', text: 'El campamento solo puede ir en meses con la sala cerrada: cambia el modo de verano o la fecha.' })
-    if (!camp.staff.length) warnings.push({ lvl: 'bad', text: 'El campamento no tiene a nadie asignado.' })
-    camp.staff.forEach(p => {
-      const fuera = [...campSet].filter(d => !disponible(p, d, ctx))
-      if (fuera.length) warnings.push({ lvl: 'bad', text: `${p} lleva el campamento pero no trabaja ${fuera.length} de esos días.` })
-      const choca = [...campSet].filter(d => off[p]?.has(d))
-      if (choca.length) warnings.push({ lvl: 'warn', text: `${p} tiene vacaciones pedidas en ${choca.length} días de campamento.` })
-    })
-  }
-  const abiertoVer = allSim.filter(d => isSummer(d.date) && !d.closed)
-  const sinAbrirVer = abiertoVer.filter(d => d.sinAbrir)
-  if (sinAbrirVer.length) warnings.push({ lvl: 'bad', text: `Verano: ${sinAbrirVer.length} días sin nadie con llave para abrir a las ${VERANO_APERTURA} (${listDates(sinAbrirVer)}).` })
-  const sinProfeVer = abiertoVer.filter(d => d.lost.length)
-  if (sinProfeVer.length) warnings.push({ lvl: 'bad', text: `Verano: ${sinProfeVer.length} días con clases sin profe (${listDates(sinProfeVer)}).` })
-  const diasComodin = abiertoVer.filter(d => d.comodin > 0)
-  if (diasComodin.length) warnings.push({ lvl: 'warn', text: `Verano: ${diasComodin.length} días en los que ${COMODIN_VERANO} deja recepción para dar clase (${diasComodin.reduce((n, d) => n + d.comodin, 0)} clases).` })
-  const sinCerrar = allSim.filter(d => d.sinCerrar && d.out.length)
-  if (sinCerrar.length) warnings.push({ lvl: 'warn', text: `${sinCerrar.length} días sin nadie con llave para cerrar (${listDates(sinCerrar, d => `${DAY_SHORT[weekdayOf(d.date)]} ${fmtShort(d.date)}`)}). Hay que alargar el turno de alguien.` })
-  const choques = allSim.flatMap(d => conflictsOf(d).filter(c => c.level === 'rojo').map(c => ({ ...c, date: d.date })))
-  const choqueTxt = [...new Set(choques.map(c => `${c.a} + ${c.b}`))]
-  if (choqueTxt.length) warnings.push({ lvl: 'bad', text: `Coinciden parejas que no deberían: ${choqueTxt.join(', ')} (${choques.length} días).` })
-
-  // Números del verano
-  const mesesCerradosList = [7, 8].filter(m => isClosed(`${y + 1}-0${m}-15`, cierre))
+  // Todo el cálculo sale de evaluarPlan (el mismo que escenarios y previsión)
+  const { ctx, conflictsOf, rows, warnings, eco, campSet, mesesCerradosList, sinAbrirVer, diasComodin } = ev
+  const balance = eco.balance
+  const kpi = ev.kpi
   const mesesCerrados = mesesCerradosList.length
-  const eco = {
-    personal: rows.reduce((s, r) => s + r.ahorro, 0),
-    sala:     mesesCerradosList.reduce((n, m) => n + (gastosSala[m] || 0) - (ingresosSala[m] || 0), 0),
-    camp:     camp.activo ? Math.round(campSet.size / 5) * camp.plazas * camp.precio : 0,
-    ociosos:  rows.filter(r => r.restan < 0 && r.cierreDias > 0)
-                  .reduce((s, r) => s + -r.restan * costes.mes[r.p] / LABORABLES_MES, 0),
-  }
-  const balance = eco.personal + eco.sala + eco.camp
-
-  const kpi = {
-    sinAbrir: allSim.filter(d => d.sinAbrir && d.out.length).length,
-    perdidas: allSim.filter(d => !isSummer(d.date)).reduce((n, d) => n + d.lost.length, 0),
-    perdVer:  abiertoVer.reduce((n, d) => n + d.lost.length, 0),
-  }
+  const dates = useMemo(() => laborablesBetween(WINDOWS[win].from, WINDOWS[win].to), [win, y])
+  const sim   = useMemo(() => simulatePlan(dates, ctx), [dates, ctx])
 
   function update(patch) { setState(s => ({ ...s, ...patch })) }
   const toggle = (list, p) => (list.includes(p) ? list.filter(x => x !== p) : [...list, p])
@@ -919,25 +838,79 @@ function Calculadora({ state, setState, costes }) {
   )
 }
 
-export default function TimeOffTab() {
-  const [state, setState] = useState(loadState)
-  const costes = useCostes()
+// Estado de guardado: cargando | guardado | guardando | error | sin-servidor
+function SyncStatus({ sync }) {
+  const txt = {
+    cargando:       'Cargando el plan de la app…',
+    guardando:      'Guardando…',
+    guardado:       sync.meta ? `Guardado en la app${sync.meta.by ? ` · ${sync.meta.by}` : ''} · ${sync.meta.updated_at?.slice(0, 16).replace(' ', ' a las ')}` : 'Guardado en la app',
+    error:          `No se pudo guardar: ${sync.msg}`,
+    'sin-servidor': `Sin conexión con el servidor (${sync.msg}): los cambios no se guardan.`,
+  }[sync.status]
+  return <p className={`sv-to-sync${sync.status === 'error' || sync.status === 'sin-servidor' ? ' sv-error' : ''}`}>{txt}</p>
+}
 
+export default function TimeOffTab() {
+  const [state, setState] = useState(defaultState)
+  const [sync, setSync]   = useState({ status: 'cargando' })
+  const costes = useCostes()
+  const hist   = useHistoricoMeses()
+  const remote = useTimeOffData()
+  const loaded    = useRef(false)
+  const lastSaved = useRef(null)
+
+  const requests  = remote.data?.requests || []
+  const scenarios = remote.data?.scenarios || []
+  const setRequests  = list => remote.setData(d => ({ ...d, requests: list }))
+  const setScenarios = list => remote.setData(d => ({ ...d, scenarios: list }))
+  const connected = !!remote.data && !remote.error
+
+  // Al cargar: el plan oficial del servidor; si aún no hay, el que hubiera en este navegador
   useEffect(() => {
-    try {
-      const { periods, ...rest } = state
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...rest, periods: periods.map(({ id, ...p }) => p) }))
-    } catch { /* sin almacenamiento: la calculadora funciona igual */ }
+    if (loaded.current || remote.loading) return
+    if (remote.error) { setSync({ status: 'sin-servidor', msg: remote.error }); return }
+    loaded.current = true
+    if (remote.data?.plan) {
+      const st = hydrate(remote.data.plan)
+      lastSaved.current = JSON.stringify(toPlain(st))
+      setState(st)
+      setSync({ status: 'guardado', meta: remote.data.plan_meta })
+    } else {
+      const legacy = legacyLocalPlan()
+      // Primer guardado: el plan del navegador o el de por defecto
+      setState(legacy ? hydrate(legacy) : st => ({ ...st }))
+      setSync({ status: 'guardando' })
+    }
+  }, [remote.loading, remote.error, remote.data])
+
+  // Autoguardado 1,5 s después del último cambio
+  useEffect(() => {
+    if (!loaded.current) return
+    const json = JSON.stringify(toPlain(state))
+    if (json === lastSaved.current) return
+    setSync({ status: 'guardando' })
+    const t = setTimeout(() => {
+      savePlan(JSON.parse(json))
+        .then(meta => { lastSaved.current = json; setSync({ status: 'guardado', meta }) })
+        .catch(e => setSync({ status: 'error', msg: e.message }))
+    }, 1500)
+    return () => clearTimeout(t)
   }, [state])
 
+  const ev  = useMemo(() => evaluarPlan(state, costes.mes, requests), [state, costes.mes, requests])
   const ctx = { paro: state.paro, cierre: state.cierre }
 
   return (
     <div className="sv-tab-panel">
-      <Normas />
-      <HistoricoVerano onApply={h => setState(s => ({ ...s, ingresosSala: h.ingresos, gastosSala: h.ahorrable }))} />
+      <SyncStatus sync={sync} />
+      <Normas requests={requests} paro={state.paro} />
+      <TimeOffRequests requests={requests} setRequests={setRequests} state={state} coste={costes.mes} connected={connected} />
+      <HistoricoVerano hist={hist} onApply={h => setState(s => ({ ...s, ingresosSala: h.ingresos, gastosSala: h.ahorrable }))} />
+      <PrevisionVerano ev={ev} state={state} historico={hist.months} />
       <ConflictMatrix keys={state.keys} ctx={ctx} />
-      <Calculadora state={state} setState={setState} costes={costes} />
+      <Calculadora state={state} setState={setState} costes={costes} ev={ev} />
+      <Escenarios scenarios={scenarios} setScenarios={setScenarios} state={state} coste={costes.mes} requests={requests}
+        connected={connected} toPlain={toPlain} hydrate={hydrate} onLoad={sc => setState(hydrate(sc.state))} />
     </div>
   )
 }

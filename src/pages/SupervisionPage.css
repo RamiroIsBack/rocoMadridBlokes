@@ -949,3 +949,30 @@
 .sv-to-tl-cell--closed { background: #1e1b14; }
 .sv-to-good { color: #34d399 !important; font-weight: 700; }
 .sv-to-row--sel td { background: rgba(245,200,66,0.06); }
+.sv-to-sync { font-size: 0.72rem; color: #666; margin: 0 0 12px; }
+.sv-to-reminder {
+  font-size: 0.8rem;
+  color: #ccc;
+  line-height: 1.6;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  border-left: 3px solid #60a5fa;
+  background: rgba(96,165,250,0.06);
+}
+.sv-to-reminder--urgent { border-left-color: #f97316; background: rgba(249,115,22,0.08); }
+.sv-to-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #111;
+  background: #f5c842;
+  border-radius: 10px;
+  padding: 1px 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.sv-to-file { position: relative; overflow: hidden; display: inline-block; }
+.sv-to-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.sv-to-check { font-size: 0.72rem; line-height: 1.45; min-width: 180px; }
+.sv-to-actions { white-space: nowrap; }
+.sv-to-actions .sv-filter-btn { margin-right: 4px; text-decoration: none; display: inline-block; }
+.sv-to-row--total td { border-bottom: 2px solid #2a2015; }

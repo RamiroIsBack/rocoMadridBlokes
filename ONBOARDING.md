@@ -271,7 +271,15 @@ blancas (`socios`/`gestion`/`profesores`) — pídele a Ramiro que te añada o u
   23 laborables, ≥50 % en julio/agosto), la matriz de parejas que no deben coincidir y una
   calculadora de supuestos (fijos discontinuos, llaves, periodos, calendario). El motor está
   en `src/utils/coverage.js` y los horarios en `src/data/staffSchedule.js`, compartidos con
-  el Playground. Es solo una calculadora: el plan se guarda en `localStorage` del navegador.
+  el Playground.
+- **CTRL Time Off en el servidor (22/10/2026).** Solo socios (la pestaña se oculta al resto).
+  Endpoints `superadmin/v1/timeoff` (plan oficial con autoguardado, escenarios y solicitudes)
+  en `progreso-extension1-1.php`, guardados en las opciones `blokes_timeoff_plan`,
+  `blokes_timeoff_scenarios` y `blokes_timeoff_requests`. Las solicitudes llegan hoy de la app
+  de fichaje externa (CSV importado) o a mano; al aprobarlas cuentan en el plan. El cálculo
+  común está en `src/utils/timeoffPlan.js`; el P&L de 2024–2025 en `src/data/plHistorico.js`
+  (compartido con Superadmin › P&L). Los costes salen de Superadmin › Nóminas (× 1,395).
+  Pendiente: avisos por correo/WhatsApp y descarga por API desde el fichaje externo.
 - **Colaboración.** El repo es `RamiroIsBack/rocoMadridBlokes`. Cualquier push a `dev`
   despliega automáticamente, lo haga quien lo haga (la cuenta `ClubRocomadrid7a` ya ha
   desplegado con éxito). El `CLAUDE.md` pide confirmar antes de crear/modificar ficheros

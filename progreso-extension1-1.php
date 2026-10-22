@@ -5655,3 +5655,184 @@ function progreso_equip_update_comp_block($request) {
     $wpdb->update(progreso_equip_table('comp_blocks'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
 }
+
+// ============================================================
+//  superadmin/v1 — CTRL Time Off (Supervisión, solo socios)
+//  plan oficial de vacaciones, escenarios guardados y solicitudes
+//  (importadas del fichaje externo o metidas a mano)
+// ============================================================
+
+define('TIMEOFF_MAX_JSON', 300000); // bytes por plan/escenario
+
+add_action('rest_api_init', function() {
+    $socio_perm = function() { return blokes_get_app_role() === 'socio'; };
+
+    register_rest_route('superadmin/v1', '/timeoff', array(
+        'methods'             => 'GET',
+        'callback'            => 'timeoff_get_all',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/timeoff/plan', array(
+        'methods'             => 'PUT',
+        'callback'            => 'timeoff_save_plan',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/timeoff/scenarios', array(
+        'methods'             => 'POST',
+        'callback'            => 'timeoff_add_scenario',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/timeoff/scenarios/(?P<id>[a-z0-9-]+)', array(
+        'methods'             => 'DELETE',
+        'callback'            => 'timeoff_delete_scenario',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/timeoff/requests', array(
+        'methods'             => 'POST',
+        'callback'            => 'timeoff_add_requests',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/timeoff/requests/(?P<id>[a-z0-9-]+)', array(
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'timeoff_update_request',
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'DELETE',
+            'callback'            => 'timeoff_delete_request',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+});
+
+function timeoff_user_name() {
+    $u = wp_get_current_user();
+    if (!$u || !$u->ID) return '';
+    $first = explode(' ', trim((string) $u->display_name))[0];
+    return $first !== '' ? $first : $u->user_login;
+}
+
+function timeoff_get_option($key) {
+    $v = get_option($key, array());
+    return is_array($v) ? $v : array();
+}
+
+// El plan es el estado de la calculadora (JSON del frontend): se guarda tal cual,
+// validado como objeto y con tamaño máximo.
+function timeoff_clean_state($state) {
+    if (!is_array($state)) return null;
+    $json = wp_json_encode($state);
+    if ($json === false || strlen($json) > TIMEOFF_MAX_JSON) return null;
+    return json_decode($json, true);
+}
+
+function timeoff_valid_date($d) {
+    if (!is_string($d) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) return false;
+    return checkdate((int) substr($d, 5, 2), (int) substr($d, 8, 2), (int) substr($d, 0, 4));
+}
+
+function timeoff_clean_request($r) {
+    $person = mb_substr(trim(sanitize_text_field($r['person'] ?? '')), 0, 60);
+    $from   = $r['from'] ?? '';
+    $to     = $r['to'] ?? $from;
+    if ($person === '' || !timeoff_valid_date($from) || !timeoff_valid_date($to) || $to < $from) return null;
+    $status = in_array($r['status'] ?? '', array('pendiente', 'aprobada', 'rechazada'), true) ? $r['status'] : 'pendiente';
+    $canal  = in_array($r['canal'] ?? '', array('app', 'fichero', 'mensaje', 'llamada', 'otro'), true) ? $r['canal'] : 'otro';
+    return array(
+        'person' => $person,
+        'from'   => $from,
+        'to'     => $to,
+        'status' => $status,
+        'canal'  => $canal,
+        'nota'   => mb_substr(sanitize_text_field($r['nota'] ?? ''), 0, 300),
+    );
+}
+
+function timeoff_get_all() {
+    $plan = get_option('blokes_timeoff_plan', null);
+    return rest_ensure_response(array(
+        'success'   => true,
+        'plan'      => is_array($plan) ? $plan['state'] : null,
+        'plan_meta' => is_array($plan) ? array('updated_at' => $plan['updated_at'], 'by' => $plan['by']) : null,
+        'scenarios' => array_values(timeoff_get_option('blokes_timeoff_scenarios')),
+        'requests'  => array_values(timeoff_get_option('blokes_timeoff_requests')),
+    ));
+}
+
+function timeoff_save_plan($request) {
+    $body  = $request->get_json_params();
+    $state = timeoff_clean_state($body['plan'] ?? null);
+    if ($state === null) return new WP_Error('invalid_plan', 'Plan no válido o demasiado grande', array('status' => 400));
+    $plan = array('state' => $state, 'updated_at' => current_time('mysql'), 'by' => timeoff_user_name());
+    update_option('blokes_timeoff_plan', $plan, false);
+    return rest_ensure_response(array('success' => true, 'plan_meta' => array('updated_at' => $plan['updated_at'], 'by' => $plan['by'])));
+}
+
+function timeoff_add_scenario($request) {
+    $body  = $request->get_json_params();
+    $name  = mb_substr(trim(sanitize_text_field($body['name'] ?? '')), 0, 80);
+    $state = timeoff_clean_state($body['state'] ?? null);
+    if ($name === '' || $state === null) return new WP_Error('invalid_scenario', 'Indica un nombre y un plan válido', array('status' => 400));
+    $list = timeoff_get_option('blokes_timeoff_scenarios');
+    if (count($list) >= 30) return new WP_Error('too_many', 'Máximo 30 escenarios: borra alguno', array('status' => 400));
+    $sc = array('id' => wp_generate_uuid4(), 'name' => $name, 'state' => $state, 'saved_at' => current_time('mysql'), 'by' => timeoff_user_name());
+    $list[] = $sc;
+    update_option('blokes_timeoff_scenarios', $list, false);
+    return rest_ensure_response(array('success' => true, 'scenario' => $sc));
+}
+
+function timeoff_delete_scenario($request) {
+    $id   = $request['id'];
+    $list = array_values(array_filter(timeoff_get_option('blokes_timeoff_scenarios'), function($s) use ($id) { return $s['id'] !== $id; }));
+    update_option('blokes_timeoff_scenarios', $list, false);
+    return rest_ensure_response(array('success' => true));
+}
+
+// Alta de una o varias solicitudes (manual o importadas). Se ignoran las repetidas
+// (misma persona y fechas).
+function timeoff_add_requests($request) {
+    $body  = $request->get_json_params();
+    $items = $body['requests'] ?? array();
+    if (!is_array($items) || count($items) > 500) return new WP_Error('invalid_requests', 'Lista de solicitudes no válida', array('status' => 400));
+    $list = timeoff_get_option('blokes_timeoff_requests');
+    $added = array(); $skipped = 0; $invalid = 0;
+    foreach ($items as $raw) {
+        $r = timeoff_clean_request(is_array($raw) ? $raw : array());
+        if (!$r) { $invalid++; continue; }
+        $dup = false;
+        foreach ($list as $x) {
+            if (mb_strtolower($x['person']) === mb_strtolower($r['person']) && $x['from'] === $r['from'] && $x['to'] === $r['to']) { $dup = true; break; }
+        }
+        if ($dup) { $skipped++; continue; }
+        $r['id']         = wp_generate_uuid4();
+        $r['created_at'] = current_time('mysql');
+        $r['by']         = timeoff_user_name();
+        $list[]  = $r;
+        $added[] = $r;
+    }
+    update_option('blokes_timeoff_requests', $list, false);
+    return rest_ensure_response(array('success' => true, 'added' => $added, 'skipped' => $skipped, 'invalid' => $invalid, 'requests' => array_values($list)));
+}
+
+function timeoff_update_request($request) {
+    $id   = $request['id'];
+    $body = $request->get_json_params();
+    $list = timeoff_get_option('blokes_timeoff_requests');
+    foreach ($list as $i => $x) {
+        if ($x['id'] !== $id) continue;
+        $r = timeoff_clean_request(array_merge($x, is_array($body) ? $body : array()));
+        if (!$r) return new WP_Error('invalid_request', 'Datos no válidos', array('status' => 400));
+        $list[$i] = array_merge($x, $r, array('updated_at' => current_time('mysql'), 'updated_by' => timeoff_user_name()));
+        update_option('blokes_timeoff_requests', $list, false);
+        return rest_ensure_response(array('success' => true, 'request' => $list[$i]));
+    }
+    return new WP_Error('not_found', 'Solicitud no encontrada', array('status' => 404));
+}
+
+function timeoff_delete_request($request) {
+    $id   = $request['id'];
+    $list = array_values(array_filter(timeoff_get_option('blokes_timeoff_requests'), function($x) use ($id) { return $x['id'] !== $id; }));
+    update_option('blokes_timeoff_requests', $list, false);
+    return rest_ensure_response(array('success' => true));
+}
