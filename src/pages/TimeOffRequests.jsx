@@ -202,7 +202,8 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
       <p className="sv-note">
         Las piden por la app de fichaje: sube el fichero que exporta (CSV, o Excel guardado como CSV) o añádelas a mano si
         llegan por mensaje o llamada. Cada solicitud se comprueba contra el plan: choques con quien no debe coincidir,
-        días que le quedan y cobertura. Al aprobarla cuenta en el calendario y en los avisos de la calculadora.
+        días que le quedan y cobertura. Al aprobarla cuenta en el calendario y en los avisos de la calculadora. Como la pide
+        la propia persona, cuenta como acuerdo (no necesita los 2 meses de antelación).
       </p>
       {!connected && <p className="sv-error">Sin conexión con el servidor: no se pueden guardar solicitudes.</p>}
 
@@ -303,7 +304,8 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
                           {imp.ok && !ambar.length && <span className="sv-to-good">Sin conflictos</span>}
                           {rojos.length > 0 && <div className="sv-to-bad">Coincide con {parejas(rojos)} ({rojos.length} días)</div>}
                           {ambar.length > 0 && <div className="sv-to-warn-txt">Evitar: {parejas(ambar)} ({ambar.length} días)</div>}
-                          {imp.restan < 0 && <div className="sv-to-bad">Se pasa {-imp.restan} días de lo que le toca</div>}
+                          {imp.restan != null && imp.restan < 0 && <div className="sv-to-bad">Se pasa {-imp.restan} días de lo que le toca</div>}
+                          {imp.otroAnio && <div className="sv-ot-muted">Es de otro año: cambia el año de la calculadora para ver sus días.</div>}
                           {imp.nuevos.filter(w => !w.text.startsWith('Coinciden')).map((w, i) => (
                             <div key={i} className={w.lvl === 'bad' ? 'sv-to-bad' : 'sv-to-warn-txt'}>{w.text}</div>
                           ))}

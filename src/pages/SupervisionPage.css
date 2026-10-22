@@ -976,3 +976,14 @@
 .sv-to-actions { white-space: nowrap; }
 .sv-to-actions .sv-filter-btn { margin-right: 4px; text-decoration: none; display: inline-block; }
 .sv-to-row--total td { border-bottom: 2px solid #2a2015; }
+.sv-to-acuerdos {
+  font-size: 0.78rem;
+  color: #ddd;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-left: 3px solid #a78bfa;
+  background: rgba(167,139,250,0.07);
+}
+.sv-to-acuerdos ul { margin: 4px 0 0; padding-left: 18px; line-height: 1.6; }
+.sv-to-warn--info { border-color: #555; color: #999; }
+.sv-to-input--bad { border-color: #f87171 !important; }

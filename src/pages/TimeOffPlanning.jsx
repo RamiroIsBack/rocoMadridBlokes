@@ -22,7 +22,7 @@ export function PrevisionVerano({ ev, state, historico }) {
 
   return (
     <div className="sv-section">
-      <h3 className="sv-section-title">Previsión de julio y agosto {ev.y + 1} con el plan actual</h3>
+      <h3 className="sv-section-title">Previsión de julio y agosto {ev.y} con el plan actual</h3>
       <p className="sv-note">
         Parte de la media de cada mes en el histórico y la ajusta con el plan de la calculadora: el sueldo de quien está en
         paro (frente a hoy), las ventas que se pierden y los gastos que se ahorran si se cierra, y el campamento. El resultado
@@ -35,7 +35,7 @@ export function PrevisionVerano({ ev, state, historico }) {
             <tr>
               <th></th>
               {years.map(y => <th key={y}>{y}</th>)}
-              <th>Media</th><th>Previsión {ev.y + 1}</th><th>Ajustes del plan</th>
+              <th>Media</th><th>Previsión {ev.y}</th><th>Ajustes del plan</th>
             </tr>
           </thead>
           <tbody>
@@ -79,7 +79,7 @@ export function PrevisionVerano({ ev, state, historico }) {
       <div className="sv-kpis">
         <div className="sv-kpi" style={{ '--kpi-color': total < 0 ? '#f87171' : '#34d399' }}>
           <span className="sv-kpi__value">{eur(total)}</span>
-          <span className="sv-kpi__label">Resultado previsto julio + agosto {ev.y + 1}</span>
+          <span className="sv-kpi__label">Resultado previsto julio + agosto {ev.y}</span>
         </div>
         <div className="sv-kpi" style={{ '--kpi-color': total - totalMed >= 0 ? '#34d399' : '#f97316' }}>
           <span className="sv-kpi__value">{total - totalMed >= 0 ? '+' : ''}{eur(total - totalMed)}</span>
@@ -152,7 +152,7 @@ export function Escenarios({ scenarios, setScenarios, state, coste, requests, on
           <thead>
             <tr>
               <th>Escenario</th><th>Paro en verano</th><th>Sala</th><th>Verano frente a hoy</th>
-              <th>Avisos graves</th><th>Clases verano sin profe</th><th>Días Eva en clase</th><th>Choques</th><th></th>
+              <th>Avisos graves</th><th>Clases verano sin profe</th><th>Días Eva en clase</th><th>Choques</th><th>Requiere acuerdo de</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -163,12 +163,13 @@ export function Escenarios({ scenarios, setScenarios, state, coste, requests, on
                   {f.sc && <div className="sv-ot-muted">{f.sc.by} · {f.sc.saved_at?.slice(0, 10)}</div>}
                 </td>
                 <td className="sv-ot-muted">{resumenParo(f.st.paro || {})}</td>
-                <td>{CIERRE_VERANO[f.st.cierre] || f.st.cierre}{f.st.camp?.activo ? ' + campamento' : ''}</td>
+                <td>{CIERRE_VERANO[f.st.cierre] || f.st.cierre}{f.st.camp?.activo ? ' + campamento' : ''} <span className="sv-ot-muted">· {f.ev.y}</span></td>
                 <td className={f.ev.eco.balance > 0 ? 'sv-to-good' : f.ev.eco.balance < 0 ? 'sv-to-bad' : ''}>{eur(f.ev.eco.balance)}</td>
                 <td className={f.ev.kpi.graves ? 'sv-to-bad' : 'sv-to-good'}>{f.ev.kpi.graves}</td>
                 <td className={f.ev.kpi.perdVer ? 'sv-to-bad' : ''}>{f.ev.kpi.perdVer}</td>
                 <td className={f.ev.kpi.comodinDias ? 'sv-to-warn-txt' : ''}>{f.ev.kpi.comodinDias}</td>
                 <td className={f.ev.kpi.choques ? 'sv-to-bad' : ''}>{f.ev.kpi.choques}</td>
+                <td className={f.ev.kpi.acuerdos.length ? 'sv-to-warn-txt' : 'sv-ot-muted'}>{f.ev.kpi.acuerdos.join(', ') || 'Nadie'}</td>
                 <td className="sv-to-actions">
                   {f.sc && <button className="sv-filter-btn" disabled={busy} onClick={() => onLoad(f.sc)}>Cargar</button>}
                   {f.sc && <button className="sv-tests-remove" disabled={busy} onClick={() => borrar(f.sc)}>✕</button>}

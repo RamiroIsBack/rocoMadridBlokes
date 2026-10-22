@@ -280,6 +280,13 @@ blancas (`socios`/`gestion`/`profesores`) — pídele a Ramiro que te añada o u
   común está en `src/utils/timeoffPlan.js`; el P&L de 2024–2025 en `src/data/plHistorico.js`
   (compartido con Superadmin › P&L). Los costes salen de Superadmin › Nóminas (× 1,395).
   Pendiente: avisos por correo/WhatsApp y descarga por API desde el fichaje externo.
+- **Reglas del convenio en CTRL Time Off (22/10/2026, asesoría).** Convenio estatal de
+  instalaciones deportivas: 23 laborables por año natural; 15 seguidos entre el 1 de junio y
+  el 30 de septiembre y el resto en dos bloques; calendario en el primer trimestre y 2 meses
+  de antelación; otro reparto solo con acuerdo expreso (art. 38 ET). Si el club cierra en
+  agosto puede fijar ahí el bloque de 15; los días de cierre que pasan de 15 se pagan o se
+  pactan. La calculadora trabaja por año natural y marca quién tiene que dar su acuerdo.
+  Pendiente de confirmar con la asesoría: si el bloque de 15 aplica a los fijos discontinuos.
 - **Colaboración.** El repo es `RamiroIsBack/rocoMadridBlokes`. Cualquier push a `dev`
   despliega automáticamente, lo haga quien lo haga (la cuenta `ClubRocomadrid7a` ya ha
   desplegado con éxito). El `CLAUDE.md` pide confirmar antes de crear/modificar ficheros

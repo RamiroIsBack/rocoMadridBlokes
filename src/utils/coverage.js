@@ -241,11 +241,6 @@ export function disponible(prof, iso, { paro = {} }) {
   return !PARO_MESES[paro[prof] || 'no'].includes(monthOf(iso))
 }
 
-// Quien para algún mes de verano ya no trabaja ese mes: no se le exige el 50 %
-export function minimoVerano(diasAnuales, mesesParo = 0) {
-  return mesesParo ? 0 : Math.ceil(diasAnuales / 2)
-}
-
 // Todas las combinaciones de paro (4 opciones por persona) que dejan cada mes
 // abierto con al menos 2 profes + el comodín y alguien con llave. Se ordenan
 // por ahorro frente a `hoy` y, a igualdad, por menos cambios.
@@ -313,14 +308,4 @@ export function simulatePlan(dates, { periods, paro = {}, cierre = 'abierto', ca
     })
     return { ...r, date, out }
   })
-}
-
-// Días de vacaciones de cada persona en `dates`: los que pide más los de cierre,
-// salvo los que no trabaja (no disponible) o trabaja en el campamento.
-export function vacationDates(prof, dates, { periods, paro = {}, cierre = 'abierto', camp }) {
-  const off = expandPeriods(periods)[prof] || new Set()
-  const campSet = camp?.staff?.includes(prof) ? campDates(camp, cierre) : new Set()
-  return dates.filter(d => disponible(prof, d, { paro })
-    && !campSet.has(d)
-    && (off.has(d) || isClosed(d, cierre)))
 }
