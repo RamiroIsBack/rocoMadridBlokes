@@ -987,3 +987,38 @@
 .sv-to-acuerdos ul { margin: 4px 0 0; padding-left: 18px; line-height: 1.6; }
 .sv-to-warn--info { border-color: #555; color: #999; }
 .sv-to-input--bad { border-color: #f87171 !important; }
+
+/* CTRL Time Off: textos secundarios legibles sobre el fondo oscuro (los grises
+   #444–#888 se leían mal). Secundario #c8c0ae, terciario #a8a08e (≈ 7:1). */
+.sv-to-root {
+  --to-text-2: #c8c0ae;
+  --to-text-3: #a8a08e;
+}
+.sv-to-root .sv-note,
+.sv-to-root .sv-to-sync,
+.sv-to-root .sv-loading,
+.sv-to-root .sv-empty,
+.sv-to-root .sv-kpi__label,
+.sv-to-root .sv-legend__label,
+.sv-to-root .sv-tests-table th,
+.sv-to-root .sv-to-tl-date,
+.sv-to-root .sv-to-tl-num { color: var(--to-text-3); }
+.sv-to-root .sv-ot-muted { color: var(--to-text-3) !important; }
+.sv-to-root .sv-to-subtitle,
+.sv-to-root .sv-to-tl-head,
+.sv-to-root .sv-to-rules,
+.sv-to-root .sv-to-pairs,
+.sv-to-root .sv-to-detail,
+.sv-to-root .sv-to-inline,
+.sv-to-root .sv-to-check,
+.sv-to-root .sv-tests-table td { color: var(--to-text-2); }
+.sv-to-root .sv-filter-btn,
+.sv-to-root .sv-period__btn,
+.sv-to-root .sv-tests-add { color: var(--to-text-2); }
+.sv-to-root .sv-note { font-style: normal; }
+.sv-to-root .sv-to-cell--off { color: var(--to-text-3); }
+.sv-to-root .sv-period__btn--active { color: #f5c842; }
+.sv-to-root .sv-filter-btn--active,
+.sv-to-root .sv-tests-add:hover,
+.sv-to-root .sv-filter-btn:hover,
+.sv-to-root .sv-period__btn:hover { color: #f0ece0; }

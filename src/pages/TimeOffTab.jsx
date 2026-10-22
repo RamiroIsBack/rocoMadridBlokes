@@ -966,7 +966,7 @@ export default function TimeOffTab() {
   const ctx = { paro: state.paro, cierre: state.cierre, year: ev.y }
 
   return (
-    <div className="sv-tab-panel">
+    <div className="sv-tab-panel sv-to-root">
       <SyncStatus sync={sync} />
       <Normas ev={ev} requests={requests} />
       <TimeOffRequests requests={requests} setRequests={setRequests} state={state} coste={costes.mes} connected={connected} />
