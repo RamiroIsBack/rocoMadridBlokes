@@ -266,3 +266,33 @@
   box-shadow: 0 2px 4px rgba(0,0,0,0.4);
 }
 .org__comp-bubble:active { cursor: grabbing; }
+
+/* ── Mover tarea (Semana, detalle) / editar periodicidad (Normas) ── */
+.org__task-move {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.org__task-move select, .org__task-move input[type="date"] {
+  padding: 4px 6px;
+  border: 1.5px solid #c8bc9a;
+  background: #fff;
+  font-size: 0.75rem;
+}
+.org__task label { gap: 0; }
+.org__task { display: flex; align-items: center; gap: 10px; }
+
+.org__periodicity-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  margin-left: auto;
+}
+.org__periodicity-edit input {
+  width: 48px;
+  padding: 4px 6px;
+  border: 1.5px solid #c8bc9a;
+  background: #fff;
+}

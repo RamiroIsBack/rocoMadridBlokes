@@ -47,6 +47,9 @@ export default function OrganizacionPage() {
   const reloadWorkers = useCallback(() => {
     return api('GET', '/equipacion/workers').then(r => setWorkers(r.data || [])).catch(() => {})
   }, [])
+  const reloadConfig = useCallback(() => {
+    return api('GET', '/equipacion/config').then(r => setConfig(r.data)).catch(() => {})
+  }, [])
 
   useEffect(() => {
     Promise.all([api('GET', '/equipacion/config'), api('GET', '/equipacion/workers')])
@@ -81,7 +84,7 @@ export default function OrganizacionPage() {
         />
       )}
       {view === 'semana' && <SemanaView config={config} workers={workers} onWorkersChanged={reloadWorkers} />}
-      {view === 'normas' && <NormasView config={config} />}
+      {view === 'normas' && <NormasView config={config} onConfigChanged={reloadConfig} />}
       {view === 'compe' && <CompeView />}
     </div>
   )
@@ -295,6 +298,17 @@ function SemanaView({ config, workers, onWorkersChanged }) {
   useEffect(() => { reloadWeeks() }, [reloadWeeks])
 
   const openWeek = id => api('GET', `/equipacion/weeks/${id}`).then(r => setDetail(r.data)).catch(() => {})
+  const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
+
+  // Tarea propuesta por el sistema, pero fijada "se puede mover si se
+  // quiere" — cambiar de persona o de día, siempre dentro de esta semana.
+  const [moving, setMoving] = useState(false)
+  const reassignTask = async (taskId, assignmentId, date) => {
+    setMoving(true)
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { assignmentId, date }) } catch {}
+    await openWeek(detail.id)
+    setMoving(false)
+  }
 
   if (detail) {
     return (
@@ -304,9 +318,21 @@ function SemanaView({ config, workers, onWorkersChanged }) {
         {detail.assignments.map(a => (
           <div key={a.id} className="org__assignment-card">
             <p className="org__assignment-name">{a.workerName}{a.isLead ? ' · responsable' : ''} — subzonas {a.subzones.map(s => `#${s}`).join(', ')}, bloques {a.blocksMin}-{a.blocksMax}</p>
-            <p className="org__assignment-tasks">
-              {a.tasks.length} tareas ({a.tasks.filter(t => t.done).length} hechas) · {a.blocks.length} bloques puestos
-            </p>
+            <ul className="org__task-list">
+              {a.tasks.map(t => (
+                <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}`}>
+                  <span className="org__task-name">{taskTypeById[t.taskTypeId]?.name || t.taskTypeId}</span>
+                  <div className="org__task-move">
+                    <select value={a.id} disabled={moving} onChange={e => reassignTask(t.id, Number(e.target.value), t.date)}>
+                      {detail.assignments.map(aa => <option key={aa.id} value={aa.id}>{aa.workerName}</option>)}
+                    </select>
+                    <input type="date" value={t.date} disabled={moving} onChange={e => reassignTask(t.id, a.id, e.target.value)} />
+                  </div>
+                </li>
+              ))}
+              {a.tasks.length === 0 && <li className="org__hint">Sin tareas (no le tocó ninguna esta semana).</li>}
+            </ul>
+            <p className="org__assignment-tasks">{a.blocks.length} bloques puestos</p>
           </div>
         ))}
       </div>
@@ -486,9 +512,44 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
 }
 
 // ─── Normas ───────────────────────────────────────────────────────────
-function NormasView({ config }) {
+function NormasView({ config, onConfigChanged }) {
+  const [editing, setEditing] = useState(null) // id del tipo de tarea que se está editando
+  const [value, setValue] = useState(1)
+
+  const startEdit = t => { setEditing(t.id); setValue(t.periodicityWeeks ?? 1) }
+  const save = async id => {
+    try { await api('PUT', `/equipacion/task-types/${id}`, { periodicityWeeks: value }) } catch {}
+    setEditing(null)
+    onConfigChanged()
+  }
+
   return (
     <div>
+      <section className="org__section">
+        <h3 className="org__section-title">Catálogo de tareas</h3>
+        <p className="org__hint">
+          El sistema propone solo las tareas que tocan según su periodicidad, y elige a quien más
+          la haya hecho antes. Cambia aquí cada cuántas semanas vuelve a tocar.
+        </p>
+        <ul className="org__task-list">
+          {(config.taskTypes || []).map(t => (
+            <li key={t.id} className="org__task">
+              <span className="org__task-name">{t.name}</span>
+              {editing === t.id ? (
+                <span className="org__periodicity-edit">
+                  cada <input type="number" min="1" max="12" value={value} onChange={e => setValue(Number(e.target.value))} /> semana(s)
+                  <button className="org__link-btn" onClick={() => save(t.id)}>Guardar</button>
+                  <button className="org__link-btn" onClick={() => setEditing(null)}>Cancelar</button>
+                </span>
+              ) : (
+                <button className="org__link-btn" onClick={() => startEdit(t)}>
+                  cada {t.periodicityWeeks ?? 1} semana(s)
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
       <section className="org__section">
         <h3 className="org__section-title">Escala de dificultad</h3>
         <table className="org__grade-table">
