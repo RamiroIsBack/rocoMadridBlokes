@@ -874,7 +874,8 @@ export default function SupervisionPage() {
     { id: 'excelmuerte', label: 'ExcelMuerte'   },
     { id: 'ctrltests',   label: 'Tests'          },
     { id: 'horasextra',  label: 'Horas extra'    },
-    { id: 'timeoff',     label: 'CTRL Time Off' },
+    // Lleva sueldos, nóminas y P&L: solo socios
+    ...(role === 'socio' ? [{ id: 'timeoff', label: 'CTRL Time Off' }] : []),
   ]
 
   const [tab, setTab] = useState('excelmuerte')
@@ -905,7 +906,7 @@ export default function SupervisionPage() {
       {tab === 'excelmuerte' && <ClasesTab />}
       {tab === 'ctrltests'   && <CtrlTestsTab />}
       {tab === 'horasextra'  && <OvertimeTab />}
-      {tab === 'timeoff'     && <TimeOffTab />}
+      {tab === 'timeoff'     && role === 'socio' && <TimeOffTab />}
     </div>
   )
 }

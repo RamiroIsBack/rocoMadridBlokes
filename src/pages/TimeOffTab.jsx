@@ -7,6 +7,7 @@ import {
   campDates, vacationDates,
 } from '../utils/coverage'
 import { useExpenses } from '../hooks/useSuperAdmin'
+import { usePayroll } from '../hooks/useOvertime'
 import { autoCategory } from '../utils/expensesParser'
 import { PL_DATA } from '../data/plHistorico'
 
@@ -41,6 +42,36 @@ const eur = n => `${Math.round(n).toLocaleString('es-ES')} €`
 function inactivosMes(mes, ctx) {
   const iso = `${temporada() + 1}-0${mes}-15`
   return PROF_ORDER.filter(p => !disponible(p, iso, ctx))
+}
+
+// ─── Coste empresa por persona ───────────────────────────────────────────────
+// Superadmin › Nóminas guarda lo que cobra cada persona (no el coste empresa).
+// Coste empresa ≈ nómina × 1,395 (tabla de referencia de la ficha: 6, 7, 10 y
+// 40 h/sem dan todas ese factor); lo que se paga en efectivo no lleva SS.
+const FACTOR_COSTE = 1.395
+
+const normName = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+
+function useCostes() {
+  const now = new Date()
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const { data, loading, error } = usePayroll(month)
+
+  return useMemo(() => {
+    const ficha = Object.fromEntries(PROF_ORDER.map(p => [p, PROF_META[p].costoMes]))
+    const nomina = {}
+    ;(data?.rows || []).forEach(r => {
+      const first = normName(r.name || '').split(/\s+/)[0]
+      const p = PROF_ORDER.find(x => normName(x) === first)
+      if (!p || r.base_nominal == null) return
+      const banco = r.base_nominal
+      const efectivo = r.cash_total != null ? Math.max(0, r.cash_total - banco) : 0
+      nomina[p] = { banco, efectivo, coste: Math.round(banco * FACTOR_COSTE + efectivo) }
+    })
+    const conNomina = Object.keys(nomina).length > 0
+    const mes = Object.fromEntries(PROF_ORDER.map(p => [p, nomina[p]?.coste ?? ficha[p]]))
+    return { mes, ficha, nomina, conNomina, month, loading, error }
+  }, [data, loading, error, month])
 }
 
 let nextId = 1
@@ -396,11 +427,11 @@ function ConflictMatrix({ keys, ctx }) {
 }
 
 // ─── Explorador de combinaciones de paro ─────────────────────────────────────
-function ExploradorParo({ paro, cierre, keys, onApply }) {
+function ExploradorParo({ paro, cierre, keys, coste, onApply }) {
   const [verTodas, setVerTodas] = useState(false)
   const combos = useMemo(() => combinacionesParo({
-    cierre, keys, hoy: HOY_PARO, coste: Object.fromEntries(PROF_ORDER.map(p => [p, PROF_META[p].costoMes])),
-  }), [cierre, keys])
+    cierre, keys, hoy: HOY_PARO, coste,
+  }), [cierre, keys, coste])
   const actual = combos.findIndex(c => PROF_ORDER.every(p => c.paro[p] === (paro[p] || 'no')))
   const lista = combos.slice(0, verTodas ? 60 : 10)
 
@@ -451,7 +482,7 @@ function ExploradorParo({ paro, cierre, keys, onApply }) {
 }
 
 // ─── Calculadora ─────────────────────────────────────────────────────────────
-function Calculadora({ state, setState }) {
+function Calculadora({ state, setState, costes }) {
   const y = temporada()
   const WINDOWS = {
     navidad:   { label: `Navidad ${y}/${String(y + 1).slice(2)}`, from: `${y}-12-14`, to: `${y + 1}-01-10` },
@@ -507,7 +538,7 @@ function Calculadora({ state, setState }) {
     return {
       p, op, disc: op === 'verano', dev, usados: vac.length, verano, cierreDias,
       min: minimoVerano(dias[p], nParo), restan: dev - vac.length,
-      ahorro: (nParo - PARO_MESES[HOY_PARO[p] || 'no'].length) * PROF_META[p].costoMes,
+      ahorro: (nParo - PARO_MESES[HOY_PARO[p] || 'no'].length) * costes.mes[p],
     }
   })
 
@@ -524,7 +555,7 @@ function Calculadora({ state, setState }) {
   rows.forEach(r => {
     if (!r.disc && r.verano < r.min) warnings.push({ lvl: 'warn', text: `${r.p}: ${r.verano} de ${r.min} días obligatorios en julio y agosto.` })
     if (r.restan < 0 && r.cierreDias > 0) {
-      warnings.push({ lvl: 'bad', text: `${r.p}: el cierre le da ${r.cierreDias} días y le tocan ${r.dev}. Sobran ${-r.restan} días pagados sin trabajar (≈ ${eur(-r.restan * PROF_META[r.p].costoMes / LABORABLES_MES)}), salvo que pase a fijo discontinuo.` })
+      warnings.push({ lvl: 'bad', text: `${r.p}: el cierre le da ${r.cierreDias} días y le tocan ${r.dev}. Sobran ${-r.restan} días pagados sin trabajar (≈ ${eur(-r.restan * costes.mes[r.p] / LABORABLES_MES)}), salvo que pase a fijo discontinuo.` })
     } else if (r.restan < 0) {
       warnings.push({ lvl: 'bad', text: `${r.p}: planifica ${r.usados} días y le corresponden ${r.dev}.` })
     }
@@ -562,7 +593,7 @@ function Calculadora({ state, setState }) {
     sala:     mesesCerradosList.reduce((n, m) => n + (gastosSala[m] || 0) - (ingresosSala[m] || 0), 0),
     camp:     camp.activo ? Math.round(campSet.size / 5) * camp.plazas * camp.precio : 0,
     ociosos:  rows.filter(r => r.restan < 0 && r.cierreDias > 0)
-                  .reduce((s, r) => s + -r.restan * PROF_META[r.p].costoMes / LABORABLES_MES, 0),
+                  .reduce((s, r) => s + -r.restan * costes.mes[r.p] / LABORABLES_MES, 0),
   }
   const balance = eco.personal + eco.sala + eco.camp
 
@@ -693,7 +724,7 @@ function Calculadora({ state, setState }) {
           <thead>
             <tr>
               <th>Persona</th><th>Paro en verano</th><th>Llave</th><th>Días/año</th><th>Le tocan</th>
-              <th>Jul–ago (mín.)</th><th>Vacaciones</th><th>Le quedan</th><th>€/mes</th><th>Ahorro/año frente a hoy</th>
+              <th>Jul–ago (mín.)</th><th>Vacaciones</th><th>Le quedan</th><th>Coste empresa/mes</th><th>Ahorro/año frente a hoy</th>
             </tr>
           </thead>
           <tbody>
@@ -717,7 +748,11 @@ function Calculadora({ state, setState }) {
                 <td className={!r.disc && r.verano < r.min ? 'sv-to-bad' : ''}>{r.disc ? 'No trabaja' : `${r.verano} (${r.min || '—'})`}</td>
                 <td>{r.usados}{r.cierreDias > 0 && <span className="sv-ot-muted"> ({r.cierreDias} cierre)</span>}</td>
                 <td className={r.restan < 0 ? 'sv-to-bad' : ''}>{r.restan}</td>
-                <td>{PROF_META[r.p].costoMes.toLocaleString('es-ES')}</td>
+                <td title={costes.nomina[r.p]
+                  ? `Nómina ${eur(costes.nomina[r.p].banco)}${costes.nomina[r.p].efectivo ? ` + efectivo ${eur(costes.nomina[r.p].efectivo)}` : ''} · ficha ${eur(costes.ficha[r.p])}`
+                  : 'Coste de la ficha (marzo 2026)'}>
+                  {eur(costes.mes[r.p])}{!costes.nomina[r.p] && <span className="sv-ot-muted"> *</span>}
+                </td>
                 <td className={r.ahorro > 0 ? 'sv-to-good' : r.ahorro < 0 ? 'sv-to-bad' : 'sv-ot-muted'}>{r.ahorro ? eur(r.ahorro) : '—'}</td>
               </tr>
             ))}
@@ -725,7 +760,15 @@ function Calculadora({ state, setState }) {
         </table>
       </div>
 
-      <ExploradorParo paro={paro} cierre={cierre} keys={keys} onApply={p => update({ paro: p })} />
+      <p className="sv-note">
+        {costes.loading ? 'Cargando nóminas de Superadmin…'
+          : costes.conNomina
+            ? `Coste empresa estimado con las nóminas de Superadmin (${costes.month}): nómina × ${String(FACTOR_COSTE).replace('.', ',')} + lo que se paga en efectivo. Pasa el ratón por el coste para ver la nómina y el dato de la ficha.`
+            : `No se pudieron leer las nóminas de Superadmin${costes.error ? ` (${costes.error})` : ''}: se usa el coste empresa de la ficha de marzo de 2026.`}
+        {costes.conNomina && PROF_ORDER.some(p => !costes.nomina[p]) && ' * Sin nómina en Superadmin: dato de la ficha.'}
+      </p>
+
+      <ExploradorParo paro={paro} cierre={cierre} keys={keys} coste={costes.mes} onApply={p => update({ paro: p })} />
 
       <h4 className="sv-to-subtitle">Periodos de vacaciones</h4>
       <div className="sv-tests-scroll">
@@ -878,6 +921,7 @@ function Calculadora({ state, setState }) {
 
 export default function TimeOffTab() {
   const [state, setState] = useState(loadState)
+  const costes = useCostes()
 
   useEffect(() => {
     try {
@@ -893,7 +937,7 @@ export default function TimeOffTab() {
       <Normas />
       <HistoricoVerano onApply={h => setState(s => ({ ...s, ingresosSala: h.ingresos, gastosSala: h.ahorrable }))} />
       <ConflictMatrix keys={state.keys} ctx={ctx} />
-      <Calculadora state={state} setState={setState} />
+      <Calculadora state={state} setState={setState} costes={costes} />
     </div>
   )
 }
