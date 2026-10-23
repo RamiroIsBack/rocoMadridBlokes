@@ -296,3 +296,77 @@
   border: 1.5px solid #c8bc9a;
   background: #fff;
 }
+
+/* ── Semana: tablero de columnas por persona con tiles arrastrables ── */
+.org__board {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  touch-action: none;
+}
+.org__board-col {
+  flex: 0 0 220px;
+  background: #fdf7e6;
+  border: 1.5px solid #e5ddc8;
+  padding: 10px;
+}
+.org__board-col--over {
+  border-color: #c8961e;
+  background: #fdf0d8;
+}
+.org__board-col-title { font-weight: 700; color: #2a2015; margin: 0 0 2px; font-size: 0.95rem; }
+.org__board-col-meta { font-size: 0.72rem; color: var(--color-text-secondary); margin: 0 0 10px; }
+.org__board-day { margin-bottom: 10px; }
+.org__board-day-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a6416;
+  margin: 0 0 4px;
+}
+
+.org__tile {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #e5ddc8;
+  padding: 8px;
+  margin-bottom: 6px;
+  cursor: grab;
+  touch-action: none;
+}
+.org__tile:active { cursor: grabbing; }
+.org__tile--done { opacity: 0.55; }
+.org__tile--missed { border-color: #ef4444; background: #fef2f2; }
+.org__tile--dragging { opacity: 0.3; }
+.org__tile-check { display: flex; align-items: center; padding-top: 1px; cursor: pointer; }
+.org__tile-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.org__tile-name { font-weight: 600; color: #2a2015; font-size: 0.85rem; }
+.org__tile-params { font-size: 0.72rem; color: var(--color-text-secondary); }
+.org__tile-badge {
+  align-self: flex-start;
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+
+.org__drag-ghost {
+  position: fixed;
+  transform: translate(-50%, -120%);
+  background: #2a2015;
+  color: #f5c842;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}

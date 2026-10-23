@@ -5,6 +5,7 @@ import './OrganizacionPage.css'
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 const WHOAMI_KEY = 'blokes_equip_worker_id'
 const DAY_LABEL = { mon: 'Lun', tue: 'Mar', wed: 'Mié', thu: 'Jue', fri: 'Vie', sat: 'Sáb', sun: 'Dom' }
+const DAY_OFFSET = { mon: 0, tue: 1, wed: 2, thu: 3, fri: 4, sat: 5, sun: 6 }
 const GRADE_COLOR = {
   INTRO: '#9ca3af', VERDE: '#22c55e', AZUL: '#3b82f6', AMARILLO: '#eab308',
   ROJO: '#ef4444', NEGRO: '#1f2937', BLANCO: '#e5e7eb',
@@ -33,6 +34,18 @@ function mondayOf(d) {
   const day = date.getDay() || 7
   if (day !== 1) date.setDate(date.getDate() - (day - 1))
   return date.toISOString().slice(0, 10)
+}
+// Aritmética de fechas en local (no UTC) para no desplazar el día por la zona horaria.
+function addDays(dateStr, n) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() + n)
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+}
+const DOW_LABEL = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+function dayLabel(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return `${DOW_LABEL[new Date(y, m - 1, d).getDay()]} ${d}/${m}`
 }
 
 export default function OrganizacionPage() {
@@ -299,6 +312,7 @@ function SemanaView({ config, workers, onWorkersChanged }) {
 
   const openWeek = id => api('GET', `/equipacion/weeks/${id}`).then(r => setDetail(r.data)).catch(() => {})
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
+  const workerById = useMemo(() => Object.fromEntries(workers.map(w => [w.id, w])), [workers])
 
   // Tarea propuesta por el sistema, pero fijada "se puede mover si se
   // quiere" — cambiar de persona o de día, siempre dentro de esta semana.
@@ -309,32 +323,106 @@ function SemanaView({ config, workers, onWorkersChanged }) {
     await openWeek(detail.id)
     setMoving(false)
   }
+  const toggleTaskDone = async (taskId, done) => {
+    setDetail(d => ({
+      ...d,
+      assignments: d.assignments.map(a => ({
+        ...a,
+        tasks: a.tasks.map(t => t.id === taskId ? { ...t, done, doneAt: done ? new Date().toISOString() : null } : t),
+      })),
+    }))
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { openWeek(detail.id) }
+  }
+
+  // Arrastrar una tile de tarea a la columna (y opcionalmente al día) de
+  // otra persona — mismo mecanismo de pointer events que el mapa de la compe.
+  const [dragTaskId, setDragTaskId] = useState(null)
+  const [dragPos, setDragPos] = useState(null)
+  const [overAssignmentId, setOverAssignmentId] = useState(null)
+  const dragInfoRef = useRef(null)
+
+  const onTileDown = (taskId, originalDate, originalAssignmentId) => e => {
+    if (moving) return
+    e.preventDefault()
+    dragInfoRef.current = { taskId, date: originalDate, assignmentId: originalAssignmentId }
+    setDragTaskId(taskId)
+    setDragPos({ x: e.clientX, y: e.clientY })
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+  const onBoardMove = e => {
+    if (dragInfoRef.current == null) return
+    setDragPos({ x: e.clientX, y: e.clientY })
+    const col = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-assignment-id]')
+    setOverAssignmentId(col ? Number(col.dataset.assignmentId) : null)
+  }
+  const onBoardUp = async e => {
+    const info = dragInfoRef.current
+    dragInfoRef.current = null
+    setDragTaskId(null)
+    setDragPos(null)
+    setOverAssignmentId(null)
+    if (!info) return
+    const el = document.elementFromPoint(e.clientX, e.clientY)
+    const col = el?.closest('[data-assignment-id]')
+    if (!col) return
+    const targetAssignmentId = Number(col.dataset.assignmentId)
+    const dayEl = el?.closest('[data-date]')
+    const targetDate = dayEl?.dataset.date || info.date
+    if (targetAssignmentId === info.assignmentId && targetDate === info.date) return
+    await reassignTask(info.taskId, targetAssignmentId, targetDate)
+  }
 
   if (detail) {
+    const todayS = todayStr()
     return (
       <div>
         <button className="org__link-btn" onClick={() => setDetail(null)}>← Volver a semanas</button>
         <h3 className="org__section-title">Semana del {detail.startDate} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
-        {detail.assignments.map(a => (
-          <div key={a.id} className="org__assignment-card">
-            <p className="org__assignment-name">{a.workerName}{a.isLead ? ' · responsable' : ''} — subzonas {a.subzones.map(s => `#${s}`).join(', ')}, bloques {a.blocksMin}-{a.blocksMax}</p>
-            <ul className="org__task-list">
-              {a.tasks.map(t => (
-                <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}`}>
-                  <span className="org__task-name">{taskTypeById[t.taskTypeId]?.name || t.taskTypeId}</span>
-                  <div className="org__task-move">
-                    <select value={a.id} disabled={moving} onChange={e => reassignTask(t.id, Number(e.target.value), t.date)}>
-                      {detail.assignments.map(aa => <option key={aa.id} value={aa.id}>{aa.workerName}</option>)}
-                    </select>
-                    <input type="date" value={t.date} disabled={moving} onChange={e => reassignTask(t.id, a.id, e.target.value)} />
-                  </div>
-                </li>
-              ))}
-              {a.tasks.length === 0 && <li className="org__hint">Sin tareas (no le tocó ninguna esta semana).</li>}
-            </ul>
-            <p className="org__assignment-tasks">{a.blocks.length} bloques puestos</p>
+        <p className="org__hint">Arrastra una tarjeta a otra persona (o a otro día de esa persona) para reasignarla.</p>
+        <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
+          {detail.assignments.map(a => {
+            const worker = workerById[a.workerId]
+            const workerDates = (worker?.workDays || []).map(d => addDays(detail.startDate, DAY_OFFSET[d]))
+            const taskDates = a.tasks.map(t => t.date)
+            const allDates = Array.from(new Set([...workerDates, ...taskDates])).sort()
+            return (
+              <div
+                key={a.id}
+                className={`org__board-col${overAssignmentId === a.id ? ' org__board-col--over' : ''}`}
+                data-assignment-id={a.id}
+              >
+                <p className="org__board-col-title">{a.workerName}{a.isLead ? ' · responsable' : ''}</p>
+                <p className="org__board-col-meta">subzonas {a.subzones.map(s => `#${s}`).join(', ')} · bloques {a.blocksMin}-{a.blocksMax}</p>
+                {allDates.map(date => {
+                  const tasksOnDate = a.tasks.filter(t => t.date === date)
+                  return (
+                    <div key={date} className="org__board-day" data-date={date}>
+                      <p className="org__board-day-label">{dayLabel(date)}</p>
+                      {tasksOnDate.map(t => (
+                        <TaskTile
+                          key={t.id}
+                          task={t}
+                          typeName={taskTypeById[t.taskTypeId]?.name || t.taskTypeId}
+                          isMissed={!t.done && t.date < todayS}
+                          dragging={dragTaskId === t.id}
+                          onPointerDown={onTileDown(t.id, t.date, a.id)}
+                          onToggleDone={toggleTaskDone}
+                        />
+                      ))}
+                    </div>
+                  )
+                })}
+                {allDates.length === 0 && <p className="org__hint">Sin tareas (no le tocó ninguna esta semana).</p>}
+                <p className="org__assignment-tasks">{a.blocks.length} bloques puestos</p>
+              </div>
+            )
+          })}
+        </div>
+        {dragTaskId != null && dragPos && (
+          <div className="org__drag-ghost" style={{ left: dragPos.x, top: dragPos.y }}>
+            {taskTypeById[detail.assignments.flatMap(a => a.tasks).find(t => t.id === dragTaskId)?.taskTypeId]?.name}
           </div>
-        ))}
+        )}
       </div>
     )
   }
@@ -507,6 +595,28 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
         <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
         <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Creando...' : 'Crear semana y repartir tareas'}</button>
       </div>
+    </div>
+  )
+}
+
+// Tile visual de una tarea: checklist incorporado (checkbox) + info de la
+// tarea (subzona, objetivo...) + arrastrable a otra persona/día. Si quedó
+// pendiente de un día ya pasado, queda marcada "FALTÓ" como histórico.
+function TaskTile({ task, typeName, isMissed, dragging, onPointerDown, onToggleDone }) {
+  const params = Object.entries(task.params || {}).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' · ')
+  return (
+    <div
+      className={`org__tile${task.done ? ' org__tile--done' : ''}${isMissed ? ' org__tile--missed' : ''}${dragging ? ' org__tile--dragging' : ''}`}
+      onPointerDown={onPointerDown}
+    >
+      <label className="org__tile-check" onPointerDown={e => e.stopPropagation()}>
+        <input type="checkbox" checked={task.done} onChange={e => onToggleDone(task.id, e.target.checked)} />
+      </label>
+      <div className="org__tile-body">
+        <span className="org__tile-name">{typeName}</span>
+        {params && <span className="org__tile-params">{params}</span>}
+      </div>
+      {isMissed && <span className="org__tile-badge">FALTÓ</span>}
     </div>
   )
 }
