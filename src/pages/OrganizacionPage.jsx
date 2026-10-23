@@ -342,6 +342,7 @@ function SemanaView({ config, workers, onWorkersChanged }) {
   const dragInfoRef = useRef(null)
 
   const onTileDown = (taskId, originalDate, originalAssignmentId) => e => {
+    console.log('DEBUG onTileDown fired', taskId, moving)
     if (moving) return
     e.preventDefault()
     dragInfoRef.current = { taskId, date: originalDate, assignmentId: originalAssignmentId }
