@@ -7,6 +7,7 @@ import { useRevenue, useProducts, useExpenses, useClasses } from '../hooks/useSu
 import ExpensesSection from '../components/ExpensesSection'
 import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
 import PayrollSection from '../components/PayrollSection'
+import ProjectsSection from '../components/ProjectsSection'
 import './SuperAdminPage.css'
 
 const PERIOD_OPTIONS = [
@@ -1097,6 +1098,7 @@ export default function SuperAdminPage() {
     { key: 'pl',       label: 'P&L' },
     { key: 'nominas',  label: 'Nóminas' },
     { key: 'acceso',   label: 'Acceso' },
+    { key: 'proyectos', label: 'Proyectos' },
   ]
 
   return (
@@ -1120,6 +1122,7 @@ export default function SuperAdminPage() {
       {saTab === 'pl'       && <PLTab />}
       {saTab === 'nominas'  && <PayrollSection />}
       {saTab === 'acceso'   && <ListasSection />}
+      {saTab === 'proyectos' && <ProjectsSection />}
     </div>
   )
 }

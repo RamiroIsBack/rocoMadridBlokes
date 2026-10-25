@@ -4679,6 +4679,7 @@ function payroll_add_partial($request) {
         'id'         => wp_generate_uuid4(),
         'person'     => $person,
         'concept'    => $concept,
+        'description'=> mb_substr(trim(sanitize_textarea_field((string) ($it['description'] ?? ''))), 0, 600),
         'amount'     => $amount,
         'method'     => 'efectivo',
         'date'       => $date,
@@ -5835,4 +5836,124 @@ function timeoff_delete_request($request) {
     $list = array_values(array_filter(timeoff_get_option('blokes_timeoff_requests'), function($x) use ($id) { return $x['id'] !== $id; }));
     update_option('blokes_timeoff_requests', $list, false);
     return rest_ensure_response(array('success' => true));
+}
+
+// ============================================================
+//  superadmin/v1 — Proyectos: presupuestos de mejora por zona (solo socios)
+//  Se guarda el documento entero (zonas → capítulos → partidas) en una opción.
+//  'rev' evita que dos socios se pisen: si no coincide con la guardada, 409.
+// ============================================================
+
+add_action('rest_api_init', function() {
+    $socio_perm = function() { return blokes_get_app_role() === 'socio'; };
+
+    register_rest_route('superadmin/v1', '/projects', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'projects_get',
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'projects_save',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+});
+
+function projects_load() {
+    $doc = get_option('blokes_projects', null);
+    if (!is_array($doc)) $doc = array('zones' => array(), 'rev' => 0, 'updated_at' => '', 'by' => '');
+    return $doc;
+}
+
+function projects_get() {
+    return rest_ensure_response(array('success' => true, 'projects' => projects_load()));
+}
+
+function projects_text($v, $max) {
+    return mb_substr(trim(sanitize_text_field((string) $v)), 0, $max);
+}
+
+function projects_id($v) {
+    $id = preg_replace('/[^a-z0-9-]/', '', strtolower((string) $v));
+    return $id !== '' ? substr($id, 0, 40) : wp_generate_uuid4();
+}
+
+function projects_num($v, $min = 0, $max = 1000000) {
+    if ($v === '' || $v === null || !is_numeric($v)) return null;
+    return round(max($min, min($max, floatval($v))), 2);
+}
+
+function projects_clean_item($it) {
+    if (!is_array($it)) return null;
+    $concept = projects_text($it['concept'] ?? '', 200);
+    if ($concept === '') return null;
+    $status = in_array($it['status'] ?? '', array('pedir', 'pendiente', 'aprobado', 'comprado', 'descartado'), true) ? $it['status'] : 'pendiente';
+    $ref    = in_array($it['qty_ref'] ?? '', array('suelo', 'perimetro', 'paredes'), true) ? $it['qty_ref'] : '';
+    return array(
+        'id'         => projects_id($it['id'] ?? ''),
+        'concept'    => $concept,
+        'description'=> mb_substr(trim(sanitize_textarea_field((string) ($it['description'] ?? ''))), 0, 600),
+        'qty'        => projects_num($it['qty'] ?? null) ?? 1,
+        'qty_ref'    => $ref,
+        'qty_factor' => projects_num($it['qty_factor'] ?? null, 0, 100) ?? 1,
+        'unit'       => projects_text($it['unit'] ?? 'ud', 12),
+        'price'      => projects_num($it['price'] ?? null) ?? 0,
+        'price_got'  => projects_num($it['price_got'] ?? null),
+        'price_type' => projects_text($it['price_type'] ?? '', 40),
+        'status'     => $status,
+        'supplier'   => projects_text($it['supplier'] ?? '', 80),
+        'source_name'=> projects_text($it['source_name'] ?? '', 300),
+        'source'     => esc_url_raw(mb_substr(trim((string) ($it['source'] ?? '')), 0, 500)),
+        'checked_at' => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($it['checked_at'] ?? '')) ? $it['checked_at'] : '',
+        'note'       => mb_substr(trim(sanitize_textarea_field((string) ($it['note'] ?? ''))), 0, 600),
+    );
+}
+
+function projects_clean_zones($zones) {
+    if (!is_array($zones) || count($zones) > 30) return null;
+    $out = array();
+    foreach ($zones as $z) {
+        $name = projects_text($z['name'] ?? '', 60);
+        if ($name === '') continue;
+        $chapters = array();
+        foreach (array_slice(is_array($z['chapters'] ?? null) ? $z['chapters'] : array(), 0, 40) as $c) {
+            $cname = projects_text($c['name'] ?? '', 80);
+            if ($cname === '') continue;
+            $items = array();
+            foreach (array_slice(is_array($c['items'] ?? null) ? $c['items'] : array(), 0, 200) as $it) {
+                $clean = projects_clean_item($it);
+                if ($clean) $items[] = $clean;
+            }
+            $chapters[] = array('id' => projects_id($c['id'] ?? ''), 'name' => $cname, 'items' => $items);
+        }
+        $m = is_array($z['measures'] ?? null) ? $z['measures'] : array();
+        $out[] = array(
+            'id'       => projects_id($z['id'] ?? ''),
+            'name'     => $name,
+            'location' => projects_text($z['location'] ?? '', 120),
+            'notes'    => mb_substr(trim(sanitize_textarea_field((string) ($z['notes'] ?? ''))), 0, 3000),
+            'measures' => array(
+                'largo' => projects_num($m['largo'] ?? null, 0, 1000),
+                'ancho' => projects_num($m['ancho'] ?? null, 0, 1000),
+                'alto'  => projects_num($m['alto'] ?? null, 0, 100),
+            ),
+            'chapters' => $chapters,
+        );
+    }
+    return $out;
+}
+
+function projects_save($request) {
+    $body    = $request->get_json_params();
+    $current = projects_load();
+    if (intval($body['rev'] ?? -1) !== intval($current['rev'])) {
+        return new WP_Error('conflict', 'Otro socio ha guardado cambios mientras editabas. Recarga para verlos.', array('status' => 409));
+    }
+    $zones = projects_clean_zones($body['zones'] ?? null);
+    if ($zones === null) return new WP_Error('invalid_projects', 'Datos no válidos o demasiados', array('status' => 400));
+    $doc = array('zones' => $zones, 'rev' => intval($current['rev']) + 1, 'updated_at' => current_time('mysql'), 'by' => timeoff_user_name());
+    update_option('blokes_projects', $doc, false);
+    return rest_ensure_response(array('success' => true, 'projects' => $doc));
 }

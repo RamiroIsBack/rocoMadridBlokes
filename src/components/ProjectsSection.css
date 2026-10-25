@@ -1,0 +1,177 @@
+/* ── Proyectos (Superadmin) ── */
+.pr-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.pr-zones { display: flex; flex-wrap: wrap; gap: 6px; }
+.pr-meta  { margin: 0 0 16px; }
+
+.pr-save { font-size: 0.72rem; color: #777; }
+.pr-save--saved  { color: #34d399; }
+.pr-save--saving,
+.pr-save--pending { color: #f5c842; }
+
+.pr-save-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  border: 1px solid #f97316;
+  background: rgba(249, 115, 22, 0.08);
+  color: #f97316;
+  font-size: 0.8rem;
+}
+
+.pr-kpi--pedir     { --kpi-color: #f97316; }
+.pr-kpi--pendiente { --kpi-color: #f5c842; }
+.pr-kpi--aprobado  { --kpi-color: #a78bfa; }
+.pr-kpi--comprado  { --kpi-color: #34d399; }
+
+/* Estado */
+.pr-status {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  font-family: inherit;
+  cursor: pointer;
+}
+.pr-status:hover { filter: brightness(1.25); }
+.pr-status--pedir      { background: #2e1a0d; color: #f97316; border-color: #5a3015; }
+.pr-status--pendiente  { background: #2a2015; color: #f5c842; border-color: #4a3a15; }
+.pr-status--aprobado   { background: #221a35; color: #a78bfa; border-color: #3a2d5c; }
+.pr-status--comprado   { background: #14301f; color: #34d399; border-color: #1f4d33; }
+.pr-status--descartado { background: #1a1a1a; color: #777;    border-color: #333; }
+
+.pr-row--discarded td { opacity: 0.5; }
+.pr-row--discarded .pr-input--wide { text-decoration: line-through; }
+
+/* Inputs */
+.pr-input {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 0.8rem;
+  padding: 3px 6px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.pr-input:hover { border-color: #333; }
+.pr-input:focus { outline: none; border-color: #f5c842; background: #111; }
+.pr-input--wide { width: 100%; min-width: 220px; font-weight: 600; color: #f0ece0; }
+.pr-input--unit { width: 52px; }
+.pr-input--qty  { width: 80px; }
+.pr-price--superseded { text-decoration: line-through; color: #777; }
+.pr-price--got { border-color: #1f4d33; }
+
+.pr-select {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #ccc;
+  font-size: 0.75rem;
+  padding: 3px 4px;
+  font-family: inherit;
+}
+
+.pr-concept { min-width: 260px; }
+.pr-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 6px 0;
+  font-size: 0.7rem;
+  color: #777;
+}
+.pr-meta-line a { color: #60a5fa; text-decoration: none; }
+.pr-meta-line a:hover { text-decoration: underline; }
+.pr-desc { padding: 2px 6px 0; font-size: 0.74rem; color: #aaa; line-height: 1.4; }
+.pr-note { padding: 2px 6px 0; font-size: 0.72rem; color: #888; font-style: italic; line-height: 1.4; }
+
+.pr-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #a78bfa;
+  font: inherit;
+  cursor: pointer;
+}
+.pr-link:hover { text-decoration: underline; }
+
+.pr-del {
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px 4px;
+}
+.pr-del:hover { color: #f87171; }
+.pr-danger:hover:not(:disabled) { border-color: #f87171 !important; color: #f87171 !important; }
+
+/* Detalles de partida */
+.pr-details td { background: rgba(255,255,255,0.02); }
+.pr-details__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px 16px;
+  padding: 6px 0;
+}
+.pr-details__grid label,
+.pr-measure,
+.pr-notes { display: flex; flex-direction: column; gap: 4px; }
+.pr-details__grid label > span,
+.pr-measure > span,
+.pr-notes > span {
+  font-size: 0.64rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #666;
+}
+.pr-details__grid .pr-input { border-color: #333; background: #111; width: 100%; }
+.pr-details__wide { grid-column: 1 / -1; }
+
+/* Zona */
+.pr-zone-head { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; max-width: 420px; }
+.pr-zone-location { font-size: 0.75rem; color: #888; }
+.pr-zone-name { font-size: 1rem; font-weight: 700; color: #f0ece0; }
+.pr-measures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  margin-bottom: 16px;
+}
+.pr-measure .sa-pay-input { width: 90px; }
+.pr-measure--out strong { font-size: 0.85rem; color: #ddd; font-variant-numeric: tabular-nums; padding-top: 4px; }
+
+.pr-chapter { margin-bottom: 20px; }
+.pr-chapter__title { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+.pr-chapter__num   { font-weight: 700; color: #a78bfa; font-size: 0.95rem; }
+.pr-chapter__name  { font-size: 0.95rem; font-weight: 700; color: #f0ece0; flex: 1; min-width: 0; max-width: 360px; }
+.pr-chapter__total { color: #f0ece0; font-variant-numeric: tabular-nums; font-size: 0.9rem; margin-right: 6px; }
+
+/* Importar */
+.pr-import { margin: 0 0 20px; --card-color: #a78bfa; }
+.pr-import__help { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; font-size: 0.74rem; }
+.pr-import__text { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 0.74rem; }
+.pr-import__preview { margin-top: 12px; font-size: 0.8rem; color: #ccc; }
+.pr-import__zone { margin-bottom: 8px; }
+.pr-import__zone ul { margin: 4px 0 0; padding-left: 20px; color: #aaa; }
+
+@media (max-width: 640px) {
+  .pr-toolbar { flex-direction: column; align-items: stretch; }
+  .pr-zone-name, .pr-chapter__name { max-width: none; }
+  .pr-input--wide { min-width: 180px; }
+}
+.pr-file { cursor: pointer; }
