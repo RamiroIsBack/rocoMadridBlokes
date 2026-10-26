@@ -16,6 +16,7 @@ import {
 import { useTimeOffData, savePlan, saveReal, syncNueve } from '../hooks/useTimeOff'
 import TimeOffRequests, { matchPerson } from './TimeOffRequests'
 import TimeOffIntegration, { personaDeEmpleado } from './TimeOffIntegration'
+import TimeOffSummary from './TimeOffSummary'
 import { PrevisionVerano, Escenarios } from './TimeOffPlanning'
 
 // Antes el plan vivía en el navegador; se importa una vez si el servidor no tiene plan
@@ -1163,11 +1164,13 @@ export default function TimeOffTab() {
       {vista === 'real' ? (
         <>
           <SyncStatus sync={syncReal} que="lo real" />
+          <TimeOffSummary ev={evReal} requests={requests} saldos={saldosReal} nueve={nueve} cierreExtra={real.cierreExtra}
+            onSync={() => syncNueve(false).then(setNueve)} />
           <Normas ev={evReal} requests={requests} />
-          <TimeOffIntegration nueve={nueve} onChange={setNueve} connected={connected} />
           <TimeOffRequests requests={requests} setRequests={setRequests} state={real} simState={sim} coste={costes.mes} connected={connected} />
           <VacacionesReales real={real} setReal={setReal} ev={evReal} saldos={saldosReal} />
           <ConflictMatrix keys={real.keys} ctx={ctxReal} />
+          <TimeOffIntegration nueve={nueve} onChange={setNueve} connected={connected} />
         </>
       ) : (
         <>
