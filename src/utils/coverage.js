@@ -152,10 +152,16 @@ export function pairConflict(a, b, opts = {}) {
 // ─── Calendario ──────────────────────────────────────────────────────────────
 
 // Festivos nacionales/Madrid en las ventanas que planificamos (no cuentan como vacaciones)
-export const FESTIVOS = [
+const FESTIVOS_BASE = [
   '2026-12-08', '2026-12-25', '2027-01-01', '2027-01-06',
   '2027-08-15', '2027-12-06', '2027-12-08', '2027-12-25', '2028-01-01', '2028-01-06',
 ]
+let festivos = new Set(FESTIVOS_BASE)
+
+// Festivos de 9to5 (nacionales, de Madrid y locales). Sin ellos, la lista básica de arriba.
+export function setFestivos(dates) {
+  festivos = new Set(dates && dates.length ? dates : FESTIVOS_BASE)
+}
 
 const JS_DAY = [null, 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', null]
 
@@ -173,7 +179,7 @@ export function weekdayOf(iso) {
 }
 
 export function isLaborable(iso) {
-  return !!weekdayOf(iso) && !FESTIVOS.includes(iso)
+  return !!weekdayOf(iso) && !festivos.has(iso)
 }
 
 export function isSummer(iso) {

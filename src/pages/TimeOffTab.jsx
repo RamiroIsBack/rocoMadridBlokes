@@ -3,7 +3,7 @@ import { PROF_META, PROF_ORDER, DAYS, DAY_LABEL } from '../data/staffSchedule'
 import {
   KEY_HOLDERS_DEFAULT, VERANO_APERTURA, COMODIN_VERANO, veranoSlots, pairConflict, simulatePlan,
   laborablesBetween, laborablesFrom, isSummer, weekdayOf, fmtShort,
-  diasDevengados, PARO_VERANO, combinacionesParo, CIERRE_VERANO, isClosed, disponible,
+  diasDevengados, PARO_VERANO, combinacionesParo, CIERRE_VERANO, isClosed, disponible, setFestivos,
 } from '../utils/coverage'
 import { useExpenses } from '../hooks/useSuperAdmin'
 import { usePayroll } from '../hooks/useOvertime'
@@ -13,8 +13,9 @@ import {
   DIAS_ANUALES, HOY_PARO, MES_LABEL, eur, inactivosMes, evaluarPlan, defaultYear, todayISO,
   BLOQUE_VERANO, MAX_BLOQUES, CIERRE_EXTRA,
 } from '../utils/timeoffPlan'
-import { useTimeOffData, savePlan } from '../hooks/useTimeOff'
-import TimeOffRequests from './TimeOffRequests'
+import { useTimeOffData, savePlan, syncNueve } from '../hooks/useTimeOff'
+import TimeOffRequests, { matchPerson } from './TimeOffRequests'
+import TimeOffIntegration, { personaDeEmpleado } from './TimeOffIntegration'
 import { PrevisionVerano, Escenarios } from './TimeOffPlanning'
 
 // Antes el plan vivía en el navegador; se importa una vez si el servidor no tiene plan
@@ -514,7 +515,7 @@ function ExploradorParo({ paro, cierre, keys, coste, onApply }) {
 }
 
 // ─── Calculadora ─────────────────────────────────────────────────────────────
-function Calculadora({ state, setState, costes, ev }) {
+function Calculadora({ state, setState, costes, ev, saldos }) {
   const y = ev.y
   const WINDOWS = {
     verano:  { label: `Verano ${y} (jun–sep)`, from: `${y}-06-01`, to: `${y}-09-30` },
@@ -683,7 +684,7 @@ function Calculadora({ state, setState, costes, ev }) {
           <thead>
             <tr>
               <th>Persona</th><th>Paro en verano</th><th>Llave</th><th>Días/año</th><th>Le tocan {y}</th>
-              <th>Bloque jun–sep</th><th>Bloques</th><th>Vacaciones</th><th>Le quedan</th><th>Coste empresa/mes</th><th>Ahorro/año frente a hoy</th>
+              <th>Bloque jun–sep</th><th>Bloques</th><th>Vacaciones</th><th>Le quedan</th>{saldos && <th title="Saldo de vacaciones en 9to5 para este año">En 9to5</th>}<th>Coste empresa/mes</th><th>Ahorro/año frente a hoy</th>
             </tr>
           </thead>
           <tbody>
@@ -716,6 +717,17 @@ function Calculadora({ state, setState, costes, ev }) {
                   )}
                 </td>
                 <td className={r.restan < 0 ? 'sv-to-bad' : ''}>{r.restan}</td>
+                {saldos && (() => {
+                  const b = saldos[r.p]
+                  if (!b) return <td className="sv-ot-muted">—</td>
+                  const descuadre = b.entitled != null && b.entitled !== r.dev
+                  return (
+                    <td className={descuadre ? 'sv-to-warn-txt' : ''}
+                      title={`9to5: le corresponden ${b.entitled ?? '—'}, disfrutados ${b.taken}, quedan ${b.remaining ?? '—'}${b.pending ? `, ${b.pending} solicitudes sin resolver` : ''}${b.unit === 'natural' ? ' (días naturales)' : ''}${descuadre ? ` · aquí le tocan ${r.dev}` : ''}`}>
+                      quedan {b.remaining ?? '—'} de {b.entitled ?? '—'}
+                    </td>
+                  )
+                })()}
                 <td title={costes.nomina[r.p]
                   ? `Nómina ${eur(costes.nomina[r.p].banco)}${costes.nomina[r.p].efectivo ? ` + efectivo ${eur(costes.nomina[r.p].efectivo)}` : ''} · ficha ${eur(costes.ficha[r.p])}`
                   : 'Coste de la ficha (marzo 2026)'}>
@@ -860,8 +872,8 @@ function Calculadora({ state, setState, costes, ev }) {
       </div>
       <p className="sv-note">
         Pulsa un día para ver el detalle. Color: vacaciones (más tenue si es cierre de la sala). Gris rayado: no trabaja ese mes.
-        Recuadro blanco: lleva el campamento. Solo se cuentan días laborables; los festivos que se descuentan son los
-        nacionales de Navidad y el 15 de agosto.
+        Recuadro blanco: lleva el campamento. Solo se cuentan días laborables; los festivos salen de 9to5 (sin conexión,
+        solo los nacionales de Navidad y el 15 de agosto).
       </p>
 
       {selDay && (
@@ -924,8 +936,12 @@ export default function TimeOffTab() {
   const loaded    = useRef(false)
   const lastSaved = useRef(null)
 
-  const requests  = remote.data?.requests || []
+  const nueve     = remote.data?.nueve || null
+  // Las de 9to5 traen el nombre completo: se casan con la persona del equipo
+  const requests  = useMemo(() => (remote.data?.requests || []).map(r =>
+    (PROF_ORDER.includes(r.person) ? r : { ...r, person: matchPerson(r.person) || r.person })), [remote.data?.requests])
   const scenarios = remote.data?.scenarios || []
+  const setNueve  = res => remote.setData(d => ({ ...d, nueve: res.nueve ?? d.nueve, requests: res.requests ?? d.requests }))
   const setRequests  = list => remote.setData(d => ({ ...d, requests: list }))
   const setScenarios = list => remote.setData(d => ({ ...d, scenarios: list }))
   const connected = !!remote.data && !remote.error
@@ -962,18 +978,49 @@ export default function TimeOffTab() {
     return () => clearTimeout(t)
   }, [state])
 
-  const ev  = useMemo(() => evaluarPlan(state, costes.mes, requests), [state, costes.mes, requests])
+  // Al abrir la pestaña, traer lo nuevo de 9to5 si hace más de 10 minutos de la última vez
+  const autoSynced = useRef(false)
+  useEffect(() => {
+    if (autoSynced.current || !nueve?.configured) return
+    autoSynced.current = true
+    const last = nueve.last_sync ? new Date(nueve.last_sync).getTime() : 0
+    if (Date.now() - last < 10 * 60 * 1000) return
+    syncNueve(false).then(setNueve).catch(() => { /* el error queda en last_error */ })
+  }, [nueve?.configured])
+
+  // Festivos de 9to5 (los que no se trabajan); sin conexión, la lista básica
+  const festivosKey = useMemo(() => {
+    const list = (nueve?.holidays || []).filter(h => !h.workable).map(h => h.date)
+    setFestivos(list)
+    return list.join()
+  }, [nueve?.holidays])
+
+  const ev  = useMemo(() => evaluarPlan(state, costes.mes, requests), [state, costes.mes, requests, festivosKey])
+
+  // Saldo de vacaciones de 9to5 del año del plan, por persona del equipo
+  const saldos = useMemo(() => {
+    const list = nueve?.balances?.[ev.y]
+    if (!list) return null
+    const emps = Object.fromEntries((nueve.employees || []).map(e => [e.id, e]))
+    const res = {}
+    list.forEach(b => {
+      const p = emps[b.employee_id] && personaDeEmpleado(emps[b.employee_id], nueve.employee_map)
+      if (p) res[p] = b
+    })
+    return res
+  }, [nueve, ev.y])
   const ctx = { paro: state.paro, cierre: state.cierre, year: ev.y }
 
   return (
     <div className="sv-tab-panel sv-to-root">
       <SyncStatus sync={sync} />
       <Normas ev={ev} requests={requests} />
+      <TimeOffIntegration nueve={nueve} onChange={setNueve} connected={connected} />
       <TimeOffRequests requests={requests} setRequests={setRequests} state={state} coste={costes.mes} connected={connected} />
       <HistoricoVerano hist={hist} onApply={h => setState(s => ({ ...s, ingresosSala: h.ingresos, gastosSala: h.ahorrable }))} />
       <PrevisionVerano ev={ev} state={state} historico={hist.months} />
       <ConflictMatrix keys={state.keys} ctx={ctx} />
-      <Calculadora state={state} setState={setState} costes={costes} ev={ev} />
+      <Calculadora state={state} setState={setState} costes={costes} ev={ev} saldos={saldos} />
       <Escenarios scenarios={scenarios} setScenarios={setScenarios} state={state} coste={costes.mes} requests={requests}
         connected={connected} toPlain={toPlain} hydrate={hydrate} onLoad={sc => setState(hydrate(sc.state))} />
     </div>

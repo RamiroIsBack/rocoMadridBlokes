@@ -1023,3 +1023,15 @@
 .sv-to-root .sv-tests-add:hover,
 .sv-to-root .sv-filter-btn:hover,
 .sv-to-root .sv-period__btn:hover { color: #f0ece0; }
+.sv-to-badge--ext { background: #60a5fa; color: #0b1220; margin-left: 0; }
+.sv-to-pre {
+  font-size: 0.7rem;
+  color: var(--to-text-2, #c8c0ae);
+  background: #0b0a07;
+  border: 1px solid #2a2015;
+  padding: 8px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.sv-to-code { font-size: 0.72rem; color: #f0ece0; background: #0b0a07; padding: 1px 6px; border-radius: 3px; word-break: break-all; }

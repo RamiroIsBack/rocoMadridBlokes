@@ -5757,6 +5757,7 @@ function timeoff_get_all() {
         'plan_meta' => is_array($plan) ? array('updated_at' => $plan['updated_at'], 'by' => $plan['by']) : null,
         'scenarios' => array_values(timeoff_get_option('blokes_timeoff_scenarios')),
         'requests'  => array_values(timeoff_get_option('blokes_timeoff_requests')),
+        'nueve'     => nueve_public(),
     ));
 }
 
@@ -5800,8 +5801,11 @@ function timeoff_add_requests($request) {
     foreach ($items as $raw) {
         $r = timeoff_clean_request(is_array($raw) ? $raw : array());
         if (!$r) { $invalid++; continue; }
+        $ext = intval($raw['ext_id'] ?? 0);
+        if ($ext > 0) { $r['ext_source'] = '9to5'; $r['ext_id'] = $ext; }
         $dup = false;
         foreach ($list as $x) {
+            if ($ext > 0 && ($x['ext_source'] ?? '') === '9to5' && intval($x['ext_id'] ?? 0) === $ext) { $dup = true; break; }
             if (mb_strtolower($x['person']) === mb_strtolower($r['person']) && $x['from'] === $r['from'] && $x['to'] === $r['to']) { $dup = true; break; }
         }
         if ($dup) { $skipped++; continue; }
@@ -5821,8 +5825,23 @@ function timeoff_update_request($request) {
     $list = timeoff_get_option('blokes_timeoff_requests');
     foreach ($list as $i => $x) {
         if ($x['id'] !== $id) continue;
-        $r = timeoff_clean_request(array_merge($x, is_array($body) ? $body : array()));
+        $body = is_array($body) ? $body : array();
+        $r = timeoff_clean_request(array_merge($x, $body));
         if (!$r) return new WP_Error('invalid_request', 'Datos no válidos', array('status' => 400));
+        $comment = mb_substr(sanitize_text_field($body['review_comment'] ?? ''), 0, 1000);
+        if (($x['ext_source'] ?? '') === '9to5' && !empty($x['ext_id'])) {
+            // Las fechas y la persona mandan en 9to5: aquí solo se decide
+            $r = array_merge($r, array('person' => $x['person'], 'from' => $x['from'], 'to' => $x['to']));
+            if ($r['status'] !== $x['status']) {
+                if ($r['status'] === 'pendiente') {
+                    return new WP_Error('nueve_pendiente', 'En 9to5 una solicitud resuelta no puede volver a pendiente', array('status' => 422));
+                }
+                $upd = nueve_review($x, $r['status'], $comment);
+                if (is_wp_error($upd)) return $upd;
+                $r = array_merge($r, $upd, array('person' => $x['person']));
+            }
+        }
+        if ($comment !== '') $r['review_comment'] = $comment;
         $list[$i] = array_merge($x, $r, array('updated_at' => current_time('mysql'), 'updated_by' => timeoff_user_name()));
         update_option('blokes_timeoff_requests', $list, false);
         return rest_ensure_response(array('success' => true, 'request' => $list[$i]));
@@ -5835,4 +5854,374 @@ function timeoff_delete_request($request) {
     $list = array_values(array_filter(timeoff_get_option('blokes_timeoff_requests'), function($x) use ($id) { return $x['id'] !== $id; }));
     update_option('blokes_timeoff_requests', $list, false);
     return rest_ensure_response(array('success' => true));
+}
+
+// ============================================================
+//  CTRL Time Off ↔ 9to5 (app de fichaje externa)
+//  La clave de API y el secreto del webhook se guardan solo aquí (opción
+//  blokes_9to5_config); nunca se devuelven al navegador.
+//  Doc: https://9to5.click/api/v1/docs
+// ============================================================
+
+define('NUEVE_API', 'https://9to5.click/api/v1');
+
+add_action('rest_api_init', function() {
+    $socio_perm = function() { return blokes_get_app_role() === 'socio'; };
+
+    register_rest_route('superadmin/v1', '/timeoff/9to5', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => function() { return rest_ensure_response(array('success' => true, 'nueve' => nueve_public())); },
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'nueve_save_settings',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/timeoff/9to5/test', array(
+        'methods'             => 'POST',
+        'callback'            => 'nueve_test',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/timeoff/9to5/sync', array(
+        'methods'             => 'POST',
+        'callback'            => 'nueve_sync_endpoint',
+        'permission_callback' => $socio_perm,
+    ));
+    // Avisos de 9to5: público, se valida con la firma HMAC
+    register_rest_route('timeoff/v1', '/9to5-webhook', array(
+        'methods'             => 'POST',
+        'callback'            => 'nueve_webhook',
+        'permission_callback' => '__return_true',
+    ));
+});
+
+// Sincronización automática cada hora
+add_action('init', function() {
+    if (!wp_next_scheduled('blokes_9to5_sync')) wp_schedule_event(time() + 300, 'hourly', 'blokes_9to5_sync');
+});
+add_action('blokes_9to5_sync', function() {
+    $c = nueve_config();
+    if (!empty($c['api_key'])) nueve_sync(false);
+});
+
+function nueve_config() {
+    $c = get_option('blokes_9to5_config', array());
+    return is_array($c) ? $c : array();
+}
+
+function nueve_save_config($c) {
+    update_option('blokes_9to5_config', $c, false);
+}
+
+// Lo que ve el navegador: nunca la clave ni el secreto
+function nueve_public() {
+    $c   = nueve_config();
+    $key = (string) ($c['api_key'] ?? '');
+    return array(
+        'configured'   => $key !== '',
+        'key_tail'     => $key !== '' ? substr($key, -4) : '',
+        'has_secret'   => !empty($c['webhook_secret']),
+        'last_sync'    => $c['last_sync'] ?? null,
+        'last_counts'  => $c['last_counts'] ?? null,
+        'last_error'   => $c['last_error'] ?? '',
+        'warnings'     => $c['warnings'] ?? array(),
+        'employee_map' => (object) ($c['employee_map'] ?? array()),
+        'employees'    => $c['employees'] ?? array(),
+        'holidays'     => $c['holidays'] ?? array(),
+        'balances'     => (object) ($c['balances'] ?? array()),
+        'last_webhook' => $c['last_webhook'] ?? null,
+        'webhook_url'  => rest_url('timeoff/v1/9to5-webhook'),
+    );
+}
+
+function nueve_request($method, $path, $body = null) {
+    $c = nueve_config();
+    if (empty($c['api_key'])) return new WP_Error('nueve_sin_clave', 'Falta la clave de API de 9to5', array('status' => 400));
+    $args = array(
+        'method'  => $method,
+        'timeout' => 20,
+        'headers' => array(
+            'Authorization'   => 'Bearer ' . $c['api_key'],
+            'Accept'          => 'application/json',
+            'Accept-Language' => 'es',
+        ),
+    );
+    if ($body !== null) {
+        $args['headers']['Content-Type'] = 'application/json';
+        $args['body'] = wp_json_encode($body);
+    }
+    $res = wp_remote_request(NUEVE_API . $path, $args);
+    if (is_wp_error($res)) {
+        return new WP_Error('nueve_red', 'No se pudo conectar con 9to5: ' . $res->get_error_message(), array('status' => 502));
+    }
+    $code = (int) wp_remote_retrieve_response_code($res);
+    $json = json_decode(wp_remote_retrieve_body($res), true);
+    if ($code < 200 || $code >= 300) {
+        $msg = (is_array($json) && !empty($json['message'])) ? $json['message'] : "HTTP $code";
+        return new WP_Error('nueve_http', "9to5: $msg", array('status' => $code === 422 ? 422 : 502, 'nueve_code' => $code));
+    }
+    return is_array($json) ? $json : array();
+}
+
+// Todas las páginas de un listado
+function nueve_list($path, $query = array()) {
+    $out  = array();
+    $page = 1;
+    do {
+        $q    = array_merge($query, array('page' => $page, 'per_page' => 200));
+        $json = nueve_request('GET', $path . '?' . http_build_query($q));
+        if (is_wp_error($json)) return $json;
+        $out  = array_merge($out, is_array($json['data'] ?? null) ? $json['data'] : array());
+        $last = intval($json['meta']['last_page'] ?? 1);
+        $page++;
+    } while ($page <= $last && $page <= 50);
+    return $out;
+}
+
+function nueve_status($s) {
+    if (in_array($s, array('pending', 'in_review'), true)) return 'pendiente';
+    if ($s === 'approved') return 'aprobada';
+    return 'rechazada'; // rejected, cancelled, revoked (el original queda en ext_status)
+}
+
+function nueve_es_vacaciones($type) {
+    $t = function_exists('iconv') ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', (string) $type)) : strtolower((string) $type);
+    return strpos($t, 'vacac') !== false;
+}
+
+// Solicitud de 9to5 → nuestra solicitud. Solo vacaciones de días completos con fin.
+function nueve_map_petition($p, $map) {
+    if (!is_array($p) || empty($p['id']) || !nueve_es_vacaciones($p['type'] ?? '')) return null;
+    if (empty($p['full_day']) || !empty($p['open_ended']) || empty($p['to'])) return null;
+    $from = substr((string) $p['from'], 0, 10);
+    $to   = substr((string) $p['to'], 0, 10);
+    if (!timeoff_valid_date($from) || !timeoff_valid_date($to) || $to < $from) return null;
+    $emp    = (string) intval($p['employee_id'] ?? 0);
+    $person = isset($map[$emp]) && $map[$emp] !== '' ? $map[$emp] : (string) ($p['employee_name'] ?? '');
+    return array(
+        'person'            => mb_substr(sanitize_text_field($person), 0, 60),
+        'from'              => $from,
+        'to'                => $to,
+        'status'            => nueve_status($p['status'] ?? ''),
+        'canal'             => 'app',
+        'nota'              => mb_substr(sanitize_text_field($p['comment'] ?? ''), 0, 300),
+        'ext_source'        => '9to5',
+        'ext_id'            => intval($p['id']),
+        'ext_status'        => sanitize_text_field($p['status'] ?? ''),
+        'ext_employee_id'   => intval($p['employee_id'] ?? 0),
+        'ext_employee_name' => mb_substr(sanitize_text_field($p['employee_name'] ?? ''), 0, 80),
+        'review_comment'    => mb_substr(sanitize_text_field($p['review_comment'] ?? ''), 0, 1000),
+        'reviewed_by'       => mb_substr(sanitize_text_field($p['reviewed_by'] ?? ''), 0, 80),
+        'ext_updated_at'    => sanitize_text_field($p['updated_at'] ?? ''),
+    );
+}
+
+// Inserta o actualiza una solicitud de 9to5 en la lista. Devuelve array($list, 'added'|'updated'|null)
+function nueve_upsert($list, $p, $map) {
+    $r = nueve_map_petition($p, $map);
+    if (!$r) return array($list, null);
+    foreach ($list as $i => $x) {
+        $same = (($x['ext_source'] ?? '') === '9to5' && intval($x['ext_id'] ?? 0) === $r['ext_id']);
+        if (!$same) continue;
+        $list[$i] = array_merge($x, $r, array('synced_at' => current_time('mysql')));
+        return array($list, 'updated');
+    }
+    $req_at          = (string) ($p['requested_at'] ?? '');
+    $r['id']         = wp_generate_uuid4();
+    $r['created_at'] = strlen($req_at) >= 19 ? substr($req_at, 0, 10) . ' ' . substr($req_at, 11, 8) : current_time('mysql');
+    $r['by']         = '9to5';
+    $r['synced_at']  = current_time('mysql');
+    $list[] = $r;
+    return array($list, 'added');
+}
+
+function nueve_sync($full = false) {
+    $c = nueve_config();
+    if (empty($c['api_key'])) return new WP_Error('nueve_sin_clave', 'Falta la clave de API de 9to5', array('status' => 400));
+    $started = current_time('c');
+    $query   = array();
+    if (!$full && !empty($c['last_sync'])) $query['updated_since'] = $c['last_sync'];
+
+    $pets = nueve_list('/petitions', $query);
+    if (is_wp_error($pets)) {
+        $c['last_error'] = $pets->get_error_message();
+        nueve_save_config($c);
+        return $pets;
+    }
+    $map  = is_array($c['employee_map'] ?? null) ? $c['employee_map'] : array();
+    $list = timeoff_get_option('blokes_timeoff_requests');
+    $added = 0; $updated = 0;
+    foreach ($pets as $p) {
+        list($list, $what) = nueve_upsert($list, $p, $map);
+        if ($what === 'added') $added++;
+        elseif ($what === 'updated') $updated++;
+    }
+    update_option('blokes_timeoff_requests', $list, false);
+
+    // Empleados, festivos y saldos: para casar personas, descontar festivos y comparar saldos.
+    // Si a la clave le falta algún permiso, se avisa pero la sincronización sigue.
+    $warnings = array();
+    $emps = nueve_list('/employees');
+    if (is_wp_error($emps)) $warnings[] = 'Empleados: ' . $emps->get_error_message();
+    else {
+        $c['employees'] = array_values(array_map(function($e) {
+            return array(
+                'id'        => intval($e['id'] ?? 0),
+                'name'      => sanitize_text_field($e['name'] ?? ''),
+                'last_name' => sanitize_text_field($e['last_name'] ?? ''),
+                'active'    => !empty($e['active']),
+            );
+        }, $emps));
+    }
+    $y   = intval(current_time('Y'));
+    $hol = nueve_list('/holidays', array('from' => $y . '-01-01', 'to' => ($y + 1) . '-12-31'));
+    if (is_wp_error($hol)) $warnings[] = 'Festivos: ' . $hol->get_error_message();
+    else {
+        $c['holidays'] = array_values(array_map(function($h) {
+            return array(
+                'date'     => sanitize_text_field($h['date'] ?? ''),
+                'name'     => sanitize_text_field($h['name'] ?? ''),
+                'workable' => !empty($h['workable']),
+            );
+        }, $hol));
+    }
+    $balances = array();
+    foreach (array($y, $y + 1) as $yr) {
+        $bal = nueve_list('/vacation-balances', array('year' => $yr));
+        if (is_wp_error($bal)) { $warnings[] = "Saldos $yr: " . $bal->get_error_message(); continue; }
+        $balances[$yr] = array_values(array_map(function($b) {
+            return array(
+                'employee_id' => intval($b['employee_id'] ?? 0),
+                'unit'        => sanitize_text_field($b['unit'] ?? ''),
+                'entitled'    => isset($b['entitled']) ? intval($b['entitled']) : null,
+                'taken'       => intval($b['taken'] ?? 0),
+                'remaining'   => isset($b['remaining']) ? intval($b['remaining']) : null,
+                'pending'     => intval($b['pending_requests'] ?? 0),
+            );
+        }, $bal));
+    }
+    if ($balances) $c['balances'] = $balances;
+
+    $c['last_sync']   = $started;
+    $c['last_counts'] = array('added' => $added, 'updated' => $updated);
+    $c['last_error']  = '';
+    $c['warnings']    = $warnings;
+    nueve_save_config($c);
+    return array('added' => $added, 'updated' => $updated, 'requests' => array_values($list));
+}
+
+function nueve_sync_endpoint($request) {
+    $body = $request->get_json_params();
+    $res  = nueve_sync(!empty($body['full']));
+    if (is_wp_error($res)) return $res;
+    return rest_ensure_response(array_merge(array('success' => true, 'nueve' => nueve_public()), $res));
+}
+
+// Guarda clave/secreto (solo si vienen) y la correspondencia empleado de 9to5 → persona
+function nueve_save_settings($request) {
+    $body = $request->get_json_params();
+    $c    = nueve_config();
+    if (!empty($body['clear'])) {
+        unset($c['api_key'], $c['webhook_secret'], $c['last_sync']);
+    }
+    if (isset($body['api_key']) && trim($body['api_key']) !== '') {
+        $key = trim($body['api_key']);
+        if (!preg_match('/^9to5_[A-Za-z0-9]{20,100}$/', $key)) return new WP_Error('nueve_clave', 'La clave de API no tiene el formato de 9to5 (9to5_…)', array('status' => 400));
+        if (($c['api_key'] ?? '') !== $key) unset($c['last_sync']); // clave nueva: sincronizar todo
+        $c['api_key'] = $key;
+    }
+    if (isset($body['webhook_secret']) && trim($body['webhook_secret']) !== '') {
+        $sec = trim($body['webhook_secret']);
+        if (!preg_match('/^[A-Za-z0-9_\-]{16,200}$/', $sec)) return new WP_Error('nueve_secreto', 'El secreto del webhook no es válido', array('status' => 400));
+        $c['webhook_secret'] = $sec;
+    }
+    if (isset($body['employee_map']) && is_array($body['employee_map'])) {
+        $map = array();
+        foreach ($body['employee_map'] as $emp => $person) {
+            $person = mb_substr(trim(sanitize_text_field((string) $person)), 0, 60);
+            if ($person !== '') $map[(string) intval($emp)] = $person;
+        }
+        $c['employee_map'] = $map;
+        // Aplicar a las solicitudes ya sincronizadas
+        $list = timeoff_get_option('blokes_timeoff_requests');
+        foreach ($list as $i => $x) {
+            if (($x['ext_source'] ?? '') !== '9to5') continue;
+            $emp = (string) intval($x['ext_employee_id'] ?? 0);
+            $list[$i]['person'] = isset($map[$emp]) ? $map[$emp] : ($x['ext_employee_name'] ?? $x['person']);
+        }
+        update_option('blokes_timeoff_requests', $list, false);
+    }
+    nueve_save_config($c);
+    return rest_ensure_response(array('success' => true, 'nueve' => nueve_public(), 'requests' => array_values(timeoff_get_option('blokes_timeoff_requests'))));
+}
+
+// Prueba la clave (GET /me) y devuelve la IP pública del servidor (para limitar la clave a ella)
+function nueve_test() {
+    $me = nueve_request('GET', '/me');
+    $ip = '';
+    $r  = wp_remote_get('https://api.ipify.org?format=json', array('timeout' => 10));
+    if (!is_wp_error($r)) {
+        $j  = json_decode(wp_remote_retrieve_body($r), true);
+        $ip = is_array($j) ? sanitize_text_field($j['ip'] ?? '') : '';
+    }
+    if (is_wp_error($me)) {
+        return rest_ensure_response(array('success' => false, 'error' => $me->get_error_message(), 'ip' => $ip));
+    }
+    return rest_ensure_response(array('success' => true, 'me' => $me, 'ip' => $ip));
+}
+
+// Aprueba o rechaza en 9to5 una solicitud que vino de allí. Devuelve los campos actualizados o WP_Error.
+function nueve_review($x, $status, $comment) {
+    $action = $status === 'aprobada' ? 'approve' : 'reject';
+    $body   = $comment !== '' ? array('comment' => $comment) : array();
+    $res    = nueve_request('POST', '/petitions/' . intval($x['ext_id']) . '/' . $action, $body);
+    if (is_wp_error($res)) return $res;
+    $p = isset($res['data']) && is_array($res['data']) ? $res['data'] : $res;
+    $c = nueve_config();
+    $mapped = nueve_map_petition($p, is_array($c['employee_map'] ?? null) ? $c['employee_map'] : array());
+    return $mapped ? $mapped : array('status' => $status, 'ext_status' => $status === 'aprobada' ? 'approved' : 'rejected');
+}
+
+function nueve_webhook($request) {
+    $c      = nueve_config();
+    $secret = (string) ($c['webhook_secret'] ?? '');
+    if ($secret === '') return new WP_Error('nueve_sin_secreto', 'Webhook no configurado', array('status' => 503));
+
+    $body = $request->get_body();
+    $t = null; $v1 = null;
+    foreach (explode(',', (string) $request->get_header('x-9to5-signature')) as $part) {
+        $kv = array_pad(explode('=', trim($part), 2), 2, null);
+        if ($kv[0] === 't') $t = $kv[1];
+        elseif ($kv[0] === 'v1') $v1 = $kv[1];
+    }
+    $ok = $t && $v1 && abs(time() - (int) $t) < 300
+        && hash_equals(hash_hmac('sha256', $t . '.' . $body, $secret), (string) $v1);
+    if (!$ok) return new WP_Error('nueve_firma', 'Firma no válida', array('status' => 401));
+
+    $evt      = json_decode($body, true);
+    $evt      = is_array($evt) ? $evt : array();
+    $delivery = (string) ($evt['id'] ?? $request->get_header('x-9to5-delivery'));
+    $seen     = get_option('blokes_9to5_deliveries', array());
+    $seen     = is_array($seen) ? $seen : array();
+    if ($delivery !== '' && in_array($delivery, $seen, true)) {
+        return rest_ensure_response(array('ok' => true, 'duplicate' => true));
+    }
+
+    $event = (string) ($evt['event'] ?? '');
+    if (in_array($event, array('petition.created', 'petition.updated'), true)) {
+        $list = timeoff_get_option('blokes_timeoff_requests');
+        list($list, $what) = nueve_upsert($list, $evt['data'] ?? array(), is_array($c['employee_map'] ?? null) ? $c['employee_map'] : array());
+        if ($what) update_option('blokes_timeoff_requests', $list, false);
+    }
+
+    if ($delivery !== '') {
+        $seen[] = $delivery;
+        update_option('blokes_9to5_deliveries', array_slice($seen, -300), false);
+    }
+    $c['last_webhook'] = array('at' => current_time('mysql'), 'event' => sanitize_text_field($event));
+    nueve_save_config($c);
+    return rest_ensure_response(array('ok' => true));
 }
