@@ -4,8 +4,9 @@ import { laborablesBetween, fmtShort, PARO_VERANO } from '../utils/coverage'
 import { BLOQUE_VERANO, todayISO } from '../utils/timeoffPlan'
 import { personaDeEmpleado } from './TimeOffIntegration'
 
-// Resumen visual por persona de lo real del año: días aprobados y pendientes sobre lo
-// que le toca, lo que le queda aquí y en 9to5, su bloque de verano y sus próximas vacaciones.
+// Resumen visual por persona de lo real: días aprobados y pendientes sobre lo que le toca,
+// lo que le queda aquí y en 9to5, su bloque de verano y sus próximas vacaciones.
+// Muestra por defecto el año en curso (lo ya disfrutado) y, en una línea, el siguiente.
 
 const fmtRango = (a, b) => (a === b ? fmtShort(a) : `${fmtShort(a)} – ${fmtShort(b)}`)
 const fmtWhen = s => (s ? s.replace('T', ' ').slice(0, 16) : '—')
@@ -14,10 +15,16 @@ function diasEnAnio(r, y) {
   return laborablesBetween(r.from, r.to).filter(d => d.startsWith(`${y}-`)).length
 }
 
-export default function TimeOffSummary({ ev, requests, saldos, nueve, onSync, cierreExtra = 'pagados' }) {
+// evs / saldosByYear: { [año]: evaluación de lo real · saldos de 9to5 } para cada año de `years`
+export default function TimeOffSummary({ years, evs, saldosByYear, requests, nueve, onSync, cierreExtra = 'pagados' }) {
   const [syncing, setSyncing] = useState(false)
-  const y = ev.y
+  const [y, setY] = useState(years[0])
+  const ev = evs[y]
+  const saldos = saldosByYear[y]
+  const otro = years.find(x => x !== y)
+  const evOtro = evs[otro]
   const hoy = todayISO()
+  const pendEn = (p, yr) => requests.filter(q => q.person === p && q.status === 'pendiente').reduce((n, q) => n + diasEnAnio(q, yr), 0)
 
   // Personas del equipo que están en 9to5 (asociadas por nombre o a mano)
   const enNueve = useMemo(() => new Set((nueve?.employees || [])
@@ -53,8 +60,15 @@ export default function TimeOffSummary({ ev, requests, saldos, nueve, onSync, ci
 
   return (
     <div className="sv-section">
-      <h3 className="sv-section-title">Vacaciones {y} por persona</h3>
+      <h3 className="sv-section-title">Vacaciones por persona</h3>
       <div className="sv-to-form">
+        <span className="sv-period">
+          {years.map(yr => (
+            <button key={yr} className={`sv-period__btn${yr === y ? ' sv-period__btn--active' : ''}`} onClick={() => setY(yr)}>
+              {yr}{yr === years[0] ? ' (en curso)' : ''}
+            </button>
+          ))}
+        </span>
         {nueve?.configured ? (
           <>
             <span className="sv-ot-muted">Datos de 9to5 sincronizados: {fmtWhen(nueve.last_sync)}</span>
@@ -112,6 +126,18 @@ export default function TimeOffSummary({ ev, requests, saldos, nueve, onSync, ci
                     : <span className={r.nParo ? 'sv-to-warn-txt' : 'sv-to-bad'}>✗ sin bloque de {BLOQUE_VERANO}{r.bloqueVerano ? ` (lleva ${r.bloqueVerano})` : ''}</span>}
               </div>
 
+              {evOtro && (() => {
+                const o = evOtro.rows.find(x => x.p === r.p)
+                const pend = pendEn(r.p, otro)
+                return o && (
+                  <div className="sv-to-card__row sv-to-card__other" onClick={() => setY(otro)} title={`Ver ${otro}`}>
+                    {otro}: le quedan <strong>{o.restan}</strong> de {o.dev}
+                    {o.usados > 0 && ` (${o.usados} aprobadas)`}
+                    {pend > 0 && <span className="sv-to-warn-txt"> · +{pend} pendientes</span>}
+                  </div>
+                )
+              })()}
+
               <div className="sv-to-card__row sv-ot-muted">
                 {proximas.length
                   ? <>Próximas: {proximas.slice(0, 2).map(q => fmtRango(q.from, q.to)).join(', ')}{proximas.length > 2 ? '…' : ''}</>
@@ -122,8 +148,9 @@ export default function TimeOffSummary({ ev, requests, saldos, nueve, onSync, ci
         })}
       </div>
       <p className="sv-note">
-        «Le quedan» cuenta las aprobadas (y el cierre de la sala, si lo hay) sobre lo que le toca este año según el
-        convenio y su paro. La cifra de 9to5 es su saldo: si no coincide, la tarjeta lo explica.
+        «Le quedan» cuenta las aprobadas (y el cierre de la sala, si lo hay) sobre lo que le toca ese año según el
+        convenio y su paro, con la configuración real. La cifra de 9to5 es su saldo de ese año: si no coincide, la
+        tarjeta lo explica. Las vacaciones cuentan por año natural: lo disfrutado en {years[0]} no resta de {years[1]}.
       </p>
     </div>
   )

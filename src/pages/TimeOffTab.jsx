@@ -1131,6 +1131,13 @@ export default function TimeOffTab() {
     return res
   }
   const saldosReal = useMemo(() => saldosDe(evReal.y), [nueve, evReal.y])
+
+  // Resumen por persona: año en curso y el siguiente, con la configuración real
+  const anioActual = new Date().getFullYear()
+  const resumenYears = [anioActual, anioActual + 1]
+  const evsResumen = useMemo(() => Object.fromEntries(resumenYears.map(yr =>
+    [yr, yr === evReal.y ? evReal : evaluarPlan({ ...real, year: yr }, costes.mes, requests)])), [evReal, real, costes.mes, requests, festivosKey])
+  const saldosResumen = useMemo(() => Object.fromEntries(resumenYears.map(yr => [yr, saldosDe(yr)])), [nueve])
   const saldosSim  = useMemo(() => saldosDe(evSim.y), [nueve, evSim.y])
 
   const desdeReal = () => {
@@ -1164,7 +1171,7 @@ export default function TimeOffTab() {
       {vista === 'real' ? (
         <>
           <SyncStatus sync={syncReal} que="lo real" />
-          <TimeOffSummary ev={evReal} requests={requests} saldos={saldosReal} nueve={nueve} cierreExtra={real.cierreExtra}
+          <TimeOffSummary years={resumenYears} evs={evsResumen} saldosByYear={saldosResumen} requests={requests} nueve={nueve} cierreExtra={real.cierreExtra}
             onSync={() => syncNueve(false).then(setNueve)} />
           <Normas ev={evReal} requests={requests} />
           <TimeOffRequests requests={requests} setRequests={setRequests} state={real} simState={sim} coste={costes.mes} connected={connected} />

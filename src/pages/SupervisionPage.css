@@ -1098,3 +1098,5 @@
 .sv-to-bar__seg--cierre { background: #60a5fa; }
 .sv-to-legend { display: inline-flex; align-items: center; gap: 6px; font-size: 0.72rem; color: var(--to-text-3, #a8a08e); }
 .sv-to-legend__sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-left: 6px; }
+.sv-to-card__other { cursor: pointer; border-top: 1px dashed #2a2015; padding-top: 4px; }
+.sv-to-card__other:hover { color: #f0ece0; }

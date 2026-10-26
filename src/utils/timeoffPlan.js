@@ -56,11 +56,13 @@ export function inactivosMes(mes, ctx) {
   return PROF_ORDER.filter(p => !disponible(p, iso, ctx))
 }
 
-// Una solicitud aprobada cuenta como un periodo más. La pide la propia persona: es acuerdo.
+// Una solicitud aprobada cuenta como un periodo más. Como la pide la propia persona, no
+// necesita los 2 meses de antelación (se salta por requestId); pero no la da por «pactada»:
+// pedir unos días no exime del bloque de 15 en verano.
 export function requestToPeriod(r) {
   return {
     id: `req-${r.id}`, prof: r.person, start: r.from, n: laborablesBetween(r.from, r.to).length,
-    requestId: r.id, acuerdo: true, comunicado: (r.created_at || '').slice(0, 10) || null,
+    requestId: r.id, acuerdo: false, comunicado: (r.created_at || '').slice(0, 10) || null,
   }
 }
 
