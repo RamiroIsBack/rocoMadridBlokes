@@ -8,6 +8,12 @@ import { matchPerson } from './TimeOffRequests'
 
 const fmtWhen = s => (s ? s.replace('T', ' ').slice(0, 16) : '—')
 
+const PERMISOS = {
+  'petitions:read': 'leer solicitudes', 'petitions:write': 'aprobar y rechazar', 'absences:read': 'ausencias',
+  'incidents:read': 'incidencias', 'work_sessions:read': 'fichajes', 'employees:read': 'trabajadores',
+  'holidays:read': 'festivos', 'vacation_balances:read': 'saldos de vacaciones', 'presence:read': 'presencia',
+}
+
 // Persona del equipo para un empleado de 9to5: la asociada a mano o, si no, por el nombre
 export function personaDeEmpleado(emp, map) {
   return map?.[String(emp.id)] || matchPerson(`${emp.name} ${emp.last_name || ''}`)
@@ -74,6 +80,15 @@ export default function TimeOffIntegration({ nueve, onChange, connected }) {
           {n.last_webhook && ` Último aviso: ${fmtWhen(n.last_webhook.at)} (${n.last_webhook.event}).`}
         </p>
       )}
+      {n.configured && (
+        <p className="sv-to-small">
+          Secreto del webhook:{' '}
+          {n.has_secret
+            ? <span className="sv-to-good">guardado ✓</span>
+            : <span className="sv-to-warn-txt">no guardado ✗ — sin él, los avisos de 9to5 se rechazan y las solicitudes llegan al abrir la pestaña o cada hora</span>}
+          {n.last_webhook ? <> · último aviso recibido: {fmtWhen(n.last_webhook.at)}</> : n.has_secret ? ' · todavía no ha llegado ningún aviso' : ''}
+        </p>
+      )}
       {n.last_error && <p className="sv-error">Último error: {n.last_error}</p>}
       {(n.warnings || []).map((w, i) => <p key={i} className="sv-to-warn-txt" style={{ fontSize: '0.75rem', margin: '2px 0' }}>{w}</p>)}
 
@@ -109,9 +124,21 @@ export default function TimeOffIntegration({ nueve, onChange, connected }) {
             <div className="sv-class-detail">
               <div className="sv-class-detail__title">{test.success ? '✓ Conexión correcta' : '✗ No conecta'}</div>
               {test.error && <p className="sv-error">{test.error}</p>}
-              {test.me && (
-                <pre className="sv-to-pre">{JSON.stringify(test.me, null, 2)}</pre>
-              )}
+              {test.me && (() => {
+                const d = test.me.data || test.me
+                const scopes = d.key?.scopes || []
+                return (
+                  <>
+                    <p className="sv-to-small">
+                      Empresa: <strong>{d.company?.display_name || d.company?.name || '—'}</strong>
+                      {d.key?.name && <> · clave «{d.key.name}»</>}
+                      {d.key?.expires_at ? <> · caduca el {fmtWhen(d.key.expires_at)}</> : <> · sin caducidad</>}
+                    </p>
+                    <p className="sv-to-small">{scopes.length} permisos: {scopes.map(x => PERMISOS[x] || x).join(', ')}.</p>
+                    <details className="sv-to-fold"><summary>Detalles técnicos</summary><pre className="sv-to-pre">{JSON.stringify(test.me, null, 2)}</pre></details>
+                  </>
+                )
+              })()}
               {test.ip && (
                 <p className="sv-note">
                   IP de nuestro servidor: <strong>{test.ip}</strong> — pásasela a 9to5 para que limiten la clave a ella.
@@ -123,7 +150,6 @@ export default function TimeOffIntegration({ nueve, onChange, connected }) {
 
           <p className="sv-note">
             Dirección del webhook para darle a 9to5: <code className="sv-to-code">{n.webhook_url}</code>
-            {!n.has_secret && ' (necesita el secreto del webhook guardado arriba para funcionar).'}
           </p>
         </>
       )}
@@ -136,6 +162,12 @@ export default function TimeOffIntegration({ nueve, onChange, connected }) {
             <table className="sv-tests-table">
               <thead><tr><th>En 9to5</th><th>Persona en el equipo</th></tr></thead>
               <tbody>
+                {PROF_ORDER.filter(p => !empleados.some(e => (n.employee_map?.[String(e.id)] || matchPerson(`${e.name} ${e.last_name || ''}`)) === p)).map(p => (
+                  <tr key={`falta-${p}`}>
+                    <td className="sv-to-warn-txt">— no está en 9to5 —</td>
+                    <td style={{ color: PROF_META[p]?.color, fontWeight: 700 }}>{p} <span className="sv-ot-muted sv-to-small">(sus vacaciones van a mano)</span></td>
+                  </tr>
+                ))}
                 {empleados.map(e => {
                   const manual = n.employee_map?.[String(e.id)]
                   const auto = matchPerson(`${e.name} ${e.last_name || ''}`)

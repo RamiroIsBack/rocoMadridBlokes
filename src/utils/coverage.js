@@ -143,10 +143,15 @@ export function pairConflict(a, b, opts = {}) {
   const single = new Set([...gapDays(onlyA), ...gapDays(onlyB)])
   const extraGaps = [...gapDays(both)].filter(g => !single.has(g)).length
   const extraComodin = both.comodin - Math.max(onlyA.comodin, onlyB.comodin)
+  // En verano, además, la regla de 2 profes + Eva: si la pareja deja menos de 2 profes
+  // (o a ninguno), hay que evitarla aunque las clases se cubran
+  const profesQuedan = opts.season === 'verano'
+    ? PROF_ORDER.filter(p => p !== COMODIN_VERANO && p !== a && p !== b && !(opts.inactive || []).includes(p)).length
+    : null
   let level = 'verde'
-  if (extraGaps > 0 || both.lost.length >= 12 || (opts.season === 'verano' && both.lost.length > 0)) level = 'rojo'
-  else if (extraLost > 0 || both.lost.length >= 8 || extraComodin > 0) level = 'ambar'
-  return { a, b, lost: both.lost.length, comodin: both.comodin, extraLost, extraGaps, sinAbrir: both.sinAbrir, sinCerrar: both.sinCerrar, level }
+  if (extraGaps > 0 || both.lost.length >= 12 || (opts.season === 'verano' && (both.lost.length > 0 || profesQuedan === 0))) level = 'rojo'
+  else if (extraLost > 0 || both.lost.length >= 8 || extraComodin > 0 || (profesQuedan !== null && profesQuedan < 2 && (a !== COMODIN_VERANO && b !== COMODIN_VERANO))) level = 'ambar'
+  return { a, b, lost: both.lost.length, comodin: both.comodin, extraLost, extraGaps, sinAbrir: both.sinAbrir, sinCerrar: both.sinCerrar, profesQuedan, level }
 }
 
 // ─── Calendario ──────────────────────────────────────────────────────────────

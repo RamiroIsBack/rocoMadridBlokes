@@ -290,8 +290,8 @@ export default function TimeOffRequests({ requests, setRequests, state, simState
           style={{ color: PROF_META[form.person]?.color }}>
           {PROF_ORDER.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
-        <label className="sv-to-inline">Desde <input className="sv-tests-input" type="date" value={form.from} onChange={e => setForm({ ...form, from: e.target.value })} /></label>
-        <label className="sv-to-inline">Hasta <input className="sv-tests-input" type="date" value={form.to} min={form.from} onChange={e => setForm({ ...form, to: e.target.value })} /></label>
+        <label className="sv-to-inline">Desde <input className="sv-tests-input" type="date" lang="es" value={form.from} onChange={e => setForm({ ...form, from: e.target.value })} /></label>
+        <label className="sv-to-inline">Hasta <input className="sv-tests-input" type="date" lang="es" value={form.to} min={form.from} onChange={e => setForm({ ...form, to: e.target.value })} /></label>
         <select className="sv-tests-select" value={form.canal} onChange={e => setForm({ ...form, canal: e.target.value })}>
           {Object.entries(CANALES).filter(([k]) => k !== 'fichero').map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select>
@@ -327,14 +327,18 @@ export default function TimeOffRequests({ requests, setRequests, state, simState
                     </td>
                     <td>{fmtShort(r.from)}{r.to !== r.from && <> – {fmtShort(r.to)}</>}</td>
                     <td>{laborablesBetween(r.from, r.to).length}</td>
-                    <td className="sv-ot-muted" title={r.nota || ''}>
+                    <td className="sv-ot-muted">
                       {r.ext_source === '9to5' ? <span className="sv-to-badge sv-to-badge--ext">9to5</span> : (CANALES[r.canal] || r.canal)}
-                      {r.nota ? ' · 💬' : ''}
+                      {r.nota && <div className="sv-to-small"><strong>Motivo:</strong> {r.nota}</div>}
                     </td>
                     <td className={r.status === 'aprobada' ? 'sv-to-good' : r.status === 'rechazada' ? 'sv-ot-muted' : 'sv-to-warn-txt'}>
                       {ESTADOS[r.status]}
                       {r.ext_status && ['cancelled', 'revoked'].includes(r.ext_status) && <span className="sv-ot-muted"> ({r.ext_status === 'cancelled' ? 'cancelada' : 'revocada'})</span>}
-                      {r.review_comment && <div className="sv-ot-muted" title={r.reviewed_by || ''}>«{r.review_comment}»</div>}
+                      {r.review_comment && (
+                        <div className="sv-ot-muted sv-to-small">
+                          <strong>Revisión{r.reviewed_by ? ` (${r.reviewed_by.replace(/^API:\s*/, 'app · ')})` : ''}:</strong> {r.review_comment}
+                        </div>
+                      )}
                     </td>
                     <td className="sv-to-check">
                       {!imp ? <span className="sv-ot-muted">—</span> : (
@@ -353,11 +357,29 @@ export default function TimeOffRequests({ requests, setRequests, state, simState
                       )}
                     </td>
                     <td className="sv-to-actions">
-                      {r.status !== 'aprobada' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'aprobada')}>Aprobar</button>}
-                      {r.status !== 'rechazada' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'rechazada')}>Rechazar</button>}
-                      {r.status !== 'pendiente' && r.ext_source !== '9to5' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'pendiente')}>A pendiente</button>}
-                      {r.status === 'aprobada' && <a className="sv-filter-btn" href={gcalLink(r)} target="_blank" rel="noreferrer">Google Calendar</a>}
-                      <button className="sv-tests-remove" disabled={busy} onClick={() => borrar(r)}>✕</button>
+                      {r.status === 'pendiente' ? (
+                        <>
+                          <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'aprobada')}>Aprobar</button>
+                          <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'rechazada')}>Rechazar</button>
+                          {r.ext_source !== '9to5' && <button className="sv-tests-remove" disabled={busy} onClick={() => borrar(r)} title="Borrar">✕</button>}
+                        </>
+                      ) : (
+                        <>
+                          {r.status === 'aprobada' && <a className="sv-filter-btn" href={gcalLink(r)} target="_blank" rel="noreferrer">Google Calendar</a>}
+                          {/* Las ya resueltas: cambiar o borrar, en un menú para no hacerlo sin querer */}
+                          <details className="sv-to-menu">
+                            <summary title="Más acciones">⋯</summary>
+                            <div className="sv-to-menu__list">
+                              {r.status !== 'aprobada' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'aprobada')}>Aprobar</button>}
+                              {r.status !== 'rechazada' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'rechazada')}>Rechazar</button>}
+                              {r.ext_source !== '9to5' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'pendiente')}>Volver a pendiente</button>}
+                              {r.ext_source !== '9to5'
+                                ? <button className="sv-tests-remove" disabled={busy} onClick={() => borrar(r)}>Borrar</button>
+                                : <span className="sv-ot-muted sv-to-small">Viene de 9to5: se gestiona allí</span>}
+                            </div>
+                          </details>
+                        </>
+                      )}
                     </td>
                   </tr>
                 )

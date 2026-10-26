@@ -1100,3 +1100,92 @@
 .sv-to-legend__sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-left: 6px; }
 .sv-to-card__other { cursor: pointer; border-top: 1px dashed #2a2015; padding-top: 4px; }
 .sv-to-card__other:hover { color: #f0ece0; }
+
+/* ── CTRL Time Off: lectura más clara (informe de pruebas) ── */
+.sv-to-small { font-size: 0.72rem; }
+.sv-to-lead  { font-size: 0.85rem; color: #f0ece0; line-height: 1.6; margin: 0 0 10px; }
+.sv-to-topbar { justify-content: space-between; margin-bottom: 6px; }
+.sv-to-topbar .sv-to-sync { margin: 0; }
+
+/* Bloques plegables */
+.sv-to-fold > summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--to-text-2, #c8c0ae);
+  margin: 8px 0;
+  list-style: revert;
+}
+.sv-to-fold > summary.sv-section-title { font-size: 0.92rem; color: #f0ece0; margin: 0 0 10px; }
+.sv-to-fold[open] > summary { margin-bottom: 10px; }
+
+/* Simulador con fondo propio para no confundirlo con lo real */
+.sv-to-subtab--sim.sv-to-subtab--active { border-color: #a78bfa; color: #a78bfa; background: #1f1830; }
+.sv-to-simwrap .sv-section { background: #120f18; border-color: #2d2440; }
+
+/* Veredicto */
+.sv-to-verdict {
+  border-left: 5px solid;
+  padding: 12px 16px;
+  margin: 6px 0 18px;
+  border-radius: 3px;
+}
+.sv-to-verdict--verde { border-color: #34d399; background: rgba(52,211,153,0.08); }
+.sv-to-verdict--ambar { border-color: #f5c842; background: rgba(245,200,66,0.08); }
+.sv-to-verdict--rojo  { border-color: #f87171; background: rgba(248,113,113,0.08); }
+.sv-to-verdict__name { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--to-text-3, #a8a08e); margin-bottom: 4px; }
+.sv-to-verdict__text { font-size: 0.95rem; color: #f0ece0; line-height: 1.55; }
+
+/* Pasos */
+.sv-to-step { border-top: 1px solid #2a2015; padding-top: 14px; margin-top: 16px; }
+.sv-to-step__title { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; font-weight: 800; color: #f0ece0; margin: 0 0 8px; }
+.sv-to-step__n {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: #a78bfa; color: #111; font-size: 0.8rem; font-weight: 800;
+}
+
+/* Indicadores sueltos */
+.sv-to-kpis .sv-to-kpi { min-width: 120px; }
+.sv-to-kpi .sv-kpi__label { text-transform: none; letter-spacing: 0; font-size: 0.7rem; }
+
+/* Dinero */
+.sv-to-money { margin: 4px 0 14px; }
+.sv-to-money__total { font-size: 1rem; color: #f0ece0; margin-bottom: 6px; }
+.sv-to-money__total strong { font-size: 1.2rem; }
+.sv-to-money__lines { list-style: none; margin: 0; padding: 0; max-width: 520px; }
+.sv-to-money__lines li { display: flex; justify-content: space-between; gap: 12px; font-size: 0.8rem; padding: 3px 0; border-bottom: 1px dashed #2a2015; color: var(--to-text-2, #c8c0ae); }
+
+/* Avisos agrupados */
+.sv-to-groups { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.sv-to-group { border-left: 3px solid; padding: 6px 12px; background: rgba(255,255,255,0.02); }
+.sv-to-group > summary { cursor: pointer; font-size: 0.82rem; font-weight: 700; color: #f0ece0; }
+.sv-to-group ul { margin: 6px 0 2px; padding-left: 18px; font-size: 0.78rem; line-height: 1.55; color: var(--to-text-2, #c8c0ae); }
+.sv-to-group--bad { border-color: #f87171; }
+.sv-to-group--acuerdo { border-color: #f5c842; }
+.sv-to-group--revisar { border-color: #555; }
+.sv-to-count { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 6px; border-radius: 9px; background: #2a2015; font-size: 0.7rem; text-align: center; }
+
+/* Explorador */
+.sv-to-combos { margin: 0 0 8px; padding-left: 20px; font-size: 0.8rem; color: var(--to-text-2, #c8c0ae); }
+.sv-to-combos li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 4px 0; border-bottom: 1px dashed #2a2015; }
+.sv-to-combos__txt { flex: 1; min-width: 200px; }
+
+/* Pacto sin bloque de verano */
+.sv-to-pacto { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; font-size: 0.65rem; color: var(--to-text-3, #a8a08e); }
+
+/* Calendario: cabecera de meses */
+.sv-to-tl-month {
+  font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+  color: #f0ece0; text-align: left; padding: 3px 4px; border-left: 1px solid #555; white-space: nowrap;
+}
+
+/* Menú de acciones de solicitudes resueltas */
+.sv-to-menu { display: inline-block; position: relative; }
+.sv-to-menu > summary { list-style: none; cursor: pointer; padding: 2px 8px; border: 1px solid #3a3020; border-radius: 3px; color: var(--to-text-2, #c8c0ae); }
+.sv-to-menu > summary::-webkit-details-marker { display: none; }
+.sv-to-menu__list {
+  position: absolute; right: 0; z-index: 5; margin-top: 4px; padding: 8px;
+  display: flex; flex-direction: column; gap: 6px; min-width: 170px;
+  background: #15120c; border: 1px solid #3a3020; border-radius: 3px;
+}

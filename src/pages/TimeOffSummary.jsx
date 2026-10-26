@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { PROF_META } from '../data/staffSchedule'
 import { laborablesBetween, fmtShort, PARO_VERANO } from '../utils/coverage'
-import { BLOQUE_VERANO, todayISO } from '../utils/timeoffPlan'
+import { BLOQUE_VERANO, todayISO, diasTrabajo } from '../utils/timeoffPlan'
+import { weekdayOf } from '../utils/coverage'
 import { personaDeEmpleado } from './TimeOffIntegration'
 
 // Resumen visual por persona de lo real: días aprobados y pendientes sobre lo que le toca,
@@ -15,14 +16,19 @@ function diasEnAnio(r, y) {
   return laborablesBetween(r.from, r.to).filter(d => d.startsWith(`${y}-`)).length
 }
 
-// evs / saldosByYear: { [año]: evaluación de lo real · saldos de 9to5 } para cada año de `years`
-export default function TimeOffSummary({ years, evs, saldosByYear, requests, nueve, onSync, cierreExtra = 'pagados' }) {
+// y: año que se ve (el selector de la subpestaña); evs / saldosByYear: { [año]: evaluación
+// de lo real · saldos de 9to5 } para ese año y el siguiente
+export default function TimeOffSummary({ y, evs, saldosByYear, requests, nueve, onSync, onYear, cierreExtra = 'pagados' }) {
   const [syncing, setSyncing] = useState(false)
-  const [y, setY] = useState(years[0])
+  const [msg, setMsg] = useState('')
   const ev = evs[y]
   const saldos = saldosByYear[y]
-  const otro = years.find(x => x !== y)
+  const otro = y + 1
   const evOtro = evs[otro]
+  // Días de las aprobadas contando solo los que trabaja la persona (como hace 9to5)
+  const soloTrabajo = p => requests
+    .filter(q => q.person === p && q.status === 'aprobada')
+    .reduce((n, q) => n + laborablesBetween(q.from, q.to).filter(d => d.startsWith(`${y}-`) && diasTrabajo(p).includes(weekdayOf(d))).length, 0)
   const hoy = todayISO()
   const pendEn = (p, yr) => requests.filter(q => q.person === p && q.status === 'pendiente').reduce((n, q) => n + diasEnAnio(q, yr), 0)
 
@@ -45,7 +51,11 @@ export default function TimeOffSummary({ years, evs, saldosByYear, requests, nue
       else if (b) {
         const motivos = []
         if (b.entitled != null && b.entitled !== r.dev) motivos.push(`9to5 le da ${b.entitled} días; aquí ${r.dev}${r.nParo ? ' (fijo discontinuo)' : ''}`)
-        if (b.taken !== r.usados) motivos.push(`9to5 cuenta ${b.taken} disfrutados; aquí ${r.usados} aprobados`)
+        if (b.taken !== r.usados) {
+          motivos.push(b.taken === soloTrabajo(r.p) && r.cierreConv === 0
+            ? `9to5 cuenta solo los días que trabaja (${b.taken}); aquí todos los laborables (${r.usados}). Criterio pendiente de la asesoría`
+            : `9to5 cuenta ${b.taken} disfrutados; aquí ${r.usados} aprobados`)
+        }
         cuadra = motivos.length === 0
         nueveTxt = motivos.join(' · ')
       }
@@ -55,24 +65,26 @@ export default function TimeOffSummary({ years, evs, saldosByYear, requests, nue
 
   const sincronizar = async () => {
     setSyncing(true)
-    try { await onSync() } finally { setSyncing(false) }
+    try {
+      const res = await onSync()
+      setMsg(`✓ Sincronizado: ${res?.added ?? 0} nuevas, ${res?.updated ?? 0} actualizadas`)
+    } catch (e) {
+      setMsg(`✗ ${e.message}`)
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setMsg(''), 5000)
+    }
   }
 
   return (
     <div className="sv-section">
-      <h3 className="sv-section-title">Vacaciones por persona</h3>
+      <h3 className="sv-section-title">Vacaciones {y} por persona</h3>
       <div className="sv-to-form">
-        <span className="sv-period">
-          {years.map(yr => (
-            <button key={yr} className={`sv-period__btn${yr === y ? ' sv-period__btn--active' : ''}`} onClick={() => setY(yr)}>
-              {yr}{yr === years[0] ? ' (en curso)' : ''}
-            </button>
-          ))}
-        </span>
         {nueve?.configured ? (
           <>
             <span className="sv-ot-muted">Datos de 9to5 sincronizados: {fmtWhen(nueve.last_sync)}</span>
             <button className="sv-filter-btn" disabled={syncing} onClick={sincronizar}>{syncing ? 'Sincronizando…' : 'Sincronizar ahora'}</button>
+            {msg && <span className="sv-tests-feedback">{msg}</span>}
           </>
         ) : (
           <span className="sv-to-warn-txt">Sin conexión con 9to5: solo cuentan las solicitudes metidas aquí.</span>
@@ -96,7 +108,7 @@ export default function TimeOffSummary({ years, evs, saldosByYear, requests, nue
               <div className="sv-to-card__head">
                 <span className="sv-to-card__name">{r.p}</span>
                 {r.op !== 'no' && <span className="sv-to-card__tag">paro {PARO_VERANO[r.op].toLowerCase()}</span>}
-                {cuadra === false && <span className="sv-to-card__flag" title={nueveTxt}>⚠</span>}
+                {cuadra === false && <span className="sv-to-card__flag" title={nueveTxt}>⚠ no cuadra con 9to5</span>}
               </div>
 
               <div className="sv-to-bar" title={`${r.usados} aprobadas${diasPend ? ` + ${diasPend} pendientes` : ''} de ${r.dev}`}>
@@ -130,7 +142,7 @@ export default function TimeOffSummary({ years, evs, saldosByYear, requests, nue
                 const o = evOtro.rows.find(x => x.p === r.p)
                 const pend = pendEn(r.p, otro)
                 return o && (
-                  <div className="sv-to-card__row sv-to-card__other" onClick={() => setY(otro)} title={`Ver ${otro}`}>
+                  <div className="sv-to-card__row sv-to-card__other" onClick={() => onYear(otro)} title={`Ver ${otro}`}>
                     {otro}: le quedan <strong>{o.restan}</strong> de {o.dev}
                     {o.usados > 0 && ` (${o.usados} aprobadas)`}
                     {pend > 0 && <span className="sv-to-warn-txt"> · +{pend} pendientes</span>}
@@ -150,7 +162,7 @@ export default function TimeOffSummary({ years, evs, saldosByYear, requests, nue
       <p className="sv-note">
         «Le quedan» cuenta las aprobadas (y el cierre de la sala, si lo hay) sobre lo que le toca ese año según el
         convenio y su paro, con la configuración real. La cifra de 9to5 es su saldo de ese año: si no coincide, la
-        tarjeta lo explica. Las vacaciones cuentan por año natural: lo disfrutado en {years[0]} no resta de {years[1]}.
+        tarjeta lo explica. Las vacaciones cuentan por año natural: lo disfrutado en {y} no resta de {otro}.
       </p>
     </div>
   )

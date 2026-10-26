@@ -20,14 +20,26 @@ export function PrevisionVerano({ ev, state, historico }) {
   const total = [7, 8].reduce((n, m) => n + prev[m].resultado, 0)
   const totalMed = [7, 8].reduce((n, m) => n + prev[m].resultadoMed, 0)
 
+  const sgn = n => `${n > 0 ? '+' : n < 0 ? '−' : ''}${eur(Math.abs(n))}`
+  const frase = m => {
+    const p = prev[m]
+    return `${MES_LABEL[m]} ${p.cerrado ? 'cerrado' : 'abierto'}: ${eur(p.resultado)} (de media, ${eur(p.resultadoMed)})`
+  }
+
   return (
     <div className="sv-section">
-      <h3 className="sv-section-title">Previsión de julio y agosto {ev.y} con el plan actual</h3>
-      <p className="sv-note">
-        Parte de la media de cada mes en el histórico y la ajusta con el plan de la calculadora: el sueldo de quien está en
-        paro (frente a hoy), las ventas que se pierden y los gastos que se ahorran si se cierra, y el campamento. El resultado
-        es ventas menos costes fijos (el Excel de 2024 tenía otro resultado porque incluía otras partidas). Los costes
-        históricos ya incluyen el paro de hoy.
+      <h3 className="sv-section-title">Previsión de julio y agosto {ev.y} con este supuesto</h3>
+      <p className="sv-to-lead">
+        Julio y agosto darían <strong className={total < 0 ? 'sv-to-bad' : 'sv-to-good'}>{eur(total)}</strong>,{' '}
+        <strong className={total - totalMed >= 0 ? 'sv-to-good' : 'sv-to-bad'}>{sgn(total - totalMed)}</strong> frente a la media de
+        los veranos anteriores ({eur(totalMed)}). {frase(7)} · {frase(8)}.
+      </p>
+      <details className="sv-to-fold">
+        <summary>Ver el detalle por mes y año</summary>
+      <p className="sv-note sv-to-small">
+        Parte de la media de cada mes en el histórico y la ajusta con el supuesto: el sueldo de quien está en paro (frente a
+        hoy), las ventas que se pierden y los gastos que se ahorran si se cierra, y el campamento. Resultado = ventas − costes
+        fijos, el mismo criterio que el histórico. Los costes históricos ya incluyen el paro de hoy.
       </p>
       <div className="sv-tests-scroll">
         <table className="sv-tests-table">
@@ -76,20 +88,24 @@ export function PrevisionVerano({ ev, state, historico }) {
           </tbody>
         </table>
       </div>
-      <div className="sv-kpis">
-        <div className="sv-kpi" style={{ '--kpi-color': total < 0 ? '#f87171' : '#34d399' }}>
-          <span className="sv-kpi__value">{eur(total)}</span>
-          <span className="sv-kpi__label">Resultado previsto julio + agosto {ev.y}</span>
-        </div>
-        <div className="sv-kpi" style={{ '--kpi-color': total - totalMed >= 0 ? '#34d399' : '#f97316' }}>
-          <span className="sv-kpi__value">{total - totalMed >= 0 ? '+' : ''}{eur(total - totalMed)}</span>
-          <span className="sv-kpi__label">Frente a la media de los veranos anteriores ({eur(totalMed)})</span>
-        </div>
-      </div>
+      </details>
       {historico.every(h => h.ahorrable == null) && ev.mesesCerradosList.length > 0 && !Object.values(state.gastosSala || {}).some(Boolean) && (
         <p className="sv-note">Los gastos que se ahorran al cerrar están a 0: rellénalos en la calculadora o usa el botón del histórico.</p>
       )}
     </div>
+  )
+}
+
+// Celda de comparación: verde si mejora frente al plan actual, rojo si empeora
+function Comp({ f, base, get, mejorSiMas = false, fmt = v => v }) {
+  const v = get(f)
+  if (f.actual) return <td>{fmt(v)}</td>
+  const d = v - get(base)
+  const mejor = mejorSiMas ? d > 0 : d < 0
+  return (
+    <td className={d === 0 ? '' : mejor ? 'sv-to-good' : 'sv-to-bad'} title={d === 0 ? 'Igual que el plan actual' : mejor ? 'Mejor que el plan actual' : 'Peor que el plan actual'}>
+      {fmt(v)}{d !== 0 && <span className="sv-to-small"> ({d > 0 ? '+' : '−'}{fmt(Math.abs(d))})</span>}
+    </td>
   )
 }
 
@@ -137,6 +153,7 @@ export function Escenarios({ scenarios, setScenarios, state, coste, requests, on
   return (
     <div className="sv-section">
       <h3 className="sv-section-title">Escenarios guardados</h3>
+      <p className="sv-note sv-to-small">Entre paréntesis, la diferencia con el plan actual: en verde si mejora y en rojo si empeora.</p>
       <p className="sv-note">
         Guarda el plan de la calculadora con un nombre para compararlo con otros. Se guardan en la app y los ven todos los
         socios. Cargar uno sustituye el plan actual (que también se guarda solo).
@@ -164,11 +181,11 @@ export function Escenarios({ scenarios, setScenarios, state, coste, requests, on
                 </td>
                 <td className="sv-ot-muted">{resumenParo(f.st.paro || {})}</td>
                 <td>{CIERRE_VERANO[f.st.cierre] || f.st.cierre}{f.st.camp?.activo ? ' + campamento' : ''} <span className="sv-ot-muted">· {f.ev.y}</span></td>
-                <td className={f.ev.eco.balance > 0 ? 'sv-to-good' : f.ev.eco.balance < 0 ? 'sv-to-bad' : ''}>{eur(f.ev.eco.balance)}</td>
-                <td className={f.ev.kpi.graves ? 'sv-to-bad' : 'sv-to-good'}>{f.ev.kpi.graves}</td>
-                <td className={f.ev.kpi.perdVer ? 'sv-to-bad' : ''}>{f.ev.kpi.perdVer}</td>
-                <td className={f.ev.kpi.comodinDias ? 'sv-to-warn-txt' : ''}>{f.ev.kpi.comodinDias}</td>
-                <td className={f.ev.kpi.choques ? 'sv-to-bad' : ''}>{f.ev.kpi.choques}</td>
+                <Comp f={f} base={filas[0]} get={x => x.ev.eco.balance} mejorSiMas fmt={v => eur(v)} />
+                <Comp f={f} base={filas[0]} get={x => x.ev.kpi.graves} />
+                <Comp f={f} base={filas[0]} get={x => x.ev.kpi.perdVer} />
+                <Comp f={f} base={filas[0]} get={x => x.ev.kpi.comodinDias} />
+                <Comp f={f} base={filas[0]} get={x => x.ev.kpi.choques} />
                 <td className={f.ev.kpi.acuerdos.length ? 'sv-to-warn-txt' : 'sv-ot-muted'}>{f.ev.kpi.acuerdos.join(', ') || 'Nadie'}</td>
                 <td className="sv-to-actions">
                   {f.sc && <button className="sv-filter-btn" disabled={busy} onClick={() => onLoad(f.sc)}>Cargar</button>}
