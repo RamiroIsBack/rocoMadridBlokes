@@ -1,0 +1,279 @@
+/* ── Presupuestos por zonas (Superadmin) ── */
+.ps { min-width: 0; }
+.ps .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── Botones ── */
+.ps-btn {
+  padding: 5px 12px;
+  background: none;
+  border: 1px solid #3a3020;
+  color: #bbb;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.ps-btn:hover:not(:disabled) { color: #f0ece0; border-color: #666; }
+.ps-btn:disabled { opacity: 0.45; cursor: default; }
+.ps-btn--primary { background: #2a2015; color: #f5c842; border-color: #f5c842; }
+.ps-btn--primary:hover:not(:disabled) { background: #3a2c18; color: #f5c842; border-color: #f5c842; }
+.ps-btn--small { padding: 3px 9px; font-size: 0.7rem; }
+.ps-btn--danger { background: rgba(248, 113, 113, 0.12); color: #f87171; border-color: #f87171; }
+.ps-btn--danger-ghost { color: #f87171; border-color: transparent; padding-left: 0; }
+.ps-btn--danger-ghost:hover:not(:disabled) { color: #fca5a5; border-color: transparent; }
+
+.ps-link {
+  background: none; border: none; padding: 0;
+  color: #f5c842; font: inherit; font-size: 0.76rem; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.ps-link--zona { font-size: 0.86rem; font-weight: 700; text-decoration: none; }
+.ps-link--zona:hover { text-decoration: underline; }
+
+.ps-aviso {
+  display: flex; gap: 12px; align-items: flex-start; justify-content: space-between;
+  padding: 8px 12px; margin-bottom: 16px; font-size: 0.78rem;
+  border-left: 3px solid #34d399; background: rgba(52, 211, 153, 0.07); color: #d6d3c8;
+}
+.ps-aviso--error { border-left-color: #f97316; background: rgba(249, 115, 22, 0.08); }
+
+/* ── Pestañas ── */
+.ps-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #2a2015;
+  margin-bottom: 22px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ps-tabs::-webkit-scrollbar { display: none; }
+.ps-tab {
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: #777;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.ps-tab:hover { color: #bbb; }
+.ps-tab--active { color: #f5c842; border-bottom-color: #f5c842; }
+.ps-tab--new { color: #a78bfa; }
+
+/* ── Textos ── */
+.ps-kicker {
+  margin: 0 0 2px;
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+  color: #888;
+}
+.ps-titulo { margin: 0 0 6px; font-size: 1.3rem; font-weight: 800; color: #f0ece0; letter-spacing: -0.01em; }
+.ps-sub    { margin: 0 0 18px; font-size: 0.8rem; color: #999; line-height: 1.45; max-width: 640px; }
+.ps-nota   { margin: 8px 0 0; font-size: 0.72rem; color: #888; }
+.ps-pie    { margin: 28px 0 0; padding-top: 14px; border-top: 1px solid #2a2015; font-size: 0.7rem; color: #777; line-height: 1.5; }
+.ps-vacio  { margin: 14px 0; padding: 18px; text-align: center; font-size: 0.8rem; color: #888; border: 1px dashed #2a2015; }
+.ps-h4     { margin: 30px 0 10px; font-size: 0.86rem; font-weight: 700; color: #f0ece0; }
+.ps-gris   { display: block; font-size: 0.7rem; color: #888; font-weight: 400; margin-top: 2px; line-height: 1.35; }
+.ps-gris-in { color: #888; font-size: 0.74rem; }
+.ps-verde  { color: #34d399; }
+.ps-small  { display: block; font-size: 0.7rem; margin-top: 2px; }
+.ps-nowrap { white-space: nowrap; }
+.ps-flex   { flex: 1; }
+
+.ps-kpis .sa-kpi { min-width: 150px; }
+.ps-kpis .sa-kpi__value { font-size: 1.2rem; }
+
+/* ── Cabecera de zona ── */
+.ps-zona__head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+.ps-medidas {
+  display: inline-block;
+  margin: 0 0 10px;
+  padding: 4px 8px;
+  background: #1a160e;
+  border: 1px solid #2a2015;
+  font-family: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.74rem;
+  color: #d6d3c8;
+  font-variant-numeric: tabular-nums;
+}
+.ps-medidas--form { margin: 0; }
+.ps-zona__notas { margin: 0 0 10px; font-size: 0.78rem; color: #aaa; line-height: 1.5; white-space: pre-line; }
+
+.ps-panel {
+  padding: 14px 16px;
+  background: rgba(245, 200, 66, 0.04);
+  border-left: 3px solid #f5c842;
+}
+.ps-panel__label { display: block; font-size: 0.64rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #888; }
+.ps-panel__big   { display: block; margin: 4px 0 10px; font-size: 1.7rem; font-weight: 800; color: #f5c842; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.ps-panel__dl {
+  display: grid; grid-template-columns: 1fr auto; gap: 4px 12px;
+  margin: 0 0 12px; font-size: 0.76rem;
+}
+.ps-panel__dl dt { color: #999; }
+.ps-panel__dl dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; color: #d6d3c8; }
+
+.ps-reparto__bar { display: flex; height: 8px; background: #2a2015; overflow: hidden; }
+.ps-reparto__bar span { display: block; height: 100%; }
+.ps-reparto__leyenda { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 0.68rem; color: #999; }
+.ps-reparto__leyenda i { display: inline-block; width: 8px; height: 8px; margin-right: 5px; vertical-align: baseline; }
+
+/* ── Barra de filtros ── */
+.ps-toolbar {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap; margin-bottom: 10px;
+}
+.ps-chips { margin-bottom: 0; }
+.ps-chip--verde { color: #34d399; border-color: rgba(52, 211, 153, 0.4); }
+.ps-chip--verde.sa-filter-btn--active { background: rgba(52, 211, 153, 0.1); color: #34d399; border-color: #34d399; }
+
+/* ── Tablas ── */
+.ps-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.ps-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  color: #d6d3c8;
+}
+.ps-table--partidas  { min-width: 980px; }
+.ps-table--resumen   { min-width: 620px; }
+.ps-table--aceptadas { min-width: 620px; }
+.ps-table th {
+  padding: 8px 8px;
+  text-align: left;
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  color: #888;
+  border-bottom: 1px solid #3a3020;
+  white-space: nowrap;
+}
+.ps-table td {
+  padding: 9px 8px;
+  vertical-align: top;
+  border-bottom: 1px solid #1f1a11;
+}
+.ps-table tfoot td {
+  padding-top: 11px;
+  border-top: 1px solid #3a3020;
+  border-bottom: none;
+  font-weight: 700;
+  color: #f0ece0;
+}
+.ps-table strong { color: #f0ece0; font-weight: 600; }
+.ps-cap td {
+  background: #1a160e;
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: #bbb;
+  padding-top: 7px; padding-bottom: 7px;
+}
+.ps-row--descartada { opacity: 0.55; }
+.ps-col-partida { min-width: 260px; max-width: 340px; }
+.ps-nota-partida { display: block; margin-top: 3px; font-size: 0.7rem; color: #a8a29e; }
+.ps-col-origen { min-width: 150px; max-width: 200px; }
+.ps-origen-linea { display: block; margin-top: 3px; font-size: 0.72rem; overflow-wrap: anywhere; }
+.ps-enlace { color: #f5c842; }
+
+.ps-tipo {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--tipo-color);
+  border: 1px solid var(--tipo-color);
+  border-radius: 20px;
+}
+
+/* Precio conseguido editable en la fila */
+.ps-conseguido {
+  width: 82px;
+  padding: 4px 6px;
+  background: #0b0a06;
+  border: 1px solid #3a3020;
+  color: #f0ece0;
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ps-conseguido::placeholder { color: #555; }
+.ps-conseguido:focus { outline: none; border-color: #f5c842; }
+.ps-conseguido--on { border-color: #34d399; background: rgba(52, 211, 153, 0.08); }
+
+/* Selector de estado en la fila */
+.ps-estado {
+  padding: 4px 6px;
+  background: #0b0a06;
+  border: 1px solid #3a3020;
+  border-left: 3px solid #777;
+  color: #d6d3c8;
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+.ps-estado:disabled { cursor: default; opacity: 0.8; }
+.ps-estado--pedir      { border-left-color: #f5c842; }
+.ps-estado--pendiente  { border-left-color: #777; }
+.ps-estado--aprobado   { border-left-color: #34d399; }
+.ps-estado--comprado   { border-left-color: #34d399; background: rgba(52, 211, 153, 0.1); }
+.ps-estado--descartado { border-left-color: #f87171; color: #888; }
+
+.ps-estado-tag { font-size: 0.72rem; font-weight: 600; color: #34d399; }
+
+/* ── Modal ── */
+.ps-modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 16px;
+  background: rgba(0, 0, 0, 0.7);
+  overflow-y: auto;
+}
+.ps-modal {
+  width: 100%; max-width: 640px;
+  padding: 20px 22px;
+  background: #100e09;
+  border: 1px solid #3a3020;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+.ps-modal__title { margin: 0 0 16px; font-size: 1rem; font-weight: 700; color: #f0ece0; }
+.ps-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
+.ps-form > .sa-error, .ps-form > .ps-nota { grid-column: 1 / -1; margin: 0; }
+.ps-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ps-field--full { grid-column: 1 / -1; }
+.ps-field > span { font-size: 0.66rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #888; }
+.ps-field small { font-size: 0.68rem; color: #777; }
+.ps-field input, .ps-field select, .ps-field textarea {
+  width: 100%; box-sizing: border-box;
+  padding: 7px 9px;
+  background: #0b0a06;
+  border: 1px solid #3a3020;
+  color: #f0ece0;
+  font: inherit; font-size: 0.82rem;
+}
+.ps-field textarea { resize: vertical; }
+.ps-field input:focus, .ps-field select:focus, .ps-field textarea:focus { outline: none; border-color: #f5c842; }
+.ps-field input:disabled { color: #999; }
+.ps-modal__actions {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 6px; padding-top: 14px; border-top: 1px solid #2a2015;
+}
+.ps-confirmar { display: inline-flex; align-items: center; gap: 8px; font-size: 0.78rem; color: #f87171; }
+
+/* ── Responsive ── */
+@media (max-width: 760px) {
+  .ps-zona__head { grid-template-columns: 1fr; }
+  .ps-kpis .sa-kpi { flex: 1 1 calc(50% - 12px); min-width: 0; }
+}
+@media (max-width: 520px) {
+  .ps-form { grid-template-columns: 1fr; }
+  .ps-modal { padding: 16px; }
+  .ps-modal-overlay { padding: 16px 10px; }
+}

@@ -6244,3 +6244,267 @@ function nueve_webhook($request) {
     nueve_save_config($c);
     return rest_ensure_response(array('ok' => true));
 }
+
+// ============================================================
+//  superadmin/v1 — Presupuestos por zonas (Superadmin, solo socios)
+//  zonas del local con sus medidas y partidas agrupadas por capítulo,
+//  con precio propuesto, precio conseguido y estado hasta la compra
+// ============================================================
+
+define('PRESUP_ESTADOS', array('pedir', 'pendiente', 'aprobado', 'comprado', 'descartado'));
+define('PRESUP_TIPOS',   array('referencia', 'estimación', 'tienda', 'presupuesto'));
+define('PRESUP_MEDIDAS', array('suelo', 'perimetro', 'paredes'));
+
+add_action('rest_api_init', function() {
+    $socio_perm = function() { return blokes_get_app_role() === 'socio'; };
+
+    register_rest_route('superadmin/v1', '/presupuestos', array(
+        'methods'             => 'GET',
+        'callback'            => 'presup_get_all',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/presupuestos/zonas', array(
+        'methods'             => 'POST',
+        'callback'            => 'presup_create_zona',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/presupuestos/zonas/(?P<id>[a-z0-9-]+)', array(
+        array(
+            'methods'             => 'PUT, PATCH',
+            'callback'            => 'presup_update_zona',
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'DELETE',
+            'callback'            => 'presup_delete_zona',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/presupuestos/partidas', array(
+        'methods'             => 'POST',
+        'callback'            => 'presup_create_partida',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/presupuestos/partidas/(?P<id>[a-z0-9-]+)', array(
+        array(
+            'methods'             => 'PUT, PATCH',
+            'callback'            => 'presup_update_partida',
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'DELETE',
+            'callback'            => 'presup_delete_partida',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+    // Importar partidas: { zona, capitulos: [{ nombre, partidas: [...] }] }
+    register_rest_route('superadmin/v1', '/presupuestos/importar', array(
+        'methods'             => 'POST',
+        'callback'            => 'presup_importar',
+        'permission_callback' => $socio_perm,
+    ));
+});
+
+function presup_zonas()    { return array_values(timeoff_get_option('blokes_presup_zonas')); }
+function presup_partidas() { return array_values(timeoff_get_option('blokes_presup_partidas')); }
+function presup_save_zonas($l)    { update_option('blokes_presup_zonas', array_values($l), false); }
+function presup_save_partidas($l) { update_option('blokes_presup_partidas', array_values($l), false); }
+
+function presup_text($v, $max)     { return mb_substr(trim(sanitize_text_field((string) $v)), 0, $max); }
+function presup_longtext($v, $max) { return mb_substr(trim(sanitize_textarea_field((string) $v)), 0, $max); }
+
+// Número ≥ 0 con 2 decimales; acepta coma decimal. null si viene vacío o no es número.
+function presup_num($v) {
+    if ($v === null || $v === '') return null;
+    $v = str_replace(',', '.', (string) $v);
+    if (!is_numeric($v)) return null;
+    return round(max(0, (float) $v), 2);
+}
+
+function presup_find($list, $id) {
+    foreach ($list as $i => $x) if ($x['id'] === $id) return $i;
+    return -1;
+}
+
+function presup_clean_zona($z) {
+    $nombre = presup_text($z['nombre'] ?? '', 120);
+    if ($nombre === '') return null;
+    return array(
+        'id'        => $z['id'] ?? wp_generate_uuid4(),
+        'nombre'    => $nombre,
+        'ubicacion' => presup_text($z['ubicacion'] ?? '', 200),
+        'largo'     => presup_num($z['largo'] ?? null),
+        'ancho'     => presup_num($z['ancho'] ?? null),
+        'alto'      => presup_num($z['alto'] ?? null),
+        'notas'     => presup_longtext($z['notas'] ?? '', 3000),
+        'orden'     => intval($z['orden'] ?? 0),
+    );
+}
+
+// La página original tenía «recibido» y «hecho»: se convierten a los estados de aquí.
+function presup_estado($e) {
+    $e = (string) $e;
+    if ($e === 'recibido') return 'pendiente';
+    if ($e === 'hecho')    return 'comprado';
+    return in_array($e, PRESUP_ESTADOS, true) ? $e : 'pendiente';
+}
+
+function presup_clean_partida($p) {
+    $concepto = presup_text($p['concepto'] ?? '', 255);
+    $capitulo = presup_text($p['capitulo'] ?? '', 120);
+    $zona_id  = (string) ($p['zona_id'] ?? '');
+    if ($concepto === '' || $capitulo === '' || $zona_id === '') return null;
+    $tipo   = (string) ($p['tipo_precio'] ?? '');
+    $medida = (string) ($p['medida'] ?? '');
+    $enlace = esc_url_raw(trim((string) ($p['enlace'] ?? '')), array('http', 'https'));
+    $fecha  = (string) ($p['fecha_consulta'] ?? '');
+    return array(
+        'id'                => $p['id'] ?? wp_generate_uuid4(),
+        'zona_id'           => $zona_id,
+        'capitulo'          => $capitulo,
+        'orden'             => intval($p['orden'] ?? 0),
+        'concepto'          => $concepto,
+        'descripcion'       => presup_longtext($p['descripcion'] ?? '', 2000),
+        'cantidad'          => presup_num($p['cantidad'] ?? 1) ?? 0,
+        'unidad'            => presup_text($p['unidad'] ?? 'ud', 20) ?: 'ud',
+        'medida'            => in_array($medida, PRESUP_MEDIDAS, true) ? $medida : null,
+        'precio_propuesto'  => presup_num($p['precio_propuesto'] ?? 0) ?? 0,
+        'precio_conseguido' => presup_num($p['precio_conseguido'] ?? null),
+        'tipo_precio'       => in_array($tipo, PRESUP_TIPOS, true) ? $tipo : 'estimación',
+        'estado'            => presup_estado($p['estado'] ?? ''),
+        'proveedor'         => presup_text($p['proveedor'] ?? '', 160),
+        'fuente'            => presup_text($p['fuente'] ?? '', 255),
+        'enlace'            => mb_substr($enlace, 0, 500),
+        'fecha_consulta'    => timeoff_valid_date($fecha) ? $fecha : null,
+        'nota'              => presup_longtext($p['nota'] ?? '', 2000),
+        'actualizado'       => current_time('mysql'),
+        'por'               => timeoff_user_name(),
+    );
+}
+
+function presup_get_all() {
+    return rest_ensure_response(array(
+        'success'  => true,
+        'zonas'    => presup_zonas(),
+        'partidas' => presup_partidas(),
+    ));
+}
+
+function presup_create_zona($request) {
+    $zonas = presup_zonas();
+    $body  = $request->get_json_params();
+    $body  = is_array($body) ? $body : array();
+    unset($body['id']);
+    $body['orden'] = count($zonas) + 1;
+    $z = presup_clean_zona($body);
+    if (!$z) return new WP_Error('invalid_zona', 'Indica el nombre de la zona', array('status' => 400));
+    foreach ($zonas as $x) {
+        if (mb_strtolower($x['nombre']) === mb_strtolower($z['nombre'])) return new WP_Error('dup_zona', 'Ya hay una zona con ese nombre', array('status' => 400));
+    }
+    $zonas[] = $z;
+    presup_save_zonas($zonas);
+    return rest_ensure_response(array('success' => true, 'zona' => $z));
+}
+
+function presup_update_zona($request) {
+    $zonas = presup_zonas();
+    $i = presup_find($zonas, $request['id']);
+    if ($i < 0) return new WP_Error('not_found', 'Zona no encontrada', array('status' => 404));
+    $body = $request->get_json_params();
+    $z = presup_clean_zona(array_merge($zonas[$i], is_array($body) ? $body : array(), array('id' => $zonas[$i]['id'])));
+    if (!$z) return new WP_Error('invalid_zona', 'Indica el nombre de la zona', array('status' => 400));
+    $zonas[$i] = $z;
+    presup_save_zonas($zonas);
+    return rest_ensure_response(array('success' => true, 'zona' => $z));
+}
+
+// Borra la zona y todas sus partidas
+function presup_delete_zona($request) {
+    $id = $request['id'];
+    presup_save_zonas(array_filter(presup_zonas(), function($z) use ($id) { return $z['id'] !== $id; }));
+    presup_save_partidas(array_filter(presup_partidas(), function($p) use ($id) { return $p['zona_id'] !== $id; }));
+    return rest_ensure_response(array('success' => true));
+}
+
+function presup_create_partida($request) {
+    $body = $request->get_json_params();
+    $body = is_array($body) ? $body : array();
+    unset($body['id']);
+    if (presup_find(presup_zonas(), (string) ($body['zona_id'] ?? '')) < 0) return new WP_Error('invalid_zona', 'Zona no encontrada', array('status' => 400));
+    $p = presup_clean_partida($body);
+    if (!$p) return new WP_Error('invalid_partida', 'Faltan el concepto o el capítulo', array('status' => 400));
+    $list = presup_partidas();
+    $list[] = $p;
+    presup_save_partidas($list);
+    return rest_ensure_response(array('success' => true, 'partida' => $p));
+}
+
+// Admite cambios parciales: { estado } o { precio_conseguido } desde la tabla.
+function presup_update_partida($request) {
+    $list = presup_partidas();
+    $i = presup_find($list, $request['id']);
+    if ($i < 0) return new WP_Error('not_found', 'Partida no encontrada', array('status' => 404));
+    $body = $request->get_json_params();
+    $p = presup_clean_partida(array_merge($list[$i], is_array($body) ? $body : array(), array('id' => $list[$i]['id'], 'zona_id' => $list[$i]['zona_id'])));
+    if (!$p) return new WP_Error('invalid_partida', 'Faltan el concepto o el capítulo', array('status' => 400));
+    $list[$i] = $p;
+    presup_save_partidas($list);
+    return rest_ensure_response(array('success' => true, 'partida' => $p));
+}
+
+function presup_delete_partida($request) {
+    $id = $request['id'];
+    presup_save_partidas(array_filter(presup_partidas(), function($p) use ($id) { return $p['id'] !== $id; }));
+    return rest_ensure_response(array('success' => true));
+}
+
+// Busca la zona por nombre (o la crea) y añade las partidas. Se saltan las que ya
+// existen (mismo capítulo y concepto en esa zona), así reimportar no duplica.
+function presup_importar($request) {
+    $body   = $request->get_json_params();
+    $nombre = presup_text($body['zona'] ?? '', 120);
+    $caps   = $body['capitulos'] ?? null;
+    if ($nombre === '' || !is_array($caps)) return new WP_Error('invalid_import', 'Formato no válido: falta «zona» o «capitulos»', array('status' => 400));
+
+    $zonas = presup_zonas();
+    $zona  = null;
+    foreach ($zonas as $z) if (mb_strtolower($z['nombre']) === mb_strtolower($nombre)) { $zona = $z; break; }
+    $creada = false;
+    if (!$zona) {
+        $zona = presup_clean_zona(array('nombre' => $nombre, 'orden' => count($zonas) + 1));
+        $zonas[] = $zona;
+        presup_save_zonas($zonas);
+        $creada = true;
+    }
+
+    $list = presup_partidas();
+    $added = 0; $skipped = 0; $invalid = 0;
+    foreach ($caps as $cap) {
+        $cap_nombre = is_array($cap) ? ($cap['nombre'] ?? '') : '';
+        $items      = is_array($cap) && is_array($cap['partidas'] ?? null) ? array_values($cap['partidas']) : array();
+        foreach ($items as $n => $raw) {
+            if (!is_array($raw)) { $invalid++; continue; }
+            unset($raw['id']);
+            $p = presup_clean_partida(array_merge($raw, array('zona_id' => $zona['id'], 'capitulo' => $cap_nombre, 'orden' => $raw['orden'] ?? $n + 1)));
+            if (!$p) { $invalid++; continue; }
+            $dup = false;
+            foreach ($list as $x) {
+                if ($x['zona_id'] === $p['zona_id'] && mb_strtolower($x['capitulo']) === mb_strtolower($p['capitulo']) && mb_strtolower($x['concepto']) === mb_strtolower($p['concepto'])) { $dup = true; break; }
+            }
+            if ($dup) { $skipped++; continue; }
+            $list[] = $p;
+            $added++;
+        }
+    }
+    presup_save_partidas($list);
+    return rest_ensure_response(array(
+        'success'  => true,
+        'zona'     => $zona,
+        'creada'   => $creada,
+        'added'    => $added,
+        'skipped'  => $skipped,
+        'invalid'  => $invalid,
+        'zonas'    => presup_zonas(),
+        'partidas' => presup_partidas(),
+    ));
+}
