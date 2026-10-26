@@ -294,6 +294,11 @@ blancas (`socios`/`gestion`/`profesores`) — pídele a Ramiro que te añada o u
   pestaña, cada hora por WP-Cron y al momento por webhook `timeoff/v1/9to5-webhook`, firmado
   con HMAC); al aprobar/rechazar aquí se aprueba/rechaza en 9to5. También se traen empleados,
   festivos y saldos. Ana no está dada de alta en 9to5 (a 26/10/2026).
+- **CTRL Time Off: lo real separado del simulador (26/10/2026).** Dos subpestañas.
+  *Vacaciones*: configuración real del año (opción `blokes_timeoff_real`: paro, llaves,
+  días, cierre) + solicitudes aprobadas; contra esto se comprueba cada solicitud, siempre en
+  su propio año. *Simulador*: el plan de prueba (`blokes_timeoff_plan`), escenarios,
+  histórico y previsión; solo pasa a lo real la configuración (botón), nunca los periodos.
 - **Colaboración.** El repo es `RamiroIsBack/rocoMadridBlokes`. Cualquier push a `dev`
   despliega automáticamente, lo haga quien lo haga (la cuenta `ClubRocomadrid7a` ya ha
   desplegado con éxito). El `CLAUDE.md` pide confirmar antes de crear/modificar ficheros

@@ -13,7 +13,7 @@ import {
   DIAS_ANUALES, HOY_PARO, MES_LABEL, eur, inactivosMes, evaluarPlan, defaultYear, todayISO,
   BLOQUE_VERANO, MAX_BLOQUES, CIERRE_EXTRA,
 } from '../utils/timeoffPlan'
-import { useTimeOffData, savePlan, syncNueve } from '../hooks/useTimeOff'
+import { useTimeOffData, savePlan, saveReal, syncNueve } from '../hooks/useTimeOff'
 import TimeOffRequests, { matchPerson } from './TimeOffRequests'
 import TimeOffIntegration, { personaDeEmpleado } from './TimeOffIntegration'
 import { PrevisionVerano, Escenarios } from './TimeOffPlanning'
@@ -514,62 +514,35 @@ function ExploradorParo({ paro, cierre, keys, coste, onApply }) {
   )
 }
 
-// ─── Calculadora ─────────────────────────────────────────────────────────────
-function Calculadora({ state, setState, costes, ev, saldos }) {
-  const y = ev.y
-  const WINDOWS = {
-    verano:  { label: `Verano ${y} (jun–sep)`, from: `${y}-06-01`, to: `${y}-09-30` },
-    navidad: { label: `Navidad ${y}/${String(y + 1).slice(2)}`, from: `${y}-12-01`, to: `${y + 1}-01-10` },
-    anio:    { label: `Año ${y}`, from: `${y}-01-01`, to: `${y}-12-31` },
-  }
-  const [win, setWin] = useState('verano')
-  const [selDate, setSelDate] = useState(null)
-  const { paro, keys, dias, periods, cierre, camp, gastosSala, ingresosSala } = state
-  const cierreExtra = state.cierreExtra || 'pagados'
+// ─── Piezas compartidas por Vacaciones (lo real) y Simulador ─────────────────
 
-  // Todo el cálculo sale de evaluarPlan (el mismo que escenarios y previsión)
-  const { ctx, conflictsOf, rows, warnings, eco, campSet, mesesCerradosList, sinAbrirVer, diasComodin } = ev
-  const balance = eco.balance
-  const kpi = ev.kpi
-  const mesesCerrados = mesesCerradosList.length
-  const dates = useMemo(() => laborablesBetween(WINDOWS[win].from, WINDOWS[win].to), [win, y])
-  const sim   = useMemo(() => simulatePlan(dates, ctx), [dates, ctx])
+const toggleIn = (list, p) => (list.includes(p) ? list.filter(x => x !== p) : [...list, p])
+const num = (v, min = 0) => Math.max(min, Number(v) || 0)
 
-  function update(patch) { setState(s => ({ ...s, ...patch })) }
-  const toggle = (list, p) => (list.includes(p) ? list.filter(x => x !== p) : [...list, p])
-  function setPeriod(id, patch) { update({ periods: periods.map(x => (x.id === id ? { ...x, ...patch } : x)) }) }
-  function setCamp(patch) { update({ camp: { ...camp, ...patch } }) }
-  const num = (v, min = 0) => Math.max(min, Number(v) || 0)
-
-  const selDay = sim.find(d => d.date === selDate)
-
+function YearSelector({ y, onChange }) {
   return (
-    <div className="sv-section">
-      <h3 className="sv-section-title">Calculadora de supuestos</h3>
-      <div className="sv-to-form">
-        <span className="sv-to-inline">
-          Año
-          <span className="sv-period">
-            {[defaultYear() - 1, defaultYear(), defaultYear() + 1].map(yr => (
-              <button key={yr} className={`sv-period__btn${yr === y ? ' sv-period__btn--active' : ''}`} onClick={() => update({ year: yr })}>{yr}</button>
-            ))}
-          </span>
-        </span>
-        <span className="sv-ot-muted">Las vacaciones cuentan por año natural; los periodos de otros años se conservan.</span>
-      </div>
-      <div className="sv-controls">
-        <div className="sv-filter-group sv-to-wrap">
-          {PRESETS.map(([id, label]) => (
-            <button key={id} className="sv-filter-btn" onClick={() => update({ ...presetPlan(id, y) })}>{label}</button>
-          ))}
-          <button className="sv-filter-btn" onClick={() => setState(defaultState(y))}>Reiniciar</button>
-        </div>
-      </div>
+    <span className="sv-to-inline">
+      Año
+      <span className="sv-period">
+        {[defaultYear() - 1, defaultYear(), defaultYear() + 1].map(yr => (
+          <button key={yr} className={`sv-period__btn${yr === y ? ' sv-period__btn--active' : ''}`} onClick={() => onChange(yr)}>{yr}</button>
+        ))}
+      </span>
+    </span>
+  )
+}
 
-      <h4 className="sv-to-subtitle">Verano</h4>
+// Sala en verano, días de cierre que pasan de 15 y campamento. Con `conDinero`, también
+// ingresos/gastos de la sala y plazas/precio del campamento (solo en el simulador).
+function ConfigVerano({ state, update, ev, conDinero }) {
+  const { cierre, camp, gastosSala = {}, ingresosSala = {} } = state
+  const cierreExtra = state.cierreExtra || 'pagados'
+  const setCamp = patch => update({ camp: { ...camp, ...patch } })
+  return (
+    <>
       <div className="sv-to-form">
         <label className="sv-to-inline">
-          Sala
+          Sala en verano
           <select className="sv-tests-select" value={cierre} onChange={e => update({ cierre: e.target.value })}>
             {Object.entries(CIERRE_VERANO).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
@@ -582,7 +555,7 @@ function Calculadora({ state, setState, costes, ev, saldos }) {
                 {Object.entries(CIERRE_EXTRA).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
               </select>
             </label>
-            {mesesCerradosList.map(m => (
+            {conDinero && ev.mesesCerradosList.map(m => (
               <span key={m} className="sv-to-inline">
                 {MES_LABEL[m]}: se pierden
                 <input className="sv-tests-input sv-tests-input--num" type="number" min="0" value={ingresosSala[m] || 0}
@@ -611,57 +584,75 @@ function Calculadora({ state, setState, costes, ev, saldos }) {
             <input className="sv-tests-input sv-tests-input--unit" type="number" min="1" max="9" value={camp.semanas}
               onChange={e => setCamp({ semanas: num(e.target.value, 1) })} />
           </label>
-          <label className="sv-to-inline">
-            Plazas
-            <input className="sv-tests-input sv-tests-input--unit" type="number" min="0" value={camp.plazas}
-              onChange={e => setCamp({ plazas: num(e.target.value) })} />
-          </label>
-          <label className="sv-to-inline">
-            € por niño y semana
-            <input className="sv-tests-input sv-tests-input--unit" type="number" min="0" value={camp.precio}
-              onChange={e => setCamp({ precio: num(e.target.value) })} />
-          </label>
+          {conDinero && (
+            <>
+              <label className="sv-to-inline">
+                Plazas
+                <input className="sv-tests-input sv-tests-input--unit" type="number" min="0" value={camp.plazas}
+                  onChange={e => setCamp({ plazas: num(e.target.value) })} />
+              </label>
+              <label className="sv-to-inline">
+                € por niño y semana
+                <input className="sv-tests-input sv-tests-input--unit" type="number" min="0" value={camp.precio}
+                  onChange={e => setCamp({ precio: num(e.target.value) })} />
+              </label>
+            </>
+          )}
           <span className="sv-to-inline">
             Lo llevan
             {PROF_ORDER.map(p => (
               <label key={p} className="sv-to-chip" style={{ color: PROF_META[p].color }}>
-                <input type="checkbox" checked={camp.staff.includes(p)} onChange={() => setCamp({ staff: toggle(camp.staff, p) })} />
+                <input type="checkbox" checked={camp.staff.includes(p)} onChange={() => setCamp({ staff: toggleIn(camp.staff, p) })} />
                 {p}
               </label>
             ))}
           </span>
         </div>
       )}
+    </>
+  )
+}
 
-      <div className="sv-kpis">
-        <div className="sv-kpi" style={{ '--kpi-color': balance > 0 ? '#34d399' : balance < 0 ? '#f97316' : '#888' }}>
-          <span className="sv-kpi__value">{eur(balance)}</span>
+// Indicadores de cobertura (comunes) y, en el simulador, dinero
+function Indicadores({ ev, conDinero }) {
+  const { eco, kpi, sinAbrirVer, diasComodin } = ev
+  return (
+    <div className="sv-kpis">
+      {conDinero && (
+        <div className="sv-kpi" style={{ '--kpi-color': eco.balance > 0 ? '#34d399' : eco.balance < 0 ? '#f97316' : '#888' }}>
+          <span className="sv-kpi__value">{eur(eco.balance)}</span>
           <span className="sv-kpi__label">
             Verano frente a hoy · personal {eur(eco.personal)}
-            {mesesCerrados > 0 && <> · sala {eur(eco.sala)}</>}
-            {camp.activo && mesesCerrados > 0 && <> · campamento {eur(eco.camp)}</>}
+            {ev.mesesCerradosList.length > 0 && <> · sala {eur(eco.sala)}</>}
+            {ev.ctx.camp?.activo && ev.mesesCerradosList.length > 0 && <> · campamento {eur(eco.camp)}</>}
           </span>
         </div>
-        {eco.ociosos > 0 && (
-          <div className="sv-kpi" style={{ '--kpi-color': '#f97316' }}>
-            <span className="sv-kpi__value">{eur(eco.ociosos)}</span>
-            <span className="sv-kpi__label">Sueldo de {eco.diasOciosos} días de cierre pagados sin trabajar (pasan de {BLOQUE_VERANO})</span>
-          </div>
-        )}
-        <div className="sv-kpi" style={{ '--kpi-color': sinAbrirVer.length || kpi.perdVer ? '#f87171' : '#34d399' }}>
-          <span className="sv-kpi__value">{sinAbrirVer.length} · {kpi.perdVer}</span>
-          <span className="sv-kpi__label">Verano: días sin apertura · clases sin profe</span>
+      )}
+      {eco.ociosos > 0 && (
+        <div className="sv-kpi" style={{ '--kpi-color': '#f97316' }}>
+          <span className="sv-kpi__value">{conDinero ? eur(eco.ociosos) : eco.diasOciosos}</span>
+          <span className="sv-kpi__label">{conDinero ? `Sueldo de ${eco.diasOciosos} días` : 'Días'} de cierre pagados sin trabajar (pasan de {BLOQUE_VERANO})</span>
         </div>
-        <div className="sv-kpi" style={{ '--kpi-color': diasComodin.length ? '#f5c842' : '#34d399' }}>
-          <span className="sv-kpi__value">{diasComodin.length}</span>
-          <span className="sv-kpi__label">Días de verano con {COMODIN_VERANO} dando clase</span>
-        </div>
-        <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }}>
-          <span className="sv-kpi__value">{kpi.sinAbrir} · {kpi.perdidas}</span>
-          <span className="sv-kpi__label">Resto del año: días sin apertura · clases sin cubrir</span>
-        </div>
+      )}
+      <div className="sv-kpi" style={{ '--kpi-color': sinAbrirVer.length || kpi.perdVer ? '#f87171' : '#34d399' }}>
+        <span className="sv-kpi__value">{sinAbrirVer.length} · {kpi.perdVer}</span>
+        <span className="sv-kpi__label">Verano: días sin apertura · clases sin profe</span>
       </div>
+      <div className="sv-kpi" style={{ '--kpi-color': diasComodin.length ? '#f5c842' : '#34d399' }}>
+        <span className="sv-kpi__value">{diasComodin.length}</span>
+        <span className="sv-kpi__label">Días de verano con {COMODIN_VERANO} dando clase</span>
+      </div>
+      <div className="sv-kpi" style={{ '--kpi-color': kpi.choques ? '#f87171' : '#f5c842' }}>
+        <span className="sv-kpi__value">{kpi.sinAbrir} · {kpi.perdidas} · {kpi.choques}</span>
+        <span className="sv-kpi__label">Resto del año: días sin apertura · clases sin cubrir · días con choque</span>
+      </div>
+    </div>
+  )
+}
 
+function Avisos({ ev }) {
+  return (
+    <>
       {ev.acuerdos.length > 0 && (
         <div className="sv-to-acuerdos">
           <strong>Requiere acuerdo expreso con:</strong>
@@ -672,23 +663,34 @@ function Calculadora({ state, setState, costes, ev, saldos }) {
           </ul>
         </div>
       )}
-
-      {warnings.length > 0 && (
+      {ev.warnings.length > 0 && (
         <ul className="sv-to-warnings">
-          {warnings.map((w, i) => <li key={i} className={`sv-to-warn sv-to-warn--${w.lvl}`}>{w.text}</li>)}
+          {ev.warnings.map((w, i) => <li key={i} className={`sv-to-warn sv-to-warn--${w.lvl}`}>{w.text}</li>)}
         </ul>
       )}
+    </>
+  )
+}
 
+// Tabla por persona. En lo real, "Vacaciones" son las aprobadas; en el simulador, las del plan.
+function PersonasTabla({ ev, state, update, costes, saldos, conDinero, etiquetaVacaciones }) {
+  const { paro, keys, dias } = state
+  const cierreExtra = state.cierreExtra || 'pagados'
+  const y = ev.y
+  return (
+    <>
       <div className="sv-tests-scroll">
         <table className="sv-tests-table">
           <thead>
             <tr>
               <th>Persona</th><th>Paro en verano</th><th>Llave</th><th>Días/año</th><th>Le tocan {y}</th>
-              <th>Bloque jun–sep</th><th>Bloques</th><th>Vacaciones</th><th>Le quedan</th>{saldos && <th title="Saldo de vacaciones en 9to5 para este año">En 9to5</th>}<th>Coste empresa/mes</th><th>Ahorro/año frente a hoy</th>
+              <th>Bloque jun–sep</th><th>Bloques</th><th>{etiquetaVacaciones}</th><th>Le quedan</th>
+              {saldos && <th title="Saldo de vacaciones en 9to5 para este año">En 9to5</th>}
+              {conDinero && <><th>Coste empresa/mes</th><th>Ahorro/año frente a hoy</th></>}
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
+            {ev.rows.map(r => (
               <tr key={r.p}>
                 <td style={{ color: PROF_META[r.p].color, fontWeight: 700 }}>
                   {r.p}{r.p === COMODIN_VERANO && <span className="sv-ot-muted"> · recepción</span>}
@@ -699,7 +701,7 @@ function Calculadora({ state, setState, costes, ev, saldos }) {
                     {Object.entries(PARO_VERANO).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
                   </select>
                 </td>
-                <td><input type="checkbox" checked={keys.includes(r.p)} onChange={() => update({ keys: toggle(keys, r.p) })} /></td>
+                <td><input type="checkbox" checked={keys.includes(r.p)} onChange={() => update({ keys: toggleIn(keys, r.p) })} /></td>
                 <td>
                   <input className="sv-tests-input sv-tests-input--unit" type="number" min="0" max="40" value={dias[r.p]}
                     onChange={e => update({ dias: { ...dias, [r.p]: num(e.target.value) } })} />
@@ -728,77 +730,53 @@ function Calculadora({ state, setState, costes, ev, saldos }) {
                     </td>
                   )
                 })()}
-                <td title={costes.nomina[r.p]
-                  ? `Nómina ${eur(costes.nomina[r.p].banco)}${costes.nomina[r.p].efectivo ? ` + efectivo ${eur(costes.nomina[r.p].efectivo)}` : ''} · ficha ${eur(costes.ficha[r.p])}`
-                  : 'Coste de la ficha (marzo 2026)'}>
-                  {eur(costes.mes[r.p])}{!costes.nomina[r.p] && <span className="sv-ot-muted"> *</span>}
-                </td>
-                <td className={r.ahorro > 0 ? 'sv-to-good' : r.ahorro < 0 ? 'sv-to-bad' : 'sv-ot-muted'}>{r.ahorro ? eur(r.ahorro) : '—'}</td>
+                {conDinero && (
+                  <>
+                    <td title={costes.nomina[r.p]
+                      ? `Nómina ${eur(costes.nomina[r.p].banco)}${costes.nomina[r.p].efectivo ? ` + efectivo ${eur(costes.nomina[r.p].efectivo)}` : ''} · ficha ${eur(costes.ficha[r.p])}`
+                      : 'Coste de la ficha (marzo 2026)'}>
+                      {eur(costes.mes[r.p])}{!costes.nomina[r.p] && <span className="sv-ot-muted"> *</span>}
+                    </td>
+                    <td className={r.ahorro > 0 ? 'sv-to-good' : r.ahorro < 0 ? 'sv-to-bad' : 'sv-ot-muted'}>{r.ahorro ? eur(r.ahorro) : '—'}</td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {conDinero && (
+        <p className="sv-note">
+          {costes.loading ? 'Cargando nóminas de Superadmin…'
+            : costes.conNomina
+              ? `Coste empresa estimado con las nóminas de Superadmin (${costes.month}): nómina × ${String(FACTOR_COSTE).replace('.', ',')} + lo que se paga en efectivo. Pasa el ratón por el coste para ver la nómina y el dato de la ficha.`
+              : `No se pudieron leer las nóminas de Superadmin${costes.error ? ` (${costes.error})` : ''}: se usa el coste empresa de la ficha de marzo de 2026.`}
+          {costes.conNomina && PROF_ORDER.some(p => !costes.nomina[p]) && ' * Sin nómina en Superadmin: dato de la ficha.'}
+        </p>
+      )}
+    </>
+  )
+}
 
-      <p className="sv-note">
-        {costes.loading ? 'Cargando nóminas de Superadmin…'
-          : costes.conNomina
-            ? `Coste empresa estimado con las nóminas de Superadmin (${costes.month}): nómina × ${String(FACTOR_COSTE).replace('.', ',')} + lo que se paga en efectivo. Pasa el ratón por el coste para ver la nómina y el dato de la ficha.`
-            : `No se pudieron leer las nóminas de Superadmin${costes.error ? ` (${costes.error})` : ''}: se usa el coste empresa de la ficha de marzo de 2026.`}
-        {costes.conNomina && PROF_ORDER.some(p => !costes.nomina[p]) && ' * Sin nómina en Superadmin: dato de la ficha.'}
-      </p>
+// Calendario día a día con cobertura, choques y quién abre y cierra
+function Calendario({ ev, titulo }) {
+  const y = ev.y
+  const { ctx, conflictsOf } = ev
+  const camp = ctx.camp
+  const WINDOWS = {
+    verano:  { label: `Verano ${y} (jun–sep)`, from: `${y}-06-01`, to: `${y}-09-30` },
+    navidad: { label: `Navidad ${y}/${String(y + 1).slice(2)}`, from: `${y}-12-01`, to: `${y + 1}-01-10` },
+    anio:    { label: `Año ${y}`, from: `${y}-01-01`, to: `${y}-12-31` },
+  }
+  const [win, setWin] = useState('verano')
+  const [selDate, setSelDate] = useState(null)
+  const dates = useMemo(() => laborablesBetween(WINDOWS[win].from, WINDOWS[win].to), [win, y])
+  const sim   = useMemo(() => simulatePlan(dates, ctx), [dates, ctx])
+  const selDay = sim.find(d => d.date === selDate)
 
-      <ExploradorParo paro={paro} cierre={cierre} keys={keys} coste={costes.mes} onApply={p => update({ paro: p })} />
-
-      <h4 className="sv-to-subtitle">Periodos de vacaciones</h4>
-      <div className="sv-tests-scroll">
-        <table className="sv-tests-table">
-          <thead><tr><th>Persona</th><th>Desde</th><th>Días laborables</th><th>Hasta</th><th>Comunicado</th><th>Acuerdo expreso</th><th>Nota</th><th></th></tr></thead>
-          <tbody>
-            {[...periods].sort((a, b) => a.start.localeCompare(b.start)).map(x => {
-              const ds = x.start && x.n > 0 ? laborablesFrom(x.start, x.n) : []
-              return (
-                <tr key={x.id}>
-                  <td>
-                    <select className="sv-tests-select" value={x.prof} onChange={e => setPeriod(x.id, { prof: e.target.value })}
-                      style={{ color: PROF_META[x.prof]?.color }}>
-                      {PROF_ORDER.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </td>
-                  <td><input className="sv-tests-input" type="date" value={x.start} onChange={e => setPeriod(x.id, { start: e.target.value })} /></td>
-                  <td>
-                    <input className="sv-tests-input sv-tests-input--unit" type="number" min="1" max="40" value={x.n}
-                      onChange={e => setPeriod(x.id, { n: num(e.target.value, 1) })} />
-                  </td>
-                  <td className="sv-ot-muted">{ds.length ? fmtShort(ds[ds.length - 1]) : ''}</td>
-                  <td>
-                    <input className={`sv-tests-input${ev.antelacion.some(a => a.p === x.prof && a.start === x.start) ? ' sv-to-input--bad' : ''}`}
-                      type="date" value={x.comunicado || ''} title="Fecha en que se comunica a la persona (2 meses de antelación)"
-                      onChange={e => setPeriod(x.id, { comunicado: e.target.value })} />
-                  </td>
-                  <td><input type="checkbox" checked={!!x.acuerdo} title="Pactado con la persona (fechas fuera de las reglas del convenio)"
-                    onChange={() => setPeriod(x.id, { acuerdo: !x.acuerdo })} /></td>
-                  <td>
-                    <input className="sv-tests-input sv-tests-input--desc" value={x.nota || ''} maxLength={120} placeholder="—"
-                      onChange={e => setPeriod(x.id, { nota: e.target.value })} />
-                  </td>
-                  <td><button className="sv-tests-remove" onClick={() => update({ periods: periods.filter(p => p.id !== x.id) })}>✕</button></td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="sv-note">
-        «Comunicado» es cuándo se le dice a la persona: con menos de 2 meses hasta el inicio, solo vale con acuerdo.
-        «Acuerdo expreso» registra que esas fechas están pactadas aunque se salgan de las reglas. Las solicitudes aprobadas
-        las pide la propia persona y cuentan como acuerdo.
-      </p>
-      <button className="sv-tests-add" onClick={() => update({ periods: [...periods, period(PROF_ORDER[0], WINDOWS[win].from, 5)] })}>
-        + Añadir periodo
-      </button>
-
-      <h4 className="sv-to-subtitle">Calendario</h4>
+  return (
+    <>
+      <h4 className="sv-to-subtitle">{titulo}</h4>
       <div className="sv-period" style={{ marginBottom: 10 }}>
         {Object.entries(WINDOWS).map(([id, w]) => (
           <button key={id} className={`sv-period__btn${win === id ? ' sv-period__btn--active' : ''}`}
@@ -904,6 +882,121 @@ function Calculadora({ state, setState, costes, ev, saldos }) {
           )}
         </div>
       )}
+    </>
+  )
+}
+
+// ─── Vacaciones: lo real ─────────────────────────────────────────────────────
+// La configuración real del año (paro, llaves, días, cierre) y las vacaciones
+// aprobadas. Es contra lo que se comprueban y aprueban las solicitudes.
+function VacacionesReales({ real, setReal, ev, saldos }) {
+  const update = patch => setReal(s => ({ ...s, ...patch }))
+  return (
+    <div className="sv-section">
+      <h3 className="sv-section-title">Vacaciones {ev.y}: lo real</h3>
+      <p className="sv-note">
+        Aquí solo cuentan las vacaciones <strong>aprobadas</strong> y la configuración real del año. Es lo que se usa para
+        comprobar las solicitudes. Para probar otras opciones, usa el Simulador: lo que hagas allí no cambia nada de aquí.
+      </p>
+      <div className="sv-to-form">
+        <YearSelector y={ev.y} onChange={yr => update({ year: yr })} />
+      </div>
+      <h4 className="sv-to-subtitle">Configuración del año</h4>
+      <ConfigVerano state={real} update={update} ev={ev} conDinero={false} />
+      <Indicadores ev={ev} conDinero={false} />
+      <Avisos ev={ev} />
+      <PersonasTabla ev={ev} state={real} update={update} saldos={saldos} conDinero={false} etiquetaVacaciones="Aprobadas" />
+      <Calendario ev={ev} titulo="Calendario de vacaciones aprobadas" />
+    </div>
+  )
+}
+
+// ─── Simulador ───────────────────────────────────────────────────────────────
+function Calculadora({ state, setState, costes, ev, saldos, onDesdeReal, onUsarEnReal }) {
+  const y = ev.y
+  const { paro, keys, periods, cierre } = state
+  const update = patch => setState(s => ({ ...s, ...patch }))
+  const setPeriod = (id, patch) => update({ periods: periods.map(x => (x.id === id ? { ...x, ...patch } : x)) })
+
+  return (
+    <div className="sv-section">
+      <h3 className="sv-section-title">Simulador de supuestos</h3>
+      <p className="sv-note">
+        Un plan de prueba para decidir: quién pasa a paro, si se cierra en verano, cómo se reparten las vacaciones… No toca
+        lo real. «Empezar desde lo real» copia aquí las vacaciones aprobadas y la configuración actual; «Usar esta
+        configuración en lo real» lleva a la pestaña Vacaciones solo el paro, las llaves, los días y el modo de verano (los
+        periodos simulados nunca se convierten en vacaciones reales: esas entran solo por solicitudes).
+      </p>
+      <div className="sv-to-form">
+        <YearSelector y={y} onChange={yr => update({ year: yr })} />
+        <button className="sv-filter-btn" onClick={onDesdeReal}>Empezar desde lo real</button>
+        <button className="sv-filter-btn" onClick={onUsarEnReal}>Usar esta configuración en lo real</button>
+      </div>
+      <div className="sv-controls">
+        <div className="sv-filter-group sv-to-wrap">
+          {PRESETS.map(([id, label]) => (
+            <button key={id} className="sv-filter-btn" onClick={() => update({ ...presetPlan(id, y) })}>{label}</button>
+          ))}
+          <button className="sv-filter-btn" onClick={() => setState(defaultState(y))}>Reiniciar</button>
+        </div>
+      </div>
+
+      <h4 className="sv-to-subtitle">Verano</h4>
+      <ConfigVerano state={state} update={update} ev={ev} conDinero />
+      <Indicadores ev={ev} conDinero />
+      <Avisos ev={ev} />
+      <PersonasTabla ev={ev} state={state} update={update} costes={costes} saldos={saldos} conDinero etiquetaVacaciones="Vacaciones" />
+
+      <ExploradorParo paro={paro} cierre={cierre} keys={keys} coste={costes.mes} onApply={p => update({ paro: p })} />
+
+      <h4 className="sv-to-subtitle">Periodos de vacaciones (simulados)</h4>
+      <div className="sv-tests-scroll">
+        <table className="sv-tests-table">
+          <thead><tr><th>Persona</th><th>Desde</th><th>Días laborables</th><th>Hasta</th><th>Comunicado</th><th>Acuerdo expreso</th><th>Nota</th><th></th></tr></thead>
+          <tbody>
+            {[...periods].sort((a, b) => a.start.localeCompare(b.start)).map(x => {
+              const ds = x.start && x.n > 0 ? laborablesFrom(x.start, x.n) : []
+              return (
+                <tr key={x.id}>
+                  <td>
+                    <select className="sv-tests-select" value={x.prof} onChange={e => setPeriod(x.id, { prof: e.target.value })}
+                      style={{ color: PROF_META[x.prof]?.color }}>
+                      {PROF_ORDER.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </td>
+                  <td><input className="sv-tests-input" type="date" value={x.start} onChange={e => setPeriod(x.id, { start: e.target.value })} /></td>
+                  <td>
+                    <input className="sv-tests-input sv-tests-input--unit" type="number" min="1" max="40" value={x.n}
+                      onChange={e => setPeriod(x.id, { n: num(e.target.value, 1) })} />
+                  </td>
+                  <td className="sv-ot-muted">{ds.length ? fmtShort(ds[ds.length - 1]) : ''}</td>
+                  <td>
+                    <input className={`sv-tests-input${ev.antelacion.some(a => a.p === x.prof && a.start === x.start) ? ' sv-to-input--bad' : ''}`}
+                      type="date" value={x.comunicado || ''} title="Fecha en que se comunica a la persona (2 meses de antelación)"
+                      onChange={e => setPeriod(x.id, { comunicado: e.target.value })} />
+                  </td>
+                  <td><input type="checkbox" checked={!!x.acuerdo} title="Pactado con la persona (fechas fuera de las reglas del convenio)"
+                    onChange={() => setPeriod(x.id, { acuerdo: !x.acuerdo })} /></td>
+                  <td>
+                    <input className="sv-tests-input sv-tests-input--desc" value={x.nota || ''} maxLength={120} placeholder="—"
+                      onChange={e => setPeriod(x.id, { nota: e.target.value })} />
+                  </td>
+                  <td><button className="sv-tests-remove" onClick={() => update({ periods: periods.filter(p => p.id !== x.id) })}>✕</button></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="sv-note">
+        «Comunicado» es cuándo se le diría a la persona: con menos de 2 meses hasta el inicio, solo vale con acuerdo.
+        «Acuerdo expreso» registra que esas fechas estarían pactadas aunque se salgan de las reglas.
+      </p>
+      <button className="sv-tests-add" onClick={() => update({ periods: [...periods, period(PROF_ORDER[0], `${y}-06-01`, 5)] })}>
+        + Añadir periodo
+      </button>
+
+      <Calendario ev={ev} titulo="Calendario del supuesto" />
 
       <p className="sv-note">
         Pasar a fijo discontinuo requiere que la persona firme el cambio de contrato. El paro en julio y agosto depende de lo
@@ -915,26 +1008,83 @@ function Calculadora({ state, setState, costes, ev, saldos }) {
   )
 }
 
+// ─── Guardado ────────────────────────────────────────────────────────────────
 // Estado de guardado: cargando | guardado | guardando | error | sin-servidor
-function SyncStatus({ sync }) {
+function SyncStatus({ sync, que }) {
   const txt = {
-    cargando:       'Cargando el plan de la app…',
-    guardando:      'Guardando…',
-    guardado:       sync.meta ? `Guardado en la app${sync.meta.by ? ` · ${sync.meta.by}` : ''} · ${sync.meta.updated_at?.slice(0, 16).replace(' ', ' a las ')}` : 'Guardado en la app',
-    error:          `No se pudo guardar: ${sync.msg}`,
+    cargando:       'Cargando de la app…',
+    guardando:      `Guardando ${que}…`,
+    guardado:       sync.meta ? `${que[0].toUpperCase()}${que.slice(1)} guardado en la app${sync.meta.by ? ` · ${sync.meta.by}` : ''} · ${sync.meta.updated_at?.slice(0, 16).replace(' ', ' a las ')}` : `${que[0].toUpperCase()}${que.slice(1)} guardado en la app`,
+    error:          `No se pudo guardar ${que}: ${sync.msg}`,
     'sin-servidor': `Sin conexión con el servidor (${sync.msg}): los cambios no se guardan.`,
   }[sync.status]
   return <p className={`sv-to-sync${sync.status === 'error' || sync.status === 'sin-servidor' ? ' sv-error' : ''}`}>{txt}</p>
 }
 
-export default function TimeOffTab() {
-  const [state, setState] = useState(defaultState)
+// Carga un estado del servidor (o el inicial) y lo guarda solo 1,5 s después de cada cambio
+function useServerState(remote, { field, metaField, hydrateFn, initial, save, fromBefore }) {
+  const [state, setState] = useState(initial)
   const [sync, setSync]   = useState({ status: 'cargando' })
+  const loaded    = useRef(false)
+  const lastSaved = useRef(null)
+
+  useEffect(() => {
+    if (loaded.current || remote.loading) return
+    if (remote.error) { setSync({ status: 'sin-servidor', msg: remote.error }); return }
+    loaded.current = true
+    const stored = remote.data?.[field]
+    if (stored) {
+      const st = hydrateFn(stored)
+      lastSaved.current = JSON.stringify(toPlain(st))
+      setState(st)
+      setSync({ status: 'guardado', meta: remote.data[metaField] })
+    } else {
+      // Primer guardado: lo que haya de antes o el inicial
+      const prev = fromBefore?.()
+      setState(prev ? hydrateFn(prev) : st => ({ ...st }))
+      setSync({ status: 'guardando' })
+    }
+  }, [remote.loading, remote.error, remote.data])
+
+  useEffect(() => {
+    if (!loaded.current) return
+    const json = JSON.stringify(toPlain(state))
+    if (json === lastSaved.current) return
+    setSync({ status: 'guardando' })
+    const t = setTimeout(() => {
+      save(JSON.parse(json))
+        .then(meta => { lastSaved.current = json; setSync({ status: 'guardado', meta }) })
+        .catch(e => setSync({ status: 'error', msg: e.message }))
+    }, 1500)
+    return () => clearTimeout(t)
+  }, [state])
+
+  return [state, setState, sync]
+}
+
+// Configuración real por defecto: la de hoy, sin periodos (las vacaciones reales son las aprobadas)
+function defaultReal(year = defaultYear()) {
+  const d = defaultState(year)
+  return { ...d, cierre: 'abierto', cierreExtra: 'pagados', periods: [] }
+}
+
+function hydrateReal(plain) {
+  return { ...defaultReal(plain.year || defaultYear()), ...plain, periods: [] }
+}
+
+export default function TimeOffTab() {
+  const [vista, setVista] = useState('real')
   const costes = useCostes()
   const hist   = useHistoricoMeses()
   const remote = useTimeOffData()
-  const loaded    = useRef(false)
-  const lastSaved = useRef(null)
+
+  const [real, setReal, syncReal] = useServerState(remote, {
+    field: 'real', metaField: 'real_meta', hydrateFn: hydrateReal, initial: defaultReal(), save: saveReal,
+  })
+  const [sim, setSim, syncSim] = useServerState(remote, {
+    field: 'plan', metaField: 'plan_meta', hydrateFn: hydrate,
+    initial: defaultState(), save: savePlan, fromBefore: legacyLocalPlan,
+  })
 
   const nueve     = remote.data?.nueve || null
   // Las de 9to5 traen el nombre completo: se casan con la persona del equipo
@@ -945,38 +1095,6 @@ export default function TimeOffTab() {
   const setRequests  = list => remote.setData(d => ({ ...d, requests: list }))
   const setScenarios = list => remote.setData(d => ({ ...d, scenarios: list }))
   const connected = !!remote.data && !remote.error
-
-  // Al cargar: el plan oficial del servidor; si aún no hay, el que hubiera en este navegador
-  useEffect(() => {
-    if (loaded.current || remote.loading) return
-    if (remote.error) { setSync({ status: 'sin-servidor', msg: remote.error }); return }
-    loaded.current = true
-    if (remote.data?.plan) {
-      const st = hydrate(remote.data.plan)
-      lastSaved.current = JSON.stringify(toPlain(st))
-      setState(st)
-      setSync({ status: 'guardado', meta: remote.data.plan_meta })
-    } else {
-      const legacy = legacyLocalPlan()
-      // Primer guardado: el plan del navegador o el de por defecto
-      setState(legacy ? hydrate(legacy) : st => ({ ...st }))
-      setSync({ status: 'guardando' })
-    }
-  }, [remote.loading, remote.error, remote.data])
-
-  // Autoguardado 1,5 s después del último cambio
-  useEffect(() => {
-    if (!loaded.current) return
-    const json = JSON.stringify(toPlain(state))
-    if (json === lastSaved.current) return
-    setSync({ status: 'guardando' })
-    const t = setTimeout(() => {
-      savePlan(JSON.parse(json))
-        .then(meta => { lastSaved.current = json; setSync({ status: 'guardado', meta }) })
-        .catch(e => setSync({ status: 'error', msg: e.message }))
-    }, 1500)
-    return () => clearTimeout(t)
-  }, [state])
 
   // Al abrir la pestaña, traer lo nuevo de 9to5 si hace más de 10 minutos de la última vez
   const autoSynced = useRef(false)
@@ -995,11 +1113,13 @@ export default function TimeOffTab() {
     return list.join()
   }, [nueve?.holidays])
 
-  const ev  = useMemo(() => evaluarPlan(state, costes.mes, requests), [state, costes.mes, requests, festivosKey])
+  // Lo real: configuración real + solicitudes aprobadas. El simulador: su plan, sin solicitudes.
+  const evReal = useMemo(() => evaluarPlan(real, costes.mes, requests), [real, costes.mes, requests, festivosKey])
+  const evSim  = useMemo(() => evaluarPlan(sim, costes.mes, []), [sim, costes.mes, festivosKey])
 
-  // Saldo de vacaciones de 9to5 del año del plan, por persona del equipo
-  const saldos = useMemo(() => {
-    const list = nueve?.balances?.[ev.y]
+  // Saldo de vacaciones de 9to5 por persona del equipo, para un año
+  const saldosDe = y => {
+    const list = nueve?.balances?.[y]
     if (!list) return null
     const emps = Object.fromEntries((nueve.employees || []).map(e => [e.id, e]))
     const res = {}
@@ -1008,21 +1128,58 @@ export default function TimeOffTab() {
       if (p) res[p] = b
     })
     return res
-  }, [nueve, ev.y])
-  const ctx = { paro: state.paro, cierre: state.cierre, year: ev.y }
+  }
+  const saldosReal = useMemo(() => saldosDe(evReal.y), [nueve, evReal.y])
+  const saldosSim  = useMemo(() => saldosDe(evSim.y), [nueve, evSim.y])
+
+  const desdeReal = () => {
+    if (!window.confirm('¿Sustituir el plan del simulador por lo real (configuración y vacaciones aprobadas)?')) return
+    const aprobadas = requests.filter(r => r.status === 'aprobada' && PROF_ORDER.includes(r.person))
+      .map(r => period(r.person, r.from, laborablesBetween(r.from, r.to).length,
+        { acuerdo: true, comunicado: (r.created_at || '').slice(0, 10) || todayISO(), nota: 'Aprobada' }))
+    const { periods: _p, ...conf } = real
+    setSim(s => ({ ...s, ...conf, periods: aprobadas }))
+  }
+  const usarEnReal = () => {
+    if (!window.confirm('¿Aplicar a lo real la configuración del simulador (paro, llaves, días y modo de verano)? Las vacaciones aprobadas no cambian.')) return
+    const { year, paro, keys, dias, cierre, cierreExtra, camp } = sim
+    setReal(r => ({ ...r, year, paro, keys, dias, cierre, cierreExtra, camp }))
+    setVista('real')
+  }
+
+  const ctxReal = { paro: real.paro, cierre: real.cierre, year: evReal.y }
 
   return (
     <div className="sv-tab-panel sv-to-root">
-      <SyncStatus sync={sync} />
-      <Normas ev={ev} requests={requests} />
-      <TimeOffIntegration nueve={nueve} onChange={setNueve} connected={connected} />
-      <TimeOffRequests requests={requests} setRequests={setRequests} state={state} coste={costes.mes} connected={connected} />
-      <HistoricoVerano hist={hist} onApply={h => setState(s => ({ ...s, ingresosSala: h.ingresos, gastosSala: h.ahorrable }))} />
-      <PrevisionVerano ev={ev} state={state} historico={hist.months} />
-      <ConflictMatrix keys={state.keys} ctx={ctx} />
-      <Calculadora state={state} setState={setState} costes={costes} ev={ev} saldos={saldos} />
-      <Escenarios scenarios={scenarios} setScenarios={setScenarios} state={state} coste={costes.mes} requests={requests}
-        connected={connected} toPlain={toPlain} hydrate={hydrate} onLoad={sc => setState(hydrate(sc.state))} />
+      <div className="sv-to-subtabs">
+        <button className={`sv-to-subtab${vista === 'real' ? ' sv-to-subtab--active' : ''}`} onClick={() => setVista('real')}>
+          Vacaciones <span className="sv-ot-muted">lo real</span>
+        </button>
+        <button className={`sv-to-subtab${vista === 'sim' ? ' sv-to-subtab--active' : ''}`} onClick={() => setVista('sim')}>
+          Simulador <span className="sv-ot-muted">supuestos</span>
+        </button>
+      </div>
+
+      {vista === 'real' ? (
+        <>
+          <SyncStatus sync={syncReal} que="lo real" />
+          <Normas ev={evReal} requests={requests} />
+          <TimeOffIntegration nueve={nueve} onChange={setNueve} connected={connected} />
+          <TimeOffRequests requests={requests} setRequests={setRequests} state={real} simState={sim} coste={costes.mes} connected={connected} />
+          <VacacionesReales real={real} setReal={setReal} ev={evReal} saldos={saldosReal} />
+          <ConflictMatrix keys={real.keys} ctx={ctxReal} />
+        </>
+      ) : (
+        <>
+          <SyncStatus sync={syncSim} que="el simulador" />
+          <Calculadora state={sim} setState={setSim} costes={costes} ev={evSim} saldos={saldosSim}
+            onDesdeReal={desdeReal} onUsarEnReal={usarEnReal} />
+          <HistoricoVerano hist={hist} onApply={h => setSim(s => ({ ...s, ingresosSala: h.ingresos, gastosSala: h.ahorrable }))} />
+          <PrevisionVerano ev={evSim} state={sim} historico={hist.months} />
+          <Escenarios scenarios={scenarios} setScenarios={setScenarios} state={sim} coste={costes.mes} requests={[]}
+            connected={connected} toPlain={toPlain} hydrate={hydrate} onLoad={sc => setSim(hydrate(sc.state))} />
+        </>
+      )}
     </div>
   )
 }

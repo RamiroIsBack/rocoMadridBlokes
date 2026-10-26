@@ -5677,6 +5677,13 @@ add_action('rest_api_init', function() {
         'callback'            => 'timeoff_save_plan',
         'permission_callback' => $socio_perm,
     ));
+    // Configuración real del año (paro, llaves, días, cierre): la que vale para aprobar.
+    // El plan de arriba es el del simulador.
+    register_rest_route('superadmin/v1', '/timeoff/real', array(
+        'methods'             => 'PUT',
+        'callback'            => 'timeoff_save_real',
+        'permission_callback' => $socio_perm,
+    ));
     register_rest_route('superadmin/v1', '/timeoff/scenarios', array(
         'methods'             => 'POST',
         'callback'            => 'timeoff_add_scenario',
@@ -5751,10 +5758,13 @@ function timeoff_clean_request($r) {
 
 function timeoff_get_all() {
     $plan = get_option('blokes_timeoff_plan', null);
+    $real = get_option('blokes_timeoff_real', null);
     return rest_ensure_response(array(
         'success'   => true,
         'plan'      => is_array($plan) ? $plan['state'] : null,
         'plan_meta' => is_array($plan) ? array('updated_at' => $plan['updated_at'], 'by' => $plan['by']) : null,
+        'real'      => is_array($real) ? $real['state'] : null,
+        'real_meta' => is_array($real) ? array('updated_at' => $real['updated_at'], 'by' => $real['by']) : null,
         'scenarios' => array_values(timeoff_get_option('blokes_timeoff_scenarios')),
         'requests'  => array_values(timeoff_get_option('blokes_timeoff_requests')),
         'nueve'     => nueve_public(),
@@ -5768,6 +5778,15 @@ function timeoff_save_plan($request) {
     $plan = array('state' => $state, 'updated_at' => current_time('mysql'), 'by' => timeoff_user_name());
     update_option('blokes_timeoff_plan', $plan, false);
     return rest_ensure_response(array('success' => true, 'plan_meta' => array('updated_at' => $plan['updated_at'], 'by' => $plan['by'])));
+}
+
+function timeoff_save_real($request) {
+    $body  = $request->get_json_params();
+    $state = timeoff_clean_state($body['real'] ?? null);
+    if ($state === null) return new WP_Error('invalid_real', 'Configuración no válida o demasiado grande', array('status' => 400));
+    $real = array('state' => $state, 'updated_at' => current_time('mysql'), 'by' => timeoff_user_name());
+    update_option('blokes_timeoff_real', $real, false);
+    return rest_ensure_response(array('success' => true, 'real_meta' => array('updated_at' => $real['updated_at'], 'by' => $real['by'])));
 }
 
 function timeoff_add_scenario($request) {

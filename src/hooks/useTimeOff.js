@@ -51,3 +51,6 @@ export const saveNueve = fields => request('/9to5', 'PUT', fields)
 export const testNueve = ()     => request('/9to5/test', 'POST', {})
 // → { added, updated, requests, nueve }
 export const syncNueve = (full = false) => request('/9to5/sync', 'POST', { full })
+
+// Configuración real del año (la que se usa para comprobar y aprobar solicitudes)
+export const saveReal = real => request('/real', 'PUT', { real }).then(j => j.real_meta)

@@ -253,25 +253,32 @@ export function evaluarPlan(state, coste, requests = [], pairLevels = null) {
   }
 }
 
-// Lo que cambia una solicitud: avisos y choques nuevos al aprobarla
+// Lo que cambia una solicitud: avisos y choques nuevos al aprobarla. Se evalúa siempre
+// en el año de la solicitud, contra la configuración `state` y las solicitudes aprobadas.
 export function impactoSolicitud(state, coste, requests, req) {
-  const base = evaluarPlan(state, coste, requests.filter(r => r.id !== req.id))
-  const con  = evaluarPlan(state, coste, [...requests.filter(r => r.id !== req.id), { ...req, status: 'aprobada' }], base.pairLevels)
+  const st   = { ...state, year: Number(req.from.slice(0, 4)) || state.year }
+  const otras = requests.filter(r => r.id !== req.id)
+  const base = evaluarPlan(st, coste, otras)
+  const con  = evaluarPlan(st, coste, [...otras, { ...req, status: 'aprobada' }], base.pairLevels)
   const nuevos = con.warnings.filter(w => w.lvl !== 'info' && !base.warnings.some(b => b.text === w.text))
   const dias = laborablesBetween(req.from, req.to)
   const choques = con.allSim
     .filter(d => dias.includes(d.date))
     .flatMap(d => conflictsOfDay(d, con.pairLevels).filter(c => c.a === req.person || c.b === req.person).map(c => ({ ...c, date: d.date })))
   const row = con.rows.find(r => r.p === req.person)
-  const otroAnio = !req.from.startsWith(`${con.y}-`) && !req.to.startsWith(`${con.y}-`)
   return {
+    y: con.y,
     dias: dias.length,
     nuevos,
     choques,
-    restan: otroAnio ? null : row?.restan,
-    otroAnio,
+    restan: row?.restan,
     ok: !nuevos.some(w => w.lvl === 'bad') && !choques.some(c => c.level === 'rojo'),
   }
+}
+
+// Solo informativo: con quién coincidiría la solicitud en el plan del simulador
+export function choquesEnSimulador(simState, coste, req) {
+  return impactoSolicitud(simState, coste, [], req).choques
 }
 
 // Previsión de julio y agosto del año del plan: media histórica del mes ajustada

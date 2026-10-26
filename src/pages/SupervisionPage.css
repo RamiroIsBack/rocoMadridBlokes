@@ -1035,3 +1035,17 @@
   white-space: pre-wrap;
 }
 .sv-to-code { font-size: 0.72rem; color: #f0ece0; background: #0b0a07; padding: 1px 6px; border-radius: 3px; word-break: break-all; }
+.sv-to-subtabs { display: flex; gap: 6px; margin: 0 0 16px; flex-wrap: wrap; }
+.sv-to-subtab {
+  background: transparent;
+  border: 1px solid #2a2015;
+  color: var(--to-text-2, #c8c0ae);
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 8px 16px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.sv-to-subtab:hover { border-color: #555; color: #f0ece0; }
+.sv-to-subtab--active { border-color: #f5c842; color: #f5c842; background: #2a2015; }
+.sv-to-subtab .sv-ot-muted { font-weight: 400; margin-left: 4px; }

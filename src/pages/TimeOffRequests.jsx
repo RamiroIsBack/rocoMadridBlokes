@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { PROF_META, PROF_ORDER } from '../data/staffSchedule'
 import { laborablesBetween, fmtShort } from '../utils/coverage'
-import { impactoSolicitud } from '../utils/timeoffPlan'
+import { impactoSolicitud, choquesEnSimulador } from '../utils/timeoffPlan'
 import { addRequests, updateRequest, deleteRequest } from '../hooks/useTimeOff'
 
 // Solicitudes de vacaciones. Hoy llegan por la app de fichaje externa (fichero
@@ -131,7 +131,8 @@ function downloadIcs(requests) {
 
 const emptyForm = () => ({ person: PROF_ORDER[0], from: '', to: '', canal: 'mensaje', status: 'pendiente', nota: '' })
 
-export default function TimeOffRequests({ requests, setRequests, state, coste, connected }) {
+// state: la configuración real (contra la que se aprueba); simState: el plan del simulador (solo informativo)
+export default function TimeOffRequests({ requests, setRequests, state, simState, coste, connected }) {
   const [form, setForm]       = useState(emptyForm)
   const [preview, setPreview] = useState(null)
   const [filtro, setFiltro]   = useState('abiertas')
@@ -145,7 +146,7 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
     try { await fn() } catch (e) { flash(`✗ ${e.message}`) } finally { setBusy(false) }
   }
 
-  // Impacto de cada solicitud abierta (pendiente o aprobada) sobre el plan
+  // Impacto de cada solicitud abierta sobre lo real (las demás aprobadas y la configuración real)
   const impactos = useMemo(() => {
     const res = {}
     requests.filter(r => r.status !== 'rechazada' && PROF_ORDER.includes(r.person)).forEach(r => {
@@ -153,6 +154,16 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
     })
     return res
   }, [requests, state, coste])
+
+  // Solo para las pendientes: con quién coincidiría en el plan del simulador
+  const enSimulador = useMemo(() => {
+    const res = {}
+    if (!simState) return res
+    requests.filter(r => r.status === 'pendiente' && PROF_ORDER.includes(r.person)).forEach(r => {
+      res[r.id] = choquesEnSimulador(simState, coste, r).filter(c => c.level === 'rojo')
+    })
+    return res
+  }, [requests, simState, coste])
 
   const lista = [...requests]
     .filter(r => filtro === 'todas' || (filtro === 'abiertas' ? r.status !== 'rechazada' : r.status === filtro))
@@ -221,9 +232,9 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
       <p className="sv-note">
         Las piden por 9to5: con la conexión activa llegan solas (y al aprobar o rechazar aquí, el trabajador lo ve en 9to5).
         Sin conexión, sube el fichero que exporta 9to5 (Empresa › Datos de la empresa › Exportar datos, CSV) o añádelas a
-        mano si llegan por mensaje o llamada. Cada solicitud se comprueba contra el plan: choques con quien no debe coincidir,
-        días que le quedan y cobertura. Al aprobarla cuenta en el calendario y en los avisos de la calculadora. Como la pide
-        la propia persona, cuenta como acuerdo (no necesita los 2 meses de antelación).
+        mano si llegan por mensaje o llamada. Cada solicitud se comprueba, en su año, contra <strong>lo real</strong>: las
+        vacaciones ya aprobadas y la configuración del año (paro, llaves, cierre). No cuenta lo que se esté probando en el
+        Simulador. Como la pide la propia persona, cuenta como acuerdo (no necesita los 2 meses de antelación).
       </p>
       {!connected && <p className="sv-error">Sin conexión con el servidor: no se pueden guardar solicitudes.</p>}
 
@@ -332,7 +343,9 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
                           {rojos.length > 0 && <div className="sv-to-bad">Coincide con {parejas(rojos)} ({rojos.length} días)</div>}
                           {ambar.length > 0 && <div className="sv-to-warn-txt">Evitar: {parejas(ambar)} ({ambar.length} días)</div>}
                           {imp.restan != null && imp.restan < 0 && <div className="sv-to-bad">Se pasa {-imp.restan} días de lo que le toca</div>}
-                          {imp.otroAnio && <div className="sv-ot-muted">Es de otro año: cambia el año de la calculadora para ver sus días.</div>}
+                          {enSimulador[r.id]?.length > 0 && (
+                            <div className="sv-ot-muted">En el simulador coincidiría con {parejas(enSimulador[r.id])}</div>
+                          )}
                           {imp.nuevos.filter(w => !w.text.startsWith('Coinciden')).map((w, i) => (
                             <div key={i} className={w.lvl === 'bad' ? 'sv-to-bad' : 'sv-to-warn-txt'}>{w.text}</div>
                           ))}
