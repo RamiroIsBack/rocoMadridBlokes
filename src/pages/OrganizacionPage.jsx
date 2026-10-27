@@ -625,16 +625,18 @@ function WorkersAdmin({ workers, onChanged }) {
 function CreateWeekForm({ config, workers, onDone, onCancel }) {
   const [startDate, setStartDate] = useState(mondayOf(todayStr()))
   const [subzones, setSubzones] = useState([])
-  const [included, setIncluded] = useState(() => Object.fromEntries(workers.map(w => [w.id, w.active])))
+  const [included, setIncluded] = useState({})
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
 
   const toggleSubzone = s => setSubzones(cur => cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s])
+  const chosenWorkers = workers.filter(w => included[w.id])
 
   const submit = async () => {
+    if (saving) return
     setSaving(true); setError(null)
     try {
-      const assignments = workers.filter(w => included[w.id]).map(w => ({
+      const assignments = chosenWorkers.map(w => ({
         workerId: w.id, subzones, blocksMin: w.blocksMin, blocksMax: w.blocksMax,
       }))
       if (!subzones.length) throw new Error('Elige al menos una subzona')
@@ -644,7 +646,6 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
       onDone()
     } catch (e) {
       setError(e.message)
-    } finally {
       setSaving(false)
     }
   }
@@ -676,6 +677,11 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
         </div>
       </div>
       {error && <p className="org__error">{error}</p>}
+      <p className="org__hint">
+        {chosenWorkers.length === 0
+          ? 'Elige quién trabaja esta semana.'
+          : `${chosenWorkers.length} persona(s): ${chosenWorkers.map(w => w.name).join(', ')}.`}
+      </p>
       <div className="org__add-actions">
         <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
         <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Creando...' : 'Crear semana y repartir tareas'}</button>

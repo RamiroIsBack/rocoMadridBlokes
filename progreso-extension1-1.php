@@ -5174,6 +5174,7 @@ function progreso_equip_delete_holdset($request) {
 function progreso_equip_get_weeks() {
     global $wpdb;
     progreso_equip_ensure_tables();
+    progreso_equip_sweep_overdue_into_current_week();
     $rows = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('weeks') . " WHERE archived = 0 ORDER BY start_date DESC LIMIT 20", ARRAY_A);
     return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
         return array(
@@ -5223,6 +5224,94 @@ function progreso_equip_get_weeks_historico() {
     return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
+// Lo que se queda suelto y vencido en una semana vieja solo se recogía al
+// crear la siguiente semana. Si esa siguiente semana ya existe y nadie crea
+// otra, puede tardar mucho en recogerse. Esto se llama al abrir/listar
+// semanas (y al mirar Hoy) para ir recogiendo, en la semana "actual" (la más
+// reciente con start_date <= hoy), lo que ya venció en semanas anteriores y
+// sigue sin moverse a mano. Misma lógica de agrupar por tipo que el arrastre
+// al crear semana, para no duplicar tarjetas.
+function progreso_equip_sweep_overdue_into_current_week() {
+    global $wpdb;
+    $today = current_time('Y-m-d');
+    $weeks_table = progreso_equip_table('weeks');
+    $assignments_table = progreso_equip_table('assignments');
+    $tasks_table = progreso_equip_table('tasks');
+
+    $week = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, start_date FROM {$weeks_table} WHERE start_date <= %s AND archived = 0 ORDER BY start_date DESC LIMIT 1",
+        $today
+    ), ARRAY_A);
+    if (!$week) return;
+    $week_id = intval($week['id']);
+
+    $pending = $wpdb->get_results($wpdb->prepare(
+        "SELECT t.*, a.worker_id FROM {$tasks_table} t
+         JOIN {$assignments_table} a ON a.id = t.assignment_id
+         WHERE t.task_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL AND a.week_id != %d",
+        $today, $week_id
+    ), ARRAY_A);
+    if (!$pending) return;
+
+    $assignments = $wpdb->get_results($wpdb->prepare(
+        "SELECT a.*, w.is_lead, w.work_days FROM {$assignments_table} a
+         JOIN " . progreso_equip_table('workers') . " w ON w.id = a.worker_id
+         WHERE a.week_id = %d", $week_id
+    ), ARRAY_A);
+    if (!$assignments) return;
+    $target = null;
+    foreach ($assignments as $a) { if ($a['is_lead']) { $target = $a; break; } }
+    if (!$target) $target = $assignments[0];
+
+    $day_offset = array('mon' => 0, 'tue' => 1, 'wed' => 2, 'thu' => 3, 'fri' => 4, 'sat' => 5, 'sun' => 6);
+    $work_days = array_filter(explode(',', $target['work_days']));
+    $dates = array();
+    foreach ($work_days as $wd) {
+        if (!isset($day_offset[$wd])) continue;
+        $d = date('Y-m-d', strtotime($week['start_date']) + $day_offset[$wd] * 86400);
+        if ($d >= $today) $dates[] = $d;
+    }
+    sort($dates);
+    if (empty($dates)) $dates[] = $today;
+    $n = count($dates);
+
+    $pending_by_type = array();
+    foreach ($pending as $old) { $pending_by_type[$old['task_type_id']][] = $old; }
+
+    $i = 0;
+    foreach ($pending_by_type as $type_id => $olds) {
+        $max_postponed = 0; $earliest_original = null; $original_worker_id = null;
+        foreach ($olds as $old) {
+            $max_postponed = max($max_postponed, intval($old['postponed_count']));
+            $od = $old['original_date'] ?: $old['task_date'];
+            if ($earliest_original === null || $od < $earliest_original) $earliest_original = $od;
+            if ($original_worker_id === null) {
+                $original_worker_id = $old['original_worker_id'] ? intval($old['original_worker_id']) : intval($old['worker_id']);
+            }
+        }
+        $target_date = $dates[$i % $n];
+        $i++;
+        $wpdb->insert($tasks_table, array(
+            'assignment_id'       => intval($target['id']),
+            'task_type_id'        => $type_id,
+            'task_date'           => $target_date,
+            'params'              => $olds[0]['params'],
+            'done'                => 0,
+            'status'              => 'pendiente',
+            'original_date'       => $earliest_original,
+            'postponed_count'     => $max_postponed + 1,
+            'original_worker_id'  => $original_worker_id,
+        ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%d'));
+        $new_task_id = $wpdb->insert_id;
+        foreach ($olds as $old) {
+            $wpdb->update($tasks_table,
+                array('status' => 'retrasada', 'moved_to_task_id' => $new_task_id),
+                array('id' => intval($old['id'])), array('%s', '%d'), array('%d')
+            );
+        }
+    }
+}
+
 // Crea la semana y, para cada trabajador asignado, reparte el catálogo de
 // tareas entre sus días de trabajo reales esa semana — así nadie se queda
 // un día sin plan, que es justo el hueco que tenía el sistema de Notion.
@@ -5241,6 +5330,12 @@ function progreso_equip_create_week($request) {
         return new WP_Error('invalid_data', 'Falta la fecha de inicio (lunes de la semana).', array('status' => 400));
     }
     $start_date = date('Y-m-d', strtotime($start_date));
+    $existing = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('weeks') . " WHERE start_date = %s", $start_date
+    ));
+    if ($existing) {
+        return new WP_Error('duplicate_week', "Ya hay una semana del {$start_date}: ábrela.", array('status' => 409, 'weekId' => intval($existing)));
+    }
     $subzones = $request->get_param('subzones');
     $subzones = is_array($subzones) ? array_map('intval', $subzones) : array();
     $notes = sanitize_textarea_field((string) $request->get_param('notes'));
@@ -5458,6 +5553,8 @@ function progreso_equip_create_week($request) {
 
 function progreso_equip_get_week_detail($request) {
     global $wpdb;
+    progreso_equip_ensure_tables();
+    progreso_equip_sweep_overdue_into_current_week();
     $week_id = intval($request['id']);
     $week = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $week_id), ARRAY_A);
     if (!$week) return new WP_Error('not_found', 'Semana no encontrada.', array('status' => 404));
@@ -5584,6 +5681,7 @@ function progreso_equip_delete_week($request) {
 function progreso_equip_get_today($request) {
     global $wpdb;
     progreso_equip_ensure_tables();
+    progreso_equip_sweep_overdue_into_current_week();
     $worker_id = intval($request->get_param('workerId'));
     $date = sanitize_text_field((string) $request->get_param('date'));
     if (!$date) $date = current_time('Y-m-d');

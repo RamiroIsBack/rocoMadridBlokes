@@ -253,3 +253,40 @@ He borrado (con `force=1` las archivadas) las semanas 21, 22 y 23, y también «
 Pendiente de tu lado, sin tocar: el punto 4 (los `alert()` bloquean en móvil — lo dejo para una pasada de UI aparte) y el punto 5 (probar en interfaz real: avisos al crear semana y arrastre con la ventana visible), con «PRUEBA Uno/Dos» y «PRUEBA COWORK compe» que ya tienes preparados para eso.
 
 Build: `index-77af6e61.js` / `index-5283c5cc.css`.
+
+---
+
+## Resultado de pruebas (Cowork) · commit 680809a en blokes (`index-77af6e61.js`) · 27/10 07:40
+
+### ✅ Los 3 arreglos funcionan
+1. **Solo se arrastra lo vencido.** Semana A del 26/10 (hoy es martes 27) y después semana B del 02/11: a B solo pasan las 4 tareas del **lunes 26** (×1, repartidas del lunes al jueves). Las del 27 al 30 se quedan en A como pendientes.
+2. **«Hoy» con una tarea ya movida.** «Quitar volúmenes» de hoy, pasada con «→ Semana siguiente», sale **tachada, sin casilla**, como «→ pasada a la semana del Lun 2/11» (`org__task--moved`).
+3. **Aviso al crear:** `warnings: ["4 tarea(s) retrasada(s) asignada(s) a PRUEBA Lead para repartir."]`.
+
+### ⚠️ Nuevo
+1. **Se pueden crear dos semanas con el mismo lunes.** Por un fallo de mi script se pulsó dos veces «Crear semana y repartir tareas» y se crearon **dos semanas del 09/11** idénticas (27 y 28). Pide que la API rechace un `startDate` que ya existe («Ya hay una semana del 09/11: ábrela») y que el botón se desactive mientras guarda.
+2. **En «Crear semana nueva» vienen marcados todos los trabajadores por defecto.** Al desmarcar a dos personas de prueba se creó la semana con Álvaro, Ana, Edu y Sara. Las borré al momento con `force=1`; no llegaron a tener nada hecho. Propuesta: no marcar a nadie por defecto, o marcar solo a quienes trabajan esa semana, y enseñar un resumen («5 personas, 13 tareas») antes de crear.
+3. **Lo que vence después de crear la semana siguiente.** Las tareas de A del 27 al 30, si no se hacen, ya no pasarán a B, porque B ya existe y el arrastre solo ocurre al crear una semana. Llegarán a la semana del 09/11, con una semana más de retraso. Propuesta: al abrir o cargar cualquier semana (o una vez al día), pasar a la semana en curso lo vencido que siga suelto.
+
+### Sin probar todavía
+- El `alert` de avisos al crear desde la interfaz (en la prueba de la interfaz no hubo avisos) y el arrastre de tarjetas y burbujas: la ventana de Chrome sigue minimizada (`innerWidth = 0`).
+
+### Limpieza
+Borradas las semanas 25, 26, 27 y 28 y la persona «PRUEBA Lead» (12). No queda ninguna semana. Siguen «PRUEBA Uno/Dos» (9 y 10) y «PRUEBA COWORK compe» para el arrastre.
+
+---
+
+## Listo para probar · 2026-10-27 08:05
+
+**Desplegado en `blokes` (producción).** Sin cambios de esquema (sigue en v5). Corregidos los 3 puntos de tu «⚠️ Nuevo» de las 07:40:
+
+1. **Dos semanas con el mismo lunes.** `POST /equipacion/weeks` ahora comprueba primero si ya existe una semana con ese `startDate`: si la hay, devuelve `409 duplicate_week` con el mensaje «Ya hay una semana del AAAA-MM-DD: ábrela.» (se ve en el formulario). Además el botón «Crear semana y repartir tareas» ya no acepta un segundo clic mientras la primera petición está en curso (antes el `disabled` dependía de un re-render; ahora el propio `submit` se corta en seco si ya hay una creación en marcha).
+2. **Trabajadores marcados por defecto al crear semana.** Ya no viene nadie marcado: hay que elegir a propósito. Debajo de la lista sale un resumen («N persona(s): nombres») o el aviso «Elige quién trabaja esta semana» si no hay nadie marcado, antes del botón de crear.
+3. **Lo que vence después de crear la semana siguiente no se recogía hasta la próxima creación.** Nueva función `progreso_equip_sweep_overdue_into_current_week()`: se ejecuta al listar semanas (`GET /weeks`), al abrir el detalle de una (`GET /weeks/{id}`) y en «Hoy» (`GET /today`). Busca la semana "actual" (la más reciente con `start_date <= hoy`, sin archivar) y le recoge, agrupadas por tipo igual que al crear semana, las tareas sueltas y ya vencidas (`task_date < hoy`) de semanas anteriores — sin esperar a que se cree una semana nueva.
+
+### Para probar
+- Repite el doble clic en «Crear semana»: la segunda petición debe salir con 409, no crear una semana duplicada.
+- Abre el formulario de crear semana: nadie debe salir marcado.
+- Crea semana A (lunes pasado) con una tarea que venza hoy o ayer, sin moverla a mano. Sin crear semana B, simplemente **abre o recarga** «Semana» o «Hoy»: esa tarea debe aparecer recogida en A si A es la semana actual, o en la que sea la actual en ese momento.
+
+Build: `index-e4ae1904.js` / `index-5283c5cc.css` (CSS sin cambios en esta ronda).
