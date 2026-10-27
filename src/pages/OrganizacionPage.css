@@ -329,6 +329,7 @@
 
 .org__tile {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px;
   background: #fff;
@@ -341,6 +342,7 @@
 .org__tile:active { cursor: grabbing; }
 .org__tile--done { opacity: 0.55; }
 .org__tile--missed { border-color: #ef4444; background: #fef2f2; }
+.org__tile--retrasada { border-color: #c8961e; background: #fdf0d8; }
 .org__tile--dragging { opacity: 0.3; }
 .org__tile-check { display: flex; align-items: center; padding-top: 1px; cursor: pointer; }
 .org__tile-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
@@ -356,6 +358,34 @@
   padding: 2px 5px;
   border-radius: 3px;
 }
+.org__tile--retrasada .org__tile-badge { background: #c8961e; }
+.org__tile-postpone {
+  flex: 0 0 100%;
+  background: none;
+  border: 1px dashed #c8bc9a;
+  color: #8a6416;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.org__tile-postpone:disabled { opacity: 0.6; cursor: default; }
+.org__task--retrasada { border-color: #c8961e; background: #fdf0d8; }
+
+/* ── Semana: histórico ── */
+.org__historico {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.org__historico-row {
+  background: #fff;
+  border: 1px solid #e5ddc8;
+  padding: 8px 12px;
+}
+.org__historico-title { font-weight: 700; color: #2a2015; margin: 0 0 2px; font-size: 0.88rem; }
+.org__historico-meta { font-size: 0.78rem; color: var(--color-text-secondary); margin: 0; }
 
 .org__drag-ghost {
   position: fixed;
