@@ -46,17 +46,19 @@ function splitLine(line, sep) {
   return out.map(x => x.trim())
 }
 
-// Cabeceras reconocidas (el export de 9to5 trae: ID, nombre, tipo, desde, hasta, estado,
-// comentario y fecha de solicitud)
+// Cabeceras reconocidas, en español o en inglés (9to5 exporta en el idioma de quien descarga:
+// ID; Employee ID; Employee; Username (tax ID); Type; Status; From; To; …; Comment; …)
 const COLS = {
   extId:  /^id$|^id solicitud|^identificador/,
-  person: /nombre|persona|empleado|trabajador|usuario|profe/,
-  from:   /desde|inicio|comienzo|from|start|fecha ini|primer/,
-  to:     /hasta|fin|final|to$|end|ultimo|último/,
+  person: /nombre|persona|empleado|employee|trabajador|usuario|profe|^name$/,
+  from:   /^desde|inicio|comienzo|^from$|start|fecha ini|primer/,
+  to:     /^hasta|^fin$|fecha fin|final|^to$|^end$|end date|ultimo dia/,
   status: /estado|status|situaci/,
   tipo:   /^tipo|^type/,
-  nota:   /nota|coment|motivo|observ|descrip/,
+  nota:   /nota|coment|comment|motivo|observ|descrip/,
 }
+// Columnas que nunca son la persona: ids y documentos (el export de 9to5 trae el DNI)
+const NO_PERSONA = /\bid\b|nif|dni|nie|tax|^username/
 
 // CSV (o texto pegado de Excel, separado por tabuladores) → filas de solicitud
 export function parseRequestsText(text) {
@@ -66,7 +68,8 @@ export function parseRequestsText(text) {
   const head = splitLine(lines[0], sep).map(norm)
   const idx = {}
   Object.entries(COLS).forEach(([k, re]) => {
-    const i = head.findIndex((h, j) => re.test(h) && !Object.values(idx).includes(j))
+    const i = head.findIndex((h, j) => re.test(h) && !Object.values(idx).includes(j) && !(k === 'person' && NO_PERSONA.test(h))
+      && !(k === 'nota' && /revis|review/.test(h)))
     if (i >= 0) idx[k] = i
   })
   if (idx.person == null || idx.from == null) {
@@ -84,7 +87,7 @@ export function parseRequestsText(text) {
     const tipo = idx.tipo != null ? c[idx.tipo] : ''
     const extId = idx.extId != null ? parseInt(c[idx.extId], 10) || null : null
     const error = !raw ? 'sin nombre' : !from ? 'fecha no válida' : to < from ? 'fin antes del inicio'
-      : tipo && !/vacac/.test(norm(tipo)) ? `no es de vacaciones (${tipo})` : null
+      : tipo && !/vacac|vacation|holiday/.test(norm(tipo)) ? `no es de vacaciones (${tipo})` : null
     return { line: n + 2, raw, person: person || raw, known: !!person, from, to, status, canal: 'fichero', nota: idx.nota != null ? c[idx.nota] : '', extId, error }
   })
   return { rows, error: null }

@@ -670,20 +670,22 @@ function Dinero({ ev, state }) {
 function AvisosAgrupados({ ev }) {
   const bloquea = ev.warnings.filter(w => w.lvl === 'bad')
   const acuerdo = ev.acuerdos.filter(a => !a.registrado)
-  const revisar = [...ev.warnings.filter(w => w.lvl !== 'bad'), ...ev.acuerdos.filter(a => a.registrado).map(a => ({ lvl: 'info', text: `${a.p}: ${a.motivo}` }))]
+  const abrir = ev.warnings.filter(w => w.abrir)
+  const revisar = [...ev.warnings.filter(w => w.lvl !== 'bad' && !w.abrir), ...ev.acuerdos.filter(a => a.registrado).map(a => ({ lvl: 'info', text: `${a.p}: ${a.motivo}` }))]
   const grupo = (titulo, cls, items, render, abierto) => items.length > 0 && (
     <details className={`sv-to-group sv-to-group--${cls}`} open={abierto}>
       <summary>{titulo} <span className="sv-to-count">{items.length}</span></summary>
       <ul>{items.map(render)}</ul>
     </details>
   )
-  if (!bloquea.length && !acuerdo.length && !revisar.length) {
+  if (!bloquea.length && !acuerdo.length && !abrir.length && !revisar.length) {
     return <p className="sv-to-good">Sin avisos: el plan cumple el convenio y la sala queda cubierta.</p>
   }
   return (
     <div className="sv-to-groups">
       {grupo('🔴 Lo impide', 'bad', bloquea, (w, i) => <li key={i}>{w.text}</li>, true)}
       {grupo('🟠 Necesita el acuerdo de la persona', 'acuerdo', acuerdo, (a, i) => <li key={i}><strong>{a.p}</strong>: {a.motivo}</li>, true)}
+      {grupo('🟠 Hay que decidir quién abre', 'acuerdo', abrir, (w, i) => <li key={i}>{w.text}</li>, true)}
       {grupo('⚪ Para revisar', 'revisar', revisar, (w, i) => <li key={i} className={w.lvl === 'info' ? 'sv-ot-muted' : ''}>{w.text}</li>, false)}
     </div>
   )
@@ -693,8 +695,11 @@ function AvisosAgrupados({ ev }) {
 function Veredicto({ ev, nombre }) {
   const bloquea = ev.warnings.filter(w => w.lvl === 'bad')
   const acuerdo = [...new Set(ev.acuerdos.filter(a => !a.registrado).map(a => a.p))]
-  const revisar = ev.warnings.filter(w => w.lvl === 'warn').length
-  const nivel = bloquea.length ? 'rojo' : acuerdo.length ? 'ambar' : 'verde'
+  const revisar = ev.warnings.filter(w => w.lvl === 'warn' && !w.abrir).length
+  // Días en que falta quien abre siempre: no se arreglan moviendo vacaciones, pero la sala no
+  // está cubierta hasta que alguien con llave se encargue
+  const sinQuienAbra = ev.warnings.reduce((n, w) => n + (w.abrir || 0), 0)
+  const nivel = bloquea.length ? 'rojo' : acuerdo.length || sinQuienAbra ? 'ambar' : 'verde'
   const b = ev.eco.balance
   return (
     <div className={`sv-to-verdict sv-to-verdict--${nivel}`}>
@@ -706,7 +711,9 @@ function Veredicto({ ev, nombre }) {
           : <>No necesita acuerdos.</>}
         {' '}{bloquea.length
           ? <><strong>{bloquea.length} {bloquea.length === 1 ? 'problema lo impide' : 'problemas lo impiden'}</strong>: {bloquea[0].text}</>
-          : <>La sala queda cubierta y cumple el convenio.</>}
+          : sinQuienAbra
+            ? <>Cumple el convenio, pero <strong>{sinQuienAbra} {sinQuienAbra === 1 ? 'día' : 'días'} no hay quien abra</strong> (falta quien abre siempre): hay que decidir quién abre.</>
+            : <>La sala queda cubierta y cumple el convenio.</>}
         {revisar > 0 && <span className="sv-ot-muted"> {revisar} {revisar === 1 ? 'cosa' : 'cosas'} para revisar.</span>}
       </div>
     </div>
@@ -1031,7 +1038,7 @@ function Calculadora({ state, setState, costes, ev, sugerido, onDesdeReal }) {
       </Paso>
 
       <Paso n="3" titulo="Vacaciones"
-        nota="«Repartir vacaciones» coloca a cada uno su bloque de 15 en verano (si el cierre no se lo da) y el resto en Navidad y primavera, buscando las semanas con menos choques y sin días sin abrir.">
+        nota="«Repartir vacaciones» coloca a cada uno su bloque de 15 en verano (si el cierre no se lo da) y el resto en Navidad y primavera, buscando las fechas con menos choques y con los menos días sin quien abra posibles (si está fuera quien abre ese día, hay que decidir quién abre).">
         <div className="sv-to-form">
           <button className="sv-tests-add" onClick={() => setState(s => conReparto(s))}>Repartir vacaciones automáticamente</button>
           <button className="sv-filter-btn" onClick={() => update({ periods: [...periods, period(PROF_ORDER[0], `${y}-06-01`, 5)] })}>+ Añadir periodo a mano</button>

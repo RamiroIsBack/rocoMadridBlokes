@@ -262,7 +262,8 @@ export function evaluarPlan(state, coste, requests = [], pairLevels = null) {
   })
   Object.entries(porTitular).forEach(([t, dias]) => {
     const semana = [...new Set(dias.map(d => weekdayOf(d.date)))]
-    warnings.push({ lvl: 'warn', text: `${t} es quien abre los ${semana.map(w => DAY_LABEL[w].toLowerCase()).join(' y ')} (${semana.map(w => SALA[w].apertura).filter((v, i, a) => a.indexOf(v) === i).join(', ')}): los ${dias.length} días que está de vacaciones hay que decidir quién abre (${listDates(dias, d => `${DAY_SHORT[weekdayOf(d.date)]} ${fmtShort(d.date)}`)}).` })
+    const cuantos = dias.length === 1 ? 'el día' : `los ${dias.length} días`
+    warnings.push({ lvl: 'warn', abrir: dias.length, text: `${t} es quien abre los ${semana.map(w => DAY_LABEL[w].toLowerCase()).join(' y ')} (${semana.map(w => SALA[w].apertura).filter((v, i, a) => a.indexOf(v) === i).join(', ')}): ${cuantos} que está de vacaciones hay que decidir quién abre (${listDates(dias, d => `${DAY_SHORT[weekdayOf(d.date)]} ${fmtShort(d.date)}`)}).` })
   })
   if (evitables.length) warnings.push({ lvl: 'bad', text: `${evitables.length} días del resto del año sin nadie con llave para abrir (${listDates(evitables, d => `${DAY_SHORT[weekdayOf(d.date)]} ${fmtShort(d.date)}`)}).` })
   const sinCerrar = allSim.filter(d => d.sinCerrar && d.out.length)
@@ -395,14 +396,16 @@ export function repartirVacaciones(state, { comunicado = todayISO() } = {}) {
       const c = conflictsOfDay(d, levels).filter(x => x.a === cand.prof || x.b === cand.prof)
       return n + (d.sinAbrir ? 100 : 0) + (d.sinCerrar ? 20 : 0) + d.lost.length * 5 + (d.comodin || 0) * 3
         + c.filter(x => x.level === 'rojo').length * 50 + c.filter(x => x.level === 'ambar').length * 8
-        + Math.max(0, d.out.length - 1) * 4   // escalonar: penaliza coincidir con otros
+        + Math.max(0, d.out.length - 1) * 8   // escalonar: penaliza coincidir con otros
     }, 0) + (empiezaEnDescanso(cand.prof, cand.start) ? 30 : 0)
   }
-  const mejor = (prof, starts, n, nota) => {
+  // `cualquierDia`: los bloques cortos pueden empezar cualquier día que trabaje (así se pisan
+  // menos días de los que abre); el de verano, el primer día que trabaja de cada semana.
+  const mejor = (prof, starts, n, nota, cualquierDia = false) => {
     let best = null
     starts.forEach(st => {
-      // Empezar el primer día que trabaja de esa semana
-      const dia = laborablesFrom(st, 5).find(d => !empiezaEnDescanso(prof, d)) || st
+      if (cualquierDia && empiezaEnDescanso(prof, st)) return
+      const dia = cualquierDia ? st : laborablesFrom(st, 5).find(d => !empiezaEnDescanso(prof, d)) || st
       const cand = mk(prof, dia, n, nota)
       const c = coste(cand)
       if (c < Infinity && (!best || c < best.c)) best = { cand, c }
@@ -428,10 +431,10 @@ export function repartirVacaciones(state, { comunicado = todayISO() } = {}) {
       const navidad = restan > 5 ? Math.floor(restan / 2) : restan
       const primavera = restan - navidad
       const cabe = n => d => laborablesFrom(d, n).slice(-1)[0] <= `${y}-12-31`
-      const cN = mejor(p, lunesEntre(`${y}-12-07`, `${y}-12-28`).filter(cabe(navidad)), navidad, 'Navidad')
+      const cN = mejor(p, laborablesBetween(`${y}-12-07`, `${y}-12-31`).filter(cabe(navidad)), navidad, 'Navidad', true)
       if (cN) placed.push(cN)
       if (primavera > 0) {
-        const cP = mejor(p, lunesEntre(`${y}-03-02`, `${y}-05-25`), primavera, 'Primavera')
+        const cP = mejor(p, laborablesBetween(`${y}-03-02`, `${y}-05-29`), primavera, 'Primavera', true)
         if (cP) placed.push(cP)
       }
     }
