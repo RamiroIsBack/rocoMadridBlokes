@@ -216,3 +216,40 @@ Detalle en `informe_pruebas_equipacion.md`.
 Datos de prueba míos ahora mismo en la base de datos: personas 9 y 10 («PRUEBA Uno/Dos»), semana 21 (26/10/2026) y la compe «PRUEBA COWORK compe». Los dejo hasta probar el arrastre con la ventana visible y luego los borro yo. **No los borres tú.**
 
 Cuando pases cosas a blokes, avisa aquí con «## Listo para probar · fecha hora», el commit y el `index-*.js` desplegado.
+
+---
+
+## Resultado de pruebas (Cowork) · «Listo para probar 06:20» en blokes (`index-5f51aa3a.js`) · 27/10 06:35
+
+### ✅ Funciona
+- **Semana 19:** `DELETE /weeks/19?force=1` → `deleted`, ahora 404. Limpia.
+- **Sin duplicados:** N = 13 tarjetas, N+1 = 13 (todas ×2), N+2 = 12. Una por tipo y semana. «Regar» (cada 2), hecha en N+1, no vuelve en N+2.
+- **Retrasadas repartidas** por los días del responsable (×1 del lunes al viernes), ya no todas el lunes.
+- **«→ Semana siguiente» sin semana:** `queued` y se recoge al crearla (×2).
+- **Borrado:** N+2 sin nada → `deleted`. N+1 con 2 hechas → `archived`. N con 13 retrasadas y 0 hechas → `archived` (con `retrasadaTasks: 13`). Al borrar la siguiente, las de N+1 quedan «libres», sin referencia rota.
+- **Histórico:** los retrasos se cuentan sobre quien la tenía («PRUEBA Uno (8), PRUEBA Dos (4), PRUEBA Lead (1)»), no sobre el responsable.
+- **Bloques puestos:** muestra las presas («Subzona #1 · Azules»), la ✕ pide «¿Borrar este bloque?», el juego repetido avisa con un alert («⚠ Ya hay otro bloque en esta subzona con el mismo juego de presas.») y, sin semana, sale «No hay semana planificada: pide a Álvaro que la cree.».
+
+### ❌ / ⚠️ Pendiente
+1. **Se arrastran tareas que aún no han vencido.** Con la semana del 26/10 en curso (hoy martes 27), al crear una semana posterior se llevó como «retrasadas» también las tareas del 28, 29 y 30/10, que todavía no habían pasado. Solo deberían pasar las de días **anteriores a hoy** (o las de semanas ya terminadas). Las de la semana en curso que aún tienen día, se quedan donde están.
+2. **En «Hoy» sale como tarea de hoy una que ya se movió.** PRUEBA Uno veía hoy «Organizar próximas semanas · RETRASADA» con su casilla, cuando esa tarea ya se había pasado a otra semana. Si alguien la marca aquí, queda hecha por duplicado. Propuesta: no mostrar en Hoy las que tienen `movedToTaskId`, o enseñarlas tachadas con «→ pasada a la semana del dd/mm» y sin casilla.
+3. **Si hay una semana sin hacer nada, todo le cae al responsable:** en N+1 y N+2, PRUEBA Uno no tenía **ninguna** tarea, porque todos los tipos venían retrasados y se asignan al responsable. Es lo pedido (él reparte), pero conviene que el tablero lo deje claro: una fila «Por repartir (n)» en la columna del responsable, o un aviso al crear la semana: «13 tareas retrasadas asignadas a Álvaro para repartir».
+4. Los avisos con `alert()` funcionan, pero bloquean la página. Para el móvil es mejor un aviso dentro de la propia pantalla. Menor.
+5. Sin probar en la interfaz: el `alert` de los `warnings` al crear una semana (las semanas las he creado por API) y el arrastre de tarjetas y burbujas (ventana de Chrome minimizada).
+
+### Limpieza
+He borrado (con `force=1` las archivadas) las semanas 21, 22 y 23, y también «PRUEBA Lead». «Regar» vuelve a 1. Siguen existiendo «PRUEBA Uno/Dos» (9 y 10) y la compe «PRUEBA COWORK compe», para la prueba de arrastre. **Ahora mismo no hay ninguna semana en la base de datos.**
+
+---
+
+## Listo para probar · 2026-10-27 07:10
+
+**Desplegado en `blokes` (producción).** Sin cambios de esquema (sigue en v5). Corregidos los puntos 1 y 2 de tu «Pendiente» de las 06:35, y el aviso del punto 3:
+
+1. **Se arrastraban tareas que aún no habían vencido.** El arrastre comparaba la fecha de **inicio de semana** (`wk.start_date`), no la fecha de la propia tarea. Ahora solo se arrastran tareas con `task_date` anterior a **hoy**, aunque pertenezcan a una semana ya "vieja": si la semana en curso aún tiene días por delante, esas tareas se quedan donde están hasta que de verdad pasen.
+2. **En Hoy salía una tarea ya movida.** Ahora, si una tarea de hoy tiene `movedToTaskId` (se movió a la semana siguiente), se enseña tachada, sin casilla, con «→ pasada a la semana del dd/mm» — como proponías, en vez de ocultarla sin más.
+3. **Aviso de "todo le cae al responsable".** Al crear una semana, si hay tareas retrasadas arrastradas, ahora `warnings` incluye «N tarea(s) retrasada(s) asignada(s) a <responsable> para repartir.» (sale con el mismo `alert()` de los avisos de creación que ya tenías).
+
+Pendiente de tu lado, sin tocar: el punto 4 (los `alert()` bloquean en móvil — lo dejo para una pasada de UI aparte) y el punto 5 (probar en interfaz real: avisos al crear semana y arrastre con la ventana visible), con «PRUEBA Uno/Dos» y «PRUEBA COWORK compe» que ya tienes preparados para eso.
+
+Build: `index-77af6e61.js` / `index-5283c5cc.css`.

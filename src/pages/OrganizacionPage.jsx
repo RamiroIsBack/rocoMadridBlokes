@@ -165,6 +165,16 @@ function HoyView({ config, workers, workerId, onChooseWorker }) {
                   const type = taskTypeById[t.taskTypeId]
                   const params = Object.entries(t.params || {}).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' · ')
                   const isRetrasada = t.status === 'retrasada'
+                  const movedAway = isRetrasada && t.movedToTaskId
+                  if (movedAway) {
+                    return (
+                      <li key={t.id} className="org__task org__task--moved">
+                        <span className="org__task-name">{type?.name || t.taskTypeId}</span>
+                        {params && <span className="org__task-params">{params}</span>}
+                        <span className="org__tile-badge">→ pasada a la semana del {dayLabel(t.movedToDate)}</span>
+                      </li>
+                    )
+                  }
                   return (
                     <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}${isRetrasada ? ' org__task--retrasada' : ''}`}>
                       <label>

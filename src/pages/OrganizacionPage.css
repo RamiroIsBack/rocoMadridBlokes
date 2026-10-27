@@ -371,6 +371,8 @@
 }
 .org__tile-postpone:disabled { opacity: 0.6; cursor: default; }
 .org__task--retrasada { border-color: #c8961e; background: #fdf0d8; }
+.org__task--moved { opacity: 0.6; }
+.org__task--moved .org__task-name { text-decoration: line-through; }
 
 /* ── Semana: histórico ── */
 .org__historico {

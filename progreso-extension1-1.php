@@ -5314,13 +5314,17 @@ function progreso_equip_create_week($request) {
     //    más alto) para no acumular duplicados semana tras semana.
     $rolled_type_ids = array();
     if ($rollover_target) {
+        // Solo se arrastran tareas cuyo día ya ha pasado (no las de la
+        // semana en curso que todavía no han llegado a su fecha): una
+        // semana nueva puede crearse mientras la anterior aún no termina.
+        $today = current_time('Y-m-d');
         $pending = $wpdb->get_results($wpdb->prepare(
             "SELECT t.*, a.worker_id FROM {$tasks_table} t
              JOIN {$assignments_table} a ON a.id = t.assignment_id
              JOIN " . progreso_equip_table('weeks') . " wk ON wk.id = a.week_id
-             WHERE wk.start_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL
+             WHERE t.task_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL
                AND wk.id != %d",
-            $start_date, $week_id
+            $today, $week_id
         ), ARRAY_A);
         $pending_by_type = array();
         foreach ($pending as $old) { $pending_by_type[$old['task_type_id']][] = $old; }
@@ -5369,6 +5373,8 @@ function progreso_equip_create_week($request) {
     //    toca ya (no hace falta esperar a que pasen las N semanas de una
     //    tarea que nunca se llegó a hacer). Si ya viene una retrasada de ese
     //    tipo (paso 2), no se genera otra — la retrasada ya cubre esta semana.
+    $rolled_count = count($rolled_type_ids);
+
     $due_types = array();
     foreach ($task_types as $type) {
         if (isset($rolled_type_ids[$type['id']])) continue;
@@ -5388,6 +5394,9 @@ function progreso_equip_create_week($request) {
     //    - Semanales normales: a quien más veces la haya hecho entre los de
     //      esta semana; sin historial, turno rotatorio.
     $warnings = array();
+    if ($rolled_count > 0 && $rollover_target) {
+        $warnings[] = "{$rolled_count} tarea(s) retrasada(s) asignada(s) a {$rollover_target['worker']['name']} para repartir.";
+    }
     $rr_cursor = 0;
     foreach ($due_types as $type) {
         $goes_to_lead = $type['lead_only'] || intval($type['periodicityWeeks']) > 1;
@@ -5588,6 +5597,16 @@ function progreso_equip_get_today($request) {
         $worker_id, $date
     ), ARRAY_A);
 
+    $moved_to_ids = array_values(array_filter(array_map(function($t) { return intval($t['moved_to_task_id']); }, $tasks)));
+    $moved_to_dates = array();
+    if ($moved_to_ids) {
+        $ph = implode(',', array_fill(0, count($moved_to_ids), '%d'));
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, task_date FROM " . progreso_equip_table('tasks') . " WHERE id IN ($ph)", ...$moved_to_ids
+        ), ARRAY_A);
+        foreach ($rows as $r) { $moved_to_dates[intval($r['id'])] = $r['task_date']; }
+    }
+
     $assignment_id = $tasks ? intval($tasks[0]['assignment_id']) : 0;
     if (!$assignment_id) {
         // Sin tareas hoy (fin de semana, día libre...): usa igualmente la
@@ -5610,12 +5629,15 @@ function progreso_equip_get_today($request) {
     return rest_ensure_response(array('success' => true, 'data' => array(
         'date' => $date,
         'assignmentId' => $assignment_id ?: null,
-        'tasks' => array_map(function($t) {
+        'tasks' => array_map(function($t) use ($moved_to_dates) {
+            $moved_to_task_id = intval($t['moved_to_task_id']) ?: null;
             return array(
                 'id' => intval($t['id']), 'taskTypeId' => $t['task_type_id'],
                 'params' => json_decode($t['params'], true) ?: new stdClass(),
                 'done' => (bool) $t['done'], 'status' => $t['status'] ?: 'pendiente',
                 'postponedCount' => intval($t['postponed_count']),
+                'movedToTaskId' => $moved_to_task_id,
+                'movedToDate' => $moved_to_task_id && isset($moved_to_dates[$moved_to_task_id]) ? $moved_to_dates[$moved_to_task_id] : null,
             );
         }, $tasks),
         'blocks' => array_map(function($b) {
