@@ -108,9 +108,12 @@ function HoyView({ config, workers, workerId, onChooseWorker }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [showAddBlock, setShowAddBlock] = useState(false)
+  const [holdsets, setHoldsets] = useState([])
 
   const worker = workers.find(w => w.id === workerId)
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
+
+  useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
 
   const reload = useCallback(() => {
     if (!workerId) return
@@ -184,16 +187,17 @@ function HoyView({ config, workers, workerId, onChooseWorker }) {
             ) : (
               <ul className="org__block-list">
                 {data.blocks.map(b => (
-                  <BlockRow key={b.id} block={b} config={config} onChanged={reload} />
+                  <BlockRow key={b.id} block={b} holdsets={holdsets} onChanged={reload} />
                 ))}
               </ul>
             )}
+            {!data.assignmentId && <p className="org__hint">No hay semana planificada: pide a Álvaro que la cree.</p>}
             {data.assignmentId && !showAddBlock && (
               <button className="org__add-btn" onClick={() => setShowAddBlock(true)}>+ Añadir bloque</button>
             )}
             {showAddBlock && (
               <AddBlockForm
-                config={config} assignmentId={data.assignmentId}
+                config={config} holdsets={holdsets} assignmentId={data.assignmentId}
                 onDone={() => { setShowAddBlock(false); reload() }}
                 onCancel={() => setShowAddBlock(false)}
               />
@@ -205,14 +209,16 @@ function HoyView({ config, workers, workerId, onChooseWorker }) {
   )
 }
 
-function BlockRow({ block, onChanged }) {
+function BlockRow({ block, holdsets, onChanged }) {
   const [busy, setBusy] = useState(false)
+  const holdsetNames = (block.holdSetIds || []).map(id => holdsets.find(h => h.id === id)?.name || `#${id}`).join(', ')
   const toggleUploaded = async () => {
     setBusy(true)
     try { await api('PUT', `/equipacion/blocks/${block.id}`, { uploadedWebapp: !block.uploadedWebapp }); onChanged() }
     finally { setBusy(false) }
   }
   const remove = async () => {
+    if (!window.confirm('¿Borrar este bloque?')) return
     setBusy(true)
     try { await api('DELETE', `/equipacion/blocks/${block.id}`); onChanged() }
     finally { setBusy(false) }
@@ -221,7 +227,7 @@ function BlockRow({ block, onChanged }) {
     <li className="org__block-row">
       <span className="org__block-grade" style={{ background: GRADE_COLOR[block.grade] || '#ccc' }}>{block.grade}</span>
       <span className="org__block-info">
-        Subzona #{block.subzone}{block.isTraverse ? ' · travesía' : ''}
+        Subzona #{block.subzone}{block.isTraverse ? ' · travesía' : ''}{holdsetNames ? ` · ${holdsetNames}` : ''}
       </span>
       <label className="org__block-upload">
         <input type="checkbox" checked={block.uploadedWebapp} onChange={toggleUploaded} disabled={busy} />
@@ -232,27 +238,23 @@ function BlockRow({ block, onChanged }) {
   )
 }
 
-function AddBlockForm({ config, assignmentId, onDone, onCancel }) {
+function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
   const [subzone, setSubzone] = useState(config.subzones[0])
   const [grade, setGrade] = useState('VERDE')
   const [holdSetIds, setHoldSetIds] = useState([])
-  const [holdsets, setHoldsets] = useState([])
   const [isTraverse, setIsTraverse] = useState(false)
-  const [warning, setWarning] = useState(null)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
 
   const toggleHoldSet = id => {
     setHoldSetIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
   }
 
   const submit = async () => {
-    setSaving(true); setError(null); setWarning(null)
+    setSaving(true); setError(null)
     try {
       const res = await api('POST', '/equipacion/blocks', { assignmentId, subzone, grade, holdSetIds, isTraverse })
-      if (res.warning) setWarning(res.warning)
+      if (res.warning) { window.alert(`⚠ ${res.warning}`) }
       onDone()
     } catch (e) {
       setError(e.message)
@@ -290,7 +292,6 @@ function AddBlockForm({ config, assignmentId, onDone, onCancel }) {
           ))}
         </div>
       </div>
-      {warning && <p className="org__warning">⚠ {warning}</p>}
       {error && <p className="org__error">{error}</p>}
       <div className="org__add-actions">
         <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
@@ -350,9 +351,10 @@ function SemanaView({ config, workers, onWorkersChanged }) {
   const deleteWeek = async () => {
     const doneTasks = detail.assignments.reduce((n, a) => n + a.tasks.filter(t => t.done).length, 0)
     const blocksCount = detail.assignments.reduce((n, a) => n + a.blocks.length, 0)
-    const msg = (doneTasks === 0 && blocksCount === 0)
+    const retrasadaTasks = detail.assignments.reduce((n, a) => n + a.tasks.filter(t => t.status === 'retrasada').length, 0)
+    const msg = (doneTasks === 0 && blocksCount === 0 && retrasadaTasks === 0)
       ? '¿Borrar esta semana? No tiene nada hecho todavía.'
-      : `Tiene ${doneTasks} tarea(s) hecha(s) y ${blocksCount} bloque(s): se archivará (no se borra el histórico), no se borrará.`
+      : `Tiene ${doneTasks} tarea(s) hecha(s), ${retrasadaTasks} retrasada(s) y ${blocksCount} bloque(s): se archivará (no se borra el histórico), no se borrará.`
     if (!window.confirm(msg)) return
     try {
       const res = await api('DELETE', `/equipacion/weeks/${detail.id}`)
@@ -627,7 +629,8 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
       }))
       if (!subzones.length) throw new Error('Elige al menos una subzona')
       if (!assignments.length) throw new Error('Elige al menos un trabajador')
-      await api('POST', '/equipacion/weeks', { startDate, subzones, assignments })
+      const res = await api('POST', '/equipacion/weeks', { startDate, subzones, assignments })
+      if (res.warnings?.length) window.alert(res.warnings.join('\n'))
       onDone()
     } catch (e) {
       setError(e.message)

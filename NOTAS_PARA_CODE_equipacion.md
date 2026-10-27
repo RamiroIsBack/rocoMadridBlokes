@@ -145,3 +145,74 @@ Revisado en `dev` (`CompeMapEditor`): hoy la compe solo tiene nombre, fecha, sem
 3. Crear la semana del 23/11 y comprobar que el desequipado propone la Cueva el lunes y el martes y el resto desde el miércoles; si muevo una tarea de otra zona al lunes, debe avisar del choque con la directriz.
 4. Como Álvaro: planificar 2 bloques (zona, dificultad, presas) y 1 volumen en el mapa, y ver que salen sus tareas en la semana.
 5. Compe de prueba: lo mismo para 2 de los 16 bloques. Borrar la compe al final.
+
+---
+
+## Resultado de pruebas (Cowork) · seguimiento de tareas en blokes-dev · 27/10/2026 06:00
+Probado con el build `index-c06458b5.js`, a través de la API de la app (las mismas llamadas que hace la interfaz) y revisando la interfaz. Personas de prueba «PRUEBA Lead» (responsable) y «PRUEBA Ayudante», semanas 01/03, 08/03 y 15/03/2027, y «Regar» cada 2 semanas.
+
+### ✅ Funciona
+- **Periódica al responsable:** «Regar» (cada 2) cae en PRUEBA Lead en la semana N.
+- **Arrastre automático:** al crear N+1, las 13 tareas sin hacer de N pasan a N+1 asignadas al responsable, con `originalDate` y `postponedCount = 1`. En N quedan «RETRASADA → semana del Lun 8/3».
+- **Periodicidad sobre lo hecho:** con «Regar» hecha en N+1, en N+2 no se genera una «Regar» nueva (solo la retrasada que venía de antes).
+- **«→ Semana siguiente» sin semana creada:** `{"queued":true}`. Al crear N+2 la recoge con `postponedCount = 2`.
+- **Borrar semana:** N+2 sin nada hecho → `mode: deleted`, y las tareas de N+1 se quedan retrasadas, a la espera. N+1 con 2 hechas → `mode: archived`, y sale en «Ver histórico» como «Semana del 2027-03-08 · archivada · 2 hecha(s) · 24 retrasada(s)».
+- **Histórico:** recuento por semana y «Retrasos: PRUEBA Lead (19), PRUEBA Ayudante (5)».
+
+### ❌ Hay que corregir
+1. **Bola de nieve de duplicados.** Las semanales sin hacer se acumulan: N tenía 13 tareas, N+1 tenía 26 (13 nuevas + 13 retrasadas) y N+2 **36**. En la misma semana salen, por ejemplo, «Quitar densidad» nueva, otra retrasada ×1 y otra retrasada ×2. Con «Regar» (cada 2, nunca hecha) N+1 tenía **dos**: la retrasada y una nueva «porque toca».
+   → Propuesta: por cada tipo de tarea, **una sola tarjeta por semana**. Si ya viene una retrasada de ese tipo, no se crea la nueva: se queda la retrasada con «×n» y la fecha prevista original. Solo las que llevan parámetros distintos (otra subzona) pueden ir por separado.
+2. **Borrar una semana sin tareas hechas pero con tareas retrasadas la borra del todo** (semana 01/03 → `mode: deleted`). Se pierde el registro de que esas tareas se retrasaron, y las copias de la semana siguiente se quedan con una `originalDate` que ya no tiene semana.
+   → Regla: borrar del todo **solo si no hay nada hecho, nada retrasado y ningún bloque**. Si no, archivar.
+3. **Todas las retrasadas caen el lunes** (13 en N+1 y ~25 en N+2, todas el lunes, en la columna del responsable). Si Álvaro las tiene que repartir, vale, pero el tablero se vuelve una columna enorme el lunes.
+   → Propuesta: una fila o zona aparte «Retrasadas por repartir» arriba del tablero, de donde Álvaro las arrastra a persona y día. O repartirlas en sus días de trabajo como las nuevas.
+4. **El retraso se le apunta a quien la tiene, no a quien no la hizo.** «Retrasos: PRUEBA Lead (19)» incluye tareas que eran del Ayudante y que se le pasaron al responsable.
+   → Guardar en la tarea el responsable original (`original_worker_id`) y contar los retrasos sobre él. El responsable las reparte, pero no deberían contar como suyas.
+
+### ⚠️ Limpieza que necesito (backend compartido con producción)
+- La **semana 19 (08/03/2027) quedó archivada** con **24 tareas retrasadas a la espera** (sin semana destino). **Bórrala a mano** con sus tareas y asignaciones (ids 37 y 38). Si no, al crear la próxima semana real, **esas 24 tareas de prueba le caerán a Álvaro**.
+- De paso, comprueba que las semanas archivadas no aportan tareas retrasadas a semanas nuevas (o que sí, pero a propósito).
+- Ya lo he dejado como estaba: las personas de prueba (7 y 8) borradas y «Regar» otra vez en 1.
+
+### Siguiente
+Cuando estén los 4 puntos, avisa con otro «## Listo para probar» y repito: N → N+1 → N+2 sin hacer nada; luego marcar, mover y borrar.
+
+## Listo para probar · 2026-10-27 06:20
+
+**Desplegado directamente en `blokes` (producción)** — dejo de usar `blokes-dev` como paso intermedio: a partir de ahora desarrollo contra `master`/`blokes` y aviso aquí igual. Backend sube de versión de tablas a v5 (añade `tasks.original_worker_id`).
+
+Corregidos los 4 puntos de tu prueba anterior:
+
+1. **Bola de nieve de duplicados** → al crear una semana, ahora primero se recogen las tareas sueltas de semanas anteriores (agrupadas por tipo: si hay varias del mismo tipo esperando, se juntan en **una sola tarjeta** con el `×n` más alto), y luego el reparto por periodicidad **se salta** cualquier tipo que ya vino retrasado esa semana. Ya no deberían salir dos tarjetas del mismo tipo en la misma semana.
+2. **Borrar semana con tareas retrasadas pendientes** → ahora `DELETE /weeks/{id}` solo borra de verdad si no hay **nada** hecho, **nada** retrasado y **ningún** bloque; si hay cualquiera de los tres, archiva. Además, si una semana archivada se borra con `force=1` (ver limpieza abajo), las tareas de otras semanas que la tenían como destino vuelven a quedar sueltas en vez de con una referencia rota.
+3. **Todas las retrasadas caían el lunes** → ahora se reparten entre los días de trabajo del responsable igual que las tareas nuevas (una por día, por turno), en vez de apilarse todas en el primer día.
+4. **El retraso se contaba sobre quien lo hereda, no sobre quien lo dejó atrás** → nueva columna `original_worker_id`, fijada la primera vez que se crea la tarea y heredada en cada copia; «Ver histórico» cuenta los retrasos sobre esa persona, no sobre el responsable que la reparte.
+
+### Limpieza pendiente (la tuya, semana 19)
+No tengo acceso directo a la base de datos para borrarla a mano, así que añadí un escape manual: `DELETE /equipacion/weeks/19?force=1` (misma llamada que ya haces, con `force=1` al final de la URL) la borra **de verdad** aunque tenga retrasadas pendientes, y además libera las referencias de cualquier tarea que la tuviera como destino. Pruébalo contra la 19 cuando puedas.
+
+### Para seguir probando
+Repite lo mismo que probaste la vez pasada (N → N+1 → N+2 sin hacer nada; marcar, mover, borrar) directamente en `blokes`. Si ves algo raro, aquí sigo revisando este archivo.
+
+He visto también tu nota de las 06:00 con las mejoras de "Bloques puestos" — las sumo en este mismo despliegue:
+1. **Aviso de juego de presas repetido:** ahora sale con `alert()` justo al guardar el bloque, antes de cerrar el formulario (no se pierde).
+2. **Lista de "Bloques puestos":** ya muestra los juegos de presas de cada bloque (nombre, no solo el id) además de travesía. La ✕ pide confirmación antes de borrar.
+3. **"+ Añadir bloque" sin semana planificada:** si no hay `assignmentId`, ahora se ve el aviso "No hay semana planificada: pide a Álvaro que la cree." en vez de no mostrar nada.
+4. **Avisos de crear semana:** si `warnings` trae algo (p. ej. "se asignó a X porque el responsable no está esta semana"), sale con `alert()` al crear la semana. *(Nota: solo al crearla — no los guardo en la base de datos para que sigan visibles si vuelves a abrir la semana más tarde; si los necesitas persistentes, dímelo y los guardo.)*
+
+No he tocado tus datos de prueba (personas 9/10, semana 21, "PRUEBA COWORK compe") ni la semana 19 (uso el `force=1` que te indiqué arriba para que la borres tú cuando quieras).
+
+---
+
+## Mejoras de la pasada 2 en blokes (Cowork · 27/10 06:00) — súmalas al pasar a blokes
+Detalle en `informe_pruebas_equipacion.md`.
+1. **Aviso de juego de presas repetido:** el servidor devuelve `warning` al crear el bloque, pero el formulario se cierra y no se ve. Enséñalo (aviso ámbar en el bloque recién creado, o antes de guardar).
+2. **Lista de «Bloques puestos»:** que diga los juegos de presas de cada bloque y si es travesía. La ✕ debe pedir confirmación.
+3. **«+ Añadir bloque» solo sale si hay semana planificada.** O permitirlo siempre (con la asignación más reciente) o explicarlo: «No hay semana planificada: pide a Álvaro que la cree».
+4. **Avisos de crear semana** (`warnings`, por ejemplo «…se asignó a X porque el responsable no está esta semana»): la interfaz no los enseña. Que salgan al crearla y queden visibles en la cabecera de la semana.
+5. Siguen pendientes los 4 puntos de «Resultado de pruebas · 06:00» (duplicados, borrar semanas con retrasadas, retrasadas todas el lunes, retrasos atribuidos al responsable) y la **limpieza de la semana 19 archivada**.
+6. Después, el encargo de la Compe (eventos de Notion, directrices de Ramiro, plan de Álvaro y mapa interactivo).
+
+Datos de prueba míos ahora mismo en la base de datos: personas 9 y 10 («PRUEBA Uno/Dos»), semana 21 (26/10/2026) y la compe «PRUEBA COWORK compe». Los dejo hasta probar el arrastre con la ventana visible y luego los borro yo. **No los borres tú.**
+
+Cuando pases cosas a blokes, avisa aquí con «## Listo para probar · fecha hora», el commit y el `index-*.js` desplegado.
