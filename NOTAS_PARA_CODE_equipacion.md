@@ -102,3 +102,46 @@ Van los 4 puntos del encargo, uno por uno. Usa `Organización` → `Semana` dent
 Todo lo de arriba se puede probar con personas/semanas de prueba y borrarlas al final con el nuevo botón "Borrar semana" (si no tienen nada hecho, se borran del todo). Si alguna queda archivada por error durante las pruebas, dímelo y la limpio a mano en la base de datos.
 
 Si todo esto sale bien en `blokes-dev`, lo paso a `master` (producción) y te aviso aquí otra vez con el commit.
+
+---
+
+# Nuevo encargo · 27/10/2026 05:40 · Compe: eventos, directrices de Ramiro, plan de Álvaro y mapa interactivo
+
+Revisado en `dev` (`CompeMapEditor`): hoy la compe solo tiene nombre, fecha, semanas de antelación y 16 números que se colocan en el mapa. **No hay eventos, ni directrices, ni datos por bloque (presas, dificultad, zona), ni volúmenes.** Todo lo de abajo está por hacer.
+
+## 1. Calendario con los eventos del rocódromo
+- Las tareas de equipación y de compe tienen que tener en cuenta los **eventos del rocódromo** (fecha, hora, nombre y zonas que ocupan o cierran).
+- **Caso real (comprobado en Notion, página ROCOMADRID › «Calendario de Eventos»):** **miércoles 25/11/2026 a las 10:00, «Visita ACE Tetuán (ESO)»: 45 alumnos + 3 profesores.** Condiciona el **desequipado**, previsto para esa semana. En la misma semana: martes 24/11 a las 18:45, «Huerto · reparto de hortalizas».
+- En Notion hay además una base de datos **«Calendario de Equipacion»** en la misma página: conviene leerla también (o migrarla) para no tener dos calendarios.
+- La base «Calendario de Eventos» tiene las columnas Título, Fecha (con hora), Categoría (Evento, Cumpleaños, Becarios, Tareas…), Estado, Encargado, Concepto y Comentario. Importar las categorías que ocupan la sala (Evento, Cumpleaños, visitas de colegios), no las tareas internas.
+- Los eventos están en Notion, pero desde aquí no hay conexión con Notion. Propuesta: alta manual de eventos en la app ahora, e importar de Notion más adelante (base de datos de Notion por su API, con un token de integración guardado en el servidor como la clave de 9to5).
+- Al crear o ver una semana: banda con los eventos de esa semana, días y zonas bloqueadas sombreados en el tablero, y aviso si una tarea cae en una zona ocupada ese día.
+
+## 2. Directrices de Ramiro: siempre visibles y de obligado cumplimiento
+- Las directrices de Ramiro (socio y dueño) mandan sobre todo lo demás. Bloque fijo **arriba de Organización, en todas las subpestañas** (Hoy, Semana, Normas, Compe), con autor y fecha. No se puede plegar.
+- Solo Ramiro (o el rol socio) las crea, edita o cierra. Cada una puede ir ligada a fechas y zonas.
+- El reparto automático tiene que **respetarlas**. Si una tarea o un plan de Álvaro choca con una directriz, sale un aviso rojo y no se puede marcar como hecha sin que se vea el choque.
+- **Directriz actual (cárgala tal cual):** «Desequipado de la semana del 23/11/2026: **primero la Cueva**; **a partir del miércoles 25/11 (día del evento) el resto** de zonas.» — Ramiro.
+
+## 3. Plan de Álvaro (jefe de equipación): él organiza todo
+Álvaro decide, y la app tiene que dejarle anotarlo:
+- **Qué bloques van en qué zona y lugar:** zona, subzona y posición en el mapa.
+- **Con qué dificultad:** el color de la escala de Normas.
+- **Qué presas:** los juegos de presas del catálogo (`holdsets`), con el aviso actual de juego repetido en el mismo panel.
+- **Dónde van los volúmenes:** marcarlos en el mapa, con tipo y tamaño o nombre, y opcionalmente a qué bloque pertenecen.
+- **Orden de autoridad:** directriz de Ramiro > plan de Álvaro > propuesta automática. Las tareas «Poner bloques / Poner volúmenes / Quitar…» de la semana deberían salir de su plan (cada bloque o volumen planificado da su tarea, con la zona y la fecha).
+- Lo mismo para la compe: los 16 bloques con su dificultad, presas y volúmenes, no solo con un número.
+
+## 4. Mapa interactivo (lo está pensando Ramiro)
+- **Capas** que se pueden encender y apagar: bloques planificados (círculo del color de dificultad), volúmenes (otra forma), zonas con evento o cerradas (sombreadas), y lo que está montado ahora (blokes de la colección).
+- **Pulsar en el mapa → añadir** un bloque o volumen ahí. **Pulsar en uno → ficha** editable (dificultad, presas, notas, equipador, fecha prevista). **Arrastrar** para mover.
+- Zoom y desplazamiento, que funcione con el dedo en el móvil (Álvaro lo usará en la sala).
+- Pulsar una zona filtra la lista de bloques y tareas de esa zona.
+- Reutiliza el mapa ya existente (`mapaEquipacion`, y el de la cabecera con las zonas 1–8).
+
+## Cómo lo probaré
+1. Crear el evento del 25/11 y ver que aparece en la semana del 23/11 y bloquea lo que toque.
+2. Ver la directriz de Ramiro fija en las 4 subpestañas; un usuario no socio no puede editarla.
+3. Crear la semana del 23/11 y comprobar que el desequipado propone la Cueva el lunes y el martes y el resto desde el miércoles; si muevo una tarea de otra zona al lunes, debe avisar del choque con la directriz.
+4. Como Álvaro: planificar 2 bloques (zona, dificultad, presas) y 1 volumen en el mapa, y ver que salen sus tareas en la semana.
+5. Compe de prueba: lo mismo para 2 de los 16 bloques. Borrar la compe al final.
