@@ -624,6 +624,12 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)', array(
         'methods' => 'PUT', 'callback' => 'progreso_equip_update_task', 'permission_callback' => $equip_perm,
     ));
+    register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)/postpone', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_postpone_task', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/weeks/historico', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_weeks_historico', 'permission_callback' => $equip_perm,
+    ));
 
     register_rest_route('progreso/v1', '/equipacion/blocks', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_create_block', 'permission_callback' => $equip_perm,
@@ -4889,7 +4895,7 @@ function progreso_equip_table($name) {
 
 function progreso_equip_ensure_tables() {
     global $wpdb;
-    $version = '3'; // v3: + task_types (editable periodicidad)
+    $version = '4'; // v4: + seguimiento (status/retrasos) y archivado de semanas
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -4918,6 +4924,7 @@ function progreso_equip_ensure_tables() {
         start_date date                NOT NULL,
         subzones   varchar(50)         NOT NULL DEFAULT '',
         notes      text                NULL,
+        archived   tinyint(1)          NOT NULL DEFAULT 0,
         created_at datetime            NOT NULL,
         PRIMARY KEY (id)
     ) {$charset};");
@@ -4936,13 +4943,17 @@ function progreso_equip_ensure_tables() {
     ) {$charset};");
 
     dbDelta("CREATE TABLE " . progreso_equip_table('tasks') . " (
-        id            bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-        assignment_id bigint(20) UNSIGNED NOT NULL,
-        task_type_id  varchar(40)         NOT NULL,
-        task_date     date                NOT NULL,
-        params        text                NULL,
-        done          tinyint(1)          NOT NULL DEFAULT 0,
-        done_at       datetime            NULL,
+        id               bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        assignment_id    bigint(20) UNSIGNED NOT NULL,
+        task_type_id     varchar(40)         NOT NULL,
+        task_date        date                NOT NULL,
+        params           text                NULL,
+        done             tinyint(1)          NOT NULL DEFAULT 0,
+        done_at          datetime            NULL,
+        status           varchar(20)         NOT NULL DEFAULT 'pendiente',
+        original_date    date                NULL,
+        postponed_count  tinyint(3)          NOT NULL DEFAULT 0,
+        moved_to_task_id bigint(20) UNSIGNED NULL,
         PRIMARY KEY (id),
         KEY assignment_id (assignment_id),
         KEY task_date (task_date)
@@ -5162,7 +5173,7 @@ function progreso_equip_delete_holdset($request) {
 function progreso_equip_get_weeks() {
     global $wpdb;
     progreso_equip_ensure_tables();
-    $rows = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('weeks') . " ORDER BY start_date DESC LIMIT 20", ARRAY_A);
+    $rows = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('weeks') . " WHERE archived = 0 ORDER BY start_date DESC LIMIT 20", ARRAY_A);
     return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
         return array(
             'id' => intval($r['id']), 'startDate' => $r['start_date'],
@@ -5170,6 +5181,40 @@ function progreso_equip_get_weeks() {
             'notes' => $r['notes'],
         );
     }, $rows)));
+}
+
+// Histórico: semanas pasadas (incluidas las archivadas), con cuántas tareas
+// quedaron hechas/retrasadas/pendientes y, de las retrasadas, por quién.
+function progreso_equip_get_weeks_historico() {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $weeks = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('weeks') . " ORDER BY start_date DESC LIMIT 30", ARRAY_A);
+    $out = array();
+    foreach ($weeks as $w) {
+        $week_id = intval($w['id']);
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT t.status, t.done, wk2.name as worker_name FROM " . progreso_equip_table('tasks') . " t
+             JOIN " . progreso_equip_table('assignments') . " a ON a.id = t.assignment_id
+             JOIN " . progreso_equip_table('workers') . " wk2 ON wk2.id = a.worker_id
+             WHERE a.week_id = %d", $week_id
+        ), ARRAY_A);
+        $hechas = 0; $retrasadas = 0; $pendientes = 0; $por_persona = array();
+        foreach ($rows as $r) {
+            if ($r['done']) { $hechas++; continue; }
+            if ($r['status'] === 'retrasada') {
+                $retrasadas++;
+                $por_persona[$r['worker_name']] = ($por_persona[$r['worker_name']] ?? 0) + 1;
+            } else {
+                $pendientes++;
+            }
+        }
+        $out[] = array(
+            'id' => $week_id, 'startDate' => $w['start_date'], 'archived' => (bool) $w['archived'],
+            'hechas' => $hechas, 'retrasadas' => $retrasadas, 'pendientes' => $pendientes,
+            'retrasosPorPersona' => $por_persona,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
 // Crea la semana y, para cada trabajador asignado, reparte el catálogo de
@@ -5246,26 +5291,48 @@ function progreso_equip_create_week($request) {
     }
     if (empty($crew)) return rest_ensure_response(array('success' => true, 'week_id' => $week_id, 'assignment_ids' => array()));
 
-    // 2. ¿Qué tareas tocan esta semana, según su periodicidad?
+    // 2. ¿Qué tareas tocan esta semana, según su periodicidad? Solo cuenta
+    //    como "hecha hace N semanas" si realmente se marcó hecha — si no,
+    //    toca ya (no hace falta esperar a que pasen las N semanas de una
+    //    tarea que nunca se llegó a hacer).
     $due_types = array();
     foreach ($task_types as $type) {
         $weeks_n = max(1, intval($type['periodicityWeeks']));
         if ($weeks_n <= 1) { $due_types[] = $type; continue; }
         $last = $wpdb->get_var($wpdb->prepare(
-            "SELECT MAX(task_date) FROM {$tasks_table} WHERE task_type_id = %s", $type['id']
+            "SELECT MAX(task_date) FROM {$tasks_table} WHERE task_type_id = %s AND done = 1", $type['id']
         ));
         $gap = $weeks_n * 7 * 86400 - 86400; // un día de margen por redondeo
         if (!$last || (strtotime($start_date) - strtotime($last)) >= $gap) $due_types[] = $type;
     }
 
-    // 3. Para cada tarea que toca, elige a quien más la ha hecho entre
-    //    quienes están esta semana; sin historial, turno rotatorio.
+    // 3. ¿Quién recibe cada tarea que toca?
+    //    - Periódicas (periodicity_weeks > 1) y las "lead_only": siempre al
+    //      responsable, que luego la reparte él mismo. Si no está esta
+    //      semana, al primero de la lista (con aviso).
+    //    - Semanales normales: a quien más veces la haya hecho entre los de
+    //      esta semana; sin historial, turno rotatorio.
     $eligible_worker_ids = array_keys($crew);
+    $lead_worker_id = null;
+    foreach ($eligible_worker_ids as $wid) {
+        if ($crew[$wid]['worker']['is_lead']) { $lead_worker_id = $wid; break; }
+    }
+    $warnings = array();
     $rr_cursor = 0;
     foreach ($due_types as $type) {
-        $candidates = array_values(array_filter($eligible_worker_ids, function($wid) use ($crew, $type) {
-            return !$type['lead_only'] || $crew[$wid]['worker']['is_lead'];
-        }));
+        $goes_to_lead = $type['lead_only'] || intval($type['periodicityWeeks']) > 1;
+
+        if ($goes_to_lead) {
+            $chosen = $lead_worker_id ?: ($eligible_worker_ids[0] ?? null);
+            if ($chosen === null) continue;
+            if (!$lead_worker_id) {
+                $warnings[] = "«{$type['name']}» se asignó a {$crew[$chosen]['worker']['name']} porque el responsable no está esta semana.";
+            }
+            $crew[$chosen]['queue'][] = $type;
+            continue;
+        }
+
+        $candidates = $eligible_worker_ids;
         if (empty($candidates)) continue;
 
         $ph = implode(',', array_fill(0, count($candidates), '%d'));
@@ -5300,11 +5367,51 @@ function progreso_equip_create_week($request) {
                 'task_date'     => $date,
                 'params'        => wp_json_encode($default_params),
                 'done'          => 0,
-            ), array('%d', '%s', '%s', '%s', '%d'));
+                'status'        => 'pendiente',
+                'original_date' => $date,
+            ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s'));
         }
     }
 
-    return rest_ensure_response(array('success' => true, 'week_id' => $week_id, 'assignment_ids' => $created_assignments));
+    // 5. Nada se pierde: cualquier tarea sin hacer de una semana anterior
+    //    que todavía no se movió a mano (postpone) pasa sola a esta semana
+    //    nueva, asignada al responsable, y queda marcada "retrasada" en su
+    //    semana de origen. Si la semana anterior también estaba a su vez
+    //    esperando sitio (postpone sin semana siguiente creada todavía),
+    //    sigue la cadena igual.
+    $rollover_target = $lead_worker_id && isset($crew[$lead_worker_id])
+        ? $crew[$lead_worker_id]
+        : (!empty($crew) ? reset($crew) : null);
+    if ($rollover_target) {
+        $pending = $wpdb->get_results($wpdb->prepare(
+            "SELECT t.* FROM {$tasks_table} t
+             JOIN {$assignments_table} a ON a.id = t.assignment_id
+             JOIN " . progreso_equip_table('weeks') . " wk ON wk.id = a.week_id
+             WHERE wk.start_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL
+               AND wk.id != %d",
+            $start_date, $week_id
+        ), ARRAY_A);
+        $target_date = !empty($rollover_target['dates']) ? $rollover_target['dates'][0] : $start_date;
+        foreach ($pending as $old) {
+            $wpdb->insert($tasks_table, array(
+                'assignment_id'   => $rollover_target['assignment_id'],
+                'task_type_id'    => $old['task_type_id'],
+                'task_date'       => $target_date,
+                'params'          => $old['params'],
+                'done'            => 0,
+                'status'          => 'pendiente',
+                'original_date'   => $old['original_date'] ?: $old['task_date'],
+                'postponed_count' => intval($old['postponed_count']) + 1,
+            ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d'));
+            $new_task_id = $wpdb->insert_id;
+            $wpdb->update($tasks_table,
+                array('status' => 'retrasada', 'moved_to_task_id' => $new_task_id),
+                array('id' => intval($old['id'])), array('%s', '%d'), array('%d')
+            );
+        }
+    }
+
+    return rest_ensure_response(array('success' => true, 'week_id' => $week_id, 'assignment_ids' => $created_assignments, 'warnings' => $warnings));
 }
 
 function progreso_equip_get_week_detail($request) {
@@ -5328,11 +5435,25 @@ function progreso_equip_get_week_detail($request) {
             "SELECT * FROM " . progreso_equip_table('tasks') . " WHERE assignment_id IN ($ph) ORDER BY task_date ASC, id ASC",
             ...$assignment_ids
         ), ARRAY_A);
+        $moved_to_ids = array_values(array_filter(array_map(function($t) { return intval($t['moved_to_task_id']); }, $tasks)));
+        $moved_to_dates = array();
+        if ($moved_to_ids) {
+            $ph2 = implode(',', array_fill(0, count($moved_to_ids), '%d'));
+            $moved_to_dates = $wpdb->get_results($wpdb->prepare(
+                "SELECT id, task_date FROM " . progreso_equip_table('tasks') . " WHERE id IN ($ph2)", ...$moved_to_ids
+            ), OBJECT_K);
+        }
         foreach ($tasks as $t) {
+            $moved_to_task_id = $t['moved_to_task_id'] !== null ? intval($t['moved_to_task_id']) : null;
             $tasks_by_assignment[intval($t['assignment_id'])][] = array(
                 'id' => intval($t['id']), 'taskTypeId' => $t['task_type_id'], 'date' => $t['task_date'],
                 'params' => json_decode($t['params'], true) ?: new stdClass(),
                 'done' => (bool) $t['done'], 'doneAt' => $t['done_at'],
+                'status' => $t['status'] ?: 'pendiente',
+                'originalDate' => $t['original_date'],
+                'postponedCount' => intval($t['postponed_count']),
+                'movedToTaskId' => $moved_to_task_id,
+                'movedToDate' => $moved_to_task_id && isset($moved_to_dates[$moved_to_task_id]) ? $moved_to_dates[$moved_to_task_id]->task_date : null,
             );
         }
         $blocks = $wpdb->get_results($wpdb->prepare(
@@ -5365,20 +5486,42 @@ function progreso_equip_get_week_detail($request) {
     )));
 }
 
+// Borrar semana: si no tiene nada hecho ni ningún bloque, se borra de
+// verdad (sirve para semanas creadas por error). Si tiene algo hecho, no
+// se pierde el histórico: se archiva (desaparece de la lista principal,
+// queda en "Histórico") y sus tareas sin hacer se tratan como cualquier
+// tarea de una semana vieja — las recoge progreso_equip_create_week la
+// próxima vez que se cree una semana.
 function progreso_equip_delete_week($request) {
     global $wpdb;
     $week_id = intval($request['id']);
     $assignment_ids = $wpdb->get_col($wpdb->prepare(
         "SELECT id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d", $week_id
     ));
+    $done_tasks = 0; $blocks_count = 0;
     if ($assignment_ids) {
         $ph = implode(',', array_fill(0, count($assignment_ids), '%d'));
-        $wpdb->query($wpdb->prepare("DELETE FROM " . progreso_equip_table('tasks')  . " WHERE assignment_id IN ($ph)", ...$assignment_ids));
-        $wpdb->query($wpdb->prepare("DELETE FROM " . progreso_equip_table('blocks') . " WHERE assignment_id IN ($ph)", ...$assignment_ids));
+        $done_tasks = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM " . progreso_equip_table('tasks') . " WHERE assignment_id IN ($ph) AND done = 1", ...$assignment_ids
+        ));
+        $blocks_count = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM " . progreso_equip_table('blocks') . " WHERE assignment_id IN ($ph)", ...$assignment_ids
+        ));
     }
-    $wpdb->delete(progreso_equip_table('assignments'), array('week_id' => $week_id), array('%d'));
-    $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d'));
-    return rest_ensure_response(array('success' => true));
+
+    if ($done_tasks === 0 && $blocks_count === 0) {
+        if ($assignment_ids) {
+            $ph = implode(',', array_fill(0, count($assignment_ids), '%d'));
+            $wpdb->query($wpdb->prepare("DELETE FROM " . progreso_equip_table('tasks')  . " WHERE assignment_id IN ($ph)", ...$assignment_ids));
+            $wpdb->query($wpdb->prepare("DELETE FROM " . progreso_equip_table('blocks') . " WHERE assignment_id IN ($ph)", ...$assignment_ids));
+        }
+        $wpdb->delete(progreso_equip_table('assignments'), array('week_id' => $week_id), array('%d'));
+        $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d'));
+        return rest_ensure_response(array('success' => true, 'mode' => 'deleted'));
+    }
+
+    $wpdb->update(progreso_equip_table('weeks'), array('archived' => 1), array('id' => $week_id), array('%d'), array('%d'));
+    return rest_ensure_response(array('success' => true, 'mode' => 'archived', 'doneTasks' => $done_tasks, 'blocks' => $blocks_count));
 }
 
 function progreso_equip_get_today($request) {
@@ -5392,7 +5535,8 @@ function progreso_equip_get_today($request) {
     $tasks = $wpdb->get_results($wpdb->prepare(
         "SELECT t.*, a.id as assignment_id FROM " . progreso_equip_table('tasks') . " t
          JOIN " . progreso_equip_table('assignments') . " a ON a.id = t.assignment_id
-         WHERE a.worker_id = %d AND t.task_date = %s ORDER BY t.id ASC",
+         WHERE a.worker_id = %d AND t.task_date = %s
+         ORDER BY (t.status = 'retrasada') DESC, t.id ASC",
         $worker_id, $date
     ), ARRAY_A);
 
@@ -5422,7 +5566,8 @@ function progreso_equip_get_today($request) {
             return array(
                 'id' => intval($t['id']), 'taskTypeId' => $t['task_type_id'],
                 'params' => json_decode($t['params'], true) ?: new stdClass(),
-                'done' => (bool) $t['done'],
+                'done' => (bool) $t['done'], 'status' => $t['status'] ?: 'pendiente',
+                'postponedCount' => intval($t['postponed_count']),
             );
         }, $tasks),
         'blocks' => array_map(function($b) {
@@ -5448,6 +5593,14 @@ function progreso_equip_update_task($request) {
         $done = (bool) $request->get_param('done');
         $upd['done']    = $done ? 1 : 0;                        $fmt[] = '%d';
         $upd['done_at'] = $done ? current_time('mysql') : null; $fmt[] = '%s';
+        if ($done) {
+            $upd['status'] = 'hecha'; $fmt[] = '%s';
+        } else {
+            $moved_to = $wpdb->get_var($wpdb->prepare(
+                "SELECT moved_to_task_id FROM " . progreso_equip_table('tasks') . " WHERE id = %d", $id
+            ));
+            $upd['status'] = $moved_to ? 'retrasada' : 'pendiente'; $fmt[] = '%s';
+        }
     }
     if ($request->get_param('date') !== null) {
         $date = sanitize_text_field((string) $request->get_param('date'));
@@ -5474,6 +5627,71 @@ function progreso_equip_update_task($request) {
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     $wpdb->update(progreso_equip_table('tasks'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
+}
+
+// Las tareas no se cancelan: solo se mueven a la semana siguiente. La
+// original se queda en su semana marcada "retrasada" (histórico de lo que
+// se fue quedando atrás) y se crea una copia en la semana siguiente para
+// el responsable, que la reparte. Si esa semana siguiente no existe
+// todavía, la tarea queda "retrasada" sin copia — progreso_equip_create_week
+// la recoge sola en cuanto se cree esa semana.
+function progreso_equip_postpone_task($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $tasks_table = progreso_equip_table('tasks');
+
+    $task = $wpdb->get_row($wpdb->prepare(
+        "SELECT t.*, a.week_id FROM {$tasks_table} t
+         JOIN " . progreso_equip_table('assignments') . " a ON a.id = t.assignment_id
+         WHERE t.id = %d", $id
+    ), ARRAY_A);
+    if (!$task) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
+    if (intval($task['moved_to_task_id'])) {
+        return new WP_Error('invalid_data', 'Esta tarea ya se movió a la semana siguiente.', array('status' => 400));
+    }
+
+    $week = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM " . progreso_equip_table('weeks') . " WHERE id = %d", intval($task['week_id'])
+    ), ARRAY_A);
+    $next_start = date('Y-m-d', strtotime($week['start_date']) + 7 * 86400);
+    $next_week = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM " . progreso_equip_table('weeks') . " WHERE start_date = %s", $next_start
+    ), ARRAY_A);
+
+    if (!$next_week) {
+        // Todavía no existe la semana siguiente: se queda "en cola".
+        $wpdb->update($tasks_table, array('status' => 'retrasada'), array('id' => $id), array('%s'), array('%d'));
+        return rest_ensure_response(array('success' => true, 'queued' => true));
+    }
+
+    $lead_assignment = $wpdb->get_row($wpdb->prepare(
+        "SELECT a.id FROM " . progreso_equip_table('assignments') . " a
+         JOIN " . progreso_equip_table('workers') . " w ON w.id = a.worker_id
+         WHERE a.week_id = %d ORDER BY w.is_lead DESC, a.id ASC LIMIT 1", intval($next_week['id'])
+    ), ARRAY_A);
+    if (!$lead_assignment) {
+        $wpdb->update($tasks_table, array('status' => 'retrasada'), array('id' => $id), array('%s'), array('%d'));
+        return rest_ensure_response(array('success' => true, 'queued' => true));
+    }
+
+    $wpdb->insert($tasks_table, array(
+        'assignment_id'   => intval($lead_assignment['id']),
+        'task_type_id'    => $task['task_type_id'],
+        'task_date'       => $next_start,
+        'params'          => $task['params'],
+        'done'            => 0,
+        'status'          => 'pendiente',
+        'original_date'   => $task['original_date'] ?: $task['task_date'],
+        'postponed_count' => intval($task['postponed_count']) + 1,
+    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d'));
+    $new_task_id = $wpdb->insert_id;
+
+    $wpdb->update($tasks_table,
+        array('status' => 'retrasada', 'moved_to_task_id' => $new_task_id),
+        array('id' => $id), array('%s', '%d'), array('%d')
+    );
+
+    return rest_ensure_response(array('success' => true, 'queued' => false, 'newTaskId' => $new_task_id, 'nextWeekId' => intval($next_week['id'])));
 }
 
 function progreso_equip_create_block($request) {

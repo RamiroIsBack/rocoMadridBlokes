@@ -161,12 +161,14 @@ function HoyView({ config, workers, workerId, onChooseWorker }) {
                 {data.tasks.map(t => {
                   const type = taskTypeById[t.taskTypeId]
                   const params = Object.entries(t.params || {}).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' · ')
+                  const isRetrasada = t.status === 'retrasada'
                   return (
-                    <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}`}>
+                    <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}${isRetrasada ? ' org__task--retrasada' : ''}`}>
                       <label>
                         <input type="checkbox" checked={t.done} onChange={e => toggleTask(t.id, e.target.checked)} />
                         <span className="org__task-name">{type?.name || t.taskTypeId}</span>
                         {params && <span className="org__task-params">{params}</span>}
+                        {isRetrasada && <span className="org__tile-badge">RETRASADA{t.postponedCount > 1 ? ` ×${t.postponedCount}` : ''}</span>}
                       </label>
                     </li>
                   )
@@ -304,6 +306,7 @@ function SemanaView({ config, workers, onWorkersChanged }) {
   const [detail, setDetail] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
   const [showWorkers, setShowWorkers] = useState(false)
+  const [showHistorico, setShowHistorico] = useState(false)
 
   const reloadWeeks = useCallback(() => {
     api('GET', '/equipacion/weeks').then(r => setWeeks(r.data || [])).catch(() => {})
@@ -332,6 +335,33 @@ function SemanaView({ config, workers, onWorkersChanged }) {
       })),
     }))
     try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { openWeek(detail.id) }
+  }
+
+  // Las tareas no se cancelan: solo se mueven a la semana siguiente, y
+  // quedan marcadas "retrasada" para que no se pierda el histórico.
+  const [postponing, setPostponing] = useState(null)
+  const postponeTask = async taskId => {
+    setPostponing(taskId)
+    try { await api('POST', `/equipacion/tasks/${taskId}/postpone`) } catch {}
+    await openWeek(detail.id)
+    setPostponing(null)
+  }
+
+  const deleteWeek = async () => {
+    const doneTasks = detail.assignments.reduce((n, a) => n + a.tasks.filter(t => t.done).length, 0)
+    const blocksCount = detail.assignments.reduce((n, a) => n + a.blocks.length, 0)
+    const msg = (doneTasks === 0 && blocksCount === 0)
+      ? '¿Borrar esta semana? No tiene nada hecho todavía.'
+      : `Tiene ${doneTasks} tarea(s) hecha(s) y ${blocksCount} bloque(s): se archivará (no se borra el histórico), no se borrará.`
+    if (!window.confirm(msg)) return
+    try {
+      const res = await api('DELETE', `/equipacion/weeks/${detail.id}`)
+      window.alert(res.mode === 'deleted' ? 'Semana borrada.' : 'Semana archivada (queda en el histórico).')
+    } catch (e) {
+      window.alert(e.message)
+    }
+    setDetail(null)
+    reloadWeeks()
   }
 
   // Arrastrar una tile de tarea a la columna (y opcionalmente al día) de
@@ -376,7 +406,10 @@ function SemanaView({ config, workers, onWorkersChanged }) {
     const todayS = todayStr()
     return (
       <div>
-        <button className="org__link-btn" onClick={() => setDetail(null)}>← Volver a semanas</button>
+        <div className="org__semana-actions">
+          <button className="org__link-btn" onClick={() => setDetail(null)}>← Volver a semanas</button>
+          <button className="org__link-btn" onClick={deleteWeek}>Borrar semana</button>
+        </div>
         <h3 className="org__section-title">Semana del {detail.startDate} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
         <p className="org__hint">Arrastra una tarjeta a otra persona (o a otro día de esa persona) para reasignarla.</p>
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
@@ -403,10 +436,12 @@ function SemanaView({ config, workers, onWorkersChanged }) {
                           key={t.id}
                           task={t}
                           typeName={taskTypeById[t.taskTypeId]?.name || t.taskTypeId}
-                          isMissed={!t.done && t.date < todayS}
+                          isMissed={!t.done && t.date < todayS && t.status !== 'retrasada'}
                           dragging={dragTaskId === t.id}
+                          postponing={postponing === t.id}
                           onPointerDown={onTileDown(t.id, t.date, a.id)}
                           onToggleDone={toggleTaskDone}
+                          onPostpone={postponeTask}
                         />
                       ))}
                     </div>
@@ -434,6 +469,9 @@ function SemanaView({ config, workers, onWorkersChanged }) {
         <button className="org__link-btn" onClick={() => setShowWorkers(s => !s)}>
           {showWorkers ? 'Ocultar personas' : 'Gestionar personas'}
         </button>
+        <button className="org__link-btn" onClick={() => setShowHistorico(s => !s)}>
+          {showHistorico ? 'Ocultar histórico' : 'Ver histórico'}
+        </button>
       </div>
       {showWorkers && <WorkersAdmin workers={workers} onChanged={onWorkersChanged} />}
       {showCreate && (
@@ -443,6 +481,7 @@ function SemanaView({ config, workers, onWorkersChanged }) {
           onCancel={() => setShowCreate(false)}
         />
       )}
+      {showHistorico && <HistoricoView />}
       <ul className="org__week-list">
         {weeks.map(w => (
           <li key={w.id} className="org__week-row" onClick={() => openWeek(w.id)}>
@@ -451,6 +490,39 @@ function SemanaView({ config, workers, onWorkersChanged }) {
           </li>
         ))}
       </ul>
+    </div>
+  )
+}
+
+// Histórico: semanas pasadas (incluidas las archivadas por "Borrar
+// semana"), con cuántas tareas quedaron hechas / retrasadas / sin hacer, y
+// de las retrasadas, quién se las fue dejando atrás.
+function HistoricoView() {
+  const [rows, setRows] = useState(null)
+  useEffect(() => {
+    api('GET', '/equipacion/weeks/historico').then(r => setRows(r.data || [])).catch(() => setRows([]))
+  }, [])
+
+  if (rows === null) return <p className="org__hint">Cargando histórico...</p>
+  if (rows.length === 0) return <p className="org__hint">Todavía no hay semanas en el histórico.</p>
+
+  return (
+    <div className="org__historico">
+      {rows.map(w => (
+        <div key={w.id} className="org__historico-row">
+          <p className="org__historico-title">
+            Semana del {w.startDate}{w.archived ? ' · archivada' : ''}
+          </p>
+          <p className="org__historico-meta">
+            {w.hechas} hecha(s) · {w.retrasadas} retrasada(s) · {w.pendientes} sin hacer todavía
+          </p>
+          {Object.keys(w.retrasosPorPersona || {}).length > 0 && (
+            <p className="org__historico-meta">
+              Retrasos: {Object.entries(w.retrasosPorPersona).map(([name, n]) => `${name} (${n})`).join(', ')}
+            </p>
+          )}
+        </div>
+      ))}
     </div>
   )
 }
@@ -600,13 +672,24 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
 }
 
 // Tile visual de una tarea: checklist incorporado (checkbox) + info de la
-// tarea (subzona, objetivo...) + arrastrable a otra persona/día. Si quedó
-// pendiente de un día ya pasado, queda marcada "FALTÓ" como histórico.
-function TaskTile({ task, typeName, isMissed, dragging, onPointerDown, onToggleDone }) {
+// tarea (subzona, objetivo...) + arrastrable a otra persona/día. Las tareas
+// no se cancelan, solo se mueven a la semana siguiente ("→ Semana
+// siguiente"), y quedan marcadas "retrasada" para que no se pierda el
+// histórico de lo que se fue quedando atrás.
+function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone }) {
   const params = Object.entries(task.params || {}).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' · ')
+  const movedAway = task.status === 'retrasada' && task.movedToTaskId
+  const isRetrasada = task.status === 'retrasada'
+  const canPostpone = !task.done && !movedAway
+
+  let badge = null
+  if (movedAway) badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
+  else if (task.postponedCount > 0) badge = `RETRASADA (×${task.postponedCount}) · prevista ${dayLabel(task.originalDate || task.date)}`
+  else if (isMissed) badge = 'FALTÓ'
+
   return (
     <div
-      className={`org__tile${task.done ? ' org__tile--done' : ''}${isMissed ? ' org__tile--missed' : ''}${dragging ? ' org__tile--dragging' : ''}`}
+      className={`org__tile${task.done ? ' org__tile--done' : ''}${isMissed ? ' org__tile--missed' : ''}${isRetrasada ? ' org__tile--retrasada' : ''}${dragging ? ' org__tile--dragging' : ''}`}
       onPointerDown={onPointerDown}
     >
       <label className="org__tile-check" onPointerDown={e => e.stopPropagation()}>
@@ -615,8 +698,17 @@ function TaskTile({ task, typeName, isMissed, dragging, onPointerDown, onToggleD
       <div className="org__tile-body">
         <span className="org__tile-name">{typeName}</span>
         {params && <span className="org__tile-params">{params}</span>}
+        {badge && <span className="org__tile-badge">{badge}</span>}
       </div>
-      {isMissed && <span className="org__tile-badge">FALTÓ</span>}
+      {canPostpone && (
+        <button
+          type="button"
+          className="org__tile-postpone"
+          onPointerDown={e => e.stopPropagation()}
+          onClick={() => onPostpone(task.id)}
+          disabled={postponing}
+        >{postponing ? '...' : '→ Semana siguiente'}</button>
+      )}
     </div>
   )
 }
@@ -824,9 +916,18 @@ function CompeMapEditor({ comp, onBack }) {
   const unplaced = blocks.filter(b => b.xPct == null)
   const placed = blocks.filter(b => b.xPct != null)
 
+  const removeComp = async () => {
+    if (!window.confirm(`¿Borrar la competición "${comp.name}"? No se puede deshacer.`)) return
+    try { await api('DELETE', `/equipacion/competitions/${comp.id}`) } catch {}
+    onBack()
+  }
+
   return (
     <div>
-      <button className="org__link-btn" onClick={onBack}>← Volver a competiciones</button>
+      <div className="org__semana-actions">
+        <button className="org__link-btn" onClick={onBack}>← Volver a competiciones</button>
+        <button className="org__link-btn" onClick={removeComp}>Borrar competición</button>
+      </div>
       <h3 className="org__section-title">{comp.name} — {comp.compDate}</h3>
       <p className="org__hint">Las tareas de equipación para esta compe empiezan el {comp.tasksStartDate}.</p>
 
