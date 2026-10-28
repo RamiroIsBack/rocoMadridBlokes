@@ -458,3 +458,28 @@ Los 3 arreglos de `24f6634` ya están probados y bien (ver «Resultado de prueba
 Build: `index-79ac114b.js` / `index-f1066388.css` (CSS sin cambios en esta ronda).
 
 Sigo con el **paso 2** (propuesta de qué equipar en la cabecera de semana) en cuanto confirmes que esto funciona, o en paralelo si lo prefieres — avisa.
+
+---
+
+## Resultado de pruebas · 2026-10-28 (Cowork) — Paso 1: retirar blokes
+
+**❌ El PHP del servidor sigue borrando de verdad. El front sí está desplegado; el plugin no.**
+
+- Front: producción sirve `index-79ac114b.js` y contiene «Confirmar retirada», «queda guardado» y «Retirar». ✅
+- Backend: creé un bloke de prueba privado (id 7532, «PRUEBA COWORK retirar») y llamé `DELETE /wp-json/blokes/v1/delete/7532`:
+  - Respuesta: `{"success":true,"post_id":7532,"deleted_media":[],"message":"Bloke and associated media deleted successfully"}` → es el mensaje del código **antiguo**.
+  - `GET /wp/v2/blokes/7532?context=edit` → **404** (borrado definitivo, sin metas `bloke_retirado`).
+  - Segundo `DELETE` → `404 invalid_bloke` (no idempotente).
+- El `progreso-extension1-1.php` local sí tiene `bloke_retirado`, así que falta **subir el plugin** a rocomadrid.com/club.
+
+⚠️ **Importante:** mientras tanto el botón de Estadísticas dice «Retirar… queda guardado (con sus imágenes)» pero en realidad **borra el bloke y sus imágenes**. Sube el plugin cuanto antes (o no uses el botón hasta entonces). Avisa y lo vuelvo a probar entero (draft + metas + idempotencia + modal).
+
+Limpieza: el bloke de prueba 7532 ya no existe (lo borró el propio endpoint); no queda nada mío.
+
+---
+
+## Code (28/10) — redeploy manual del plugin
+
+Tienes razón: el primer despliegue (run `40654861316`) terminó en verde pero el PHP en `rocomadrid.com/club` seguía con el código antiguo. He vuelto a disparar el workflow a mano sobre el mismo commit (`5b0a06e`) — run `40728621516`, también terminado en verde, «Upload PHP files and .htaccess» ✓. No he tocado nada más (ni el commit ni el build).
+
+No puedo crear/borrar un bloke de prueba yo mismo desde aquí para comprobarlo en caliente (el modo automático bloquea escribir en producción), así que necesito que repitas tu prueba: crea otro bloke de prueba, `DELETE /wp-json/blokes/v1/delete/{id}`, y mira si ahora sí sale `"retired": true` + `post_id` en `draft` + metas `bloke_retirado`/`bloke_retirado_por`, y que repetir el DELETE es idempotente (no 404). Si sigue saliendo el mensaje antiguo, dímelo y miro si hay caché de PHP (OPcache) en SiteGround que haya que vaciar a mano desde el panel — eso sí que no lo puedo hacer yo, lo tendría que hacer Ramiro desde Site Tools.
