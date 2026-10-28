@@ -31,8 +31,10 @@ export const UNIDADES = ['ud', 'm²', 'ml', 'm³', 'h', 'placas', 'kit']
 export const isActiva   = p => p.estado !== 'descartado'
 export const isAceptada = p => p.estado === 'aprobado' || p.estado === 'comprado'
 
-// Valor de la medida de la zona (null si faltan datos para calcularla)
+// Valor de la medida de la zona (null si faltan datos para calcularla
+// o si la zona no es una sala concreta)
 export function medidaZona(zona, medida) {
+  if (zona?.sin_sala) return null
   const l = Number(zona?.largo) || 0
   const a = Number(zona?.ancho) || 0
   const h = Number(zona?.alto)  || 0
@@ -130,6 +132,12 @@ export function fmtMedidas(zona) {
   return s
 }
 
+// Línea de medidas de la cabecera y del resumen
+export function textoMedidas(zona) {
+  if (zona?.sin_sala) return 'Varias salas · sin medidas'
+  return fmtMedidas(zona) || 'Medidas pendientes'
+}
+
 // «85,5» → 85.5 · vacío → null · no numérico → undefined (no se guarda) · negativo → 0
 export function parsePrecio(str) {
   const s = String(str ?? '').trim().replace(/\s/g, '').replace(',', '.')
@@ -159,8 +167,8 @@ export function exportar(zonas, partidas) {
     zonas: [...zonas].sort((a, b) => (a.orden || 0) - (b.orden || 0)).map(z => {
       const ps = partidas.filter(p => p.zona_id === z.id)
       return {
-        nombre: z.nombre, ubicacion: z.ubicacion, largo: z.largo, ancho: z.ancho, alto: z.alto,
-        medidas: fmtMedidas(z), notas: z.notas,
+        nombre: z.nombre, ubicacion: z.ubicacion, sin_sala: !!z.sin_sala, largo: z.largo, ancho: z.ancho, alto: z.alto,
+        medidas: z.sin_sala ? '' : fmtMedidas(z), notas: z.notas,
         capitulos: porCapitulo(ps).map(c => ({
           nombre: c.nombre,
           partidas: c.partidas.map(p => ({

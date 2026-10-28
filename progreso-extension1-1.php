@@ -7662,6 +7662,8 @@ function presup_clean_zona($z) {
         'alto'      => presup_num($z['alto'] ?? null),
         'notas'     => presup_longtext($z['notas'] ?? '', 3000),
         'orden'     => intval($z['orden'] ?? 0),
+        // Zona sin sala concreta («Varias salas»): sin medidas
+        'sin_sala'  => filter_var($z['sin_sala'] ?? false, FILTER_VALIDATE_BOOLEAN),
     );
 }
 
@@ -7688,6 +7690,7 @@ function presup_clean_partida($p) {
         'capitulo'          => $capitulo,
         'orden'             => intval($p['orden'] ?? 0),
         'concepto'          => $concepto,
+        'donde'             => presup_text($p['donde'] ?? '', 160),
         'descripcion'       => presup_longtext($p['descripcion'] ?? '', 2000),
         'cantidad'          => presup_num($p['cantidad'] ?? 1) ?? 0,
         'unidad'            => presup_text($p['unidad'] ?? 'ud', 20) ?: 'ud',

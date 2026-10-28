@@ -6,7 +6,7 @@ import {
 import {
   ESTADOS, ESTADO_LABEL, TIPOS, TIPO_BY_KEY, MEDIDAS, UNIDADES,
   isActiva, isAceptada, medidaZona, cantidad, precioFinal, importePropuesto, importeFinal,
-  totales, porCapitulo, fmtEur, fmtCant, fmtFecha, fmtMedidas, parsePrecio, dominio, urlSegura, exportar,
+  totales, porCapitulo, fmtEur, fmtCant, fmtFecha, fmtMedidas, textoMedidas, parsePrecio, dominio, urlSegura, exportar,
 } from '../utils/presupuestos'
 import './PresupuestosSection.css'
 
@@ -238,7 +238,7 @@ function ResumenGeneral({ zonas, partidas, zonaDe, onAbrir }) {
                   <tr key={z.id}>
                     <td>
                       <button className="ps-link ps-link--zona" onClick={() => onAbrir(z.id)}>{z.nombre}</button>
-                      <span className="ps-gris">{fmtMedidas(z) || 'Medidas pendientes'}</span>
+                      <span className="ps-gris">{textoMedidas(z)}</span>
                     </td>
                     <td className="num">{tz.nActivas}</td>
                     <td className="num">{fmtEur(tz.propuesto)}</td>
@@ -297,7 +297,7 @@ function AceptadasZona({ zona, items, zonaDe }) {
         <tr key={p.id}>
           <td>
             <strong>{p.concepto}</strong>
-            <span className="ps-gris">{[p.capitulo, p.proveedor].filter(Boolean).join(' · ')}</span>
+            <span className="ps-gris">{[p.capitulo, p.donde, p.proveedor].filter(Boolean).join(' · ')}</span>
           </td>
           <td className="num">{fmtCant(cantidad(p, zona))} {p.unidad}</td>
           <td className="num">
@@ -314,7 +314,6 @@ function AceptadasZona({ zona, items, zonaDe }) {
 // ─── Pestaña de zona ─────────────────────────────────────────────────────────
 function ZonaView({ zona, zonaDe, partidas, filtro, setFiltro, canEdit, onCampo, onEditar, onNueva, onEditarZona }) {
   const t = totales(partidas, zonaDe)
-  const medidas = fmtMedidas(zona)
 
   const cuenta = { todas: partidas.length, aceptadas: partidas.filter(isAceptada).length }
   ESTADOS.forEach(e => { cuenta[e.key] = partidas.filter(p => p.estado === e.key).length })
@@ -331,7 +330,7 @@ function ZonaView({ zona, zonaDe, partidas, filtro, setFiltro, canEdit, onCampo,
         <div className="ps-zona__info">
           {zona.ubicacion && <p className="ps-kicker">{zona.ubicacion}</p>}
           <h3 className="ps-titulo">{zona.nombre}</h3>
-          <p className="ps-medidas">{medidas || 'Medidas pendientes'}</p>
+          <p className="ps-medidas">{textoMedidas(zona)}</p>
           {zona.notas && <p className="ps-zona__notas">{zona.notas}</p>}
           {canEdit && <button className="ps-link" onClick={onEditarZona}>Editar datos de la zona</button>}
         </div>
@@ -450,12 +449,13 @@ function PartidaRow({ p, zona, canEdit, onCampo, onEditar }) {
     <tr className={p.estado === 'descartado' ? 'ps-row--descartada' : ''}>
       <td className="ps-col-partida">
         <strong>{p.concepto}</strong>
+        {p.donde && <span className="ps-donde">{p.donde}</span>}
         {p.descripcion && <span className="ps-gris">{p.descripcion}</span>}
         {p.nota && <em className="ps-nota-partida">{p.nota}</em>}
       </td>
       <td className="num ps-nowrap">
         {fmtCant(cantidad(p, zona))} {p.unidad}
-        {p.medida && <span className="ps-gris" title={auto ? 'Calculado con las medidas de la zona' : 'Se calculará al meter las medidas de la zona'}>
+        {p.medida && !zona.sin_sala && <span className="ps-gris" title={auto ? 'Calculado con las medidas de la zona' : 'Se calculará al meter las medidas de la zona'}>
           {auto ? '↻ ' : ''}{p.medida === 'perimetro' ? 'perímetro' : p.medida}
         </span>}
       </td>
@@ -571,7 +571,7 @@ function PartidaModal({ inicial, zona, capitulos, onGuardar, onBorrar, onCerrar,
   const editando = !inicial.nueva
   const [f, setF] = useState(() => editando
     ? { ...inicial, cantidad: num2str(inicial.cantidad), precio_propuesto: num2str(inicial.precio_propuesto), precio_conseguido: num2str(inicial.precio_conseguido), medida: inicial.medida || '' }
-    : { zona_id: zona.id, concepto: '', descripcion: '', capitulo: capitulos[capitulos.length - 1] || '', orden: 0,
+    : { zona_id: zona.id, concepto: '', donde: '', descripcion: '', capitulo: capitulos[capitulos.length - 1] || '', orden: 0,
         cantidad: '1', unidad: 'ud', medida: '', precio_propuesto: '0', precio_conseguido: '',
         tipo_precio: 'estimación', estado: 'pendiente', proveedor: '', fuente: '', enlace: '', fecha_consulta: hoy(), nota: '' })
   const [guardando, setGuardando] = useState(false)
@@ -595,7 +595,7 @@ function PartidaModal({ inicial, zona, capitulos, onGuardar, onBorrar, onCerrar,
     try {
       await onGuardar({
         ...f, cantidad: cant, precio_propuesto: prop, precio_conseguido: cons,
-        orden: parseInt(f.orden, 10) || 0, medida: f.medida || null,
+        orden: parseInt(f.orden, 10) || 0, medida: (!zona.sin_sala && f.medida) || null,
       })
     } catch (err) {
       setError(err.message)
@@ -613,25 +613,32 @@ function PartidaModal({ inicial, zona, capitulos, onGuardar, onBorrar, onCerrar,
     <Modal titulo={editando ? 'Editar partida' : 'Nueva partida'} onCerrar={onCerrar}>
       <form className="ps-form" onSubmit={submit}>
         <Field label="Concepto *" full><input value={f.concepto} onChange={set('concepto')} autoFocus /></Field>
+        {zona.sin_sala && (
+          <Field label="Dónde" full hint="Salas o partes del local a las que afecta">
+            <input value={f.donde || ''} onChange={set('donde')} placeholder="Sala 2 y vestuarios" maxLength={160} />
+          </Field>
+        )}
         <Field label="Descripción / medición" full><textarea rows={2} value={f.descripcion} onChange={set('descripcion')} /></Field>
         <Field label="Capítulo *">
           <input value={f.capitulo} onChange={set('capitulo')} list="ps-capitulos" />
           <datalist id="ps-capitulos">{capitulos.map(c => <option key={c} value={c} />)}</datalist>
         </Field>
         <Field label="Orden"><input type="number" value={f.orden} onChange={set('orden')} /></Field>
-        <Field label="Cantidad *" hint={auto != null ? 'Calculada con las medidas de la zona' : f.medida ? 'Se recalculará al meter las medidas de la zona' : null}>
+        <Field label="Cantidad *" hint={auto != null ? 'Calculada con las medidas de la zona' : f.medida && !zona.sin_sala ?'Se recalculará al meter las medidas de la zona' : null}>
           <input inputMode="decimal" value={auto != null ? fmtCant(auto) : f.cantidad} onChange={set('cantidad')} disabled={auto != null} />
         </Field>
         <Field label="Unidad">
           <input value={f.unidad} onChange={set('unidad')} list="ps-unidades" />
           <datalist id="ps-unidades">{UNIDADES.map(u => <option key={u} value={u} />)}</datalist>
         </Field>
-        <Field label="Medida" full>
-          <select value={f.medida} onChange={set('medida')}>
-            <option value="">Ninguna (cantidad a mano)</option>
-            {MEDIDAS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
-          </select>
-        </Field>
+        {!zona.sin_sala && (
+          <Field label="Medida" full>
+            <select value={f.medida} onChange={set('medida')}>
+              <option value="">Ninguna (cantidad a mano)</option>
+              {MEDIDAS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </select>
+          </Field>
+        )}
         <Field label="Precio propuesto (€/ud con IVA) *"><input inputMode="decimal" value={f.precio_propuesto} onChange={set('precio_propuesto')} /></Field>
         <Field label="Precio conseguido (€/ud con IVA)" hint="Vacío = igual al propuesto"><input inputMode="decimal" value={f.precio_conseguido} onChange={set('precio_conseguido')} /></Field>
         <Field label="Tipo de precio">
@@ -656,6 +663,7 @@ function ZonaModal({ inicial, onGuardar, onBorrar, onCerrar, onFallo }) {
   const [f, setF] = useState({
     nombre: inicial.nombre || '', ubicacion: inicial.ubicacion || '', notas: inicial.notas || '',
     largo: num2str(inicial.largo), ancho: num2str(inicial.ancho), alto: num2str(inicial.alto),
+    sin_sala: !!inicial.sin_sala,
   })
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState(null)
@@ -664,13 +672,16 @@ function ZonaModal({ inicial, onGuardar, onBorrar, onCerrar, onFallo }) {
 
   async function submit(e) {
     e.preventDefault()
-    const dims = { largo: parsePrecio(f.largo), ancho: parsePrecio(f.ancho), alto: parsePrecio(f.alto) }
+    // Sin sala concreta no hay medidas: se guardan vacías
+    const dims = f.sin_sala
+      ? { largo: null, ancho: null, alto: null }
+      : { largo: parsePrecio(f.largo), ancho: parsePrecio(f.ancho), alto: parsePrecio(f.alto) }
     if (!f.nombre.trim()) return setError('El nombre es obligatorio.')
     if (Object.values(dims).some(v => v === undefined)) return setError('Las medidas tienen que ser números.')
     setGuardando(true)
     setError(null)
     try {
-      await onGuardar({ ...(editando ? { id: inicial.id } : {}), nombre: f.nombre, ubicacion: f.ubicacion, notas: f.notas, ...dims })
+      await onGuardar({ ...(editando ? { id: inicial.id } : {}), nombre: f.nombre, ubicacion: f.ubicacion, notas: f.notas, sin_sala: f.sin_sala, ...dims })
     } catch (err) {
       setError(err.message)
       onFallo(err)
@@ -688,12 +699,21 @@ function ZonaModal({ inicial, onGuardar, onBorrar, onCerrar, onFallo }) {
       <form className="ps-form" onSubmit={submit}>
         <Field label="Nombre *" full><input value={f.nombre} onChange={set('nombre')} autoFocus /></Field>
         <Field label="Ubicación" full><input value={f.ubicacion} onChange={set('ubicacion')} placeholder="Planta 1 · junto a Sala 2" /></Field>
-        <Field label="Largo (m)"><input inputMode="decimal" value={f.largo} onChange={set('largo')} /></Field>
-        <Field label="Ancho (m)"><input inputMode="decimal" value={f.ancho} onChange={set('ancho')} /></Field>
-        <Field label="Altura (m)" hint="Para las partidas de paredes"><input inputMode="decimal" value={f.alto} onChange={set('alto')} /></Field>
-        <Field label="Medidas" hint="Las partidas con «medida» recalculan su cantidad con estos datos">
-          <span className="ps-medidas ps-medidas--form">{vista || '—'}</span>
-        </Field>
+        <label className="ps-check">
+          <input type="checkbox" checked={f.sin_sala} onChange={e => setF(x => ({ ...x, sin_sala: e.target.checked }))} />
+          <span>Sin sala concreta (varias salas)</span>
+          <small>Para actuaciones que no son de una sala: no lleva medidas y cada partida dice dónde es</small>
+        </label>
+        {!f.sin_sala && (
+          <>
+            <Field label="Largo (m)"><input inputMode="decimal" value={f.largo} onChange={set('largo')} /></Field>
+            <Field label="Ancho (m)"><input inputMode="decimal" value={f.ancho} onChange={set('ancho')} /></Field>
+            <Field label="Altura (m)" hint="Para las partidas de paredes"><input inputMode="decimal" value={f.alto} onChange={set('alto')} /></Field>
+            <Field label="Medidas" hint="Las partidas con «medida» recalculan su cantidad con estos datos">
+              <span className="ps-medidas ps-medidas--form">{vista || '—'}</span>
+            </Field>
+          </>
+        )}
         <Field label="Notas" full><textarea rows={3} value={f.notas} onChange={set('notas')} /></Field>
         {editando && <p className="ps-nota">Eliminar la zona borra también todas sus partidas.</p>}
         <ModalActions editando={editando} guardando={guardando} error={error} onBorrar={borrar} onCerrar={onCerrar} />
