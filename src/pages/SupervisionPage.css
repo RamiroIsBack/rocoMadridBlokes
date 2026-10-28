@@ -640,6 +640,30 @@
 .sv-grp-estado--warn { background: #2a2410; color: #facc15; }
 .sv-grp-estado--bad  { background: #2a1a1a; color: #f87171; }
 
+.sv-grp-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.sv-grp-menu {
+  background: #1a1a1a; border: 1px solid rgba(255,255,255,0.12); border-radius: 10px;
+  display: flex; flex-direction: column; min-width: 200px; overflow: hidden;
+}
+.sv-grp-menu button {
+  background: none; border: none; color: #e5e5e5; text-align: left;
+  padding: 12px 16px; font-size: 14px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.sv-grp-menu button:hover { background: rgba(255,255,255,0.06); }
+.sv-grp-menu__cancel { color: #999 !important; border-bottom: none !important; }
+.sv-grp-modal {
+  background: #1a1a1a; border: 1px solid rgba(255,255,255,0.12); border-radius: 10px;
+  padding: 20px; min-width: 300px; max-width: 420px; display: flex; flex-direction: column; gap: 10px;
+}
+.sv-grp-modal h3 { margin: 0 0 6px; font-size: 15px; }
+.sv-grp-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #bbb; }
+.sv-grp-field--check { flex-direction: row; align-items: center; gap: 8px; }
+.sv-grp-modal__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+
 /* ── Group summary ── */
 .sv-group-summary {
   margin-top: 14px;

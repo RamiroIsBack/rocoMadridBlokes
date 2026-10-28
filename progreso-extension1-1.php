@@ -749,6 +749,31 @@ add_action('rest_api_init', function() {
         'permission_callback' => $sa_perm,
         'args'                => array('months' => array('type' => 'integer', 'default' => 4)),
     ));
+    register_rest_route('superadmin/v1', '/gestion/marcar-cobrado', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_marcar_cobrado',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/pausar', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_pausar',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/reanudar', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_reanudar',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/log', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_log_get',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/nota', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_nota',
+        'permission_callback' => $sa_perm,
+    ));
 
     register_rest_route('superadmin/v1', '/expenses', array(
         array(
@@ -3098,8 +3123,10 @@ function superadmin_gestion_grupos($request) {
         }
 
         $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
+        $pausa_motivo = $status === 'on-hold' ? get_post_meta($sub_obj->get_id(), '_rm_pausa_motivo', true) : '';
+        $pausa_hasta  = $status === 'on-hold' ? get_post_meta($sub_obj->get_id(), '_rm_pausa_hasta', true) : '';
         $estado = $es_pending_cancel ? 'baja_fin_mes'
-            : ($status === 'on-hold' ? 'en_espera' : ($status === 'pending' ? 'pendiente_pago' : 'activo'));
+            : ($status === 'on-hold' ? ($pausa_motivo ? 'pausado' : 'en_espera') : ($status === 'pending' ? 'pendiente_pago' : 'activo'));
 
         $dias_sub = $dia ? explode('-', $dia) : array();
 
@@ -3121,13 +3148,16 @@ function superadmin_gestion_grupos($request) {
         }
 
         $grupos[$gkey]['alumnos'][] = array(
-            'subId'    => intval($sub['id']),
-            'alumno'   => $sub['cliente'] ?? '',
-            'telefono' => $sub['telefono'] ?? '',
-            'dias'     => count($dias_sub) ?: 1,
-            'estado'   => $estado,
-            'pagos'    => $pagos,
-            'notas'    => '',
+            'subId'       => intval($sub['id']),
+            'alumno'      => $sub['cliente'] ?? '',
+            'telefono'    => $sub['telefono'] ?? '',
+            'dias'        => count($dias_sub) ?: 1,
+            'estado'      => $estado,
+            'pausaMotivo' => $pausa_motivo ?: '',
+            'pausaHasta'  => $pausa_hasta ?: '',
+            'manual'      => method_exists($sub_obj, 'is_manual') ? $sub_obj->is_manual() : true,
+            'pagos'       => $pagos,
+            'notas'       => get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '',
         );
     }
 
@@ -3138,6 +3168,224 @@ function superadmin_gestion_grupos($request) {
     usort($data, function($a, $b) { return count($b['alumnos']) <=> count($a['alumnos']); });
 
     return rest_ensure_response(array('success' => true, 'data' => array('meses' => $meses, 'grupos' => $data)));
+}
+
+// ─── Sección 8.2: acciones de ExcelMuerte sobre WooCommerce (quedan registradas) ──────────
+
+function blokes_gestion_log_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_gestion_log';
+}
+
+function blokes_ensure_gestion_log_table() {
+    global $wpdb;
+    $table = blokes_gestion_log_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        sub_id      bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        accion      varchar(40)         NOT NULL,
+        antes       text                NULL,
+        despues     text                NULL,
+        detalle     text                NULL,
+        user_id     bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        user_login  varchar(100)        NOT NULL DEFAULT '',
+        created_at  datetime            NOT NULL,
+        PRIMARY KEY (id),
+        KEY sub_id (sub_id)
+    ) {$charset};";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+
+function blokes_gestion_log($sub_id, $accion, $antes, $despues, $detalle = array()) {
+    global $wpdb;
+    blokes_ensure_gestion_log_table();
+    $user = wp_get_current_user();
+    $wpdb->insert(blokes_gestion_log_table(), array(
+        'sub_id'     => intval($sub_id),
+        'accion'     => $accion,
+        'antes'      => is_array($antes)   ? wp_json_encode($antes)   : (string) $antes,
+        'despues'    => is_array($despues) ? wp_json_encode($despues) : (string) $despues,
+        'detalle'    => wp_json_encode($detalle),
+        'user_id'    => $user ? $user->ID : 0,
+        'user_login' => $user ? $user->user_login : '',
+        'created_at' => current_time('mysql'),
+    ));
+}
+
+// Desactiva los emails de cliente de WC/WCS mientras se ejecuta $cb (acciones manuales de
+// Eva/Ramiro desde ExcelMuerte: por defecto no avisan al alumno, salvo que se pida lo contrario).
+function blokes_gestion_sin_emails($cb) {
+    $ids = array(
+        'customer_processing_order', 'customer_completed_order', 'customer_on_hold_order',
+        'customer_invoice', 'customer_renewal_invoice', 'customer_completed_renewal_order',
+        'customer_payment_retry', 'cancelled_subscription', 'expired_subscription',
+        'on_hold_subscription', 'subscription_switch_completed',
+    );
+    foreach ($ids as $id) add_filter('woocommerce_email_enabled_' . $id, '__return_false', 9999);
+    try {
+        return $cb();
+    } finally {
+        foreach ($ids as $id) remove_filter('woocommerce_email_enabled_' . $id, '__return_false', 9999);
+    }
+}
+
+function blokes_gestion_metodo_label($metodo) {
+    $map = array(
+        'transferencia' => 'Transferencia', 'efectivo' => 'Efectivo', 'bizum' => 'Bizum',
+        'tarjeta' => 'Tarjeta/web', 'wellhub' => 'Wellhub',
+    );
+    return $map[$metodo] ?? ucfirst($metodo);
+}
+
+/**
+ * Marcar cobrado: completa la renovación pendiente de una suscripción (o crea una si no hay
+ * ninguna) y la reactiva. Solo para suscripciones de renovación MANUAL (transferencia/efectivo):
+ * las de tarjeta/Redsys cobran solas y aquí se rechazan, para no duplicar el cobro.
+ */
+function superadmin_gestion_marcar_cobrado($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id   = intval($request->get_param('sub_id'));
+    $importe  = floatval($request->get_param('importe'));
+    $metodo   = sanitize_key($request->get_param('metodo'));
+    $fecha    = sanitize_text_field($request->get_param('fecha')); // 'Y-m-d', opcional
+    $parcial  = (bool) $request->get_param('parcial');
+    $nota     = sanitize_text_field($request->get_param('nota'));
+
+    if (!$sub_id || $importe <= 0 || !$metodo) {
+        return new WP_Error('bad_request', 'Faltan sub_id, importe o metodo.', array('status' => 400));
+    }
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    if (method_exists($sub, 'is_manual') && !$sub->is_manual()) {
+        return new WP_Error('cobro_automatico', 'Esta suscripción cobra sola por tarjeta/Redsys: no se puede marcar cobrado a mano (cobro doble).', array('status' => 409));
+    }
+
+    $antes = array('status' => $sub->get_status());
+
+    // Renovación pendiente de pago ya existente (la más reciente sin pagar)
+    $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
+    $order = null;
+    foreach (array_reverse($order_ids) as $oid) {
+        $o = wc_get_order($oid);
+        if ($o && in_array($o->get_status(), array('pending', 'on-hold', 'failed'), true)) { $order = $o; break; }
+    }
+    if (!$order && function_exists('wcs_create_renewal_order')) {
+        $order = wcs_create_renewal_order($sub);
+    }
+    if (!$order) return new WP_Error('no_order', 'No se ha podido encontrar ni crear el pedido de renovación.', array('status' => 500));
+
+    $metodo_label = blokes_gestion_metodo_label($metodo);
+    $fecha_ts  = $fecha ? strtotime($fecha . ' 12:00:00') : time();
+    $fecha_txt = date_i18n('d/m/Y', $fecha_ts);
+
+    blokes_gestion_sin_emails(function() use ($order, $metodo_label, $importe, $fecha_ts, $fecha_txt, $parcial, $nota) {
+        $order->set_payment_method_title($metodo_label);
+        $nota_txt = sprintf('ExcelMuerte: cobrado %s € (%s) el %s.', number_format($importe, 2, ',', '.'), $metodo_label, $fecha_txt);
+        if ($parcial) $nota_txt .= ' PAGO PARCIAL' . ($nota ? ' — ' . $nota : '') . '.';
+        elseif ($nota) $nota_txt .= ' ' . $nota;
+        $order->add_order_note($nota_txt);
+        $order->save();
+        update_post_meta($order->get_id(), '_rm_importe_cobrado', $importe);
+        update_post_meta($order->get_id(), '_rm_metodo_cobro', $metodo);
+        if ($parcial) update_post_meta($order->get_id(), '_rm_pago_parcial', $nota ?: '1');
+        $order->payment_complete();
+        if ($fecha) {
+            $order->set_date_paid($fecha_ts);
+            $order->save();
+        }
+    });
+
+    $sub = wcs_get_subscription($sub_id); // recarga tras el payment_complete
+    $despues = array('status' => $sub ? $sub->get_status() : null, 'order_id' => $order->get_id());
+    blokes_gestion_log($sub_id, 'marcar_cobrado', $antes, $despues, array(
+        'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota,
+    ));
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+/**
+ * Pausar (lesión, viaje…): on-hold con motivo y fecha de vuelta guardados aparte, para no
+ * mezclarlo con un simple impago (que también deja la suscripción en on-hold).
+ */
+function superadmin_gestion_pausar($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id       = intval($request->get_param('sub_id'));
+    $motivo       = sanitize_text_field($request->get_param('motivo'));
+    $fecha_vuelta = sanitize_text_field($request->get_param('fecha_vuelta')); // 'Y-m-d', opcional
+
+    if (!$sub_id || !$motivo) return new WP_Error('bad_request', 'Faltan sub_id o motivo.', array('status' => 400));
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    $antes = array('status' => $sub->get_status());
+    blokes_gestion_sin_emails(function() use ($sub, $motivo) {
+        $sub->update_status('on-hold', 'Pausa (' . $motivo . ') vía ExcelMuerte');
+    });
+    update_post_meta($sub_id, '_rm_pausa_motivo', $motivo);
+    if ($fecha_vuelta) update_post_meta($sub_id, '_rm_pausa_hasta', $fecha_vuelta);
+    else delete_post_meta($sub_id, '_rm_pausa_hasta');
+
+    $despues = array('status' => 'on-hold', 'motivo' => $motivo, 'fecha_vuelta' => $fecha_vuelta);
+    blokes_gestion_log($sub_id, 'pausar', $antes, $despues);
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+/** Reanudar: vuelve a activa y borra la marca de pausa. */
+function superadmin_gestion_reanudar($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id = intval($request->get_param('sub_id'));
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    $antes = array('status' => $sub->get_status(), 'pausaMotivo' => get_post_meta($sub_id, '_rm_pausa_motivo', true));
+    blokes_gestion_sin_emails(function() use ($sub) {
+        $sub->update_status('active', 'Reanudada vía ExcelMuerte');
+    });
+    delete_post_meta($sub_id, '_rm_pausa_motivo');
+    delete_post_meta($sub_id, '_rm_pausa_hasta');
+
+    $despues = array('status' => 'active');
+    blokes_gestion_log($sub_id, 'reanudar', $antes, $despues);
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+/** Historial de acciones (para depurar o ver «quién, cuándo»). Sin sub_id, las últimas 50. */
+function superadmin_gestion_log_get($request) {
+    global $wpdb;
+    blokes_ensure_gestion_log_table();
+    $sub_id = intval($request->get_param('sub_id'));
+    $table  = blokes_gestion_log_table();
+    if ($sub_id) {
+        $rows = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$table} WHERE sub_id = %d ORDER BY id DESC LIMIT 100", $sub_id), ARRAY_A);
+    } else {
+        $rows = $wpdb->get_results("SELECT * FROM {$table} ORDER BY id DESC LIMIT 50", ARRAY_A);
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $rows));
+}
+
+/** Nota por alumno (columna «Observaciones» del Excel): solo meta, sin tocar WooCommerce. */
+function superadmin_gestion_nota($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    $nota   = sanitize_text_field($request->get_param('nota'));
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    $antes = get_post_meta($sub_id, '_rm_nota', true);
+    update_post_meta($sub_id, '_rm_nota', $nota);
+    blokes_gestion_log($sub_id, 'nota', $antes, $nota);
+    return rest_ensure_response(array('success' => true, 'data' => array('nota' => $nota)));
 }
 
 function superadmin_classes($request) {

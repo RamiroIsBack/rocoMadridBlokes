@@ -3,7 +3,10 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useClasses, usePeopleSummary, useGestionGrupos } from '../hooks/useSuperAdmin'
+import {
+  useClasses, usePeopleSummary, useGestionGrupos,
+  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota,
+} from '../hooks/useSuperAdmin'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
@@ -936,16 +939,142 @@ function CtrlTestsTab() {
 const ESTADO_LABEL = {
   activo:          { txt: 'Activo',                    cls: 'sv-grp-estado--ok' },
   en_espera:       { txt: 'En espera (pausa o impago)', cls: 'sv-grp-estado--warn' },
+  pausado:         { txt: 'Pausado',                    cls: 'sv-grp-estado--warn' },
   pendiente_pago:  { txt: 'Pendiente de alta',          cls: 'sv-grp-estado--warn' },
   baja_fin_mes:    { txt: 'Baja a fin de mes',          cls: 'sv-grp-estado--bad' },
+}
+const METODO_OPCIONES = [
+  ['transferencia', 'Transferencia'], ['efectivo', 'Efectivo'], ['bizum', 'Bizum'],
+  ['tarjeta', 'Tarjeta/web'], ['wellhub', 'Wellhub'],
+]
+const hoyISO = () => new Date().toISOString().slice(0, 10)
+
+function AccionModal({ alumno, tipo, onClose, onDone }) {
+  const [importe, setImporte] = useState('')
+  const [metodo, setMetodo]   = useState('transferencia')
+  const [fecha, setFecha]     = useState(hoyISO())
+  const [parcial, setParcial] = useState(false)
+  const [motivo, setMotivo]   = useState('')
+  const [fechaVuelta, setFechaVuelta] = useState('')
+  const [nota, setNota]       = useState(alumno.notas || '')
+  const [busy, setBusy]       = useState(false)
+  const [err, setErr]         = useState(null)
+
+  const titulos = {
+    marcar_cobrado: 'Marcar cobrado', pausar: 'Pausar', reanudar: 'Reanudar', nota: 'Nota',
+  }
+
+  async function submit() {
+    setBusy(true); setErr(null)
+    try {
+      if (tipo === 'marcar_cobrado') {
+        if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
+        await gestionMarcarCobrado({ sub_id: alumno.subId, importe: Number(importe), metodo, fecha, parcial, nota })
+      } else if (tipo === 'pausar') {
+        if (!motivo.trim()) throw new Error('Pon un motivo.')
+        await gestionPausar({ sub_id: alumno.subId, motivo, fecha_vuelta: fechaVuelta })
+      } else if (tipo === 'reanudar') {
+        await gestionReanudar({ sub_id: alumno.subId })
+      } else if (tipo === 'nota') {
+        await gestionNota({ sub_id: alumno.subId, nota })
+      }
+      onDone()
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="sv-grp-overlay" onClick={onClose}>
+      <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
+        <h3>{titulos[tipo]} — {alumno.alumno || `Suscripción #${alumno.subId}`}</h3>
+
+        {tipo === 'marcar_cobrado' && (
+          <>
+            {alumno.manual === false && (
+              <p className="sv-to-warn-txt">Esta suscripción cobra sola por tarjeta/Redsys: el servidor rechazará la acción (para evitar cobro doble).</p>
+            )}
+            <label className="sv-grp-field">Importe (€)
+              <input className="sv-tests-input" type="number" step="0.01" min="0" value={importe} onChange={e => setImporte(e.target.value)} />
+            </label>
+            <label className="sv-grp-field">Método
+              <select className="sv-tests-select" value={metodo} onChange={e => setMetodo(e.target.value)}>
+                {METODO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
+              </select>
+            </label>
+            <label className="sv-grp-field">Fecha
+              <input className="sv-tests-input" type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+            </label>
+            <label className="sv-grp-field sv-grp-field--check">
+              <input type="checkbox" checked={parcial} onChange={e => setParcial(e.target.checked)} />
+              Pago parcial / medio mes
+            </label>
+            <label className="sv-grp-field">Nota
+              <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} placeholder="Opcional" />
+            </label>
+          </>
+        )}
+
+        {tipo === 'pausar' && (
+          <>
+            <label className="sv-grp-field">Motivo
+              <input className="sv-tests-input" type="text" value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Lesión, viaje…" />
+            </label>
+            <label className="sv-grp-field">Fecha de vuelta (opcional)
+              <input className="sv-tests-input" type="date" value={fechaVuelta} onChange={e => setFechaVuelta(e.target.value)} />
+            </label>
+          </>
+        )}
+
+        {tipo === 'reanudar' && (
+          <p>¿Reanudar esta suscripción (vuelve a «Activo»)?</p>
+        )}
+
+        {tipo === 'nota' && (
+          <label className="sv-grp-field">Nota
+            <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} />
+          </label>
+        )}
+
+        {err && <p className="sv-error">{err}</p>}
+
+        <div className="sv-grp-modal__actions">
+          <button className="sv-tests-select" onClick={onClose} disabled={busy}>Cancelar</button>
+          <button className="sv-tests-danger sv-tests-danger--confirm" onClick={submit} disabled={busy}>
+            {busy ? 'Guardando…' : 'Confirmar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AccionMenu({ alumno, onPick, onClose }) {
+  const puedePausar   = alumno.estado === 'activo' || alumno.estado === 'pendiente_pago'
+  const puedeReanudar = alumno.estado === 'en_espera' || alumno.estado === 'pausado'
+  return (
+    <div className="sv-grp-overlay" onClick={onClose}>
+      <div className="sv-grp-menu" onClick={e => e.stopPropagation()}>
+        <button onClick={() => onPick('marcar_cobrado')}>Marcar cobrado</button>
+        {puedePausar   && <button onClick={() => onPick('pausar')}>Pausar</button>}
+        {puedeReanudar && <button onClick={() => onPick('reanudar')}>Reanudar</button>}
+        <button onClick={() => onPick('nota')}>Nota</button>
+        <button className="sv-grp-menu__cancel" onClick={onClose}>Cancelar</button>
+      </div>
+    </div>
+  )
 }
 const MES_CORTO_GRP = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 const mesLabelGrp = ym => { const [y, m] = ym.split('-'); return `${MES_CORTO_GRP[Number(m) - 1]} ${y.slice(2)}` }
 const PAGO_PENDIENTE = new Set(['pending', 'on-hold', 'failed'])
 
 function GruposTab() {
-  const { data, loading, error } = useGestionGrupos(4)
+  const { data, loading, error, refetch } = useGestionGrupos(4)
   const [grupoKey, setGrupoKey] = useState('')
+  const [menuFor, setMenuFor] = useState(null)   // alumno con el menú de acciones abierto
+  const [accion, setAccion]   = useState(null)   // { alumno, tipo } con el modal abierto
 
   const grupos = data?.grupos || []
   const meses  = data?.meses || []
@@ -978,9 +1107,10 @@ function GruposTab() {
   return (
     <div className="sv-tab-panel">
       <p className="sv-note">
-        Sustituye el Excel «Grupos»: de momento solo lectura (los botones de cobrar, pausar, dar de baja… llegan en la
-        siguiente ronda, probados primero con datos de prueba). <strong>Alumno y pagador son la misma persona por ahora</strong>
-        — hasta que la migración añada quién es realmente cada alumno, esto cuenta suscripciones, no alumnos.
+        Sustituye el Excel «Grupos». <strong>Alumno y pagador son la misma persona por ahora</strong> — hasta que la
+        migración añada quién es realmente cada alumno, esto cuenta suscripciones, no alumnos.
+        Las acciones (⋯) escriben de verdad en WooCommerce: <strong>pruébalas primero con una suscripción de prueba</strong>,
+        no se envían correos al alumno, y todo queda registrado (quién, cuándo, antes → después).
       </p>
 
       <div className="sv-controls">
@@ -1048,7 +1178,7 @@ function GruposTab() {
                     )
                   })}
                   <td className="sv-ot-muted">{a.notas || '—'}</td>
-                  <td><button className="sv-tests-remove" disabled title="Las acciones llegan en la siguiente ronda">⋯</button></td>
+                  <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
                 </tr>
               )
             })}
@@ -1056,6 +1186,22 @@ function GruposTab() {
         </table>
       </div>
       {alumnos.length === 0 && <p className="sv-empty">Sin suscripciones en vigor para este grupo.</p>}
+
+      {menuFor && (
+        <AccionMenu
+          alumno={menuFor}
+          onClose={() => setMenuFor(null)}
+          onPick={tipo => { setAccion({ alumno: menuFor, tipo }); setMenuFor(null) }}
+        />
+      )}
+      {accion && (
+        <AccionModal
+          alumno={accion.alumno}
+          tipo={accion.tipo}
+          onClose={() => setAccion(null)}
+          onDone={() => { setAccion(null); refetch() }}
+        />
+      )}
     </div>
   )
 }

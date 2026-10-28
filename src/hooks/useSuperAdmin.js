@@ -6,6 +6,7 @@ function useEndpoint(path, params = {}) {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
   const query = new URLSearchParams(params).toString()
@@ -21,9 +22,9 @@ function useEndpoint(path, params = {}) {
       })
       .then(json => { setData(json.data ?? json); setLoading(false) })
       .catch(e  => { setError(e.message); setLoading(false) })
-  }, [url])
+  }, [url, reloadKey])
 
-  return { data, loading, error }
+  return { data, loading, error, refetch: () => setReloadKey(k => k + 1) }
 }
 
 export function useRevenue(months, excludeTransfer = false) {
@@ -45,6 +46,23 @@ export function usePeopleSummary() {
 export function useGestionGrupos(months = 4) {
   return useEndpoint('/gestion/grupos', { months })
 }
+
+async function gestionPost(path, body) {
+  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
+  const res = await fetch(`${CLUB_URL}/wp-json/superadmin/v1${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
+    body: JSON.stringify(body),
+  })
+  const json = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(json?.message || `HTTP ${res.status}`)
+  return json?.data ?? json
+}
+
+export const gestionMarcarCobrado = body => gestionPost('/gestion/marcar-cobrado', body)
+export const gestionPausar        = body => gestionPost('/gestion/pausar', body)
+export const gestionReanudar      = body => gestionPost('/gestion/reanudar', body)
+export const gestionNota          = body => gestionPost('/gestion/nota', body)
 
 export function useExpenses(months, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)
