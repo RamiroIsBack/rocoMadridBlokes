@@ -490,6 +490,7 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
             <div className="sv-member-legend">
               <span className="sv-member-legend__item sv-member-legend__item--new">Nuevo este mes</span>
               <span className="sv-member-legend__item sv-member-legend__item--active">Se mantiene</span>
+              <span className="sv-member-legend__item sv-member-legend__item--ending">Se va este mes (ya canceló)</span>
               <span className="sv-member-legend__item sv-member-legend__item--lost">Baja / pendiente pago</span>
             </div>
             <div className="sv-member-list">
@@ -502,6 +503,13 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
               ))}
               {(selectedClass.members_active || []).filter(m => !m.new).map((m, i) => (
                 <span key={`a-${i}`} className="sv-member sv-member--active">
+                  <span className="sv-member__name">{m.name}</span>
+                  {m.phone && <span className="sv-member__phone">{m.phone}</span>}
+                </span>
+              ))}
+              {(selectedClass.members_ending || []).map((m, i) => (
+                <span key={`e-${i}`} className="sv-member sv-member--ending"
+                  data-tooltip="Ya canceló: tiene acceso hasta que acabe el periodo pagado, no se renueva">
                   <span className="sv-member__name">{m.name}</span>
                   {m.phone && <span className="sv-member__phone">{m.phone}</span>}
                 </span>
@@ -612,6 +620,9 @@ function ClasesTab() {
   const top12      = filtered.slice(0, 12)
   const hasRevenue = top12.some(c => c.revenue != null)
   const totalRevenue = top12.reduce((s, c) => s + (c.revenue || 0), 0)
+  // pending-cancel: ya canceló, pero sigue con acceso hasta que acabe el periodo pagado.
+  // No cuentan como activos (no se renuevan), pero no hay que perderlos de vista.
+  const totalEnding = useMemo(() => (data || []).reduce((s, c) => s + (c.ending || 0), 0), [data])
 
   return (
     <div className="sv-tab-panel">
@@ -644,6 +655,11 @@ function ClasesTab() {
             <h2 className="sv-section-title">Horario por día</h2>
             <p className="sv-note">Snapshot actual de alumnos activos por franja horaria. Verde intenso = mucha gente; rosa = clase programada pero sin activos; — = sin clase en ese horario.</p>
             <ScheduleGrid classes={data} filter={filter} />
+            {totalEnding > 0 && (
+              <p className="sv-note sv-to-small">
+                + <strong>{totalEnding}</strong> {totalEnding === 1 ? 'que ya canceló' : 'que ya cancelaron'} y se {totalEnding === 1 ? 'va' : 'van'} este mes (tienen acceso hasta que acabe el periodo pagado, no cuentan arriba como activos).
+              </p>
+            )}
           </section>
 
           {hasRevenue && (

@@ -182,9 +182,9 @@ export function mesesCerradosManana(mananas) {
   return []
 }
 
-// Horas semanales de clase de cada persona que empiezan antes del corte (base normal, el
-// horario de verano se rehace cada año y no entra aquí). Solo clases: equipar, comida o
-// gestión de por la mañana no son horas que se «dejen de dar» si se cierra a los alumnos.
+// Horas semanales de cada persona que empiezan antes del corte (base normal, el horario de
+// verano se rehace cada año y no entra aquí). Todas sus horas, no solo las de clase: si está
+// en paro o de baja, tampoco equipa esa mañana.
 export function horasMananaPorPersona(corteHora = MANANAS_CORTE_DEFECTO) {
   const corte = minsOf(corteHora)
   const res = {}
@@ -192,7 +192,7 @@ export function horasMananaPorPersona(corteHora = MANANAS_CORTE_DEFECTO) {
     let horas = 0
     DAYS.forEach(d => {
       ;(BASE[p]?.[d] || []).forEach(slot => {
-        if (slot.tipo === 'clase' && minsOf(slot.start) < corte) horas += (minsOf(slot.end) - minsOf(slot.start)) / 60
+        if (minsOf(slot.start) < corte) horas += (minsOf(slot.end) - minsOf(slot.start)) / 60
       })
     })
     if (horas > 0) res[p] = horas
@@ -200,12 +200,14 @@ export function horasMananaPorPersona(corteHora = MANANAS_CORTE_DEFECTO) {
   return res
 }
 
-// Ingresos mensuales reales de las clases con suscripción que empiezan antes del corte
-// (a partir de la lista de /progreso/v1/clases: dia, horario, precio, alumnos, tipo)
+// Ingresos mensuales reales de las clases que empiezan antes del corte (a partir de la lista
+// de /progreso/v1/clases: dia, horario, precio, alumnos, tipo). Incluye tanto las de 2 días
+// («classes») como las de 1 día («single»): las dos son suscripciones reales, solo cambia
+// cuántos días a la semana paga cada alumno.
 export function ingresosMananaDeClases(clases, corteHora = MANANAS_CORTE_DEFECTO) {
   const corte = minsOf(corteHora)
   return (clases || [])
-    .filter(c => c.tipo === 'classes' && minsOf(c.horario) < corte)
+    .filter(c => minsOf(c.horario) < corte)
     .reduce((acc, c) => {
       const alumnos = Number(c.alumnos) || 0
       acc.alumnos += alumnos

@@ -549,6 +549,7 @@
 }
 .sv-member-legend__item--new::before    { background: #34d399; }
 .sv-member-legend__item--active::before { background: #fdba74; }
+.sv-member-legend__item--ending::before { background: #facc15; }
 .sv-member-legend__item--lost::before   { background: #f87171; }
 
 /* ── Member chips ── */
@@ -620,6 +621,12 @@
   border-color: rgba(248,113,113,0.2);
 }
 .sv-member--lost .sv-member__phone { color: rgba(248,113,113,0.5); }
+.sv-member--ending {
+  background: #2a2410;
+  color: #facc15;
+  border-color: rgba(250,204,21,0.3);
+}
+.sv-member--ending .sv-member__phone { color: rgba(250,204,21,0.55); }
 
 /* ── Group summary ── */
 .sv-group-summary {

@@ -483,3 +483,19 @@ Limpieza: el bloke de prueba 7532 ya no existe (lo borró el propio endpoint); n
 Tienes razón: el primer despliegue (run `40654861316`) terminó en verde pero el PHP en `rocomadrid.com/club` seguía con el código antiguo. He vuelto a disparar el workflow a mano sobre el mismo commit (`5b0a06e`) — run `40728621516`, también terminado en verde, «Upload PHP files and .htaccess» ✓. No he tocado nada más (ni el commit ni el build).
 
 No puedo crear/borrar un bloke de prueba yo mismo desde aquí para comprobarlo en caliente (el modo automático bloquea escribir en producción), así que necesito que repitas tu prueba: crea otro bloke de prueba, `DELETE /wp-json/blokes/v1/delete/{id}`, y mira si ahora sí sale `"retired": true` + `post_id` en `draft` + metas `bloke_retirado`/`bloke_retirado_por`, y que repetir el DELETE es idempotente (no 404). Si sigue saliendo el mensaje antiguo, dímelo y miro si hay caché de PHP (OPcache) en SiteGround que haya que vaciar a mano desde el panel — eso sí que no lo puedo hacer yo, lo tendría que hacer Ramiro desde Site Tools.
+
+---
+
+## ➜ Encargo nuevo de Ramiro (28/10 tarde): mira `NOTAS_PARA_CODE_mananas_y_datos.md`
+Mañanas en el simulador, sueldos reales, cuadre de ExcelMuerte con wp-admin, contar personas (1 o 2 días), y sobre todo **ExcelMuerte como herramienta de Eva para manejar WooCommerce y sustituir el Excel «Grupos»** (sección 8). La copia del Excel está en `datos_privados/` (no se sube a git). Avisa con «## Listo para probar» en ese archivo.
+
+## Resultado de pruebas · 2026-10-28 18:14 (Cowork) — Paso 1 tras el redeploy: ✅ FUNCIONA
+Bloke de prueba 7533: `retired: true`, `draft`, `retired_by: ramiro`; segundo DELETE idempotente (misma fecha). Borrado del todo después. Solo falta registrar las metas `bloke_retirado`/`bloke_retirado_por` en REST si se van a leer desde el front. **Sigue con el paso 2.**
+
+---
+
+## Listo para probar · 2026-10-28 — `bloke_retirado`/`bloke_retirado_por` ya salen en REST
+
+Añadidas al mismo filtro que ya exponía `bloke_colorPresa` y `bloke_first_ascent` (`rest_prepare_blokes`): `GET /wp/v2/blokes/{id}?context=edit` ya devuelve `bloke_retirado` y `bloke_retirado_por` en el nivel raíz (o `null` si no está retirado). Va en el mismo despliegue que el encargo de mañanas/datos (mismo build, avisado en `NOTAS_PARA_CODE_mananas_y_datos.md`).
+
+Sigo con el **paso 2** (propuesta de qué equipar) en cuanto pueda — ahora mismo estoy en varios frentes del otro encargo a la vez, avisa si prefieres que me centre solo en este.

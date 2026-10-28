@@ -220,6 +220,8 @@ add_filter('rest_prepare_blokes', function($response, $post, $request) {
     $data['bloke_completion_count'] = (int) get_post_meta($post->ID, '_bloke_completion_count', true);
     $fa = get_post_meta($post->ID, '_bloke_first_ascent', true);
     $data['bloke_first_ascent']     = is_array($fa) ? $fa : null;
+    $data['bloke_retirado']         = get_post_meta($post->ID, 'bloke_retirado', true) ?: null;
+    $data['bloke_retirado_por']     = get_post_meta($post->ID, 'bloke_retirado_por', true) ?: null;
     $response->set_data($data);
     return $response;
 }, 10, 3);
@@ -2996,9 +2998,11 @@ function superadmin_classes($request) {
                     'horario'         => $sub['horario'] ?? '',
                     'edad'            => $edad,
                     'active'          => 0,
+                    'ending'          => 0,
                     'all'             => 0,
                     'history'         => array(),
                     'members_active'  => array(),
+                    'members_ending'  => array(),
                     'members_pending' => array(),
                     'members_lost'    => array(),
                 );
@@ -3006,6 +3010,11 @@ function superadmin_classes($request) {
             $classes[$class_key]['all']++;
             $member_name  = $sub['cliente']  ?? '';
             $member_phone = $sub['telefono'] ?? '';
+            // pending-cancel: el cliente ya canceló pero sigue con acceso hasta que acabe el
+            // periodo pagado. blokes_get_pending_cancel_alumnos() los marca 'status' => 'active'
+            // para que no desaparezcan de ningún sitio, pero no son activos de verdad: no se
+            // renuevan. Van aparte («se van este mes»), no al recuento de activos.
+            $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
 
             // Per-month active snapshot using subscription start/end dates
             if (function_exists('wcs_get_subscription') && !empty($sub['id'])) {
@@ -3015,9 +3024,12 @@ function superadmin_classes($request) {
                     $member_phone = $sub_obj->get_billing_phone() ?: '';
                 }
 
-                if ($sub['status'] === 'active') {
+                if ($sub['status'] === 'active' && !$es_pending_cancel) {
                     $classes[$class_key]['active']++;
                     $classes[$class_key]['members_active'][] = array('name' => $member_name, 'phone' => $member_phone, 'new' => false);
+                } elseif ($es_pending_cancel) {
+                    $classes[$class_key]['ending']++;
+                    $classes[$class_key]['members_ending'][] = array('name' => $member_name, 'phone' => $member_phone);
                 } elseif (in_array($sub['status'], array('on-hold', 'pending'))) {
                     $classes[$class_key]['members_pending'][] = array('name' => $member_name, 'phone' => $member_phone);
                 }
@@ -3028,14 +3040,21 @@ function superadmin_classes($request) {
                 $sub_start_ym = $dt_created->format('Y-m');
 
                 if ($sub['status'] === 'active') {
+                    // Hasta que no acabe el periodo pagado sigue contando como activa mes a mes
+                    // en el histórico (aunque ya esté "pending-cancel" y no entre en el snapshot
+                    // de arriba): de verdad lo estuvo hasta ahora.
                     $sub_end_ym = $now_ym;
                     // Mark as new if subscription started this month
-                    if ($sub_start_ym >= $now_ym) {
+                    if (!$es_pending_cancel && $sub_start_ym >= $now_ym) {
                         $idx = count($classes[$class_key]['members_active']) - 1;
                         if ($idx >= 0) $classes[$class_key]['members_active'][$idx]['new'] = true;
                     }
                 } else {
-                    $end_ts     = $sub_obj->get_time('cancelled') ?: $sub_obj->get_time('end');
+                    $end_ts = $sub_obj->get_time('cancelled') ?: $sub_obj->get_time('end');
+                    // "En espera" (on-hold) no tiene fecha de cancelación ni de fin: sin esto,
+                    // se le daba por acabada el mismo mes que empezó y desaparecía del histórico
+                    // de los meses siguientes aunque siguiera en espera. Usamos el último pago.
+                    if (!$end_ts && $sub['status'] === 'on-hold') $end_ts = $sub_obj->get_time('last_payment');
                     $sub_end_ym = $end_ts ? date('Y-m', $end_ts) : $sub_start_ym;
                     // Track recently lost: cancelled within last 2 months
                     $two_months_ago = date('Y-m', strtotime('-2 months'));
