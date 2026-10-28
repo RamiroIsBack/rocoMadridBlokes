@@ -38,6 +38,10 @@ export function useClasses(months) {
   return useEndpoint('/classes', { months })
 }
 
+export function usePeopleSummary() {
+  return useEndpoint('/people-summary')
+}
+
 export function useExpenses(months, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)
   const [breakdown, setBreakdown] = useState(null)

@@ -3,7 +3,7 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useClasses } from '../hooks/useSuperAdmin'
+import { useClasses, usePeopleSummary } from '../hooks/useSuperAdmin'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
@@ -152,18 +152,17 @@ function ScheduleGrid({ classes, filter }) {
     return t
   }, [grid, timeSlots])
 
-  // Row totals: sum c.active once per class (not per day) to avoid double-counting
+  // Plazas por sesión: el Total de cada fila suma sus columnas de día, así que una clase
+  // Martes-Jueves cuenta una vez en martes y otra en jueves (igual criterio que el pie de
+  // columna). No es "personas distintas" — eso está en la sección "Personas", aparte.
   const rowTotals = useMemo(() => {
     const totals = {}
-    timeSlots.forEach(slot => { totals[slot] = 0 })
-    parsed.forEach(c => {
-      if (totals[c.meta.time] !== undefined) totals[c.meta.time] += c.active
-    })
+    timeSlots.forEach(slot => { totals[slot] = grid[slot].reduce((s, n) => s + n, 0) })
     return totals
-  }, [parsed, timeSlots])
+  }, [grid, timeSlots])
 
-  // Grand total: unique students — each class counted once regardless of days
-  const grandTotal = useMemo(() => parsed.reduce((s, c) => s + c.active, 0), [parsed])
+  // Gran total: suma de todas las plazas por sesión de la semana
+  const grandTotal = useMemo(() => dayTotals.reduce((s, n) => s + n, 0), [dayTotals])
 
   if (!timeSlots.length) {
     return (
@@ -188,7 +187,7 @@ function ScheduleGrid({ classes, filter }) {
             <tr>
               <th className="sv-th sv-th--time">Horario</th>
               {WEEKDAYS.map(d => <th key={d} className="sv-th">{d}</th>)}
-              <th className="sv-th sv-th--total">Total</th>
+              <th className="sv-th sv-th--total" title="Plazas por sesión: suma las columnas de día de esta fila. Una clase Martes-Jueves cuenta una vez en martes y otra en jueves (no es el nº de personas distintas — eso está en «Personas», arriba).">Total ⓘ</th>
             </tr>
           </thead>
           <tbody>
@@ -217,7 +216,7 @@ function ScheduleGrid({ classes, filter }) {
               {dayTotals.map((n, i) => (
                 <td key={i} className="sv-td-total">{n || '—'}</td>
               ))}
-              <td className="sv-td-grand">{grandTotal || '—'}</td>
+              <td className="sv-td-grand" title="Plazas por sesión de toda la semana (sesiones/semana).">{grandTotal || '—'}</td>
             </tr>
           </tfoot>
         </table>
@@ -600,6 +599,52 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
   )
 }
 
+const BUCKET_LABEL = { adultos_grupo: 'Adultos (grupo)', ninos_adolescentes: 'Niños / adolescentes', pilates_yoga: 'Pilates / Yoga' }
+
+// Personas (cuentas de facturación), no suscripciones. Cada número lleva su definición en
+// un «ⓘ» porque, hasta que la migración de la sección 8 añada un campo "Alumno" en cada
+// suscripción (distinto del pagador), "persona" aquí es en realidad "cuenta": una familia
+// con una sola cuenta para varios hijos cuenta como 1.
+function PeopleSummaryKpis() {
+  const { data, loading, error } = usePeopleSummary()
+  if (loading) return <div className="sv-loading">Cargando personas…</div>
+  if (error)   return <div className="sv-error">Error: {error}</div>
+  if (!data)   return null
+
+  const porDias = (bucket) => {
+    const d = data.por_dias?.[bucket] || {}
+    const partes = ['1', '2', '3+'].filter(k => d[k]).map(k => `${d[k]} × ${k} ${k === '1' ? 'día' : 'días'}`)
+    return partes.length ? partes.join(' · ') : 'sin datos'
+  }
+
+  return (
+    <div className="sv-kpis">
+      <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }}
+        title="Cuentas de facturación con una suscripción en vigor (activa o ya cancelada pero con acceso hasta fin de periodo). No es el nº exacto de alumnos: una cuenta puede tener varios hijos/hermanos — eso lo resolverá el campo «Alumno» de la migración (sección 8).">
+        <span className="sv-kpi__value">{data.cuentas_total}</span>
+        <span className="sv-kpi__label">Cuentas en vigor ⓘ</span>
+      </div>
+      {Object.keys(BUCKET_LABEL).map(b => (
+        <div key={b} className="sv-kpi" style={{ '--kpi-color': '#a78bfa' }}
+          title={`Días a la semana de ${BUCKET_LABEL[b]}: cuántas cuentas de este grupo vienen 1, 2 o 3+ días (sumando todas sus suscripciones). Niños/adolescentes y Pilates/Yoga van aparte del resto.`}>
+          <span className="sv-kpi__value">{porDias(b)}</span>
+          <span className="sv-kpi__label">{BUCKET_LABEL[b]} ⓘ</span>
+        </div>
+      ))}
+      <div className="sv-kpi" style={{ '--kpi-color': '#34d399' }}
+        title="Suma de plazas por sesión (día + hora): una suscripción Martes-Jueves cuenta una vez en martes y una vez en jueves. Es el mismo criterio que la columna Total de «Horario por día»; sirve para el coste por plaza.">
+        <span className="sv-kpi__value">{data.sesiones_semana}</span>
+        <span className="sv-kpi__label">Sesiones/semana ⓘ</span>
+      </div>
+      <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }}
+        title="Ingreso mensual equivalente de todas las suscripciones en vigor: las trimestrales se dividen por 3 y las anuales por 12, para poder comparar con un mes normal.">
+        <span className="sv-kpi__value">{fmtEur(data.ingreso_mes_total)}</span>
+        <span className="sv-kpi__label">Ingreso mensual equiv. ⓘ</span>
+      </div>
+    </div>
+  )
+}
+
 // ─── Clases tab ───────────────────────────────────────────────────────────────
 function ClasesTab() {
   const [months, setMonths]           = useState(6)
@@ -651,6 +696,12 @@ function ClasesTab() {
 
       {!loading && !error && data && (
         <>
+          <section className="sv-section">
+            <h2 className="sv-section-title">Personas</h2>
+            <p className="sv-note">Cuentas con suscripción en vigor, no suscripciones (una Martes-Jueves es 1 cuenta que viene 2 días). Pasa el ratón por cada número (ⓘ) para ver qué cuenta exactamente.</p>
+            <PeopleSummaryKpis />
+          </section>
+
           <section className="sv-section">
             <h2 className="sv-section-title">Horario por día</h2>
             <p className="sv-note">Snapshot actual de alumnos activos por franja horaria. Verde intenso = mucha gente; rosa = clase programada pero sin activos; — = sin clase en ese horario.</p>

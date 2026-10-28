@@ -732,6 +732,11 @@ add_action('rest_api_init', function() {
         'permission_callback' => $sa_perm,
         'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
     ));
+    register_rest_route('superadmin/v1', '/people-summary', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_people_summary',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/classes', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_classes',
@@ -2965,6 +2970,91 @@ function superadmin_products($request) {
     usort($data, function($a, $b) { return $b['revenue'] <=> $a['revenue']; });
 
     return rest_ensure_response(array('data' => $data));
+}
+
+// Cuenta PERSONAS (cuentas de facturación), no suscripciones: una suscripción Martes-Jueves
+// es 1 persona que viene 2 días; dos suscripciones de la misma cuenta son la misma persona.
+// Aviso: hoy la cuenta es la unidad real (no hay un campo "alumno" en la suscripción, distinto
+// del pagador — lo añadirá la migración de la sección 8), así que una cuenta con varios
+// alumnos (p. ej. hermanos) cuenta aquí como 1. "En vigor" incluye pending-cancel (todavía
+// viene, aunque no se renueve), igual que el resto de ExcelMuerte.
+function superadmin_people_summary($request) {
+    if (!class_exists('RocoMadrid_SF_Stats')) {
+        return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats not available. Call this endpoint on the club subsite.', array('status' => 503));
+    }
+
+    $all = blokes_get_all_subscription_data();
+    $vigentes = array_values(array_filter($all, function($s) { return ($s['status'] ?? '') === 'active'; }));
+
+    $cuentas = array();
+    // Sesiones/semana = plazas por sesión sumadas (una Martes-Jueves cuenta en los dos días),
+    // igual criterio que la columna Total de "Horario por día".
+    $sesiones_semana = 0;
+    $ingreso_mes_total = 0;
+
+    foreach ($vigentes as $sub) {
+        if (empty($sub['id'])) continue;
+        $uid = intval(get_post_meta($sub['id'], '_customer_user', true));
+        if (!$uid && !empty($sub['email'])) {
+            $u = get_user_by('email', $sub['email']);
+            if ($u) $uid = $u->ID;
+        }
+        $cuenta_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : "s{$sub['id']}");
+
+        $producto        = $sub['producto'] ?? '';
+        $edad            = $sub['edad'] ?? 'Adultos';
+        $es_pilates_yoga = in_array($producto, array('Pilates', 'Yoga'), true);
+        $es_menor        = $edad !== 'Adultos';
+        $bucket          = $es_pilates_yoga ? 'pilates_yoga' : ($es_menor ? 'ninos_adolescentes' : 'adultos_grupo');
+
+        $dia      = $sub['dia'] ?? '';
+        $dias_sub = $dia ? explode('-', $dia) : array();
+
+        if (!isset($cuentas[$cuenta_key])) {
+            $cuentas[$cuenta_key] = array('dias' => array(), 'bucket' => $bucket, 'nombre' => $sub['cliente'] ?? '', 'ingresoMes' => 0);
+        }
+        foreach ($dias_sub as $d) {
+            $cuentas[$cuenta_key]['dias'][$d] = true;
+            $sesiones_semana++;
+        }
+        // Si una cuenta mezcla Pilates/Yoga con un grupo normal, que cuente como el grupo normal
+        if ($cuentas[$cuenta_key]['bucket'] === 'pilates_yoga' && $bucket !== 'pilates_yoga') {
+            $cuentas[$cuenta_key]['bucket'] = $bucket;
+        }
+
+        if (function_exists('wcs_get_subscription')) {
+            $sub_obj = wcs_get_subscription(intval($sub['id']));
+            if ($sub_obj) {
+                $total    = floatval($sub_obj->get_total());
+                $period   = $sub_obj->get_billing_period();
+                $interval = max(1, intval($sub_obj->get_billing_interval()));
+                $meses    = $period === 'year' ? ($interval * 12) : ($period === 'month' ? $interval : null);
+                if ($meses) {
+                    $equivalente = round($total / $meses, 2);
+                    $ingreso_mes_total += $equivalente;
+                    $cuentas[$cuenta_key]['ingresoMes'] += $equivalente;
+                }
+            }
+        }
+    }
+
+    $por_dias = array(
+        'adultos_grupo'      => array('1' => 0, '2' => 0, '3+' => 0),
+        'ninos_adolescentes' => array('1' => 0, '2' => 0, '3+' => 0),
+        'pilates_yoga'       => array('1' => 0, '2' => 0, '3+' => 0),
+    );
+    foreach ($cuentas as $c) {
+        $n = count($c['dias']);
+        $clave = $n >= 3 ? '3+' : (string) $n;
+        $por_dias[$c['bucket']][$clave]++;
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'cuentas_total'      => count($cuentas),
+        'por_dias'           => $por_dias,
+        'sesiones_semana'    => $sesiones_semana,
+        'ingreso_mes_total'  => round($ingreso_mes_total, 2),
+    )));
 }
 
 function superadmin_classes($request) {
