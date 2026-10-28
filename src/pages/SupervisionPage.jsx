@@ -626,13 +626,13 @@ function PeopleSummaryKpis() {
       </div>
       {Object.keys(BUCKET_LABEL).map(b => (
         <div key={b} className="sv-kpi" style={{ '--kpi-color': '#a78bfa' }}
-          title={`Días a la semana de ${BUCKET_LABEL[b]}: cuántas cuentas de este grupo vienen 1, 2 o 3+ días (sumando todas sus suscripciones). Niños/adolescentes y Pilates/Yoga van aparte del resto.`}>
+          title={`Días a la semana de ${BUCKET_LABEL[b]}: cuántas cuentas de este grupo vienen 1, 2 o 3+ días (sumando todas sus suscripciones). Niños/adolescentes y Pilates/Yoga van aparte del resto. Solo cuenta lo que hay suscrito en la web — un alumno que paga por fuera (transferencia, efectivo) y no tiene suscripción en la web no sale aquí.`}>
           <span className="sv-kpi__value">{porDias(b)}</span>
           <span className="sv-kpi__label">{BUCKET_LABEL[b]} ⓘ</span>
         </div>
       ))}
       <div className="sv-kpi" style={{ '--kpi-color': '#34d399' }}
-        title="Suma de plazas por sesión (día + hora): una suscripción Martes-Jueves cuenta una vez en martes y una vez en jueves. Es el mismo criterio que la columna Total de «Horario por día»; sirve para el coste por plaza.">
+        title="Suma de plazas por sesión (día + hora): una suscripción Martes-Jueves cuenta una vez en martes y una vez en jueves. Mismo criterio que la columna Total de «Horario por día», salvo que aquí sí se incluyen las pending-cancel (ya cancelaron, pero siguen viniendo hasta fin de periodo) — por eso puede salir algo más alto que el total de «Horario por día», que las cuenta aparte.">
         <span className="sv-kpi__value">{data.sesiones_semana}</span>
         <span className="sv-kpi__label">Sesiones/semana ⓘ</span>
       </div>

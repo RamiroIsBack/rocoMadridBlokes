@@ -762,7 +762,7 @@ function ConfigMananas({ state, update, costes, clases }) {
               <span className="sv-to-inline">Si se cierra, cada persona que da clase por la mañana:</span>
               {Object.keys(horas).map(p => (
                 <label key={p} className="sv-to-inline" style={{ color: PROF_META[p]?.color }}>
-                  {p} ({horas[p]} h/sem de mañana)
+                  {p} ({horas[p]} h/sem de mañana · coste {eur(costes.mes[p] || 0)}/mes{!costes.nomina[p] ? ', de la ficha' : ''})
                   <select className="sv-tests-select" value={mananas.disposicion?.[p] || 'tarde'}
                     onChange={e => setMananas({ disposicion: { ...mananas.disposicion, [p]: e.target.value } })}>
                     {Object.entries(MANANAS_DISPOSICION).map(([id, label]) => <option key={id} value={id}>{label}</option>)}

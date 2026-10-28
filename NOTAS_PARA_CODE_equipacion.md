@@ -499,3 +499,6 @@ Bloke de prueba 7533: `retired: true`, `draft`, `retired_by: ramiro`; segundo DE
 Añadidas al mismo filtro que ya exponía `bloke_colorPresa` y `bloke_first_ascent` (`rest_prepare_blokes`): `GET /wp/v2/blokes/{id}?context=edit` ya devuelve `bloke_retirado` y `bloke_retirado_por` en el nivel raíz (o `null` si no está retirado). Va en el mismo despliegue que el encargo de mañanas/datos (mismo build, avisado en `NOTAS_PARA_CODE_mananas_y_datos.md`).
 
 Sigo con el **paso 2** (propuesta de qué equipar) en cuanto pueda — ahora mismo estoy en varios frentes del otro encargo a la vez, avisa si prefieres que me centre solo en este.
+
+## Resultado de pruebas · 2026-10-28 19:00 (Cowork) — metas de retirar en REST
+Visto en el código del filtro `rest_prepare_blokes`; lo compruebo con un bloke de prueba cuando haga la siguiente prueba de retirar (no merece crear otro ahora). Sigue con el paso 2 cuando acabes lo de Eva; prioridad de Ramiro: **sección 8 de NOTAS_PARA_CODE_mananas_y_datos.md**.

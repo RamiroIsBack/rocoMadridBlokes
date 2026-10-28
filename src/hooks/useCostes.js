@@ -7,9 +7,10 @@ import { usePayroll } from './useOvertime'
 // (nómina base × FACTOR_COSTE + lo que se paga en efectivo); si la persona no tiene
 // nómina ahí, se usa el coste de la ficha (`PROF_META.costoMes`, de marzo de 2026,
 // a revisar) como último recurso.
-// Coste empresa ≈ nómina × 1,395 (tabla de referencia de la ficha: 6, 7, 10 y 40 h/sem
-// dan todas ese factor); lo que se paga en efectivo no lleva SS.
-export const FACTOR_COSTE = 1.395
+// Factor coste empresa / nómina: revisado con las nóminas reales de octubre de 2026
+// (ver NOTAS_PARA_CODE_mananas_y_datos.md, sección 1 · 19:00). Quien cotiza por la base
+// mínima (hoy Sigurd) se sale de este factor; el resto lo cumple.
+export const FACTOR_COSTE = 1.43
 
 const normName = s => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
 
