@@ -1135,6 +1135,8 @@
 .sv-to-verdict--rojo  { border-color: #f87171; background: rgba(248,113,113,0.08); }
 .sv-to-verdict__name { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--to-text-3, #a8a08e); margin-bottom: 4px; }
 .sv-to-verdict__text { font-size: 0.95rem; color: #f0ece0; line-height: 1.55; }
+.sv-to-verdict__months { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px; font-size: 0.85rem; color: #f0ece0; }
+.sv-to-camp { border-left: 3px solid #f0ece0; padding: 4px 0 4px 12px; margin: 8px 0 12px; }
 
 /* Pasos */
 .sv-to-step { border-top: 1px solid #2a2015; padding-top: 14px; margin-top: 16px; }

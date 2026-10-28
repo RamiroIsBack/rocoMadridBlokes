@@ -62,7 +62,7 @@ export function PrevisionVerano({ ev, state, historico }) {
                   <td>{eur(p.ventas)}</td>
                   <td className="sv-ot-muted">
                     {p.cerrado ? 'Sala cerrada: sin ventas' : 'Abierto: media del mes'}
-                    {p.camp > 0 && ` · campamento +${eur(p.camp)}`}
+                    {p.campIngresos > 0 && ` · campamento +${eur(p.campIngresos)}`}
                   </td>
                 </tr>,
                 <tr key={`${m}c`}>
@@ -73,7 +73,8 @@ export function PrevisionVerano({ ev, state, historico }) {
                   <td className="sv-ot-muted">
                     {p.ahorroPersonal !== 0 && `Personal ${p.ahorroPersonal > 0 ? '−' : '+'}${eur(Math.abs(p.ahorroPersonal))}`}
                     {p.ahorroSala > 0 && ` · gastos de sala −${eur(p.ahorroSala)}`}
-                    {p.ahorroPersonal === 0 && !p.ahorroSala && 'Igual que hoy'}
+                    {p.campCostes > 0 && ` · campamento +${eur(p.campCostes)}`}
+                    {p.ahorroPersonal === 0 && !p.ahorroSala && !p.campCostes && 'Igual que hoy'}
                   </td>
                 </tr>,
                 <tr key={`${m}r`} className="sv-to-row--total">

@@ -299,6 +299,13 @@ blancas (`socios`/`gestion`/`profesores`) — pídele a Ramiro que te añada o u
   días, cierre) + solicitudes aprobadas; contra esto se comprueba cada solicitud, siempre en
   su propio año. *Simulador*: el plan de prueba (`blokes_timeoff_plan`), escenarios,
   histórico y previsión; solo pasa a lo real la configuración (botón), nunca los periodos.
+- **Campamento de verano en el simulador (28/10/2026).** Va por la mañana con la sala
+  abierta (por la tarde) o cerrada: semanas y plazas por mes desde el primer lunes de julio y
+  de agosto, ocupación, precio, descuento, ratio de monitores y costes por niño. Las cuentas
+  están en `src/utils/campamento.js`: la plantilla que lo lleva no cuesta más con la sala
+  cerrada; con la sala abierta son horas de más, y si mañana + tarde pasan de 9 h sale un aviso
+  rojo. El formato antiguo (`start` + `semanas`) se convierte con `normalizeCamp`. La huella
+  del supuesto activo (`firmaPlan`) va normalizada porque PHP devuelve `{}` como `[]`.
 - **Colaboración.** El repo es `RamiroIsBack/rocoMadridBlokes`. Cualquier push a `dev`
   despliega automáticamente, lo haga quien lo haga (la cuenta `ClubRocomadrid7a` ya ha
   desplegado con éxito). El `CLAUDE.md` pide confirmar antes de crear/modificar ficheros

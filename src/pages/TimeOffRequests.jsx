@@ -81,8 +81,9 @@ export function parseRequestsText(text) {
     const from = parseDate(c[idx.from])
     const to = idx.to != null ? (parseDate(c[idx.to]) || from) : from
     const st = norm(idx.status != null ? c[idx.status] : '')
-    const status = /aprob|approv|acept|concedid|ok/.test(st) ? 'aprobada'
-      : /rechaz|reject|denegad|anulad|cancel|revo/.test(st) ? 'rechazada' : 'pendiente'
+    // Primero lo rechazado: «Revoked» contiene «ok»
+    const status = /rechaz|reject|denegad|denied|anulad|cancel|revo/.test(st) ? 'rechazada'
+      : /aprob|approv|acept|concedid|^ok$/.test(st) ? 'aprobada' : 'pendiente'
     const person = matchPerson(raw)
     const tipo = idx.tipo != null ? c[idx.tipo] : ''
     const extId = idx.extId != null ? parseInt(c[idx.extId], 10) || null : null
@@ -179,7 +180,14 @@ export default function TimeOffRequests({ requests, setRequests, state, simState
     e.target.value = ''
     if (!f) return
     const reader = new FileReader()
-    reader.onload = ev => setPreview({ name: f.name, ...parseRequestsText(String(ev.target.result)) })
+    // Las que ya están (por el id de 9to5 o por persona y fechas) no se vuelven a importar
+    const yaEsta = r => requests.some(x => (r.extId && Number(x.ext_id) === r.extId)
+      || (x.person === r.person && x.from === r.from && x.to === r.to))
+    reader.onload = ev => {
+      const res = parseRequestsText(String(ev.target.result))
+      res.rows = res.rows.map(r => (!r.error && yaEsta(r) ? { ...r, error: 'ya estaba', yaEstaba: true } : r))
+      setPreview({ name: f.name, ...res })
+    }
     reader.readAsText(f, 'utf-8')
   }
 
@@ -271,7 +279,7 @@ export default function TimeOffRequests({ requests, setRequests, state, simState
                         <td>{r.to ? fmtShort(r.to) : '—'}</td>
                         <td>{ESTADOS[r.status]}</td>
                         <td className="sv-ot-muted">{r.nota}</td>
-                        <td className={r.error ? 'sv-to-bad' : 'sv-to-good'}>{r.error || '✓'}</td>
+                        <td className={r.yaEstaba ? 'sv-ot-muted' : r.error ? 'sv-to-bad' : 'sv-to-good'}>{r.error || '✓'}</td>
                       </tr>
                     ))}
                   </tbody>

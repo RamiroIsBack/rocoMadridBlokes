@@ -13,8 +13,9 @@ import { PROF_ORDER, DAYS, BASE, SALA, DAY_LABEL } from '../data/staffSchedule'
 import {
   VERANO_APERTURA, COMODIN_VERANO, pairConflict, simulatePlan, laborablesBetween, laborablesFrom,
   isSummer, weekdayOf, fmtShort, monthOf, diasDevengados, PARO_MESES, PARO_VERANO, isClosed,
-  disponible, campDates,
+  disponible, campDates, normalizeCamp, expandPeriods,
 } from './coverage'
+import { cuentasCamp, JORNADA_MAX } from './campamento'
 
 export const DIAS_ANUALES     = 23
 export const BLOQUE_VERANO    = 15    // laborables seguidos entre junio y septiembre
@@ -123,13 +124,19 @@ function tramos(dias, yearDates) {
 
 // Vacaciones de una persona en el año: las de sus periodos y las del cierre de la sala.
 // Del cierre, los primeros 15 laborables son el bloque de verano del convenio; el resto
-// según cierreExtra. No cuentan los días que no trabaja (paro) ni los de campamento.
+// según cierreExtra. No cuentan los días que no trabaja (paro); los de cierre en que lleva
+// el campamento tampoco son vacaciones.
 function vacacionesPersona(p, yearDates, { offSet, ctx, cierre, cierreExtra, campSet, camp }) {
-  const trabaja = d => disponible(p, d, ctx) && !(camp?.staff?.includes(p) && campSet.has(d))
-  const cerrados = yearDates.filter(d => isClosed(d, cierre) && trabaja(d) && !offSet.has(d))
-  const cierreConv  = cerrados.slice(0, BLOQUE_VERANO)
-  const cierreExtraDias = cerrados.slice(BLOQUE_VERANO)
-  const propias = yearDates.filter(d => offSet.has(d) && trabaja(d))
+  const disp = d => disponible(p, d, ctx)
+  const enCamp = d => camp?.staff?.includes(p) && campSet.has(d)
+  const cerrados = yearDates.filter(d => isClosed(d, cierre) && disp(d) && !enCamp(d) && !offSet.has(d))
+  // El bloque de 15 del convenio, del primer tramo seguido que llegue (el campamento puede
+  // partir el cierre en trozos); si ninguno llega, los primeros días de cierre
+  const largo = tramos(cerrados, yearDates).find(t => t.length >= BLOQUE_VERANO)
+  const cierreConv = largo ? largo.slice(0, BLOQUE_VERANO) : cerrados.slice(0, BLOQUE_VERANO)
+  const convSet = new Set(cierreConv)
+  const cierreExtraDias = cerrados.filter(d => !convSet.has(d))
+  const propias = yearDates.filter(d => offSet.has(d) && disp(d))
   const vac = [...propias, ...cierreConv, ...(cierreExtra === 'descontar' ? cierreExtraDias : [])].sort()
   return { vac, cierreConv, cierreExtraDias }
 }
@@ -138,14 +145,15 @@ function vacacionesPersona(p, yearDates, { offSet, ctx, cierre, cierreExtra, cam
 // coste: coste empresa al mes por persona. requests: solicitudes (cuentan las aprobadas).
 export function evaluarPlan(state, coste, requests = [], pairLevels = null) {
   const y = state.year || defaultYear()
-  const { paro, keys, dias, cierre, camp, gastosSala = {}, ingresosSala = {} } = state
+  const { paro, keys, dias, cierre, gastosSala = {}, ingresosSala = {} } = state
+  const camp = normalizeCamp(state.camp)
   const cierreExtra = state.cierreExtra || 'pagados'
   const periods = effectivePeriods(state.periods, requests)
   const ctx = { periods, paro, cierre, camp, keys, year: y }
   const levels = pairLevels || computePairLevels(keys, ctx)
   const yearDates = laborablesBetween(`${y}-01-01`, `${y}-12-31`)
   const allSim = simulatePlan(yearDates, ctx)
-  const campSet = campDates(camp, cierre)
+  const campSet = campDates(camp, y)
   const conflictsOf = day => conflictsOfDay(day, levels)
   const enVentana = d => d >= `${y}-${VENTANA_VERANO.from}` && d <= `${y}-${VENTANA_VERANO.to}`
 
@@ -235,12 +243,23 @@ export function evaluarPlan(state, coste, requests = [], pairLevels = null) {
   const ignorados = periods.filter(x => x.prof && x.start && x.n > 0)
     .flatMap(x => diasDe(x).filter(d => d.startsWith(`${y}-`) && isSummer(d) && !disponible(x.prof, d, ctx)).map(d => x.prof))
   ;[...new Set(ignorados)].forEach(p => warnings.push({ lvl: 'warn', text: `${p}: ${ignorados.filter(x => x === p).length} días de vacaciones en un mes de verano que no trabaja; no cuentan.` }))
+  // Campamento: cuentas, quién lo lleva y su jornada
+  const offDe = expandPeriods(periods)
+  const campCtx = {
+    y, cierre, simByDate: new Map(allSim.map(d => [d.date, d])),
+    presente: (p, d) => disponible(p, d, ctx) && !offDe[p]?.has(d),
+  }
+  const campRes = cuentasCamp(camp, campCtx)
   if (camp.activo) {
-    if (!campSet.size) warnings.push({ lvl: 'warn', text: 'El campamento solo puede ir en meses con la sala cerrada: cambia el modo de verano o la fecha.' })
-    if (!camp.staff.length) warnings.push({ lvl: 'bad', text: 'El campamento no tiene a nadie asignado.' })
-    camp.staff.forEach(p => {
-      const fuera = [...campSet].filter(d => !disponible(p, d, ctx))
-      if (fuera.length) warnings.push({ lvl: 'bad', text: `${p} lleva el campamento pero no trabaja ${fuera.length} de esos días.` })
+    if (!campSet.size) warnings.push({ lvl: 'warn', text: 'El campamento está activado pero no tiene semanas en julio ni en agosto.' })
+    else if (!campRes.ingresos) warnings.push({ lvl: 'warn', text: 'Campamento sin demanda o sin precio (plazas, ocupación o € por niño a 0): el resultado no cuenta lo que ingresaría.' })
+    Object.entries(campRes.ausente).forEach(([p, n]) => warnings.push({ lvl: 'warn', text: `${p} lleva el campamento pero ${n === 1 ? 'un día no está' : `${n} días no está`} (paro o vacaciones): lo cubre un monitor de fuera.` }))
+    Object.entries(campRes.exceso).forEach(([p, ds]) => {
+      const max = Math.max(...ds.map(x => x.horas))
+      const txt = p === COMODIN_VERANO
+        ? `${p} no puede llevar el campamento por la mañana y estar en recepción por la tarde`
+        : `${p}: campamento por la mañana y clases por la tarde`
+      warnings.push({ lvl: 'bad', text: `${txt}: ${ds.length} ${ds.length === 1 ? 'día' : 'días'} pasa de ${JORNADA_MAX} h de jornada (hasta ${String(max).replace('.', ',')} h).` })
     })
   }
   const abiertoVer = allSim.filter(d => isSummer(d.date) && !d.closed)
@@ -274,13 +293,17 @@ export function evaluarPlan(state, coste, requests = [], pairLevels = null) {
 
   // Números del verano
   const mesesCerradosList = [7, 8].filter(m => isClosed(`${y}-0${m}-15`, cierre))
-  const campMes = m => (camp.activo ? Math.round([...campSet].filter(d => monthOf(d) === m).length / 5) * camp.plazas * camp.precio : 0)
+  const campMes = m => campRes.porMes[m]?.resultado || 0
   const personalMes = m => PROF_ORDER.reduce((s, p) =>
-    s + ((PARO_MESES[paro[p] || 'no'].includes(m) ? 1 : 0) - (PARO_MESES[HOY_PARO[p] || 'no'].includes(m) ? 1 : 0)) * coste[p], 0)
+    s + ((PARO_MESES[paro[p] || 'no'].includes(m) ? 1 : 0) - (PARO_MESES[HOY_PARO[p] || 'no'].includes(m) ? 1 : 0)) * (coste[p] || 0), 0)
+  const salaMes = m => (mesesCerradosList.includes(m) ? (gastosSala[m] || 0) - (ingresosSala[m] || 0) : 0)
   const eco = {
     personal: rows.reduce((s, r) => s + r.ahorro, 0),
-    sala:     mesesCerradosList.reduce((n, m) => n + (gastosSala[m] || 0) - (ingresosSala[m] || 0), 0),
-    camp:     campMes(7) + campMes(8),
+    sala:     salaMes(7) + salaMes(8),
+    camp:     campRes.total,
+    campRes,
+    // Lo que aporta cada mes frente a hoy
+    mes:      m => personalMes(m) + salaMes(m) + campMes(m),
     // Días de cierre que pasan de 15 y se pagan sin trabajar (informativo: se pagarían igual)
     ociosos:  cierreExtra === 'pagados'
       ? rows.reduce((s, r) => s + r.cierreExtra * coste[r.p] / LABORABLES_MES, 0) : 0,
@@ -302,7 +325,7 @@ export function evaluarPlan(state, coste, requests = [], pairLevels = null) {
 
   return {
     y, ctx, periods, pairLevels: levels, conflictsOf, yearDates, allSim, rows, warnings, acuerdos, antelacion, descanso,
-    abiertoVer, sinAbrirVer, diasComodin, campSet, mesesCerradosList, eco, kpi,
+    abiertoVer, sinAbrirVer, diasComodin, campSet, campCtx, mesesCerradosList, eco, kpi,
   }
 }
 
@@ -353,11 +376,13 @@ export function previsionVerano(ev, state, historico) {
     const cerrado = ev.mesesCerradosList.includes(m)
     const ahorroPersonal = ev.eco.personalMes(m)
     const ahorroSala = cerrado ? ((state.gastosSala || {})[m] || media('ahorrable') || 0) : 0
-    const ventas = (cerrado ? 0 : ventasMed) + ev.eco.campMes(m)
-    const costes = costesMed - ahorroPersonal - ahorroSala
+    const cm = ev.eco.campRes.porMes[m]
+    const ventas = (cerrado ? 0 : ventasMed) + cm.ingresos
+    const costes = costesMed - ahorroPersonal - ahorroSala + cm.costeNinos + cm.costeMonitores
     res[m] = {
       historico: meses, ventasMed, costesMed, resultadoMed: ventasMed - costesMed,
-      cerrado, ahorroPersonal, ahorroSala, camp: ev.eco.campMes(m), ventas, costes, resultado: ventas - costes,
+      cerrado, ahorroPersonal, ahorroSala, camp: ev.eco.campMes(m), campIngresos: cm.ingresos,
+      campCostes: cm.costeNinos + cm.costeMonitores, ventas, costes, resultado: ventas - costes,
     }
   })
   return res
@@ -384,8 +409,9 @@ export function repartirVacaciones(state, { comunicado = todayISO() } = {}) {
   const mk = (prof, start, n, nota) => ({ prof, start, n, comunicado, acuerdo: false, nota })
 
   // Coste de añadir un periodo: choques con lo colocado y problemas de cobertura esos días
-  const campSet0 = campDates(state.camp, state.cierre)
-  const enCamp = (p, d) => state.camp?.activo && state.camp.staff?.includes(p) && campSet0.has(d)
+  const camp0 = normalizeCamp(state.camp)
+  const campSet0 = campDates(camp0, y)
+  const enCamp = (p, d) => camp0.staff.includes(p) && campSet0.has(d)
   const coste = (cand) => {
     const dias = laborablesFrom(cand.start, cand.n)
     // Solo días que trabaja de verdad: ni paro, ni cierre de la sala, ni campamento
