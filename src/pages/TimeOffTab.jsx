@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { Component, useState, useMemo, useEffect, useRef } from 'react'
 import { PROF_META, PROF_ORDER, DAYS, DAY_LABEL } from '../data/staffSchedule'
 import {
   KEY_HOLDERS_DEFAULT, VERANO_APERTURA, COMODIN_VERANO, veranoSlots, pairConflict, simulatePlan,
@@ -1329,6 +1329,22 @@ function anioVistaInicial() {
   return new Date().getFullYear()
 }
 
+// Si algo del simulador falla, se avisa en su sitio en vez de dejar la pestaña en blanco
+class FalloSeguro extends Component {
+  state = { error: null }
+  static getDerivedStateFromError(error) { return { error } }
+  componentDidCatch(error) { console.error('Simulador:', error) }
+  render() {
+    if (!this.state.error) return this.props.children
+    return (
+      <div className="sv-section">
+        <p className="sv-error">Algo ha fallado en {this.props.que}: {String(this.state.error.message || this.state.error)}</p>
+        <button className="sv-filter-btn" onClick={() => this.setState({ error: null })}>Volver a intentarlo</button>
+      </div>
+    )
+  }
+}
+
 export default function TimeOffTab() {
   const [vista, setVista] = useState('real')
   const [anio, setAnioState] = useState(anioVistaInicial)
@@ -1355,7 +1371,7 @@ export default function TimeOffTab() {
   const scenarios = remote.data?.scenarios || []
   const setNueve  = res => remote.setData(d => ({ ...d, nueve: res.nueve ?? d.nueve, requests: res.requests ?? d.requests }))
   const setRequests  = list => remote.setData(d => ({ ...d, requests: list }))
-  const setScenarios = list => remote.setData(d => ({ ...d, scenarios: list }))
+  const setScenarios = list => remote.setData(d => ({ ...d, scenarios: typeof list === 'function' ? list(d.scenarios || []) : list }))
   const connected = !!remote.data && !remote.error
   const cargando  = remote.loading && !remote.data
 
@@ -1456,7 +1472,7 @@ export default function TimeOffTab() {
           <TimeOffIntegration nueve={nueve} onChange={setNueve} connected={connected} />
         </>
       ) : (
-        <div className="sv-to-simwrap">
+        <FalloSeguro que="el simulador"><div className="sv-to-simwrap">
           <SyncStatus sync={syncSim} que="el simulador" />
           <Calculadora state={sim} setState={setSim} costes={costes} ev={evSim} sugerido={sugerido} onDesdeReal={desdeReal} onGuardarAnterior={guardarAnterior} />
           <PrevisionVerano ev={evSim} state={sim} historico={hist.months} />
@@ -1472,7 +1488,7 @@ export default function TimeOffTab() {
           </div>
           <Escenarios scenarios={scenarios} setScenarios={setScenarios} state={sim} coste={costes.mes} requests={[]}
             connected={connected} toPlain={toPlain} hydrate={hydrate} onLoad={cargarEscenario} />
-        </div>
+        </div></FalloSeguro>
       )}
     </div>
   )
