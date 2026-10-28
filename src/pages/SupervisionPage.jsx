@@ -957,6 +957,7 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
   const [motivo, setMotivo]   = useState('')
   const [fechaVuelta, setFechaVuelta] = useState('')
   const [nota, setNota]       = useState(alumno.notas || '')
+  const [mantenerPausa, setMantenerPausa] = useState(true)
   const [busy, setBusy]       = useState(false)
   const [err, setErr]         = useState(null)
 
@@ -969,7 +970,7 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
     try {
       if (tipo === 'marcar_cobrado') {
         if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
-        await gestionMarcarCobrado({ sub_id: alumno.subId, importe: Number(importe), metodo, fecha, parcial, nota })
+        await gestionMarcarCobrado({ sub_id: alumno.subId, importe: Number(importe), metodo, fecha, parcial, nota, mantener_pausa: mantenerPausa })
       } else if (tipo === 'pausar') {
         if (!motivo.trim()) throw new Error('Pon un motivo.')
         await gestionPausar({ sub_id: alumno.subId, motivo, fecha_vuelta: fechaVuelta })
@@ -995,6 +996,12 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
           <>
             {alumno.manual === false && (
               <p className="sv-to-warn-txt">Esta suscripción cobra sola por tarjeta/Redsys: el servidor rechazará la acción (para evitar cobro doble).</p>
+            )}
+            {alumno.estado === 'pausado' && (
+              <label className="sv-grp-field sv-grp-field--check">
+                <input type="checkbox" checked={mantenerPausa} onChange={e => setMantenerPausa(e.target.checked)} />
+                Mantener la pausa ({alumno.pausaMotivo}) aunque se marque cobrado
+              </label>
             )}
             <label className="sv-grp-field">Importe (€)
               <input className="sv-tests-input" type="number" step="0.01" min="0" value={importe} onChange={e => setImporte(e.target.value)} />

@@ -3183,16 +3183,25 @@ function superadmin_gestion_grupos($request) {
         }
         if ($pendiente) unset($pendiente['ts']);
 
-        $telefono = $sub['telefono'] ?? '';
-        if (!$telefono) $telefono = $sub_obj->get_billing_phone();
-        if (!$telefono) $telefono = blokes_telefono_de_email($sub['email'] ?? $sub_obj->get_billing_email());
+        // El teléfono/nombre de la propia suscripción (su copia de la dirección de
+        // facturación) es más de fiar que el del plugin de terceros o el de la cuenta: para
+        // una familia con una sola cuenta, el de facturación de CADA suscripción suele ser el
+        // del alumno real, no el del pagador.
+        $placeholder = array('', 'N/A', '-', '—');
+        $telefono = $sub_obj->get_billing_phone();
+        if (in_array($telefono, $placeholder, true)) $telefono = $sub['telefono'] ?? '';
+        if (in_array($telefono, $placeholder, true)) $telefono = blokes_telefono_de_email($sub['email'] ?? $sub_obj->get_billing_email());
+        if (in_array($telefono, $placeholder, true)) $telefono = '';
+
+        $nombre_fact = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name());
+        $alumno_nombre = $nombre_fact !== '' ? $nombre_fact : ($sub['cliente'] ?? '');
 
         $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
         $persona_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : ('n' . strtolower(trim($sub['cliente'] ?? ''))));
 
         $fila = array(
             'subId'       => intval($sub['id']),
-            'alumno'      => $sub['cliente'] ?? '',
+            'alumno'      => $alumno_nombre,
             'telefono'    => $telefono,
             'dias'        => count($dias_sub) ?: 1,
             'estado'      => $estado,
@@ -3287,15 +3296,13 @@ function blokes_gestion_log($sub_id, $accion, $antes, $despues, $detalle = array
     ));
 }
 
-// Desactiva los emails de cliente de WC/WCS mientras se ejecuta $cb (acciones manuales de
-// Eva/Ramiro desde ExcelMuerte: por defecto no avisan al alumno, salvo que se pida lo contrario).
+// Desactiva TODOS los emails de WC/WCS (cliente y admin) mientras se ejecuta $cb (acciones
+// manuales de Eva/Ramiro desde ExcelMuerte: por defecto no avisan a nadie, salvo que se pida lo
+// contrario). Coge los ids de verdad de WC()->mailer() en vez de adivinarlos a mano: así entran
+// también los de WooCommerce Subscriptions (customer_processing_renewal_order,
+// new_renewal_order...) sin tener que listarlos uno a uno.
 function blokes_gestion_sin_emails($cb) {
-    $ids = array(
-        'customer_processing_order', 'customer_completed_order', 'customer_on_hold_order',
-        'customer_invoice', 'customer_renewal_invoice', 'customer_completed_renewal_order',
-        'customer_payment_retry', 'cancelled_subscription', 'expired_subscription',
-        'on_hold_subscription', 'subscription_switch_completed',
-    );
+    $ids = function_exists('WC') ? array_keys(WC()->mailer()->get_emails()) : array();
     foreach ($ids as $id) add_filter('woocommerce_email_enabled_' . $id, '__return_false', 9999);
     try {
         return $cb();
@@ -3327,6 +3334,8 @@ function superadmin_gestion_marcar_cobrado($request) {
     $fecha    = sanitize_text_field($request->get_param('fecha')); // 'Y-m-d', opcional
     $parcial  = (bool) $request->get_param('parcial');
     $nota     = sanitize_text_field($request->get_param('nota'));
+    $mantener_pausa = $request->get_param('mantener_pausa');
+    $mantener_pausa = $mantener_pausa === null ? true : (bool) $mantener_pausa;
 
     if (!$sub_id || $importe <= 0 || !$metodo) {
         return new WP_Error('bad_request', 'Faltan sub_id, importe o metodo.', array('status' => 400));
@@ -3339,6 +3348,8 @@ function superadmin_gestion_marcar_cobrado($request) {
     }
 
     $antes = array('status' => $sub->get_status());
+    $pausa_motivo_antes = get_post_meta($sub_id, '_rm_pausa_motivo', true);
+    $estaba_pausada = $sub->has_status('on-hold') && $pausa_motivo_antes;
 
     // Renovación pendiente de pago ya existente (la más reciente sin pagar)
     $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
@@ -3367,16 +3378,33 @@ function superadmin_gestion_marcar_cobrado($request) {
         update_post_meta($order->get_id(), '_rm_metodo_cobro', $metodo);
         if ($parcial) update_post_meta($order->get_id(), '_rm_pago_parcial', $nota ?: '1');
         $order->payment_complete();
+        // payment_complete() deja "processing" (el producto no es virtual/descargable):
+        // aquí se considera cobrado de verdad, así que pasa a "completado".
+        $order->update_status('completed', 'ExcelMuerte: pedido completado tras marcar cobrado.');
         if ($fecha) {
             $order->set_date_paid($fecha_ts);
             $order->save();
         }
     });
 
-    $sub = wcs_get_subscription($sub_id); // recarga tras el payment_complete
+    // payment_complete() reactiva la suscripción sola (la pone "active"). Si estaba pausada de
+    // verdad (no solo en espera por impago) y no se ha pedido reanudar también (mantener_pausa,
+    // por defecto true), se vuelve a pausar con el mismo motivo — cobrar no debe reactivar a
+    // quien sigue sin poder venir.
+    if ($estaba_pausada && $mantener_pausa) {
+        $sub_recargada = wcs_get_subscription($sub_id);
+        if ($sub_recargada) {
+            blokes_gestion_sin_emails(function() use ($sub_recargada) {
+                $sub_recargada->update_status('on-hold', 'ExcelMuerte: cobrado, se mantiene la pausa.');
+            });
+        }
+    }
+
+    $sub = wcs_get_subscription($sub_id); // recarga tras el payment_complete (y la repausa, si toca)
     $despues = array('status' => $sub ? $sub->get_status() : null, 'order_id' => $order->get_id());
     blokes_gestion_log($sub_id, 'marcar_cobrado', $antes, $despues, array(
         'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota,
+        'mantuvo_pausa' => $estaba_pausada && $mantener_pausa,
     ));
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
