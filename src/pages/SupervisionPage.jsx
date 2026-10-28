@@ -3,7 +3,7 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useClasses, usePeopleSummary } from '../hooks/useSuperAdmin'
+import { useClasses, usePeopleSummary, useGestionGrupos } from '../hooks/useSuperAdmin'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
@@ -932,6 +932,134 @@ function CtrlTestsTab() {
   )
 }
 
+// ─── Grupos (sección 8.1): sustituye el Excel «Grupos» de Eva, solo lectura por ahora ──────
+const ESTADO_LABEL = {
+  activo:          { txt: 'Activo',                    cls: 'sv-grp-estado--ok' },
+  en_espera:       { txt: 'En espera (pausa o impago)', cls: 'sv-grp-estado--warn' },
+  pendiente_pago:  { txt: 'Pendiente de alta',          cls: 'sv-grp-estado--warn' },
+  baja_fin_mes:    { txt: 'Baja a fin de mes',          cls: 'sv-grp-estado--bad' },
+}
+const MES_CORTO_GRP = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+const mesLabelGrp = ym => { const [y, m] = ym.split('-'); return `${MES_CORTO_GRP[Number(m) - 1]} ${y.slice(2)}` }
+const PAGO_PENDIENTE = new Set(['pending', 'on-hold', 'failed'])
+
+function GruposTab() {
+  const { data, loading, error } = useGestionGrupos(4)
+  const [grupoKey, setGrupoKey] = useState('')
+
+  const grupos = data?.grupos || []
+  const meses  = data?.meses || []
+  const mesActual = meses[meses.length - 1]
+
+  const grupo = grupoKey ? grupos.find(g => `${g.dia}|${g.horario}|${g.edad}` === grupoKey) : null
+  const alumnos = grupo ? grupo.alumnos : grupos.flatMap(g => g.alumnos)
+
+  const kpis = useMemo(() => {
+    const k = { personas: alumnos.length, dia1: 0, dia2: 0, dia3: 0, plazas: 0, cobradoMes: 0, pendienteMes: 0 }
+    alumnos.forEach(a => {
+      if (a.dias >= 3) k.dia3++
+      else if (a.dias === 2) k.dia2++
+      else k.dia1++
+      k.plazas += a.dias
+      const pago = mesActual ? a.pagos[mesActual] : null
+      if (pago) {
+        if (PAGO_PENDIENTE.has(pago.estadoPedido)) k.pendienteMes++
+        else k.cobradoMes += pago.importe
+      } else if (a.estado === 'activo') {
+        k.pendienteMes++
+      }
+    })
+    return k
+  }, [alumnos, mesActual])
+
+  if (loading) return <div className="sv-loading">Cargando grupos…</div>
+  if (error)   return <div className="sv-error">Error: {error}</div>
+
+  return (
+    <div className="sv-tab-panel">
+      <p className="sv-note">
+        Sustituye el Excel «Grupos»: de momento solo lectura (los botones de cobrar, pausar, dar de baja… llegan en la
+        siguiente ronda, probados primero con datos de prueba). <strong>Alumno y pagador son la misma persona por ahora</strong>
+        — hasta que la migración añada quién es realmente cada alumno, esto cuenta suscripciones, no alumnos.
+      </p>
+
+      <div className="sv-controls">
+        <div className="sv-controls-right">
+          <select className="sv-tests-select" value={grupoKey} onChange={e => setGrupoKey(e.target.value)}>
+            <option value="">Todos los grupos</option>
+            {grupos.map(g => {
+              const key = `${g.dia}|${g.horario}|${g.edad}`
+              const lbl = g.edad !== 'Adultos' ? `${g.label} (${g.edad})` : g.label
+              return <option key={key} value={key}>{lbl} — {g.alumnos.length}</option>
+            })}
+          </select>
+        </div>
+      </div>
+
+      <div className="sv-kpis">
+        <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }} title="Suscripciones en vigor en este grupo (o en todos, si no has elegido uno).">
+          <span className="sv-kpi__value">{kpis.personas}</span>
+          <span className="sv-kpi__label">Personas ⓘ</span>
+        </div>
+        <div className="sv-kpi" style={{ '--kpi-color': '#a78bfa' }} title="Cuántas vienen 1, 2 o 3+ días a la semana.">
+          <span className="sv-kpi__value">{kpis.dia1} × 1 día · {kpis.dia2} × 2 · {kpis.dia3 ? `${kpis.dia3} × 3+` : ''}</span>
+          <span className="sv-kpi__label">Por días ⓘ</span>
+        </div>
+        <div className="sv-kpi" style={{ '--kpi-color': '#34d399' }} title="Plazas por sesión (una de 2 días cuenta en los dos).">
+          <span className="sv-kpi__value">{kpis.plazas}</span>
+          <span className="sv-kpi__label">Plazas ⓘ</span>
+        </div>
+        <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }} title={`Cobrado en ${mesActual ? mesLabelGrp(mesActual) : 'este mes'}: pedidos de renovación ya pagados.`}>
+          <span className="sv-kpi__value">{fmtEur(kpis.cobradoMes)}</span>
+          <span className="sv-kpi__label">Cobrado del mes ⓘ</span>
+        </div>
+        <div className="sv-kpi" style={{ '--kpi-color': '#f87171' }} title="Activos sin pago registrado este mes todavía, o con una renovación en espera de pago (no cuenta a quien ya está pausado o de baja).">
+          <span className="sv-kpi__value">{kpis.pendienteMes}</span>
+          <span className="sv-kpi__label">Pendiente del mes ⓘ</span>
+        </div>
+      </div>
+
+      <div className="sv-tests-scroll">
+        <table className="sv-tests-table">
+          <thead>
+            <tr>
+              <th>Alumno (pagador)</th><th>Teléfono</th><th>Días</th><th>Estado</th>
+              {meses.map(m => <th key={m}>{mesLabelGrp(m)}</th>)}
+              <th>Notas</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {alumnos.map(a => {
+              const est = ESTADO_LABEL[a.estado] || { txt: a.estado, cls: '' }
+              return (
+                <tr key={a.subId}>
+                  <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                  <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                  <td>{a.dias}</td>
+                  <td><span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span></td>
+                  {meses.map(m => {
+                    const p = a.pagos[m]
+                    if (!p) return <td key={m} className="sv-ot-muted">—</td>
+                    const pendiente = PAGO_PENDIENTE.has(p.estadoPedido)
+                    return (
+                      <td key={m} className={pendiente ? 'sv-to-bad' : ''} title={`${p.metodo} · ${p.fecha}`}>
+                        {fmtEur(p.importe)}{pendiente ? ' ⏳' : ''}
+                      </td>
+                    )
+                  })}
+                  <td className="sv-ot-muted">{a.notas || '—'}</td>
+                  <td><button className="sv-tests-remove" disabled title="Las acciones llegan en la siguiente ronda">⋯</button></td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {alumnos.length === 0 && <p className="sv-empty">Sin suscripciones en vigor para este grupo.</p>}
+    </div>
+  )
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SupervisionPage() {
   const role          = window.blokesSiteData?.userRole
@@ -939,6 +1067,7 @@ export default function SupervisionPage() {
 
   const TABS = [
     { id: 'excelmuerte', label: 'ExcelMuerte'   },
+    { id: 'grupos',      label: 'Grupos'        },
     { id: 'ctrltests',   label: 'Tests'          },
     { id: 'horasextra',  label: 'Horas extra'    },
     // Lleva sueldos, nóminas y P&L: solo socios
@@ -971,6 +1100,7 @@ export default function SupervisionPage() {
       </div>
 
       {tab === 'excelmuerte' && <ClasesTab />}
+      {tab === 'grupos'      && <GruposTab />}
       {tab === 'ctrltests'   && <CtrlTestsTab />}
       {tab === 'horasextra'  && <OvertimeTab />}
       {tab === 'timeoff'     && role === 'socio' && <TimeOffTab />}

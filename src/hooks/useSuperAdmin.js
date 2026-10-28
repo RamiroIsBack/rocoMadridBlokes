@@ -42,6 +42,10 @@ export function usePeopleSummary() {
   return useEndpoint('/people-summary')
 }
 
+export function useGestionGrupos(months = 4) {
+  return useEndpoint('/gestion/grupos', { months })
+}
+
 export function useExpenses(months, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)
   const [breakdown, setBreakdown] = useState(null)

@@ -743,6 +743,12 @@ add_action('rest_api_init', function() {
         'permission_callback' => $sa_perm,
         'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
     ));
+    register_rest_route('superadmin/v1', '/gestion/grupos', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_grupos',
+        'permission_callback' => $sa_perm,
+        'args'                => array('months' => array('type' => 'integer', 'default' => 4)),
+    ));
 
     register_rest_route('superadmin/v1', '/expenses', array(
         array(
@@ -3055,6 +3061,83 @@ function superadmin_people_summary($request) {
         'sesiones_semana'    => $sesiones_semana,
         'ingreso_mes_total'  => round($ingreso_mes_total, 2),
     )));
+}
+
+// Pantalla "Grupos" (sección 8.1): sustituye la lectura del Excel de Eva. Por ahora solo
+// lectura (sin las acciones de la sección 8.2, que van en una ronda aparte, probadas primero
+// con datos de prueba). Una fila por SUSCRIPCIÓN, no por alumno — hasta que la migración
+// (8.4) añada el campo "Alumno", alumno y pagador son la misma persona.
+function superadmin_gestion_grupos($request) {
+    if (!class_exists('RocoMadrid_SF_Stats') || !function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats/WooCommerce Subscriptions not available. Call this endpoint on the club subsite.', array('status' => 503));
+    }
+    $months = max(1, min(12, intval($request->get_param('months')) ?: 4));
+    $meses  = array();
+    for ($i = $months - 1; $i >= 0; $i--) {
+        $meses[] = (new DateTime())->modify("-{$i} months")->format('Y-m');
+    }
+    $meses_set = array_fill_keys($meses, true);
+
+    $all    = blokes_get_all_subscription_data();
+    $grupos = array();
+
+    foreach ($all as $sub) {
+        if (empty($sub['id'])) continue;
+        $status = $sub['status'] ?? '';
+        if (!in_array($status, array('active', 'on-hold', 'pending'), true)) continue; // cancelled de verdad: fuera
+
+        $dia = $sub['dia'] ?? ''; $horario = $sub['horario'] ?? ''; $edad = $sub['edad'] ?? 'Adultos';
+        if (!$dia && !$horario) continue;
+
+        $sub_obj = wcs_get_subscription(intval($sub['id']));
+        if (!$sub_obj) continue;
+
+        $gkey = $dia . '|' . $horario . '|' . $edad;
+        if (!isset($grupos[$gkey])) {
+            $grupos[$gkey] = array('label' => trim($dia . ' · ' . $horario), 'dia' => $dia, 'horario' => $horario, 'edad' => $edad, 'alumnos' => array());
+        }
+
+        $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
+        $estado = $es_pending_cancel ? 'baja_fin_mes'
+            : ($status === 'on-hold' ? 'en_espera' : ($status === 'pending' ? 'pendiente_pago' : 'activo'));
+
+        $dias_sub = $dia ? explode('-', $dia) : array();
+
+        $pagos = array_fill_keys($meses, null);
+        $order_ids = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
+        foreach ($order_ids as $oid) {
+            $order = wc_get_order($oid);
+            if (!$order) continue;
+            $fecha = $order->get_date_paid() ?: $order->get_date_created();
+            if (!$fecha) continue;
+            $ym = $fecha->date('Y-m');
+            if (!isset($meses_set[$ym])) continue;
+            $pagos[$ym] = array(
+                'importe' => floatval($order->get_total()),
+                'metodo'  => $order->get_payment_method_title(),
+                'fecha'   => $fecha->date('d/m/Y'),
+                'estadoPedido' => $order->get_status(),
+            );
+        }
+
+        $grupos[$gkey]['alumnos'][] = array(
+            'subId'    => intval($sub['id']),
+            'alumno'   => $sub['cliente'] ?? '',
+            'telefono' => $sub['telefono'] ?? '',
+            'dias'     => count($dias_sub) ?: 1,
+            'estado'   => $estado,
+            'pagos'    => $pagos,
+            'notas'    => '',
+        );
+    }
+
+    $data = array_values($grupos);
+    foreach ($data as &$g) {
+        usort($g['alumnos'], function($a, $b) { return strcasecmp($a['alumno'], $b['alumno']); });
+    }
+    usort($data, function($a, $b) { return count($b['alumnos']) <=> count($a['alumnos']); });
+
+    return rest_ensure_response(array('success' => true, 'data' => array('meses' => $meses, 'grupos' => $data)));
 }
 
 function superadmin_classes($request) {

@@ -628,6 +628,18 @@
 }
 .sv-member--ending .sv-member__phone { color: rgba(250,204,21,0.55); }
 
+/* ── Grupos (sección 8) ── */
+.sv-grp-estado {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.sv-grp-estado--ok   { background: #14532d; color: #34d399; }
+.sv-grp-estado--warn { background: #2a2410; color: #facc15; }
+.sv-grp-estado--bad  { background: #2a1a1a; color: #f87171; }
+
 /* ── Group summary ── */
 .sv-group-summary {
   margin-top: 14px;
