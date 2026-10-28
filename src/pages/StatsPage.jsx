@@ -711,7 +711,7 @@ export default function StatsPage() {
                       <button
                         className="stats-table__delete-btn"
                         onClick={() => handleDeleteClick(card)}
-                        title="Eliminar bloke"
+                        title="Retirar bloke"
                       >
                         🗑️
                       </button>
@@ -895,23 +895,23 @@ export default function StatsPage() {
       {deleteConfirm && (
         <div className="stats-modal-overlay" onClick={handleDeleteCancel}>
           <div className="stats-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Confirmar eliminación</h3>
-            <p>¿Estás seguro de que quieres eliminar el bloke <strong>"{deleteConfirm.title}"</strong>?</p>
-            <p className="stats-modal__warning">Esta acción eliminará también las imágenes asociadas y no se puede deshacer.</p>
+            <h3>Confirmar retirada</h3>
+            <p>¿Estás seguro de que quieres retirar el bloke <strong>"{deleteConfirm.title}"</strong>?</p>
+            <p className="stats-modal__warning">Desaparecerá de la colección pública, pero queda guardado (con sus imágenes) para el histórico.</p>
             <div className="stats-modal__actions">
-              <button 
+              <button
                 className="stats-modal__cancel"
                 onClick={handleDeleteCancel}
                 disabled={isDeleting}
               >
                 Cancelar
               </button>
-              <button 
+              <button
                 className="stats-modal__confirm"
                 onClick={handleDeleteConfirm}
                 disabled={isDeleting}
               >
-                {isDeleting ? 'Eliminando...' : 'Eliminar'}
+                {isDeleting ? 'Retirando...' : 'Retirar'}
               </button>
             </div>
           </div>

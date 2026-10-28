@@ -403,3 +403,58 @@ Colores montados: trave (blanco) 10, amarillo 8, rojo 7, verde 6, negro 6 y azul
 - En una compe con números sin colocar: arrastra uno directamente al mapa (con el ratón o el dedo) y suéltalo — debe colocarse donde lo sueltes. Sigue funcionando tocar el número y luego tocar el mapa.
 
 Build: `index-db2486b4.js` / `index-b137706a.css`.
+
+---
+
+## Resultado de pruebas (Cowork) · commit 24f6634 en blokes (`index-db2486b4.js`) · 28/10 06:55
+
+### ✅ Los 3 arreglos funcionan
+1. **Semana pasada sin robar.** Con la semana actual del 26/10 ya creada, creé la del 19/10: **no se llevó nada** de la del 26 (sus tareas salieron nuevas). Después el barrido pasó lo vencido del 19 a la semana actual, como debe ser.
+2. **Sin duplicados en el barrido.** Lo que llegaba del 19 se juntó con la tarjeta pendiente del mismo tipo que ya había en la del 26 (×1). **0 tipos duplicados** en la semana actual.
+3. **Arrastrar desde la bandeja al mapa**, con el ratón de verdad: el número 6 soltado sobre el mapa queda colocado («2 de 16 bloques colocados») y el tocar y tocar sigue funcionando. Un aviso: en el primer intento, si el gesto no arranca justo encima del número, se selecciona el texto de la página. Pon `user-select: none` y `touch-action: none` en `.org__comp-chip` y gestiona `pointercancel`, para que en el móvil el desplazamiento de la página no corte el arrastre (desde aquí no puedo probar con el dedo).
+
+### Limpieza
+He borrado las semanas 32 y 33, la compe de prueba (id 6) y «PRUEBA Uno/Dos» (13 y 14). Queda una compe **«Competición» del 30/11 (id 5)** que no es mía: ¿es tuya, de una prueba? Si es de prueba, bórrala.
+
+---
+
+## ▶ Ramiro (28/10 06:43): «prueba y seguimos avanzando» — **adelante con el encargo de las 20:10 y las 20:20**
+Orden propuesto, para poder probar por partes:
+1. **Retirar en vez de borrar** los blokes (meta `bloke_retirado`) y ocultarlos en la colección pública. Es la base del histórico.
+2. **Propuesta de qué equipar** (subzona por el bloque más viejo, con las subzonas sin datos primero, y colores que faltan frente al objetivo de Normas) y enseñarla en la cabecera de la semana. Solo mostrarla, sin crear nada.
+3. **Creación automática** de la semana actual y la siguiente (WP-Cron y al abrir Organización), todo a Álvaro y con `auto = 1`.
+Avisa con «## Listo para probar» después de cada paso.
+
+---
+
+## ▶▶ CONFIRMADO POR RAMIRO · 28/10 09:00 — EMPIEZA YA EL ENCARGO DE LAS 20:10 Y LAS 20:20
+Los 3 arreglos de `24f6634` ya están probados y bien (ver «Resultado de pruebas · 06:55» más arriba). No hace falta más confirmación: **empieza el encargo grande**, por pasos y avisando con «## Listo para probar» después de cada uno:
+1. Retirar los blokes en vez de borrarlos (meta `bloke_retirado` y fecha), para tener histórico.
+2. Propuesta de qué equipar en la cabecera de la semana: subzona por el bloque más viejo (las que no tienen datos, primero) y colores que faltan frente a un objetivo editable en Normas (por defecto, el reparto actual: trave 10, amarillo 8, rojo 7, verde 6, negro 6, azul 5).
+3. Semana actual y siguiente creadas solas (WP-Cron los domingos y al abrir Organización), todo a Álvaro y con `auto = 1`, respetando directrices y eventos.
+
+---
+
+## Listo para probar · 2026-10-28 09:40 — Paso 1: retirar blokes en vez de borrarlos
+
+**Desplegado en `blokes` (producción).** Sin cambios de esquema en las tablas de Equipación (sigue en v5); esto toca solo la colección de `blokes` (custom post type).
+
+1. **`blokes_delete_with_media` ya no borra.** El endpoint sigue siendo el mismo (`DELETE /wp-json/blokes/v1/delete/{id}`, el que llama el botón de Estadísticas), pero ahora:
+   - Pone el post en `post_status = draft` → desaparece de la colección pública (`GET /wp-json/wp/v2/blokes` solo devuelve `publish` por defecto, con o sin autenticación) y por tanto de Estadísticas y del front público.
+   - Guarda `bloke_retirado` (fecha/hora, `current_time('mysql')`) y `bloke_retirado_por` (el `user_login` de quien lo retira) como post meta.
+   - **No borra** la imagen destacada ni la galería — se conservan.
+   - Es **idempotente**: si el bloke ya estaba retirado, responde `success: true` con la fecha original, sin tocar nada ni dar error.
+2. **Modal de Estadísticas actualizado**: ahora dice «Confirmar retirada» / «Se retirará de la colección pública, pero queda guardado (con sus imágenes) para el histórico», y el botón dice «Retirar» en vez de «Eliminar».
+
+### Dato para el paso 2
+`bloke_subsala` (1–8) ya coincide exactamente con la `subzona` de Equipación (1–8): entrada = 1,2; sala_grande = 3,4,5,6,7; cueva = 8. No hace falta tabla de mapeo, los blokes y las subzonas de Equipación usan el mismo número.
+
+### Para probar
+1. Coge un bloke de prueba (o crea uno) y anota su id, subzona y color.
+2. Desde Estadísticas, pulsa el botón de retirar (🗑️) sobre ese bloke y confirma. Debe desaparecer de la tabla de Estadísticas y de la colección pública en `/blokes`.
+3. Comprueba que sigue existiendo (no borrado) consultando con sesión de administrador: `GET /wp-json/wp/v2/blokes/{id}?context=edit` — debe salir `status: "draft"` y, si pides `_fields=meta` o miras el post en wp-admin, los campos `bloke_retirado` (fecha) y `bloke_retirado_por` (tu usuario) con valor.
+4. Repite el retiro sobre el mismo id (ej. volviendo a llamar al endpoint `DELETE`): debe responder éxito con la misma fecha de `bloke_retirado`, no un error ni una fecha nueva.
+
+Build: `index-79ac114b.js` / `index-f1066388.css` (CSS sin cambios en esta ronda).
+
+Sigo con el **paso 2** (propuesta de qué equipar en la cabecera de semana) en cuanto confirmes que esto funciona, o en paralelo si lo prefieres — avisa.

@@ -1301,6 +1301,10 @@ function blokes_rate_bloke($request) {
     return array('rating' => $new_rating, 'interactions' => $interactions);
 }
 
+// "Borrar" un bloke en realidad lo retira: se oculta de la colección pública
+// (pasa a post_status 'draft', fuera del listado REST por defecto) pero no se
+// borra ni la ficha ni sus imágenes, para conservar el histórico (subzona,
+// color, fechas) que usan Estadísticas y la propuesta semanal de Organización.
 function blokes_delete_with_media($request) {
     $post_id = intval($request['id']);
 
@@ -1309,34 +1313,41 @@ function blokes_delete_with_media($request) {
         return new WP_Error('invalid_bloke', 'Invalid bloke ID', array('status' => 404));
     }
 
-    $deleted_media = array();
-
-    $featured_media_id = get_post_thumbnail_id($post_id);
-    if ($featured_media_id) {
-        $deleted_media[] = $featured_media_id;
-        wp_delete_attachment($featured_media_id, true);
-    }
-
-    $gallery = get_field('bloke_gallery', $post_id);
-    if (is_array($gallery)) {
-        foreach ($gallery as $attachment_id) {
-            if (is_numeric($attachment_id)) {
-                $deleted_media[] = $attachment_id;
-                wp_delete_attachment($attachment_id, true);
-            }
-        }
-    }
-
-    $deleted = wp_delete_post($post_id, true);
-    if ($deleted) {
+    $already_retired = get_post_meta($post_id, 'bloke_retirado', true);
+    if ($already_retired) {
         return array(
-            'success'       => true,
-            'post_id'       => $post_id,
-            'deleted_media' => $deleted_media,
-            'message'       => 'Bloke and associated media deleted successfully',
+            'success'      => true,
+            'post_id'      => $post_id,
+            'retired'      => true,
+            'retired_at'   => $already_retired,
+            'message'      => 'Este bloke ya estaba retirado',
         );
     }
-    return new WP_Error('delete_failed', 'Failed to delete bloke', array('status' => 500));
+
+    $user = wp_get_current_user();
+    $retired_at = current_time('mysql');
+    $retired_by = $user && $user->exists() ? $user->user_login : '';
+
+    update_post_meta($post_id, 'bloke_retirado', $retired_at);
+    update_post_meta($post_id, 'bloke_retirado_por', $retired_by);
+
+    $updated = wp_update_post(array(
+        'ID'          => $post_id,
+        'post_status' => 'draft',
+    ), true);
+
+    if (is_wp_error($updated)) {
+        return $updated;
+    }
+
+    return array(
+        'success'    => true,
+        'post_id'    => $post_id,
+        'retired'    => true,
+        'retired_at' => $retired_at,
+        'retired_by' => $retired_by,
+        'message'    => 'Bloke retirado (oculto de la colección, histórico conservado)',
+    );
 }
 
 function blokes_upload_image($request) {
