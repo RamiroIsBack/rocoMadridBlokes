@@ -8,7 +8,7 @@ import {
 } from '../utils/coverage'
 import { equilibrioCamp, tablaCamp } from '../utils/campamento'
 import { useExpenses } from '../hooks/useSuperAdmin'
-import { usePayroll } from '../hooks/useOvertime'
+import { useCostes, FACTOR_COSTE } from '../hooks/useCostes'
 import { autoCategory } from '../utils/expensesParser'
 import { PL_DATA } from '../data/plHistorico'
 import {
@@ -36,36 +36,6 @@ function daysUntil(iso) {
   const [y, m, d] = iso.split('-').map(Number)
   const today = new Date(); today.setHours(0, 0, 0, 0)
   return Math.round((new Date(y, m - 1, d) - today) / 86400000)
-}
-
-// ─── Coste empresa por persona ───────────────────────────────────────────────
-// Superadmin › Nóminas guarda lo que cobra cada persona (no el coste empresa).
-// Coste empresa ≈ nómina × 1,395 (tabla de referencia de la ficha: 6, 7, 10 y
-// 40 h/sem dan todas ese factor); lo que se paga en efectivo no lleva SS.
-const FACTOR_COSTE = 1.395
-
-const normName = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
-
-function useCostes() {
-  const now = new Date()
-  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  const { data, loading, error } = usePayroll(month)
-
-  return useMemo(() => {
-    const ficha = Object.fromEntries(PROF_ORDER.map(p => [p, PROF_META[p].costoMes]))
-    const nomina = {}
-    ;(data?.rows || []).forEach(r => {
-      const first = normName(r.name || '').split(/\s+/)[0]
-      const p = PROF_ORDER.find(x => normName(x) === first)
-      if (!p || r.base_nominal == null) return
-      const banco = r.base_nominal
-      const efectivo = r.cash_total != null ? Math.max(0, r.cash_total - banco) : 0
-      nomina[p] = { banco, efectivo, coste: Math.round(banco * FACTOR_COSTE + efectivo) }
-    })
-    const conNomina = Object.keys(nomina).length > 0
-    const mes = Object.fromEntries(PROF_ORDER.map(p => [p, nomina[p]?.coste ?? ficha[p]]))
-    return { mes, ficha, nomina, conNomina, month, loading, error }
-  }, [data, loading, error, month])
 }
 
 let nextId = 1

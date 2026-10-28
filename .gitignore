@@ -38,3 +38,6 @@ coverage/
 # Notas de trabajo con datos reales de alumnos/clientes (nombres, teléfonos, pagos):
 # el repo es público, esto no se sube nunca.
 NOTAS_PARA_CODE_mananas_y_datos.md
+
+# Datos personales (copias de Excel de Eva, exportaciones) — no subir
+datos_privados/
