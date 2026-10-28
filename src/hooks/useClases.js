@@ -1,0 +1,28 @@
+import { useState, useEffect } from 'react'
+
+const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
+
+function getAuthHeaders() {
+  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
+  return nonce ? { 'X-WP-Nonce': nonce } : {}
+}
+
+// Clases reales de WooCommerce (dia, horario, precio, alumnos activos) — las usa CTRL
+// Time Off para calcular los ingresos reales de las clases de mañana.
+export function useClases(enabled = true) {
+  const [clases, setClases]   = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState(null)
+
+  useEffect(() => {
+    if (!enabled) return
+    setLoading(true)
+    fetch(`${CLUB_URL}/wp-json/progreso/v1/clases`, { credentials: 'include', headers: getAuthHeaders() })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(json => { if (json?.data?.clases) setClases(json.data.clases) })
+      .catch(e => setError(e))
+      .finally(() => setLoading(false))
+  }, [enabled])
+
+  return { clases, loading, error }
+}

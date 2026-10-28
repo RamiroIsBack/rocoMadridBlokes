@@ -9,7 +9,7 @@
 // - Calendario en el primer trimestre; cada persona conoce sus fechas con 2 meses de antelación.
 // - Si el club cierra en agosto puede fijar ahí el bloque de 15 días. Los días de cierre
 //   que pasan de 15 no los cubre el convenio: o se pagan sin trabajar o se pactan.
-import { PROF_ORDER, DAYS, BASE, SALA, DAY_LABEL } from '../data/staffSchedule'
+import { PROF_ORDER, PROF_META, DAYS, BASE, SALA, DAY_LABEL } from '../data/staffSchedule'
 import {
   VERANO_APERTURA, COMODIN_VERANO, pairConflict, simulatePlan, laborablesBetween, laborablesFrom,
   isSummer, weekdayOf, fmtShort, monthOf, diasDevengados, PARO_MESES, PARO_VERANO, isClosed,
@@ -26,6 +26,22 @@ export const VENTANA_VERANO   = { from: '06-01', to: '09-30' }
 export const HOY_PARO = { Sigurd: 'verano', Ana: 'agosto' }
 export const LABORABLES_MES = 21.75
 export const MES_LABEL = { 7: 'Julio', 8: 'Agosto' }
+export const MESES_ANUALES = {
+  1: 'Enero', 2: 'Febrero', 3: 'Marzo', 4: 'Abril', 5: 'Mayo', 6: 'Junio',
+  7: 'Julio', 8: 'Agosto', 9: 'Septiembre', 10: 'Octubre', 11: 'Noviembre', 12: 'Diciembre',
+}
+export const MANANAS_CORTE_DEFECTO    = '14:00'
+export const MANANAS_PCT_TARDE_DEFECTO = 25
+export const MANANAS_MODO = {
+  abiertas:        'Abiertas',
+  'cerradas-todo':  'Cerradas todo el año',
+  'cerradas-meses': 'Cerradas en estos meses',
+}
+export const MANANAS_DISPOSICION = {
+  tarde: 'Pasa sus horas a la tarde (no se ahorra nada)',
+  paro:  'Paro (fijo discontinuo) esos meses',
+  baja:  'Baja',
+}
 export const CIERRE_EXTRA = {
   pagados:   'Se pagan sin trabajar (no hace falta acuerdo)',
   descontar: 'Se descuentan de sus vacaciones (hace falta acuerdo)',
@@ -139,6 +155,99 @@ function vacacionesPersona(p, yearDates, { offSet, ctx, cierre, cierreExtra, cam
   const propias = yearDates.filter(d => offSet.has(d) && disp(d))
   const vac = [...propias, ...cierreConv, ...(cierreExtra === 'descontar' ? cierreExtraDias : [])].sort()
   return { vac, cierreConv, cierreExtraDias }
+}
+
+// ─── Mañanas (cerrar antes de una hora de corte, todo el año o algunos meses) ────────────
+// Sin red: recibe los ingresos reales de mañana ya calculados (de /progreso/v1/clases) y el
+// coste empresa de cada persona, para poder evaluarse igual que el resto del plan.
+
+function minsOf(hhmm) {
+  const m = String(hhmm || '').match(/(\d{1,2}):(\d{2})/)
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0
+}
+
+export function normalizeMananas(m) {
+  return {
+    modo: 'abiertas', meses: [], corteHora: MANANAS_CORTE_DEFECTO,
+    pctTarde: MANANAS_PCT_TARDE_DEFECTO, gastoSala: 0, disposicion: {},
+    ...(m || {}),
+  }
+}
+
+// Meses (1-12) cerrados por la mañana con esta configuración
+export function mesesCerradosManana(mananas) {
+  const m = normalizeMananas(mananas)
+  if (m.modo === 'cerradas-todo') return Array.from({ length: 12 }, (_, i) => i + 1)
+  if (m.modo === 'cerradas-meses') return [...(m.meses || [])].sort((a, b) => a - b)
+  return []
+}
+
+// Horas semanales de clase de cada persona que empiezan antes del corte (base normal, el
+// horario de verano se rehace cada año y no entra aquí). Solo clases: equipar, comida o
+// gestión de por la mañana no son horas que se «dejen de dar» si se cierra a los alumnos.
+export function horasMananaPorPersona(corteHora = MANANAS_CORTE_DEFECTO) {
+  const corte = minsOf(corteHora)
+  const res = {}
+  PROF_ORDER.forEach(p => {
+    let horas = 0
+    DAYS.forEach(d => {
+      ;(BASE[p]?.[d] || []).forEach(slot => {
+        if (slot.tipo === 'clase' && minsOf(slot.start) < corte) horas += (minsOf(slot.end) - minsOf(slot.start)) / 60
+      })
+    })
+    if (horas > 0) res[p] = horas
+  })
+  return res
+}
+
+// Ingresos mensuales reales de las clases con suscripción que empiezan antes del corte
+// (a partir de la lista de /progreso/v1/clases: dia, horario, precio, alumnos, tipo)
+export function ingresosMananaDeClases(clases, corteHora = MANANAS_CORTE_DEFECTO) {
+  const corte = minsOf(corteHora)
+  return (clases || [])
+    .filter(c => c.tipo === 'classes' && minsOf(c.horario) < corte)
+    .reduce((acc, c) => {
+      const alumnos = Number(c.alumnos) || 0
+      acc.alumnos += alumnos
+      acc.ingresos += (Number(c.precio) || 0) * alumnos
+      if (alumnos) acc.detalle.push({ dia: c.dia, horario: c.horario, alumnos, precio: Number(c.precio) || 0 })
+      return acc
+    }, { alumnos: 0, ingresos: 0, detalle: [] })
+}
+
+// Cuentas de cerrar por la mañana: ingreso que se pierde (neto del % que pasa a la tarde),
+// ahorro de personal (de quien se pone en paro/baja; quien pasa sus horas a la tarde no
+// ahorra nada) y de sala, por mes cerrado y en el año.
+export function cuentasMananas(mananas, { ingresosManana, coste = {}, horasManana }) {
+  const m = normalizeMananas(mananas)
+  const cerrados = mesesCerradosManana(m)
+  const horas = horasManana || horasMananaPorPersona(m.corteHora)
+  const perdidaBruta = ingresosManana?.ingresos || 0
+  const perdidaNeta = perdidaBruta * (1 - (m.pctTarde || 0) / 100)
+  const personas = Object.keys(horas)
+  const ahorroPersonal = personas.reduce((s, p) => {
+    const disp = m.disposicion?.[p] || 'tarde'
+    if (disp === 'tarde') return s
+    const frac = Math.min(1, horas[p] / (PROF_META[p]?.horasSem || horas[p] || 1))
+    return s + frac * (coste[p] || 0)
+  }, 0)
+  const ahorroSala = m.gastoSala || 0
+  const resultadoMes = -perdidaNeta + ahorroPersonal + ahorroSala
+  return {
+    cerrados, personas, horas, perdidaBruta, perdidaNeta, ahorroPersonal, ahorroSala,
+    resultadoMes, resultadoAnio: resultadoMes * cerrados.length,
+    alumnosManana: ingresosManana?.alumnos || 0,
+  }
+}
+
+// Punto de equilibrio: a partir de qué % de alumnos que pasan a la tarde el cierre deja de
+// perder dinero ese mes (fuerza bruta 0-100, igual criterio que equilibrioCamp)
+export function equilibrioManana(mananas, ctx) {
+  const m = normalizeMananas(mananas)
+  for (let pct = 0; pct <= 100; pct++) {
+    if (cuentasMananas({ ...m, pctTarde: pct }, ctx).resultadoMes >= 0) return pct
+  }
+  return null
 }
 
 // state: el plan (year, paro, keys, dias, periods, cierre, cierreExtra, camp, gastosSala, ingresosSala)

@@ -12,10 +12,12 @@ import { usePayroll } from '../hooks/useOvertime'
 import { autoCategory } from '../utils/expensesParser'
 import { PL_DATA } from '../data/plHistorico'
 import {
-  DIAS_ANUALES, HOY_PARO, MES_LABEL, eur, inactivosMes, evaluarPlan, defaultYear, todayISO, repartirVacaciones,
-  BLOQUE_VERANO, MAX_BLOQUES, CIERRE_EXTRA,
+  DIAS_ANUALES, HOY_PARO, MES_LABEL, MESES_ANUALES, MANANAS_MODO, MANANAS_DISPOSICION, eur, inactivosMes,
+  evaluarPlan, defaultYear, todayISO, repartirVacaciones, BLOQUE_VERANO, MAX_BLOQUES, CIERRE_EXTRA,
+  normalizeMananas, horasMananaPorPersona, ingresosMananaDeClases, cuentasMananas, equilibrioManana,
 } from '../utils/timeoffPlan'
 import { useTimeOffData, savePlan, saveReal, syncNueve, addScenario } from '../hooks/useTimeOff'
+import { useClases } from '../hooks/useClases'
 import TimeOffRequests, { matchPerson } from './TimeOffRequests'
 import TimeOffIntegration, { personaDeEmpleado } from './TimeOffIntegration'
 import TimeOffSummary from './TimeOffSummary'
@@ -110,6 +112,11 @@ function firmaPlan(st) {
     camp: c.activo ? [CAMP_MESES.map(m => [c.meses[m].semanas, c.meses[m].plazas]), [...c.staff].sort(), c.precio, c.ocupacion] : null,
     periods: (st.periods || []).map(p => [p.prof, p.start, Number(p.n), !!p.acuerdo]).sort(),
     pacto: PROF_ORDER.filter(p => st.pactoVerano?.[p]),
+    mananas: (() => {
+      const mn = normalizeMananas(st.mananas)
+      return mn.modo === 'abiertas' ? null : [mn.modo, [...mn.meses].sort(), mn.corteHora, mn.pctTarde, mn.gastoSala,
+        PROF_ORDER.filter(p => mn.disposicion?.[p] && mn.disposicion[p] !== 'tarde').map(p => [p, mn.disposicion[p]])]
+    })(),
   })
 }
 
@@ -129,6 +136,7 @@ function defaultState(year = defaultYear()) {
     // €/mes por mes de verano (7 = julio, 8 = agosto)
     gastosSala:   { 7: 0, 8: 0 },
     ingresosSala: { 7: 0, 8: 0 },
+    mananas: normalizeMananas(),
     preset: null,
   }
 }
@@ -138,6 +146,7 @@ function hydrate(plain) {
   const st = { ...defaultState(plain.year || defaultYear()), ...plain }
   st.periods = (plain.periods || []).map(p => ({ ...p, id: nextId++ }))
   st.camp = normalizeCamp(plain.camp)
+  st.mananas = normalizeMananas(plain.mananas)
   // Planes guardados con la huella anterior: si no se había tocado, se pasa a la nueva
   if (st.preset?.firma?.includes('"paro":{')) {
     const pv = plain.pactoVerano
@@ -730,6 +739,111 @@ function CampCuentas({ ev }) {
   )
 }
 
+// ─── Mañanas: cerrar antes de una hora de corte, todo el año o algunos meses ─────────────
+function ConfigMananas({ state, update, costes, clases }) {
+  const mananas = normalizeMananas(state.mananas)
+  const setMananas = patch => update({ mananas: { ...mananas, ...patch } })
+  const horas = useMemo(() => horasMananaPorPersona(mananas.corteHora), [mananas.corteHora])
+  const cerrado = mananas.modo !== 'abiertas'
+  return (
+    <>
+      <div className="sv-to-form">
+        <label className="sv-to-inline">
+          Mañanas
+          <select className="sv-tests-select" value={mananas.modo} onChange={e => setMananas({ modo: e.target.value })}>
+            {Object.entries(MANANAS_MODO).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </label>
+        <label className="sv-to-inline">
+          Es «mañana» lo que va antes de
+          <input className="sv-tests-input" type="time" value={mananas.corteHora}
+            onChange={e => setMananas({ corteHora: e.target.value || MANANAS_CORTE_DEFECTO })} />
+        </label>
+      </div>
+      {mananas.modo === 'cerradas-meses' && (
+        <div className="sv-filter-group sv-to-wrap">
+          {Object.entries(MESES_ANUALES).map(([n, label]) => (
+            <label key={n} className="sv-to-chip">
+              <input type="checkbox" checked={mananas.meses.includes(Number(n))}
+                onChange={() => setMananas({ meses: toggleIn(mananas.meses, Number(n)) })} />
+              {label}
+            </label>
+          ))}
+        </div>
+      )}
+      {cerrado && (
+        <>
+          <div className="sv-to-form">
+            <label className="sv-to-inline">
+              % de alumnos que se pasa a la tarde (no se pierden)
+              <input type="range" min="0" max="100" value={mananas.pctTarde}
+                onChange={e => setMananas({ pctTarde: num(e.target.value) })} />
+              {mananas.pctTarde} %
+            </label>
+            <label className="sv-to-inline">
+              Gasto de sala por la mañana que se ahorra
+              <input className="sv-tests-input sv-tests-input--num" type="number" min="0" value={mananas.gastoSala}
+                onChange={e => update({ mananas: { ...mananas, gastoSala: num(e.target.value) } })} />
+              €/mes
+            </label>
+          </div>
+          {Object.keys(horas).length > 0 && (
+            <div className="sv-to-form">
+              <span className="sv-to-inline">Si se cierra, cada persona que da clase por la mañana:</span>
+              {Object.keys(horas).map(p => (
+                <label key={p} className="sv-to-inline" style={{ color: PROF_META[p]?.color }}>
+                  {p} ({horas[p]} h/sem de mañana)
+                  <select className="sv-tests-select" value={mananas.disposicion?.[p] || 'tarde'}
+                    onChange={e => setMananas({ disposicion: { ...mananas.disposicion, [p]: e.target.value } })}>
+                    {Object.entries(MANANAS_DISPOSICION).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                  </select>
+                </label>
+              ))}
+              <span className="sv-ot-muted sv-to-small">La decisión laboral es de Ramiro; esto solo pone números.</span>
+            </div>
+          )}
+          <MananasCuentas mananas={mananas} costes={costes} clases={clases} horas={horas} />
+        </>
+      )}
+    </>
+  )
+}
+
+function MananasCuentas({ mananas, costes, clases, horas }) {
+  const ingresosManana = useMemo(() => ingresosMananaDeClases(clases, mananas.corteHora), [clases, mananas.corteHora])
+  const ctx = { ingresosManana, coste: costes.mes, horasManana: horas }
+  const r = useMemo(() => cuentasMananas(mananas, ctx), [mananas, ingresosManana, costes.mes, horas])
+  const eq = useMemo(() => equilibrioManana(mananas, ctx), [mananas, ingresosManana, costes.mes, horas])
+  const cls = n => (n > 0 ? 'sv-to-good' : n < 0 ? 'sv-to-bad' : '')
+  if (!r.cerrados.length) return null
+  const lineas = [
+    [`Ingresos de mañana que se pierden (de ${r.alumnosManana} alumnos, ${mananas.pctTarde}% se pasa a la tarde)`, -r.perdidaNeta],
+    r.ahorroPersonal > 0 && ['Personal que no trabaja esa mañana', r.ahorroPersonal],
+    r.ahorroSala > 0 && ['Gasto de sala', r.ahorroSala],
+  ].filter(Boolean)
+  return (
+    <div className="sv-to-money">
+      <div className={`sv-to-money__total ${cls(r.resultadoMes)}`}>
+        Mañanas {r.resultadoMes >= 0 ? 'compensa' : 'no compensa'}: <strong>{signo(r.resultadoMes)}/mes</strong> en los {r.cerrados.length} {r.cerrados.length === 1 ? 'mes cerrado' : 'meses cerrados'}
+        {' '}({signo(r.resultadoAnio)}/año)
+      </div>
+      <ul className="sv-to-money__lines">
+        {lineas.map(([txt, n]) => (
+          <li key={txt}><span>{txt}</span><span className={n > 0 ? 'sv-to-good' : n < 0 ? 'sv-to-bad' : ''}>{signo(n)}</span></li>
+        ))}
+      </ul>
+      {ingresosManana.ingresos === 0 && (
+        <p className="sv-to-warn-txt sv-to-small">No se han encontrado ingresos reales de clases de mañana (revisa la conexión con la tienda).</p>
+      )}
+      <p className="sv-note sv-to-small">
+        {eq != null && eq > 0
+          ? <>A partir de que un <strong>{eq}%</strong> de los alumnos de mañana se pase a la tarde, cerrar compensa con este ahorro.</>
+          : <>Con este ahorro, cerrar compensa aunque nadie se pase a la tarde.</>}
+      </p>
+    </div>
+  )
+}
+
 // Un recuadro por indicador, en rojo (o ámbar) si pasa de 0
 function KpiBox({ value, label, malo = 'bad' }) {
   const color = value > 0 ? (malo === 'warn' ? '#f5c842' : '#f87171') : '#34d399'
@@ -1131,7 +1245,7 @@ function Paso({ n, titulo, children, nota }) {
   )
 }
 
-function Calculadora({ state, setState, costes, ev, sugerido, onDesdeReal, onGuardarAnterior }) {
+function Calculadora({ state, setState, costes, clases, ev, sugerido, onDesdeReal, onGuardarAnterior }) {
   const y = ev.y
   const { paro, keys, periods, cierre } = state
   const update = patch => setState(s => ({ ...s, ...patch }))
@@ -1184,7 +1298,12 @@ function Calculadora({ state, setState, costes, ev, sugerido, onDesdeReal, onGua
         <ExploradorParo paro={paro} cierre={cierre} keys={keys} coste={costes.mes} onApply={aplicarParo} />
       </Paso>
 
-      <Paso n="3" titulo="Vacaciones"
+      <Paso n="3" titulo="Mañanas"
+        nota="Cerrar antes de la hora de corte en los meses elegidos. Los ingresos de mañana son los reales de las clases con suscripción (de la tienda), no una cifra fija.">
+        <ConfigMananas state={state} update={update} costes={costes} clases={clases} />
+      </Paso>
+
+      <Paso n="4" titulo="Vacaciones"
         nota="«Repartir vacaciones» coloca a cada uno su bloque de 15 en verano (si el cierre no se lo da) y el resto en Navidad y primavera, buscando las fechas con menos choques y con los menos días sin quien abra posibles (si está fuera quien abre ese día, hay que decidir quién abre).">
         <div className="sv-to-form">
           <button className="sv-tests-add" onClick={() => setState(s => conReparto(s))}>Repartir vacaciones automáticamente</button>
@@ -1233,7 +1352,7 @@ function Calculadora({ state, setState, costes, ev, sugerido, onDesdeReal, onGua
         <Calendario ev={ev} titulo="Calendario del supuesto" />
       </Paso>
 
-      <Paso n="4" titulo="Resultado">
+      <Paso n="5" titulo="Resultado">
         <Dinero ev={ev} state={state} />
         <Indicadores ev={ev} />
         <AvisosAgrupados ev={ev} />
@@ -1310,7 +1429,7 @@ function defaultReal() {
 
 function hydrateReal(plain) {
   const { year, ...rest } = plain
-  return { ...defaultReal(), ...rest, camp: normalizeCamp(rest.camp), periods: [] }
+  return { ...defaultReal(), ...rest, camp: normalizeCamp(rest.camp), mananas: normalizeMananas(rest.mananas), periods: [] }
 }
 
 // Simulador sin plan guardado: «Hoy» con las vacaciones ya repartidas
@@ -1355,6 +1474,7 @@ export default function TimeOffTab() {
   const costes = useCostes()
   const hist   = useHistoricoMeses()
   const remote = useTimeOffData()
+  const clasesReal = useClases(vista === 'sim')
 
   const [real, setReal, syncReal] = useServerState(remote, {
     field: 'real', metaField: 'real_meta', hydrateFn: hydrateReal, initial: defaultReal(), save: saveReal,
@@ -1474,12 +1594,12 @@ export default function TimeOffTab() {
       ) : (
         <FalloSeguro que="el simulador"><div className="sv-to-simwrap">
           <SyncStatus sync={syncSim} que="el simulador" />
-          <Calculadora state={sim} setState={setSim} costes={costes} ev={evSim} sugerido={sugerido} onDesdeReal={desdeReal} onGuardarAnterior={guardarAnterior} />
+          <Calculadora state={sim} setState={setSim} costes={costes} clases={clasesReal.clases} ev={evSim} sugerido={sugerido} onDesdeReal={desdeReal} onGuardarAnterior={guardarAnterior} />
           <PrevisionVerano ev={evSim} state={sim} historico={hist.months} />
           <HistoricoVerano hist={hist} onApply={h => setSim(s => ({ ...s, ingresosSala: h.ingresos, gastosSala: h.ahorrable }))} />
           <div className="sv-section">
             <div className="sv-to-step">
-              <h4 className="sv-to-step__title"><span className="sv-to-step__n">5</span>Guardar, comparar o llevar a lo real</h4>
+              <h4 className="sv-to-step__title"><span className="sv-to-step__n">6</span>Guardar, comparar o llevar a lo real</h4>
               <div className="sv-to-form">
                 <button className="sv-filter-btn" onClick={usarEnReal}>Usar esta configuración en lo real</button>
                 <span className="sv-ot-muted sv-to-small">Lleva a Vacaciones el paro, las llaves, los días, los pactos y el modo de verano. Los periodos simulados nunca pasan a ser vacaciones reales: esas solo entran por solicitudes.</span>
