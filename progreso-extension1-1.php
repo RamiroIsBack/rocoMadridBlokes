@@ -6175,3 +6175,210 @@ function projects_save($request) {
     update_option('blokes_projects', $doc, false);
     return rest_ensure_response(array('success' => true, 'projects' => $doc));
 }
+
+// ============================================================
+//  superadmin/v1 — Eventos: reservas de cumpleaños, colegios y eventos
+//  Acceso: socio y gestion, más los emails de la lista de Eventos
+//  (blokes_events_access, la edita un socio desde Superadmin → Acceso).
+// ============================================================
+
+function events_access_list() {
+    $list = get_option('blokes_events_access', array());
+    return is_array($list) ? array_values($list) : array();
+}
+
+function events_can_access() {
+    if (in_array(blokes_get_app_role(), array('socio', 'gestion'))) return true;
+    if (!is_user_logged_in()) return false;
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    return $email !== '' && in_array($email, array_map('strtolower', events_access_list()));
+}
+
+add_action('rest_api_init', function() {
+    $ev_perm    = 'events_can_access';
+    $socio_perm = function() { return blokes_get_app_role() === 'socio'; };
+
+    register_rest_route('superadmin/v1', '/events/access', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'events_get_access',
+            'permission_callback' => '__return_true',
+        ),
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'events_save_access',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/events/bookings', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'events_list_bookings',
+            'permission_callback' => $ev_perm,
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'events_create_bookings',
+            'permission_callback' => $ev_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/events/bookings/(?P<id>[a-z0-9-]+)', array(
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'events_update_booking',
+            'permission_callback' => $ev_perm,
+        ),
+        array(
+            'methods'             => 'DELETE',
+            'callback'            => 'events_delete_booking',
+            'permission_callback' => $ev_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/events/settings', array(
+        'methods'             => 'PUT',
+        'callback'            => 'events_save_settings',
+        'permission_callback' => $ev_perm,
+    ));
+});
+
+// Cualquiera puede preguntar si tiene acceso (para enseñar o no el menú); la lista solo la ve un socio.
+function events_get_access() {
+    $out = array('can' => events_can_access());
+    if (blokes_get_app_role() === 'socio') $out['emails'] = events_access_list();
+    return rest_ensure_response($out);
+}
+
+function events_save_access($request) {
+    $body  = $request->get_json_params();
+    $clean = array();
+    foreach ((is_array($body['emails'] ?? null) ? $body['emails'] : array()) as $email) {
+        $e = sanitize_email(strtolower(trim((string) $email)));
+        if ($e && !in_array($e, $clean)) $clean[] = $e;
+    }
+    update_option('blokes_events_access', $clean, false);
+    return rest_ensure_response(array('success' => true, 'emails' => $clean));
+}
+
+function events_default_settings() {
+    return array(
+        'price_per_kid' => 15,
+        'min_price'     => 180,
+        'deposit_pct'   => 30,
+        'monitors_pay'  => 80,
+        'slots'         => array('11:00', '17:00'),
+    );
+}
+
+function events_get_settings() {
+    $s = get_option('blokes_events_settings', array());
+    return array_merge(events_default_settings(), is_array($s) ? $s : array());
+}
+
+function events_save_settings($request) {
+    $body = $request->get_json_params();
+    $s    = events_get_settings();
+    foreach (array('price_per_kid', 'min_price', 'deposit_pct', 'monitors_pay') as $k) {
+        if (isset($body[$k]) && is_numeric($body[$k])) $s[$k] = round(max(0, floatval($body[$k])), 2);
+    }
+    if (isset($body['slots']) && is_array($body['slots'])) {
+        $slots = array();
+        foreach ($body['slots'] as $t) if (preg_match('/^\d{2}:\d{2}$/', (string) $t)) $slots[] = $t;
+        sort($slots);
+        if ($slots) $s['slots'] = array_values(array_unique($slots));
+    }
+    update_option('blokes_events_settings', $s, false);
+    return rest_ensure_response(array('success' => true, 'settings' => $s));
+}
+
+function events_get_bookings() {
+    $list = get_option('blokes_events_bookings', array());
+    return is_array($list) ? $list : array();
+}
+
+function events_save_bookings($list) {
+    usort($list, function($a, $b) { return strcmp($a['date'] . $a['time'], $b['date'] . $b['time']); });
+    update_option('blokes_events_bookings', array_values($list), false);
+}
+
+function events_num($v) {
+    if ($v === '' || $v === null || !is_numeric($v)) return null;
+    return round(max(0, min(100000, floatval($v))), 2);
+}
+
+function events_clean_booking($b) {
+    if (!is_array($b)) return null;
+    $date = (string) ($b['date'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return null;
+    $pick = function($v, $allowed, $default) { return in_array($v, $allowed, true) ? $v : $default; };
+    $text = function($v, $max) { return mb_substr(trim(sanitize_text_field((string) $v)), 0, $max); };
+    $time = function($v) { return preg_match('/^\d{2}:\d{2}$/', (string) $v) ? $v : ''; };
+    return array(
+        'date'          => $date,
+        'time'          => $time($b['time'] ?? ''),
+        'end_time'      => $time($b['end_time'] ?? ''),
+        'type'          => $pick($b['type'] ?? '', array('cumpleanos', 'colegio', 'asociacion', 'empresa', 'evento', 'otro'), 'cumpleanos'),
+        'status'        => $pick($b['status'] ?? '', array('solicitud', 'confirmada', 'celebrada', 'cancelada'), 'solicitud'),
+        'origin'        => $pick($b['origin'] ?? '', array('web', 'telefono', 'whatsapp', 'email', 'presencial', 'otro'), 'otro'),
+        'contact'       => $text($b['contact'] ?? '', 80),
+        'phone'         => $text($b['phone'] ?? '', 30),
+        'email'         => sanitize_email((string) ($b['email'] ?? '')),
+        'honoree'       => $text($b['honoree'] ?? '', 80),
+        'age'           => events_num($b['age'] ?? null),
+        'kids'          => events_num($b['kids'] ?? null),
+        'total'         => events_num($b['total'] ?? null),
+        'deposit'       => events_num($b['deposit'] ?? null),
+        'deposit_paid'  => !empty($b['deposit_paid']),
+        'deposit_date'  => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($b['deposit_date'] ?? '')) ? $b['deposit_date'] : '',
+        'rest_paid'     => !empty($b['rest_paid']),
+        'monitors_pay'  => events_num($b['monitors_pay'] ?? null),
+        'materials'     => events_num($b['materials'] ?? null),
+        'monitors'      => $text($b['monitors'] ?? '', 120),
+        'notes'         => mb_substr(trim(sanitize_textarea_field((string) ($b['notes'] ?? ''))), 0, 2000),
+    );
+}
+
+function events_list_bookings() {
+    return rest_ensure_response(array('success' => true, 'bookings' => events_get_bookings(), 'settings' => events_get_settings()));
+}
+
+// Acepta una reserva o { bookings: [...] } para cargar varias de golpe (migración del Excel)
+function events_create_bookings($request) {
+    $body  = $request->get_json_params();
+    $input = isset($body['bookings']) && is_array($body['bookings']) ? $body['bookings'] : array($body);
+    if (count($input) > 500) return new WP_Error('too_many', 'Máximo 500 reservas de golpe', array('status' => 400));
+    $list  = events_get_bookings();
+    $added = array();
+    foreach ($input as $raw) {
+        $b = events_clean_booking($raw);
+        if (!$b) continue;
+        $b['id']         = wp_generate_uuid4();
+        $b['created_at'] = current_time('mysql');
+        $b['created_by'] = timeoff_user_name();
+        $list[]  = $b;
+        $added[] = $b;
+    }
+    if (!$added) return new WP_Error('invalid_booking', 'Falta la fecha o no es válida', array('status' => 400));
+    events_save_bookings($list);
+    return rest_ensure_response(array('success' => true, 'added' => $added, 'bookings' => events_get_bookings()));
+}
+
+function events_update_booking($request) {
+    $id   = $request['id'];
+    $list = events_get_bookings();
+    foreach ($list as $i => $x) {
+        if ($x['id'] !== $id) continue;
+        $b = events_clean_booking(array_merge($x, (array) $request->get_json_params()));
+        if (!$b) return new WP_Error('invalid_booking', 'Falta la fecha o no es válida', array('status' => 400));
+        $list[$i] = array_merge($x, $b, array('updated_at' => current_time('mysql'), 'updated_by' => timeoff_user_name()));
+        events_save_bookings($list);
+        return rest_ensure_response(array('success' => true, 'booking' => $list[$i]));
+    }
+    return new WP_Error('not_found', 'Reserva no encontrada', array('status' => 404));
+}
+
+function events_delete_booking($request) {
+    $id   = $request['id'];
+    $list = array_values(array_filter(events_get_bookings(), function($x) use ($id) { return $x['id'] !== $id; }));
+    events_save_bookings($list);
+    return rest_ensure_response(array('success' => true));
+}

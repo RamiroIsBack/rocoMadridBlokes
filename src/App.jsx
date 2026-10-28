@@ -16,10 +16,12 @@ import PlaygroundPage from './pages/PlaygroundPage'
 import FichajePage from './pages/FichajePage'
 import TimeOffPage from './pages/TimeOffPage'
 import LeaguesPage from './pages/LeaguesPage'
+import EventosPage from './pages/EventosPage'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
 import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
+import { useEventsAccess } from './hooks/useEvents'
 import './App.css'
 
 const PRODUCT_NAMES = { 'Classes': 'Clases', 'Single Days': 'Días sueltos' }
@@ -73,6 +75,7 @@ export default function App() {
   const [navVisible, setNavVisible] = useState(false)
   const lastScrollY = useRef(0)
   const sd = window.blokesSiteData || {}
+  const canEvents = useEventsAccess()
 
   // Profile modal state
   const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto } = useProfile()
@@ -292,6 +295,11 @@ export default function App() {
                   </li>
                 </>
               )}
+              {canEvents && (
+                <li className="app-nav__item">
+                  <NavLink to="/eventos" className="app-nav__link">Eventos</NavLink>
+                </li>
+              )}
               {sd.userRole === 'socio' && (
                 <li className="app-nav__item">
                   <NavLink to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</NavLink>
@@ -334,6 +342,7 @@ export default function App() {
             <Route path="/supervision" element={<SupervisionPage />} />
             <Route path="/playground" element={<PlaygroundPage />} />
             <Route path="/ligas" element={<LeaguesPage />} />
+            <Route path="/eventos" element={<EventosPage />} />
           </Routes>
         </main>
 
