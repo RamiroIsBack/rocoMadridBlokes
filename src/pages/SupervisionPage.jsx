@@ -1084,18 +1084,22 @@ function GruposTab() {
   const alumnos = grupo ? grupo.alumnos : grupos.flatMap(g => g.alumnos)
 
   const kpis = useMemo(() => {
-    const k = { personas: alumnos.length, dia1: 0, dia2: 0, dia3: 0, plazas: 0, cobradoMes: 0, pendienteMes: 0 }
+    const k = { personas: 0, enEspera: 0, dia1: 0, dia2: 0, dia3: 0, plazas: 0, cobradoMes: 0, pendienteMes: 0, pendienteImporte: 0 }
     alumnos.forEach(a => {
-      if (a.dias >= 3) k.dia3++
-      else if (a.dias === 2) k.dia2++
-      else k.dia1++
-      k.plazas += a.dias
+      if (a.enVigor) {
+        k.personas++
+        if (a.dias >= 3) k.dia3++
+        else if (a.dias === 2) k.dia2++
+        else k.dia1++
+        k.plazas += a.dias
+      } else {
+        k.enEspera++
+      }
       const pago = mesActual ? a.pagos[mesActual] : null
-      if (pago) {
-        if (PAGO_PENDIENTE.has(pago.estadoPedido)) k.pendienteMes++
-        else k.cobradoMes += pago.importe
-      } else if (a.estado === 'activo') {
+      if (pago && !PAGO_PENDIENTE.has(pago.estadoPedido)) k.cobradoMes += pago.importe
+      if (a.pendiente && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes') {
         k.pendienteMes++
+        k.pendienteImporte += a.pendiente.importe
       }
     })
     return k
@@ -1107,8 +1111,10 @@ function GruposTab() {
   return (
     <div className="sv-tab-panel">
       <p className="sv-note">
-        Sustituye el Excel «Grupos». <strong>Alumno y pagador son la misma persona por ahora</strong> — hasta que la
-        migración añada quién es realmente cada alumno, esto cuenta suscripciones, no alumnos.
+        Sustituye el Excel «Grupos», agrupado por franja (M-J, L-X, Viernes…) como sus pestañas.
+        <strong> Alumno y pagador son la misma persona por ahora</strong> — hasta que la migración añada quién es
+        realmente cada alumno, esto es por cuenta pagadora, no por alumno real. Una fila con <strong>⚠</strong> tiene
+        otra suscripción antigua colgando en este mismo grupo (duplicado; la bandeja de la 8.3 los juntará).
         Las acciones (⋯) escriben de verdad en WooCommerce: <strong>pruébalas primero con una suscripción de prueba</strong>,
         no se envían correos al alumno, y todo queda registrado (quién, cuándo, antes → después).
       </p>
@@ -1120,31 +1126,33 @@ function GruposTab() {
             {grupos.map(g => {
               const key = `${g.dia}|${g.horario}|${g.edad}`
               const lbl = g.edad !== 'Adultos' ? `${g.label} (${g.edad})` : g.label
-              return <option key={key} value={key}>{lbl} — {g.alumnos.length}</option>
+              const nVigor = g.alumnos.filter(a => a.enVigor).length
+              const nEspera = g.alumnos.length - nVigor
+              return <option key={key} value={key}>{lbl} — {nVigor}{nEspera ? ` (+${nEspera} en espera)` : ''}</option>
             })}
           </select>
         </div>
       </div>
 
       <div className="sv-kpis">
-        <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }} title="Suscripciones en vigor en este grupo (o en todos, si no has elegido uno).">
-          <span className="sv-kpi__value">{kpis.personas}</span>
+        <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }} title="Personas en vigor (activas o de baja a fin de mes) en este grupo — mismo criterio que «Cuentas en vigor» de ExcelMuerte. Las en espera/pausadas/pendientes de alta se cuentan aparte.">
+          <span className="sv-kpi__value">{kpis.personas}{kpis.enEspera ? <span className="sv-ot-muted"> (+{kpis.enEspera} en espera)</span> : ''}</span>
           <span className="sv-kpi__label">Personas ⓘ</span>
         </div>
-        <div className="sv-kpi" style={{ '--kpi-color': '#a78bfa' }} title="Cuántas vienen 1, 2 o 3+ días a la semana.">
+        <div className="sv-kpi" style={{ '--kpi-color': '#a78bfa' }} title="Solo de las que están en vigor: cuántas vienen 1, 2 o 3+ días a la semana.">
           <span className="sv-kpi__value">{kpis.dia1} × 1 día · {kpis.dia2} × 2 · {kpis.dia3 ? `${kpis.dia3} × 3+` : ''}</span>
           <span className="sv-kpi__label">Por días ⓘ</span>
         </div>
-        <div className="sv-kpi" style={{ '--kpi-color': '#34d399' }} title="Plazas por sesión (una de 2 días cuenta en los dos).">
+        <div className="sv-kpi" style={{ '--kpi-color': '#34d399' }} title="Plazas por sesión de las que están en vigor (una de 2 días cuenta en los dos).">
           <span className="sv-kpi__value">{kpis.plazas}</span>
           <span className="sv-kpi__label">Plazas ⓘ</span>
         </div>
-        <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }} title={`Cobrado en ${mesActual ? mesLabelGrp(mesActual) : 'este mes'}: pedidos de renovación ya pagados.`}>
+        <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }} title={`Cobrado en ${mesActual ? mesLabelGrp(mesActual) : 'este mes'}: pedidos de ese mes ya pagados (de las clases; no incluye entradas sueltas ni bonos).`}>
           <span className="sv-kpi__value">{fmtEur(kpis.cobradoMes)}</span>
           <span className="sv-kpi__label">Cobrado del mes ⓘ</span>
         </div>
-        <div className="sv-kpi" style={{ '--kpi-color': '#f87171' }} title="Activos sin pago registrado este mes todavía, o con una renovación en espera de pago (no cuenta a quien ya está pausado o de baja).">
-          <span className="sv-kpi__value">{kpis.pendienteMes}</span>
+        <div className="sv-kpi" style={{ '--kpi-color': '#f87171' }} title="Tienen de verdad un pedido sin pagar (pendiente, fallido o en espera de pago), no solo «sin pedido este mes» — así no cuenta a quien paga trimestral y le toca más adelante. No incluye a quien ya está pausado o de baja.">
+          <span className="sv-kpi__value">{kpis.pendienteMes} · {fmtEur(kpis.pendienteImporte)}</span>
           <span className="sv-kpi__label">Pendiente del mes ⓘ</span>
         </div>
       </div>
@@ -1163,7 +1171,12 @@ function GruposTab() {
               const est = ESTADO_LABEL[a.estado] || { txt: a.estado, cls: '' }
               return (
                 <tr key={a.subId}>
-                  <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                  <td>
+                    {a.alumno || <span className="sv-ot-muted">—</span>}
+                    {a.otrasSubs?.length > 0 && (
+                      <span title={`${a.otrasSubs.length} suscripción(es) antigua(s) colgando en este grupo (duplicado)`}> ⚠</span>
+                    )}
+                  </td>
                   <td className="sv-ot-muted">{a.telefono || '—'}</td>
                   <td>{a.dias}</td>
                   <td><span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span></td>

@@ -3092,6 +3092,21 @@ function superadmin_people_summary($request) {
 // lectura (sin las acciones de la sección 8.2, que van en una ronda aparte, probadas primero
 // con datos de prueba). Una fila por SUSCRIPCIÓN, no por alumno — hasta que la migración
 // (8.4) añada el campo "Alumno", alumno y pagador son la misma persona.
+// Un día suelto pertenece siempre a la misma pareja de días que ya usa Eva en sus pestañas
+// (Martes y Jueves van juntos en "M-J", Lunes y Miércoles en "L-X"); si ya viene como pareja
+// (o es Viernes/Sábado/vacío de Pilates-Yoga), se deja igual.
+function blokes_dia_a_pareja($dia) {
+    $map = array('Lunes' => 'Lunes-Miércoles', 'Miércoles' => 'Lunes-Miércoles', 'Martes' => 'Martes-Jueves', 'Jueves' => 'Martes-Jueves');
+    return $map[$dia] ?? $dia;
+}
+
+// Si el teléfono de facturación está vacío (alta hecha desde admin), muchas cuentas usan un
+// email del tipo "6xxxxxxxx@rocomadrid.com": el número sigue sirviendo de teléfono.
+function blokes_telefono_de_email($email) {
+    $local = $email ? strstr($email, '@', true) : false;
+    return ($local && preg_match('/^\d{9}$/', $local)) ? $local : '';
+}
+
 function superadmin_gestion_grupos($request) {
     if (!class_exists('RocoMadrid_SF_Stats') || !function_exists('wcs_get_subscription')) {
         return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats/WooCommerce Subscriptions not available. Call this endpoint on the club subsite.', array('status' => 503));
@@ -3112,14 +3127,20 @@ function superadmin_gestion_grupos($request) {
         if (!in_array($status, array('active', 'on-hold', 'pending'), true)) continue; // cancelled de verdad: fuera
 
         $dia = $sub['dia'] ?? ''; $horario = $sub['horario'] ?? ''; $edad = $sub['edad'] ?? 'Adultos';
-        if (!$dia && !$horario) continue;
+        $producto = $sub['producto'] ?? '';
+        $es_pilates_yoga = in_array($producto, array('Pilates', 'Yoga'), true);
+        if (!$dia && !$horario && !$es_pilates_yoga) continue;
 
         $sub_obj = wcs_get_subscription(intval($sub['id']));
         if (!$sub_obj) continue;
 
-        $gkey = $dia . '|' . $horario . '|' . $edad;
+        // Agrupar por franja como en el Excel de Eva (M-J 20:30 junta a los de 2 días y a los
+        // sueltos de solo martes o solo jueves), no por cada combinación exacta de día.
+        $pareja = $es_pilates_yoga ? $producto : blokes_dia_a_pareja($dia);
+        $gkey   = $pareja . '|' . $horario . '|' . $edad;
         if (!isset($grupos[$gkey])) {
-            $grupos[$gkey] = array('label' => trim($dia . ' · ' . $horario), 'dia' => $dia, 'horario' => $horario, 'edad' => $edad, 'alumnos' => array());
+            $label = $es_pilates_yoga ? $producto : trim($pareja . ' · ' . $horario);
+            $grupos[$gkey] = array('label' => $label, 'dia' => $pareja, 'horario' => $horario, 'edad' => $edad, 'personas' => array());
         }
 
         $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
@@ -3127,43 +3148,94 @@ function superadmin_gestion_grupos($request) {
         $pausa_hasta  = $status === 'on-hold' ? get_post_meta($sub_obj->get_id(), '_rm_pausa_hasta', true) : '';
         $estado = $es_pending_cancel ? 'baja_fin_mes'
             : ($status === 'on-hold' ? ($pausa_motivo ? 'pausado' : 'en_espera') : ($status === 'pending' ? 'pendiente_pago' : 'activo'));
+        $en_vigor = ($estado === 'activo' || $estado === 'baja_fin_mes'); // mismo criterio que people-summary
 
         $dias_sub = $dia ? explode('-', $dia) : array();
 
+        // "Pendiente" = hay de verdad un pedido sin pagar (pending/failed/on-hold) relacionado,
+        // no "no hay un pedido fechado este mes" (eso contaba mal a quien paga trimestral: su
+        // único pedido es de hace 2 meses y le cubre de sobra, sin que haga falta ningún cálculo
+        // de periodos — si no hay pedido impagado, no está pendiente).
         $pagos = array_fill_keys($meses, null);
+        $pendiente = null;
         $order_ids = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
         foreach ($order_ids as $oid) {
             $order = wc_get_order($oid);
             if (!$order) continue;
             $fecha = $order->get_date_paid() ?: $order->get_date_created();
             if (!$fecha) continue;
+            $o_status = $order->get_status();
+            if (in_array($o_status, array('pending', 'failed', 'on-hold'), true)) {
+                if (!$pendiente || $fecha->getTimestamp() > $pendiente['ts']) {
+                    $pendiente = array('importe' => floatval($order->get_total()), 'fecha' => $fecha->date('d/m/Y'), 'ts' => $fecha->getTimestamp());
+                }
+            }
             $ym = $fecha->date('Y-m');
             if (!isset($meses_set[$ym])) continue;
+            $metodo = $order->get_payment_method_title();
+            if (!$metodo && in_array($o_status, array('completed', 'processing'), true)) $metodo = 'Manual';
             $pagos[$ym] = array(
                 'importe' => floatval($order->get_total()),
-                'metodo'  => $order->get_payment_method_title(),
+                'metodo'  => $metodo,
                 'fecha'   => $fecha->date('d/m/Y'),
-                'estadoPedido' => $order->get_status(),
+                'estadoPedido' => $o_status,
             );
         }
+        if ($pendiente) unset($pendiente['ts']);
 
-        $grupos[$gkey]['alumnos'][] = array(
+        $telefono = $sub['telefono'] ?? '';
+        if (!$telefono) $telefono = $sub_obj->get_billing_phone();
+        if (!$telefono) $telefono = blokes_telefono_de_email($sub['email'] ?? $sub_obj->get_billing_email());
+
+        $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
+        $persona_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : ('n' . strtolower(trim($sub['cliente'] ?? ''))));
+
+        $fila = array(
             'subId'       => intval($sub['id']),
             'alumno'      => $sub['cliente'] ?? '',
-            'telefono'    => $sub['telefono'] ?? '',
+            'telefono'    => $telefono,
             'dias'        => count($dias_sub) ?: 1,
             'estado'      => $estado,
+            'enVigor'     => $en_vigor,
             'pausaMotivo' => $pausa_motivo ?: '',
             'pausaHasta'  => $pausa_hasta ?: '',
             'manual'      => method_exists($sub_obj, 'is_manual') ? $sub_obj->is_manual() : true,
             'pagos'       => $pagos,
+            'pendiente'   => $pendiente,
             'notas'       => get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '',
         );
+
+        if (!isset($grupos[$gkey]['personas'][$persona_key])) $grupos[$gkey]['personas'][$persona_key] = array();
+        $grupos[$gkey]['personas'][$persona_key][] = $fila;
     }
 
-    $data = array_values($grupos);
-    foreach ($data as &$g) {
-        usort($g['alumnos'], function($a, $b) { return strcasecmp($a['alumno'], $b['alumno']); });
+    // Una persona con varias suscripciones en el mismo grupo (alta nueva + vieja en espera
+    // colgando, lo típico de los 19 duplicados de octubre): una sola fila, con el histórico de
+    // pagos de todas fusionado; las demás se guardan aparte como "duplicados" (bandeja 8.3).
+    $data = array();
+    foreach ($grupos as $g) {
+        $alumnos = array(); $duplicados = array();
+        foreach ($g['personas'] as $subs) {
+            usort($subs, function($a, $b) {
+                $rango = function($s) { return $s['enVigor'] ? 0 : (in_array($s['estado'], array('en_espera', 'pausado'), true) ? 1 : 2); };
+                return $rango($a) <=> $rango($b);
+            });
+            $principal = $subs[0];
+            $otras = array_slice($subs, 1);
+            foreach ($otras as $otra) {
+                foreach ($otra['pagos'] as $ym => $p) {
+                    if ($p && empty($principal['pagos'][$ym])) $principal['pagos'][$ym] = $p;
+                }
+                if (!$principal['pendiente'] && $otra['pendiente']) $principal['pendiente'] = $otra['pendiente'];
+            }
+            if ($otras) {
+                $principal['otrasSubs'] = array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $otras);
+                $duplicados[] = array('alumno' => $principal['alumno'], 'subs' => array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $subs));
+            }
+            $alumnos[] = $principal;
+        }
+        usort($alumnos, function($a, $b) { return strcasecmp($a['alumno'], $b['alumno']); });
+        $data[] = array('label' => $g['label'], 'dia' => $g['dia'], 'horario' => $g['horario'], 'edad' => $g['edad'], 'alumnos' => $alumnos, 'duplicados' => $duplicados);
     }
     usort($data, function($a, $b) { return count($b['alumnos']) <=> count($a['alumnos']); });
 

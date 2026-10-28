@@ -192,7 +192,8 @@ export function horasMananaPorPersona(corteHora = MANANAS_CORTE_DEFECTO) {
     let horas = 0
     DAYS.forEach(d => {
       ;(BASE[p]?.[d] || []).forEach(slot => {
-        if (minsOf(slot.start) < corte) horas += (minsOf(slot.end) - minsOf(slot.start)) / 60
+        const start = minsOf(slot.start)
+        if (start < corte) horas += (Math.min(minsOf(slot.end), corte) - start) / 60
       })
     })
     if (horas > 0) res[p] = horas
