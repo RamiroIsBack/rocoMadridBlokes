@@ -5224,6 +5224,51 @@ function progreso_equip_get_weeks_historico() {
     return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
+// Junta una o varias tareas que llegan retrasadas de semanas anteriores con
+// la tarjeta de su mismo tipo que ya hubiera pendiente en la semana de
+// destino (si la hay), en vez de crear una tarjeta duplicada del mismo tipo
+// esa semana. Las viejas quedan "retrasada" apuntando (moved_to_task_id) a
+// la tarjeta final, sea nueva o la que ya estaba. Devuelve el id de esa
+// tarjeta final.
+function progreso_equip_merge_rolled_task($week_id, $assignment_id, $type_id, $target_date, $params, $max_postponed, $earliest_original, $original_worker_id) {
+    global $wpdb;
+    $tasks_table = progreso_equip_table('tasks');
+    $assignments_table = progreso_equip_table('assignments');
+
+    $existing = $wpdb->get_row($wpdb->prepare(
+        "SELECT t.* FROM {$tasks_table} t
+         JOIN {$assignments_table} a ON a.id = t.assignment_id
+         WHERE a.week_id = %d AND t.task_type_id = %s AND t.done = 0 AND t.moved_to_task_id IS NULL
+         ORDER BY t.id ASC LIMIT 1",
+        $week_id, $type_id
+    ), ARRAY_A);
+
+    if ($existing) {
+        $existing_original = $existing['original_date'] ?: $existing['task_date'];
+        $new_original = ($earliest_original !== null && $earliest_original < $existing_original) ? $earliest_original : $existing_original;
+        $new_original_worker = $existing['original_worker_id'] ? intval($existing['original_worker_id']) : $original_worker_id;
+        $wpdb->update($tasks_table, array(
+            'postponed_count'    => max(intval($existing['postponed_count']), $max_postponed + 1),
+            'original_date'      => $new_original,
+            'original_worker_id' => $new_original_worker,
+        ), array('id' => intval($existing['id'])), array('%d', '%s', '%d'), array('%d'));
+        return intval($existing['id']);
+    }
+
+    $wpdb->insert($tasks_table, array(
+        'assignment_id'       => $assignment_id,
+        'task_type_id'        => $type_id,
+        'task_date'           => $target_date,
+        'params'              => $params,
+        'done'                => 0,
+        'status'              => 'pendiente',
+        'original_date'       => $earliest_original,
+        'postponed_count'     => $max_postponed + 1,
+        'original_worker_id'  => $original_worker_id,
+    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%d'));
+    return $wpdb->insert_id;
+}
+
 // Lo que se queda suelto y vencido en una semana vieja solo se recogía al
 // crear la siguiente semana. Si esa siguiente semana ya existe y nadie crea
 // otra, puede tardar mucho en recogerse. Esto se llama al abrir/listar
@@ -5248,8 +5293,10 @@ function progreso_equip_sweep_overdue_into_current_week() {
     $pending = $wpdb->get_results($wpdb->prepare(
         "SELECT t.*, a.worker_id FROM {$tasks_table} t
          JOIN {$assignments_table} a ON a.id = t.assignment_id
-         WHERE t.task_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL AND a.week_id != %d",
-        $today, $week_id
+         JOIN {$weeks_table} wk ON wk.id = a.week_id
+         WHERE t.task_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL
+           AND wk.start_date < %s AND wk.id != %d",
+        $today, $week['start_date'], $week_id
     ), ARRAY_A);
     if (!$pending) return;
 
@@ -5291,18 +5338,10 @@ function progreso_equip_sweep_overdue_into_current_week() {
         }
         $target_date = $dates[$i % $n];
         $i++;
-        $wpdb->insert($tasks_table, array(
-            'assignment_id'       => intval($target['id']),
-            'task_type_id'        => $type_id,
-            'task_date'           => $target_date,
-            'params'              => $olds[0]['params'],
-            'done'                => 0,
-            'status'              => 'pendiente',
-            'original_date'       => $earliest_original,
-            'postponed_count'     => $max_postponed + 1,
-            'original_worker_id'  => $original_worker_id,
-        ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%d'));
-        $new_task_id = $wpdb->insert_id;
+        $new_task_id = progreso_equip_merge_rolled_task(
+            $week_id, intval($target['id']), $type_id, $target_date, $olds[0]['params'],
+            $max_postponed, $earliest_original, $original_worker_id
+        );
         foreach ($olds as $old) {
             $wpdb->update($tasks_table,
                 array('status' => 'retrasada', 'moved_to_task_id' => $new_task_id),
@@ -5418,8 +5457,8 @@ function progreso_equip_create_week($request) {
              JOIN {$assignments_table} a ON a.id = t.assignment_id
              JOIN " . progreso_equip_table('weeks') . " wk ON wk.id = a.week_id
              WHERE t.task_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL
-               AND wk.id != %d",
-            $today, $week_id
+               AND wk.start_date < %s AND wk.id != %d",
+            $today, $start_date, $week_id
         ), ARRAY_A);
         $pending_by_type = array();
         foreach ($pending as $old) { $pending_by_type[$old['task_type_id']][] = $old; }
@@ -5442,18 +5481,10 @@ function progreso_equip_create_week($request) {
             }
             $target_date = $n > 0 ? $dates[$i % $n] : $start_date;
             $i++;
-            $wpdb->insert($tasks_table, array(
-                'assignment_id'       => $rollover_target['assignment_id'],
-                'task_type_id'        => $type_id,
-                'task_date'           => $target_date,
-                'params'              => $olds[0]['params'],
-                'done'                => 0,
-                'status'              => 'pendiente',
-                'original_date'       => $earliest_original,
-                'postponed_count'     => $max_postponed + 1,
-                'original_worker_id'  => $original_worker_id,
-            ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%d'));
-            $new_task_id = $wpdb->insert_id;
+            $new_task_id = progreso_equip_merge_rolled_task(
+                $week_id, $rollover_target['assignment_id'], $type_id, $target_date, $olds[0]['params'],
+                $max_postponed, $earliest_original, $original_worker_id
+            );
             foreach ($olds as $old) {
                 $wpdb->update($tasks_table,
                     array('status' => 'retrasada', 'moved_to_task_id' => $new_task_id),

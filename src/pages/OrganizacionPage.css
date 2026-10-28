@@ -232,6 +232,7 @@
   font-weight: 700;
   color: #2a2015;
   cursor: pointer;
+  touch-action: none;
 }
 .org__comp-chip--selected { background: #2a2015; color: #f5c842; }
 
@@ -266,6 +267,7 @@
   box-shadow: 0 2px 4px rgba(0,0,0,0.4);
 }
 .org__comp-bubble:active { cursor: grabbing; }
+.org__comp-bubble--ghost { opacity: 0.6; pointer-events: none; border-style: dashed; }
 
 /* ── Mover tarea (Semana, detalle) / editar periodicidad (Normas) ── */
 .org__task-move {

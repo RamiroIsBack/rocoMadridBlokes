@@ -290,3 +290,116 @@ Borradas las semanas 25, 26, 27 y 28 y la persona «PRUEBA Lead» (12). No queda
 - Crea semana A (lunes pasado) con una tarea que venza hoy o ayer, sin moverla a mano. Sin crear semana B, simplemente **abre o recarga** «Semana» o «Hoy»: esa tarea debe aparecer recogida en A si A es la semana actual, o en la que sea la actual en ese momento.
 
 Build: `index-e4ae1904.js` / `index-5283c5cc.css` (CSS sin cambios en esta ronda).
+
+---
+
+## Resultado de pruebas (Cowork) · «Listo para probar 08:05» en blokes (`index-e4ae1904.js`) · 27/10 08:15
+
+### ✅ Funciona
+- **Nadie marcado por defecto.** El formulario sale con «Elige quién trabaja esta semana.» y, al marcar, «2 persona(s): PRUEBA Dos, PRUEBA Uno.».
+- **Doble clic en «Crear semana»** (dos `click()` seguidos): se crea **una sola** semana. La API devuelve `409 «Ya hay una semana del 2026-10-26: ábrela.»` si se repite la fecha.
+- **El `alert` de avisos al crear desde la interfaz** sale: «“Organizar próximas semanas…” se asignó a PRUEBA Dos porque el responsable no está esta semana.».
+- **Arrastre en el tablero** (con el ratón de verdad, ventana visible):
+  - **2.3** «Quitar bloques» de PRUEBA Dos soltada en la columna de PRUEBA Uno → pasa a Uno y conserva el lunes 26. Se guarda.
+  - **2.4** «Quitar volúmenes» (Dos, martes 27) soltada sobre el miércoles 28 de Uno → pasa a Uno el día 28 exacto.
+- **Mapa de la compe:** **4.3** tocar el 2 y luego el mapa lo coloca. **4.4** arrastrar la burbuja la mueve, y el doble clic la devuelve a la bandeja.
+- «Borrar competición» y «Borrar semana» desde la interfaz: piden confirmación (y, si no hay nada hecho, «¿Borrar esta semana? No tiene nada hecho todavía.» → «Semana borrada.»).
+
+### ❌ Hay que corregir
+1. **Crear una semana pasada se lleva tareas de una semana posterior (hacia atrás).** Con la semana actual del 26/10 ya creada, creé una semana del **19/10**. Al crearla se llevó las 4 tareas vencidas del **lunes 26** de la semana actual («4 tarea(s) retrasada(s) asignada(s) a PRUEBA Uno para repartir.»). Después, el barrido (`sweep`) devolvió a la semana del 26 todo lo de la del 19, y esas 4 volvieron a ella con **×2** tras un solo día de retraso.
+   → Al crear y al barrer, coger solo tareas de semanas con `start_date` **anterior** a la de destino, y nunca de la propia semana de destino.
+2. **El barrido no junta por tipo con lo que ya hay en la semana de destino.** Después del barrido, la semana del 26 tenía **9 tipos duplicados activos** (por ejemplo «Quitar densidad» pendiente del día 27 y otra «Quitar densidad ×1» el 28, y lo mismo con Organizar, Quitar volúmenes, Limpiar, Poner volúmenes, Poner bloques, Poner densidad, Poner travesías y Ordenar).
+   → La regla «una tarjeta por tipo y semana» también tiene que valer en el barrido: si en la semana actual ya hay una pendiente de ese tipo, no se añade otra (se marca la vieja como retrasada → esa tarjeta, y se sube su ×n).
+3. **4.2: arrastrar un número desde la bandeja al mapa no hace nada.** Solo funciona tocar y tocar. El guion (y Álvaro en el móvil) espera poder arrastrarlo. Añade arrastre desde la bandeja con el mismo mecanismo de pointer que las burbujas.
+
+### ⚠️ Menor
+- Al abrir la compe ya había una burbuja **1** colocada que no puse yo (¿de tus pruebas?). Sin importancia, porque la compe ya está borrada.
+
+### Limpieza
+Semanas 29, 30 y 31 borradas, la compe «PRUEBA COWORK compe» borrada y «PRUEBA Uno/Dos» (9 y 10) borradas. **No queda nada de prueba:** 0 semanas, 0 competiciones, y las personas son Álvaro, Ana, Edu y Sara.
+
+---
+
+# Nuevo encargo · 27/10/2026 20:10 · Semanas creadas solas y reparto automático (Ramiro)
+
+**Lo que pide Ramiro**
+1. **Las semanas en curso tienen que estar ya creadas.** Si Álvaro no hace nada, la semana existe igual: la actual y la siguiente.
+2. **Lo que toca equipar lo decide el sistema con datos:**
+   - **Dónde:** según los últimos bloques que se han puesto (Estadísticas: la lista de blokes con sala, subzona y fecha). Toca la subzona con los bloques **más antiguos**, o la que lleve más tiempo sin equiparse.
+   - **Qué colores:** los que faltan respecto a lo que se quiere tener equipado. El objetivo sale del **histórico** (Estadísticas › «Ver histórico mensual», con la media mensual y el reparto por color) y de la escala de Normas (solo los colores que «se planifican»: VERDE, AZUL, AMARILLO, ROJO, NEGRO, más travesías). Ejemplo: si de media se ponen X amarillos al mes y ahora hay menos amarillos montados de los que tocan, la semana propone amarillos.
+3. **Todo se asigna a Álvaro.** Después él lo reparte **arrastrando** las tareas a los demás (eso ya funciona: probado a las 08:15).
+
+**Cómo lo haría**
+- **Creación automática:** una tarea programada de WordPress (WP-Cron, diaria, por ejemplo los domingos a las 20:00, y además al abrir Organización) que crea la semana actual y la siguiente si no existen, con `assignments = [responsable]` y todas las tareas a su nombre, repartidas por sus días de trabajo. Marcarlas como `auto = 1` y enseñarlo en la cabecera: «Semana creada automáticamente: reparte las tareas arrastrándolas».
+  - Que use el mismo `create_week`, así que respeta la periodicidad, recoge retrasadas, junta por tipo y no se duplica (409).
+  - Si Álvaro crea la semana a mano antes, la automática no se crea. Si ya está creada en automático, el botón «Crear semana» pasa a ser «Editar personas de la semana» (añadir o quitar gente sin rehacer las tareas).
+- **Propuesta de qué equipar** (función nueva `progreso_equip_propuesta_semana()`):
+  - **Subzonas:** ordenar las subzonas 1–8 por la fecha media (o la más antigua) de los blokes activos de la colección. Proponer la más antigua, o las 2 primeras si hay mucho equipo esa semana. Respetar las **directrices de Ramiro** y los **eventos** (por ejemplo, la semana del 23/11: Cueva primero y el resto desde el miércoles).
+  - **Colores:** el objetivo por color sale de la media del histórico (o de una tabla editable en Normas: «queremos tener montados N verdes, N azules…»). La diferencia entre el objetivo y lo que hay montado da los colores de la tarea «Poner bloques» (params `objetivo` y `colores`, por ejemplo «2 AMARILLO, 1 ROJO, 1 VERDE»). Tener en cuenta el aviso de Normas («Bloques amarillos están quedando muy duros»).
+  - **Quitar:** la tarea «Quitar bloques» de esa subzona con la lista de los blokes más viejos que se quitan (id o título de la colección), para que al quitarlos se den de baja en la webapp.
+  - Enseñar la propuesta en la cabecera de la semana: «Esta semana: subzona #3 (bloques de hace 9 semanas). Faltan 2 amarillos, 1 rojo y 1 verde según el histórico.».
+- **Normas:** un sitio para que Ramiro o Álvaro ajusten el objetivo por color y las semanas máximas que puede estar montado un bloque.
+
+**Cómo lo probaré**
+1. Sin semanas en la base de datos, abrir Organización (o lanzar el cron): aparecen la semana actual y la siguiente, con todas las tareas en Álvaro y la cabecera «creada automáticamente».
+2. Comprobar que la subzona y los colores propuestos coinciden con lo que sale en Estadísticas (los blokes más antiguos por subzona y el reparto por color frente a la media mensual).
+3. Arrastrar dos tareas a otra persona y recargar: se mantiene.
+4. Volver a lanzar el cron: no duplica nada.
+5. **Limpieza:** como esto crea semanas reales, después de probar se dejan solo las automáticas buenas (o se borran si Ramiro lo prefiere).
+
+Cuando esté, añade «## Listo para probar · fecha hora» al final de este archivo.
+
+---
+
+## Encargo 20:10 · cómo hacerlo funcionar con los datos reales (Cowork, 27/10 20:20)
+
+He mirado la colección real (`/wp-json/wp/v2/blokes`, 42 blokes publicados). Esto cambia el planteamiento:
+
+**Lo que hay hoy en los datos**
+| Subzona | Blokes | Edad media | El más viejo |
+|---|---|---|---|
+| entrada #1 | **0** | — | — |
+| entrada #2 | **0** | — | — |
+| sala_grande #3 | 7 | 18 días | 22 días |
+| sala_grande #4 | 6 | 13 días | 13 días |
+| sala_grande #5 | 8 | 8 días | 11 días |
+| sala_grande #6 | 5 | 8 días | 10 días |
+| sala_grande #7 | 8 | 1 día | 4 días |
+| cueva #8 | 8 | 9 días | 9 días |
+
+Colores montados: trave (blanco) 10, amarillo 8, rojo 7, verde 6, negro 6 y azul 5.
+**El histórico mensual de Estadísticas solo tiene octubre de 2026**, porque cuenta los blokes que existen en la colección, y los que se quitan se borran (`/blokes/v1/delete`). **Así no hay histórico del que sacar el objetivo de colores ni la antigüedad real.**
+
+**Cómo lo haría**
+1. **No borrar blokes al quitarlos: retirarlos.** Meta `bloke_retirado = fecha` (y `retirado_por`), y que la colección pública los oculte. Así el histórico mensual (puestos y quitados por color) y la edad por subzona se pueden calcular de verdad. La tarea «Quitar bloques» de Equipación debería marcar los retirados así (con una lista para marcar, generada desde la colección de esa subzona).
+2. **Cargar el pasado que falta:** si hay registros anteriores en otro sitio (Notion «Calendario de Equipacion», Excel o la tabla `blocks` de Equipación), importarlos una vez. Si no, el sistema empieza a aprender desde ahora.
+3. **Subzona que toca:** ordenar por **edad del bloque más viejo montado**. Una subzona **sin ningún bloke registrado** (hoy entrada #1 y #2) cuenta como «desconocida» y sale **la primera**, con el aviso «sin datos: registra sus bloques en la webapp o equípala». Desempate: la que hace más tiempo que se equipó (de la tabla `weeks`/`blocks`).
+   - Con los datos de hoy saldría: **#1 y #2 (sin datos)**, luego **#3 (22 días)**, después #4…
+4. **Colores que hacen falta:**
+   - **Objetivo:** editable en Normas («queremos tener montados»). Por defecto, el reparto actual redondeado: trave 10, amarillo 8, rojo 7, verde 6, negro 6, azul 5 (≈42 en total). Cuando haya histórico de verdad, proponer el objetivo a partir de la media de los últimos 3 meses.
+   - **Por semana:** quitar N bloques de la subzona elegida da N huecos. Los colores para rellenarlos = los que más faltan respecto al objetivo, contando lo que se quita. Ejemplo con #3: si se quitan 2 azules y 1 amarillo, y el azul está 1 por debajo del objetivo, se proponen 3 azules. Respetar los mínimos y máximos por persona (`blocks_min`/`blocks_max`) y el aviso de Normas de los amarillos.
+5. **Generación** (cron del domingo y al abrir Organización, como en el encargo de las 20:10), todo en **el responsable (Álvaro)**:
+   - «Quitar bloques · subzona #3» con la lista de blokes concretos (título, color y edad) y una casilla para cada uno.
+   - «Poner bloques · subzona #3 · objetivo: 2 azul, 1 amarillo».
+   - El resto de tareas por periodicidad, como ahora.
+   - Cabecera: «Semana creada automáticamente. Subzona #3: bloques de hace 22 días. Faltan 1 azul y 1 verde según el objetivo. Reparte arrastrando.».
+6. **Cerrar el ciclo:** al guardar «Bloques puestos» en Hoy (subzona, color y presas), crear el bloke en la colección o enlazarlo al que se suba a la webapp («subido a la webapp»), para que la siguiente propuesta ya lo cuente.
+
+**Preguntas para Ramiro (las hago yo):** ¿hay un registro anterior de bloques equipados (Notion o Excel) para importarlo? ¿El objetivo de colores lo fija él o Álvaro?
+
+---
+
+## Listo para probar · 2026-10-28 09:00
+
+**Desplegado en `blokes` (producción).** Sin cambios de esquema (sigue en v5). Corregidos los 3 puntos de tu prueba de las 08:15 (el encargo grande de las 20:10/20:20 — semanas automáticas y propuesta por estadísticas reales — queda pendiente, lo empiezo cuando Ramiro confirme que entro en eso):
+
+1. **Crear una semana pasada se llevaba tareas de una semana posterior.** El arrastre (al crear semana y en el barrido al cargar) comparaba solo `task_date < hoy`, sin mirar si la semana de origen era de verdad **anterior** a la de destino. Ahora las dos consultas exigen además `wk.start_date < (fecha de la semana de destino)`, así que crear una semana en el pasado ya no puede robarle tareas a una semana que empieza después.
+2. **El barrido no juntaba por tipo con lo que ya hubiera en la semana de destino.** Nueva función compartida (`progreso_equip_merge_rolled_task`) que, antes de crear una tarjeta retrasada, mira si la semana de destino ya tiene una tarjeta pendiente de ese mismo tipo: si la hay, se queda esa (subiendo su `×n` y adelantando la fecha original si hace falta) en vez de crear otra. La usan tanto el arrastre al crear semana como el barrido al cargar — ya no deberían salir dos tarjetas del mismo tipo en la misma semana por ninguna de las dos vías.
+3. **Arrastrar un número de la bandeja de la compe al mapa no hacía nada.** Añadido el mismo mecanismo de pointer que usan las burbujas ya colocadas: se puede arrastrar un número directamente al mapa (aparece una bolita fantasma mientras se arrastra) o seguir con tocar-y-tocar como antes — un movimiento menor a 6px se trata como toque, no como arrastre, para no romper lo que ya funcionaba.
+
+### Para probar
+- Con una semana ya creada (p. ej. la actual), crea otra con fecha **anterior**: no debe tocar las tareas de la semana posterior.
+- Deja una tarea pendiente de un tipo en la semana actual (por periodicidad) y, por otro lado, que llegue una retrasada del mismo tipo desde una semana anterior (al crear la semana siguiente, o esperando al barrido): debe quedar **una sola tarjeta** de ese tipo, no dos.
+- En una compe con números sin colocar: arrastra uno directamente al mapa (con el ratón o el dedo) y suéltalo — debe colocarse donde lo sueltes. Sigue funcionando tocar el número y luego tocar el mapa.
+
+Build: `index-db2486b4.js` / `index-b137706a.css`.

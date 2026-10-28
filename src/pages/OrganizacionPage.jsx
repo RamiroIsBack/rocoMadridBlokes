@@ -890,6 +890,8 @@ function CompeMapEditor({ comp, onBack }) {
   const [blocks, setBlocks] = useState(comp.blocks)
   const [selectedToPlace, setSelectedToPlace] = useState(null)
   const dragIdRef = useRef(null)
+  const [trayDrag, setTrayDrag] = useState(null)
+  const trayPointerRef = useRef(null)
 
   useEffect(() => { setBlocks(comp.blocks) }, [comp])
 
@@ -927,6 +929,37 @@ function CompeMapEditor({ comp, onBack }) {
     setSelectedToPlace(null)
     try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: x, yPct: y }) } catch {}
   }
+  // Arrastrar un número de la bandeja hasta el mapa (además de tocar y
+  // tocar): mismo mecanismo de pointer que las burbujas ya colocadas, con un
+  // umbral de movimiento para no romper el "toca y toca" con un simple tap.
+  const onTrayPointerDown = id => e => {
+    trayPointerRef.current = { id, startX: e.clientX, startY: e.clientY, moved: false }
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+  }
+  const onTrayPointerMove = e => {
+    const st = trayPointerRef.current
+    if (!st) return
+    if (!st.moved && Math.hypot(e.clientX - st.startX, e.clientY - st.startY) > 6) st.moved = true
+    if (st.moved) setTrayDrag({ id: st.id, ...posFromClient(e.clientX, e.clientY) })
+  }
+  const onTrayPointerUp = async e => {
+    const st = trayPointerRef.current
+    trayPointerRef.current = null
+    if (!st) return
+    if (!st.moved) {
+      setSelectedToPlace(cur => cur === st.id ? null : st.id)
+      return
+    }
+    setTrayDrag(null)
+    const rect = wrapRef.current.getBoundingClientRect()
+    const within = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom
+    if (!within) return
+    const { x, y } = posFromClient(e.clientX, e.clientY)
+    setSelectedToPlace(null)
+    setBlocks(cur => cur.map(b => b.id === st.id ? { ...b, xPct: x, yPct: y } : b))
+    try { await api('PUT', `/equipacion/comp-blocks/${st.id}`, { xPct: x, yPct: y }) } catch {}
+  }
+
   const unplace = async id => {
     setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: null, yPct: null } : b))
     try { await api('PUT', `/equipacion/comp-blocks/${id}`, { unplace: true }) } catch {}
@@ -952,13 +985,15 @@ function CompeMapEditor({ comp, onBack }) {
 
       {unplaced.length > 0 && (
         <div className="org__comp-tray">
-          <p className="org__hint">Toca un número y luego el sitio del mapa:</p>
+          <p className="org__hint">Arrastra un número al mapa, o toca el número y luego el sitio del mapa:</p>
           <div className="org__comp-tray-chips">
             {unplaced.map(b => (
               <button
                 key={b.id}
                 className={`org__comp-chip${selectedToPlace === b.id ? ' org__comp-chip--selected' : ''}`}
-                onClick={() => setSelectedToPlace(cur => cur === b.id ? null : b.id)}
+                onPointerDown={onTrayPointerDown(b.id)}
+                onPointerMove={onTrayPointerMove}
+                onPointerUp={onTrayPointerUp}
               >{b.number}</button>
             ))}
           </div>
@@ -983,6 +1018,11 @@ function CompeMapEditor({ comp, onBack }) {
             title="Arrastra para mover, doble clic para quitar del mapa"
           >{b.number}</div>
         ))}
+        {trayDrag && (
+          <div className="org__comp-bubble org__comp-bubble--ghost" style={{ left: `${trayDrag.x}%`, top: `${trayDrag.y}%` }}>
+            {blocks.find(b => b.id === trayDrag.id)?.number}
+          </div>
+        )}
       </div>
       <p className="org__hint">{placed.length} de {blocks.length} bloques colocados. Doble clic en una burbuja para quitarla del mapa.</p>
     </div>
