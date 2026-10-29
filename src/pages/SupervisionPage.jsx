@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar,
+  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento,
 } from '../hooks/useSuperAdmin'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import OvertimeTab from './OvertimeTab'
@@ -977,6 +977,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const titulos = {
     marcar_cobrado: 'Marcar cobrado', pausar: 'Pausar', reanudar: 'Reanudar', nota: 'Nota',
     dar_de_baja: 'Dar de baja', fusionar: 'Fusionar duplicado',
+    exento: alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio',
   }
   const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'dar_de_baja', 'fusionar'].includes(tipo)
 
@@ -999,6 +1000,8 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
         res = await gestionDarDeBaja({ sub_id: alumno.subId, modo: modoBaja, motivo, simular: sim })
       } else if (tipo === 'fusionar') {
         res = await gestionFusionar({ sub_id_viejo: targetId, simular: sim })
+      } else if (tipo === 'exento') {
+        res = await gestionExento({ sub_id: alumno.subId, exento: !alumno.exento })
       }
       if (sim) setPreview(res)
       else onDone()
@@ -1094,6 +1097,14 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
               <p>¿Cancelar la suscripción vieja <strong>#{targetId}</strong> (duplicado de esta misma, ya con una más nueva activa)? No se toca la suscripción nueva.</p>
             )}
 
+            {tipo === 'exento' && (
+              <p>
+                {alumno.exento
+                  ? '¿Quitar la marca de exento/socio? Volverá a contar como un cobro normal.'
+                  : '¿Marcar como exento/socio (el «*» del Excel de Eva)? Figura como alumno, pero no se le pide cobro ni cuenta como pendiente. No toca WooCommerce.'}
+              </p>
+            )}
+
             {tipo === 'nota' && (
               <label className="sv-grp-field">Nota
                 <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} />
@@ -1143,6 +1154,7 @@ function AccionMenu({ alumno, onPick, onClose }) {
         {puedeReanudar && <button onClick={() => onPick('reanudar')}>Reanudar</button>}
         {puedeBaja     && <button onClick={() => onPick('dar_de_baja')}>Dar de baja</button>}
         <button onClick={() => onPick('nota')}>Nota</button>
+        <button onClick={() => onPick('exento')}>{alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio'}</button>
         {alumno.otrasSubs?.map(s => (
           <button key={s.subId} onClick={() => onPick('fusionar', s.subId)}>Fusionar — cancelar #{s.subId}</button>
         ))}
@@ -1189,7 +1201,7 @@ function GruposTab() {
       }
       const pago = mesActual ? a.pagos[mesActual] : null
       if (pago && !PAGO_PENDIENTE.has(pago.estadoPedido)) k.cobradoMes += pago.importe
-      if (a.pendiente && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes') {
+      if (a.pendiente && !a.exento && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes') {
         k.pendienteMes++
         k.pendienteImporte += a.pendiente.importe
       }
@@ -1282,7 +1294,7 @@ function GruposTab() {
           <span className="sv-kpi__value">{fmtEur(kpis.cobradoMes)}</span>
           <span className="sv-kpi__label">Cobrado del mes ⓘ</span>
         </div>
-        <div className="sv-kpi" style={{ '--kpi-color': '#f87171' }} title="Tienen de verdad un pedido sin pagar (pendiente, fallido o en espera de pago), no solo «sin pedido este mes» — así no cuenta a quien paga trimestral y le toca más adelante. No incluye a quien ya está pausado o de baja.">
+        <div className="sv-kpi" style={{ '--kpi-color': '#f87171' }} title="Tienen de verdad un pedido sin pagar (pendiente, fallido o en espera de pago), no solo «sin pedido este mes» — así no cuenta a quien paga trimestral y le toca más adelante. No incluye a quien ya está pausado, de baja o marcado exento/socio (*).">
           <span className="sv-kpi__value">{kpis.pendienteMes} · {fmtEur(kpis.pendienteImporte)}</span>
           <span className="sv-kpi__label">Pendiente del mes ⓘ</span>
         </div>
@@ -1304,6 +1316,7 @@ function GruposTab() {
                 <tr key={a.subId}>
                   <td>
                     {a.alumno || <span className="sv-ot-muted">—</span>}
+                    {a.exento && <span title="Exento/socio: no se le pide cobro">*</span>}
                     {a.otrasSubs?.length > 0 && (
                       <span title={`${a.otrasSubs.length} suscripción(es) antigua(s) colgando en este grupo (duplicado)`}> ⚠</span>
                     )}

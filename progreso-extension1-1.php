@@ -784,6 +784,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_fusionar',
         'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/exento', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_exento',
+        'permission_callback' => $sa_perm,
+    ));
 
     register_rest_route('superadmin/v1', '/expenses', array(
         array(
@@ -3264,6 +3269,7 @@ function superadmin_gestion_grupos($request) {
             'pausaHasta'  => $pausa_hasta ?: '',
             'manual'      => method_exists($sub_obj, 'is_manual') ? $sub_obj->is_manual() : true,
             'importeCatalogo' => floatval($sub_obj->get_total()),
+            'exento'      => (bool) get_post_meta($sub_obj->get_id(), '_rm_exento', true),
             'pagos'       => $pagos,
             'pendiente'   => $pendiente,
             'notas'       => get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '',
@@ -3291,6 +3297,7 @@ function superadmin_gestion_grupos($request) {
                     if ($p && empty($principal['pagos'][$ym])) $principal['pagos'][$ym] = $p;
                 }
                 if (!$principal['pendiente'] && $otra['pendiente']) $principal['pendiente'] = $otra['pendiente'];
+                if ($otra['exento']) $principal['exento'] = true;
             }
             if ($otras) {
                 $principal['otrasSubs'] = array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $otras);
@@ -3819,6 +3826,21 @@ function superadmin_gestion_nota($request) {
     update_post_meta($sub_id, '_rm_nota', $nota);
     blokes_gestion_log($sub_id, 'nota', $antes, $nota);
     return rest_ensure_response(array('success' => true, 'data' => array('nota' => $nota)));
+}
+
+/**
+ * Exento/socio (el «*» del Excel de Eva): solo una marca, sin tocar WooCommerce ni el cobro —
+ * figura como alumno, pero marcado para que no se cuente como impago/duda de cobro.
+ */
+function superadmin_gestion_exento($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    $exento = (bool) $request->get_param('exento');
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    $antes = (bool) get_post_meta($sub_id, '_rm_exento', true);
+    if ($exento) update_post_meta($sub_id, '_rm_exento', '1');
+    else delete_post_meta($sub_id, '_rm_exento');
+    blokes_gestion_log($sub_id, 'exento', $antes, $exento);
+    return rest_ensure_response(array('success' => true, 'data' => array('exento' => $exento)));
 }
 
 function superadmin_classes($request) {
