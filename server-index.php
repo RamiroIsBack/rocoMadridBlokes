@@ -20,10 +20,22 @@ $slug   = !empty($_parts[0]) ? $_parts[0] : 'blokes';
 $app_dir = __DIR__ . '/';
 $app_url = trailingslashit(home_url($slug));
 
+// El despliegue sube los ficheros nuevos antes de borrar los viejos, pero durante esa
+// ventana puede haber momentáneamente DOS .js o .css en la carpeta (el viejo y el nuevo) —
+// glob() no garantiza ningún orden entre ellos. Coger siempre el más reciente por fecha de
+// modificación asegura que, aunque una petición caiga justo en ese instante, sirva el bundle
+// de verdad en vivo y no uno a medio borrar.
+$mas_reciente = function($archivos) {
+    if (!$archivos) return '';
+    usort($archivos, function($a, $b) { return filemtime($b) <=> filemtime($a); });
+    return $archivos[0];
+};
 $css_files = glob($app_dir . 'assets/*.css') ?: [];
 $js_files  = glob($app_dir . 'assets/*.js')  ?: [];
-$css_url   = $css_files ? $app_url . 'assets/' . basename($css_files[0]) : '';
-$js_url    = $js_files  ? $app_url . 'assets/' . basename($js_files[0])  : '';
+$css_file  = $mas_reciente($css_files);
+$js_file   = $mas_reciente($js_files);
+$css_url   = $css_file ? $app_url . 'assets/' . basename($css_file) : '';
+$js_url    = $js_file  ? $app_url . 'assets/' . basename($js_file)  : '';
 
 // Subscription data (club WP, blog 3)
 switch_to_blog(3);
