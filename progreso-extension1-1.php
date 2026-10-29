@@ -3423,6 +3423,22 @@ function blokes_cobros_manuales_todos() {
     return $out;
 }
 
+// Pedidos sin pagar (pending/failed/on-hold) de la suscripción: se listan siempre, y si
+// $simular es false se cancelan de verdad (cancelar un pedido sin pagar no genera factura ni
+// email). Se usa al dar de baja, fusionar o reactivar por efectivo, para que el pedido viejo no
+// se quede "pendiente de pago" colgando y contando como impago en ningún sitio.
+function blokes_cancelar_pedidos_impagados($sub, $simular) {
+    $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
+    $pedidos = array();
+    foreach ($order_ids as $oid) {
+        $o = wc_get_order($oid);
+        if (!$o || !in_array($o->get_status(), array('pending', 'failed', 'on-hold'), true)) continue;
+        $pedidos[] = array('id' => $oid, 'importe' => floatval($o->get_total()));
+        if (!$simular) $o->update_status('cancelled', 'ExcelMuerte: pedido sin pagar cancelado al gestionar la suscripción.');
+    }
+    return $pedidos;
+}
+
 /**
  * Marcar cobrado.
  * - Efectivo: NO toca WooCommerce ni genera factura — se apunta en una tabla propia
@@ -3471,10 +3487,13 @@ function superadmin_gestion_marcar_cobrado($request) {
         $pausa_motivo_antes = get_post_meta($sub_id, '_rm_pausa_motivo', true);
         $reactivaria = $sub->has_status('on-hold') && !$pausa_motivo_antes;
 
+        $pedidos_a_cancelar = blokes_cancelar_pedidos_impagados($sub, true); // solo listar, por ahora
+
         if ($simular) {
             return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
                 'subId' => $sub_id, 'periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo_label,
                 'fecha' => $fecha_txt, 'parcial' => $parcial, 'reactivaLaSuscripcion' => $reactivaria,
+                'pedidosACancelar' => $pedidos_a_cancelar,
                 'aviso' => 'Simulación: no se escribiría nada todavía. El efectivo no toca WooCommerce ni genera factura, solo queda apuntado en Grupos.',
             )));
         }
@@ -3492,7 +3511,10 @@ function superadmin_gestion_marcar_cobrado($request) {
                 $sub->update_status('active', 'ExcelMuerte: cobrado en efectivo, reactivada (estaba en espera por impago).');
             });
         }
-        $despues = array('periodo' => $periodo, 'importe' => $importe, 'metodo' => 'efectivo', 'reactivada' => $reactivaria);
+        // El/los pedido(s) sin pagar que quedaban colgando (si los había) ya no deben seguir
+        // contando como impago en ningún sitio, se haya reactivado la suscripción o no.
+        $pedidos_cancelados = blokes_cancelar_pedidos_impagados($sub, false);
+        $despues = array('periodo' => $periodo, 'importe' => $importe, 'metodo' => 'efectivo', 'reactivada' => $reactivaria, 'pedidosCancelados' => $pedidos_cancelados);
         blokes_gestion_log($sub_id, 'marcar_cobrado_efectivo', $antes, $despues, array('fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota));
         return rest_ensure_response(array('success' => true, 'data' => $despues));
     }
@@ -3654,6 +3676,9 @@ function superadmin_gestion_reanudar($request) {
 /**
  * Dar de baja: a fin de mes (pending-cancel, sigue viniendo hasta que se acabe lo pagado) o
  * inmediata (cancelled). Sin pedido ni factura ni email; solo cambia el estado.
+ * Si estaba "en espera" (on-hold, sin nada pagado en curso), "a fin de mes" no tiene sentido —
+ * no hay ningún periodo pagado del que tirar — así que se fuerza inmediata, y de paso se
+ * cancela cualquier pedido suyo sin pagar (si no, se queda "pendiente de pago" colgando).
  */
 function superadmin_gestion_dar_de_baja($request) {
     if (!function_exists('wcs_get_subscription')) {
@@ -3670,11 +3695,16 @@ function superadmin_gestion_dar_de_baja($request) {
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
 
-    $estado_nuevo = $modo === 'fin_mes' ? 'pending-cancel' : 'cancelled';
+    $estaba_en_espera = $sub->has_status('on-hold') || $sub->has_status('pending');
+    $modo_real    = $estaba_en_espera ? 'inmediata' : $modo;
+    $estado_nuevo = $modo_real === 'fin_mes' ? 'pending-cancel' : 'cancelled';
+    $pedidos_a_cancelar = $estado_nuevo === 'cancelled' ? blokes_cancelar_pedidos_impagados($sub, true) : array();
 
     if ($simular) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'subId' => $sub_id, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => $estado_nuevo, 'motivo' => $motivo,
+            'modoForzadoInmediata' => $estaba_en_espera && $modo === 'fin_mes',
+            'pedidosACancelar' => $pedidos_a_cancelar,
             'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
         )));
     }
@@ -3684,17 +3714,46 @@ function superadmin_gestion_dar_de_baja($request) {
         $sub->update_status($estado_nuevo, 'ExcelMuerte: baja (' . ($motivo ?: 'sin motivo') . ') vía ExcelMuerte');
     });
     update_post_meta($sub_id, '_rm_baja_motivo', $motivo);
+    $pedidos_cancelados = $estado_nuevo === 'cancelled' ? blokes_cancelar_pedidos_impagados($sub, false) : array();
 
-    $despues = array('status' => $estado_nuevo, 'motivo' => $motivo);
-    blokes_gestion_log($sub_id, 'dar_de_baja', $antes, $despues, array('modo' => $modo));
+    $despues = array('status' => $estado_nuevo, 'motivo' => $motivo, 'pedidosCancelados' => $pedidos_cancelados);
+    blokes_gestion_log($sub_id, 'dar_de_baja', $antes, $despues, array('modo' => $modo_real));
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
+// Busca si existe otra suscripción del mismo cliente, misma clase (día+horario+edad) y más
+// reciente, en vigor (activa o de baja a fin de mes) — la "nueva" de la que $sub_id_viejo sería
+// el duplicado colgando. Devuelve su fila de blokes_get_all_subscription_data() o null.
+function blokes_buscar_sub_mas_nueva($sub_id_viejo) {
+    $all = blokes_get_all_subscription_data();
+    $viejo = null;
+    foreach ($all as $s) { if (intval($s['id']) === $sub_id_viejo) { $viejo = $s; break; } }
+    if (!$viejo) return null;
+
+    $uid_viejo = intval(get_post_meta($sub_id_viejo, '_customer_user', true));
+    foreach ($all as $s) {
+        if (intval($s['id']) === $sub_id_viejo) continue;
+        $en_vigor = ($s['status'] ?? '') === 'active'; // ya incluye pending-cancel con status forzado a 'active'
+        if (!$en_vigor) continue;
+        $mismo_cliente = $uid_viejo && intval(get_post_meta(intval($s['id']), '_customer_user', true)) === $uid_viejo;
+        if (!$mismo_cliente) $mismo_cliente = !empty($viejo['email']) && !empty($s['email']) && strcasecmp($s['email'], $viejo['email']) === 0;
+        if (!$mismo_cliente) continue;
+        if (($s['horario'] ?? '') !== ($viejo['horario'] ?? '')) continue;
+        if (($s['edad'] ?? 'Adultos') !== ($viejo['edad'] ?? 'Adultos')) continue;
+        if (blokes_dia_a_pareja($s['dia'] ?? '') !== blokes_dia_a_pareja($viejo['dia'] ?? '')) continue;
+        return $s;
+    }
+    return null;
+}
+
 /**
- * Fusionar duplicados: cancela inmediatamente una suscripción vieja que se quedó colgando en
- * espera/pendiente cuando el alumno se volvió a apuntar con una nueva (los 19 casos de
- * octubre). No toca la suscripción nueva ni genera pedido ni factura ni email.
+ * Fusionar duplicados: cancela la suscripción vieja que se quedó colgando en espera/pendiente
+ * cuando el alumno se volvió a apuntar con una nueva (los 19 casos de octubre) — pero solo si
+ * de verdad hay una suscripción más nueva en vigor del mismo cliente y la misma clase; si no,
+ * 409 (para no poder cancelar por error a alguien que solo debe un mes, no es un duplicado). No
+ * toca la suscripción nueva, ni genera pedido, factura o email, y cancela también los pedidos
+ * sin pagar de la vieja.
  */
 function superadmin_gestion_fusionar($request) {
     if (!function_exists('wcs_get_subscription')) {
@@ -3710,9 +3769,17 @@ function superadmin_gestion_fusionar($request) {
         return new WP_Error('sigue_activa', 'Esa suscripción está activa, no es la vieja a cancelar — revisa el subId.', array('status' => 409));
     }
 
+    $nueva = blokes_buscar_sub_mas_nueva($sub_id_viejo);
+    if (!$nueva) {
+        return new WP_Error('no_es_duplicado', 'No se ha encontrado ninguna suscripción más nueva en vigor del mismo alumno y la misma clase — esta puede ser la única suya. Revísalo antes de cancelarla a mano (usa "Dar de baja" si es lo que quieres).', array('status' => 409));
+    }
+
+    $pedidos_a_cancelar = blokes_cancelar_pedidos_impagados($sub, true);
+
     if ($simular) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'subId' => $sub_id_viejo, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => 'cancelled',
+            'subIdNueva' => intval($nueva['id']), 'pedidosACancelar' => $pedidos_a_cancelar,
             'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
         )));
     }
@@ -3721,9 +3788,10 @@ function superadmin_gestion_fusionar($request) {
     blokes_gestion_sin_emails(function() use ($sub) {
         $sub->update_status('cancelled', 'ExcelMuerte: fusionada/cancelada, duplicado de una suscripción más nueva de la misma clase.');
     });
+    $pedidos_cancelados = blokes_cancelar_pedidos_impagados($sub, false);
 
-    $despues = array('status' => 'cancelled');
-    blokes_gestion_log($sub_id_viejo, 'fusionar', $antes, $despues);
+    $despues = array('status' => 'cancelled', 'pedidosCancelados' => $pedidos_cancelados);
+    blokes_gestion_log($sub_id_viejo, 'fusionar', $antes, $despues, array('subIdNueva' => intval($nueva['id'])));
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }

@@ -1075,6 +1075,9 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
 
             {tipo === 'dar_de_baja' && (
               <>
+                {(alumno.estado === 'en_espera' || alumno.estado === 'pendiente_pago') && (
+                  <p className="sv-to-warn-txt">Está en espera (sin nada pagado en curso): aunque elijas «a fin de mes», se dará de baja inmediata y se cancelará cualquier pedido suyo sin pagar.</p>
+                )}
                 <label className="sv-grp-field">Cuándo
                   <select className="sv-tests-select" value={modoBaja} onChange={e => setModoBaja(e.target.value)}>
                     <option value="fin_mes">A fin de mes (sigue viniendo hasta que acabe lo pagado)</option>
