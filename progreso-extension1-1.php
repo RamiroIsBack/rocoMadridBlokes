@@ -6382,3 +6382,168 @@ function events_delete_booking($request) {
     events_save_bookings($list);
     return rest_ensure_response(array('success' => true));
 }
+
+// ============================================================
+//  superadmin/v1 — Calendario: tareas y eventos leídos de Notion
+//  Base de datos "Funciones Rocomadrid" (espacio Madridroco), con
+//  la integración interna "Blokes". El token lo pega un socio desde
+//  la web y solo vive en wp_options; nunca se devuelve al navegador.
+//  Lo ven socio y gestion. De momento solo lectura.
+// ============================================================
+
+define('BLOKES_NOTION_DB',          '290d5fb11f5b8090a0e2faab61be4695');
+define('BLOKES_NOTION_DATA_SOURCE', '290d5fb1-1f5b-80ba-98c0-000bfcf4a16f');
+
+function calendar_can_view() {
+    return in_array(blokes_get_app_role(), array('socio', 'gestion'));
+}
+
+add_action('rest_api_init', function() {
+    register_rest_route('superadmin/v1', '/calendar', array(
+        'methods'             => 'GET',
+        'callback'            => 'calendar_get_items',
+        'permission_callback' => 'calendar_can_view',
+    ));
+    register_rest_route('superadmin/v1', '/calendar/token', array(
+        'methods'             => 'PUT',
+        'callback'            => 'calendar_save_token',
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+    ));
+});
+
+// Llama a la API de Notion. Prueba primero con data sources (API 2025-09-03)
+// y, si no, con la consulta clásica de base de datos (2022-06-28).
+function calendar_notion_query($token, $body) {
+    $tries = array(
+        array('https://api.notion.com/v1/data_sources/' . BLOKES_NOTION_DATA_SOURCE . '/query', '2025-09-03'),
+        array('https://api.notion.com/v1/databases/' . BLOKES_NOTION_DB . '/query', '2022-06-28'),
+    );
+    $last = null;
+    foreach ($tries as $t) {
+        $res = wp_remote_post($t[0], array(
+            'timeout' => 20,
+            'headers' => array(
+                'Authorization'  => 'Bearer ' . $token,
+                'Notion-Version' => $t[1],
+                'Content-Type'   => 'application/json',
+            ),
+            'body'    => wp_json_encode($body),
+        ));
+        if (is_wp_error($res)) return new WP_Error('notion_down', 'No se pudo conectar con Notion: ' . $res->get_error_message(), array('status' => 502));
+        $code = wp_remote_retrieve_response_code($res);
+        $json = json_decode(wp_remote_retrieve_body($res), true);
+        if ($code === 200) return $json;
+        $last = array($code, is_array($json) ? ($json['code'] ?? '') : '');
+        if ($code === 401) break;
+    }
+    if ($last[0] === 401) return new WP_Error('notion_token', 'Notion no acepta el token. Revisa que sea el de la integración Blokes del espacio Madridroco.', array('status' => 502));
+    if ($last[1] === 'object_not_found') return new WP_Error('notion_access', 'La integración Blokes no tiene acceso a «Funciones Rocomadrid». Conéctala desde Notion: ••• → Más → Conexiones.', array('status' => 502));
+    return new WP_Error('notion_error', 'Notion respondió con un error (' . $last[0] . ' ' . $last[1] . ')', array('status' => 502));
+}
+
+function calendar_plain($rich) {
+    $out = '';
+    foreach ((array) $rich as $r) $out .= $r['plain_text'] ?? '';
+    return trim($out);
+}
+
+// Página de Notion → elemento del calendario. Busca las propiedades por tipo
+// o por nombre sin espacios, porque "Fecha " lleva un espacio al final.
+function calendar_map_page($p) {
+    $props = $p['properties'] ?? array();
+    $by    = array();
+    foreach ($props as $name => $v) $by[trim($name)] = $v;
+    $title = '';
+    $date  = null;
+    foreach ($props as $v) {
+        if (($v['type'] ?? '') === 'title') $title = calendar_plain($v['title']);
+    }
+    if (isset($by['Fecha']['date'])) $date = $by['Fecha']['date'];
+    if (!$date || empty($date['start'])) return null;
+    $select = function($k) use ($by) {
+        if (!isset($by[$k]['type'])) return null;
+        $v = $by[$k][$by[$k]['type']] ?? null;
+        return $v ? array('name' => $v['name'], 'color' => $v['color'] ?? 'default') : null;
+    };
+    $text = function($k) use ($by) {
+        return isset($by[$k]['rich_text']) ? calendar_plain($by[$k]['rich_text']) : '';
+    };
+    $owners = array();
+    foreach ((array) ($by['Encargado']['multi_select'] ?? array()) as $o) $owners[] = $o['name'];
+    return array(
+        'id'       => $p['id'],
+        'url'      => $p['url'] ?? '',
+        'title'    => $title !== '' ? $title : 'Sin título',
+        'start'    => $date['start'],
+        'end'      => $date['end'] ?? null,
+        'category' => $select('Categoría'),
+        'status'   => $select('Estado'),
+        'owners'   => $owners,
+        'concept'  => $text('Concepto'),
+        'comment'  => $text('Comentario'),
+        'contact'  => $text('Contacto'),
+        'price'    => $by['Precio']['number'] ?? null,
+    );
+}
+
+function calendar_get_items($request) {
+    $token = get_option('blokes_notion_token', '');
+    if (!$token) return rest_ensure_response(array('configured' => false, 'items' => array()));
+
+    $from = (string) $request->get_param('from');
+    $to   = (string) $request->get_param('to');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) || $from > $to) {
+        return new WP_Error('bad_range', 'Rango de fechas no válido', array('status' => 400));
+    }
+    if ((strtotime($to) - strtotime($from)) > 120 * DAY_IN_SECONDS) {
+        return new WP_Error('bad_range', 'Rango de fechas demasiado largo', array('status' => 400));
+    }
+
+    $key = 'blokes_cal_' . md5($from . $to . get_option('blokes_notion_cache_v', 0));
+    if (!$request->get_param('refresh')) {
+        $cached = get_transient($key);
+        if (is_array($cached)) return rest_ensure_response($cached);
+    }
+
+    // Lo que empieza hasta 60 días antes también entra si termina dentro del rango (vacaciones, etc.)
+    $since = gmdate('Y-m-d', strtotime($from) - 60 * DAY_IN_SECONDS);
+    $body  = array(
+        'filter'    => array('and' => array(
+            array('property' => 'Fecha ', 'date' => array('on_or_after'  => $since)),
+            array('property' => 'Fecha ', 'date' => array('on_or_before' => $to)),
+        )),
+        'sorts'     => array(array('property' => 'Fecha ', 'direction' => 'ascending')),
+        'page_size' => 100,
+    );
+    $items = array();
+    for ($i = 0; $i < 10; $i++) {
+        $json = calendar_notion_query($token, $body);
+        if (is_wp_error($json)) return $json;
+        foreach ((array) ($json['results'] ?? array()) as $p) {
+            $it = calendar_map_page($p);
+            if (!$it) continue;
+            $last = substr($it['end'] ?: $it['start'], 0, 10);
+            if ($last >= $from) $items[] = $it;
+        }
+        if (empty($json['has_more']) || empty($json['next_cursor'])) break;
+        $body['start_cursor'] = $json['next_cursor'];
+    }
+
+    $out = array('configured' => true, 'items' => $items, 'fetched_at' => current_time('mysql'));
+    set_transient($key, $out, 5 * MINUTE_IN_SECONDS);
+    return rest_ensure_response($out);
+}
+
+// Guarda el token solo si Notion lo acepta y ve la base de datos.
+function calendar_save_token($request) {
+    $body  = $request->get_json_params();
+    $token = trim((string) ($body['token'] ?? ''));
+    if (!preg_match('/^(ntn_|secret_)[A-Za-z0-9]{20,}$/', $token)) {
+        return new WP_Error('bad_token', 'Eso no parece un token de Notion (empieza por ntn_)', array('status' => 400));
+    }
+    $test = calendar_notion_query($token, array('page_size' => 1));
+    if (is_wp_error($test)) return $test;
+    update_option('blokes_notion_token', $token, false);
+    update_option('blokes_notion_cache_v', time(), false);
+    return rest_ensure_response(array('success' => true));
+}
