@@ -260,6 +260,15 @@
 .ps-field textarea { resize: vertical; }
 .ps-field input:focus, .ps-field select:focus, .ps-field textarea:focus { outline: none; border-color: #f5c842; }
 .ps-field input:disabled { color: #999; }
+.ps-check {
+  grid-column: 1 / -1;
+  display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 2px 8px;
+  cursor: pointer;
+}
+.ps-check input { margin: 0; accent-color: #f5c842; }
+.ps-check span { font-size: 0.82rem; color: #f0ece0; }
+.ps-check small { grid-column: 2; font-size: 0.68rem; color: #777; }
+.ps-donde { display: block; font-size: 0.72rem; color: #f5c842; }
 .ps-modal__actions {
   grid-column: 1 / -1;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
