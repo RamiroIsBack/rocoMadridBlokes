@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota,
+  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar,
 } from '../hooks/useSuperAdmin'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import OvertimeTab from './OvertimeTab'
@@ -957,7 +957,7 @@ const METODO_CONSECUENCIA = {
 }
 const hoyISO = () => new Date().toISOString().slice(0, 10)
 
-function AccionModal({ alumno, tipo, onClose, onDone }) {
+function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const [importe, setImporte] = useState(alumno.importeCatalogo ? String(alumno.importeCatalogo) : '')
   const [metodo, setMetodo]   = useState('transferencia')
   const [fecha, setFecha]     = useState(hoyISO())
@@ -966,8 +966,9 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
   const [fechaVuelta, setFechaVuelta] = useState('')
   const [nota, setNota]       = useState(alumno.notas || '')
   const [mantenerPausa, setMantenerPausa] = useState(true)
-  // Marcar cobrado puede generar factura/AEAT de verdad: por defecto se simula. Pausar/Reanudar
-  // ya están validados con datos de prueba, así que por defecto actúan de verdad.
+  const [modoBaja, setModoBaja] = useState('fin_mes')
+  // Marcar cobrado puede generar factura/AEAT de verdad: por defecto se simula. El resto ya
+  // están validadas con datos de prueba, así que por defecto actúan de verdad.
   const [simular, setSimular] = useState(tipo === 'marcar_cobrado')
   const [preview, setPreview] = useState(null)
   const [busy, setBusy]       = useState(false)
@@ -975,8 +976,9 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
 
   const titulos = {
     marcar_cobrado: 'Marcar cobrado', pausar: 'Pausar', reanudar: 'Reanudar', nota: 'Nota',
+    dar_de_baja: 'Dar de baja', fusionar: 'Fusionar duplicado',
   }
-  const puedeSimular = tipo === 'marcar_cobrado' || tipo === 'pausar' || tipo === 'reanudar'
+  const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'dar_de_baja', 'fusionar'].includes(tipo)
 
   async function submit(forzarReal = false) {
     setBusy(true); setErr(null)
@@ -993,6 +995,10 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
         res = await gestionReanudar({ sub_id: alumno.subId, simular: sim })
       } else if (tipo === 'nota') {
         res = await gestionNota({ sub_id: alumno.subId, nota })
+      } else if (tipo === 'dar_de_baja') {
+        res = await gestionDarDeBaja({ sub_id: alumno.subId, modo: modoBaja, motivo, simular: sim })
+      } else if (tipo === 'fusionar') {
+        res = await gestionFusionar({ sub_id_viejo: targetId, simular: sim })
       }
       if (sim) setPreview(res)
       else onDone()
@@ -1067,6 +1073,24 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
               <p>¿Reanudar esta suscripción (vuelve a «Activo»)?</p>
             )}
 
+            {tipo === 'dar_de_baja' && (
+              <>
+                <label className="sv-grp-field">Cuándo
+                  <select className="sv-tests-select" value={modoBaja} onChange={e => setModoBaja(e.target.value)}>
+                    <option value="fin_mes">A fin de mes (sigue viniendo hasta que acabe lo pagado)</option>
+                    <option value="inmediata">Inmediata</option>
+                  </select>
+                </label>
+                <label className="sv-grp-field">Motivo
+                  <input className="sv-tests-input" type="text" value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Opcional" />
+                </label>
+              </>
+            )}
+
+            {tipo === 'fusionar' && (
+              <p>¿Cancelar la suscripción vieja <strong>#{targetId}</strong> (duplicado de esta misma, ya con una más nueva activa)? No se toca la suscripción nueva.</p>
+            )}
+
             {tipo === 'nota' && (
               <label className="sv-grp-field">Nota
                 <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} />
@@ -1107,13 +1131,18 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
 function AccionMenu({ alumno, onPick, onClose }) {
   const puedePausar   = alumno.estado === 'activo' || alumno.estado === 'pendiente_pago'
   const puedeReanudar = alumno.estado === 'en_espera' || alumno.estado === 'pausado'
+  const puedeBaja     = alumno.estado !== 'baja_fin_mes'
   return (
     <div className="sv-grp-overlay" onClick={onClose}>
       <div className="sv-grp-menu" onClick={e => e.stopPropagation()}>
         <button onClick={() => onPick('marcar_cobrado')}>Marcar cobrado</button>
         {puedePausar   && <button onClick={() => onPick('pausar')}>Pausar</button>}
         {puedeReanudar && <button onClick={() => onPick('reanudar')}>Reanudar</button>}
+        {puedeBaja     && <button onClick={() => onPick('dar_de_baja')}>Dar de baja</button>}
         <button onClick={() => onPick('nota')}>Nota</button>
+        {alumno.otrasSubs?.map(s => (
+          <button key={s.subId} onClick={() => onPick('fusionar', s.subId)}>Fusionar — cancelar #{s.subId}</button>
+        ))}
         <button className="sv-grp-menu__cancel" onClick={onClose}>Cancelar</button>
       </div>
     </div>
@@ -1256,13 +1285,14 @@ function GruposTab() {
         <AccionMenu
           alumno={menuFor}
           onClose={() => setMenuFor(null)}
-          onPick={tipo => { setAccion({ alumno: menuFor, tipo }); setMenuFor(null) }}
+          onPick={(tipo, targetId) => { setAccion({ alumno: menuFor, tipo, targetId }); setMenuFor(null) }}
         />
       )}
       {accion && (
         <AccionModal
           alumno={accion.alumno}
           tipo={accion.tipo}
+          targetId={accion.targetId ?? accion.alumno.subId}
           onClose={() => setAccion(null)}
           onDone={() => { setAccion(null); refetch() }}
         />

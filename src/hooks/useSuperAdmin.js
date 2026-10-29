@@ -63,6 +63,8 @@ export const gestionMarcarCobrado = body => gestionPost('/gestion/marcar-cobrado
 export const gestionPausar        = body => gestionPost('/gestion/pausar', body)
 export const gestionReanudar      = body => gestionPost('/gestion/reanudar', body)
 export const gestionNota          = body => gestionPost('/gestion/nota', body)
+export const gestionDarDeBaja     = body => gestionPost('/gestion/dar-de-baja', body)
+export const gestionFusionar      = body => gestionPost('/gestion/fusionar', body)
 
 export function useExpenses(months, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)

@@ -774,6 +774,16 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_nota',
         'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/dar-de-baja', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_dar_de_baja',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/fusionar', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_fusionar',
+        'permission_callback' => $sa_perm,
+    ));
 
     register_rest_route('superadmin/v1', '/expenses', array(
         array(
@@ -3637,6 +3647,83 @@ function superadmin_gestion_reanudar($request) {
 
     $despues = array('status' => 'active');
     blokes_gestion_log($sub_id, 'reanudar', $antes, $despues);
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+/**
+ * Dar de baja: a fin de mes (pending-cancel, sigue viniendo hasta que se acabe lo pagado) o
+ * inmediata (cancelled). Sin pedido ni factura ni email; solo cambia el estado.
+ */
+function superadmin_gestion_dar_de_baja($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id  = intval($request->get_param('sub_id'));
+    $modo    = sanitize_key($request->get_param('modo')); // 'fin_mes' | 'inmediata'
+    $motivo  = sanitize_text_field($request->get_param('motivo'));
+    $simular = (bool) $request->get_param('simular');
+
+    if (!$sub_id || !in_array($modo, array('fin_mes', 'inmediata'), true)) {
+        return new WP_Error('bad_request', 'Falta sub_id o modo (fin_mes/inmediata).', array('status' => 400));
+    }
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    $estado_nuevo = $modo === 'fin_mes' ? 'pending-cancel' : 'cancelled';
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'subId' => $sub_id, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => $estado_nuevo, 'motivo' => $motivo,
+            'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
+        )));
+    }
+
+    $antes = array('status' => $sub->get_status());
+    blokes_gestion_sin_emails(function() use ($sub, $estado_nuevo, $motivo) {
+        $sub->update_status($estado_nuevo, 'ExcelMuerte: baja (' . ($motivo ?: 'sin motivo') . ') vía ExcelMuerte');
+    });
+    update_post_meta($sub_id, '_rm_baja_motivo', $motivo);
+
+    $despues = array('status' => $estado_nuevo, 'motivo' => $motivo);
+    blokes_gestion_log($sub_id, 'dar_de_baja', $antes, $despues, array('modo' => $modo));
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+/**
+ * Fusionar duplicados: cancela inmediatamente una suscripción vieja que se quedó colgando en
+ * espera/pendiente cuando el alumno se volvió a apuntar con una nueva (los 19 casos de
+ * octubre). No toca la suscripción nueva ni genera pedido ni factura ni email.
+ */
+function superadmin_gestion_fusionar($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id_viejo = intval($request->get_param('sub_id_viejo'));
+    $simular      = (bool) $request->get_param('simular');
+
+    if (!$sub_id_viejo) return new WP_Error('bad_request', 'Falta sub_id_viejo.', array('status' => 400));
+    $sub = wcs_get_subscription($sub_id_viejo);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    if ($sub->has_status('active')) {
+        return new WP_Error('sigue_activa', 'Esa suscripción está activa, no es la vieja a cancelar — revisa el subId.', array('status' => 409));
+    }
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'subId' => $sub_id_viejo, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => 'cancelled',
+            'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
+        )));
+    }
+
+    $antes = array('status' => $sub->get_status());
+    blokes_gestion_sin_emails(function() use ($sub) {
+        $sub->update_status('cancelled', 'ExcelMuerte: fusionada/cancelada, duplicado de una suscripción más nueva de la misma clase.');
+    });
+
+    $despues = array('status' => 'cancelled');
+    blokes_gestion_log($sub_id_viejo, 'fusionar', $antes, $despues);
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
