@@ -795,6 +795,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_exento',
         'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/cambiar-grupo', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_cambiar_grupo',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/externos', array(
         array('methods' => 'GET',  'callback' => 'superadmin_gestion_externos_get',   'permission_callback' => $sa_perm),
         array('methods' => 'POST', 'callback' => 'superadmin_gestion_externos_crear', 'permission_callback' => $sa_perm),
@@ -4183,6 +4188,140 @@ function superadmin_gestion_exento($request) {
     else delete_post_meta($sub_id, '_rm_exento');
     blokes_gestion_log($sub_id, 'exento', $antes, $exento);
     return rest_ensure_response(array('success' => true, 'data' => array('exento' => $exento)));
+}
+
+/**
+ * Cambiar de grupo/horario, o de 1 a 2 días (y al revés) (8.2.5). Solo para suscripciones de
+ * clase semanal (producto "Classes"/Tarifas) — no aplica a Pilates, Yoga ni Días sueltos. Busca
+ * en el catálogo de WooCommerce la variación que corresponde a la combinación nueva (la misma
+ * que lista `GET /progreso/v1/clases`) y recalcula el precio con la tabla de tarifas vigente
+ * (RocoMadrid_SF_Pricing, la misma que usa el formulario de alta), respetando el plan de pago
+ * actual (mensual/trimestral/anual) — cambiar de grupo no cambia cada cuánto se cobra, solo
+ * cuánto. No crea pedido ni toca renovaciones ya pagadas: el histórico queda intacto, el precio
+ * nuevo se nota desde la próxima renovación.
+ */
+function superadmin_gestion_cambiar_grupo($request) {
+    if (!function_exists('wcs_get_subscription') || !class_exists('RocoMadrid_Step_Form') || !class_exists('RocoMadrid_SF_Pricing')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions o RocoMadrid Step Form no disponibles.', array('status' => 503));
+    }
+    $sub_id        = intval($request->get_param('sub_id'));
+    $dia_nuevo     = blokes_normalizar_dia(sanitize_text_field((string) $request->get_param('dia')));
+    $horario_nuevo = blokes_normalizar_horario(sanitize_text_field((string) $request->get_param('horario')));
+    $edad_param    = $request->get_param('edad');
+    $simular       = (bool) $request->get_param('simular');
+
+    if (!$sub_id || !$dia_nuevo || !$horario_nuevo) {
+        return new WP_Error('bad_request', 'Faltan sub_id, dia o horario.', array('status' => 400));
+    }
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    $product_classes_id = RocoMadrid_Step_Form::product_tarifas_id();
+    $item = null;
+    foreach ($sub->get_items() as $it) {
+        if (intval($it->get_product_id()) === intval($product_classes_id)) { $item = $it; break; }
+    }
+    if (!$item) {
+        return new WP_Error('no_aplica', 'Esta suscripción no es de un grupo semanal (Classes) — esta acción no aplica a Pilates, Yoga o Días sueltos.', array('status' => 400));
+    }
+
+    // Día/horario/edad actuales: para el "antes" y como valor por defecto de la edad si no se
+    // pide cambiarla también. Mismo orden de prioridad que en blokes_get_pending_cancel_alumnos:
+    // primero _step_form_selections, si falta se mira la variación de WooCommerce.
+    $selecciones_actuales = $item->get_meta('_step_form_selections', true);
+    $dia_actual = $horario_actual = $edad_actual = '';
+    if (!empty($selecciones_actuales) && is_array($selecciones_actuales)) {
+        $dia_actual     = $selecciones_actuales['pa_dias']    ?? '';
+        $horario_actual = $selecciones_actuales['pa_horario'] ?? '';
+        $edad_actual    = $selecciones_actuales['pa_edad']    ?? '';
+    }
+    if (empty($dia_actual) || empty($horario_actual) || empty($edad_actual)) {
+        $variacion_actual = wc_get_product($item->get_variation_id());
+        if ($variacion_actual) {
+            foreach ($variacion_actual->get_variation_attributes() as $key => $value) {
+                $key_lower = strtolower($key);
+                if (empty($dia_actual) && strpos($key_lower, 'dias') !== false) $dia_actual = $value;
+                if (empty($horario_actual) && strpos($key_lower, 'horario') !== false) $horario_actual = $value;
+                if (empty($edad_actual) && strpos($key_lower, 'edad') !== false) $edad_actual = $value;
+            }
+        }
+    }
+    $dia_actual     = blokes_normalizar_dia($dia_actual);
+    $horario_actual = blokes_normalizar_horario($horario_actual);
+    $edad_actual    = blokes_normalizar_edad($edad_actual);
+    $edad_nuevo     = ($edad_param !== null && $edad_param !== '') ? blokes_normalizar_edad(sanitize_text_field((string) $edad_param)) : $edad_actual;
+
+    // Buscar en el catálogo la variación que corresponde a la combinación nueva — igual que hace
+    // progreso_get_clases() para listarlas, para no inventar una combinación que no existe.
+    $producto = wc_get_product($product_classes_id);
+    if (!$producto) return new WP_Error('not_found', 'No se encuentra el producto de clases (Tarifas) en WooCommerce.', array('status' => 404));
+    $variacion_nueva = null;
+    foreach ($producto->get_children() as $vid) {
+        $variacion = wc_get_product($vid);
+        if (!$variacion) continue;
+        $attrs = $variacion->get_attributes();
+        $dia_slug     = $attrs['pa_dias']    ?? '';
+        $horario_slug = $attrs['pa_horario'] ?? '';
+        $edad_slug    = $attrs['pa_edad']    ?? '';
+        $dia_term     = $dia_slug     ? get_term_by('slug', $dia_slug,     'pa_dias')    : null;
+        $horario_term = $horario_slug ? get_term_by('slug', $horario_slug, 'pa_horario') : null;
+        $edad_term    = $edad_slug    ? get_term_by('slug', $edad_slug,    'pa_edad')    : null;
+        $dia_v     = blokes_normalizar_dia($dia_term ? $dia_term->name : ucfirst($dia_slug));
+        $horario_v = blokes_normalizar_horario($horario_term ? $horario_term->name : $horario_slug);
+        $edad_v    = blokes_normalizar_edad($edad_term ? $edad_term->name : ($edad_slug ? ucfirst($edad_slug) : 'Adultos'));
+        if ($dia_v === $dia_nuevo && $horario_v === $horario_nuevo && $edad_v === $edad_nuevo) {
+            $variacion_nueva = $variacion;
+            break;
+        }
+    }
+    if (!$variacion_nueva) {
+        return new WP_Error('no_existe', 'No existe esa combinación de día, horario y edad en el catálogo de clases.', array('status' => 404));
+    }
+
+    // Precio nuevo según la tabla de tarifas vigente (misma lógica que el formulario de alta),
+    // respetando el plan de pago actual (mensual/trimestral/anual).
+    $frecuencia = (strpos($dia_nuevo, '-') !== false) ? '2_days' : '1_day';
+    $planes = RocoMadrid_SF_Pricing::calculate_plan_prices(array(
+        'pa_dias' => $dia_nuevo, 'pa_horario' => $horario_nuevo, 'pa_edad' => $edad_nuevo, 'frequency' => $frecuencia,
+    ));
+    $periodo  = $sub->get_billing_period();
+    $interval = max(1, intval($sub->get_billing_interval()));
+    $plan_key = ($periodo === 'year') ? 'annual' : (($interval >= 3) ? 'quarterly' : 'monthly');
+    $precio_nuevo  = floatval($planes[$plan_key]['price'] ?? $planes['monthly']['price']);
+    $precio_actual = floatval($sub->get_total());
+
+    $antes   = array('dia' => $dia_actual, 'horario' => $horario_actual, 'edad' => $edad_actual, 'precio' => $precio_actual);
+    $despues = array('dia' => $dia_nuevo,  'horario' => $horario_nuevo,  'edad' => $edad_nuevo,  'precio' => $precio_nuevo);
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'subId' => $sub_id, 'antes' => $antes, 'despues' => $despues,
+            'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
+        )));
+    }
+
+    blokes_gestion_sin_emails(function() use ($item, $sub, $variacion_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo, $precio_nuevo, $selecciones_actuales) {
+        $item->set_variation_id($variacion_nueva->get_id());
+        $item->set_name($variacion_nueva->get_name());
+        $nuevas_selecciones = is_array($selecciones_actuales) ? $selecciones_actuales : array();
+        $nuevas_selecciones['pa_dias']    = $dia_nuevo;
+        $nuevas_selecciones['pa_horario'] = $horario_nuevo;
+        $nuevas_selecciones['pa_edad']    = $edad_nuevo;
+        $item->add_meta_data('_step_form_selections', $nuevas_selecciones, true);
+        $item->set_subtotal($precio_nuevo);
+        $item->set_total($precio_nuevo);
+        $item->save();
+        $sub->calculate_totals(false);
+        $sub->add_order_note(sprintf(
+            'ExcelMuerte: cambio de grupo a %s · %s (%s), %s €.',
+            $dia_nuevo, $horario_nuevo, $edad_nuevo, number_format($precio_nuevo, 2, ',', '.')
+        ));
+        $sub->save();
+    });
+
+    blokes_gestion_log($sub_id, 'cambiar_grupo', $antes, $despues);
+
+    return rest_ensure_response(array('success' => true, 'data' => array('subId' => $sub_id, 'antes' => $antes, 'despues' => $despues)));
 }
 
 function superadmin_classes($request) {

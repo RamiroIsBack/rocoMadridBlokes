@@ -5,9 +5,10 @@ import {
 } from 'recharts'
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento,
+  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
 } from '../hooks/useSuperAdmin'
+import { useClases } from '../hooks/useClases'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
@@ -975,9 +976,12 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const [extHorario, setExtHorario] = useState(alumno.externoHorario || '')
   const [extEdad, setExtEdad]       = useState(alumno.externoEdad || 'Adultos')
   const [extPeriodo, setExtPeriodo] = useState(hoyISO().slice(0, 7))
-  // Marcar cobrado puede generar factura/AEAT de verdad: por defecto se simula. El resto ya
-  // están validadas con datos de prueba, así que por defecto actúan de verdad.
-  const [simular, setSimular] = useState(tipo === 'marcar_cobrado')
+  const [grupoNuevo, setGrupoNuevo] = useState('') // "dia|horario|edad" del <select>
+  const { clases: catalogoClases } = useClases(tipo === 'cambiar_grupo')
+  // Marcar cobrado y cambiar de grupo pueden generar factura/cambio de precio de verdad: por
+  // defecto se simulan. El resto ya están validadas con datos de prueba, así que por defecto
+  // actúan de verdad.
+  const [simular, setSimular] = useState(tipo === 'marcar_cobrado' || tipo === 'cambiar_grupo')
   const [preview, setPreview] = useState(null)
   const [busy, setBusy]       = useState(false)
   const [err, setErr]         = useState(null)
@@ -986,9 +990,11 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
     marcar_cobrado: 'Marcar cobrado', pausar: 'Pausar', reanudar: 'Reanudar', nota: 'Nota',
     dar_de_baja: 'Dar de baja', fusionar: 'Fusionar duplicado',
     exento: alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio',
+    cambiar_grupo: 'Cambiar de grupo/horario',
     ext_cobrar: 'Marcar cobrado (fuera de la web)', ext_editar: alumno.externoId ? 'Editar datos' : 'Alta de alumno externo', ext_borrar: 'Eliminar alumno externo',
   }
-  const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'dar_de_baja', 'fusionar'].includes(tipo)
+  const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'dar_de_baja', 'fusionar', 'cambiar_grupo'].includes(tipo)
+  const clasesSemanales = (catalogoClases || []).filter(c => c.tipo === 'classes')
 
   async function submit(forzarReal = false) {
     setBusy(true); setErr(null)
@@ -1013,6 +1019,10 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
         res = alumno.esExterno
           ? await gestionExternoActualizar(alumno.externoId, { dia: alumno.externoDia, horario: alumno.externoHorario, edad: alumno.externoEdad, nombre: alumno.alumno, telefono: alumno.telefono, notas: alumno.notas, exento: !alumno.exento })
           : await gestionExento({ sub_id: alumno.subId, exento: !alumno.exento })
+      } else if (tipo === 'cambiar_grupo') {
+        if (!grupoNuevo) throw new Error('Elige el grupo nuevo.')
+        const [dia, horario, edad] = grupoNuevo.split('|')
+        res = await gestionCambiarGrupo({ sub_id: alumno.subId, dia, horario, edad, simular: sim })
       } else if (tipo === 'ext_cobrar') {
         if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
         res = await gestionExternoPago(alumno.externoId, { periodo: extPeriodo, importe: Number(importe), metodo, fecha })
@@ -1132,6 +1142,28 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
               </label>
             )}
 
+            {tipo === 'cambiar_grupo' && (
+              <>
+                <p className="sv-ot-muted">
+                  Actual: {alumno.dia || '—'} · {alumno.horario || '—'} · {alumno.edad || 'Adultos'}
+                  {alumno.importeCatalogo != null ? ` · ${alumno.importeCatalogo} €` : ''}
+                </p>
+                <label className="sv-grp-field">Grupo nuevo
+                  <select className="sv-tests-select" value={grupoNuevo} onChange={e => setGrupoNuevo(e.target.value)}>
+                    <option value="">— Elige día · horario · edad —</option>
+                    {clasesSemanales.map(c => (
+                      <option key={`${c.dia}|${c.horario}|${c.edad}`} value={`${c.dia}|${c.horario}|${c.edad}`}>
+                        {c.dia} · {c.horario} · {c.edad} ({c.precio} €)
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="sv-to-warn-txt">
+                  Cambia el precio de la suscripción a partir de la próxima renovación (según la tabla de tarifas vigente), sin tocar lo ya pagado. No genera pedido ni factura.
+                </p>
+              </>
+            )}
+
             {tipo === 'ext_cobrar' && (
               <>
                 <p className="sv-ot-muted">No toca WooCommerce: solo queda apuntado como pago de este alumno externo.</p>
@@ -1236,6 +1268,7 @@ function AccionMenu({ alumno, onPick, onClose }) {
         {puedeBaja     && <button onClick={() => onPick('dar_de_baja')}>Dar de baja</button>}
         <button onClick={() => onPick('nota')}>Nota</button>
         <button onClick={() => onPick('exento')}>{alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio'}</button>
+        <button onClick={() => onPick('cambiar_grupo')}>Cambiar de grupo/horario</button>
         {alumno.otrasSubs?.map(s => (
           <button key={s.subId} onClick={() => onPick('fusionar', s.subId)}>Fusionar — cancelar #{s.subId}</button>
         ))}
@@ -1259,11 +1292,14 @@ function GruposTab() {
   const meses  = data?.meses || []
   const mesActual = meses[meses.length - 1]
 
+  // dia/horario/edad del grupo se cuelgan de cada fila (no solo el label) para que "Cambiar de
+  // grupo/horario" sepa cuál es el grupo actual sin tener que repartirlo por props aparte.
+  const conGrupoDatos = g => g.alumnos.map(a => ({ ...a, grupoLabel: g.label, dia: g.dia, horario: g.horario, edad: g.edad }))
   const grupo = grupoKey ? grupos.find(g => `${g.dia}|${g.horario}|${g.edad}` === grupoKey) : null
-  const alumnos = grupo ? grupo.alumnos : grupos.flatMap(g => g.alumnos)
+  const alumnos = grupo ? conGrupoDatos(grupo) : grupos.flatMap(conGrupoDatos)
   // Bandejas 8.3: las mismas filas de siempre, filtradas y aplanadas de todos los grupos a la
   // vez, para que Eva no tenga que ir grupo por grupo buscando a quién le toca cada cosa.
-  const conGrupo = useMemo(() => grupos.flatMap(g => g.alumnos.map(a => ({ ...a, grupoLabel: g.label }))), [grupos])
+  const conGrupo = useMemo(() => grupos.flatMap(conGrupoDatos), [grupos])
   const duplicados  = useMemo(() => conGrupo.filter(a => a.otrasSubs?.length > 0), [conGrupo])
   const porCobrar    = useMemo(() => conGrupo.filter(a => a.pendiente && !a.exento && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes'), [conGrupo])
   const pausados      = useMemo(
