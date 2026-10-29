@@ -149,6 +149,3 @@
   .ev-month .ev-chip { font-size: 0.62rem; padding: 2px 3px; }
   .ev-month .ev-free { font-size: 0.58rem; padding: 1px 2px; }
 }
-
-/* Diagnóstico de reservas de la web (temporal) */
-.ev-debug { max-height: 420px; overflow: auto; margin: 12px 0 0; padding: 10px; background: #100e09; color: #ddd; font-size: 0.72rem; white-space: pre-wrap; word-break: break-word; border: 1px solid #2a2015; border-radius: 4px; }

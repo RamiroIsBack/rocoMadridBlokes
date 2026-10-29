@@ -34,7 +34,6 @@ export function useEventsAccess() {
   return can
 }
 
-export const getSsaDebug      = ()       => request('/events/ssa-debug')
 export const getEventsAccess  = ()       => request('/events/access')
 export const saveEventsAccess = (emails) => request('/events/access', 'PUT', { emails }).then(json => json.emails)
 

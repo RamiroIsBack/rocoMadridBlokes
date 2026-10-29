@@ -8336,63 +8336,7 @@ add_action('rest_api_init', function() {
         'callback'            => 'events_save_settings',
         'permission_callback' => $ev_perm,
     ));
-    register_rest_route('superadmin/v1', '/events/ssa-debug', array(
-        'methods'             => 'GET',
-        'callback'            => 'events_ssa_debug',
-        'permission_callback' => $socio_perm,
-    ));
 });
-
-// Diagnóstico (solo lectura) de las reservas de la web: Simply Schedule Appointments vive en el
-// sitio principal (blog 1). Enseña sus tablas y columnas, y las últimas citas sin datos del
-// cliente; los valores completos solo de las citas de prueba (7, 8 y 9).
-function events_ssa_debug() {
-    global $wpdb;
-    $prefix = $wpdb->get_blog_prefix(1);
-    $tables = $wpdb->get_col($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($prefix . 'ssa_') . '%'));
-    $out    = array('prefix' => $prefix, 'tables' => array());
-    foreach ($tables as $t) {
-        $out['tables'][$t] = array(
-            'rows'    => intval($wpdb->get_var("SELECT COUNT(*) FROM `$t`")),
-            'columns' => $wpdb->get_col("SHOW COLUMNS FROM `$t`"),
-        );
-    }
-
-    $appts = $prefix . 'ssa_appointments';
-    if (!in_array($appts, $tables, true)) return rest_ensure_response($out);
-
-    $short = function($v) { return is_string($v) && mb_strlen($v) > 300 ? mb_substr($v, 0, 300) . '…' : $v; };
-    $out['by_status'] = $wpdb->get_results("SELECT status, COUNT(*) AS n FROM `$appts` GROUP BY status", ARRAY_A);
-    $out['latest']    = array();
-    foreach ($wpdb->get_results("SELECT * FROM `$appts` ORDER BY id DESC LIMIT 15", ARRAY_A) ?: array() as $r) {
-        $info = json_decode((string) ($r['customer_information'] ?? ''), true);
-        if (in_array(intval($r['id']), array(7, 8, 9), true)) {
-            $r = array_map($short, $r);
-            $r['customer_information'] = $info;
-        } else {
-            $r = array(
-                'id'                  => $r['id'],
-                'status'              => $r['status'] ?? null,
-                'appointment_type_id' => $r['appointment_type_id'] ?? null,
-                'start_date'          => $r['start_date'] ?? null,
-                'end_date'            => $r['end_date'] ?? null,
-                'date_created'        => $r['date_created'] ?? null,
-                'date_modified'       => $r['date_modified'] ?? null,
-                'customer_fields'     => is_array($info) ? array_keys($info) : null,
-            );
-        }
-        $out['latest'][] = $r;
-    }
-
-    $types = $prefix . 'ssa_appointment_types';
-    if (in_array($types, $tables, true)) {
-        $keep = array_flip(array('id', 'slug', 'title', 'duration', 'status', 'timezone_style'));
-        $out['types'] = array_map(function($r) use ($keep) { return array_intersect_key($r, $keep); },
-            $wpdb->get_results("SELECT * FROM `$types`", ARRAY_A) ?: array());
-    }
-    $out['wp_timezone'] = wp_timezone_string();
-    return rest_ensure_response($out);
-}
 
 // Cualquiera puede preguntar si tiene acceso (para enseñar o no el menú); la lista solo la ve un socio.
 function events_get_access() {
@@ -8490,7 +8434,104 @@ function events_clean_booking($b) {
     );
 }
 
+// Reservas de la web: Simply Schedule Appointments vive en el sitio principal (blog 1) y guarda
+// las horas en UTC. Cada vez que se abren Eventos o el Calendario:
+//  - una cita nueva con fecha de hoy en adelante entra como Solicitud · Web (con ssa_id). Si ya
+//    había una reserva sin ssa_id ese día a esa hora (apuntada a mano), solo se enlaza;
+//  - si una cita enlazada se cancela en la web, la reserva pasa a Cancelada.
+// No se toca nada más, para no pisar lo que edite Juan. Las citas ya vistas se recuerdan
+// (blokes_events_ssa_seen): si Juan borra una reserva importada, no vuelve a entrar.
+function events_ssa_sync() {
+    global $wpdb;
+    $table = $wpdb->get_blog_prefix(1) . 'ssa_appointments';
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table))) !== $table) return;
+    if (get_transient('blokes_ssa_sync_lock')) return;
+    set_transient('blokes_ssa_sync_lock', 1, 30);
+
+    $rows = $wpdb->get_results("SELECT id, status, start_date, end_date, customer_information FROM `$table`", ARRAY_A) ?: array();
+    $list = events_get_bookings();
+    $seen = get_option('blokes_events_ssa_seen', array());
+    $seen = is_array($seen) ? $seen : array();
+    $tz   = wp_timezone();
+    $now  = wp_date('Y-m-d');
+    $changed = false;
+
+    $local = function($utc) use ($tz) {
+        try { $d = new DateTime($utc, new DateTimeZone('UTC')); } catch (Exception $e) { return null; }
+        $d->setTimezone($tz);
+        return $d;
+    };
+
+    $by_ssa = array();
+    foreach ($list as $i => $b) if (!empty($b['ssa_id'])) $by_ssa[intval($b['ssa_id'])] = $i;
+
+    foreach ($rows as $r) {
+        $sid    = intval($r['id']);
+        $booked = in_array($r['status'], array('booked', 'pending_form', 'pending_payment'), true);
+
+        // Cancelada (o cambiada de día) en la web
+        if (isset($by_ssa[$sid])) {
+            $i = $by_ssa[$sid];
+            if (!$booked && in_array($list[$i]['status'], array('solicitud', 'confirmada'), true)) {
+                $list[$i]['status']     = 'cancelada';
+                $list[$i]['notes']      = trim($list[$i]['notes'] . "\nCancelada en la web (" . wp_date('d/m/Y H:i') . ').');
+                $list[$i]['updated_at'] = current_time('mysql');
+                $list[$i]['updated_by'] = 'Web (SSA)';
+                $changed = true;
+            }
+            continue;
+        }
+        if (in_array($sid, $seen, true) || !$booked) continue;
+
+        $start = $local($r['start_date']);
+        $end   = $local($r['end_date']);
+        if (!$start || $start->format('Y-m-d') < $now) continue;
+        $date = $start->format('Y-m-d');
+        $time = $start->format('H:i');
+        $seen[]  = $sid;
+        $changed = true;
+
+        // ¿Ya la había apuntado alguien a mano?
+        $match = null;
+        foreach ($list as $i => $b) {
+            if (empty($b['ssa_id']) && $b['date'] === $date && $b['time'] === $time && $b['status'] !== 'cancelada') { $match = $i; break; }
+        }
+        if ($match !== null) {
+            $list[$match]['ssa_id'] = $sid;
+            continue;
+        }
+
+        $info = json_decode((string) $r['customer_information'], true);
+        $info = is_array($info) ? array_change_key_case($info, CASE_LOWER) : array();
+        $b = events_clean_booking(array(
+            'date'     => $date,
+            'time'     => $time,
+            'end_time' => $end ? $end->format('H:i') : '',
+            'type'     => 'cumpleanos',
+            'status'   => 'solicitud',
+            'origin'   => 'web',
+            'contact'  => $info['name'] ?? '',
+            'email'    => $info['email'] ?? '',
+            'phone'    => $info['phone'] ?? '',
+            'notes'    => trim(($info['notes'] ?? '') . "\nReserva hecha en la web."),
+        ));
+        if (!$b) continue;
+        $b['id']         = wp_generate_uuid4();
+        $b['ssa_id']     = $sid;
+        $b['created_at'] = current_time('mysql');
+        $b['created_by'] = 'Web (SSA)';
+        $list[] = $b;
+    }
+
+    if ($changed) {
+        events_save_bookings($list);
+        update_option('blokes_events_ssa_seen', array_values(array_unique($seen)), false);
+    }
+    delete_transient('blokes_ssa_sync_lock');
+}
+
 function events_list_bookings() {
+    events_ssa_sync();
     return rest_ensure_response(array('success' => true, 'bookings' => events_get_bookings(), 'settings' => events_get_settings()));
 }
 
