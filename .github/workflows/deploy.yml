@@ -34,23 +34,18 @@ jobs:
           echo "FTP_PATH=${RAW%/}/" >> $GITHUB_ENV
 
       - name: Deploy dist/assets/ to SiteGround
+        # Sube los ficheros nuevos ANTES de borrar los viejos (nunca al revés): index.html
+        # (que apunta a los hashes nuevos) no se sube hasta el siguiente paso, así que mientras
+        # tanto sigue en vivo la versión vieja de index.html, que todavía pide los hashes
+        # viejos. Borrar primero deja una ventana de varios segundos en la que esos ficheros
+        # viejos ya no existen y la página en curso (de cualquier visitante) los pide y falla
+        # con 404 — la app entera deja de arrancar hasta que termina el despliegue.
         env:
           FTP_HOST: ${{ secrets.SFTP_HOST }}
           FTP_USER: ${{ secrets.SFTP_USERNAME }}
           FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
         run: |
           echo "FTP_PATH=${FTP_PATH}"
-          listing=$(curl -sk --ssl-reqd \
-            --user "$FTP_USER:$FTP_PASS" \
-            "ftp://$FTP_HOST:21${FTP_PATH}assets/" 2>/dev/null || true)
-          while IFS= read -r line; do
-            fname=$(echo "$line" | awk '{print $NF}' | tr -d '\r')
-            [ -z "$fname" ] && continue
-            curl -sk --ssl-reqd \
-              --user "$FTP_USER:$FTP_PASS" \
-              -Q "DELE ${FTP_PATH}assets/$fname" \
-              "ftp://$FTP_HOST:21/" || true
-          done <<< "$listing"
           ls -la dist/assets/
           for f in dist/assets/*; do
             [ -f "$f" ] || continue
@@ -61,17 +56,26 @@ jobs:
               --user "$FTP_USER:$FTP_PASS" \
               -T "$f" "$url" || { echo "FAILED: $fname"; exit 1; }
           done
+          listing=$(curl -sk --ssl-reqd \
+            --user "$FTP_USER:$FTP_PASS" \
+            "ftp://$FTP_HOST:21${FTP_PATH}assets/" 2>/dev/null || true)
+          while IFS= read -r line; do
+            fname=$(echo "$line" | awk '{print $NF}' | tr -d '\r')
+            [ -z "$fname" ] && continue
+            [ -f "dist/assets/$fname" ] && continue   # sigue vigente, no es un sobrante
+            curl -sk --ssl-reqd \
+              --user "$FTP_USER:$FTP_PASS" \
+              -Q "DELE ${FTP_PATH}assets/$fname" \
+              "ftp://$FTP_HOST:21/" || true
+          done <<< "$listing"
 
-      - name: Upload PHP files and .htaccess
-        # Solo master toca el plugin PHP en vivo: es un único fichero compartido en el
-        # servidor (no hay una copia separada para blokes-dev), así que si dev también
-        # subiera aquí, el último push (de cualquiera de las dos ramas) pisaría al otro.
-        if: github.ref_name == 'master'
+      - name: Upload index.php and .htaccess
+        # Esto SÍ corre en las dos ramas: cada una tiene su propia ruta ($FTP_PATH, blokes vs
+        # blokes-dev), así que no hay nada compartido que una rama pueda pisarle a la otra aquí.
         env:
           FTP_HOST: ${{ secrets.SFTP_HOST }}
           FTP_USER: ${{ secrets.SFTP_USERNAME }}
           FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
-          PLUGIN_PATH: ${{ secrets.SFTP_PLUGIN_PATH }}
         run: |
           curl -sk --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
@@ -87,7 +91,29 @@ jobs:
             --user "$FTP_USER:$FTP_PASS" \
             -T /tmp/htaccess-deploy \
             "ftp://$FTP_HOST:21${FTP_PATH}.htaccess"
+
+      - name: Upload plugin PHP (master only — fichero compartido)
+        # Solo master toca el plugin PHP en vivo: es un único fichero compartido en el
+        # servidor (no hay una copia separada para blokes-dev), así que si dev también
+        # subiera aquí, el último push (de cualquiera de las dos ramas) pisaría al otro.
+        if: github.ref_name == 'master'
+        env:
+          FTP_HOST: ${{ secrets.SFTP_HOST }}
+          FTP_USER: ${{ secrets.SFTP_USERNAME }}
+          FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
+          PLUGIN_PATH: ${{ secrets.SFTP_PLUGIN_PATH }}
+        run: |
+          # Sube a un nombre temporal y renombra (RNFR/RNTO) en vez de sobrescribir el fichero
+          # en vivo directamente: una subida larga deja el PHP a medias un rato (WordPress lo
+          # carga en cada petición), y durante ese rato los endpoints nuevos daban 404/500. El
+          # rename es atómico en el servidor, así que nunca hay un estado intermedio visible.
+          TMP_PHP="progreso-extension1-1.php.deploying-${{ github.run_id }}"
           curl -k --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
             -T progreso-extension1-1.php \
-            "ftp://$FTP_HOST:21${PLUGIN_PATH}progreso-extension1-1.php"
+            "ftp://$FTP_HOST:21${PLUGIN_PATH}${TMP_PHP}"
+          curl -sk --ssl-reqd --fail \
+            --user "$FTP_USER:$FTP_PASS" \
+            -Q "RNFR ${PLUGIN_PATH}${TMP_PHP}" \
+            -Q "RNTO ${PLUGIN_PATH}progreso-extension1-1.php" \
+            "ftp://$FTP_HOST:21/"
