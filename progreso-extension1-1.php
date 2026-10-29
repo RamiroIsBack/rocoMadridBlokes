@@ -3129,6 +3129,8 @@ function superadmin_gestion_grupos($request) {
 
     $all    = blokes_get_all_subscription_data();
     $grupos = array();
+    $cobros_manuales = blokes_cobros_manuales_todos(); // efectivo apuntado desde "Marcar cobrado", sin WooCommerce
+    $hoy_ym = date('Y-m');
 
     foreach ($all as $sub) {
         if (empty($sub['id'])) continue;
@@ -3195,6 +3197,20 @@ function superadmin_gestion_grupos($request) {
         }
         if ($pendiente) unset($pendiente['ts']);
 
+        // Fusiona los cobros en efectivo apuntados a mano (sin WooCommerce): ganan sobre un
+        // pedido de la web para ese mes, y si hay uno de este mes, ya no hay nada "pendiente"
+        // aunque quede un pedido viejo sin pagar colgando.
+        foreach ($meses as $ym) {
+            $cm = $cobros_manuales[$sub['id'] . '|' . $ym] ?? null;
+            if ($cm) {
+                $pagos[$ym] = array(
+                    'importe' => floatval($cm['importe']), 'metodo' => blokes_gestion_metodo_label($cm['metodo']),
+                    'fecha'   => date('d/m/Y', strtotime($cm['fecha'])), 'estadoPedido' => 'completed',
+                );
+            }
+        }
+        if ($pendiente && isset($cobros_manuales[$sub['id'] . '|' . $hoy_ym])) $pendiente = null;
+
         $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
         $persona_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : ('n' . strtolower(trim($sub['cliente'] ?? ''))));
 
@@ -3230,6 +3246,7 @@ function superadmin_gestion_grupos($request) {
             'pausaMotivo' => $pausa_motivo ?: '',
             'pausaHasta'  => $pausa_hasta ?: '',
             'manual'      => method_exists($sub_obj, 'is_manual') ? $sub_obj->is_manual() : true,
+            'importeCatalogo' => floatval($sub_obj->get_total()),
             'pagos'       => $pagos,
             'pendiente'   => $pendiente,
             'notas'       => get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '',
@@ -3335,16 +3352,68 @@ function blokes_gestion_sin_emails($cb) {
 
 function blokes_gestion_metodo_label($metodo) {
     $map = array(
-        'transferencia' => 'Transferencia', 'efectivo' => 'Efectivo', 'bizum' => 'Bizum',
-        'tarjeta' => 'Tarjeta/web', 'wellhub' => 'Wellhub',
+        'transferencia' => 'Transferencia', 'efectivo' => 'Efectivo',
+        'tarjeta' => 'Tarjeta (TPV roco)', 'wellhub' => 'Wellhub',
     );
     return $map[$metodo] ?? ucfirst($metodo);
 }
 
+function blokes_cobros_manuales_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_cobros_manuales';
+}
+
+// Efectivo (29/10, decisión de Ramiro): sin WooCommerce y sin factura — solo queda apuntado
+// aquí para que "Grupos" y ExcelMuerte lo cuenten como cobrado. Transferencia, tarjeta (TPV
+// roco) y Wellhub sí van por WooCommerce y generan factura (Verifactu/AEAT), igual que un cobro
+// con tarjeta en la web.
+function blokes_ensure_cobros_manuales_table() {
+    global $wpdb;
+    $table = blokes_cobros_manuales_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        sub_id      bigint(20) UNSIGNED NOT NULL,
+        periodo     varchar(7)          NOT NULL,
+        importe     decimal(10,2)       NOT NULL,
+        metodo      varchar(30)         NOT NULL DEFAULT 'efectivo',
+        fecha       date                NOT NULL,
+        nota        varchar(255)        NOT NULL DEFAULT '',
+        parcial     tinyint(1)          NOT NULL DEFAULT 0,
+        user_id     bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        user_login  varchar(100)        NOT NULL DEFAULT '',
+        created_at  datetime            NOT NULL,
+        PRIMARY KEY (id),
+        KEY sub_id (sub_id),
+        KEY periodo (periodo)
+    ) {$charset};";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+
+// El cobro manual (efectivo) más reciente de cada sub_id+mes, para fusionarlo con los pagos de
+// WooCommerce en "Grupos"/ExcelMuerte sin tener que tocar esas consultas una por una.
+function blokes_cobros_manuales_todos() {
+    global $wpdb;
+    blokes_ensure_cobros_manuales_table();
+    $rows = $wpdb->get_results("SELECT * FROM " . blokes_cobros_manuales_table() . " ORDER BY id DESC", ARRAY_A);
+    $out = array();
+    foreach ($rows as $r) {
+        $key = $r['sub_id'] . '|' . $r['periodo'];
+        if (!isset($out[$key])) $out[$key] = $r; // ya viene del más reciente al más antiguo
+    }
+    return $out;
+}
+
 /**
- * Marcar cobrado: completa la renovación pendiente de una suscripción (o crea una si no hay
- * ninguna) y la reactiva. Solo para suscripciones de renovación MANUAL (transferencia/efectivo):
- * las de tarjeta/Redsys cobran solas y aquí se rechazan, para no duplicar el cobro.
+ * Marcar cobrado.
+ * - Efectivo: NO toca WooCommerce ni genera factura — se apunta en una tabla propia
+ *   (`wp_blokes_cobros_manuales`) y "Grupos"/ExcelMuerte lo cuentan como cobrado ese mes.
+ * - Transferencia / Tarjeta (TPV roco) / Wellhub: completa la renovación pendiente (o crea una
+ *   si no hay ninguna) y la reactiva — esto SÍ genera factura real (Verifactu/AEAT), igual que
+ *   un cobro con tarjeta en la web. Rechaza las suscripciones de cobro automático por
+ *   tarjeta/Redsys (409), para no duplicar el cobro.
  */
 function superadmin_gestion_marcar_cobrado($request) {
     if (!function_exists('wcs_get_subscription')) {
@@ -3359,6 +3428,7 @@ function superadmin_gestion_marcar_cobrado($request) {
     $mantener_pausa = $request->get_param('mantener_pausa');
     $mantener_pausa = $mantener_pausa === null ? true : (bool) $mantener_pausa;
     $simular  = (bool) $request->get_param('simular');
+    $es_efectivo = $metodo === 'efectivo';
 
     if (!$sub_id || $importe <= 0 || !$metodo) {
         return new WP_Error('bad_request', 'Faltan sub_id, importe o metodo.', array('status' => 400));
@@ -3366,11 +3436,40 @@ function superadmin_gestion_marcar_cobrado($request) {
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
 
+    $fecha_ts  = $fecha ? strtotime($fecha . ' 12:00:00') : time();
+    $fecha_txt = date_i18n('d/m/Y', $fecha_ts);
+    $metodo_label = blokes_gestion_metodo_label($metodo);
+    $antes = array('status' => $sub->get_status());
+
+    // ── Efectivo: nada de WooCommerce, nada de factura ──
+    if ($es_efectivo) {
+        $periodo = date('Y-m', $fecha_ts);
+        if ($simular) {
+            return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+                'subId' => $sub_id, 'periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo_label,
+                'fecha' => $fecha_txt, 'parcial' => $parcial,
+                'aviso' => 'Simulación: no se escribiría nada todavía. El efectivo no toca WooCommerce ni genera factura, solo queda apuntado en Grupos.',
+            )));
+        }
+        blokes_ensure_cobros_manuales_table();
+        global $wpdb;
+        $user = wp_get_current_user();
+        $wpdb->insert(blokes_cobros_manuales_table(), array(
+            'sub_id' => $sub_id, 'periodo' => $periodo, 'importe' => $importe, 'metodo' => 'efectivo',
+            'fecha' => date('Y-m-d', $fecha_ts), 'nota' => $nota, 'parcial' => $parcial ? 1 : 0,
+            'user_id' => $user ? $user->ID : 0, 'user_login' => $user ? $user->user_login : '',
+            'created_at' => current_time('mysql'),
+        ));
+        $despues = array('periodo' => $periodo, 'importe' => $importe, 'metodo' => 'efectivo');
+        blokes_gestion_log($sub_id, 'marcar_cobrado_efectivo', $antes, $despues, array('fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota));
+        return rest_ensure_response(array('success' => true, 'data' => $despues));
+    }
+
+    // ── Transferencia / Tarjeta (TPV) / Wellhub: por WooCommerce, con factura ──
     if (method_exists($sub, 'is_manual') && !$sub->is_manual()) {
         return new WP_Error('cobro_automatico', 'Esta suscripción cobra sola por tarjeta/Redsys: no se puede marcar cobrado a mano (cobro doble).', array('status' => 409));
     }
 
-    $antes = array('status' => $sub->get_status());
     $pausa_motivo_antes = get_post_meta($sub_id, '_rm_pausa_motivo', true);
     $estaba_pausada = $sub->has_status('on-hold') && $pausa_motivo_antes;
 
@@ -3382,10 +3481,6 @@ function superadmin_gestion_marcar_cobrado($request) {
         $o = wc_get_order($oid);
         if ($o && in_array($o->get_status(), array('pending', 'on-hold', 'failed'), true)) { $order = $o; break; }
     }
-
-    $metodo_label = blokes_gestion_metodo_label($metodo);
-    $fecha_ts  = $fecha ? strtotime($fecha . ' 12:00:00') : time();
-    $fecha_txt = date_i18n('d/m/Y', $fecha_ts);
 
     // Modo simulación: ni crea ni completa ningún pedido, ni toca la suscripción — para poder
     // probar contra un caso real (secciones 6b/7) viendo qué pasaría, sin generar factura/AEAT
@@ -3399,7 +3494,7 @@ function superadmin_gestion_marcar_cobrado($request) {
             'pasaAActiva'     => !($estaba_pausada && $mantener_pausa),
             'mantienePausa'   => $estaba_pausada && $mantener_pausa,
             'importe'         => $importe, 'metodo' => $metodo_label, 'fecha' => $fecha_txt, 'parcial' => $parcial,
-            'aviso'           => 'Simulación: no se ha escrito nada en WooCommerce ni se ha generado factura.',
+            'aviso'           => 'Simulación: no se ha escrito nada en WooCommerce. De confirmarlo, SE EMITIRÁ FACTURA y se enviará a Hacienda (Verifactu).',
         );
         blokes_gestion_log($sub_id, 'marcar_cobrado_simulado', $antes, null, $preview);
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $preview));
@@ -3422,7 +3517,8 @@ function superadmin_gestion_marcar_cobrado($request) {
         if ($parcial) update_post_meta($order->get_id(), '_rm_pago_parcial', $nota ?: '1');
         $order->payment_complete();
         // payment_complete() deja "processing" (el producto no es virtual/descargable):
-        // aquí se considera cobrado de verdad, así que pasa a "completado".
+        // aquí se considera cobrado de verdad, así que pasa a "completado" — esto emite la
+        // factura real (Verifactu/AEAT) con la fecha de hoy, como confirmó Ramiro.
         $order->update_status('completed', 'ExcelMuerte: pedido completado tras marcar cobrado.');
         if ($fecha) {
             $order->set_date_paid($fecha_ts);

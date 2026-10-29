@@ -944,13 +944,21 @@ const ESTADO_LABEL = {
   baja_fin_mes:    { txt: 'Baja a fin de mes',          cls: 'sv-grp-estado--bad' },
 }
 const METODO_OPCIONES = [
-  ['transferencia', 'Transferencia'], ['efectivo', 'Efectivo'], ['bizum', 'Bizum'],
-  ['tarjeta', 'Tarjeta/web'], ['wellhub', 'Wellhub'],
+  ['transferencia', 'Transferencia'], ['tarjeta', 'Tarjeta (TPV roco)'],
+  ['efectivo', 'Efectivo'], ['wellhub', 'Wellhub'],
 ]
+// Efectivo: sin WooCommerce y sin factura, solo queda apuntado en Grupos (decisión de Ramiro,
+// 29/10). Los demás van por WooCommerce y SÍ generan factura real (Verifactu/AEAT).
+const METODO_CONSECUENCIA = {
+  efectivo: 'Efectivo: no se toca WooCommerce ni se genera factura. Solo queda apuntado en Grupos.',
+  transferencia: 'Se completará el pedido y se emitirá factura real (Verifactu/AEAT), con la fecha de hoy.',
+  tarjeta: 'Se completará el pedido y se emitirá factura real (Verifactu/AEAT), con la fecha de hoy.',
+  wellhub: 'Se completará el pedido y se emitirá factura real (Verifactu/AEAT), con la fecha de hoy.',
+}
 const hoyISO = () => new Date().toISOString().slice(0, 10)
 
 function AccionModal({ alumno, tipo, onClose, onDone }) {
-  const [importe, setImporte] = useState('')
+  const [importe, setImporte] = useState(alumno.importeCatalogo ? String(alumno.importeCatalogo) : '')
   const [metodo, setMetodo]   = useState('transferencia')
   const [fecha, setFecha]     = useState(hoyISO())
   const [parcial, setParcial] = useState(false)
@@ -1013,8 +1021,8 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
           <>
             {tipo === 'marcar_cobrado' && (
               <>
-                {alumno.manual === false && (
-                  <p className="sv-to-warn-txt">Esta suscripción cobra sola por tarjeta/Redsys: el servidor rechazará la acción (para evitar cobro doble).</p>
+                {alumno.manual === false && metodo !== 'efectivo' && (
+                  <p className="sv-to-warn-txt">Esta suscripción cobra sola por tarjeta/Redsys: el servidor rechazará la acción (para evitar cobro doble). El efectivo sí se puede apuntar.</p>
                 )}
                 {alumno.estado === 'pausado' && (
                   <label className="sv-grp-field sv-grp-field--check">
@@ -1030,6 +1038,7 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
                     {METODO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
                   </select>
                 </label>
+                <p className={metodo === 'efectivo' ? 'sv-ot-muted' : 'sv-to-warn-txt'}>{METODO_CONSECUENCIA[metodo]}</p>
                 <label className="sv-grp-field">Fecha
                   <input className="sv-tests-input" type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
                 </label>
