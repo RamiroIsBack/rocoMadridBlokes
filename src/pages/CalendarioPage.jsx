@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   useCalendar, saveNotionToken, getBookings, notionColor,
-  CATEGORIES, CATEGORY_COLORS, NOTION_VIEW_CATEGORIES, NO_CATEGORY, NOTION_CALENDAR_URL,
+  CATEGORY_COLORS, CALENDAR_CATEGORIES, NO_CATEGORY, NOTION_CALENDAR_URL,
 } from '../hooks/useCalendar'
 import { TYPES, typeOf, statusOf } from '../hooks/useEvents'
 import { fmtEur } from '../utils/monthFormat'
@@ -352,16 +352,23 @@ export default function CalendarioPage() {
     getBookings().then(setBookings).catch(() => setBookings([]))
   }, [showEvents])
 
+  // Categorías elegidas dentro de las de eventos; null = todas (también si lo guardado ya no vale)
+  const selCats = useMemo(() => {
+    const sel = (prefs.cats ?? []).filter(c => CALENDAR_CATEGORIES.includes(c))
+    return sel.length && sel.length < CALENDAR_CATEGORIES.length ? sel : null
+  }, [prefs.cats])
+
   const items = useMemo(() => {
     const evs = bookings.filter(b => b.status !== 'cancelada' && prefs.evTypes.includes(b.type))
     // Si ese día ya hay un cumpleaños en Eventos, el "Cumpleaños" de Notion es el mismo: no se repite
     const cumpleDays = new Set(evs.filter(b => b.type === 'cumpleanos').map(b => b.date))
     const notion = (data?.items ?? []).map(fromNotion)
+      .filter(it => CALENDAR_CATEGORIES.includes(it.category))
       .filter(it => prefs.archived || !it.archived)
-      .filter(it => !prefs.cats || prefs.cats.includes(it.category))
+      .filter(it => !selCats || selCats.includes(it.category))
       .filter(it => !(it.category === 'Cumpleaños' && cumpleDays.has(it.date)))
     return [...notion, ...evs.map(fromBooking)]
-  }, [data, bookings, prefs])
+  }, [data, bookings, prefs, selCats])
 
   if (!['socio', 'gestion'].includes(role)) {
     return (
@@ -372,19 +379,18 @@ export default function CalendarioPage() {
     )
   }
 
-  const present = new Set((data?.items ?? []).map(it => it.category?.name || NO_CATEGORY))
-  const cats    = [...CATEGORIES, ...[...present].filter(c => !CATEGORIES.includes(c))]
+  const present = new Set((data?.items ?? []).map(it => it.category?.name))
+  const cats    = CALENDAR_CATEGORIES
   const colorOf = {
-    ...Object.fromEntries(CATEGORIES.map(c => [c, notionColor(CATEGORY_COLORS[c])])),
+    ...Object.fromEntries(cats.map(c => [c, notionColor(CATEGORY_COLORS[c])])),
     ...Object.fromEntries((data?.items ?? []).filter(it => it.category).map(it => [it.category.name, notionColor(it.category.color)])),
   }
-  const active  = c => !prefs.cats || prefs.cats.includes(c)
+  const active  = c => !selCats || selCats.includes(c)
   const toggle  = c => {
-    const cur = prefs.cats ?? cats
+    const cur  = selCats ?? cats
     const next = cur.includes(c) ? cur.filter(x => x !== c) : [...cur, c]
-    update({ cats: next.length === cats.length ? null : next })
+    update({ cats: next.length === cats.length || next.length === 0 ? null : next })
   }
-  const isNotionView = prefs.cats && prefs.cats.length === NOTION_VIEW_CATEGORIES.length && NOTION_VIEW_CATEGORIES.every(c => prefs.cats.includes(c))
   const legend = [
     ...cats.filter(c => active(c) && present.has(c)).map(c => [c, colorOf[c] || '#9b9a97']),
     ...TYPES.filter(t => prefs.evTypes.includes(t.id)).map(t => [`${t.label} (Eventos)`, t.color]),
@@ -419,9 +425,7 @@ export default function CalendarioPage() {
           </div>
 
           <div className="cal-filters">
-            <button className={`sa-filter-btn${!prefs.cats ? ' sa-filter-btn--active' : ''}`} onClick={() => update({ cats: null })}>Todas</button>
-            <button className={`sa-filter-btn${isNotionView ? ' sa-filter-btn--active' : ''}`} onClick={() => update({ cats: NOTION_VIEW_CATEGORIES })}
-              title="Competición, Cumpleaños, Evento, Sustitución y Vacaciones">Calendario de eventos</button>
+            <button className={`sa-filter-btn${!selCats ? ' sa-filter-btn--active' : ''}`} onClick={() => update({ cats: null })}>Todas</button>
             <span className="cal-filters__sep" />
             {cats.map(c => (
               <button key={c} className={`cal-cat${active(c) ? ' cal-cat--on' : ''}`} style={{ '--cat-color': colorOf[c] || '#9b9a97' }} onClick={() => toggle(c)}>{c}</button>

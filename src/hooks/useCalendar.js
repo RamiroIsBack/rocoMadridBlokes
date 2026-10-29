@@ -58,8 +58,8 @@ export const CATEGORY_COLORS = {
   'Mejoras': 'purple', 'Reunion': 'purple', 'Sustitucion': 'pink', 'Tareas': 'purple', 'Vacaciones': 'orange',
 }
 export const CATEGORIES = Object.keys(CATEGORY_COLORS)
-// Las que enseña la vista "Calendario de Eventos" de Notion
-export const NOTION_VIEW_CATEGORIES = ['Competicion', 'Cumpleaños', 'Evento', 'Sustitucion', 'Vacaciones']
+// Las únicas que salen en el Calendario: las mismas que la vista "Calendario de Eventos" de Notion
+export const CALENDAR_CATEGORIES = ['Competicion', 'Cumpleaños', 'Evento', 'Sustitucion', 'Vacaciones']
 export const NO_CATEGORY = 'Sin categoría'
 
 export const NOTION_CALENDAR_URL = 'https://www.notion.so/292d5fb11f5b80129a5aef1e47cf0741'
