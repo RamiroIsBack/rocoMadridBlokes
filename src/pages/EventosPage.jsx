@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import {
-  useEventsAccess, useBookings, createBooking, importBookings, updateBooking, deleteBooking, saveEventSettings,
+  useEventsAccess, useBookings, createBooking, importBookings, updateBooking, deleteBooking, saveEventSettings, getSsaDebug,
   TYPES, STATUSES, ORIGINS, typeOf, statusOf, originOf, money, counts, emptyBooking,
 } from '../hooks/useEvents'
 import { fmtEur } from '../utils/monthFormat'
@@ -345,7 +345,29 @@ function Money({ bookings, settings, onSettings }) {
         <p className="sa-pay-note">Ganancia = total − pago a monitores − materiales. No cuentan las reservas canceladas.</p>
       </div>
       <SettingsPanel settings={settings} onSaved={onSettings} />
+      {window.blokesSiteData?.userRole === 'socio' && <SsaDebug />}
     </>
+  )
+}
+
+// Diagnóstico temporal: qué guarda el sistema de reservas de la web (SSA) antes de conectarlo
+function SsaDebug() {
+  const [out, setOut]   = useState('')
+  const [busy, setBusy] = useState(false)
+  async function run() {
+    setBusy(true)
+    try { setOut(JSON.stringify(await getSsaDebug(), null, 2)) } catch (e) { setOut(`✗ ${e.message}`) }
+    setBusy(false)
+  }
+  return (
+    <div className="sa-section">
+      <div className="sa-section__header"><h2 className="sa-section-title">Reservas de la web · diagnóstico</h2></div>
+      <div className="sa-pay-actions">
+        <button className="sa-list-save__btn" onClick={run} disabled={busy}>{busy ? 'Leyendo…' : 'Leer reservas de la web'}</button>
+        {out && <button className="sa-pay-action" onClick={() => navigator.clipboard?.writeText(out)}>Copiar</button>}
+      </div>
+      {out && <pre className="ev-debug">{out}</pre>}
+    </div>
   )
 }
 

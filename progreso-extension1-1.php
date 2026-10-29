@@ -8336,7 +8336,63 @@ add_action('rest_api_init', function() {
         'callback'            => 'events_save_settings',
         'permission_callback' => $ev_perm,
     ));
+    register_rest_route('superadmin/v1', '/events/ssa-debug', array(
+        'methods'             => 'GET',
+        'callback'            => 'events_ssa_debug',
+        'permission_callback' => $socio_perm,
+    ));
 });
+
+// Diagnóstico (solo lectura) de las reservas de la web: Simply Schedule Appointments vive en el
+// sitio principal (blog 1). Enseña sus tablas y columnas, y las últimas citas sin datos del
+// cliente; los valores completos solo de las citas de prueba (7, 8 y 9).
+function events_ssa_debug() {
+    global $wpdb;
+    $prefix = $wpdb->get_blog_prefix(1);
+    $tables = $wpdb->get_col($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($prefix . 'ssa_') . '%'));
+    $out    = array('prefix' => $prefix, 'tables' => array());
+    foreach ($tables as $t) {
+        $out['tables'][$t] = array(
+            'rows'    => intval($wpdb->get_var("SELECT COUNT(*) FROM `$t`")),
+            'columns' => $wpdb->get_col("SHOW COLUMNS FROM `$t`"),
+        );
+    }
+
+    $appts = $prefix . 'ssa_appointments';
+    if (!in_array($appts, $tables, true)) return rest_ensure_response($out);
+
+    $short = function($v) { return is_string($v) && mb_strlen($v) > 300 ? mb_substr($v, 0, 300) . '…' : $v; };
+    $out['by_status'] = $wpdb->get_results("SELECT status, COUNT(*) AS n FROM `$appts` GROUP BY status", ARRAY_A);
+    $out['latest']    = array();
+    foreach ($wpdb->get_results("SELECT * FROM `$appts` ORDER BY id DESC LIMIT 15", ARRAY_A) ?: array() as $r) {
+        $info = json_decode((string) ($r['customer_information'] ?? ''), true);
+        if (in_array(intval($r['id']), array(7, 8, 9), true)) {
+            $r = array_map($short, $r);
+            $r['customer_information'] = $info;
+        } else {
+            $r = array(
+                'id'                  => $r['id'],
+                'status'              => $r['status'] ?? null,
+                'appointment_type_id' => $r['appointment_type_id'] ?? null,
+                'start_date'          => $r['start_date'] ?? null,
+                'end_date'            => $r['end_date'] ?? null,
+                'date_created'        => $r['date_created'] ?? null,
+                'date_modified'       => $r['date_modified'] ?? null,
+                'customer_fields'     => is_array($info) ? array_keys($info) : null,
+            );
+        }
+        $out['latest'][] = $r;
+    }
+
+    $types = $prefix . 'ssa_appointment_types';
+    if (in_array($types, $tables, true)) {
+        $keep = array_flip(array('id', 'slug', 'title', 'duration', 'status', 'timezone_style'));
+        $out['types'] = array_map(function($r) use ($keep) { return array_intersect_key($r, $keep); },
+            $wpdb->get_results("SELECT * FROM `$types`", ARRAY_A) ?: array());
+    }
+    $out['wp_timezone'] = wp_timezone_string();
+    return rest_ensure_response($out);
+}
 
 // Cualquiera puede preguntar si tiene acceso (para enseñar o no el menú); la lista solo la ve un socio.
 function events_get_access() {
