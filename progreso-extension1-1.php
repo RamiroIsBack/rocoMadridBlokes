@@ -3581,10 +3581,12 @@ function blokes_externos_normaliza_telefono($t) {
     return strlen($d) === 9 ? $d : (strlen($d) > 9 ? substr($d, -9) : $d);
 }
 
-// Para comparar nombres: sin tildes ni "*" (lo usan para marcar casos en el Excel), sin
-// puntuación, en minúsculas y con los espacios repetidos colapsados.
+// Para comparar nombres: quita paréntesis con lo que traigan dentro ("(16 años)", "(amiga de
+// Marta)"), tildes y "*" (lo usan para marcar casos en el Excel), sin puntuación, en minúsculas
+// y con los espacios repetidos colapsados.
 function blokes_externos_normaliza_nombre($n) {
     $n = remove_accents((string) $n);
+    $n = preg_replace('/\([^)]*\)/', ' ', $n);
     $n = str_replace('*', ' ', $n);
     $n = preg_replace('/[^a-zA-Z\s]/', ' ', $n);
     return mb_strtolower(trim(preg_replace('/\s+/', ' ', $n)));
@@ -3602,6 +3604,17 @@ function blokes_externos_nombres_parecidos($a, $b) {
     if (count(array_intersect($pa, $pb)) >= min(2, count($pa), count($pb))) return true;
     similar_text($a, $b, $pct);
     return $pct >= 80;
+}
+
+// El usuario de la cuenta ("adrianmendoza") no lleva espacios: comparar contra el nombre completo
+// pegado, o contra nombre de pila + primer apellido pegados, para los casos donde el nombre de
+// facturación no coincide pero el usuario sí es, literalmente, la misma persona.
+function blokes_externos_nombre_coincide_usuario($nombre_norm, $usuario_n) {
+    if ($nombre_norm === '' || $usuario_n === '') return false;
+    $tokens = array_values(array_filter(explode(' ', $nombre_norm)));
+    if (empty($tokens)) return false;
+    if ($usuario_n === implode('', $tokens)) return true;
+    return count($tokens) >= 2 && $usuario_n === ($tokens[0] . $tokens[1]);
 }
 
 // Todos los externos activos, con sus pagos anidados por periodo (YYYY-MM).
@@ -3651,7 +3664,8 @@ function blokes_externos_buscar_en_web($telefono, $nombre, $dia = '', $horario =
         $user         = $sub_obj->get_user();
         $usuario_n    = $user ? blokes_externos_normaliza_nombre($user->user_login) : '';
 
-        if ($nombre_norm !== '' && ($nombre_norm === $nombre_web_n || ($usuario_n !== '' && $nombre_norm === $usuario_n))) {
+        $usuario_coincide = blokes_externos_nombre_coincide_usuario($nombre_norm, $usuario_n);
+        if ($nombre_norm !== '' && ($nombre_norm === $nombre_web_n || $usuario_coincide)) {
             return array('subId' => intval($s['id']), 'tipo' => 'confirmado');
         }
         $nombre_parecido = $nombre_norm !== '' && (
@@ -3765,7 +3779,10 @@ function superadmin_gestion_externos_pago($request) {
  * — si la tiene, no se crea nada (no son "externos", ya están). Si no la tiene y no existe ya
  * como externo (mismo teléfono), se crea; si ya existe como externo, se actualizan sus pagos y
  * notas. Antes de nada, descarta las filas sin ningún pago registrado en septiembre ni octubre
- * (salvo exentos): son alumnos que ya no vienen y se quedaron en el Excel. Con `simular` no
+ * (salvo exentos): son alumnos que ya no vienen y se quedaron en el Excel. Las filas marcadas
+ * "posible familiar" (mismo teléfono que una suscripción de la web, pero no se puede confirmar
+ * si es la misma persona) no se crean en el volcado real salvo que la fila llegue con
+ * `confirmarFamiliar: true` — hasta entonces quedan como "pendiente_revision". Con `simular` no
  * escribe nada, solo dice qué haría con cada fila.
  */
 function superadmin_gestion_externos_importar($request) {
@@ -3810,10 +3827,19 @@ function superadmin_gestion_externos_importar($request) {
         }
         // Mismo teléfono que una suscripción de la web, pero no hay suficiente para confirmar que
         // es la misma persona (nombre distinto, o hermanos ambiguos en el grupo): probablemente un
-        // familiar compartiendo el móvil de los padres. No se descarta — se crea/actualiza igual,
-        // pero se avisa con el subId de esa otra suscripción para que se revise a mano antes de
-        // confirmar de verdad (nunca se crea solo por esto, queda para decidir en la vista previa).
+        // familiar compartiendo el móvil de los padres. En `simular` se muestra igual qué pasaría
+        // (para decidir mirando la vista previa), pero en el volcado real NO se crea ni se
+        // actualiza nada por esto solo — se queda "pendiente_revision" hasta que, tras decidir a
+        // mano que es un familiar distinto y no la misma persona, se repita esa fila con
+        // `confirmarFamiliar: true`.
         $posible_familiar = $match && $match['tipo'] === 'posible_familiar' ? $match['subId'] : null;
+        if ($posible_familiar && !$simular && empty($raw['confirmarFamiliar'])) {
+            $resultado[] = array(
+                'nombre' => $f['nombre'], 'accion' => 'pendiente_revision', 'posibleFamiliar' => $posible_familiar,
+                'motivo' => 'El teléfono coincide con otra suscripción de la web, pero no hay bastante para saber si es la misma persona o un familiar. Hay que decidirlo a mano antes de crearlo.',
+            );
+            continue;
+        }
 
         $existente = $f['telefono'] !== '' ? ($existentes[$f['telefono']] ?? null) : null;
 
@@ -3856,9 +3882,10 @@ function superadmin_gestion_externos_importar($request) {
         $resultado[] = $fila;
     }
 
-    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0, 'noActivo' => 0, 'posibleFamiliar' => 0);
+    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0, 'noActivo' => 0, 'pendienteRevision' => 0, 'posibleFamiliar' => 0);
+    $mapa_accion = array('ya_en_web' => 'yaEnWeb', 'pendiente_revision' => 'pendienteRevision');
     foreach ($resultado as $r) {
-        $k = $r['accion'] === 'ya_en_web' ? 'yaEnWeb' : $r['accion'];
+        $k = $mapa_accion[$r['accion']] ?? $r['accion'];
         if (isset($resumen[$k])) $resumen[$k]++;
         if (!empty($r['posibleFamiliar'])) $resumen['posibleFamiliar']++;
     }
