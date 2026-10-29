@@ -85,6 +85,31 @@
   vertical-align: middle;
 }
 
+.entrena__missing-tag {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: hsl(calc(var(--missing-hue, 0)), 70%, 32%);
+  background: hsl(calc(var(--missing-hue, 0)), 90%, 95%);
+  border: 1px solid hsl(calc(var(--missing-hue, 0)), 80%, 75%);
+  border-radius: 3px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
+/* Le falta algún test: borde animado a la izquierda, de amarillo (casi completo) a rojo
+   (le falta mucho), según --missing-hue (0 = rojo, 50 = amarillo), calculado por fila. */
+@keyframes entrena-missing-pulse {
+  0%, 100% { box-shadow: inset 4px 0 0 0 hsl(var(--missing-hue, 0), 85%, 50%); }
+  50%      { box-shadow: inset 4px 0 0 0 hsl(var(--missing-hue, 0), 85%, 68%); }
+}
+.entrena__row--missing td:first-child {
+  animation: entrena-missing-pulse 1.8s ease-in-out infinite;
+}
+
 .entrena__modal-overlay {
   position: fixed;
   inset: 0;

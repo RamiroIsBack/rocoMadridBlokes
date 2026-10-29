@@ -668,6 +668,12 @@ add_action('rest_api_init', function() {
         'permission_callback' => 'is_user_logged_in',
     ));
 
+    register_rest_route('progreso/v1', '/training/completitud', array(
+        'methods'             => 'GET',
+        'callback'            => 'progreso_get_training_completitud',
+        'permission_callback' => function() { return blokes_can_supervise(); },
+    ));
+
     register_rest_route('progreso/v1', '/training/(?P<user_id>\d+)', array(
         'methods'             => 'GET',
         'callback'            => 'progreso_get_training',
@@ -1665,9 +1671,13 @@ function progreso_get_alumnos($request) {
 
     $all_data = array_merge(blokes_get_all_subscription_data(), blokes_get_placeholder_alumnos('pending'));
 
-    $filtered = array_values(array_filter($all_data, function($sub) use ($filtros) {
+    // Coincide por pareja de día (Lunes/Miércoles/Lunes-Miércoles son la misma franja para esto),
+    // no por valor exacto: a un profe le da igual que el alumno venga 1 o 2 días, quiere verlos
+    // todos juntos en la hora de clase. Qué días va cada uno sigue intacto en su propia ficha.
+    $parejas_filtro = array_map('blokes_dia_a_pareja', $filtros['dia']);
+    $filtered = array_values(array_filter($all_data, function($sub) use ($filtros, $parejas_filtro) {
         if ($filtros['status'] !== 'all' && $sub['status'] !== $filtros['status']) return false;
-        if (!empty($filtros['dia']) && !in_array($sub['dia'], $filtros['dia'])) return false;
+        if (!empty($parejas_filtro) && !in_array(blokes_dia_a_pareja($sub['dia']), $parejas_filtro, true)) return false;
         if ($filtros['horario']  && $sub['horario']  !== $filtros['horario'])  return false;
         if ($filtros['edad']     && $sub['edad']     !== $filtros['edad'])     return false;
         if ($filtros['producto'] && $sub['producto'] !== $filtros['producto']) return false;
@@ -2112,6 +2122,28 @@ function progreso_ensure_training_table() {
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta($sql);
     update_option('blokes_training_table_version', $version);
+}
+
+// Qué tests tiene registrados cada alumno (alguna vez, no solo este mes), de todos a la vez —
+// para marcar en la lista a quién le faltan sin pedir el historial completo uno por uno.
+function progreso_get_training_completitud() {
+    progreso_ensure_training_table();
+    global $wpdb;
+    $rows = $wpdb->get_results("SELECT DISTINCT user_id, placeholder_id, test_id FROM " . progreso_training_table(), ARRAY_A);
+    $users = array(); $placeholders = array();
+    foreach ($rows as $r) {
+        $tid = intval($r['test_id']);
+        $pid = intval($r['placeholder_id']);
+        if ($pid > 0) {
+            if (!isset($placeholders[$pid])) $placeholders[$pid] = array();
+            $placeholders[$pid][] = $tid;
+        } else {
+            $uid = intval($r['user_id']);
+            if (!isset($users[$uid])) $users[$uid] = array();
+            $users[$uid][] = $tid;
+        }
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array('users' => $users, 'placeholders' => $placeholders)));
 }
 
 // Notas para profesores (lesiones, variantes...). Una por test y mes.

@@ -14,18 +14,38 @@ const ORDEN_DIAS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','
 
 const TESTS_LIST = Object.values(ZONES).flatMap(z => z.tests).filter(tid => TEST_MAP[tid]?.visible !== false)
 
+// Cuántos tests le faltan a un alumno (de siempre, no solo este mes) y el estilo de aviso
+// correspondiente: más le falta → más rojo; casi completo → más hacia amarillo.
+function testsFaltantes(alumno, completitud) {
+  if (!alumno?.user_id && !alumno?.placeholder_id) return 0 // sin cuenta vinculada: no se le puede medir todavía
+  const hechos = alumno?.is_placeholder
+    ? completitud.placeholders?.[alumno.placeholder_id]
+    : completitud.users?.[alumno.user_id]
+  if (!hechos) return TESTS_LIST.length
+  const set = new Set(hechos)
+  return TESTS_LIST.filter(tid => !set.has(Number(tid))).length
+}
+function missingRowStyle(faltantes) {
+  if (!faltantes) return null
+  const ratio = Math.min(1, faltantes / TESTS_LIST.length)
+  return { '--missing-hue': 50 - 50 * ratio, '--missing-count': faltantes }
+}
+
 function getAuthHeaders() {
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
   return nonce ? { 'X-WP-Nonce': nonce } : {}
 }
 
+// Para los profes, "viene el Lunes", "viene el Miércoles" y "viene Lunes y Miércoles" es la
+// misma franja — no hay que separarlos al buscar, solo en la ficha de cada alumno (que sigue
+// mostrando su día real). Mismo criterio que usa el backend para esto.
+const DIA_A_PAREJA = { Lunes: 'Lunes-Miércoles', Miércoles: 'Lunes-Miércoles', Martes: 'Martes-Jueves', Jueves: 'Martes-Jueves' }
+function diaAPareja(dia) { return DIA_A_PAREJA[dia] || dia }
+
 function diaMatches(claDia, filterDia) {
   if (!filterDia) return true
   if (!claDia) return false
-  if (claDia === filterDia) return true
-  // Single-day filter matches combined schedules containing that day
-  if (!filterDia.includes('-')) return claDia.split('-').includes(filterDia)
-  return false
+  return diaAPareja(claDia) === diaAPareja(filterDia)
 }
 
 function applyClaseFilters(clases, filters, exclude) {
@@ -41,6 +61,15 @@ function applyClaseFilters(clases, filters, exclude) {
 function distinct(clases, key) {
   const seen = new Set(), result = []
   clases.forEach(c => { if (c[key] && !seen.has(c[key])) { seen.add(c[key]); result.push(c[key]) } })
+  return result
+}
+// Opciones de "Día": una por franja (pareja), no una por cada combinación exacta de días.
+function distinctDiaParejas(clases) {
+  const seen = new Set(), result = []
+  clases.forEach(c => {
+    const p = c.dia && diaAPareja(c.dia)
+    if (p && !seen.has(p)) { seen.add(p); result.push(p) }
+  })
   return result
 }
 function sortDias(dias) {
@@ -66,7 +95,7 @@ function formatDate(dt) {
 }
 
 // ─── Per-student row in Test mode ───────────────────────────────────
-function TestModeRow({ alumno, testId, ambiguousActive }) {
+function TestModeRow({ alumno, testId, ambiguousActive, faltantes, onLogged }) {
   const { history, loading, logTraining, logTrainingConfirmed, updateTraining, reload } = useAlumnoTraining(alumno)
   const [value, setValue]   = useState('')
   const [note, setNote]     = useState('')
@@ -98,17 +127,18 @@ function TestModeRow({ alumno, testId, ambiguousActive }) {
       } else {
         if ((await logTrainingConfirmed(testId, val, unit, note)) === null) return
       }
-      setSaved(true); setTimeout(() => setSaved(false), 2000); reload()
+      setSaved(true); setTimeout(() => setSaved(false), 2000); reload(); onLogged?.()
     } catch (e) { setErr(e.message || 'Error') }
     finally { setSaving(false) }
   }
 
   return (
-    <tr className="entrena__test-row">
+    <tr className={`entrena__test-row${faltantes ? ' entrena__row--missing' : ''}`} style={missingRowStyle(faltantes)}>
       <td className="entrena__test-row__name">
         {alumno.cliente || alumno.nombre || '—'}
         {ambiguousActive && <span className="entrena__active-tag" title="Hay varias personas con este nombre — esta es la que tiene suscripción activa">activo ahora</span>}
         {alumno.is_placeholder && <span className="entrena__manual-tag" title="Alumno manual, sin cuenta vinculada">manual</span>}
+        {faltantes > 0 && <span className="entrena__missing-tag" title={`Le faltan ${faltantes} test${faltantes !== 1 ? 's' : ''} por hacer`}>faltan {faltantes}</span>}
       </td>
       <td className="entrena__test-row__meta">{alumno.dia} · {alumno.horario}</td>
       <td className="entrena__test-row__last">
@@ -197,6 +227,9 @@ export default function EntrenamientosPage() {
   const [manualError, setManualError]   = useState(null)
   const [manualDupes, setManualDupes]   = useState(null) // candidates the server returned for this name
   const [search, setSearch]             = useState('')
+  const [completitud, setCompletitud]   = useState({ users: {}, placeholders: {} })
+  const [completitudKey, setCompletitudKey] = useState(0)
+  const bumpCompletitud = useCallback(() => setCompletitudKey(k => k + 1), [])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -205,6 +238,16 @@ export default function EntrenamientosPage() {
       .then(json => { if (json?.data?.clases) setAllClases(json.data.clases) })
       .catch(() => {})
   }, [isAuthenticated])
+
+  // Para marcar a quién le faltan tests sin pedir el historial completo alumno por alumno.
+  // Se vuelve a pedir si cambia la lista de alumnos o justo después de guardar un test.
+  useEffect(() => {
+    if (!isAuthenticated) return
+    fetch(`${CLUB_URL}/wp-json/progreso/v1/training/completitud`, { credentials: 'include', headers: getAuthHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(json => { if (json?.data) setCompletitud(json.data) })
+      .catch(() => {})
+  }, [isAuthenticated, alumnos, completitudKey])
 
   const fetchAlumnos = useCallback(async (currentFilters) => {
     setLoading(true); setError(null)
@@ -284,12 +327,12 @@ export default function EntrenamientosPage() {
     }
   }
 
-  const diaOptions     = sortDias(distinct(applyClaseFilters(allClases, filters, 'dia'), 'dia'))
+  const diaOptions     = sortDias(distinctDiaParejas(applyClaseFilters(allClases, filters, 'dia')))
   const turnoOptions   = distinct(applyClaseFilters(allClases, filters, 'turno'), 'turno').sort()
   const edadOptions    = distinct(applyClaseFilters(allClases, filters, 'edad'), 'edad').sort()
   const horarioOptions = distinct(applyClaseFilters(allClases, filters, 'horario'), 'horario').sort()
 
-  const manualDiaOptions     = sortDias(distinct(applyClaseFilters(allClases, manualForm, 'dia'), 'dia'))
+  const manualDiaOptions     = sortDias(distinctDiaParejas(applyClaseFilters(allClases, manualForm, 'dia')))
   const manualTurnoOptions   = distinct(applyClaseFilters(allClases, manualForm, 'turno'), 'turno').sort()
   const manualEdadOptions    = distinct(applyClaseFilters(allClases, manualForm, 'edad'), 'edad').sort()
   const manualHorarioOptions = distinct(applyClaseFilters(allClases, manualForm, 'horario'), 'horario').sort()
@@ -555,7 +598,7 @@ export default function EntrenamientosPage() {
             <tbody>
               {visibleAlumnos
                 .filter(a => a.user_id || a.placeholder_id)
-                .map((a, i) => <TestModeRow key={a.placeholder_id ? `ph-${a.placeholder_id}` : (a.id ?? i)} alumno={a} testId={selectedTest} ambiguousActive={isAmbiguousActive(a)} />)
+                .map((a, i) => <TestModeRow key={a.placeholder_id ? `ph-${a.placeholder_id}` : (a.id ?? i)} alumno={a} testId={selectedTest} ambiguousActive={isAmbiguousActive(a)} faltantes={testsFaltantes(a, completitud)} onLogged={bumpCompletitud} />)
               }
             </tbody>
           </table>
@@ -580,16 +623,19 @@ export default function EntrenamientosPage() {
                 const isSelected = a.placeholder_id
                   ? selectedAlumno?.placeholder_id === a.placeholder_id
                   : (selectedAlumno?.id === a.id && !selectedAlumno?.placeholder_id)
+                const faltantes = testsFaltantes(a, completitud)
                 return (
                   <Fragment key={rowKey}>
                     <tr
-                      className={`entrena__row${isSelected ? ' entrena__row--active' : ''}`}
+                      className={`entrena__row${isSelected ? ' entrena__row--active' : ''}${faltantes ? ' entrena__row--missing' : ''}`}
+                      style={missingRowStyle(faltantes)}
                       onClick={() => setSelectedAlumno(isSelected ? null : a)}
                     >
                       <td>
                         {a.cliente || a.nombre || '—'}
                         {isAmbiguousActive(a) && <span className="entrena__active-tag" title="Hay varias personas con este nombre — esta es la que tiene suscripción activa">activo ahora</span>}
                         {a.is_placeholder && <span className="entrena__manual-tag" title="Alumno manual, sin cuenta vinculada">manual</span>}
+                        {faltantes > 0 && <span className="entrena__missing-tag" title={`Le faltan ${faltantes} test${faltantes !== 1 ? 's' : ''} por hacer`}>faltan {faltantes}</span>}
                       </td>
                       <td>{FRECUENCIA_LABEL[a.frecuencia] || a.producto || '—'}</td>
                       <td>{a.dia || '—'}</td>
