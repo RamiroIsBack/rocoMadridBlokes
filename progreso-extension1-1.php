@@ -3153,7 +3153,14 @@ function superadmin_gestion_grupos($request) {
         $horario_agrupa = blokes_horario_agrupable($horario);
         $gkey   = $pareja . '|' . $horario_agrupa . '|' . $edad;
         if (!isset($grupos[$gkey])) {
-            $label = $es_pilates_yoga ? $producto : trim($pareja . ' · ' . $horario_agrupa);
+            // La edad va DENTRO del label (no solo como campo aparte): dos grupos con el mismo
+            // día+horario pero distinta edad (adultos y niños a la misma hora) se veían
+            // idénticos en el selector si solo el frontend decidía si añadir el sufijo.
+            $edad_suffix = '';
+            if (!$es_pilates_yoga && $edad !== 'Adultos') {
+                $edad_suffix = ' · ' . (stripos($edad, 'Menores') !== false ? 'Niños' : (stripos($edad, 'Adolescentes') !== false ? 'Adol.' : $edad));
+            }
+            $label = $es_pilates_yoga ? $producto : (trim($pareja . ' · ' . $horario_agrupa) . $edad_suffix);
             $grupos[$gkey] = array('label' => $label, 'dia' => $pareja, 'horario' => $horario_agrupa, 'edad' => $edad, 'personas' => array());
         }
 

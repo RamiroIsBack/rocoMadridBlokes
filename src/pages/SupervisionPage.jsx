@@ -1178,10 +1178,9 @@ function GruposTab() {
             <option value="">Todos los grupos</option>
             {grupos.map(g => {
               const key = `${g.dia}|${g.horario}|${g.edad}`
-              const lbl = g.edad !== 'Adultos' ? `${g.label} (${g.edad})` : g.label
               const nVigor = g.alumnos.filter(a => a.enVigor).length
               const nEspera = g.alumnos.length - nVigor
-              return <option key={key} value={key}>{lbl} — {nVigor}{nEspera ? ` (+${nEspera} en espera)` : ''}</option>
+              return <option key={key} value={key}>{g.label} — {nVigor}{nEspera ? ` (+${nEspera} en espera)` : ''}</option>
             })}
           </select>
         </div>
