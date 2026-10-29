@@ -7832,3 +7832,495 @@ function presup_importar($request) {
         'partidas' => presup_partidas(),
     ));
 }
+
+// ============================================================
+//  superadmin/v1 — Proyectos: presupuestos de mejora por zona (solo socios)
+//  Se guarda el documento entero (zonas → capítulos → partidas) en una opción.
+//  'rev' evita que dos socios se pisen: si no coincide con la guardada, 409.
+// ============================================================
+
+add_action('rest_api_init', function() {
+    $socio_perm = function() { return blokes_get_app_role() === 'socio'; };
+
+    register_rest_route('superadmin/v1', '/projects', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'projects_get',
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'projects_save',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+});
+
+function projects_load() {
+    $doc = get_option('blokes_projects', null);
+    if (!is_array($doc)) $doc = array('zones' => array(), 'rev' => 0, 'updated_at' => '', 'by' => '');
+    return $doc;
+}
+
+function projects_get() {
+    return rest_ensure_response(array('success' => true, 'projects' => projects_load()));
+}
+
+function projects_text($v, $max) {
+    return mb_substr(trim(sanitize_text_field((string) $v)), 0, $max);
+}
+
+function projects_id($v) {
+    $id = preg_replace('/[^a-z0-9-]/', '', strtolower((string) $v));
+    return $id !== '' ? substr($id, 0, 40) : wp_generate_uuid4();
+}
+
+function projects_num($v, $min = 0, $max = 1000000) {
+    if ($v === '' || $v === null || !is_numeric($v)) return null;
+    return round(max($min, min($max, floatval($v))), 2);
+}
+
+function projects_clean_item($it) {
+    if (!is_array($it)) return null;
+    $concept = projects_text($it['concept'] ?? '', 200);
+    if ($concept === '') return null;
+    $status = in_array($it['status'] ?? '', array('pedir', 'pendiente', 'aprobado', 'comprado', 'descartado'), true) ? $it['status'] : 'pendiente';
+    $ref    = in_array($it['qty_ref'] ?? '', array('suelo', 'perimetro', 'paredes'), true) ? $it['qty_ref'] : '';
+    return array(
+        'id'         => projects_id($it['id'] ?? ''),
+        'concept'    => $concept,
+        'description'=> mb_substr(trim(sanitize_textarea_field((string) ($it['description'] ?? ''))), 0, 600),
+        'qty'        => projects_num($it['qty'] ?? null) ?? 1,
+        'qty_ref'    => $ref,
+        'qty_factor' => projects_num($it['qty_factor'] ?? null, 0, 100) ?? 1,
+        'unit'       => projects_text($it['unit'] ?? 'ud', 12),
+        'price'      => projects_num($it['price'] ?? null) ?? 0,
+        'price_got'  => projects_num($it['price_got'] ?? null),
+        'price_type' => projects_text($it['price_type'] ?? '', 40),
+        'status'     => $status,
+        'supplier'   => projects_text($it['supplier'] ?? '', 80),
+        'source_name'=> projects_text($it['source_name'] ?? '', 300),
+        'source'     => esc_url_raw(mb_substr(trim((string) ($it['source'] ?? '')), 0, 500)),
+        'checked_at' => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($it['checked_at'] ?? '')) ? $it['checked_at'] : '',
+        'note'       => mb_substr(trim(sanitize_textarea_field((string) ($it['note'] ?? ''))), 0, 600),
+    );
+}
+
+function projects_clean_zones($zones) {
+    if (!is_array($zones) || count($zones) > 30) return null;
+    $out = array();
+    foreach ($zones as $z) {
+        $name = projects_text($z['name'] ?? '', 60);
+        if ($name === '') continue;
+        $chapters = array();
+        foreach (array_slice(is_array($z['chapters'] ?? null) ? $z['chapters'] : array(), 0, 40) as $c) {
+            $cname = projects_text($c['name'] ?? '', 80);
+            if ($cname === '') continue;
+            $items = array();
+            foreach (array_slice(is_array($c['items'] ?? null) ? $c['items'] : array(), 0, 200) as $it) {
+                $clean = projects_clean_item($it);
+                if ($clean) $items[] = $clean;
+            }
+            $chapters[] = array('id' => projects_id($c['id'] ?? ''), 'name' => $cname, 'items' => $items);
+        }
+        $m = is_array($z['measures'] ?? null) ? $z['measures'] : array();
+        $out[] = array(
+            'id'       => projects_id($z['id'] ?? ''),
+            'name'     => $name,
+            'location' => projects_text($z['location'] ?? '', 120),
+            'notes'    => mb_substr(trim(sanitize_textarea_field((string) ($z['notes'] ?? ''))), 0, 3000),
+            'measures' => array(
+                'largo' => projects_num($m['largo'] ?? null, 0, 1000),
+                'ancho' => projects_num($m['ancho'] ?? null, 0, 1000),
+                'alto'  => projects_num($m['alto'] ?? null, 0, 100),
+            ),
+            'chapters' => $chapters,
+        );
+    }
+    return $out;
+}
+
+function projects_save($request) {
+    $body    = $request->get_json_params();
+    $current = projects_load();
+    if (intval($body['rev'] ?? -1) !== intval($current['rev'])) {
+        return new WP_Error('conflict', 'Otro socio ha guardado cambios mientras editabas. Recarga para verlos.', array('status' => 409));
+    }
+    $zones = projects_clean_zones($body['zones'] ?? null);
+    if ($zones === null) return new WP_Error('invalid_projects', 'Datos no válidos o demasiados', array('status' => 400));
+    $doc = array('zones' => $zones, 'rev' => intval($current['rev']) + 1, 'updated_at' => current_time('mysql'), 'by' => timeoff_user_name());
+    update_option('blokes_projects', $doc, false);
+    return rest_ensure_response(array('success' => true, 'projects' => $doc));
+}
+
+// ============================================================
+//  superadmin/v1 — Eventos: reservas de cumpleaños, colegios y eventos
+//  Acceso: socio y gestion, más los emails de la lista de Eventos
+//  (blokes_events_access, la edita un socio desde Superadmin → Acceso).
+// ============================================================
+
+function events_access_list() {
+    $list = get_option('blokes_events_access', array());
+    return is_array($list) ? array_values($list) : array();
+}
+
+function events_can_access() {
+    if (in_array(blokes_get_app_role(), array('socio', 'gestion'))) return true;
+    if (!is_user_logged_in()) return false;
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    return $email !== '' && in_array($email, array_map('strtolower', events_access_list()));
+}
+
+add_action('rest_api_init', function() {
+    $ev_perm    = 'events_can_access';
+    $socio_perm = function() { return blokes_get_app_role() === 'socio'; };
+
+    register_rest_route('superadmin/v1', '/events/access', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'events_get_access',
+            'permission_callback' => '__return_true',
+        ),
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'events_save_access',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/events/bookings', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'events_list_bookings',
+            'permission_callback' => $ev_perm,
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'events_create_bookings',
+            'permission_callback' => $ev_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/events/bookings/(?P<id>[a-z0-9-]+)', array(
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'events_update_booking',
+            'permission_callback' => $ev_perm,
+        ),
+        array(
+            'methods'             => 'DELETE',
+            'callback'            => 'events_delete_booking',
+            'permission_callback' => $ev_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/events/settings', array(
+        'methods'             => 'PUT',
+        'callback'            => 'events_save_settings',
+        'permission_callback' => $ev_perm,
+    ));
+});
+
+// Cualquiera puede preguntar si tiene acceso (para enseñar o no el menú); la lista solo la ve un socio.
+function events_get_access() {
+    $out = array('can' => events_can_access());
+    if (blokes_get_app_role() === 'socio') $out['emails'] = events_access_list();
+    return rest_ensure_response($out);
+}
+
+function events_save_access($request) {
+    $body  = $request->get_json_params();
+    $clean = array();
+    foreach ((is_array($body['emails'] ?? null) ? $body['emails'] : array()) as $email) {
+        $e = sanitize_email(strtolower(trim((string) $email)));
+        if ($e && !in_array($e, $clean)) $clean[] = $e;
+    }
+    update_option('blokes_events_access', $clean, false);
+    return rest_ensure_response(array('success' => true, 'emails' => $clean));
+}
+
+function events_default_settings() {
+    return array(
+        'price_per_kid' => 15,
+        'min_price'     => 180,
+        'deposit_pct'   => 30,
+        'monitors_pay'  => 80,
+        'slots'         => array('11:00', '17:00'),
+    );
+}
+
+function events_get_settings() {
+    $s = get_option('blokes_events_settings', array());
+    return array_merge(events_default_settings(), is_array($s) ? $s : array());
+}
+
+function events_save_settings($request) {
+    $body = $request->get_json_params();
+    $s    = events_get_settings();
+    foreach (array('price_per_kid', 'min_price', 'deposit_pct', 'monitors_pay') as $k) {
+        if (isset($body[$k]) && is_numeric($body[$k])) $s[$k] = round(max(0, floatval($body[$k])), 2);
+    }
+    if (isset($body['slots']) && is_array($body['slots'])) {
+        $slots = array();
+        foreach ($body['slots'] as $t) if (preg_match('/^\d{2}:\d{2}$/', (string) $t)) $slots[] = $t;
+        sort($slots);
+        if ($slots) $s['slots'] = array_values(array_unique($slots));
+    }
+    update_option('blokes_events_settings', $s, false);
+    return rest_ensure_response(array('success' => true, 'settings' => $s));
+}
+
+function events_get_bookings() {
+    $list = get_option('blokes_events_bookings', array());
+    return is_array($list) ? $list : array();
+}
+
+function events_save_bookings($list) {
+    usort($list, function($a, $b) { return strcmp($a['date'] . $a['time'], $b['date'] . $b['time']); });
+    update_option('blokes_events_bookings', array_values($list), false);
+}
+
+function events_num($v) {
+    if ($v === '' || $v === null || !is_numeric($v)) return null;
+    return round(max(0, min(100000, floatval($v))), 2);
+}
+
+function events_clean_booking($b) {
+    if (!is_array($b)) return null;
+    $date = (string) ($b['date'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return null;
+    $pick = function($v, $allowed, $default) { return in_array($v, $allowed, true) ? $v : $default; };
+    $text = function($v, $max) { return mb_substr(trim(sanitize_text_field((string) $v)), 0, $max); };
+    $time = function($v) { return preg_match('/^\d{2}:\d{2}$/', (string) $v) ? $v : ''; };
+    return array(
+        'date'          => $date,
+        'time'          => $time($b['time'] ?? ''),
+        'end_time'      => $time($b['end_time'] ?? ''),
+        'type'          => $pick($b['type'] ?? '', array('cumpleanos', 'colegio', 'asociacion', 'empresa', 'evento', 'otro'), 'cumpleanos'),
+        'status'        => $pick($b['status'] ?? '', array('solicitud', 'confirmada', 'celebrada', 'cancelada'), 'solicitud'),
+        'origin'        => $pick($b['origin'] ?? '', array('web', 'telefono', 'whatsapp', 'email', 'presencial', 'otro'), 'otro'),
+        'contact'       => $text($b['contact'] ?? '', 80),
+        'phone'         => $text($b['phone'] ?? '', 30),
+        'email'         => sanitize_email((string) ($b['email'] ?? '')),
+        'honoree'       => $text($b['honoree'] ?? '', 80),
+        'age'           => events_num($b['age'] ?? null),
+        'kids'          => events_num($b['kids'] ?? null),
+        'total'         => events_num($b['total'] ?? null),
+        'deposit'       => events_num($b['deposit'] ?? null),
+        'deposit_paid'  => !empty($b['deposit_paid']),
+        'deposit_date'  => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($b['deposit_date'] ?? '')) ? $b['deposit_date'] : '',
+        'rest_paid'     => !empty($b['rest_paid']),
+        'monitors_pay'  => events_num($b['monitors_pay'] ?? null),
+        'materials'     => events_num($b['materials'] ?? null),
+        'monitors'      => $text($b['monitors'] ?? '', 120),
+        'notes'         => mb_substr(trim(sanitize_textarea_field((string) ($b['notes'] ?? ''))), 0, 2000),
+    );
+}
+
+function events_list_bookings() {
+    return rest_ensure_response(array('success' => true, 'bookings' => events_get_bookings(), 'settings' => events_get_settings()));
+}
+
+// Acepta una reserva o { bookings: [...] } para cargar varias de golpe (migración del Excel)
+function events_create_bookings($request) {
+    $body  = $request->get_json_params();
+    $input = isset($body['bookings']) && is_array($body['bookings']) ? $body['bookings'] : array($body);
+    if (count($input) > 500) return new WP_Error('too_many', 'Máximo 500 reservas de golpe', array('status' => 400));
+    $list  = events_get_bookings();
+    $added = array();
+    foreach ($input as $raw) {
+        $b = events_clean_booking($raw);
+        if (!$b) continue;
+        $b['id']         = wp_generate_uuid4();
+        $b['created_at'] = current_time('mysql');
+        $b['created_by'] = timeoff_user_name();
+        $list[]  = $b;
+        $added[] = $b;
+    }
+    if (!$added) return new WP_Error('invalid_booking', 'Falta la fecha o no es válida', array('status' => 400));
+    events_save_bookings($list);
+    return rest_ensure_response(array('success' => true, 'added' => $added, 'bookings' => events_get_bookings()));
+}
+
+function events_update_booking($request) {
+    $id   = $request['id'];
+    $list = events_get_bookings();
+    foreach ($list as $i => $x) {
+        if ($x['id'] !== $id) continue;
+        $b = events_clean_booking(array_merge($x, (array) $request->get_json_params()));
+        if (!$b) return new WP_Error('invalid_booking', 'Falta la fecha o no es válida', array('status' => 400));
+        $list[$i] = array_merge($x, $b, array('updated_at' => current_time('mysql'), 'updated_by' => timeoff_user_name()));
+        events_save_bookings($list);
+        return rest_ensure_response(array('success' => true, 'booking' => $list[$i]));
+    }
+    return new WP_Error('not_found', 'Reserva no encontrada', array('status' => 404));
+}
+
+function events_delete_booking($request) {
+    $id   = $request['id'];
+    $list = array_values(array_filter(events_get_bookings(), function($x) use ($id) { return $x['id'] !== $id; }));
+    events_save_bookings($list);
+    return rest_ensure_response(array('success' => true));
+}
+
+// ============================================================
+//  superadmin/v1 — Calendario: tareas y eventos leídos de Notion
+//  Base de datos "Funciones Rocomadrid" (espacio Madridroco), con
+//  la integración interna "Blokes". El token lo pega un socio desde
+//  la web y solo vive en wp_options; nunca se devuelve al navegador.
+//  Lo ven socio y gestion. De momento solo lectura.
+// ============================================================
+
+define('BLOKES_NOTION_DB',          '290d5fb11f5b8090a0e2faab61be4695');
+define('BLOKES_NOTION_DATA_SOURCE', '290d5fb1-1f5b-80ba-98c0-000bfcf4a16f');
+
+function calendar_can_view() {
+    return in_array(blokes_get_app_role(), array('socio', 'gestion'));
+}
+
+add_action('rest_api_init', function() {
+    register_rest_route('superadmin/v1', '/calendar', array(
+        'methods'             => 'GET',
+        'callback'            => 'calendar_get_items',
+        'permission_callback' => 'calendar_can_view',
+    ));
+    register_rest_route('superadmin/v1', '/calendar/token', array(
+        'methods'             => 'PUT',
+        'callback'            => 'calendar_save_token',
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+    ));
+});
+
+// Llama a la API de Notion. Prueba primero con data sources (API 2025-09-03)
+// y, si no, con la consulta clásica de base de datos (2022-06-28).
+function calendar_notion_query($token, $body) {
+    $tries = array(
+        array('https://api.notion.com/v1/data_sources/' . BLOKES_NOTION_DATA_SOURCE . '/query', '2025-09-03'),
+        array('https://api.notion.com/v1/databases/' . BLOKES_NOTION_DB . '/query', '2022-06-28'),
+    );
+    $last = null;
+    foreach ($tries as $t) {
+        $res = wp_remote_post($t[0], array(
+            'timeout' => 20,
+            'headers' => array(
+                'Authorization'  => 'Bearer ' . $token,
+                'Notion-Version' => $t[1],
+                'Content-Type'   => 'application/json',
+            ),
+            'body'    => wp_json_encode($body),
+        ));
+        if (is_wp_error($res)) return new WP_Error('notion_down', 'No se pudo conectar con Notion: ' . $res->get_error_message(), array('status' => 502));
+        $code = wp_remote_retrieve_response_code($res);
+        $json = json_decode(wp_remote_retrieve_body($res), true);
+        if ($code === 200) return $json;
+        $last = array($code, is_array($json) ? ($json['code'] ?? '') : '');
+        if ($code === 401) break;
+    }
+    if ($last[0] === 401) return new WP_Error('notion_token', 'Notion no acepta el token. Revisa que sea el de la integración Blokes del espacio Madridroco.', array('status' => 502));
+    if ($last[1] === 'object_not_found') return new WP_Error('notion_access', 'La integración Blokes no tiene acceso a «Funciones Rocomadrid». Conéctala desde Notion: ••• → Más → Conexiones.', array('status' => 502));
+    return new WP_Error('notion_error', 'Notion respondió con un error (' . $last[0] . ' ' . $last[1] . ')', array('status' => 502));
+}
+
+function calendar_plain($rich) {
+    $out = '';
+    foreach ((array) $rich as $r) $out .= $r['plain_text'] ?? '';
+    return trim($out);
+}
+
+// Página de Notion → elemento del calendario. Busca las propiedades por tipo
+// o por nombre sin espacios, porque "Fecha " lleva un espacio al final.
+function calendar_map_page($p) {
+    $props = $p['properties'] ?? array();
+    $by    = array();
+    foreach ($props as $name => $v) $by[trim($name)] = $v;
+    $title = '';
+    $date  = null;
+    foreach ($props as $v) {
+        if (($v['type'] ?? '') === 'title') $title = calendar_plain($v['title']);
+    }
+    if (isset($by['Fecha']['date'])) $date = $by['Fecha']['date'];
+    if (!$date || empty($date['start'])) return null;
+    $select = function($k) use ($by) {
+        if (!isset($by[$k]['type'])) return null;
+        $v = $by[$k][$by[$k]['type']] ?? null;
+        return $v ? array('name' => $v['name'], 'color' => $v['color'] ?? 'default') : null;
+    };
+    $text = function($k) use ($by) {
+        return isset($by[$k]['rich_text']) ? calendar_plain($by[$k]['rich_text']) : '';
+    };
+    $owners = array();
+    foreach ((array) ($by['Encargado']['multi_select'] ?? array()) as $o) $owners[] = $o['name'];
+    return array(
+        'id'       => $p['id'],
+        'url'      => $p['url'] ?? '',
+        'title'    => $title !== '' ? $title : 'Sin título',
+        'start'    => $date['start'],
+        'end'      => $date['end'] ?? null,
+        'category' => $select('Categoría'),
+        'status'   => $select('Estado'),
+        'owners'   => $owners,
+        'concept'  => $text('Concepto'),
+        'comment'  => $text('Comentario'),
+        'contact'  => $text('Contacto'),
+        'price'    => $by['Precio']['number'] ?? null,
+    );
+}
+
+function calendar_get_items($request) {
+    $token = get_option('blokes_notion_token', '');
+    if (!$token) return rest_ensure_response(array('configured' => false, 'items' => array()));
+
+    $from = (string) $request->get_param('from');
+    $to   = (string) $request->get_param('to');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) || $from > $to) {
+        return new WP_Error('bad_range', 'Rango de fechas no válido', array('status' => 400));
+    }
+    if ((strtotime($to) - strtotime($from)) > 120 * DAY_IN_SECONDS) {
+        return new WP_Error('bad_range', 'Rango de fechas demasiado largo', array('status' => 400));
+    }
+
+    $key = 'blokes_cal_' . md5($from . $to . get_option('blokes_notion_cache_v', 0));
+    if (!$request->get_param('refresh')) {
+        $cached = get_transient($key);
+        if (is_array($cached)) return rest_ensure_response($cached);
+    }
+
+    // Lo que empieza hasta 60 días antes también entra si termina dentro del rango (vacaciones, etc.)
+    $since = gmdate('Y-m-d', strtotime($from) - 60 * DAY_IN_SECONDS);
+    $body  = array(
+        'filter'    => array('and' => array(
+            array('property' => 'Fecha ', 'date' => array('on_or_after'  => $since)),
+            array('property' => 'Fecha ', 'date' => array('on_or_before' => $to)),
+        )),
+        'sorts'     => array(array('property' => 'Fecha ', 'direction' => 'ascending')),
+        'page_size' => 100,
+    );
+    $items = array();
+    for ($i = 0; $i < 10; $i++) {
+        $json = calendar_notion_query($token, $body);
+        if (is_wp_error($json)) return $json;
+        foreach ((array) ($json['results'] ?? array()) as $p) {
+            $it = calendar_map_page($p);
+            if (!$it) continue;
+            $last = substr($it['end'] ?: $it['start'], 0, 10);
+            if ($last >= $from) $items[] = $it;
+        }
+        if (empty($json['has_more']) || empty($json['next_cursor'])) break;
+        $body['start_cursor'] = $json['next_cursor'];
+    }
+
+    $out = array('configured' => true, 'items' => $items, 'fetched_at' => current_time('mysql'));
+    set_transient($key, $out, 5 * MINUTE_IN_SECONDS);
+    return rest_ensure_response($out);
+}
+
+// Guarda el token solo si Notion lo acepta y ve la base de datos.
+function calendar_save_token($request) {
+    $body  = $request->get_json_params();
+    $token = trim((string) ($body['token'] ?? ''));
+    if (!preg_match('/^(ntn_|secret_)[A-Za-z0-9]{20,}$/', $token)) {
+        return new WP_Error('bad_token', 'Eso no parece un token de Notion (empieza por ntn_)', array('status' => 400));
+    }
+    $test = calendar_notion_query($token, array('page_size' => 1));
+    if (is_wp_error($test)) return $test;
+    update_option('blokes_notion_token', $token, false);
+    update_option('blokes_notion_cache_v', time(), false);
+    return rest_ensure_response(array('success' => true));
+}

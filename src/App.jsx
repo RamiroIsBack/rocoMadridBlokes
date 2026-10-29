@@ -16,10 +16,13 @@ import PlaygroundPage from './pages/PlaygroundPage'
 import FichajePage from './pages/FichajePage'
 import TimeOffPage from './pages/TimeOffPage'
 import LeaguesPage from './pages/LeaguesPage'
+import EventosPage from './pages/EventosPage'
+import CalendarioPage from './pages/CalendarioPage'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
 import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
+import { useEventsAccess } from './hooks/useEvents'
 import './App.css'
 
 const PRODUCT_NAMES = { 'Classes': 'Clases', 'Single Days': 'Días sueltos' }
@@ -35,7 +38,7 @@ const SUBSALA_POSITIONS = {
   '8': { top: '44.5%', right: '18%', transform: 'translateX(50%)' },
 }
 
-const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground']
+const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground', '/eventos', '/calendario']
 
 function detectBasename() {
   const injected = window.blokesSiteData?.appBasename
@@ -73,6 +76,7 @@ export default function App() {
   const [navVisible, setNavVisible] = useState(false)
   const lastScrollY = useRef(0)
   const sd = window.blokesSiteData || {}
+  const canEvents = useEventsAccess()
 
   // Profile modal state
   const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto } = useProfile()
@@ -292,6 +296,16 @@ export default function App() {
                   </li>
                 </>
               )}
+              {canEvents && (
+                <li className="app-nav__item">
+                  <NavLink to="/eventos" className="app-nav__link">Eventos</NavLink>
+                </li>
+              )}
+              {['gestion', 'socio'].includes(sd.userRole) && (
+                <li className="app-nav__item">
+                  <NavLink to="/calendario" className="app-nav__link">Calendario</NavLink>
+                </li>
+              )}
               {sd.userRole === 'socio' && (
                 <li className="app-nav__item">
                   <NavLink to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</NavLink>
@@ -334,6 +348,8 @@ export default function App() {
             <Route path="/supervision" element={<SupervisionPage />} />
             <Route path="/playground" element={<PlaygroundPage />} />
             <Route path="/ligas" element={<LeaguesPage />} />
+            <Route path="/eventos" element={<EventosPage />} />
+            <Route path="/calendario" element={<CalendarioPage />} />
           </Routes>
         </main>
 

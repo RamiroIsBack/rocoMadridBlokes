@@ -8,6 +8,8 @@ import ExpensesSection from '../components/ExpensesSection'
 import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
 import PayrollSection from '../components/PayrollSection'
 import PresupuestosSection from '../components/PresupuestosSection'
+import ProjectsSection from '../components/ProjectsSection'
+import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
 import './SuperAdminPage.css'
 
 const PERIOD_OPTIONS = [
@@ -1099,6 +1101,7 @@ export default function SuperAdminPage() {
     { key: 'nominas',  label: 'Nóminas' },
     { key: 'acceso',   label: 'Acceso' },
     { key: 'presupuestos', label: 'Presupuestos' },
+    { key: 'proyectos', label: 'Proyectos' },
   ]
 
   return (
@@ -1123,6 +1126,7 @@ export default function SuperAdminPage() {
       {saTab === 'nominas'  && <PayrollSection />}
       {saTab === 'acceso'   && <ListasSection />}
       {saTab === 'presupuestos' && <PresupuestosSection />}
+      {saTab === 'proyectos' && <ProjectsSection />}
     </div>
   )
 }
@@ -1231,9 +1235,68 @@ function ListasSection() {
                 </div>
               )
             })}
+            <EventsAccessGroup />
           </div>
         </div>
       </details>
     </section>
+  )
+}
+
+// Lista de Eventos: se guarda aparte (superadmin/v1), para dar acceso solo a Eventos (p. ej. Juan)
+function EventsAccessGroup() {
+  const [emails, setEmails] = useState(null)
+  const [input,  setInput]  = useState('')
+  const [status, setStatus] = useState('')   // '', 'saving', 'saved' o mensaje de error
+
+  useEffect(() => {
+    getEventsAccess().then(json => setEmails(json.emails || [])).catch(e => { setEmails([]); setStatus(e.message) })
+  }, [])
+
+  const add = () => {
+    const email = input.trim().toLowerCase()
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return
+    if (!emails.includes(email)) setEmails([...emails, email])
+    setInput('')
+  }
+  const save = async () => {
+    setStatus('saving')
+    try {
+      setEmails(await saveEventsAccess(emails))
+      setStatus('saved')
+      setTimeout(() => setStatus(''), 3000)
+    } catch (e) {
+      setStatus(e.message)
+    }
+  }
+
+  if (!emails) return null
+  return (
+    <div className="sa-list-group" style={{ '--list-color': '#f87171' }}>
+      <div className="sa-list-group__header">
+        <span className="sa-list-group__name">Eventos</span>
+        <span className="sa-list-group__acceso">Solo la sección Eventos (gestión y socios ya entran)</span>
+      </div>
+      <div className="sa-list-group__emails">
+        {emails.map(email => (
+          <span key={email} className="sa-list-email">
+            {email}
+            <button className="sa-list-email__remove" onClick={() => setEmails(emails.filter(e => e !== email))} aria-label="Quitar">×</button>
+          </span>
+        ))}
+        {emails.length === 0 && <span className="sa-list-empty">Sin emails configurados</span>}
+      </div>
+      <div className="sa-list-add">
+        <input
+          type="email" className="sa-list-add__input" placeholder="nuevo@email.com"
+          value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()}
+        />
+        <button className="sa-list-add__btn" onClick={add}>+</button>
+        <button className={`sa-list-save__btn${status === 'saved' ? ' sa-list-save__btn--saved' : ''}`} onClick={save} disabled={status === 'saving'}>
+          {status === 'saving' ? '…' : status === 'saved' ? 'Guardado ✓' : 'Guardar'}
+        </button>
+        {status && !['saving', 'saved'].includes(status) && <span className="sa-list-error">{status}</span>}
+      </div>
+    </div>
   )
 }
