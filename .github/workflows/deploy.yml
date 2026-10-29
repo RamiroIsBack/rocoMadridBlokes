@@ -63,6 +63,10 @@ jobs:
           done
 
       - name: Upload PHP files and .htaccess
+        # Solo master toca el plugin PHP en vivo: es un único fichero compartido en el
+        # servidor (no hay una copia separada para blokes-dev), así que si dev también
+        # subiera aquí, el último push (de cualquiera de las dos ramas) pisaría al otro.
+        if: github.ref_name == 'master'
         env:
           FTP_HOST: ${{ secrets.SFTP_HOST }}
           FTP_USER: ${{ secrets.SFTP_USERNAME }}
