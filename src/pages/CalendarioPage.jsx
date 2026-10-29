@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  useCalendar, saveNotionToken, getBookings, notionColor,
+  useCalendar, useCalendarAccess, saveNotionToken, notionColor,
   CATEGORY_COLORS, CALENDAR_CATEGORIES, NO_CATEGORY, NOTION_CALENDAR_URL,
 } from '../hooks/useCalendar'
 import { TYPES, typeOf, statusOf } from '../hooks/useEvents'
@@ -217,7 +217,8 @@ function MonthSummary({ items, month, order, onOpen }) {
 }
 
 // ─── Detalle ────────────────────────────────────────────────────────────────
-function Detail({ it, onClose }) {
+// Quien no es socio ni gestión recibe del servidor menos campos: las filas vacías no salen.
+function Detail({ it, full, onClose }) {
   const r   = it.raw
   const row = (label, value) => value ? <div className="cal-detail__row"><span>{label}</span><p>{value}</p></div> : null
   const when = it.endDate !== it.date
@@ -236,7 +237,7 @@ function Detail({ it, onClose }) {
           <>
             {row('Categoría', it.category)}
             {row('Estado', r.status?.name)}
-            {row('Encargado', r.owners.join(', '))}
+            {row('Encargado', r.owners?.join(', '))}
             {row('Concepto', r.concept)}
             {row('Contacto', r.contact)}
             {row('Precio', r.price != null ? fmtEur(r.price) : '')}
@@ -247,16 +248,20 @@ function Detail({ it, onClose }) {
             {row('Estado', statusOf(r.status).label)}
             {row('Referente', r.contact)}
             {row('Teléfono', r.phone)}
+            {row('Edad', r.age)}
             {row('Niños / personas', r.kids)}
+            {row('Monitores', r.monitors)}
             {row('Notas', r.notes)}
           </>
         )}
       </div>
-      <div className="sa-pay-actions">
-        {it.kind === 'notion'
-          ? <a className="sa-list-save__btn cal-btn-link" href={r.url} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>
-          : <Link className="sa-list-save__btn cal-btn-link" to="/eventos">Ver en Eventos</Link>}
-      </div>
+      {full && (
+        <div className="sa-pay-actions">
+          {it.kind === 'notion'
+            ? <a className="sa-list-save__btn cal-btn-link" href={r.url} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>
+            : <Link className="sa-list-save__btn cal-btn-link" to="/eventos">Ver en Eventos</Link>}
+        </div>
+      )}
     </div>
   )
 }
@@ -324,8 +329,8 @@ function NotionSetup({ onSaved, onCancel }) {
 
 // ─── Página ─────────────────────────────────────────────────────────────────
 export default function CalendarioPage() {
-  const role    = window.blokesSiteData?.userRole
-  const isSocio = role === 'socio'
+  const isSocio = window.blokesSiteData?.userRole === 'socio'
+  const access  = useCalendarAccess()
   const [week, setWeek]   = useState(() => weekStart(today()))
   const [month, setMonth] = useState(() => monthOf(today()))
   const [prefs, setPrefs] = useState(() => {
@@ -336,21 +341,15 @@ export default function CalendarioPage() {
   })
   const [open, setOpen]   = useState(null)
   const [setup, setSetup] = useState(false)
-  const [bookings, setBookings] = useState([])
 
   // Se pide a Notion lo que cubren a la vez la semana y el mes que se ven
   const cells = monthCells(month)
   const from  = [week, cells[0]].sort()[0]
   const to    = [addDays(week, 6), cells[cells.length - 1]].sort()[1]
-  const { data, loading, error, reload } = useCalendar(from, to)
+  const { data, loading, error, reload } = useCalendar(from, to, access.can)
+  const full = data?.full ?? access.full
 
   const update = changes => setPrefs(p => { const n = { ...p, ...changes }; savePrefs(n); return n })
-
-  const showEvents = prefs.evTypes.length > 0
-  useEffect(() => {
-    if (!showEvents) return
-    getBookings().then(setBookings).catch(() => setBookings([]))
-  }, [showEvents])
 
   // Categorías elegidas dentro de las de eventos; null = todas (también si lo guardado ya no vale)
   const selCats = useMemo(() => {
@@ -359,7 +358,7 @@ export default function CalendarioPage() {
   }, [prefs.cats])
 
   const items = useMemo(() => {
-    const evs = bookings.filter(b => b.status !== 'cancelada' && prefs.evTypes.includes(b.type))
+    const evs = (data?.bookings ?? []).filter(b => b.status !== 'cancelada' && prefs.evTypes.includes(b.type))
     // Si ese día ya hay un cumpleaños en Eventos, el "Cumpleaños" de Notion es el mismo: no se repite
     const cumpleDays = new Set(evs.filter(b => b.type === 'cumpleanos').map(b => b.date))
     const notion = (data?.items ?? []).map(fromNotion)
@@ -368,13 +367,13 @@ export default function CalendarioPage() {
       .filter(it => !selCats || selCats.includes(it.category))
       .filter(it => !(it.category === 'Cumpleaños' && cumpleDays.has(it.date)))
     return [...notion, ...evs.map(fromBooking)]
-  }, [data, bookings, prefs, selCats])
+  }, [data, prefs, selCats])
 
-  if (!['socio', 'gestion'].includes(role)) {
+  if (!access.can) {
     return (
       <div className="sa-forbidden">
         <span className="sa-forbidden__icon">🔒</span>
-        <p>Acceso restringido a gestión y socios.</p>
+        <p>Acceso restringido a gestión, socios, profes y personas autorizadas.</p>
       </div>
     )
   }
@@ -415,7 +414,7 @@ export default function CalendarioPage() {
           <div className="sa-section cal-controls">
           <div className="ev-toolbar">
             <button className="sa-pay-action" onClick={() => reload(true)} disabled={loading}>{loading ? 'Cargando…' : 'Actualizar'}</button>
-            <a className="sa-pay-action cal-btn-link" href={NOTION_CALENDAR_URL} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>
+            {full && <a className="sa-pay-action cal-btn-link" href={NOTION_CALENDAR_URL} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>}
             <EventTypesDropdown selected={prefs.evTypes} onChange={evTypes => update({ evTypes })} />
             <label className="cal-switch">
               <input type="checkbox" checked={prefs.archived} onChange={e => update({ archived: e.target.checked })} />
@@ -435,14 +434,14 @@ export default function CalendarioPage() {
 
           {error && <div className="sa-error">Error: {error}</div>}
 
-          {open && <Detail key={open.key} it={open} onClose={() => setOpen(null)} />}
+          {open && <Detail key={open.key} it={open} full={full} onClose={() => setOpen(null)} />}
 
           <WeekSummary items={items} start={week} onShift={shiftWeek} onOpen={openItem} />
           <MonthCalendar items={items} month={month} onMonth={setMonth} onOpen={openItem} legend={legend} />
           <MonthSummary items={items} month={month} order={[...cats, ...TYPES.map(t => `${t.label} (Eventos)`)]} onOpen={openItem} />
           <p className="sa-pay-note">
-            Los datos vienen de Notion («Funciones Rocomadrid») y se refrescan cada 5 minutos; «Actualizar» los trae al momento.
-            Para cambiar una tarea, ábrela en Notion.
+            Los datos vienen de Notion («Funciones Rocomadrid») y de Eventos, y se refrescan cada 5 minutos; «Actualizar» los trae al momento.
+            {full && ' Para cambiar una tarea, ábrela en Notion.'}
           </p>
         </>
       )}

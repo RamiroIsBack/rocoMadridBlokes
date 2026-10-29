@@ -8459,7 +8459,104 @@ function events_clean_booking($b) {
     );
 }
 
+// Reservas de la web: Simply Schedule Appointments vive en el sitio principal (blog 1) y guarda
+// las horas en UTC. Cada vez que se abren Eventos o el Calendario:
+//  - una cita nueva con fecha de hoy en adelante entra como Solicitud · Web (con ssa_id). Si ya
+//    había una reserva sin ssa_id ese día a esa hora (apuntada a mano), solo se enlaza;
+//  - si una cita enlazada se cancela en la web, la reserva pasa a Cancelada.
+// No se toca nada más, para no pisar lo que edite Juan. Las citas ya vistas se recuerdan
+// (blokes_events_ssa_seen): si Juan borra una reserva importada, no vuelve a entrar.
+function events_ssa_sync() {
+    global $wpdb;
+    $table = $wpdb->get_blog_prefix(1) . 'ssa_appointments';
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table))) !== $table) return;
+    if (get_transient('blokes_ssa_sync_lock')) return;
+    set_transient('blokes_ssa_sync_lock', 1, 30);
+
+    $rows = $wpdb->get_results("SELECT id, status, start_date, end_date, customer_information FROM `$table`", ARRAY_A) ?: array();
+    $list = events_get_bookings();
+    $seen = get_option('blokes_events_ssa_seen', array());
+    $seen = is_array($seen) ? $seen : array();
+    $tz   = wp_timezone();
+    $now  = wp_date('Y-m-d');
+    $changed = false;
+
+    $local = function($utc) use ($tz) {
+        try { $d = new DateTime($utc, new DateTimeZone('UTC')); } catch (Exception $e) { return null; }
+        $d->setTimezone($tz);
+        return $d;
+    };
+
+    $by_ssa = array();
+    foreach ($list as $i => $b) if (!empty($b['ssa_id'])) $by_ssa[intval($b['ssa_id'])] = $i;
+
+    foreach ($rows as $r) {
+        $sid    = intval($r['id']);
+        $booked = in_array($r['status'], array('booked', 'pending_form', 'pending_payment'), true);
+
+        // Cancelada (o cambiada de día) en la web
+        if (isset($by_ssa[$sid])) {
+            $i = $by_ssa[$sid];
+            if (!$booked && in_array($list[$i]['status'], array('solicitud', 'confirmada'), true)) {
+                $list[$i]['status']     = 'cancelada';
+                $list[$i]['notes']      = trim($list[$i]['notes'] . "\nCancelada en la web (" . wp_date('d/m/Y H:i') . ').');
+                $list[$i]['updated_at'] = current_time('mysql');
+                $list[$i]['updated_by'] = 'Web (SSA)';
+                $changed = true;
+            }
+            continue;
+        }
+        if (in_array($sid, $seen, true) || !$booked) continue;
+
+        $start = $local($r['start_date']);
+        $end   = $local($r['end_date']);
+        if (!$start || $start->format('Y-m-d') < $now) continue;
+        $date = $start->format('Y-m-d');
+        $time = $start->format('H:i');
+        $seen[]  = $sid;
+        $changed = true;
+
+        // ¿Ya la había apuntado alguien a mano?
+        $match = null;
+        foreach ($list as $i => $b) {
+            if (empty($b['ssa_id']) && $b['date'] === $date && $b['time'] === $time && $b['status'] !== 'cancelada') { $match = $i; break; }
+        }
+        if ($match !== null) {
+            $list[$match]['ssa_id'] = $sid;
+            continue;
+        }
+
+        $info = json_decode((string) $r['customer_information'], true);
+        $info = is_array($info) ? array_change_key_case($info, CASE_LOWER) : array();
+        $b = events_clean_booking(array(
+            'date'     => $date,
+            'time'     => $time,
+            'end_time' => $end ? $end->format('H:i') : '',
+            'type'     => 'cumpleanos',
+            'status'   => 'solicitud',
+            'origin'   => 'web',
+            'contact'  => $info['name'] ?? '',
+            'email'    => $info['email'] ?? '',
+            'phone'    => $info['phone'] ?? '',
+            'notes'    => trim(($info['notes'] ?? '') . "\nReserva hecha en la web."),
+        ));
+        if (!$b) continue;
+        $b['id']         = wp_generate_uuid4();
+        $b['ssa_id']     = $sid;
+        $b['created_at'] = current_time('mysql');
+        $b['created_by'] = 'Web (SSA)';
+        $list[] = $b;
+    }
+
+    if ($changed) {
+        events_save_bookings($list);
+        update_option('blokes_events_ssa_seen', array_values(array_unique($seen)), false);
+    }
+    delete_transient('blokes_ssa_sync_lock');
+}
+
 function events_list_bookings() {
+    events_ssa_sync();
     return rest_ensure_response(array('success' => true, 'bookings' => events_get_bookings(), 'settings' => events_get_settings()));
 }
 
@@ -8510,28 +8607,75 @@ function events_delete_booking($request) {
 //  Base de datos "Funciones Rocomadrid" (espacio Madridroco), con
 //  la integración interna "Blokes". El token lo pega un socio desde
 //  la web y solo vive en wp_options; nunca se devuelve al navegador.
-//  Lo ven socio y gestion. De momento solo lectura.
+//  Socio y gestion lo ven entero. Los profesores y los emails de la
+//  lista de Calendario (blokes_calendar_access, la edita un socio desde
+//  Superadmin → Acceso) ven una versión reducida: sin contactos,
+//  teléfonos, precios ni comentarios. Se recorta aquí, en el servidor.
+//  De momento solo lectura.
 // ============================================================
 
 define('BLOKES_NOTION_DB',          '290d5fb11f5b8090a0e2faab61be4695');
 define('BLOKES_NOTION_DATA_SOURCE', '290d5fb1-1f5b-80ba-98c0-000bfcf4a16f');
 
-function calendar_can_view() {
+function calendar_access_list() {
+    $list = get_option('blokes_calendar_access', array());
+    return is_array($list) ? array_values($list) : array();
+}
+
+function calendar_full_view() {
     return in_array(blokes_get_app_role(), array('socio', 'gestion'));
 }
 
+function calendar_can_view() {
+    if (in_array(blokes_get_app_role(), array('socio', 'gestion', 'profesor'))) return true;
+    if (!is_user_logged_in()) return false;
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    return $email !== '' && in_array($email, array_map('strtolower', calendar_access_list()));
+}
+
 add_action('rest_api_init', function() {
+    $socio_perm = function() { return blokes_get_app_role() === 'socio'; };
     register_rest_route('superadmin/v1', '/calendar', array(
         'methods'             => 'GET',
         'callback'            => 'calendar_get_items',
         'permission_callback' => 'calendar_can_view',
     ));
+    register_rest_route('superadmin/v1', '/calendar/access', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'calendar_get_access',
+            'permission_callback' => '__return_true',
+        ),
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'calendar_save_access',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
     register_rest_route('superadmin/v1', '/calendar/token', array(
         'methods'             => 'PUT',
         'callback'            => 'calendar_save_token',
-        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+        'permission_callback' => $socio_perm,
     ));
 });
+
+// Cualquiera puede preguntar si tiene acceso (para enseñar o no el menú); la lista solo la ve un socio.
+function calendar_get_access() {
+    $out = array('can' => calendar_can_view(), 'full' => calendar_full_view());
+    if (blokes_get_app_role() === 'socio') $out['emails'] = calendar_access_list();
+    return rest_ensure_response($out);
+}
+
+function calendar_save_access($request) {
+    $body  = $request->get_json_params();
+    $clean = array();
+    foreach ((is_array($body['emails'] ?? null) ? $body['emails'] : array()) as $email) {
+        $e = sanitize_email(strtolower(trim((string) $email)));
+        if ($e && !in_array($e, $clean)) $clean[] = $e;
+    }
+    update_option('blokes_calendar_access', $clean, false);
+    return rest_ensure_response(array('success' => true, 'emails' => $clean));
+}
 
 // Llama a la API de Notion. Prueba primero con data sources (API 2025-09-03)
 // y, si no, con la consulta clásica de base de datos (2022-06-28).
@@ -8608,10 +8752,9 @@ function calendar_map_page($p) {
     );
 }
 
+// Tareas de Notion + reservas de Eventos del rango. Quien no es socio ni gestión recibe la
+// versión reducida (sin contactos, teléfonos, precios, notas ni enlace a Notion).
 function calendar_get_items($request) {
-    $token = get_option('blokes_notion_token', '');
-    if (!$token) return rest_ensure_response(array('configured' => false, 'items' => array()));
-
     $from = (string) $request->get_param('from');
     $to   = (string) $request->get_param('to');
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) || $from > $to) {
@@ -8621,10 +8764,34 @@ function calendar_get_items($request) {
         return new WP_Error('bad_range', 'Rango de fechas demasiado largo', array('status' => 400));
     }
 
+    $out = calendar_notion_items($from, $to, (bool) $request->get_param('refresh'));
+    if (is_wp_error($out)) return $out;
+
+    events_ssa_sync();
+    $bookings = array_values(array_filter(events_get_bookings(), function($b) use ($from, $to) {
+        return $b['date'] >= $from && $b['date'] <= $to && $b['status'] !== 'cancelada';
+    }));
+
+    $out['full'] = calendar_full_view();
+    if (!$out['full']) {
+        $keep_task    = array_flip(array('id', 'title', 'start', 'end', 'category', 'status', 'owners'));
+        $keep_booking = array_flip(array('id', 'date', 'time', 'end_time', 'type', 'status', 'honoree', 'age', 'kids', 'monitors'));
+        $out['items'] = array_map(function($it) use ($keep_task) { return array_intersect_key($it, $keep_task); }, $out['items']);
+        $bookings     = array_map(function($b) use ($keep_booking) { return array_intersect_key($b, $keep_booking); }, $bookings);
+    }
+    $out['bookings'] = $bookings;
+    return rest_ensure_response($out);
+}
+
+// Lo de Notion, guardado 5 minutos ($refresh se lo salta)
+function calendar_notion_items($from, $to, $refresh) {
+    $token = get_option('blokes_notion_token', '');
+    if (!$token) return array('configured' => false, 'items' => array());
+
     $key = 'blokes_cal_' . md5($from . $to . get_option('blokes_notion_cache_v', 0));
-    if (!$request->get_param('refresh')) {
+    if (!$refresh) {
         $cached = get_transient($key);
-        if (is_array($cached)) return rest_ensure_response($cached);
+        if (is_array($cached)) return $cached;
     }
 
     // Lo que empieza hasta 60 días antes también entra si termina dentro del rango (vacaciones, etc.)
@@ -8653,7 +8820,7 @@ function calendar_get_items($request) {
 
     $out = array('configured' => true, 'items' => $items, 'fetched_at' => current_time('mysql'));
     set_transient($key, $out, 5 * MINUTE_IN_SECONDS);
-    return rest_ensure_response($out);
+    return $out;
 }
 
 // Guarda el token solo si Notion lo acepta y ve la base de datos.
