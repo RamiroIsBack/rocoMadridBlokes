@@ -3617,6 +3617,15 @@ function blokes_externos_nombre_coincide_usuario($nombre_norm, $usuario_n) {
     return count($tokens) >= 2 && $usuario_n === ($tokens[0] . $tokens[1]);
 }
 
+// ¿Hay constancia de pago ese periodo? Vale el importe, o que el método apunte a "web" (lo paga
+// por la suscripción de WooCommerce, no por este seguimiento aparte, así que no trae importe).
+function blokes_externos_tiene_pago($pagos, $periodo) {
+    $p = is_array($pagos) ? ($pagos[$periodo] ?? null) : null;
+    if (!is_array($p)) return false;
+    if (floatval($p['importe'] ?? 0) > 0) return true;
+    return mb_strtolower(trim((string) ($p['metodo'] ?? ''))) === 'web';
+}
+
 // Todos los externos activos, con sus pagos anidados por periodo (YYYY-MM).
 function blokes_externos_todos() {
     blokes_ensure_externos_tables();
@@ -3673,23 +3682,22 @@ function blokes_externos_buscar_en_web($telefono, $nombre, $dia = '', $horario =
             || ($usuario_n !== '' && blokes_externos_nombres_parecidos($nombre_norm, $usuario_n))
         );
 
-        if ($tel === '') {
-            if ($nombre_parecido && !$familiar) $familiar = array('subId' => intval($s['id']), 'tipo' => 'posible_familiar');
-            continue;
-        }
         $tel_web        = blokes_externos_normaliza_telefono($sub_obj->get_billing_phone() ?: ($s['telefono'] ?? ''));
         $tel_en_email   = blokes_externos_normaliza_telefono($sub_obj->get_billing_email() ?: ($s['email'] ?? ''));
-        $coincide_tel   = $tel_web !== '' && $tel === $tel_web;
-        $coincide_email = $tel_en_email !== '' && $tel === $tel_en_email;
-        if (!$coincide_tel && !$coincide_email) continue;
+        $telefono_coincide = $tel !== '' && (($tel_web !== '' && $tel === $tel_web) || ($tel_en_email !== '' && $tel === $tel_en_email));
 
-        if ($nombre_parecido) {
+        // Teléfono + nombre que se parece: confirma, aunque ninguno de los dos sea exacto por sí
+        // solo. Teléfono + mismo grupo (sin nombre): confirma también, salvo hermanos ambiguos.
+        if ($telefono_coincide && $nombre_parecido) {
             return array('subId' => intval($s['id']), 'tipo' => 'confirmado');
         }
-        if (!$hay_hermanos_mismo_telefono && $s['dia'] === $dia_f && $s['horario'] === $horario_f && ($s['edad'] ?: 'Adultos') === $edad_f) {
+        if ($telefono_coincide && !$hay_hermanos_mismo_telefono && $s['dia'] === $dia_f && $s['horario'] === $horario_f && ($s['edad'] ?: 'Adultos') === $edad_f) {
             return array('subId' => intval($s['id']), 'tipo' => 'confirmado');
         }
-        if (!$familiar) {
+        // Ni lo anterior ni nada exacto, pero hay algo (teléfono que coincide sin que cuadre el
+        // resto, o nombre que se parece aunque el teléfono no coincida o falte en una de las dos
+        // partes): no es para fiarse solo, pero tampoco para ignorarlo.
+        if (($telefono_coincide || $nombre_parecido) && !$familiar) {
             $familiar = array('subId' => intval($s['id']), 'tipo' => 'posible_familiar');
         }
     }
@@ -3776,10 +3784,10 @@ function superadmin_gestion_externos_pago($request) {
 /**
  * Migración del Excel "Grupos" (8.4, una vez): recibe las filas ya leídas del Excel y, por cada
  * una, mira si esa persona (por teléfono o nombre) ya tiene una suscripción en vigor en la web
- * — si la tiene, no se crea nada (no son "externos", ya están). Si no la tiene y no existe ya
- * como externo (mismo teléfono), se crea; si ya existe como externo, se actualizan sus pagos y
- * notas. Antes de nada, descarta las filas sin ningún pago registrado en septiembre ni octubre
- * (salvo exentos): son alumnos que ya no vienen y se quedaron en el Excel. Las filas marcadas
+ * — si la tiene, no se crea nada (no son "externos", ya están). Si no, y no tiene ningún pago
+ * registrado en septiembre ni octubre (salvo exentos), se descarta: es alumnado que ya no viene
+ * y se quedó en el Excel. Si no existe ya como externo (mismo teléfono), se crea; si ya existe,
+ * se actualizan sus pagos y notas. Las filas marcadas
  * "posible familiar" (mismo teléfono que una suscripción de la web, pero no se puede confirmar
  * si es la misma persona) no se crean en el volcado real salvo que la fila llegue con
  * `confirmarFamiliar: true` — hasta entonces quedan como "pendiente_revision". Con `simular` no
@@ -3814,15 +3822,18 @@ function superadmin_gestion_externos_importar($request) {
         if ($f['nombre'] === '') { $resultado[] = array('nombre' => '(sin nombre)', 'accion' => 'invalida', 'motivo' => 'Falta el nombre'); continue; }
 
         $pagos = is_array($raw['pagos'] ?? null) ? $raw['pagos'] : array();
-        if (!$f['exento'] && floatval($pagos[$periodo_sep]['importe'] ?? 0) <= 0 && floatval($pagos[$periodo_oct]['importe'] ?? 0) <= 0) {
-            $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'no_activo', 'motivo' => 'Sin pago en septiembre ni octubre: probablemente ya no viene');
-            continue;
-        }
 
+        // Primero el cruce con la web: alguien que paga por su suscripción de WooCommerce puede
+        // no tener nada que apuntar en este seguimiento aparte, y no por eso ha dejado de venir.
         $hay_hermanos = $f['telefono'] !== '' && ($conteo_telefono[$f['telefono']] ?? 0) > 1;
         $match = blokes_externos_buscar_en_web($f['telefono'], $f['nombre'], $f['dia'], $f['horario'], $f['edad'], $hay_hermanos);
         if ($match && $match['tipo'] === 'confirmado') {
             $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'ya_en_web', 'subId' => $match['subId']);
+            continue;
+        }
+
+        if (!$f['exento'] && !blokes_externos_tiene_pago($pagos, $periodo_sep) && !blokes_externos_tiene_pago($pagos, $periodo_oct)) {
+            $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'no_activo', 'motivo' => 'Sin pago en septiembre ni octubre: probablemente ya no viene');
             continue;
         }
         // Mismo teléfono que una suscripción de la web, pero no hay suficiente para confirmar que
@@ -3883,7 +3894,7 @@ function superadmin_gestion_externos_importar($request) {
     }
 
     $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0, 'noActivo' => 0, 'pendienteRevision' => 0, 'posibleFamiliar' => 0);
-    $mapa_accion = array('ya_en_web' => 'yaEnWeb', 'pendiente_revision' => 'pendienteRevision');
+    $mapa_accion = array('ya_en_web' => 'yaEnWeb', 'pendiente_revision' => 'pendienteRevision', 'no_activo' => 'noActivo');
     foreach ($resultado as $r) {
         $k = $mapa_accion[$r['accion']] ?? $r['accion'];
         if (isset($resumen[$k])) $resumen[$k]++;
