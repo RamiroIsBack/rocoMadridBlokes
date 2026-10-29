@@ -3273,6 +3273,9 @@ function superadmin_gestion_grupos($request) {
             'pagos'       => $pagos,
             'pendiente'   => $pendiente,
             'notas'       => get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '',
+            // Sin nombre de facturación ni en el perfil de WordPress: lo que se ve es el
+            // nombre de usuario de la cuenta, no un nombre real.
+            'sinNombre'   => $nombre_fact === '',
         );
 
         if (!isset($grupos[$gkey]['personas'][$persona_key])) $grupos[$gkey]['personas'][$persona_key] = array();

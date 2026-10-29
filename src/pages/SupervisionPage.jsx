@@ -1170,7 +1170,7 @@ const PAGO_PENDIENTE = new Set(['pending', 'on-hold', 'failed'])
 function GruposTab() {
   const { data, loading, error, refetch } = useGestionGrupos(4)
   const [grupoKey, setGrupoKey] = useState('')
-  const [vista, setVista]     = useState('grupos') // 'grupos' | 'duplicados'
+  const [vista, setVista]     = useState('grupos') // 'grupos' | 'duplicados' | 'cobrar' | 'pausados' | 'bajas' | 'sindatos'
   const [menuFor, setMenuFor] = useState(null)   // alumno con el menú de acciones abierto
   const [accion, setAccion]   = useState(null)   // { alumno, tipo } con el modal abierto
 
@@ -1180,12 +1180,17 @@ function GruposTab() {
 
   const grupo = grupoKey ? grupos.find(g => `${g.dia}|${g.horario}|${g.edad}` === grupoKey) : null
   const alumnos = grupo ? grupo.alumnos : grupos.flatMap(g => g.alumnos)
-  // Bandeja 8.3 "Duplicados": todas las filas con una suscripción vieja colgando, de todos los
-  // grupos a la vez, para fusionarlas sin tener que ir grupo por grupo.
-  const duplicados = useMemo(
-    () => grupos.flatMap(g => g.alumnos.filter(a => a.otrasSubs?.length > 0).map(a => ({ ...a, grupoLabel: g.label }))),
-    [grupos]
+  // Bandejas 8.3: las mismas filas de siempre, filtradas y aplanadas de todos los grupos a la
+  // vez, para que Eva no tenga que ir grupo por grupo buscando a quién le toca cada cosa.
+  const conGrupo = useMemo(() => grupos.flatMap(g => g.alumnos.map(a => ({ ...a, grupoLabel: g.label }))), [grupos])
+  const duplicados  = useMemo(() => conGrupo.filter(a => a.otrasSubs?.length > 0), [conGrupo])
+  const porCobrar    = useMemo(() => conGrupo.filter(a => a.pendiente && !a.exento && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes'), [conGrupo])
+  const pausados      = useMemo(
+    () => conGrupo.filter(a => a.estado === 'pausado').sort((a, b) => (a.pausaHasta || '9999') < (b.pausaHasta || '9999') ? -1 : 1),
+    [conGrupo]
   )
+  const bajas          = useMemo(() => conGrupo.filter(a => a.estado === 'baja_fin_mes'), [conGrupo])
+  const sinDatos        = useMemo(() => conGrupo.filter(a => !a.telefono || a.sinNombre), [conGrupo])
 
   const kpis = useMemo(() => {
     const k = { personas: 0, enEspera: 0, dia1: 0, dia2: 0, dia3: 0, plazas: 0, cobradoMes: 0, pendienteMes: 0, pendienteImporte: 0 }
@@ -1226,6 +1231,18 @@ function GruposTab() {
       <div className="sv-controls">
         <div className="sv-controls-left">
           <button className={`sv-tab-mini ${vista === 'grupos' ? 'is-active' : ''}`} onClick={() => setVista('grupos')}>Grupos</button>
+          <button className={`sv-tab-mini ${vista === 'cobrar' ? 'is-active' : ''}`} onClick={() => setVista('cobrar')}>
+            Cobrar este mes {porCobrar.length ? `(${porCobrar.length})` : ''}
+          </button>
+          <button className={`sv-tab-mini ${vista === 'pausados' ? 'is-active' : ''}`} onClick={() => setVista('pausados')}>
+            Pausados {pausados.length ? `(${pausados.length})` : ''}
+          </button>
+          <button className={`sv-tab-mini ${vista === 'bajas' ? 'is-active' : ''}`} onClick={() => setVista('bajas')}>
+            Bajas a fin de mes {bajas.length ? `(${bajas.length})` : ''}
+          </button>
+          <button className={`sv-tab-mini ${vista === 'sindatos' ? 'is-active' : ''}`} onClick={() => setVista('sindatos')}>
+            Sin datos {sinDatos.length ? `(${sinDatos.length})` : ''}
+          </button>
           <button className={`sv-tab-mini ${vista === 'duplicados' ? 'is-active' : ''}`} onClick={() => setVista('duplicados')}>
             Duplicados {duplicados.length ? `(${duplicados.length})` : ''}
           </button>
@@ -1244,6 +1261,119 @@ function GruposTab() {
           </div>
         )}
       </div>
+
+      {vista === 'cobrar' && (
+        <>
+          <p className="sv-note">
+            Tienen de verdad un pedido sin pagar este mes (no solo «sin pedido»): no incluye a quien ya está pausado,
+            de baja o marcado exento/socio.
+          </p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Estado</th><th>Pendiente</th><th></th></tr>
+              </thead>
+              <tbody>
+                {porCobrar.map(a => {
+                  const est = ESTADO_LABEL[a.estado] || { txt: a.estado, cls: '' }
+                  return (
+                    <tr key={`${a.subId}-${a.grupoLabel}`}>
+                      <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                      <td className="sv-ot-muted">{a.grupoLabel}</td>
+                      <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                      <td><span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span></td>
+                      <td className="sv-to-bad">{fmtEur(a.pendiente.importe)} <span className="sv-ot-muted">({a.pendiente.fecha})</span></td>
+                      <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          {porCobrar.length === 0 && <p className="sv-empty">Nadie con un pago pendiente real este mes.</p>}
+        </>
+      )}
+
+      {vista === 'pausados' && (
+        <>
+          <p className="sv-note">Por lesión, viaje… (no es impago). Ordenado por cuándo vuelven.</p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Motivo</th><th>Vuelve el</th><th></th></tr>
+              </thead>
+              <tbody>
+                {pausados.map(a => (
+                  <tr key={`${a.subId}-${a.grupoLabel}`}>
+                    <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                    <td className="sv-ot-muted">{a.grupoLabel}</td>
+                    <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                    <td>{a.pausaMotivo || <span className="sv-ot-muted">—</span>}</td>
+                    <td className={a.pausaHasta ? '' : 'sv-ot-muted'}>{a.pausaHasta || 'Sin fecha'}</td>
+                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {pausados.length === 0 && <p className="sv-empty">Nadie pausado ahora mismo.</p>}
+        </>
+      )}
+
+      {vista === 'bajas' && (
+        <>
+          <p className="sv-note">Siguen viniendo hasta que se les acabe lo ya pagado; luego se dan de baja solas.</p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Notas</th><th></th></tr>
+              </thead>
+              <tbody>
+                {bajas.map(a => (
+                  <tr key={`${a.subId}-${a.grupoLabel}`}>
+                    <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                    <td className="sv-ot-muted">{a.grupoLabel}</td>
+                    <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                    <td className="sv-ot-muted">{a.notas || '—'}</td>
+                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {bajas.length === 0 && <p className="sv-empty">Nadie de baja a fin de mes ahora.</p>}
+        </>
+      )}
+
+      {vista === 'sindatos' && (
+        <>
+          <p className="sv-note">
+            Altas hechas desde wp-admin sin teléfono y/o sin nombre de facturación: lo que se ve es el nombre de
+            usuario de la cuenta, no un nombre real. Se arreglará del todo con la migración del Excel.
+          </p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno (como sale)</th><th>Grupo</th><th>Teléfono</th><th>Falta</th><th></th></tr>
+              </thead>
+              <tbody>
+                {sinDatos.map(a => (
+                  <tr key={`${a.subId}-${a.grupoLabel}`}>
+                    <td>{a.alumno || <span className="sv-ot-muted">—</span>} <span className="sv-ot-muted">#{a.subId}</span></td>
+                    <td className="sv-ot-muted">{a.grupoLabel}</td>
+                    <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                    <td className="sv-ot-muted">
+                      {[!a.telefono && 'teléfono', a.sinNombre && 'nombre'].filter(Boolean).join(' y ')}
+                    </td>
+                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {sinDatos.length === 0 && <p className="sv-empty">Todos con teléfono y nombre real.</p>}
+        </>
+      )}
 
       {vista === 'duplicados' && (
         <>
