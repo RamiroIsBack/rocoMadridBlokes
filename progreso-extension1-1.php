@@ -3107,6 +3107,15 @@ function blokes_telefono_de_email($email) {
     return ($local && preg_match('/^\d{9}$/', $local)) ? $local : '';
 }
 
+// Para agrupar por franja no basta con el horario normalizado "para mostrar": altas hechas
+// desde admin guardan el horario con espacios o guiones distintos ("17:30 - 18:30" vs
+// "17:30-18:30") y eso partía el mismo grupo en dos en el selector.
+function blokes_horario_agrupable($horario) {
+    $h = trim((string) $horario);
+    $h = preg_replace('/\s*-\s*/', '-', $h);
+    return preg_replace('/\s+/', ' ', $h);
+}
+
 function superadmin_gestion_grupos($request) {
     if (!class_exists('RocoMadrid_SF_Stats') || !function_exists('wcs_get_subscription')) {
         return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats/WooCommerce Subscriptions not available. Call this endpoint on the club subsite.', array('status' => 503));
@@ -3135,12 +3144,15 @@ function superadmin_gestion_grupos($request) {
         if (!$sub_obj) continue;
 
         // Agrupar por franja como en el Excel de Eva (M-J 20:30 junta a los de 2 días y a los
-        // sueltos de solo martes o solo jueves), no por cada combinación exacta de día.
-        $pareja = $es_pilates_yoga ? $producto : blokes_dia_a_pareja($dia);
-        $gkey   = $pareja . '|' . $horario . '|' . $edad;
+        // sueltos de solo martes o solo jueves), no por cada combinación exacta de día. El
+        // horario se normaliza aparte para agrupar (espacios/guiones distintos de las altas
+        // hechas desde admin no deben partir el mismo grupo en dos).
+        $pareja         = $es_pilates_yoga ? $producto : blokes_dia_a_pareja($dia);
+        $horario_agrupa = blokes_horario_agrupable($horario);
+        $gkey   = $pareja . '|' . $horario_agrupa . '|' . $edad;
         if (!isset($grupos[$gkey])) {
-            $label = $es_pilates_yoga ? $producto : trim($pareja . ' · ' . $horario);
-            $grupos[$gkey] = array('label' => $label, 'dia' => $pareja, 'horario' => $horario, 'edad' => $edad, 'personas' => array());
+            $label = $es_pilates_yoga ? $producto : trim($pareja . ' · ' . $horario_agrupa);
+            $grupos[$gkey] = array('label' => $label, 'dia' => $pareja, 'horario' => $horario_agrupa, 'edad' => $edad, 'personas' => array());
         }
 
         $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
@@ -3183,21 +3195,30 @@ function superadmin_gestion_grupos($request) {
         }
         if ($pendiente) unset($pendiente['ts']);
 
+        $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
+        $persona_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : ('n' . strtolower(trim($sub['cliente'] ?? ''))));
+
         // El teléfono/nombre de la propia suscripción (su copia de la dirección de
         // facturación) es más de fiar que el del plugin de terceros o el de la cuenta: para
         // una familia con una sola cuenta, el de facturación de CADA suscripción suele ser el
-        // del alumno real, no el del pagador.
+        // del alumno real, no el del pagador. Si ni eso ni la cuenta tienen nada (altas desde
+        // admin sin dirección de facturación), se mira el perfil de WordPress del usuario.
         $placeholder = array('', 'N/A', '-', '—');
         $telefono = $sub_obj->get_billing_phone();
         if (in_array($telefono, $placeholder, true)) $telefono = $sub['telefono'] ?? '';
         if (in_array($telefono, $placeholder, true)) $telefono = blokes_telefono_de_email($sub['email'] ?? $sub_obj->get_billing_email());
+        if (in_array($telefono, $placeholder, true) && $uid) $telefono = get_user_meta($uid, 'billing_phone', true);
         if (in_array($telefono, $placeholder, true)) $telefono = '';
 
         $nombre_fact = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name());
+        if ($nombre_fact === '' && $uid) {
+            $u = get_user_by('id', $uid);
+            if ($u) {
+                $nombre_fact = trim($u->first_name . ' ' . $u->last_name);
+                if ($nombre_fact === '') $nombre_fact = $u->display_name && $u->display_name !== $u->user_login ? $u->display_name : '';
+            }
+        }
         $alumno_nombre = $nombre_fact !== '' ? $nombre_fact : ($sub['cliente'] ?? '');
-
-        $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
-        $persona_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : ('n' . strtolower(trim($sub['cliente'] ?? ''))));
 
         $fila = array(
             'subId'       => intval($sub['id']),
@@ -3296,18 +3317,19 @@ function blokes_gestion_log($sub_id, $accion, $antes, $despues, $detalle = array
     ));
 }
 
-// Desactiva TODOS los emails de WC/WCS (cliente y admin) mientras se ejecuta $cb (acciones
-// manuales de Eva/Ramiro desde ExcelMuerte: por defecto no avisan a nadie, salvo que se pida lo
-// contrario). Coge los ids de verdad de WC()->mailer() en vez de adivinarlos a mano: así entran
-// también los de WooCommerce Subscriptions (customer_processing_renewal_order,
-// new_renewal_order...) sin tener que listarlos uno a uno.
+// Desactiva TODOS los emails mientras se ejecuta $cb (acciones manuales de Eva/Ramiro desde
+// ExcelMuerte: por defecto no avisan a nadie, salvo que se pida lo contrario).
+// `woocommerce_email_enabled_{id}` no basta: WooCommerce Subscriptions dispara sus correos de
+// renovación desde sus propios hooks de transición de estado, sin pasar por ese filtro siempre.
+// `pre_wp_mail` corta de raíz CUALQUIER wp_mail() mientras dure la acción (wp_mail() devuelve
+// directamente lo que diga este filtro sin intentar enviar nada) — no depende de qué plugin
+// dispare el email ni de cómo registre su id.
 function blokes_gestion_sin_emails($cb) {
-    $ids = function_exists('WC') ? array_keys(WC()->mailer()->get_emails()) : array();
-    foreach ($ids as $id) add_filter('woocommerce_email_enabled_' . $id, '__return_false', 9999);
+    add_filter('pre_wp_mail', '__return_true', 9999);
     try {
         return $cb();
     } finally {
-        foreach ($ids as $id) remove_filter('woocommerce_email_enabled_' . $id, '__return_false', 9999);
+        remove_filter('pre_wp_mail', '__return_true', 9999);
     }
 }
 
@@ -3336,6 +3358,7 @@ function superadmin_gestion_marcar_cobrado($request) {
     $nota     = sanitize_text_field($request->get_param('nota'));
     $mantener_pausa = $request->get_param('mantener_pausa');
     $mantener_pausa = $mantener_pausa === null ? true : (bool) $mantener_pausa;
+    $simular  = (bool) $request->get_param('simular');
 
     if (!$sub_id || $importe <= 0 || !$metodo) {
         return new WP_Error('bad_request', 'Faltan sub_id, importe o metodo.', array('status' => 400));
@@ -3351,21 +3374,41 @@ function superadmin_gestion_marcar_cobrado($request) {
     $pausa_motivo_antes = get_post_meta($sub_id, '_rm_pausa_motivo', true);
     $estaba_pausada = $sub->has_status('on-hold') && $pausa_motivo_antes;
 
-    // Renovación pendiente de pago ya existente (la más reciente sin pagar)
+    // Renovación pendiente de pago ya existente (la más reciente sin pagar) — solo se BUSCA, no
+    // se crea todavía: crear un pedido ya escribe en la base de datos de verdad.
     $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
     $order = null;
     foreach (array_reverse($order_ids) as $oid) {
         $o = wc_get_order($oid);
         if ($o && in_array($o->get_status(), array('pending', 'on-hold', 'failed'), true)) { $order = $o; break; }
     }
-    if (!$order && function_exists('wcs_create_renewal_order')) {
-        $order = wcs_create_renewal_order($sub);
-    }
-    if (!$order) return new WP_Error('no_order', 'No se ha podido encontrar ni crear el pedido de renovación.', array('status' => 500));
 
     $metodo_label = blokes_gestion_metodo_label($metodo);
     $fecha_ts  = $fecha ? strtotime($fecha . ' 12:00:00') : time();
     $fecha_txt = date_i18n('d/m/Y', $fecha_ts);
+
+    // Modo simulación: ni crea ni completa ningún pedido, ni toca la suscripción — para poder
+    // probar contra un caso real (secciones 6b/7) viendo qué pasaría, sin generar factura/AEAT
+    // ni ningún otro efecto. Nada de lo de abajo se ejecuta.
+    if ($simular) {
+        $preview = array(
+            'subId'           => $sub_id,
+            'estadoAntes'     => $antes['status'],
+            'pedidoExistente' => $order ? $order->get_id() : null,
+            'seCrearaPedido'  => !$order,
+            'pasaAActiva'     => !($estaba_pausada && $mantener_pausa),
+            'mantienePausa'   => $estaba_pausada && $mantener_pausa,
+            'importe'         => $importe, 'metodo' => $metodo_label, 'fecha' => $fecha_txt, 'parcial' => $parcial,
+            'aviso'           => 'Simulación: no se ha escrito nada en WooCommerce ni se ha generado factura.',
+        );
+        blokes_gestion_log($sub_id, 'marcar_cobrado_simulado', $antes, null, $preview);
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $preview));
+    }
+
+    if (!$order && function_exists('wcs_create_renewal_order')) {
+        $order = wcs_create_renewal_order($sub);
+    }
+    if (!$order) return new WP_Error('no_order', 'No se ha podido encontrar ni crear el pedido de renovación.', array('status' => 500));
 
     blokes_gestion_sin_emails(function() use ($order, $metodo_label, $importe, $fecha_ts, $fecha_txt, $parcial, $nota) {
         $order->set_payment_method_title($metodo_label);
@@ -3421,10 +3464,19 @@ function superadmin_gestion_pausar($request) {
     $sub_id       = intval($request->get_param('sub_id'));
     $motivo       = sanitize_text_field($request->get_param('motivo'));
     $fecha_vuelta = sanitize_text_field($request->get_param('fecha_vuelta')); // 'Y-m-d', opcional
+    $simular      = (bool) $request->get_param('simular');
 
     if (!$sub_id || !$motivo) return new WP_Error('bad_request', 'Faltan sub_id o motivo.', array('status' => 400));
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'subId' => $sub_id, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => 'on-hold',
+            'motivo' => $motivo, 'fecha_vuelta' => $fecha_vuelta,
+            'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
+        )));
+    }
 
     $antes = array('status' => $sub->get_status());
     blokes_gestion_sin_emails(function() use ($sub, $motivo) {
@@ -3446,9 +3498,17 @@ function superadmin_gestion_reanudar($request) {
         return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
     }
     $sub_id = intval($request->get_param('sub_id'));
+    $simular = (bool) $request->get_param('simular');
     if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'subId' => $sub_id, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => 'active',
+            'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
+        )));
+    }
 
     $antes = array('status' => $sub->get_status(), 'pausaMotivo' => get_post_meta($sub_id, '_rm_pausa_motivo', true));
     blokes_gestion_sin_emails(function() use ($sub) {

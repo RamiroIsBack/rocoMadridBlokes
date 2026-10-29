@@ -663,6 +663,9 @@
 .sv-grp-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #bbb; }
 .sv-grp-field--check { flex-direction: row; align-items: center; gap: 8px; }
 .sv-grp-modal__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.sv-grp-preview { list-style: none; margin: 0; padding: 0; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.sv-grp-preview li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding: 3px 0; }
+.sv-grp-preview li span:first-child { color: #999; }
 
 /* ── Group summary ── */
 .sv-group-summary {

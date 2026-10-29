@@ -958,28 +958,36 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
   const [fechaVuelta, setFechaVuelta] = useState('')
   const [nota, setNota]       = useState(alumno.notas || '')
   const [mantenerPausa, setMantenerPausa] = useState(true)
+  // Marcar cobrado puede generar factura/AEAT de verdad: por defecto se simula. Pausar/Reanudar
+  // ya están validados con datos de prueba, así que por defecto actúan de verdad.
+  const [simular, setSimular] = useState(tipo === 'marcar_cobrado')
+  const [preview, setPreview] = useState(null)
   const [busy, setBusy]       = useState(false)
   const [err, setErr]         = useState(null)
 
   const titulos = {
     marcar_cobrado: 'Marcar cobrado', pausar: 'Pausar', reanudar: 'Reanudar', nota: 'Nota',
   }
+  const puedeSimular = tipo === 'marcar_cobrado' || tipo === 'pausar' || tipo === 'reanudar'
 
-  async function submit() {
+  async function submit(forzarReal = false) {
     setBusy(true); setErr(null)
+    const sim = puedeSimular ? (forzarReal ? false : simular) : false
     try {
+      let res
       if (tipo === 'marcar_cobrado') {
         if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
-        await gestionMarcarCobrado({ sub_id: alumno.subId, importe: Number(importe), metodo, fecha, parcial, nota, mantener_pausa: mantenerPausa })
+        res = await gestionMarcarCobrado({ sub_id: alumno.subId, importe: Number(importe), metodo, fecha, parcial, nota, mantener_pausa: mantenerPausa, simular: sim })
       } else if (tipo === 'pausar') {
         if (!motivo.trim()) throw new Error('Pon un motivo.')
-        await gestionPausar({ sub_id: alumno.subId, motivo, fecha_vuelta: fechaVuelta })
+        res = await gestionPausar({ sub_id: alumno.subId, motivo, fecha_vuelta: fechaVuelta, simular: sim })
       } else if (tipo === 'reanudar') {
-        await gestionReanudar({ sub_id: alumno.subId })
+        res = await gestionReanudar({ sub_id: alumno.subId, simular: sim })
       } else if (tipo === 'nota') {
-        await gestionNota({ sub_id: alumno.subId, nota })
+        res = await gestionNota({ sub_id: alumno.subId, nota })
       }
-      onDone()
+      if (sim) setPreview(res)
+      else onDone()
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -992,66 +1000,95 @@ function AccionModal({ alumno, tipo, onClose, onDone }) {
       <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
         <h3>{titulos[tipo]} — {alumno.alumno || `Suscripción #${alumno.subId}`}</h3>
 
-        {tipo === 'marcar_cobrado' && (
+        {preview ? (
           <>
-            {alumno.manual === false && (
-              <p className="sv-to-warn-txt">Esta suscripción cobra sola por tarjeta/Redsys: el servidor rechazará la acción (para evitar cobro doble).</p>
+            <p className="sv-to-warn-txt">Simulación: no se ha escrito nada todavía.</p>
+            <ul className="sv-grp-preview">
+              {Object.entries(preview).filter(([k]) => k !== 'aviso').map(([k, v]) => (
+                <li key={k}><span>{k}</span><span>{typeof v === 'boolean' ? (v ? 'sí' : 'no') : String(v ?? '—')}</span></li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <>
+            {tipo === 'marcar_cobrado' && (
+              <>
+                {alumno.manual === false && (
+                  <p className="sv-to-warn-txt">Esta suscripción cobra sola por tarjeta/Redsys: el servidor rechazará la acción (para evitar cobro doble).</p>
+                )}
+                {alumno.estado === 'pausado' && (
+                  <label className="sv-grp-field sv-grp-field--check">
+                    <input type="checkbox" checked={mantenerPausa} onChange={e => setMantenerPausa(e.target.checked)} />
+                    Mantener la pausa ({alumno.pausaMotivo}) aunque se marque cobrado
+                  </label>
+                )}
+                <label className="sv-grp-field">Importe (€)
+                  <input className="sv-tests-input" type="number" step="0.01" min="0" value={importe} onChange={e => setImporte(e.target.value)} />
+                </label>
+                <label className="sv-grp-field">Método
+                  <select className="sv-tests-select" value={metodo} onChange={e => setMetodo(e.target.value)}>
+                    {METODO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
+                  </select>
+                </label>
+                <label className="sv-grp-field">Fecha
+                  <input className="sv-tests-input" type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+                </label>
+                <label className="sv-grp-field sv-grp-field--check">
+                  <input type="checkbox" checked={parcial} onChange={e => setParcial(e.target.checked)} />
+                  Pago parcial / medio mes
+                </label>
+                <label className="sv-grp-field">Nota
+                  <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} placeholder="Opcional" />
+                </label>
+              </>
             )}
-            {alumno.estado === 'pausado' && (
-              <label className="sv-grp-field sv-grp-field--check">
-                <input type="checkbox" checked={mantenerPausa} onChange={e => setMantenerPausa(e.target.checked)} />
-                Mantener la pausa ({alumno.pausaMotivo}) aunque se marque cobrado
+
+            {tipo === 'pausar' && (
+              <>
+                <label className="sv-grp-field">Motivo
+                  <input className="sv-tests-input" type="text" value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Lesión, viaje…" />
+                </label>
+                <label className="sv-grp-field">Fecha de vuelta (opcional)
+                  <input className="sv-tests-input" type="date" value={fechaVuelta} onChange={e => setFechaVuelta(e.target.value)} />
+                </label>
+              </>
+            )}
+
+            {tipo === 'reanudar' && (
+              <p>¿Reanudar esta suscripción (vuelve a «Activo»)?</p>
+            )}
+
+            {tipo === 'nota' && (
+              <label className="sv-grp-field">Nota
+                <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} />
               </label>
             )}
-            <label className="sv-grp-field">Importe (€)
-              <input className="sv-tests-input" type="number" step="0.01" min="0" value={importe} onChange={e => setImporte(e.target.value)} />
-            </label>
-            <label className="sv-grp-field">Método
-              <select className="sv-tests-select" value={metodo} onChange={e => setMetodo(e.target.value)}>
-                {METODO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
-              </select>
-            </label>
-            <label className="sv-grp-field">Fecha
-              <input className="sv-tests-input" type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
-            </label>
-            <label className="sv-grp-field sv-grp-field--check">
-              <input type="checkbox" checked={parcial} onChange={e => setParcial(e.target.checked)} />
-              Pago parcial / medio mes
-            </label>
-            <label className="sv-grp-field">Nota
-              <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} placeholder="Opcional" />
-            </label>
+
+            {puedeSimular && (
+              <label className="sv-grp-field sv-grp-field--check">
+                <input type="checkbox" checked={simular} onChange={e => setSimular(e.target.checked)} />
+                Simular (calcula qué pasaría, sin escribir nada en WooCommerce)
+              </label>
+            )}
           </>
-        )}
-
-        {tipo === 'pausar' && (
-          <>
-            <label className="sv-grp-field">Motivo
-              <input className="sv-tests-input" type="text" value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Lesión, viaje…" />
-            </label>
-            <label className="sv-grp-field">Fecha de vuelta (opcional)
-              <input className="sv-tests-input" type="date" value={fechaVuelta} onChange={e => setFechaVuelta(e.target.value)} />
-            </label>
-          </>
-        )}
-
-        {tipo === 'reanudar' && (
-          <p>¿Reanudar esta suscripción (vuelve a «Activo»)?</p>
-        )}
-
-        {tipo === 'nota' && (
-          <label className="sv-grp-field">Nota
-            <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} />
-          </label>
         )}
 
         {err && <p className="sv-error">{err}</p>}
 
         <div className="sv-grp-modal__actions">
           <button className="sv-tests-select" onClick={onClose} disabled={busy}>Cancelar</button>
-          <button className="sv-tests-danger sv-tests-danger--confirm" onClick={submit} disabled={busy}>
-            {busy ? 'Guardando…' : 'Confirmar'}
-          </button>
+          {preview ? (
+            <>
+              <button className="sv-tests-select" onClick={() => setPreview(null)} disabled={busy}>Volver</button>
+              <button className="sv-tests-danger sv-tests-danger--confirm" onClick={() => submit(true)} disabled={busy}>
+                {busy ? 'Guardando…' : 'Confirmar de verdad'}
+              </button>
+            </>
+          ) : (
+            <button className="sv-tests-danger sv-tests-danger--confirm" onClick={() => submit(false)} disabled={busy}>
+              {busy ? 'Guardando…' : (puedeSimular && simular ? 'Simular' : 'Confirmar')}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1142,7 +1179,7 @@ function GruposTab() {
       </div>
 
       <div className="sv-kpis">
-        <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }} title="Personas en vigor (activas o de baja a fin de mes) en este grupo — mismo criterio que «Cuentas en vigor» de ExcelMuerte. Las en espera/pausadas/pendientes de alta se cuentan aparte.">
+        <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }} title="Personas en vigor (activas o de baja a fin de mes) en este grupo — mismo criterio que «Cuentas en vigor» de ExcelMuerte. Las en espera/pausadas/pendientes de alta se cuentan aparte. En «Todos los grupos» cuenta por grupo: quien está en dos grupos distintos (p. ej. un grupo normal y Pilates/Yoga) suma 2, por eso puede ser algo más que las cuentas únicas de ExcelMuerte.">
           <span className="sv-kpi__value">{kpis.personas}{kpis.enEspera ? <span className="sv-ot-muted"> (+{kpis.enEspera} en espera)</span> : ''}</span>
           <span className="sv-kpi__label">Personas ⓘ</span>
         </div>
@@ -1154,7 +1191,7 @@ function GruposTab() {
           <span className="sv-kpi__value">{kpis.plazas}</span>
           <span className="sv-kpi__label">Plazas ⓘ</span>
         </div>
-        <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }} title={`Cobrado en ${mesActual ? mesLabelGrp(mesActual) : 'este mes'}: pedidos de ese mes ya pagados (de las clases; no incluye entradas sueltas ni bonos).`}>
+        <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }} title={`Cobrado en ${mesActual ? mesLabelGrp(mesActual) : 'este mes'}: suma de los pedidos de renovación/alta de ese mes que ya están pagados (de las suscripciones de clases, Pilates y Yoga; no incluye entradas sueltas ni bonos). Cambia día a día porque es en vivo: no es una foto fija, sino lo cobrado hasta ahora.`}>
           <span className="sv-kpi__value">{fmtEur(kpis.cobradoMes)}</span>
           <span className="sv-kpi__label">Cobrado del mes ⓘ</span>
         </div>
