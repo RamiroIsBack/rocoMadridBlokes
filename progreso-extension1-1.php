@@ -3599,17 +3599,18 @@ function blokes_externos_todos() {
     return $filas;
 }
 
-// ¿Esta persona ya tiene una suscripción en vigor en la web? Por nombre exacto siempre vale
-// (una persona = un nombre). Por teléfono NO basta por sí solo: varios hermanos de una misma
-// familia suelen compartir el móvil de los padres, así que coincidir solo en teléfono puede ser
-// la suscripción de OTRO miembro de la familia, no la de esta persona. En ese caso devolvemos
-// "posible_familiar" (no se descarta la fila, se avisa para revisar a mano) en vez de darla por
-// ya existente — a menos que además coincida el grupo (día/horario), que sí lo confirma.
-function blokes_externos_buscar_en_web($telefono, $nombre, $dia = '', $horario = '') {
-    $tel           = blokes_externos_normaliza_telefono($telefono);
-    $pareja_filtro = $dia !== '' ? blokes_dia_a_pareja($dia) : '';
-    $all           = blokes_get_all_subscription_data();
-    $familiar      = null;
+// ¿Esta persona ya tiene una suscripción en vigor en la web? Por nombre exacto siempre vale (una
+// persona = un nombre). El teléfono NUNCA confirma por sí solo — ni aunque además coincida el
+// grupo: en la mayoría de familias los hermanos van juntos a la misma clase y comparten el móvil
+// de los padres, así que "mismo teléfono y mismo grupo" sigue siendo justo el caso típico de dos
+// personas distintas, no una señal de que sea la misma. Si solo coincide el teléfono (por el
+// campo de teléfono de verdad, o porque el móvil está metido en el email de la cuenta en vez del
+// teléfono — pasa en alguna familia), se devuelve "posible_familiar" para revisar a mano, nunca
+// se descarta la fila ni se confirma sola.
+function blokes_externos_buscar_en_web($telefono, $nombre) {
+    $tel      = blokes_externos_normaliza_telefono($telefono);
+    $all      = blokes_get_all_subscription_data();
+    $familiar = null;
     foreach ($all as $s) {
         if (!in_array($s['status'] ?? '', array('active', 'on-hold', 'pending'), true)) continue;
         $sub_obj = wcs_get_subscription(intval($s['id']));
@@ -3618,15 +3619,14 @@ function blokes_externos_buscar_en_web($telefono, $nombre, $dia = '', $horario =
         if ($nombre && $nombre_web && mb_strtolower(trim($nombre)) === mb_strtolower(trim($nombre_web))) {
             return array('subId' => intval($s['id']), 'tipo' => 'confirmado');
         }
-        $tel_web = blokes_externos_normaliza_telefono($sub_obj->get_billing_phone() ?: ($s['telefono'] ?? ''));
-        if ($tel === '' || $tel_web === '' || $tel !== $tel_web) continue;
-        $grupo_match = $pareja_filtro !== '' && $horario !== ''
-            && blokes_dia_a_pareja($s['dia'] ?? '') === $pareja_filtro
-            && trim((string) ($s['horario'] ?? '')) === trim($horario);
-        if ($grupo_match) {
-            return array('subId' => intval($s['id']), 'tipo' => 'confirmado');
+        if ($tel === '') continue;
+        $tel_web       = blokes_externos_normaliza_telefono($sub_obj->get_billing_phone() ?: ($s['telefono'] ?? ''));
+        $tel_en_email   = blokes_externos_normaliza_telefono($sub_obj->get_billing_email() ?: ($s['email'] ?? ''));
+        $coincide_tel   = $tel_web !== '' && $tel === $tel_web;
+        $coincide_email = $tel_en_email !== '' && $tel === $tel_en_email;
+        if (($coincide_tel || $coincide_email) && !$familiar) {
+            $familiar = array('subId' => intval($s['id']), 'tipo' => 'posible_familiar');
         }
-        if (!$familiar) $familiar = array('subId' => intval($s['id']), 'tipo' => 'posible_familiar');
     }
     return $familiar;
 }
@@ -3731,7 +3731,7 @@ function superadmin_gestion_externos_importar($request) {
         $f = blokes_externos_limpia($raw);
         if ($f['nombre'] === '') { $resultado[] = array('nombre' => '(sin nombre)', 'accion' => 'invalida', 'motivo' => 'Falta el nombre'); continue; }
 
-        $match = blokes_externos_buscar_en_web($f['telefono'], $f['nombre'], $f['dia'], $f['horario']);
+        $match = blokes_externos_buscar_en_web($f['telefono'], $f['nombre']);
         if ($match && $match['tipo'] === 'confirmado') {
             $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'ya_en_web', 'subId' => $match['subId']);
             continue;
