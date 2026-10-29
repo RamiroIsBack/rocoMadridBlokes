@@ -23,6 +23,7 @@ import UserAvatar from './components/UserAvatar'
 import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import { useEventsAccess } from './hooks/useEvents'
+import { useCalendarAccess } from './hooks/useCalendar'
 import './App.css'
 
 const PRODUCT_NAMES = { 'Classes': 'Clases', 'Single Days': 'Días sueltos' }
@@ -77,6 +78,7 @@ export default function App() {
   const lastScrollY = useRef(0)
   const sd = window.blokesSiteData || {}
   const canEvents = useEventsAccess()
+  const canCalendar = useCalendarAccess().can
 
   // Profile modal state
   const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto } = useProfile()
@@ -301,7 +303,7 @@ export default function App() {
                   <NavLink to="/eventos" className="app-nav__link">Eventos</NavLink>
                 </li>
               )}
-              {['gestion', 'socio'].includes(sd.userRole) && (
+              {canCalendar && (
                 <li className="app-nav__item">
                   <NavLink to="/calendario" className="app-nav__link">Calendario</NavLink>
                 </li>

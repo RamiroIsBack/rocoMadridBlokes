@@ -8582,28 +8582,75 @@ function events_delete_booking($request) {
 //  Base de datos "Funciones Rocomadrid" (espacio Madridroco), con
 //  la integración interna "Blokes". El token lo pega un socio desde
 //  la web y solo vive en wp_options; nunca se devuelve al navegador.
-//  Lo ven socio y gestion. De momento solo lectura.
+//  Socio y gestion lo ven entero. Los profesores y los emails de la
+//  lista de Calendario (blokes_calendar_access, la edita un socio desde
+//  Superadmin → Acceso) ven una versión reducida: sin contactos,
+//  teléfonos, precios ni comentarios. Se recorta aquí, en el servidor.
+//  De momento solo lectura.
 // ============================================================
 
 define('BLOKES_NOTION_DB',          '290d5fb11f5b8090a0e2faab61be4695');
 define('BLOKES_NOTION_DATA_SOURCE', '290d5fb1-1f5b-80ba-98c0-000bfcf4a16f');
 
-function calendar_can_view() {
+function calendar_access_list() {
+    $list = get_option('blokes_calendar_access', array());
+    return is_array($list) ? array_values($list) : array();
+}
+
+function calendar_full_view() {
     return in_array(blokes_get_app_role(), array('socio', 'gestion'));
 }
 
+function calendar_can_view() {
+    if (in_array(blokes_get_app_role(), array('socio', 'gestion', 'profesor'))) return true;
+    if (!is_user_logged_in()) return false;
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    return $email !== '' && in_array($email, array_map('strtolower', calendar_access_list()));
+}
+
 add_action('rest_api_init', function() {
+    $socio_perm = function() { return blokes_get_app_role() === 'socio'; };
     register_rest_route('superadmin/v1', '/calendar', array(
         'methods'             => 'GET',
         'callback'            => 'calendar_get_items',
         'permission_callback' => 'calendar_can_view',
     ));
+    register_rest_route('superadmin/v1', '/calendar/access', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'calendar_get_access',
+            'permission_callback' => '__return_true',
+        ),
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'calendar_save_access',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
     register_rest_route('superadmin/v1', '/calendar/token', array(
         'methods'             => 'PUT',
         'callback'            => 'calendar_save_token',
-        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+        'permission_callback' => $socio_perm,
     ));
 });
+
+// Cualquiera puede preguntar si tiene acceso (para enseñar o no el menú); la lista solo la ve un socio.
+function calendar_get_access() {
+    $out = array('can' => calendar_can_view(), 'full' => calendar_full_view());
+    if (blokes_get_app_role() === 'socio') $out['emails'] = calendar_access_list();
+    return rest_ensure_response($out);
+}
+
+function calendar_save_access($request) {
+    $body  = $request->get_json_params();
+    $clean = array();
+    foreach ((is_array($body['emails'] ?? null) ? $body['emails'] : array()) as $email) {
+        $e = sanitize_email(strtolower(trim((string) $email)));
+        if ($e && !in_array($e, $clean)) $clean[] = $e;
+    }
+    update_option('blokes_calendar_access', $clean, false);
+    return rest_ensure_response(array('success' => true, 'emails' => $clean));
+}
 
 // Llama a la API de Notion. Prueba primero con data sources (API 2025-09-03)
 // y, si no, con la consulta clásica de base de datos (2022-06-28).
@@ -8680,10 +8727,9 @@ function calendar_map_page($p) {
     );
 }
 
+// Tareas de Notion + reservas de Eventos del rango. Quien no es socio ni gestión recibe la
+// versión reducida (sin contactos, teléfonos, precios, notas ni enlace a Notion).
 function calendar_get_items($request) {
-    $token = get_option('blokes_notion_token', '');
-    if (!$token) return rest_ensure_response(array('configured' => false, 'items' => array()));
-
     $from = (string) $request->get_param('from');
     $to   = (string) $request->get_param('to');
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) || $from > $to) {
@@ -8693,10 +8739,34 @@ function calendar_get_items($request) {
         return new WP_Error('bad_range', 'Rango de fechas demasiado largo', array('status' => 400));
     }
 
+    $out = calendar_notion_items($from, $to, (bool) $request->get_param('refresh'));
+    if (is_wp_error($out)) return $out;
+
+    events_ssa_sync();
+    $bookings = array_values(array_filter(events_get_bookings(), function($b) use ($from, $to) {
+        return $b['date'] >= $from && $b['date'] <= $to && $b['status'] !== 'cancelada';
+    }));
+
+    $out['full'] = calendar_full_view();
+    if (!$out['full']) {
+        $keep_task    = array_flip(array('id', 'title', 'start', 'end', 'category', 'status', 'owners'));
+        $keep_booking = array_flip(array('id', 'date', 'time', 'end_time', 'type', 'status', 'honoree', 'age', 'kids', 'monitors'));
+        $out['items'] = array_map(function($it) use ($keep_task) { return array_intersect_key($it, $keep_task); }, $out['items']);
+        $bookings     = array_map(function($b) use ($keep_booking) { return array_intersect_key($b, $keep_booking); }, $bookings);
+    }
+    $out['bookings'] = $bookings;
+    return rest_ensure_response($out);
+}
+
+// Lo de Notion, guardado 5 minutos ($refresh se lo salta)
+function calendar_notion_items($from, $to, $refresh) {
+    $token = get_option('blokes_notion_token', '');
+    if (!$token) return array('configured' => false, 'items' => array());
+
     $key = 'blokes_cal_' . md5($from . $to . get_option('blokes_notion_cache_v', 0));
-    if (!$request->get_param('refresh')) {
+    if (!$refresh) {
         $cached = get_transient($key);
-        if (is_array($cached)) return rest_ensure_response($cached);
+        if (is_array($cached)) return $cached;
     }
 
     // Lo que empieza hasta 60 días antes también entra si termina dentro del rango (vacaciones, etc.)
@@ -8725,7 +8795,7 @@ function calendar_get_items($request) {
 
     $out = array('configured' => true, 'items' => $items, 'fetched_at' => current_time('mysql'));
     set_transient($key, $out, 5 * MINUTE_IN_SECONDS);
-    return rest_ensure_response($out);
+    return $out;
 }
 
 // Guarda el token solo si Notion lo acepta y ve la base de datos.
