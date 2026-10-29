@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import {
   useEventsAccess, useBookings, createBooking, importBookings, updateBooking, deleteBooking, saveEventSettings,
-  TYPES, STATUSES, ORIGINS, typeOf, statusOf, originOf, money, counts, emptyBooking,
+  TYPES, STATUSES, ORIGINS, typeOf, statusOf, originOf, money, counts, depositDue, emptyBooking,
 } from '../hooks/useEvents'
 import { fmtEur } from '../utils/monthFormat'
 import './SuperAdminPage.css'
@@ -114,7 +114,7 @@ function WeekSummary({ bookings, settings, start, onShift, onOpen, onNew }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i))
   const list = bookings.filter(b => b.date >= days[0] && b.date <= days[6] && counts(b))
   const kids = list.reduce((s, b) => s + (b.kids || 0), 0)
-  const pend = list.filter(b => !b.deposit_paid && b.status !== 'celebrada').length
+  const pend = list.filter(b => depositDue(b, settings)).length
 
   return (
     <div className="sa-section">
@@ -138,7 +138,7 @@ function WeekSummary({ bookings, settings, start, onShift, onOpen, onNew }) {
           return (
             <div key={d} className={`ev-week__day${d === today() ? ' ev-week__day--today' : ''}${weekend ? ' ev-week__day--weekend' : ''}`}>
               <div className="ev-week__date">{fmtDay(d)}</div>
-              {items.map(b => <BookingChip key={b.id} b={b} onClick={() => onOpen(b)} />)}
+              {items.map(b => <BookingChip key={b.id} b={b} settings={settings} onClick={() => onOpen(b)} />)}
               {free.map(s => <button key={s} className="ev-free" onClick={() => onNew(d, s)}>{s} libre</button>)}
             </div>
           )
@@ -148,14 +148,14 @@ function WeekSummary({ bookings, settings, start, onShift, onOpen, onNew }) {
   )
 }
 
-function BookingChip({ b, onClick }) {
+function BookingChip({ b, settings, onClick }) {
   const t = typeOf(b.type)
   return (
     <button className={`ev-chip${b.status === 'solicitud' ? ' ev-chip--tentative' : ''}`} style={{ '--type-color': t.color }} onClick={onClick}
       title={`${t.label} · ${statusOf(b.status).label}`}>
       <span className="ev-chip__time">{b.time || '—'}</span>
       <span className="ev-chip__name">{b.honoree || b.contact || t.label}</span>
-      {!b.deposit_paid && b.status !== 'celebrada' && <span className="ev-chip__warn" title="Señal sin pagar">€</span>}
+      {depositDue(b, settings) && <span className="ev-chip__warn" title={b.deposit_paid ? 'Señal a 0 €: revisa si de verdad está pagada' : 'Señal sin pagar'}>€</span>}
     </button>
   )
 }
@@ -185,7 +185,7 @@ function MonthCalendar({ bookings, settings, month, onMonth, onOpen, onNew }) {
           return (
             <div key={d} className={`ev-month__cell${monthOf(d) !== month ? ' ev-month__cell--out' : ''}${d === today() ? ' ev-month__cell--today' : ''}${weekend ? ' ev-month__cell--weekend' : ''}`}>
               <span className="ev-month__num">{parse(d).getDate()}</span>
-              {items.map(b => <BookingChip key={b.id} b={b} onClick={() => onOpen(b)} />)}
+              {items.map(b => <BookingChip key={b.id} b={b} settings={settings} onClick={() => onOpen(b)} />)}
               {free.map(s => <button key={s} className="ev-free" onClick={() => onNew(d, s)}>{s}</button>)}
             </div>
           )
@@ -216,7 +216,7 @@ function BookingList({ bookings, settings, onOpen, onChange }) {
   const rows = bookings.filter(b => {
     if (filter === 'proximas') return b.date >= t && b.status !== 'cancelada'
     if (filter === 'pasadas')  return b.date < t
-    if (filter === 'senal')    return counts(b) && !b.deposit_paid && b.status !== 'celebrada'
+    if (filter === 'senal')    return depositDue(b, settings)
     if (filter === 'cobro')    return counts(b) && money(b, settings).pending > 0.01
     return true
   }).filter(b => !q || `${b.contact} ${b.honoree} ${b.phone} ${b.email} ${b.notes}`.toLowerCase().includes(q.toLowerCase()))
@@ -264,9 +264,9 @@ function BookingList({ bookings, settings, onOpen, onChange }) {
                       <td className="sa-pay-num">{b.kids ?? '—'}</td>
                       <td className="sa-pay-num sa-pay-strong">{fmtEur(m.total)}</td>
                       <td>
-                        <Badge cls={b.deposit_paid ? 'ev-badge--ok' : 'ev-badge--warn'} title="Pulsa para cambiar"
+                        <Badge cls={b.deposit_paid && !depositDue(b, settings) ? 'ev-badge--ok' : 'ev-badge--warn'} title={b.deposit_paid && depositDue(b, settings) ? 'Señal a 0 €: revisa si de verdad está pagada. Pulsa para cambiar' : 'Pulsa para cambiar'}
                           onClick={() => onChange(b, { deposit_paid: !b.deposit_paid, deposit_date: !b.deposit_paid ? (b.deposit_date || today()) : b.deposit_date })}>
-                          {b.deposit_paid ? `Pagada · ${fmtEur(m.deposit)}` : `Sin pagar · ${fmtEur(m.deposit)}`}
+                          {b.deposit_paid ? `Pagada · ${fmtEur(m.deposit)}${depositDue(b, settings) ? ' ⚠' : ''}` : `Sin pagar · ${fmtEur(m.deposit)}`}
                         </Badge>
                       </td>
                       <td className={`sa-pay-num${m.pending > 0.01 ? ' ev-warn' : ''}`}>{fmtEur(m.pending)}</td>
