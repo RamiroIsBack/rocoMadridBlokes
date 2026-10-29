@@ -3440,6 +3440,9 @@ function superadmin_gestion_marcar_cobrado($request) {
     if (!$sub_id || $importe <= 0 || !$metodo) {
         return new WP_Error('bad_request', 'Faltan sub_id, importe o metodo.', array('status' => 400));
     }
+    if (!in_array($metodo, array('transferencia', 'tarjeta', 'efectivo', 'wellhub'), true)) {
+        return new WP_Error('bad_request', 'Método no reconocido. Usa transferencia, tarjeta, efectivo o wellhub.', array('status' => 400));
+    }
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
 
@@ -3451,10 +3454,17 @@ function superadmin_gestion_marcar_cobrado($request) {
     // ── Efectivo: nada de WooCommerce, nada de factura ──
     if ($es_efectivo) {
         $periodo = date('Y-m', $fecha_ts);
+        // Si estaba "en espera" por simple impago (sin motivo de pausa guardado), cobrar en
+        // efectivo la reactiva igual que lo haría un cobro por WooCommerce — sin pedido, sin
+        // factura y sin email. Si estaba pausada de verdad (lesión...), no se toca: el efectivo
+        // no debe reactivar a quien sigue sin poder venir (decisión de Ramiro, 29/10).
+        $pausa_motivo_antes = get_post_meta($sub_id, '_rm_pausa_motivo', true);
+        $reactivaria = $sub->has_status('on-hold') && !$pausa_motivo_antes;
+
         if ($simular) {
             return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
                 'subId' => $sub_id, 'periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo_label,
-                'fecha' => $fecha_txt, 'parcial' => $parcial,
+                'fecha' => $fecha_txt, 'parcial' => $parcial, 'reactivaLaSuscripcion' => $reactivaria,
                 'aviso' => 'Simulación: no se escribiría nada todavía. El efectivo no toca WooCommerce ni genera factura, solo queda apuntado en Grupos.',
             )));
         }
@@ -3467,7 +3477,12 @@ function superadmin_gestion_marcar_cobrado($request) {
             'user_id' => $user ? $user->ID : 0, 'user_login' => $user ? $user->user_login : '',
             'created_at' => current_time('mysql'),
         ));
-        $despues = array('periodo' => $periodo, 'importe' => $importe, 'metodo' => 'efectivo');
+        if ($reactivaria) {
+            blokes_gestion_sin_emails(function() use ($sub) {
+                $sub->update_status('active', 'ExcelMuerte: cobrado en efectivo, reactivada (estaba en espera por impago).');
+            });
+        }
+        $despues = array('periodo' => $periodo, 'importe' => $importe, 'metodo' => 'efectivo', 'reactivada' => $reactivaria);
         blokes_gestion_log($sub_id, 'marcar_cobrado_efectivo', $antes, $despues, array('fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota));
         return rest_ensure_response(array('success' => true, 'data' => $despues));
     }
