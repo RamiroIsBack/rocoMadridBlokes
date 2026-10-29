@@ -3594,21 +3594,36 @@ function blokes_externos_todos() {
     return $filas;
 }
 
-// ¿Esta persona (por teléfono, o si no por nombre) ya tiene una suscripción en vigor en la web?
-// Para no crear un externo duplicado de alguien que en realidad ya está en WooCommerce.
-function blokes_externos_buscar_en_web($telefono, $nombre) {
-    $tel = blokes_externos_normaliza_telefono($telefono);
-    $all = blokes_get_all_subscription_data();
+// ¿Esta persona ya tiene una suscripción en vigor en la web? Por nombre exacto siempre vale
+// (una persona = un nombre). Por teléfono NO basta por sí solo: varios hermanos de una misma
+// familia suelen compartir el móvil de los padres, así que coincidir solo en teléfono puede ser
+// la suscripción de OTRO miembro de la familia, no la de esta persona. En ese caso devolvemos
+// "posible_familiar" (no se descarta la fila, se avisa para revisar a mano) en vez de darla por
+// ya existente — a menos que además coincida el grupo (día/horario), que sí lo confirma.
+function blokes_externos_buscar_en_web($telefono, $nombre, $dia = '', $horario = '') {
+    $tel           = blokes_externos_normaliza_telefono($telefono);
+    $pareja_filtro = $dia !== '' ? blokes_dia_a_pareja($dia) : '';
+    $all           = blokes_get_all_subscription_data();
+    $familiar      = null;
     foreach ($all as $s) {
         if (!in_array($s['status'] ?? '', array('active', 'on-hold', 'pending'), true)) continue;
         $sub_obj = wcs_get_subscription(intval($s['id']));
         if (!$sub_obj) continue;
-        $tel_web = blokes_externos_normaliza_telefono($sub_obj->get_billing_phone() ?: ($s['telefono'] ?? ''));
-        if ($tel !== '' && $tel_web !== '' && $tel === $tel_web) return intval($s['id']);
         $nombre_web = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) ?: ($s['cliente'] ?? '');
-        if ($nombre && $nombre_web && mb_strtolower(trim($nombre)) === mb_strtolower(trim($nombre_web))) return intval($s['id']);
+        if ($nombre && $nombre_web && mb_strtolower(trim($nombre)) === mb_strtolower(trim($nombre_web))) {
+            return array('subId' => intval($s['id']), 'tipo' => 'confirmado');
+        }
+        $tel_web = blokes_externos_normaliza_telefono($sub_obj->get_billing_phone() ?: ($s['telefono'] ?? ''));
+        if ($tel === '' || $tel_web === '' || $tel !== $tel_web) continue;
+        $grupo_match = $pareja_filtro !== '' && $horario !== ''
+            && blokes_dia_a_pareja($s['dia'] ?? '') === $pareja_filtro
+            && trim((string) ($s['horario'] ?? '')) === trim($horario);
+        if ($grupo_match) {
+            return array('subId' => intval($s['id']), 'tipo' => 'confirmado');
+        }
+        if (!$familiar) $familiar = array('subId' => intval($s['id']), 'tipo' => 'posible_familiar');
     }
-    return null;
+    return $familiar;
 }
 
 function superadmin_gestion_externos_get() {
@@ -3711,11 +3726,16 @@ function superadmin_gestion_externos_importar($request) {
         $f = blokes_externos_limpia($raw);
         if ($f['nombre'] === '') { $resultado[] = array('nombre' => '(sin nombre)', 'accion' => 'invalida', 'motivo' => 'Falta el nombre'); continue; }
 
-        $sub_id_web = blokes_externos_buscar_en_web($f['telefono'], $f['nombre']);
-        if ($sub_id_web) {
-            $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'ya_en_web', 'subId' => $sub_id_web);
+        $match = blokes_externos_buscar_en_web($f['telefono'], $f['nombre'], $f['dia'], $f['horario']);
+        if ($match && $match['tipo'] === 'confirmado') {
+            $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'ya_en_web', 'subId' => $match['subId']);
             continue;
         }
+        // Mismo teléfono que una suscripción de la web, pero ni el nombre ni el grupo coinciden:
+        // probablemente un hermano/familiar compartiendo el móvil de los padres. No se descarta —
+        // se crea/actualiza igual, pero se avisa con el subId de esa otra suscripción para que se
+        // revise a mano antes de confirmar (no fiable para decidir solo).
+        $posible_familiar = $match && $match['tipo'] === 'posible_familiar' ? $match['subId'] : null;
 
         $pagos = is_array($raw['pagos'] ?? null) ? $raw['pagos'] : array();
         $existente = $f['telefono'] !== '' ? ($existentes[$f['telefono']] ?? null) : null;
@@ -3733,7 +3753,9 @@ function superadmin_gestion_externos_importar($request) {
                     ));
                 }
             }
-            $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'actualizaria_existente', 'id' => $existente['id'], 'pagos' => count($pagos));
+            $fila = array('nombre' => $f['nombre'], 'accion' => 'actualizaria_existente', 'id' => $existente['id'], 'pagos' => count($pagos));
+            if ($posible_familiar) $fila['posibleFamiliar'] = $posible_familiar;
+            $resultado[] = $fila;
             continue;
         }
 
@@ -3752,13 +3774,16 @@ function superadmin_gestion_externos_importar($request) {
             }
             blokes_gestion_log($nuevo_id, 'externo_importar', null, $f, 'Migración 8.4 desde el Excel');
         }
-        $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'nuevo', 'grupo' => trim($f['dia'] . ' ' . $f['horario']), 'pagos' => count($pagos));
+        $fila = array('nombre' => $f['nombre'], 'accion' => 'nuevo', 'grupo' => trim($f['dia'] . ' ' . $f['horario']), 'pagos' => count($pagos));
+        if ($posible_familiar) $fila['posibleFamiliar'] = $posible_familiar;
+        $resultado[] = $fila;
     }
 
-    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0);
+    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0, 'posibleFamiliar' => 0);
     foreach ($resultado as $r) {
         $k = $r['accion'] === 'ya_en_web' ? 'yaEnWeb' : $r['accion'];
         if (isset($resumen[$k])) $resumen[$k]++;
+        if (!empty($r['posibleFamiliar'])) $resumen['posibleFamiliar']++;
     }
     return rest_ensure_response(array('success' => true, 'data' => array('simulado' => $simular, 'resumen' => $resumen, 'filas' => $resultado)));
 }
