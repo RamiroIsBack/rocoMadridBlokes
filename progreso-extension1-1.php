@@ -3581,6 +3581,29 @@ function blokes_externos_normaliza_telefono($t) {
     return strlen($d) === 9 ? $d : (strlen($d) > 9 ? substr($d, -9) : $d);
 }
 
+// Para comparar nombres: sin tildes ni "*" (lo usan para marcar casos en el Excel), sin
+// puntuación, en minúsculas y con los espacios repetidos colapsados.
+function blokes_externos_normaliza_nombre($n) {
+    $n = remove_accents((string) $n);
+    $n = str_replace('*', ' ', $n);
+    $n = preg_replace('/[^a-zA-Z\s]/', ' ', $n);
+    return mb_strtolower(trim(preg_replace('/\s+/', ' ', $n)));
+}
+
+// ¿Se parecen dos nombres ya normalizados? Igual con que coincidan nombre + un apellido (aunque
+// falte un nombre compuesto o el segundo apellido), o con que el parecido global sea alto —
+// para cuando hay una errata o el orden de nombre/apellidos está cambiado.
+function blokes_externos_nombres_parecidos($a, $b) {
+    if ($a === '' || $b === '') return false;
+    if ($a === $b) return true;
+    $pa = array_values(array_filter(explode(' ', $a)));
+    $pb = array_values(array_filter(explode(' ', $b)));
+    if (empty($pa) || empty($pb)) return false;
+    if (count(array_intersect($pa, $pb)) >= min(2, count($pa), count($pb))) return true;
+    similar_text($a, $b, $pct);
+    return $pct >= 80;
+}
+
 // Todos los externos activos, con sus pagos anidados por periodo (YYYY-MM).
 function blokes_externos_todos() {
     blokes_ensure_externos_tables();
@@ -3599,32 +3622,60 @@ function blokes_externos_todos() {
     return $filas;
 }
 
-// ¿Esta persona ya tiene una suscripción en vigor en la web? Por nombre exacto siempre vale (una
-// persona = un nombre). El teléfono NUNCA confirma por sí solo — ni aunque además coincida el
-// grupo: en la mayoría de familias los hermanos van juntos a la misma clase y comparten el móvil
-// de los padres, así que "mismo teléfono y mismo grupo" sigue siendo justo el caso típico de dos
-// personas distintas, no una señal de que sea la misma. Si solo coincide el teléfono (por el
-// campo de teléfono de verdad, o porque el móvil está metido en el email de la cuenta en vez del
-// teléfono — pasa en alguna familia), se devuelve "posible_familiar" para revisar a mano, nunca
-// se descarta la fila ni se confirma sola.
-function blokes_externos_buscar_en_web($telefono, $nombre) {
-    $tel      = blokes_externos_normaliza_telefono($telefono);
-    $all      = blokes_get_all_subscription_data();
-    $familiar = null;
+// ¿Esta persona ya tiene una suscripción en vigor en la web? Señales, de más a menos fiable:
+// nombre exacto (ignorando tildes/"*", y comparando también con el usuario de la cuenta, no solo
+// con el nombre de facturación) — eso solo ya confirma: una persona = un nombre. Si no, teléfono
+// que coincide (por el campo de teléfono, o porque está metido en el email de la cuenta) más
+// nombre que se parece (aunque no sea exacto) — confirma. Si no, teléfono y grupo (día, horario y
+// edad) iguales — también confirma, salvo que en esta misma pestaña del Excel haya más de un
+// alumno con ese mismo teléfono: ahí no se puede saber a cuál de los hermanos corresponde esa
+// suscripción, así que no se confirma sola. En cualquier otro caso en que solo coincida el
+// teléfono, se devuelve "posible_familiar" para revisar a mano: nunca se descarta la fila ni se
+// confirma sola.
+function blokes_externos_buscar_en_web($telefono, $nombre, $dia = '', $horario = '', $edad = '', $hay_hermanos_mismo_telefono = false) {
+    $tel         = blokes_externos_normaliza_telefono($telefono);
+    $nombre_norm = blokes_externos_normaliza_nombre($nombre);
+    $dia_f       = blokes_normalizar_dia($dia);
+    $horario_f   = blokes_normalizar_horario($horario);
+    $edad_f      = blokes_normalizar_edad($edad) ?: 'Adultos';
+    $all         = blokes_get_all_subscription_data();
+    $familiar    = null;
+
     foreach ($all as $s) {
         if (!in_array($s['status'] ?? '', array('active', 'on-hold', 'pending'), true)) continue;
         $sub_obj = wcs_get_subscription(intval($s['id']));
         if (!$sub_obj) continue;
-        $nombre_web = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) ?: ($s['cliente'] ?? '');
-        if ($nombre && $nombre_web && mb_strtolower(trim($nombre)) === mb_strtolower(trim($nombre_web))) {
+
+        $nombre_web   = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) ?: ($s['cliente'] ?? '');
+        $nombre_web_n = blokes_externos_normaliza_nombre($nombre_web);
+        $user         = $sub_obj->get_user();
+        $usuario_n    = $user ? blokes_externos_normaliza_nombre($user->user_login) : '';
+
+        if ($nombre_norm !== '' && ($nombre_norm === $nombre_web_n || ($usuario_n !== '' && $nombre_norm === $usuario_n))) {
             return array('subId' => intval($s['id']), 'tipo' => 'confirmado');
         }
-        if ($tel === '') continue;
-        $tel_web       = blokes_externos_normaliza_telefono($sub_obj->get_billing_phone() ?: ($s['telefono'] ?? ''));
+        $nombre_parecido = $nombre_norm !== '' && (
+            blokes_externos_nombres_parecidos($nombre_norm, $nombre_web_n)
+            || ($usuario_n !== '' && blokes_externos_nombres_parecidos($nombre_norm, $usuario_n))
+        );
+
+        if ($tel === '') {
+            if ($nombre_parecido && !$familiar) $familiar = array('subId' => intval($s['id']), 'tipo' => 'posible_familiar');
+            continue;
+        }
+        $tel_web        = blokes_externos_normaliza_telefono($sub_obj->get_billing_phone() ?: ($s['telefono'] ?? ''));
         $tel_en_email   = blokes_externos_normaliza_telefono($sub_obj->get_billing_email() ?: ($s['email'] ?? ''));
         $coincide_tel   = $tel_web !== '' && $tel === $tel_web;
         $coincide_email = $tel_en_email !== '' && $tel === $tel_en_email;
-        if (($coincide_tel || $coincide_email) && !$familiar) {
+        if (!$coincide_tel && !$coincide_email) continue;
+
+        if ($nombre_parecido) {
+            return array('subId' => intval($s['id']), 'tipo' => 'confirmado');
+        }
+        if (!$hay_hermanos_mismo_telefono && $s['dia'] === $dia_f && $s['horario'] === $horario_f && ($s['edad'] ?: 'Adultos') === $edad_f) {
+            return array('subId' => intval($s['id']), 'tipo' => 'confirmado');
+        }
+        if (!$familiar) {
             $familiar = array('subId' => intval($s['id']), 'tipo' => 'posible_familiar');
         }
     }
@@ -3713,7 +3764,9 @@ function superadmin_gestion_externos_pago($request) {
  * una, mira si esa persona (por teléfono o nombre) ya tiene una suscripción en vigor en la web
  * — si la tiene, no se crea nada (no son "externos", ya están). Si no la tiene y no existe ya
  * como externo (mismo teléfono), se crea; si ya existe como externo, se actualizan sus pagos y
- * notas. Con `simular` no escribe nada, solo dice qué haría con cada fila.
+ * notas. Antes de nada, descarta las filas sin ningún pago registrado en septiembre ni octubre
+ * (salvo exentos): son alumnos que ya no vienen y se quedaron en el Excel. Con `simular` no
+ * escribe nada, solo dice qué haría con cada fila.
  */
 function superadmin_gestion_externos_importar($request) {
     blokes_ensure_externos_tables();
@@ -3726,23 +3779,42 @@ function superadmin_gestion_externos_importar($request) {
     $existentes = array();
     foreach (blokes_externos_todos() as $e) $existentes[blokes_externos_normaliza_telefono($e['telefono'])] = $e;
 
+    // Para detectar hermanos ambiguos: dos o más filas de esta misma pestaña con el mismo
+    // teléfono. Ahí "teléfono + grupo" no basta para confirmar a cuál de ellos corresponde una
+    // suscripción de la web.
+    $conteo_telefono = array();
+    foreach ($filas as $raw) {
+        $t = blokes_externos_normaliza_telefono($raw['telefono'] ?? '');
+        if ($t !== '') $conteo_telefono[$t] = ($conteo_telefono[$t] ?? 0) + 1;
+    }
+    $anio        = date('Y');
+    $periodo_sep = $anio . '-09';
+    $periodo_oct = $anio . '-10';
+
     $resultado = array();
     foreach ($filas as $raw) {
         $f = blokes_externos_limpia($raw);
         if ($f['nombre'] === '') { $resultado[] = array('nombre' => '(sin nombre)', 'accion' => 'invalida', 'motivo' => 'Falta el nombre'); continue; }
 
-        $match = blokes_externos_buscar_en_web($f['telefono'], $f['nombre']);
+        $pagos = is_array($raw['pagos'] ?? null) ? $raw['pagos'] : array();
+        if (!$f['exento'] && floatval($pagos[$periodo_sep]['importe'] ?? 0) <= 0 && floatval($pagos[$periodo_oct]['importe'] ?? 0) <= 0) {
+            $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'no_activo', 'motivo' => 'Sin pago en septiembre ni octubre: probablemente ya no viene');
+            continue;
+        }
+
+        $hay_hermanos = $f['telefono'] !== '' && ($conteo_telefono[$f['telefono']] ?? 0) > 1;
+        $match = blokes_externos_buscar_en_web($f['telefono'], $f['nombre'], $f['dia'], $f['horario'], $f['edad'], $hay_hermanos);
         if ($match && $match['tipo'] === 'confirmado') {
             $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'ya_en_web', 'subId' => $match['subId']);
             continue;
         }
-        // Mismo teléfono que una suscripción de la web, pero ni el nombre ni el grupo coinciden:
-        // probablemente un hermano/familiar compartiendo el móvil de los padres. No se descarta —
-        // se crea/actualiza igual, pero se avisa con el subId de esa otra suscripción para que se
-        // revise a mano antes de confirmar (no fiable para decidir solo).
+        // Mismo teléfono que una suscripción de la web, pero no hay suficiente para confirmar que
+        // es la misma persona (nombre distinto, o hermanos ambiguos en el grupo): probablemente un
+        // familiar compartiendo el móvil de los padres. No se descarta — se crea/actualiza igual,
+        // pero se avisa con el subId de esa otra suscripción para que se revise a mano antes de
+        // confirmar de verdad (nunca se crea solo por esto, queda para decidir en la vista previa).
         $posible_familiar = $match && $match['tipo'] === 'posible_familiar' ? $match['subId'] : null;
 
-        $pagos = is_array($raw['pagos'] ?? null) ? $raw['pagos'] : array();
         $existente = $f['telefono'] !== '' ? ($existentes[$f['telefono']] ?? null) : null;
 
         if ($existente) {
@@ -3784,7 +3856,7 @@ function superadmin_gestion_externos_importar($request) {
         $resultado[] = $fila;
     }
 
-    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0, 'posibleFamiliar' => 0);
+    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0, 'noActivo' => 0, 'posibleFamiliar' => 0);
     foreach ($resultado as $r) {
         $k = $r['accion'] === 'ya_en_web' ? 'yaEnWeb' : $r['accion'];
         if (isset($resumen[$k])) $resumen[$k]++;
