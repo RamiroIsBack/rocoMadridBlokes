@@ -4,8 +4,13 @@
 .cal-token-link { margin-left: auto; font-size: 0.72rem; color: #666; }
 .cal-btn-link { text-decoration: none; display: inline-block; }
 
+/* Bloque oscuro con la barra y los filtros (la página va sobre fondo crema) */
+.cal-controls { margin-bottom: 24px; padding: 14px 16px; }
+.cal-controls .ev-toolbar { margin: 0 0 12px; }
+.cal-controls .cal-token-link { color: #777; }
+
 /* Filtros por categoría */
-.cal-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -8px 0 20px; }
+.cal-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .cal-filters__sep { width: 1px; height: 18px; background: #333; margin: 0 4px; }
 .cal-cat {
   font-size: 0.7rem;
@@ -32,12 +37,59 @@
 .cal-cat--on::before { opacity: 1; }
 
 /* Chips */
-.cal-chip--done .ev-chip__name { text-decoration: line-through; color: #777; }
 .cal-chip--booking { background: rgba(248,113,113,0.08); }
-.cal-legend__done { border: 1px solid #555; background: #2a2a2a !important; }
+.cal-chip__ok { color: #34d399; font-weight: 800; font-size: 0.7rem; }
 
-/* Detalle */
-.cal-detail { margin: 0 0 24px; }
+/* Desplegable de tipos de Eventos */
+.cal-dd { position: relative; }
+.cal-dd__btn { list-style: none; cursor: pointer; user-select: none; }
+.cal-dd__btn::-webkit-details-marker { display: none; }
+.cal-dd__btn strong { color: #f0ece0; }
+.cal-dd__menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 200px;
+  padding: 8px 10px;
+  background: #16130d;
+  border: 1px solid #3a3020;
+  border-radius: 4px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+}
+.cal-dd__quick { display: flex; gap: 12px; padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid #2a2015; font-size: 0.72rem; }
+.cal-dd__opt { display: flex; align-items: center; gap: 7px; padding: 4px 0; font-size: 0.8rem; color: #ddd; cursor: pointer; }
+.cal-dd__opt input { accent-color: #a78bfa; }
+.cal-dd__opt i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
+
+/* Resumen del mes */
+.cal-sum { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.cal-sum__group { border-left: 3px solid var(--cat-color, #999); padding: 2px 0 2px 10px; }
+.cal-sum__title { margin: 0 0 6px; font-size: 0.8rem; font-weight: 700; color: #f0ece0; }
+.cal-sum__title span { margin-left: 4px; font-size: 0.7rem; color: #888; font-weight: 600; }
+.cal-sum__list { list-style: none; margin: 0; padding: 0; }
+.cal-sum__item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  width: 100%;
+  padding: 3px 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cal-sum__item:hover .cal-sum__name { color: #fff; text-decoration: underline; }
+.cal-sum__date { flex: 0 0 auto; font-size: 0.72rem; color: #888; font-variant-numeric: tabular-nums; text-transform: capitalize; }
+.cal-sum__name { flex: 1 1 140px; font-size: 0.78rem; color: #ddd; }
+.cal-sum__who { width: 100%; font-size: 0.66rem; color: #666; }
+
+/* Detalle: fondo oscuro propio para que se lea siempre */
+.cal-detail { margin: 0 0 24px; background: #100e09; color: #ddd; border-top-color: #2a2015; border-right-color: #2a2015; border-bottom-color: #2a2015; }
+.cal-detail .sa-pay-file__title { color: #f0ece0; }
+.cal-detail .cal-btn-link { color: #f5c842; border-color: #5a4a20; }
+.cal-detail .cal-btn-link:hover { color: #1a1a1a; background: #f5c842; }
 .cal-detail__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));

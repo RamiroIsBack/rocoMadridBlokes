@@ -4,7 +4,7 @@ import {
   useCalendar, saveNotionToken, getBookings, notionColor,
   CATEGORIES, CATEGORY_COLORS, NOTION_VIEW_CATEGORIES, NO_CATEGORY, NOTION_CALENDAR_URL,
 } from '../hooks/useCalendar'
-import { typeOf, statusOf } from '../hooks/useEvents'
+import { TYPES, typeOf, statusOf } from '../hooks/useEvents'
 import { fmtEur } from '../utils/monthFormat'
 import './SuperAdminPage.css'
 import './EventosPage.css'
@@ -39,18 +39,28 @@ function savePrefs(p) {
 }
 
 // ─── Elementos del calendario: tareas de Notion y reservas de Eventos ──────
-const DONE = ['Listo', 'Archivo']
+// "Listo" en Notion quiere decir organizado/confirmado, no pasado: lleva ✓, sin tachar.
+const READY = ['Listo', 'Archivo']
+
+// Notion manda las horas con zona (a veces UTC): se pasan a la hora de este navegador
+function splitDate(s) {
+  if (!s) return { date: '', time: '' }
+  if (s.length <= 10) return { date: s, time: '' }
+  const d = new Date(s)
+  return { date: isoDate(d), time: `${pad(d.getHours())}:${pad(d.getMinutes())}` }
+}
 
 function fromNotion(it) {
-  const date = it.start.slice(0, 10)
+  const start = splitDate(it.start)
+  const end   = it.end ? splitDate(it.end) : { date: start.date, time: '' }
   return {
     key: it.id, kind: 'notion', raw: it,
-    date, endDate: it.end ? it.end.slice(0, 10) : date,
-    time: it.start.length > 10 ? it.start.slice(11, 16) : '',
+    date: start.date, endDate: end.date || start.date,
+    time: start.time, endTime: end.time,
     title: it.title,
     category: it.category?.name || NO_CATEGORY,
     color: notionColor(it.category?.color),
-    done: DONE.includes(it.status?.name),
+    ready: READY.includes(it.status?.name),
     archived: it.status?.name === 'Archivo',
   }
 }
@@ -59,10 +69,10 @@ function fromBooking(b) {
   const t = typeOf(b.type)
   return {
     key: `ev-${b.id}`, kind: 'booking', raw: b,
-    date: b.date, endDate: b.date, time: b.time,
+    date: b.date, endDate: b.date, time: b.time, endTime: b.end_time,
     title: `${t.label}: ${b.honoree || b.contact || '—'}`,
     category: 'Reserva', color: t.color,
-    done: b.status === 'celebrada', archived: false,
+    ready: ['confirmada', 'celebrada'].includes(b.status), archived: false,
   }
 }
 
@@ -72,11 +82,12 @@ const byTime = (a, b) => (a.time || '99').localeCompare(b.time || '99') || a.tit
 function Chip({ it, onClick }) {
   return (
     <button
-      className={`ev-chip cal-chip${it.done ? ' cal-chip--done' : ''}${it.kind === 'booking' ? ' cal-chip--booking' : ''}`}
+      className={`ev-chip cal-chip${it.kind === 'booking' ? ' cal-chip--booking' : ''}`}
       style={{ '--type-color': it.color }} onClick={onClick}
       title={`${it.category}${it.raw.status?.name ? ` · ${it.raw.status.name}` : ''}${it.raw.owners?.length ? ` · ${it.raw.owners.join(', ')}` : ''}`}>
       {it.time && <span className="ev-chip__time">{it.time}</span>}
       <span className="ev-chip__name">{it.title}</span>
+      {it.ready && <span className="cal-chip__ok" title={it.kind === 'notion' ? 'Listo' : 'Confirmada'}>✓</span>}
     </button>
   )
 }
@@ -87,7 +98,7 @@ function WeekSummary({ items, start, onShift, onOpen }) {
   const list = items.filter(it => it.date <= days[6] && it.endDate >= days[0])
   const tasks    = list.filter(it => it.kind === 'notion')
   const bookings = list.filter(it => it.kind === 'booking')
-  const pending  = tasks.filter(it => !it.done).length
+  const pending  = tasks.filter(it => !it.ready).length
 
   return (
     <div className="sa-section">
@@ -103,7 +114,7 @@ function WeekSummary({ items, start, onShift, onOpen }) {
         {list.length === 0 ? 'Nada previsto esta semana' : (
           <>
             {tasks.length} tarea{tasks.length === 1 ? '' : 's'}
-            {pending > 0 && pending < tasks.length && ` (${pending} sin terminar)`}
+            {pending > 0 && pending < tasks.length && ` (${pending} sin marcar como Listo)`}
             {bookings.length > 0 && ` · ${bookings.length} reserva${bookings.length === 1 ? '' : 's'} de Eventos`}
           </>
         )}
@@ -151,8 +162,56 @@ function MonthCalendar({ items, month, onMonth, onOpen, legend }) {
       </div>
       <div className="ev-legend">
         {legend.map(([label, color]) => <span key={label}><i style={{ background: color }} />{label}</span>)}
-        <span><i className="cal-legend__done" />Listo / celebrada</span>
+        <span><b className="cal-chip__ok">✓</b> Listo (Notion) / confirmada (Eventos)</span>
       </div>
+    </div>
+  )
+}
+
+// ─── Resumen del mes: lo importante agrupado, sin ir día a día ─────────────
+function MonthSummary({ items, month, order, onOpen }) {
+  const list  = items.filter(it => monthOf(it.date) === month || (it.date < `${month}-01` && it.endDate >= `${month}-01`))
+  const groups = {}
+  for (const it of list) {
+    const name = it.kind === 'booking' ? `${typeOf(it.raw.type).label} (Eventos)` : it.category
+    ;(groups[name] ??= { name, color: it.color, items: [] }).items.push(it)
+  }
+  const sorted = Object.values(groups).sort((a, b) => {
+    const ia = order.indexOf(a.name), ib = order.indexOf(b.name)
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.name.localeCompare(b.name)
+  })
+  const range = it => it.endDate !== it.date
+    ? `${fmtDay(it.date)} → ${fmtDay(it.endDate)}`
+    : `${fmtDay(it.date)}${it.time ? ` · ${it.time}` : ''}`
+
+  return (
+    <div className="sa-section">
+      <div className="sa-section__header">
+        <h2 className="sa-section-title">Resumen de <span className="ev-cap">{fmtMonth(month)}</span></h2>
+        <span className="sa-pay-muted">{list.length} en total</span>
+      </div>
+      {sorted.length === 0
+        ? <p className="sa-pay-empty sa-pay-muted">No hay nada este mes con los filtros elegidos.</p>
+        : (
+          <div className="cal-sum">
+            {sorted.map(g => (
+              <div key={g.name} className="cal-sum__group" style={{ '--cat-color': g.color }}>
+                <h3 className="cal-sum__title">{g.name} <span>{g.items.length}</span></h3>
+                <ul className="cal-sum__list">
+                  {g.items.sort((a, b) => a.date.localeCompare(b.date) || byTime(a, b)).map(it => (
+                    <li key={it.key}>
+                      <button className="cal-sum__item" onClick={() => onOpen(it)}>
+                        <span className="cal-sum__date">{range(it)}</span>
+                        <span className="cal-sum__name">{it.title}{it.ready && <b className="cal-chip__ok"> ✓</b>}</span>
+                        {it.raw.owners?.length > 0 && <span className="cal-sum__who">{it.raw.owners.join(', ')}</span>}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+        )}
     </div>
   )
 }
@@ -162,8 +221,8 @@ function Detail({ it, onClose }) {
   const r   = it.raw
   const row = (label, value) => value ? <div className="cal-detail__row"><span>{label}</span><p>{value}</p></div> : null
   const when = it.endDate !== it.date
-    ? `${fmtDay(it.date)}${it.time ? ` ${it.time}` : ''} → ${fmtDay(it.endDate)}${r.end?.length > 10 ? ` ${r.end.slice(11, 16)}` : ''}`
-    : `${fmtDay(it.date)}${it.time ? ` · ${it.time}` : ''}${it.kind === 'booking' && r.end_time ? `–${r.end_time}` : ''}${r.end?.length > 10 ? `–${r.end.slice(11, 16)}` : ''}`
+    ? `${fmtDay(it.date)}${it.time ? ` ${it.time}` : ''} → ${fmtDay(it.endDate)}${it.endTime ? ` ${it.endTime}` : ''}`
+    : `${fmtDay(it.date)}${it.time ? ` · ${it.time}` : ''}${it.endTime ? `–${it.endTime}` : ''}`
 
   return (
     <div className="sa-pay-file cal-detail" style={{ '--card-color': it.color }}>
@@ -199,6 +258,33 @@ function Detail({ it, onClose }) {
           : <Link className="sa-list-save__btn cal-btn-link" to="/eventos">Ver en Eventos</Link>}
       </div>
     </div>
+  )
+}
+
+// ─── Desplegable: qué tipos de reserva de Eventos se ven ────────────────────
+function EventTypesDropdown({ selected, onChange }) {
+  const all   = TYPES.map(t => t.id)
+  const label = selected.length === 0 ? 'Ninguna'
+    : selected.length === all.length ? 'Todas'
+    : TYPES.filter(t => selected.includes(t.id)).map(t => t.label).join(', ')
+  const toggle = id => onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id])
+
+  return (
+    <details className="cal-dd">
+      <summary className="sa-pay-action cal-dd__btn">Reservas de Eventos: <strong>{label}</strong> ▾</summary>
+      <div className="cal-dd__menu">
+        <div className="cal-dd__quick">
+          <button type="button" className="pr-link" onClick={() => onChange(all)}>Todas</button>
+          <button type="button" className="pr-link" onClick={() => onChange([])}>Ninguna</button>
+        </div>
+        {TYPES.map(t => (
+          <label key={t.id} className="cal-dd__opt">
+            <input type="checkbox" checked={selected.includes(t.id)} onChange={() => toggle(t.id)} />
+            <i style={{ background: t.color }} />{t.label}
+          </label>
+        ))}
+      </div>
+    </details>
   )
 }
 
@@ -242,7 +328,12 @@ export default function CalendarioPage() {
   const isSocio = role === 'socio'
   const [week, setWeek]   = useState(() => weekStart(today()))
   const [month, setMonth] = useState(() => monthOf(today()))
-  const [prefs, setPrefs] = useState(() => ({ cats: null, bookings: false, archived: false, ...loadPrefs() }))
+  const [prefs, setPrefs] = useState(() => {
+    const p = { cats: null, archived: false, ...loadPrefs() }
+    // evTypes: tipos de reserva de Eventos que se ven (antes era un sí/no en "bookings")
+    if (!Array.isArray(p.evTypes)) p.evTypes = p.bookings ? TYPES.map(t => t.id) : []
+    return p
+  })
   const [open, setOpen]   = useState(null)
   const [setup, setSetup] = useState(false)
   const [bookings, setBookings] = useState([])
@@ -255,17 +346,21 @@ export default function CalendarioPage() {
 
   const update = changes => setPrefs(p => { const n = { ...p, ...changes }; savePrefs(n); return n })
 
+  const showEvents = prefs.evTypes.length > 0
   useEffect(() => {
-    if (!prefs.bookings) return
+    if (!showEvents) return
     getBookings().then(setBookings).catch(() => setBookings([]))
-  }, [prefs.bookings])
+  }, [showEvents])
 
   const items = useMemo(() => {
+    const evs = bookings.filter(b => b.status !== 'cancelada' && prefs.evTypes.includes(b.type))
+    // Si ese día ya hay un cumpleaños en Eventos, el "Cumpleaños" de Notion es el mismo: no se repite
+    const cumpleDays = new Set(evs.filter(b => b.type === 'cumpleanos').map(b => b.date))
     const notion = (data?.items ?? []).map(fromNotion)
       .filter(it => prefs.archived || !it.archived)
       .filter(it => !prefs.cats || prefs.cats.includes(it.category))
-    const evs = prefs.bookings ? bookings.filter(b => b.status !== 'cancelada').map(fromBooking) : []
-    return [...notion, ...evs]
+      .filter(it => !(it.category === 'Cumpleaños' && cumpleDays.has(it.date)))
+    return [...notion, ...evs.map(fromBooking)]
   }, [data, bookings, prefs])
 
   if (!['socio', 'gestion'].includes(role)) {
@@ -292,7 +387,7 @@ export default function CalendarioPage() {
   const isNotionView = prefs.cats && prefs.cats.length === NOTION_VIEW_CATEGORIES.length && NOTION_VIEW_CATEGORIES.every(c => prefs.cats.includes(c))
   const legend = [
     ...cats.filter(c => active(c) && present.has(c)).map(c => [c, colorOf[c] || '#9b9a97']),
-    ...(prefs.bookings ? [['Reservas de Eventos (color del tipo)', '#f87171']] : []),
+    ...TYPES.filter(t => prefs.evTypes.includes(t.id)).map(t => [`${t.label} (Eventos)`, t.color]),
   ]
 
   const configured = data?.configured
@@ -311,13 +406,11 @@ export default function CalendarioPage() {
 
       {(configured || (!data && loading) || error) && (
         <>
+          <div className="sa-section cal-controls">
           <div className="ev-toolbar">
             <button className="sa-pay-action" onClick={() => reload(true)} disabled={loading}>{loading ? 'Cargando…' : 'Actualizar'}</button>
             <a className="sa-pay-action cal-btn-link" href={NOTION_CALENDAR_URL} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>
-            <label className="cal-switch">
-              <input type="checkbox" checked={prefs.bookings} onChange={e => update({ bookings: e.target.checked })} />
-              Incluir reservas de Eventos
-            </label>
+            <EventTypesDropdown selected={prefs.evTypes} onChange={evTypes => update({ evTypes })} />
             <label className="cal-switch">
               <input type="checkbox" checked={prefs.archived} onChange={e => update({ archived: e.target.checked })} />
               Mostrar archivadas
@@ -334,6 +427,7 @@ export default function CalendarioPage() {
               <button key={c} className={`cal-cat${active(c) ? ' cal-cat--on' : ''}`} style={{ '--cat-color': colorOf[c] || '#9b9a97' }} onClick={() => toggle(c)}>{c}</button>
             ))}
           </div>
+          </div>
 
           {error && <div className="sa-error">Error: {error}</div>}
 
@@ -341,6 +435,7 @@ export default function CalendarioPage() {
 
           <WeekSummary items={items} start={week} onShift={shiftWeek} onOpen={openItem} />
           <MonthCalendar items={items} month={month} onMonth={setMonth} onOpen={openItem} legend={legend} />
+          <MonthSummary items={items} month={month} order={[...cats, ...TYPES.map(t => `${t.label} (Eventos)`)]} onOpen={openItem} />
           <p className="sa-pay-note">
             Los datos vienen de Notion («Funciones Rocomadrid») y se refrescan cada 5 minutos; «Actualizar» los trae al momento.
             Para cambiar una tarea, ábrela en Notion.
