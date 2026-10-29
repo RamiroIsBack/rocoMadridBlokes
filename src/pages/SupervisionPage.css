@@ -60,6 +60,12 @@
   margin-bottom: 24px;
 }
 .sv-controls-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sv-controls-left  { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sv-tab-mini {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #bbb;
+  border-radius: 999px; padding: 5px 14px; font-size: 13px; cursor: pointer;
+}
+.sv-tab-mini.is-active { background: #2563eb; border-color: #2563eb; color: #fff; }
 .sv-filter-group   { display: flex; gap: 6px; }
 
 .sv-filter-btn {

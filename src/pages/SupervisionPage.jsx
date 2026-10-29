@@ -1155,6 +1155,7 @@ const PAGO_PENDIENTE = new Set(['pending', 'on-hold', 'failed'])
 function GruposTab() {
   const { data, loading, error, refetch } = useGestionGrupos(4)
   const [grupoKey, setGrupoKey] = useState('')
+  const [vista, setVista]     = useState('grupos') // 'grupos' | 'duplicados'
   const [menuFor, setMenuFor] = useState(null)   // alumno con el menú de acciones abierto
   const [accion, setAccion]   = useState(null)   // { alumno, tipo } con el modal abierto
 
@@ -1164,6 +1165,12 @@ function GruposTab() {
 
   const grupo = grupoKey ? grupos.find(g => `${g.dia}|${g.horario}|${g.edad}` === grupoKey) : null
   const alumnos = grupo ? grupo.alumnos : grupos.flatMap(g => g.alumnos)
+  // Bandeja 8.3 "Duplicados": todas las filas con una suscripción vieja colgando, de todos los
+  // grupos a la vez, para fusionarlas sin tener que ir grupo por grupo.
+  const duplicados = useMemo(
+    () => grupos.flatMap(g => g.alumnos.filter(a => a.otrasSubs?.length > 0).map(a => ({ ...a, grupoLabel: g.label }))),
+    [grupos]
+  )
 
   const kpis = useMemo(() => {
     const k = { personas: 0, enEspera: 0, dia1: 0, dia2: 0, dia3: 0, plazas: 0, cobradoMes: 0, pendienteMes: 0, pendienteImporte: 0 }
@@ -1202,19 +1209,59 @@ function GruposTab() {
       </p>
 
       <div className="sv-controls">
-        <div className="sv-controls-right">
-          <select className="sv-tests-select" value={grupoKey} onChange={e => setGrupoKey(e.target.value)}>
-            <option value="">Todos los grupos</option>
-            {grupos.map(g => {
-              const key = `${g.dia}|${g.horario}|${g.edad}`
-              const nVigor = g.alumnos.filter(a => a.enVigor).length
-              const nEspera = g.alumnos.length - nVigor
-              return <option key={key} value={key}>{g.label} — {nVigor}{nEspera ? ` (+${nEspera} en espera)` : ''}</option>
-            })}
-          </select>
+        <div className="sv-controls-left">
+          <button className={`sv-tab-mini ${vista === 'grupos' ? 'is-active' : ''}`} onClick={() => setVista('grupos')}>Grupos</button>
+          <button className={`sv-tab-mini ${vista === 'duplicados' ? 'is-active' : ''}`} onClick={() => setVista('duplicados')}>
+            Duplicados {duplicados.length ? `(${duplicados.length})` : ''}
+          </button>
         </div>
+        {vista === 'grupos' && (
+          <div className="sv-controls-right">
+            <select className="sv-tests-select" value={grupoKey} onChange={e => setGrupoKey(e.target.value)}>
+              <option value="">Todos los grupos</option>
+              {grupos.map(g => {
+                const key = `${g.dia}|${g.horario}|${g.edad}`
+                const nVigor = g.alumnos.filter(a => a.enVigor).length
+                const nEspera = g.alumnos.length - nVigor
+                return <option key={key} value={key}>{g.label} — {nVigor}{nEspera ? ` (+${nEspera} en espera)` : ''}</option>
+              })}
+            </select>
+          </div>
+        )}
       </div>
 
+      {vista === 'duplicados' && (
+        <>
+          <p className="sv-note">
+            Alumnos con una suscripción vieja colgando de la misma clase (se volvieron a apuntar con un alta nueva).
+            «Fusionar» cancela solo la vieja; la activa no se toca.
+          </p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Estado (vigente)</th><th>Antiguas colgando</th><th></th></tr>
+              </thead>
+              <tbody>
+                {duplicados.map(a => {
+                  const est = ESTADO_LABEL[a.estado] || { txt: a.estado, cls: '' }
+                  return (
+                    <tr key={`${a.subId}-${a.grupoLabel}`}>
+                      <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                      <td className="sv-ot-muted">{a.grupoLabel}</td>
+                      <td><span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span> <span className="sv-ot-muted">#{a.subId}</span></td>
+                      <td className="sv-ot-muted">{a.otrasSubs.map(s => `#${s.subId} (${ESTADO_LABEL[s.estado]?.txt || s.estado})`).join(', ')}</td>
+                      <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          {duplicados.length === 0 && <p className="sv-empty">Sin duplicados pendientes de fusionar.</p>}
+        </>
+      )}
+
+      {vista === 'grupos' && (<>
       <div className="sv-kpis">
         <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }} title="Personas en vigor (activas o de baja a fin de mes) en este grupo — mismo criterio que «Cuentas en vigor» de ExcelMuerte. Las en espera/pausadas/pendientes de alta se cuentan aparte. En «Todos los grupos» cuenta por grupo: quien está en dos grupos distintos (p. ej. un grupo normal y Pilates/Yoga) suma 2, por eso puede ser algo más que las cuentas únicas de ExcelMuerte.">
           <span className="sv-kpi__value">{kpis.personas}{kpis.enEspera ? <span className="sv-ot-muted"> (+{kpis.enEspera} en espera)</span> : ''}</span>
@@ -1280,6 +1327,7 @@ function GruposTab() {
         </table>
       </div>
       {alumnos.length === 0 && <p className="sv-empty">Sin suscripciones en vigor para este grupo.</p>}
+      </>)}
 
       {menuFor && (
         <AccionMenu

@@ -83,7 +83,17 @@ jobs:
             --user "$FTP_USER:$FTP_PASS" \
             -T /tmp/htaccess-deploy \
             "ftp://$FTP_HOST:21${FTP_PATH}.htaccess"
+          # Sube a un nombre temporal y renombra (RNFR/RNTO) en vez de sobrescribir el fichero
+          # en vivo directamente: una subida larga deja el PHP a medias un rato (WordPress lo
+          # carga en cada petición), y durante ese rato los endpoints nuevos daban 404/500. El
+          # rename es atómico en el servidor, así que nunca hay un estado intermedio visible.
+          TMP_PHP="progreso-extension1-1.php.deploying-${{ github.run_id }}"
           curl -k --ssl-reqd \
             --user "$FTP_USER:$FTP_PASS" \
             -T progreso-extension1-1.php \
-            "ftp://$FTP_HOST:21${PLUGIN_PATH}progreso-extension1-1.php"
+            "ftp://$FTP_HOST:21${PLUGIN_PATH}${TMP_PHP}"
+          curl -sk --ssl-reqd --fail \
+            --user "$FTP_USER:$FTP_PASS" \
+            -Q "RNFR ${PLUGIN_PATH}${TMP_PHP}" \
+            -Q "RNTO ${PLUGIN_PATH}progreso-extension1-1.php" \
+            "ftp://$FTP_HOST:21/"
