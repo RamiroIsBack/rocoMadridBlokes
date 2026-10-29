@@ -6,6 +6,7 @@ import {
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
   gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento,
+  gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
 } from '../hooks/useSuperAdmin'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import OvertimeTab from './OvertimeTab'
@@ -942,6 +943,7 @@ const ESTADO_LABEL = {
   pausado:         { txt: 'Pausado',                    cls: 'sv-grp-estado--warn' },
   pendiente_pago:  { txt: 'Pendiente de alta',          cls: 'sv-grp-estado--warn' },
   baja_fin_mes:    { txt: 'Baja a fin de mes',          cls: 'sv-grp-estado--bad' },
+  externo:         { txt: 'Fuera de la web',            cls: 'sv-grp-estado--ext' },
 }
 const METODO_OPCIONES = [
   ['transferencia', 'Transferencia'], ['tarjeta', 'Tarjeta (TPV roco)'],
@@ -967,6 +969,12 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const [nota, setNota]       = useState(alumno.notas || '')
   const [mantenerPausa, setMantenerPausa] = useState(true)
   const [modoBaja, setModoBaja] = useState('fin_mes')
+  const [extNombre, setExtNombre]   = useState(alumno.alumno || '')
+  const [extTelefono, setExtTelefono] = useState(alumno.telefono || '')
+  const [extDia, setExtDia]         = useState(alumno.externoDia || '')
+  const [extHorario, setExtHorario] = useState(alumno.externoHorario || '')
+  const [extEdad, setExtEdad]       = useState(alumno.externoEdad || 'Adultos')
+  const [extPeriodo, setExtPeriodo] = useState(hoyISO().slice(0, 7))
   // Marcar cobrado puede generar factura/AEAT de verdad: por defecto se simula. El resto ya
   // están validadas con datos de prueba, así que por defecto actúan de verdad.
   const [simular, setSimular] = useState(tipo === 'marcar_cobrado')
@@ -978,6 +986,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
     marcar_cobrado: 'Marcar cobrado', pausar: 'Pausar', reanudar: 'Reanudar', nota: 'Nota',
     dar_de_baja: 'Dar de baja', fusionar: 'Fusionar duplicado',
     exento: alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio',
+    ext_cobrar: 'Marcar cobrado (fuera de la web)', ext_editar: alumno.externoId ? 'Editar datos' : 'Alta de alumno externo', ext_borrar: 'Eliminar alumno externo',
   }
   const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'dar_de_baja', 'fusionar'].includes(tipo)
 
@@ -1001,7 +1010,19 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
       } else if (tipo === 'fusionar') {
         res = await gestionFusionar({ sub_id_viejo: targetId, simular: sim })
       } else if (tipo === 'exento') {
-        res = await gestionExento({ sub_id: alumno.subId, exento: !alumno.exento })
+        res = alumno.esExterno
+          ? await gestionExternoActualizar(alumno.externoId, { dia: alumno.externoDia, horario: alumno.externoHorario, edad: alumno.externoEdad, nombre: alumno.alumno, telefono: alumno.telefono, notas: alumno.notas, exento: !alumno.exento })
+          : await gestionExento({ sub_id: alumno.subId, exento: !alumno.exento })
+      } else if (tipo === 'ext_cobrar') {
+        if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
+        res = await gestionExternoPago(alumno.externoId, { periodo: extPeriodo, importe: Number(importe), metodo, fecha })
+      } else if (tipo === 'ext_editar') {
+        if (!extNombre.trim()) throw new Error('Pon el nombre.')
+        if (!extDia.trim() && !extHorario.trim()) throw new Error('Pon el grupo (día y/u horario).')
+        const body = { dia: extDia, horario: extHorario, edad: extEdad, nombre: extNombre, telefono: extTelefono, notas: nota, exento: alumno.exento }
+        res = alumno.externoId ? await gestionExternoActualizar(alumno.externoId, body) : await gestionExternoCrear(body)
+      } else if (tipo === 'ext_borrar') {
+        res = await gestionExternoBorrar(alumno.externoId)
       }
       if (sim) setPreview(res)
       else onDone()
@@ -1015,7 +1036,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   return (
     <div className="sv-grp-overlay" onClick={onClose}>
       <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
-        <h3>{titulos[tipo]} — {alumno.alumno || `Suscripción #${alumno.subId}`}</h3>
+        <h3>{titulos[tipo]}{alumno.subId ? ` — ${alumno.alumno || `Suscripción #${alumno.subId}`}` : ''}</h3>
 
         {preview ? (
           <>
@@ -1111,6 +1132,53 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
               </label>
             )}
 
+            {tipo === 'ext_cobrar' && (
+              <>
+                <p className="sv-ot-muted">No toca WooCommerce: solo queda apuntado como pago de este alumno externo.</p>
+                <label className="sv-grp-field">Mes (periodo)
+                  <input className="sv-tests-input" type="month" value={extPeriodo} onChange={e => setExtPeriodo(e.target.value)} />
+                </label>
+                <label className="sv-grp-field">Importe (€)
+                  <input className="sv-tests-input" type="number" step="0.01" min="0" value={importe} onChange={e => setImporte(e.target.value)} />
+                </label>
+                <label className="sv-grp-field">Método
+                  <select className="sv-tests-select" value={metodo} onChange={e => setMetodo(e.target.value)}>
+                    {METODO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
+                  </select>
+                </label>
+                <label className="sv-grp-field">Fecha
+                  <input className="sv-tests-input" type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+                </label>
+              </>
+            )}
+
+            {tipo === 'ext_editar' && (
+              <>
+                <label className="sv-grp-field">Nombre
+                  <input className="sv-tests-input" type="text" value={extNombre} onChange={e => setExtNombre(e.target.value)} />
+                </label>
+                <label className="sv-grp-field">Teléfono
+                  <input className="sv-tests-input" type="text" value={extTelefono} onChange={e => setExtTelefono(e.target.value)} />
+                </label>
+                <label className="sv-grp-field">Día (Lunes/Martes… o Pilates/Yoga)
+                  <input className="sv-tests-input" type="text" value={extDia} onChange={e => setExtDia(e.target.value)} />
+                </label>
+                <label className="sv-grp-field">Horario
+                  <input className="sv-tests-input" type="text" value={extHorario} onChange={e => setExtHorario(e.target.value)} placeholder="17:30-18:30" />
+                </label>
+                <label className="sv-grp-field">Edad
+                  <input className="sv-tests-input" type="text" value={extEdad} onChange={e => setExtEdad(e.target.value)} placeholder="Adultos" />
+                </label>
+                <label className="sv-grp-field">Notas
+                  <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} />
+                </label>
+              </>
+            )}
+
+            {tipo === 'ext_borrar' && (
+              <p>¿Eliminar a <strong>{alumno.alumno}</strong> de los alumnos externos? No afecta a nada de WooCommerce. Es para altas hechas por error — si de verdad dejó de venir, mejor déjalo y no le apuntes más pagos.</p>
+            )}
+
             {puedeSimular && (
               <label className="sv-grp-field sv-grp-field--check">
                 <input type="checkbox" checked={simular} onChange={e => setSimular(e.target.checked)} />
@@ -1143,6 +1211,19 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
 }
 
 function AccionMenu({ alumno, onPick, onClose }) {
+  if (alumno.esExterno) {
+    return (
+      <div className="sv-grp-overlay" onClick={onClose}>
+        <div className="sv-grp-menu" onClick={e => e.stopPropagation()}>
+          <button onClick={() => onPick('ext_cobrar')}>Marcar cobrado</button>
+          <button onClick={() => onPick('ext_editar')}>Editar datos</button>
+          <button onClick={() => onPick('exento')}>{alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio'}</button>
+          <button onClick={() => onPick('ext_borrar')}>Eliminar (alta por error)</button>
+          <button className="sv-grp-menu__cancel" onClick={onClose}>Cancelar</button>
+        </div>
+      </div>
+    )
+  }
   const puedePausar   = alumno.estado === 'activo' || alumno.estado === 'pendiente_pago'
   const puedeReanudar = alumno.estado === 'en_espera' || alumno.estado === 'pausado'
   const puedeBaja     = alumno.estado !== 'baja_fin_mes'
@@ -1191,6 +1272,7 @@ function GruposTab() {
   )
   const bajas          = useMemo(() => conGrupo.filter(a => a.estado === 'baja_fin_mes'), [conGrupo])
   const sinDatos        = useMemo(() => conGrupo.filter(a => !a.telefono || a.sinNombre), [conGrupo])
+  const pagaFuera        = useMemo(() => conGrupo.filter(a => a.esExterno), [conGrupo])
 
   const kpis = useMemo(() => {
     const k = { personas: 0, enEspera: 0, dia1: 0, dia2: 0, dia3: 0, plazas: 0, cobradoMes: 0, pendienteMes: 0, pendienteImporte: 0 }
@@ -1242,6 +1324,9 @@ function GruposTab() {
           </button>
           <button className={`sv-tab-mini ${vista === 'sindatos' ? 'is-active' : ''}`} onClick={() => setVista('sindatos')}>
             Sin datos {sinDatos.length ? `(${sinDatos.length})` : ''}
+          </button>
+          <button className={`sv-tab-mini ${vista === 'externos' ? 'is-active' : ''}`} onClick={() => setVista('externos')}>
+            Pagan fuera de la web {pagaFuera.length ? `(${pagaFuera.length})` : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'duplicados' ? 'is-active' : ''}`} onClick={() => setVista('duplicados')}>
             Duplicados {duplicados.length ? `(${duplicados.length})` : ''}
@@ -1372,6 +1457,38 @@ function GruposTab() {
             </table>
           </div>
           {sinDatos.length === 0 && <p className="sv-empty">Todos con teléfono y nombre real.</p>}
+        </>
+      )}
+
+      {vista === 'externos' && (
+        <>
+          <p className="sv-note">
+            Pagan fuera de la web (en mano, por transferencia directa…), sin suscripción de WooCommerce: lo que
+            lleve aquí no toca WooCommerce ni genera factura. De la migración del Excel, o añadidos a mano.
+          </p>
+          <button
+            className="sv-tests-select"
+            onClick={() => setAccion({ alumno: { esExterno: true, alumno: '', telefono: '', notas: '', exento: false, externoDia: '', externoHorario: '', externoEdad: 'Adultos' }, tipo: 'ext_editar' })}
+          >+ Alta externa</button>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Notas</th><th></th></tr>
+              </thead>
+              <tbody>
+                {pagaFuera.map(a => (
+                  <tr key={`ext-${a.externoId}`}>
+                    <td>{a.alumno || <span className="sv-ot-muted">—</span>}{a.exento && <span title="Exento/socio">*</span>}</td>
+                    <td className="sv-ot-muted">{a.grupoLabel}</td>
+                    <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                    <td className="sv-ot-muted">{a.notas || '—'}</td>
+                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {pagaFuera.length === 0 && <p className="sv-empty">Nadie dado de alta como externo todavía.</p>}
         </>
       )}
 

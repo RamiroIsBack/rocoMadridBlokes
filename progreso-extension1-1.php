@@ -789,6 +789,24 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_exento',
         'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/externos', array(
+        array('methods' => 'GET',  'callback' => 'superadmin_gestion_externos_get',   'permission_callback' => $sa_perm),
+        array('methods' => 'POST', 'callback' => 'superadmin_gestion_externos_crear', 'permission_callback' => $sa_perm),
+    ));
+    register_rest_route('superadmin/v1', '/gestion/externos/importar', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_externos_importar',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/externos/(?P<id>\d+)', array(
+        array('methods' => 'PUT',    'callback' => 'superadmin_gestion_externos_actualizar', 'permission_callback' => $sa_perm),
+        array('methods' => 'DELETE', 'callback' => 'superadmin_gestion_externos_borrar',      'permission_callback' => $sa_perm),
+    ));
+    register_rest_route('superadmin/v1', '/gestion/externos/(?P<id>\d+)/pago', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_externos_pago',
+        'permission_callback' => $sa_perm,
+    ));
 
     register_rest_route('superadmin/v1', '/expenses', array(
         array(
@@ -3282,6 +3300,33 @@ function superadmin_gestion_grupos($request) {
         $grupos[$gkey]['personas'][$persona_key][] = $fila;
     }
 
+    // Alumnos "externos" (8.4: pagan fuera de la web, no tienen suscripción) — una fila más por
+    // grupo, con el mismo aspecto que las de WooCommerce para que las bandejas y bandejas de la
+    // 8.3 los traten igual. Sin pedido real, así que nunca tienen "pendiente" calculado (se ve
+    // en la columna del mes si falta el pago, no en la bandeja "Cobrar este mes").
+    foreach (blokes_externos_todos() as $ext) {
+        $dia_ext = $ext['dia']; $horario_ext = $ext['horario']; $edad_ext = $ext['edad'] ?: 'Adultos';
+        $es_py_ext = in_array($dia_ext, array('Pilates', 'Yoga'), true);
+        $pareja_ext = $es_py_ext ? $dia_ext : blokes_dia_a_pareja($dia_ext);
+        $horario_agrupa_ext = blokes_horario_agrupable($horario_ext);
+        $gkey_ext = $pareja_ext . '|' . $horario_agrupa_ext . '|' . $edad_ext;
+        if (!isset($grupos[$gkey_ext])) {
+            $edad_suffix = (!$es_py_ext && $edad_ext !== 'Adultos') ? ' · ' . (stripos($edad_ext, 'Menores') !== false ? 'Niños' : (stripos($edad_ext, 'Adolescentes') !== false ? 'Adol.' : $edad_ext)) : '';
+            $label_ext = $es_py_ext ? $dia_ext : (trim($pareja_ext . ' · ' . $horario_agrupa_ext) . $edad_suffix);
+            $grupos[$gkey_ext] = array('label' => $label_ext, 'dia' => $pareja_ext, 'horario' => $horario_agrupa_ext, 'edad' => $edad_ext, 'personas' => array());
+        }
+        $pagos_ext = array_fill_keys($meses, null);
+        foreach ($ext['pagos'] as $ym => $p) if (isset($meses_set[$ym])) $pagos_ext[$ym] = array_merge($p, array('estadoPedido' => 'completed'));
+        $persona_key_ext = 'ext' . $ext['id'];
+        $grupos[$gkey_ext]['personas'][$persona_key_ext][] = array(
+            'subId' => 'ext-' . $ext['id'], 'alumno' => $ext['nombre'], 'telefono' => $ext['telefono'],
+            'dias' => 1, 'estado' => 'externo', 'enVigor' => true, 'pausaMotivo' => '', 'pausaHasta' => '',
+            'manual' => true, 'importeCatalogo' => 0, 'exento' => (bool) $ext['exento'], 'pagos' => $pagos_ext,
+            'pendiente' => null, 'notas' => $ext['notas'], 'sinNombre' => false, 'esExterno' => true,
+            'externoId' => intval($ext['id']), 'externoDia' => $dia_ext, 'externoHorario' => $horario_ext, 'externoEdad' => $edad_ext,
+        );
+    }
+
     // Una persona con varias suscripciones en el mismo grupo (alta nueva + vieja en espera
     // colgando, lo típico de los 19 duplicados de octubre): una sola fila, con el histórico de
     // pagos de todas fusionado; las demás se guardan aparte como "duplicados" (bandeja 8.3).
@@ -3447,6 +3492,243 @@ function blokes_cancelar_pedidos_impagados($sub, $simular) {
         if (!$simular) $o->update_status('cancelled', 'ExcelMuerte: pedido sin pagar cancelado al gestionar la suscripción.');
     }
     return $pedidos;
+}
+
+// ─── Sección 8.4: alumnos que pagan fuera de la web ("externos") ─────────────────────────
+// No tienen suscripción de WooCommerce — pagan en mano/transferencia fuera de la tienda y Eva
+// los llevaba solo en el Excel. Viven en dos tablas propias, nunca tocan WooCommerce ni Woo
+// Subscriptions, y se fusionan dentro de "Grupos" como una fila más (campo `esExterno`).
+
+function blokes_externos_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_externos';
+}
+function blokes_externos_pagos_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_externos_pagos';
+}
+
+function blokes_ensure_externos_tables() {
+    global $wpdb;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE " . blokes_externos_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        dia         varchar(60)         NOT NULL DEFAULT '',
+        horario     varchar(60)         NOT NULL DEFAULT '',
+        edad        varchar(60)         NOT NULL DEFAULT 'Adultos',
+        nombre      varchar(190)        NOT NULL DEFAULT '',
+        telefono    varchar(30)         NOT NULL DEFAULT '',
+        exento      tinyint(1)          NOT NULL DEFAULT 0,
+        notas       varchar(500)        NOT NULL DEFAULT '',
+        activo      tinyint(1)          NOT NULL DEFAULT 1,
+        user_login  varchar(100)        NOT NULL DEFAULT '',
+        created_at  datetime            NOT NULL,
+        updated_at  datetime            NOT NULL,
+        PRIMARY KEY (id)
+    ) {$charset};");
+    dbDelta("CREATE TABLE " . blokes_externos_pagos_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        externo_id  bigint(20) UNSIGNED NOT NULL,
+        periodo     varchar(7)          NOT NULL,
+        importe     decimal(10,2)       NOT NULL,
+        metodo      varchar(30)         NOT NULL DEFAULT '',
+        fecha       date                NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY externo_periodo (externo_id, periodo)
+    ) {$charset};");
+}
+
+function blokes_externos_normaliza_telefono($t) {
+    $d = preg_replace('/\D/', '', (string) $t);
+    return strlen($d) === 9 ? $d : (strlen($d) > 9 ? substr($d, -9) : $d);
+}
+
+// Todos los externos activos, con sus pagos anidados por periodo (YYYY-MM).
+function blokes_externos_todos() {
+    blokes_ensure_externos_tables();
+    global $wpdb;
+    $filas = $wpdb->get_results("SELECT * FROM " . blokes_externos_table() . " WHERE activo = 1", ARRAY_A);
+    $pagos_rows = $wpdb->get_results("SELECT * FROM " . blokes_externos_pagos_table(), ARRAY_A);
+    $pagos_por_externo = array();
+    foreach ($pagos_rows as $p) {
+        $pagos_por_externo[$p['externo_id']][$p['periodo']] = array(
+            'importe' => floatval($p['importe']), 'metodo' => $p['metodo'], 'fecha' => date('d/m/Y', strtotime($p['fecha'])),
+        );
+    }
+    foreach ($filas as &$f) {
+        $f['pagos'] = $pagos_por_externo[$f['id']] ?? array();
+    }
+    return $filas;
+}
+
+// ¿Esta persona (por teléfono, o si no por nombre) ya tiene una suscripción en vigor en la web?
+// Para no crear un externo duplicado de alguien que en realidad ya está en WooCommerce.
+function blokes_externos_buscar_en_web($telefono, $nombre) {
+    $tel = blokes_externos_normaliza_telefono($telefono);
+    $all = blokes_get_all_subscription_data();
+    foreach ($all as $s) {
+        if (!in_array($s['status'] ?? '', array('active', 'on-hold', 'pending'), true)) continue;
+        $sub_obj = wcs_get_subscription(intval($s['id']));
+        if (!$sub_obj) continue;
+        $tel_web = blokes_externos_normaliza_telefono($sub_obj->get_billing_phone() ?: ($s['telefono'] ?? ''));
+        if ($tel !== '' && $tel_web !== '' && $tel === $tel_web) return intval($s['id']);
+        $nombre_web = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) ?: ($s['cliente'] ?? '');
+        if ($nombre && $nombre_web && mb_strtolower(trim($nombre)) === mb_strtolower(trim($nombre_web))) return intval($s['id']);
+    }
+    return null;
+}
+
+function superadmin_gestion_externos_get() {
+    return rest_ensure_response(array('success' => true, 'data' => blokes_externos_todos()));
+}
+
+function blokes_externos_limpia($body, $defaults = array()) {
+    return array(
+        'dia'      => sanitize_text_field((string) ($body['dia'] ?? $defaults['dia'] ?? '')),
+        'horario'  => sanitize_text_field((string) ($body['horario'] ?? $defaults['horario'] ?? '')),
+        'edad'     => sanitize_text_field((string) ($body['edad'] ?? $defaults['edad'] ?? 'Adultos')) ?: 'Adultos',
+        'nombre'   => mb_substr(sanitize_text_field((string) ($body['nombre'] ?? '')), 0, 190),
+        'telefono' => blokes_externos_normaliza_telefono($body['telefono'] ?? ''),
+        'exento'   => !empty($body['exento']) ? 1 : 0,
+        'notas'    => mb_substr(sanitize_text_field((string) ($body['notas'] ?? '')), 0, 500),
+    );
+}
+
+// Alta de un alumno externo suelto (lo usa Eva en el día a día, aparte de la migración).
+function superadmin_gestion_externos_crear($request) {
+    blokes_ensure_externos_tables();
+    global $wpdb;
+    $body = $request->get_json_params();
+    $f = blokes_externos_limpia($body);
+    if ($f['nombre'] === '') return new WP_Error('bad_request', 'Falta el nombre.', array('status' => 400));
+    if (!$f['dia'] && !$f['horario']) return new WP_Error('bad_request', 'Falta el grupo (día/horario).', array('status' => 400));
+    $u = wp_get_current_user();
+    $wpdb->insert(blokes_externos_table(), array_merge($f, array(
+        'activo' => 1, 'user_login' => $u->user_login, 'created_at' => current_time('mysql'), 'updated_at' => current_time('mysql'),
+    )));
+    $id = $wpdb->insert_id;
+    blokes_gestion_log($id, 'externo_crear', null, $f, 'Alta externa (fuera de WooCommerce)');
+    return rest_ensure_response(array('success' => true, 'data' => array('id' => $id)));
+}
+
+function superadmin_gestion_externos_actualizar($request) {
+    blokes_ensure_externos_tables();
+    global $wpdb;
+    $id = intval($request['id']);
+    $antes = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_externos_table() . ' WHERE id = %d', $id), ARRAY_A);
+    if (!$antes) return new WP_Error('not_found', 'Externo no encontrado.', array('status' => 404));
+    $body = $request->get_json_params();
+    $f = blokes_externos_limpia($body, $antes);
+    if ($f['nombre'] === '') return new WP_Error('bad_request', 'Falta el nombre.', array('status' => 400));
+    $wpdb->update(blokes_externos_table(), array_merge($f, array('updated_at' => current_time('mysql'))), array('id' => $id));
+    blokes_gestion_log($id, 'externo_actualizar', $antes, $f);
+    return rest_ensure_response(array('success' => true));
+}
+
+function superadmin_gestion_externos_borrar($request) {
+    blokes_ensure_externos_tables();
+    global $wpdb;
+    $id = intval($request['id']);
+    $wpdb->update(blokes_externos_table(), array('activo' => 0, 'updated_at' => current_time('mysql')), array('id' => $id));
+    blokes_gestion_log($id, 'externo_borrar', null, null);
+    return rest_ensure_response(array('success' => true));
+}
+
+// Apunta (o corrige) el pago de un mes concreto. Igual que el cobro manual de las
+// suscripciones, pero en su propia tabla — nunca toca WooCommerce.
+function superadmin_gestion_externos_pago($request) {
+    blokes_ensure_externos_tables();
+    global $wpdb;
+    $id = intval($request['id']);
+    $body = $request->get_json_params();
+    $periodo = (string) ($body['periodo'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}$/', $periodo)) return new WP_Error('bad_request', 'Periodo no válido (YYYY-MM).', array('status' => 400));
+    $importe = floatval($body['importe'] ?? 0);
+    $metodo  = blokes_gestion_metodo_label(sanitize_text_field((string) ($body['metodo'] ?? '')));
+    $fecha   = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fecha'] ?? '')) ? $body['fecha'] : current_time('Y-m-d');
+    $wpdb->query($wpdb->prepare(
+        "INSERT INTO " . blokes_externos_pagos_table() . " (externo_id, periodo, importe, metodo, fecha) VALUES (%d, %s, %f, %s, %s)
+         ON DUPLICATE KEY UPDATE importe = %f, metodo = %s, fecha = %s",
+        $id, $periodo, $importe, $metodo, $fecha, $importe, $metodo, $fecha
+    ));
+    blokes_gestion_log($id, 'externo_pago', null, array('periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo));
+    return rest_ensure_response(array('success' => true));
+}
+
+/**
+ * Migración del Excel "Grupos" (8.4, una vez): recibe las filas ya leídas del Excel y, por cada
+ * una, mira si esa persona (por teléfono o nombre) ya tiene una suscripción en vigor en la web
+ * — si la tiene, no se crea nada (no son "externos", ya están). Si no la tiene y no existe ya
+ * como externo (mismo teléfono), se crea; si ya existe como externo, se actualizan sus pagos y
+ * notas. Con `simular` no escribe nada, solo dice qué haría con cada fila.
+ */
+function superadmin_gestion_externos_importar($request) {
+    blokes_ensure_externos_tables();
+    global $wpdb;
+    $body    = $request->get_json_params();
+    $filas   = is_array($body['filas'] ?? null) ? $body['filas'] : array();
+    $simular = !empty($body['simular']);
+    if (count($filas) > 200) return new WP_Error('too_many', 'Máximo 200 filas de golpe.', array('status' => 400));
+
+    $existentes = array();
+    foreach (blokes_externos_todos() as $e) $existentes[blokes_externos_normaliza_telefono($e['telefono'])] = $e;
+
+    $resultado = array();
+    foreach ($filas as $raw) {
+        $f = blokes_externos_limpia($raw);
+        if ($f['nombre'] === '') { $resultado[] = array('nombre' => '(sin nombre)', 'accion' => 'invalida', 'motivo' => 'Falta el nombre'); continue; }
+
+        $sub_id_web = blokes_externos_buscar_en_web($f['telefono'], $f['nombre']);
+        if ($sub_id_web) {
+            $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'ya_en_web', 'subId' => $sub_id_web);
+            continue;
+        }
+
+        $pagos = is_array($raw['pagos'] ?? null) ? $raw['pagos'] : array();
+        $existente = $f['telefono'] !== '' ? ($existentes[$f['telefono']] ?? null) : null;
+
+        if ($existente) {
+            if (!$simular) {
+                $wpdb->update(blokes_externos_table(), array_merge($f, array('updated_at' => current_time('mysql'))), array('id' => $existente['id']));
+                foreach ($pagos as $periodo => $p) {
+                    if (!preg_match('/^\d{4}-\d{2}$/', $periodo) || !is_array($p)) continue;
+                    $wpdb->query($wpdb->prepare(
+                        "INSERT INTO " . blokes_externos_pagos_table() . " (externo_id, periodo, importe, metodo, fecha) VALUES (%d, %s, %f, %s, %s)
+                         ON DUPLICATE KEY UPDATE importe = %f, metodo = %s, fecha = %s",
+                        $existente['id'], $periodo, floatval($p['importe'] ?? 0), (string) ($p['metodo'] ?? ''), (string) ($p['fecha'] ?? current_time('Y-m-d')),
+                        floatval($p['importe'] ?? 0), (string) ($p['metodo'] ?? ''), (string) ($p['fecha'] ?? current_time('Y-m-d'))
+                    ));
+                }
+            }
+            $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'actualizaria_existente', 'id' => $existente['id'], 'pagos' => count($pagos));
+            continue;
+        }
+
+        if (!$simular) {
+            $u = wp_get_current_user();
+            $wpdb->insert(blokes_externos_table(), array_merge($f, array(
+                'activo' => 1, 'user_login' => $u->user_login, 'created_at' => current_time('mysql'), 'updated_at' => current_time('mysql'),
+            )));
+            $nuevo_id = $wpdb->insert_id;
+            foreach ($pagos as $periodo => $p) {
+                if (!preg_match('/^\d{4}-\d{2}$/', $periodo) || !is_array($p)) continue;
+                $wpdb->insert(blokes_externos_pagos_table(), array(
+                    'externo_id' => $nuevo_id, 'periodo' => $periodo, 'importe' => floatval($p['importe'] ?? 0),
+                    'metodo' => (string) ($p['metodo'] ?? ''), 'fecha' => (string) ($p['fecha'] ?? current_time('Y-m-d')),
+                ));
+            }
+            blokes_gestion_log($nuevo_id, 'externo_importar', null, $f, 'Migración 8.4 desde el Excel');
+        }
+        $resultado[] = array('nombre' => $f['nombre'], 'accion' => 'nuevo', 'grupo' => trim($f['dia'] . ' ' . $f['horario']), 'pagos' => count($pagos));
+    }
+
+    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0);
+    foreach ($resultado as $r) {
+        $k = $r['accion'] === 'ya_en_web' ? 'yaEnWeb' : $r['accion'];
+        if (isset($resumen[$k])) $resumen[$k]++;
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array('simulado' => $simular, 'resumen' => $resumen, 'filas' => $resultado)));
 }
 
 /**

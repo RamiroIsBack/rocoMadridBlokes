@@ -47,17 +47,18 @@ export function useGestionGrupos(months = 4) {
   return useEndpoint('/gestion/grupos', { months })
 }
 
-async function gestionPost(path, body) {
+async function gestionCall(method, path, body) {
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
   const res = await fetch(`${CLUB_URL}/wp-json/superadmin/v1${path}`, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
-    body: JSON.stringify(body),
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   const json = await res.json().catch(() => null)
   if (!res.ok) throw new Error(json?.message || `HTTP ${res.status}`)
   return json?.data ?? json
 }
+const gestionPost = (path, body) => gestionCall('POST', path, body)
 
 export const gestionMarcarCobrado = body => gestionPost('/gestion/marcar-cobrado', body)
 export const gestionPausar        = body => gestionPost('/gestion/pausar', body)
@@ -66,6 +67,14 @@ export const gestionNota          = body => gestionPost('/gestion/nota', body)
 export const gestionDarDeBaja     = body => gestionPost('/gestion/dar-de-baja', body)
 export const gestionFusionar      = body => gestionPost('/gestion/fusionar', body)
 export const gestionExento        = body => gestionPost('/gestion/exento', body)
+
+// 8.4: alumnos que pagan fuera de la web (sin suscripción de WooCommerce).
+export const gestionExternosGet      = ()           => gestionCall('GET', '/gestion/externos')
+export const gestionExternoCrear     = body         => gestionPost('/gestion/externos', body)
+export const gestionExternoActualizar = (id, body)  => gestionCall('PUT', `/gestion/externos/${id}`, body)
+export const gestionExternoBorrar    = id           => gestionCall('DELETE', `/gestion/externos/${id}`)
+export const gestionExternoPago      = (id, body)   => gestionPost(`/gestion/externos/${id}/pago`, body)
+export const gestionExternosImportar = body         => gestionPost('/gestion/externos/importar', body)
 
 export function useExpenses(months, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)

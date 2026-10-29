@@ -645,6 +645,7 @@
 .sv-grp-estado--ok   { background: #14532d; color: #34d399; }
 .sv-grp-estado--warn { background: #2a2410; color: #facc15; }
 .sv-grp-estado--bad  { background: #2a1a1a; color: #f87171; }
+.sv-grp-estado--ext  { background: #1e2430; color: #94a3b8; }
 
 .sv-grp-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.6);
