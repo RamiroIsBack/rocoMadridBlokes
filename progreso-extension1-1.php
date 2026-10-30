@@ -3790,8 +3790,10 @@ function superadmin_gestion_externos_pago($request) {
  * se actualizan sus pagos y notas. Las filas marcadas
  * "posible familiar" (mismo teléfono que una suscripción de la web, pero no se puede confirmar
  * si es la misma persona) no se crean en el volcado real salvo que la fila llegue con
- * `confirmarFamiliar: true` — hasta entonces quedan como "pendiente_revision". Con `simular` no
- * escribe nada, solo dice qué haría con cada fila.
+ * `confirmarFamiliar: true` — hasta entonces quedan como "pendiente_revision". Entre las propias
+ * filas nuevas de este mismo lote, dos o más que comparten teléfono se avisan con
+ * `hermanoEnLote` (candidatos a bono familiar) pero se crean igual, sin esperar confirmación.
+ * Con `simular` no escribe nada, solo dice qué haría con cada fila.
  */
 function superadmin_gestion_externos_importar($request) {
     blokes_ensure_externos_tables();
@@ -3806,11 +3808,16 @@ function superadmin_gestion_externos_importar($request) {
 
     // Para detectar hermanos ambiguos: dos o más filas de esta misma pestaña con el mismo
     // teléfono. Ahí "teléfono + grupo" no basta para confirmar a cuál de ellos corresponde una
-    // suscripción de la web.
-    $conteo_telefono = array();
+    // suscripción de la web. También sirve para avisar de hermanos nuevos (candidatos a bono
+    // familiar) que comparten teléfono entre ellos, no con la web.
+    $conteo_telefono     = array();
+    $nombres_por_telefono = array();
     foreach ($filas as $raw) {
         $t = blokes_externos_normaliza_telefono($raw['telefono'] ?? '');
-        if ($t !== '') $conteo_telefono[$t] = ($conteo_telefono[$t] ?? 0) + 1;
+        if ($t === '') continue;
+        $conteo_telefono[$t] = ($conteo_telefono[$t] ?? 0) + 1;
+        $n = mb_substr(sanitize_text_field((string) ($raw['nombre'] ?? '')), 0, 190);
+        if ($n !== '') $nombres_por_telefono[$t][] = $n;
     }
     $anio        = date('Y');
     $periodo_sep = $anio . '-09';
@@ -3890,15 +3897,22 @@ function superadmin_gestion_externos_importar($request) {
         }
         $fila = array('nombre' => $f['nombre'], 'accion' => 'nuevo', 'grupo' => trim($f['dia'] . ' ' . $f['horario']), 'pagos' => count($pagos));
         if ($posible_familiar) $fila['posibleFamiliar'] = $posible_familiar;
+        // Hermanos nuevos que comparten teléfono entre ellos (no con la web): no es un duplicado —
+        // los dos se crean igual — pero se avisa como candidatos a bono familiar.
+        if (($conteo_telefono[$f['telefono']] ?? 0) > 1) {
+            $otros = array_values(array_diff($nombres_por_telefono[$f['telefono']] ?? array(), array($f['nombre'])));
+            if ($otros) $fila['hermanoEnLote'] = $otros;
+        }
         $resultado[] = $fila;
     }
 
-    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0, 'noActivo' => 0, 'pendienteRevision' => 0, 'posibleFamiliar' => 0);
+    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0, 'noActivo' => 0, 'pendienteRevision' => 0, 'posibleFamiliar' => 0, 'hermanoEnLote' => 0);
     $mapa_accion = array('ya_en_web' => 'yaEnWeb', 'pendiente_revision' => 'pendienteRevision', 'no_activo' => 'noActivo');
     foreach ($resultado as $r) {
         $k = $mapa_accion[$r['accion']] ?? $r['accion'];
         if (isset($resumen[$k])) $resumen[$k]++;
         if (!empty($r['posibleFamiliar'])) $resumen['posibleFamiliar']++;
+        if (!empty($r['hermanoEnLote'])) $resumen['hermanoEnLote']++;
     }
     return rest_ensure_response(array('success' => true, 'data' => array('simulado' => $simular, 'resumen' => $resumen, 'filas' => $resultado)));
 }
