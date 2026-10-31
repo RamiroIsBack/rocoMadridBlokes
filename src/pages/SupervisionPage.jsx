@@ -6,6 +6,7 @@ import {
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
   gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno,
+  gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
@@ -1488,6 +1489,24 @@ function GruposTab() {
   const [menuFor, setMenuFor] = useState(null)   // alumno con el menú de acciones abierto
   const [accion, setAccion]   = useState(null)   // { alumno, tipo } con el modal abierto
   const [buscador, setBuscador] = useState(false) // modal de "Añadir alumno" (buscar)
+  const [espera, setEspera] = useState(null) // lista de espera (8.5), cargada al entrar en esa vista
+  const [esperaForm, setEsperaForm] = useState({ dia: '', horario: '', edad: 'Adultos', nombre: '', telefono: '', notas: '' })
+  const [esperaBusy, setEsperaBusy] = useState(false)
+
+  async function cargarEspera() { try { setEspera(await gestionListaEsperaGet()) } catch (e) { setEspera([]) } }
+  function abrirEspera() { setVista('espera'); if (espera === null) cargarEspera() }
+  async function altaEspera(e) {
+    e.preventDefault()
+    if (!esperaForm.nombre.trim()) return
+    setEsperaBusy(true)
+    try {
+      await gestionListaEsperaCrear(esperaForm)
+      setEsperaForm({ dia: '', horario: '', edad: 'Adultos', nombre: '', telefono: '', notas: '' })
+      await cargarEspera()
+    } catch (err) { alert(err.message) } finally { setEsperaBusy(false) }
+  }
+  async function marcarAtendidoEspera(id, atendido) { await gestionListaEsperaActualizar(id, { atendido }); cargarEspera() }
+  async function borrarEspera(id) { if (!confirm('¿Eliminar de la lista de espera?')) return; await gestionListaEsperaBorrar(id); cargarEspera() }
 
   const grupos = data?.grupos || []
   const meses  = data?.meses || []
@@ -1569,6 +1588,9 @@ function GruposTab() {
           </button>
           <button className={`sv-tab-mini ${vista === 'duplicados' ? 'is-active' : ''}`} onClick={() => setVista('duplicados')}>
             Duplicados {duplicados.length ? `(${duplicados.length})` : ''}
+          </button>
+          <button className={`sv-tab-mini ${vista === 'espera' ? 'is-active' : ''}`} onClick={abrirEspera}>
+            Lista de espera
           </button>
           <button className={`sv-tab-mini ${vista === 'campanas' ? 'is-active' : ''}`} onClick={() => setVista('campanas')}>
             Campañas
@@ -1765,6 +1787,67 @@ function GruposTab() {
             </table>
           </div>
           {duplicados.length === 0 && <p className="sv-empty">Sin duplicados pendientes de fusionar.</p>}
+        </>
+      )}
+
+      {vista === 'espera' && (
+        <>
+          <p className="sv-note">
+            Interesados que todavía no son alumnos (sin suscripción ni alta externa) — para cuando un grupo está lleno
+            o alguien preguntó y aún no se ha apuntado. Cuando entre, borra su fila aquí (el alta real va por la
+            suscripción web o por "Añadir alumno" cuando esté montado).
+          </p>
+          <form onSubmit={altaEspera} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, alignItems: 'flex-end' }}>
+            <label className="sv-grp-field">Nombre
+              <input className="sv-tests-input" type="text" value={esperaForm.nombre} onChange={e => setEsperaForm(f => ({ ...f, nombre: e.target.value }))} required />
+            </label>
+            <label className="sv-grp-field">Teléfono
+              <input className="sv-tests-input" type="text" value={esperaForm.telefono} onChange={e => setEsperaForm(f => ({ ...f, telefono: e.target.value }))} />
+            </label>
+            <label className="sv-grp-field">Día
+              <input className="sv-tests-input" type="text" value={esperaForm.dia} onChange={e => setEsperaForm(f => ({ ...f, dia: e.target.value }))} placeholder="Lunes/Martes…" />
+            </label>
+            <label className="sv-grp-field">Horario
+              <input className="sv-tests-input" type="text" value={esperaForm.horario} onChange={e => setEsperaForm(f => ({ ...f, horario: e.target.value }))} placeholder="18:30" />
+            </label>
+            <label className="sv-grp-field">Edad
+              <input className="sv-tests-input" type="text" value={esperaForm.edad} onChange={e => setEsperaForm(f => ({ ...f, edad: e.target.value }))} placeholder="Adultos" />
+            </label>
+            <label className="sv-grp-field">Notas
+              <input className="sv-tests-input" type="text" value={esperaForm.notas} onChange={e => setEsperaForm(f => ({ ...f, notas: e.target.value }))} />
+            </label>
+            <button className="sv-tests-save" type="submit" disabled={esperaBusy}>Añadir a la lista</button>
+          </form>
+
+          {espera === null ? (
+            <p className="sv-loading">Cargando…</p>
+          ) : (
+            <div className="sv-tests-scroll">
+              <table className="sv-tests-table">
+                <thead>
+                  <tr><th>Nombre</th><th>Teléfono</th><th>Grupo</th><th>Notas</th><th>Desde</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {espera.map(p => (
+                    <tr key={p.id} style={p.atendido ? { opacity: 0.5 } : undefined}>
+                      <td>{p.nombre}</td>
+                      <td className="sv-ot-muted">{p.telefono || '—'}</td>
+                      <td className="sv-ot-muted">{[p.dia, p.horario, p.edad !== 'Adultos' ? p.edad : ''].filter(Boolean).join(' · ') || '—'}</td>
+                      <td className="sv-ot-muted">{p.notas || '—'}</td>
+                      <td className="sv-ot-muted">{p.created_at ? p.created_at.slice(0, 10) : '—'}</td>
+                      <td>
+                        <button className="sv-tests-select" onClick={() => marcarAtendidoEspera(p.id, p.atendido ? 0 : 1)}>
+                          {p.atendido ? 'Reabrir' : 'Marcar atendido'}
+                        </button>{' '}
+                        <button className="sv-tests-remove" onClick={() => borrarEspera(p.id)}>Eliminar</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {espera.length === 0 && <p className="sv-empty">Nadie en la lista de espera.</p>}
+            </div>
+          )}
         </>
       )}
 

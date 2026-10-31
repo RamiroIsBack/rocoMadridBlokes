@@ -80,6 +80,12 @@ export const gestionExternoBorrar    = id           => gestionCall('DELETE', `/g
 export const gestionExternoPago      = (id, body)   => gestionPost(`/gestion/externos/${id}/pago`, body)
 export const gestionExternosImportar = body         => gestionPost('/gestion/externos/importar', body)
 
+// Lista de espera por grupo (8.5: interesados que aún no son alumnos).
+export const gestionListaEsperaGet         = ()          => gestionCall('GET', '/gestion/lista-espera')
+export const gestionListaEsperaCrear       = body        => gestionPost('/gestion/lista-espera', body)
+export const gestionListaEsperaActualizar  = (id, body)  => gestionCall('PUT', `/gestion/lista-espera/${id}`, body)
+export const gestionListaEsperaBorrar      = id          => gestionCall('DELETE', `/gestion/lista-espera/${id}`)
+
 // Remitentes de transferencias (banco) ya clasificados a mano (Clases/Eventos/...),
 // compartido entre todos los superadmin en vez de guardarse por navegador.
 export const gestionExpenseSendersGet = ()                       => gestionCall('GET', '/expenses/senders')

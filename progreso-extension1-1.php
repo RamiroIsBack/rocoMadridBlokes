@@ -845,6 +845,18 @@ add_action('rest_api_init', function() {
         'permission_callback' => $sa_perm,
     ));
 
+    // Lista de espera por grupo (interesados que aún no son alumnos — grupos_como_excel.md,
+    // punto 7). Independiente de "en espera" de una suscripción on-hold: esto es gente sin
+    // ninguna suscripción ni externo todavía.
+    register_rest_route('superadmin/v1', '/gestion/lista-espera', array(
+        array('methods' => 'GET',  'callback' => 'superadmin_gestion_lista_espera_get',   'permission_callback' => $sa_perm),
+        array('methods' => 'POST', 'callback' => 'superadmin_gestion_lista_espera_crear',  'permission_callback' => $sa_perm),
+    ));
+    register_rest_route('superadmin/v1', '/gestion/lista-espera/(?P<id>\d+)', array(
+        array('methods' => 'PUT',    'callback' => 'superadmin_gestion_lista_espera_actualizar', 'permission_callback' => $sa_perm),
+        array('methods' => 'DELETE', 'callback' => 'superadmin_gestion_lista_espera_borrar',      'permission_callback' => $sa_perm),
+    ));
+
     register_rest_route('superadmin/v1', '/expenses', array(
         array(
             'methods'             => 'GET',
@@ -4034,6 +4046,92 @@ function superadmin_gestion_externos_pago($request) {
         $id, $periodo, $importe, $metodo, $fecha, $cubre_meses, $importe, $metodo, $fecha, $cubre_meses
     ));
     blokes_gestion_log($id, 'externo_pago', null, array('periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo, 'cubreMeses' => $cubre_meses));
+    return rest_ensure_response(array('success' => true));
+}
+
+// ─── Lista de espera (grupos_como_excel.md, punto 7) ──────────────────────────────────────
+// Gente interesada en un grupo que aún no es alumno (sin suscripción ni fila de externo). Vive
+// en su propia tabla, independiente de "en espera" de una suscripción on-hold.
+
+function blokes_lista_espera_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_lista_espera';
+}
+
+function blokes_ensure_lista_espera_table() {
+    global $wpdb;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE " . blokes_lista_espera_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        dia         varchar(60)         NOT NULL DEFAULT '',
+        horario     varchar(60)         NOT NULL DEFAULT '',
+        edad        varchar(60)         NOT NULL DEFAULT 'Adultos',
+        nombre      varchar(190)        NOT NULL DEFAULT '',
+        telefono    varchar(30)         NOT NULL DEFAULT '',
+        notas       varchar(500)        NOT NULL DEFAULT '',
+        atendido    tinyint(1)          NOT NULL DEFAULT 0,
+        user_login  varchar(100)        NOT NULL DEFAULT '',
+        created_at  datetime            NOT NULL,
+        updated_at  datetime            NOT NULL,
+        PRIMARY KEY (id)
+    ) {$charset};");
+}
+
+function superadmin_gestion_lista_espera_get() {
+    blokes_ensure_lista_espera_table();
+    global $wpdb;
+    $filas = $wpdb->get_results("SELECT * FROM " . blokes_lista_espera_table() . " ORDER BY atendido ASC, created_at ASC", ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => $filas));
+}
+
+function blokes_lista_espera_limpia($body, $defaults = array()) {
+    return array(
+        'dia'      => sanitize_text_field((string) ($body['dia'] ?? $defaults['dia'] ?? '')),
+        'horario'  => sanitize_text_field((string) ($body['horario'] ?? $defaults['horario'] ?? '')),
+        'edad'     => sanitize_text_field((string) ($body['edad'] ?? $defaults['edad'] ?? 'Adultos')) ?: 'Adultos',
+        'nombre'   => mb_substr(sanitize_text_field((string) ($body['nombre'] ?? '')), 0, 190),
+        'telefono' => blokes_externos_normaliza_telefono($body['telefono'] ?? ''),
+        'notas'    => mb_substr(sanitize_text_field((string) ($body['notas'] ?? '')), 0, 500),
+    );
+}
+
+function superadmin_gestion_lista_espera_crear($request) {
+    blokes_ensure_lista_espera_table();
+    global $wpdb;
+    $body = $request->get_json_params();
+    $f = blokes_lista_espera_limpia($body);
+    if ($f['nombre'] === '') return new WP_Error('bad_request', 'Falta el nombre.', array('status' => 400));
+    $u = wp_get_current_user();
+    $wpdb->insert(blokes_lista_espera_table(), array_merge($f, array(
+        'atendido' => 0, 'user_login' => $u->user_login, 'created_at' => current_time('mysql'), 'updated_at' => current_time('mysql'),
+    )));
+    $id = $wpdb->insert_id;
+    blokes_gestion_log($id, 'lista_espera_crear', null, $f, 'Alta en lista de espera');
+    return rest_ensure_response(array('success' => true, 'data' => array('id' => $id)));
+}
+
+function superadmin_gestion_lista_espera_actualizar($request) {
+    blokes_ensure_lista_espera_table();
+    global $wpdb;
+    $id = intval($request['id']);
+    $antes = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_lista_espera_table() . ' WHERE id = %d', $id), ARRAY_A);
+    if (!$antes) return new WP_Error('not_found', 'No encontrado en la lista de espera.', array('status' => 404));
+    $body = $request->get_json_params();
+    $f = blokes_lista_espera_limpia($body, $antes);
+    if ($f['nombre'] === '') return new WP_Error('bad_request', 'Falta el nombre.', array('status' => 400));
+    $f['atendido'] = isset($body['atendido']) ? (!empty($body['atendido']) ? 1 : 0) : intval($antes['atendido']);
+    $wpdb->update(blokes_lista_espera_table(), array_merge($f, array('updated_at' => current_time('mysql'))), array('id' => $id));
+    blokes_gestion_log($id, 'lista_espera_actualizar', $antes, $f);
+    return rest_ensure_response(array('success' => true));
+}
+
+function superadmin_gestion_lista_espera_borrar($request) {
+    blokes_ensure_lista_espera_table();
+    global $wpdb;
+    $id = intval($request['id']);
+    $wpdb->delete(blokes_lista_espera_table(), array('id' => $id));
+    blokes_gestion_log($id, 'lista_espera_borrar', null, null);
     return rest_ensure_response(array('success' => true));
 }
 
