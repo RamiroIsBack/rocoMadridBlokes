@@ -5511,19 +5511,36 @@ function superadmin_gestion_buscar_alumno($request) {
     if (mb_strlen($q) < 2) {
         return new WP_Error('bad_request', 'Escribe al menos 2 caracteres (nombre, teléfono o email).', array('status' => 400));
     }
-    $q_norm  = blokes_externos_normaliza_nombre($q);
-    $q_tel   = blokes_externos_normaliza_telefono($q);
-    $q_tel_valida = strlen($q_tel) >= 6;
-    $q_email = mb_strtolower($q);
+    // Cada palabra de la búsqueda cuenta por separado y por puntos: "nombre apellido" tiene que
+    // encontrar una ficha donde solo coincida el apellido (con otro nombre de pila guardado), no
+    // solo la frase completa. También puntúa el nombre/teléfono del TUTOR, para encontrar a un
+    // alumno menor buscando por su padre/madre.
+    $q_words = array_values(array_filter(preg_split('/\s+/', $q)));
+    $q_tel_general = blokes_externos_normaliza_telefono($q);
+    $q_tel_valida  = strlen($q_tel_general) >= 6;
 
-    $coincide = function($nombre, $telefono, $email) use ($q_norm, $q_tel, $q_tel_valida, $q_email) {
-        if ($q_norm !== '' && strpos(blokes_externos_normaliza_nombre((string) $nombre), $q_norm) !== false) return true;
-        if ($q_tel_valida && $telefono && strpos(blokes_externos_normaliza_telefono((string) $telefono), $q_tel) !== false) return true;
-        if ($q_email !== '' && $email && strpos(mb_strtolower((string) $email), $q_email) !== false) return true;
-        return false;
+    $puntos = function($nombre, $telefono, $email, $tutorNombre = '', $tutorTelefono = '') use ($q_words) {
+        $score = 0;
+        foreach ($q_words as $palabra) {
+            $p_norm  = blokes_externos_normaliza_nombre($palabra);
+            $p_tel   = blokes_externos_normaliza_telefono($palabra);
+            $p_tel_valida = strlen($p_tel) >= 6;
+            $p_email = mb_strtolower($palabra);
+            $hit = false;
+            if ($p_norm !== '' && strpos(blokes_externos_normaliza_nombre((string) $nombre), $p_norm) !== false) $hit = true;
+            if (!$hit && $p_norm !== '' && $tutorNombre !== '' && strpos(blokes_externos_normaliza_nombre((string) $tutorNombre), $p_norm) !== false) $hit = true;
+            if (!$hit && $p_tel_valida && $telefono && strpos(blokes_externos_normaliza_telefono((string) $telefono), $p_tel) !== false) $hit = true;
+            if (!$hit && $p_tel_valida && $tutorTelefono && strpos(blokes_externos_normaliza_telefono((string) $tutorTelefono), $p_tel) !== false) $hit = true;
+            if (!$hit && $p_email !== '' && $email && strpos(mb_strtolower((string) $email), $p_email) !== false) $hit = true;
+            if ($hit) $score++;
+        }
+        return $score;
     };
 
     $personas = array();
+    $marcar_score = function(&$personas, $key, $score) {
+        $personas[$key]['score'] = max($personas[$key]['score'] ?? 0, $score);
+    };
 
     foreach (blokes_get_all_subscription_data() as $sub) {
         if (empty($sub['id'])) continue;
@@ -5532,16 +5549,21 @@ function superadmin_gestion_buscar_alumno($request) {
         $telefono = $sub_obj->get_billing_phone() ?: ($sub['telefono'] ?? '');
         $nombre   = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) ?: ($sub['cliente'] ?? '');
         $email    = $sub_obj->get_billing_email() ?: ($sub['email'] ?? '');
-        if (!$coincide($nombre, $telefono, $email)) continue;
+        $tutor_nombre   = get_post_meta($sub_obj->get_id(), '_rm_tutor_nombre', true) ?: '';
+        $tutor_telefono = get_post_meta($sub_obj->get_id(), '_rm_tutor_telefono', true) ?: '';
+        $score = $puntos($nombre, $telefono, $email, $tutor_nombre, $tutor_telefono);
+        if ($score === 0) continue;
 
-        $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
-        $key = $uid ? "u{$uid}" : ('s' . intval($sub['id']));
+        // Preferir el id de cliente de la API de Woo (fiable con HPOS) y, si falta, el
+        // teléfono normalizado, para que varias suscripciones antiguas de la misma persona sin
+        // usuario de WordPress salgan juntas en un solo resultado, no una fila por suscripción.
+        $uid = intval($sub_obj->get_customer_id());
+        if (!$uid) $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
+        $key = $uid ? "u{$uid}" : ($telefono ? 't' . blokes_externos_normaliza_telefono($telefono) : ('s' . intval($sub['id'])));
         if (!isset($personas[$key])) {
             $personas[$key] = array(
                 'uid' => $uid ?: null, 'nombre' => $nombre, 'telefono' => $telefono, 'email' => $email,
-                'tutorNombre'   => get_post_meta($sub_obj->get_id(), '_rm_tutor_nombre', true) ?: '',
-                'tutorTelefono' => get_post_meta($sub_obj->get_id(), '_rm_tutor_telefono', true) ?: '',
-                'grupos' => array(),
+                'tutorNombre' => $tutor_nombre, 'tutorTelefono' => $tutor_telefono, 'grupos' => array(),
             );
         }
         $status = $sub['status'] ?? '';
@@ -5551,11 +5573,14 @@ function superadmin_gestion_buscar_alumno($request) {
             'subId' => intval($sub['id']), 'dia' => $sub['dia'] ?? '', 'horario' => $sub['horario'] ?? '', 'edad' => $sub['edad'] ?: 'Adultos',
             'estado' => $estado, 'label' => trim(($sub['dia'] ?? '') . ' · ' . ($sub['horario'] ?? ''), ' ·'),
         );
+        $marcar_score($personas, $key, $score);
     }
 
     foreach (blokes_externos_todos() as $ext) {
-        if (!$coincide($ext['nombre'], $ext['telefono'], '')) continue;
-        $personas['ext' . $ext['id']] = array(
+        $score = $puntos($ext['nombre'], $ext['telefono'], '', $ext['tutor_nombre'] ?: '', $ext['tutor_telefono'] ?: '');
+        if ($score === 0) continue;
+        $key = 'ext' . $ext['id'];
+        $personas[$key] = array(
             'uid' => null, 'externoId' => intval($ext['id']), 'nombre' => $ext['nombre'], 'telefono' => $ext['telefono'], 'email' => '',
             'tutorNombre' => $ext['tutor_nombre'] ?: '', 'tutorTelefono' => $ext['tutor_telefono'] ?: '',
             'grupos' => array(array(
@@ -5563,25 +5588,31 @@ function superadmin_gestion_buscar_alumno($request) {
                 'estado' => $ext['activo'] ? 'externo' : 'externo_baja', 'label' => trim($ext['dia'] . ' · ' . $ext['horario'], ' ·'),
             )),
         );
+        $marcar_score($personas, $key, $score);
     }
 
     // Usuarios de WordPress que no han salido ya por tener suscripción o externo propio
     // (alumno antiguo, o registrado desde la web sin apuntarse a ninguna clase).
     $args = $q_tel_valida
-        ? array('number' => 15, 'meta_query' => array(array('key' => 'billing_phone', 'value' => $q_tel, 'compare' => 'LIKE')))
+        ? array('number' => 15, 'meta_query' => array(array('key' => 'billing_phone', 'value' => $q_tel_general, 'compare' => 'LIKE')))
         : array('number' => 15, 'search' => '*' . $q . '*', 'search_columns' => array('user_login', 'user_email', 'display_name'));
     foreach (get_users($args) as $u) {
         $key = "u{$u->ID}";
         if (isset($personas[$key])) continue;
         $nombre = trim($u->first_name . ' ' . $u->last_name) ?: $u->display_name;
-        if (!$coincide($nombre, get_user_meta($u->ID, 'billing_phone', true), $u->user_email)) continue;
+        $score = $puntos($nombre, get_user_meta($u->ID, 'billing_phone', true), $u->user_email);
+        if ($score === 0) continue;
         $personas[$key] = array(
             'uid' => $u->ID, 'nombre' => $nombre, 'telefono' => get_user_meta($u->ID, 'billing_phone', true), 'email' => $u->user_email,
             'tutorNombre' => '', 'tutorTelefono' => '', 'grupos' => array(),
         );
+        $marcar_score($personas, $key, $score);
     }
 
-    return rest_ensure_response(array('success' => true, 'data' => array_values($personas)));
+    usort($personas, function($a, $b) { return $b['score'] <=> $a['score']; });
+    $personas = array_map(function($p) { unset($p['score']); return $p; }, array_values($personas));
+
+    return rest_ensure_response(array('success' => true, 'data' => $personas));
 }
 
 function superadmin_classes($request) {
