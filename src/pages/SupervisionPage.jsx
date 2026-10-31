@@ -1401,6 +1401,85 @@ function WaMark({ alumno, onClick }) {
   )
 }
 
+function ProfesorLine({ dia, horario }) {
+  const profesores = profesoresDeGrupo(dia, horario)
+  if (!profesores.length) return null
+  const mismo = profesores.every(d => d.profs.length === 1 && d.profs[0] === profesores[0].profs[0])
+  const texto = mismo
+    ? profesores[0].profs.join(', ')
+    : profesores.map(d => `${d.dia}: ${d.profs.join('/')}`).join(' · ')
+  return (
+    <p className="sv-note sv-grp-profesor" title="Sacado del horario de referencia (staffSchedule.js) por día y hora de clase: puede no reflejar sustituciones o cambios recientes.">
+      👤 Profesor{profesores.some(d => d.profs.length > 1) || !mismo ? 'es' : ''}: {texto}
+    </p>
+  )
+}
+
+// Tabla de alumnos de Grupos, compartida entre "un grupo concreto" y, por bloques, "Todos los
+// grupos" (cowork, 19:35: el profesor y el grupo de cada uno también tienen que verse ahí).
+function TablaAlumnos({ alumnos, meses, onWa, onMenu }) {
+  return (
+    <div className="sv-tests-scroll">
+      <table className="sv-tests-table">
+        <thead>
+          <tr>
+            <th>Alumno (pagador)</th><th>Teléfono</th><th>Días</th><th>Estado</th>
+            {meses.map(m => <th key={m}>{mesLabelGrp(m)}</th>)}
+            <th>Notas</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {alumnos.map(a => {
+            const est = ESTADO_LABEL[a.estado] || { txt: a.estado, cls: '' }
+            return (
+              <tr key={a.subId}>
+                <td>
+                  {a.alumno || <span className="sv-ot-muted">—</span>}
+                  {a.telefono
+                    ? <WaMark alumno={a} onClick={() => onWa(a)} />
+                    : <span className="sv-wa sv-wa--sin" title="No se puede pedir el consentimiento de WhatsApp sin teléfono guardado">(sin tlf)</span>}
+                  {a.sinNombre && <span className="sv-to-warn-txt" title="No es un nombre real: es el usuario de la cuenta (sin dirección de facturación). Pulsa ⋯ → «Editar nombre/teléfono» para arreglarlo."> ⚠ no es nombre real</span>}
+                  {a.exento && <span title="Exento/socio: no se le pide cobro">*</span>}
+                  {a.otrasSubs?.length > 0 && (
+                    <span title={`${a.otrasSubs.length} suscripción(es) antigua(s) colgando en este grupo (duplicado)`}> ⚠</span>
+                  )}
+                  {(a.edad || '').includes('Menores') && (
+                    a.tutorNombre || a.tutorTelefono
+                      ? <div className="sv-ot-muted sv-grp-tutor">👪 {a.tutorNombre || '—'}{a.tutorTelefono ? ` · ${a.tutorTelefono}` : ''}</div>
+                      : <div className="sv-to-warn-txt sv-grp-tutor">👪 falta el tutor</div>
+                  )}
+                </td>
+                <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                <td>{a.dias}</td>
+                <td><span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span></td>
+                {meses.map(m => {
+                  const p = a.pagos[m]
+                  if (!p) return <td key={m} className="sv-ot-muted">—</td>
+                  if (p.cubierto) {
+                    return (
+                      <td key={m} className="sv-pago-cubierto" title={`Cubierto por el pago del ${p.fecha} (${fmtEur(p.importe)}, ${p.metodo})`}>
+                        Pagado ({p.tipo || '…'})
+                      </td>
+                    )
+                  }
+                  const pendiente = PAGO_PENDIENTE.has(p.estadoPedido)
+                  return (
+                    <td key={m} className={pendiente ? 'sv-to-bad' : ''} title={`${p.metodo} · ${p.fecha}`}>
+                      {fmtEur(p.importe)}{pendiente ? ' ⏳' : ''}
+                    </td>
+                  )
+                })}
+                <td className="sv-ot-muted">{a.notas || '—'}</td>
+                <td><button className="sv-tests-remove" onClick={() => onMenu(a)} title="Acciones">⋯</button></td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 const ESTADO_BUSQUEDA_LABEL = {
   activo: 'Activo', en_espera_o_pausado: 'En espera / pausado', pendiente_pago: 'Pendiente de pago', baja: 'De baja',
   externo: 'Externo (fuera de la web)', externo_baja: 'Externo, de baja',
@@ -1854,19 +1933,7 @@ function GruposTab() {
       {vista === 'campanas' && <CampanasSection />}
 
       {vista === 'grupos' && (<>
-      {grupo && (() => {
-        const profesores = profesoresDeGrupo(grupo.dia, grupo.horario)
-        if (!profesores.length) return null
-        const mismo = profesores.every(d => d.profs.length === 1 && d.profs[0] === profesores[0].profs[0])
-        const texto = mismo
-          ? profesores[0].profs.join(', ')
-          : profesores.map(d => `${d.dia}: ${d.profs.join('/')}`).join(' · ')
-        return (
-          <p className="sv-note sv-grp-profesor" title="Sacado del horario de referencia (staffSchedule.js) por día y hora de clase: puede no reflejar sustituciones o cambios recientes.">
-            👤 Profesor{profesores.some(d => d.profs.length > 1) || !mismo ? 'es' : ''}: {texto}
-          </p>
-        )
-      })()}
+      {grupo && <ProfesorLine dia={grupo.dia} horario={grupo.horario} />}
       {/* Dinero AGREGADO (cobrado del mes, importe pendiente total) es solo para socio — ver
           NOTAS_PARA_CODE_privacidad_dinero.md. Lo de cada alumno (quién debe y cuánto) sí lo ve
           gestion, en la tabla de abajo. */}
@@ -1895,65 +1962,30 @@ function GruposTab() {
         </div>
       </div>
 
-      <div className="sv-tests-scroll">
-        <table className="sv-tests-table">
-          <thead>
-            <tr>
-              <th>Alumno (pagador)</th><th>Teléfono</th><th>Días</th><th>Estado</th>
-              {meses.map(m => <th key={m}>{mesLabelGrp(m)}</th>)}
-              <th>Notas</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {alumnos.map(a => {
-              const est = ESTADO_LABEL[a.estado] || { txt: a.estado, cls: '' }
-              return (
-                <tr key={a.subId}>
-                  <td>
-                    {a.alumno || <span className="sv-ot-muted">—</span>}
-                    {a.telefono
-                      ? <WaMark alumno={a} onClick={() => setAccion({ alumno: a, tipo: 'optin_whatsapp' })} />
-                      : <span className="sv-wa sv-wa--sin" title="No se puede pedir el consentimiento de WhatsApp sin teléfono guardado">(sin tlf)</span>}
-                    {a.sinNombre && <span className="sv-to-warn-txt" title="No es un nombre real: es el usuario de la cuenta (sin dirección de facturación). Pulsa ⋯ → «Editar nombre/teléfono» para arreglarlo."> ⚠ no es nombre real</span>}
-                    {a.exento && <span title="Exento/socio: no se le pide cobro">*</span>}
-                    {a.otrasSubs?.length > 0 && (
-                      <span title={`${a.otrasSubs.length} suscripción(es) antigua(s) colgando en este grupo (duplicado)`}> ⚠</span>
-                    )}
-                    {(a.edad || '').includes('Menores') && (
-                      a.tutorNombre || a.tutorTelefono
-                        ? <div className="sv-ot-muted sv-grp-tutor">👪 {a.tutorNombre || '—'}{a.tutorTelefono ? ` · ${a.tutorTelefono}` : ''}</div>
-                        : <div className="sv-to-warn-txt sv-grp-tutor">👪 falta el tutor</div>
-                    )}
-                  </td>
-                  <td className="sv-ot-muted">{a.telefono || '—'}</td>
-                  <td>{a.dias}</td>
-                  <td><span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span></td>
-                  {meses.map(m => {
-                    const p = a.pagos[m]
-                    if (!p) return <td key={m} className="sv-ot-muted">—</td>
-                    if (p.cubierto) {
-                      return (
-                        <td key={m} className="sv-pago-cubierto" title={`Cubierto por el pago del ${p.fecha} (${fmtEur(p.importe)}, ${p.metodo})`}>
-                          Pagado ({p.tipo || '…'})
-                        </td>
-                      )
-                    }
-                    const pendiente = PAGO_PENDIENTE.has(p.estadoPedido)
-                    return (
-                      <td key={m} className={pendiente ? 'sv-to-bad' : ''} title={`${p.metodo} · ${p.fecha}`}>
-                        {fmtEur(p.importe)}{pendiente ? ' ⏳' : ''}
-                      </td>
-                    )
-                  })}
-                  <td className="sv-ot-muted">{a.notas || '—'}</td>
-                  <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-      {alumnos.length === 0 && <p className="sv-empty">Sin suscripciones en vigor para este grupo.</p>}
+      {grupo ? (
+        <>
+          <TablaAlumnos
+            alumnos={alumnos} meses={meses}
+            onWa={a => setAccion({ alumno: a, tipo: 'optin_whatsapp' })} onMenu={a => setMenuFor(a)}
+          />
+          {alumnos.length === 0 && <p className="sv-empty">Sin suscripciones en vigor para este grupo.</p>}
+        </>
+      ) : (
+        grupos.map(g => {
+          const gAlumnos = conGrupoDatos(g)
+          return (
+            <div key={`${g.dia}|${g.horario}|${g.edad}`} className="sv-grp-bloque">
+              <h4 className="sv-grp-bloque__titulo">{g.label}</h4>
+              <ProfesorLine dia={g.dia} horario={g.horario} />
+              <TablaAlumnos
+                alumnos={gAlumnos} meses={meses}
+                onWa={a => setAccion({ alumno: a, tipo: 'optin_whatsapp' })} onMenu={a => setMenuFor(a)}
+              />
+              {gAlumnos.length === 0 && <p className="sv-empty">Sin suscripciones en vigor para este grupo.</p>}
+            </div>
+          )
+        })
+      )}
       </>)}
 
       {menuFor && (

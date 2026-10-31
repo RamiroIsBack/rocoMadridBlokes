@@ -949,6 +949,9 @@
 
 .sv-grp-tutor { font-size: 0.68rem; margin-top: 2px; }
 .sv-grp-profesor { margin: 0 0 10px; }
+.sv-grp-bloque { margin-bottom: 24px; padding-top: 14px; border-top: 1px solid #2a2015; }
+.sv-grp-bloque:first-child { padding-top: 0; border-top: none; }
+.sv-grp-bloque__titulo { color: #f5c842; font-size: 0.92rem; margin: 0 0 4px; }
 
 .sv-to-timeline-wrap {
   overflow-x: auto;
