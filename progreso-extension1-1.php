@@ -2611,7 +2611,7 @@ function progreso_get_group_stats($user_ids) {
     if (!empty($user_ids)) {
         $ids   = array_map('intval', $user_ids);
         $in_sq = implode(',', $ids);
-        $since = date('Y-m-d', strtotime('-12 months'));
+        $since = date('Y-m-d', strtotime('first day of this month -12 months'));
         $rows  = $wpdb->get_results($wpdb->prepare(
             "SELECT test_id, DATE_FORMAT(logged_at,'%%Y-%%m') AS month,
                     AVG(value_kg) AS avg_kg, COUNT(DISTINCT user_id) AS user_count
@@ -2769,7 +2769,7 @@ function progreso_delete_all_training() {
 function progreso_training_summary() {
     global $wpdb;
     progreso_ensure_training_table();
-    $since = date('Y-m-d', strtotime('-12 months'));
+    $since = date('Y-m-d', strtotime('first day of this month -12 months'));
     $rows  = $wpdb->get_results($wpdb->prepare(
         "SELECT test_id,
                 DATE_FORMAT(logged_at, '%%Y-%%m') AS month,
@@ -3353,7 +3353,10 @@ function superadmin_gestion_grupos($request) {
     $months = max(1, min(12, intval($request->get_param('months')) ?: 4));
     $meses  = array();
     for ($i = $months - 1; $i >= 0; $i--) {
-        $meses[] = (new DateTime())->modify("-{$i} months")->format('Y-m');
+        // Día 1 del mes antes de restar: si no, los días 29-31 se desbordan al mes siguiente
+        // (31/10 menos 1 mes da "31/09", que no existe, y PHP lo convierte en 1/10 — se
+        // repetía octubre dos veces y faltaba septiembre).
+        $meses[] = (new DateTime('first day of this month'))->modify("-{$i} months")->format('Y-m');
     }
     $meses_set = array_fill_keys($meses, true);
 
@@ -4646,7 +4649,8 @@ function superadmin_campanas_marcar_accion($request) {
 // WhatsApp recupera gente y a quién dirigir cada una (31/10).
 function superadmin_gestion_bajas_motivo($request) {
     $meses = max(1, min(36, intval($request->get_param('meses') ?: 12)));
-    $desde = date('Y-m-d', strtotime("-{$meses} months"));
+    // "first day of this month" antes de restar: evita el desborde de mes de los días 29-31.
+    $desde = date('Y-m-d', strtotime("first day of this month -{$meses} months"));
     $metas = get_posts(array(
         'post_type' => 'shop_subscription', 'post_status' => array('wc-cancelled', 'wc-pending-cancel'),
         'posts_per_page' => -1, 'fields' => 'ids',
@@ -5319,7 +5323,7 @@ function superadmin_classes($request) {
                     if (!$end_ts && $sub['status'] === 'on-hold') $end_ts = $sub_obj->get_time('last_payment');
                     $sub_end_ym = $end_ts ? date('Y-m', $end_ts) : $sub_start_ym;
                     // Track recently lost: cancelled within last 2 months
-                    $two_months_ago = date('Y-m', strtotime('-2 months'));
+                    $two_months_ago = date('Y-m', strtotime('first day of this month -2 months'));
                     if ($sub_end_ym >= $two_months_ago && !in_array($sub['status'], array('on-hold', 'pending'))) {
                         $classes[$class_key]['members_lost'][] = array('name' => $member_name, 'phone' => $member_phone);
                     }
