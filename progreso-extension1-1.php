@@ -867,6 +867,13 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_bajas_motivo',
         'permission_callback' => $sa_perm,
     ));
+    // Ficha de Grupos (fase b): para que Eva lo marque cuando alguien dice que sí en persona o
+    // por WhatsApp.
+    register_rest_route('superadmin/v1', '/gestion/optin-whatsapp', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_optin_whatsapp',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/campanas/contactos/importar', array(
         'methods'             => 'POST',
         'callback'            => 'superadmin_campanas_importar_contactos',
@@ -4166,6 +4173,67 @@ function blokes_campanas_externos_por_telefono() {
     return $por_tel;
 }
 
+// Consentimiento de WhatsApp (31/10, fase b): se registra en dos sitios — el user meta (si hay
+// un usuario de WordPress detrás) y la fila de `wp_blokes_contactos` por teléfono (para que
+// Campañas lo vea sin depender de que esa persona tenga cuenta). $telefono puede venir vacío
+// (p. ej. un usuario sin billing_phone); en ese caso solo se guarda en el user meta.
+function blokes_registrar_optin_whatsapp($telefono, $user_id, $valor, $canal, $texto, $quien, $nombre_si_nuevo = '') {
+    $tel = blokes_externos_normaliza_telefono((string) $telefono);
+    $ahora = current_time('mysql');
+
+    if ($user_id) {
+        update_user_meta($user_id, 'optin_whatsapp', $valor ? '1' : '0');
+        update_user_meta($user_id, 'optin_whatsapp_fecha', $ahora);
+        update_user_meta($user_id, 'optin_whatsapp_canal', $canal);
+    }
+
+    if ($tel === '') return;
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $existente = $wpdb->get_row($wpdb->prepare(
+        "SELECT id FROM " . blokes_contactos_table() . " WHERE telefono = %s", $tel
+    ), ARRAY_A);
+    $campos = array(
+        'optin_whatsapp' => $valor ? 1 : 0, 'optin_fecha' => $ahora, 'optin_canal' => $canal,
+        'optin_texto' => $texto, 'optin_quien' => $quien, 'updated_at' => $ahora,
+    );
+    if ($existente) {
+        $wpdb->update(blokes_contactos_table(), $campos, array('id' => $existente['id']));
+    } else {
+        $wpdb->insert(blokes_contactos_table(), array_merge($campos, array(
+            'telefono' => $tel, 'nombres' => wp_json_encode(array_filter(array($nombre_si_nuevo)) ?: array('(sin nombre)')),
+            'origen' => 'optin', 'created_at' => $ahora,
+        )));
+    }
+}
+
+const BLOKES_OPTIN_WHATSAPP_TEXTO = 'Acepto recibir avisos y promociones de RocoMadrid por WhatsApp. Puedo darme de baja cuando quiera respondiendo BAJA.';
+
+// Casilla de consentimiento en el checkout clásico de WooCommerce (31/10, fase b). Desmarcada
+// por defecto (RGPD: nada premarcado). El checkout de este sitio es el clásico (ver
+// rocomadrid-step-form/includes/class-checkout-fields.php, el mismo hook que usa ese plugin
+// para su propio checkbox), no el de bloques.
+add_action('woocommerce_checkout_after_terms_and_conditions', 'blokes_render_optin_whatsapp_checkbox');
+function blokes_render_optin_whatsapp_checkbox() {
+    woocommerce_form_field('optin_whatsapp', array(
+        'type' => 'checkbox', 'class' => array('form-row-wide'),
+        'label' => BLOKES_OPTIN_WHATSAPP_TEXTO, 'required' => false,
+    ), WC()->checkout->get_value('optin_whatsapp'));
+}
+add_action('woocommerce_checkout_update_order_meta', 'blokes_save_optin_whatsapp_checkout');
+function blokes_save_optin_whatsapp_checkout($order_id) {
+    $marcado = !empty($_POST['optin_whatsapp']);
+    update_post_meta($order_id, '_optin_whatsapp', $marcado ? '1' : '0');
+    if (!$marcado) return; // RGPD: no registrar nada si no lo marca, ni siquiera "no"
+    $order = wc_get_order($order_id);
+    if (!$order) return;
+    blokes_registrar_optin_whatsapp(
+        $order->get_billing_phone(), $order->get_customer_id(), true, 'checkout',
+        BLOKES_OPTIN_WHATSAPP_TEXTO, 'checkout pedido #' . $order_id,
+        trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name())
+    );
+}
+
 // 'actuales' | 'nuevos' | 'antiguos' | null (no se sabe: ni suscripción, ni externo, ni origen
 // reconocible — no entra en ninguna campaña hasta que alguien lo revise a mano).
 function blokes_campanas_clasificar($telefono, $subs_por_tel, $externos_por_tel, $contacto, $dias_nuevo = 60) {
@@ -4467,6 +4535,24 @@ function superadmin_gestion_bajas_motivo($request) {
     }
     ksort($por_mes_motivo);
     return rest_ensure_response(array('success' => true, 'data' => $por_mes_motivo));
+}
+
+// POST /gestion/optin-whatsapp — { telefono, valor, nombre? } — para que Eva lo marque desde
+// la ficha de Grupos cuando alguien dice que sí (o retira el consentimiento) en persona o por
+// WhatsApp.
+function superadmin_gestion_optin_whatsapp($request) {
+    $body     = $request->get_json_params();
+    $telefono = sanitize_text_field((string) ($body['telefono'] ?? ''));
+    $valor    = (bool) ($body['valor'] ?? false);
+    $nombre   = sanitize_text_field((string) ($body['nombre'] ?? ''));
+    if ($telefono === '') return new WP_Error('bad_request', 'Falta el teléfono.', array('status' => 400));
+
+    $u = wp_get_current_user();
+    blokes_registrar_optin_whatsapp(
+        $telefono, 0, $valor, 'grupos', $valor ? BLOKES_OPTIN_WHATSAPP_TEXTO : '',
+        'Grupos: ' . ($u ? $u->user_login : ''), $nombre
+    );
+    return rest_ensure_response(array('success' => true));
 }
 
 /**
@@ -5475,6 +5561,11 @@ add_action('rest_api_init', function() {
         array('methods' => 'GET',  'callback' => 'blokes_api_get_profile',  'permission_callback' => 'is_user_logged_in'),
         array('methods' => 'POST', 'callback' => 'blokes_api_save_profile', 'permission_callback' => 'is_user_logged_in'),
     ));
+    register_rest_route('blokes/v1', '/profile/optin-whatsapp', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_api_save_optin_whatsapp',
+        'permission_callback' => 'is_user_logged_in',
+    ));
     register_rest_route('blokes/v1', '/profile/check-nickname', array(
         'methods'             => 'GET',
         'callback'            => 'blokes_api_check_nickname',
@@ -5693,7 +5784,22 @@ function blokes_api_get_profile() {
         'avatarType'      => $av['type'],
         'avatarData'      => $av['data'],
         'profileComplete' => blokes_is_profile_complete($uid),
+        'optinWhatsapp'   => get_user_meta($uid, 'optin_whatsapp', true) === '1',
     ));
+}
+
+// Casilla de WhatsApp en el perfil (31/10, fase b): aparte de guardar perfil (nickname/avatar),
+// para poder marcarla o quitarla cuando quiera sin tocar lo demás.
+function blokes_api_save_optin_whatsapp($request) {
+    $uid = get_current_user_id();
+    $valor = (bool) $request->get_param('optinWhatsapp');
+    $telefono = get_user_meta($uid, 'billing_phone', true);
+    $user = get_userdata($uid);
+    blokes_registrar_optin_whatsapp(
+        $telefono, $uid, $valor, 'perfil', $valor ? BLOKES_OPTIN_WHATSAPP_TEXTO : '',
+        'perfil propio', $user ? $user->display_name : ''
+    );
+    return rest_ensure_response(array('success' => true, 'optinWhatsapp' => $valor));
 }
 
 function blokes_api_save_profile($request) {

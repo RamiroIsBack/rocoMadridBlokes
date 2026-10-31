@@ -36,6 +36,8 @@ export default function ProfileSetupModal({
   saveProfile,
   checkNickname,
   uploadPhoto,
+  optinWhatsapp = false,
+  saveOptinWhatsapp,
 }) {
   const existingNick = currentNickname || ''
   const hasProfile   = !!(existingNick || currentAvatarType)
@@ -156,6 +158,14 @@ export default function ProfileSetupModal({
               {currentNickname && (
                 <p className="ps-view-nick">@{currentNickname}</p>
               )}
+              <label className="ps-optin-whatsapp">
+                <input
+                  type="checkbox"
+                  checked={optinWhatsapp}
+                  onChange={e => saveOptinWhatsapp && saveOptinWhatsapp(e.target.checked)}
+                />
+                Acepto recibir avisos y promociones de RocoMadrid por WhatsApp. Puedo darme de baja cuando quiera respondiendo BAJA.
+              </label>
               <button
                 className="ps-save-btn"
                 onClick={() => setViewMode(false)}

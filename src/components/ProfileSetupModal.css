@@ -78,6 +78,19 @@
   margin: 0;
 }
 
+.ps-optin-whatsapp {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: #aaa;
+  text-align: left;
+  max-width: 320px;
+  margin-top: 10px;
+  cursor: pointer;
+}
+.ps-optin-whatsapp input { margin-top: 2px; flex-shrink: 0; }
+
 /* Edit mode header with back button */
 .ps-edit-header {
   display: flex;

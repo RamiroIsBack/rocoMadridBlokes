@@ -121,6 +121,7 @@ function UploadContactsPanel({ onImported, onPlantillasSugeridas }) {
 function ContactosPanel({ onPlantillasSugeridas }) {
   const [lista, setLista]       = useState('all')
   const [tipo, setTipo]         = useState('all')
+  const [soloOptin, setSoloOptin] = useState(false)
   const [data, setData]         = useState(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(null)
@@ -160,6 +161,12 @@ function ContactosPanel({ onPlantillasSugeridas }) {
           <option value="adulto">Adultos</option>
           <option value="menor">Menores</option>
         </select>
+        {data && (
+          <label className="cmp-check">
+            <input type="checkbox" checked={soloOptin} onChange={e => setSoloOptin(e.target.checked)} />
+            Solo con consentimiento WhatsApp ({data.contactos.filter(c => c.optinWhatsapp).length})
+          </label>
+        )}
       </div>
 
       {loading && <p className="cmp-hint">Cargando…</p>}
@@ -168,16 +175,17 @@ function ContactosPanel({ onPlantillasSugeridas }) {
         <div className="cmp-table-wrap">
           <table className="cmp-table">
             <thead>
-              <tr><th>Teléfono</th><th>Nombres</th><th>Tipo</th><th>Lista</th><th>Origen</th></tr>
+              <tr><th>Teléfono</th><th>Nombres</th><th>Tipo</th><th>Lista</th><th>Origen</th><th>Consiente</th></tr>
             </thead>
             <tbody>
-              {data.contactos.map(c => (
+              {data.contactos.filter(c => !soloOptin || c.optinWhatsapp).map(c => (
                 <tr key={c.id}>
                   <td>{c.telefono}</td>
                   <td>{c.nombres.join(', ')}</td>
                   <td>{c.tipo}</td>
                   <td><span className={`cmp-badge cmp-badge--${c.lista || 'sin_clasificar'}`}>{LISTA_LABEL[c.lista || 'sin_clasificar']}</span></td>
                   <td className="cmp-muted">{c.origen}</td>
+                  <td>{c.optinWhatsapp ? '✓' : <span className="cmp-muted">—</span>}</td>
                 </tr>
               ))}
             </tbody>

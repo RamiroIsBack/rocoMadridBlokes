@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo,
+  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
@@ -974,6 +974,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const [mantenerPausa, setMantenerPausa] = useState(true)
   const [modoBaja, setModoBaja] = useState('fin_mes')
   const [motivoBajaCategoria, setMotivoBajaCategoria] = useState('')
+  const [optinWhatsappValor, setOptinWhatsappValor] = useState(false)
   const [extNombre, setExtNombre]   = useState(alumno.alumno || '')
   const [extTelefono, setExtTelefono] = useState(alumno.telefono || '')
   const [extDia, setExtDia]         = useState(alumno.externoDia || '')
@@ -996,6 +997,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
     exento: alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio',
     cambiar_grupo: 'Cambiar de grupo/horario',
     ext_cobrar: 'Marcar cobrado (fuera de la web)', ext_editar: alumno.externoId ? 'Editar datos' : 'Alta de alumno externo', ext_borrar: 'Eliminar alumno externo',
+    optin_whatsapp: 'Consentimiento WhatsApp',
   }
   const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'dar_de_baja', 'fusionar', 'cambiar_grupo'].includes(tipo)
   const clasesSemanales = (catalogoClases || []).filter(c => c.tipo === 'classes')
@@ -1038,6 +1040,9 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
         res = alumno.externoId ? await gestionExternoActualizar(alumno.externoId, body) : await gestionExternoCrear(body)
       } else if (tipo === 'ext_borrar') {
         res = await gestionExternoBorrar(alumno.externoId)
+      } else if (tipo === 'optin_whatsapp') {
+        if (!alumno.telefono) throw new Error('Esta persona no tiene teléfono guardado.')
+        res = await gestionOptinWhatsapp({ telefono: alumno.telefono, valor: optinWhatsappValor, nombre: alumno.alumno })
       }
       if (sim) setPreview(res)
       else onDone()
@@ -1149,6 +1154,16 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
                   ? '¿Quitar la marca de exento/socio? Volverá a contar como un cobro normal.'
                   : '¿Marcar como exento/socio (el «*» del Excel de Eva)? Figura como alumno, pero no se le pide cobro ni cuenta como pendiente. No toca WooCommerce.'}
               </p>
+            )}
+
+            {tipo === 'optin_whatsapp' && (
+              <>
+                <p className="sv-note">Marca esto cuando esta persona haya dicho que sí (en persona o por WhatsApp) a recibir avisos y promociones por WhatsApp — o quítalo si pide darse de baja. Teléfono: {alumno.telefono || '—'}.</p>
+                <label className="sv-grp-field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={optinWhatsappValor} onChange={e => setOptinWhatsappValor(e.target.checked)} />
+                  Acepta recibir avisos y promociones por WhatsApp
+                </label>
+              </>
             )}
 
             {tipo === 'nota' && (
@@ -1284,6 +1299,7 @@ function AccionMenu({ alumno, onPick, onClose }) {
         <button onClick={() => onPick('nota')}>Nota</button>
         <button onClick={() => onPick('exento')}>{alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio'}</button>
         <button onClick={() => onPick('cambiar_grupo')}>Cambiar de grupo/horario</button>
+        <button onClick={() => onPick('optin_whatsapp')}>Consentimiento WhatsApp</button>
         {alumno.otrasSubs?.map(s => (
           <button key={s.subId} onClick={() => onPick('fusionar', s.subId)}>Fusionar — cancelar #{s.subId}</button>
         ))}

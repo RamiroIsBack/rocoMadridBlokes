@@ -81,7 +81,7 @@ export default function App() {
   const canCalendar = useCalendarAccess().can
 
   // Profile modal state
-  const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto } = useProfile()
+  const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto, optinWhatsapp, saveOptinWhatsapp } = useProfile()
   const [profileModalOpen,    setProfileModalOpen]    = useState(false)
   const [profileModalBlock,   setProfileModalBlock]   = useState(false)
   const [profileModalMsg,     setProfileModalMsg]     = useState('')
@@ -380,6 +380,8 @@ export default function App() {
             saveProfile={saveProfile}
             checkNickname={checkNickname}
             uploadPhoto={uploadPhoto}
+            optinWhatsapp={optinWhatsapp}
+            saveOptinWhatsapp={saveOptinWhatsapp}
           />
         )}
       </div>
