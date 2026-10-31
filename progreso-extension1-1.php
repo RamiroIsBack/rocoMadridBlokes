@@ -3462,7 +3462,7 @@ function blokes_gestion_sin_emails($cb) {
 function blokes_gestion_metodo_label($metodo) {
     $map = array(
         'transferencia' => 'Transferencia', 'efectivo' => 'Efectivo',
-        'tarjeta' => 'Tarjeta (TPV roco)', 'wellhub' => 'Wellhub',
+        'tarjeta' => 'Tarjeta (TPV roco)', 'wellhub' => 'Wellhub', 'bizum' => 'Bizum',
     );
     return $map[$metodo] ?? ucfirst($metodo);
 }
@@ -3617,13 +3617,24 @@ function blokes_externos_nombre_coincide_usuario($nombre_norm, $usuario_n) {
     return count($tokens) >= 2 && $usuario_n === ($tokens[0] . $tokens[1]);
 }
 
-// ¿Hay constancia de pago ese periodo? Vale el importe, o que el método apunte a "web" (lo paga
-// por la suscripción de WooCommerce, no por este seguimiento aparte, así que no trae importe).
+// ¿Hay constancia de pago ese periodo? Vale el importe, o que el método apunte a "web" o "bizum"
+// sin importe (se apunta así cuando el Excel solo tiene el método, sin cantidad rellena).
 function blokes_externos_tiene_pago($pagos, $periodo) {
     $p = is_array($pagos) ? ($pagos[$periodo] ?? null) : null;
     if (!is_array($p)) return false;
     if (floatval($p['importe'] ?? 0) > 0) return true;
-    return mb_strtolower(trim((string) ($p['metodo'] ?? ''))) === 'web';
+    return in_array(mb_strtolower(trim((string) ($p['metodo'] ?? ''))), array('web', 'bizum'), true);
+}
+
+// ¿El Excel dice que esta fila paga por la web (suscripción de WooCommerce) en algún periodo? Si
+// es así pero no se ha podido confirmar ninguna suscripción suya, no se puede dar por "nuevo"
+// limpio: por definición alguien que paga por la web ya tiene una suscripción en alguna parte.
+function blokes_externos_paga_por_web($pagos, $periodo_sep, $periodo_oct) {
+    foreach (array($periodo_sep, $periodo_oct) as $periodo) {
+        $p = is_array($pagos) ? ($pagos[$periodo] ?? null) : null;
+        if (is_array($p) && mb_strtolower(trim((string) ($p['metodo'] ?? ''))) === 'web') return true;
+    }
+    return false;
 }
 
 // Todos los externos activos, con sus pagos anidados por periodo (YYYY-MM).
@@ -3851,10 +3862,17 @@ function superadmin_gestion_externos_importar($request) {
         // mano que es un familiar distinto y no la misma persona, se repita esa fila con
         // `confirmarFamiliar: true`.
         $posible_familiar = $match && $match['tipo'] === 'posible_familiar' ? $match['subId'] : null;
-        if ($posible_familiar && !$simular && empty($raw['confirmarFamiliar'])) {
+        // El Excel dice que paga por la web, pero no se ha encontrado ninguna suscripción suya ni
+        // siquiera como posible familiar: alguien que paga por la web, por definición, ya tiene
+        // una suscripción en alguna parte — crearlo como "nuevo" sería casi seguro un duplicado.
+        // Misma puerta que `posible_familiar` (pendiente_revision salvo `confirmarFamiliar: true`).
+        $paga_web_sin_match = !$posible_familiar && blokes_externos_paga_por_web($pagos, $periodo_sep, $periodo_oct);
+        if (($posible_familiar || $paga_web_sin_match) && !$simular && empty($raw['confirmarFamiliar'])) {
             $resultado[] = array(
                 'nombre' => $f['nombre'], 'accion' => 'pendiente_revision', 'posibleFamiliar' => $posible_familiar,
-                'motivo' => 'El teléfono coincide con otra suscripción de la web, pero no hay bastante para saber si es la misma persona o un familiar. Hay que decidirlo a mano antes de crearlo.',
+                'motivo' => $posible_familiar
+                    ? 'El teléfono coincide con otra suscripción de la web, pero no hay bastante para saber si es la misma persona o un familiar. Hay que decidirlo a mano antes de crearlo.'
+                    : 'El Excel dice que paga por la web, pero no se ha encontrado ninguna suscripción suya para confirmarlo. Hay que decidirlo a mano antes de crearlo.',
             );
             continue;
         }
@@ -3876,6 +3894,7 @@ function superadmin_gestion_externos_importar($request) {
             }
             $fila = array('nombre' => $f['nombre'], 'accion' => 'actualizaria_existente', 'id' => $existente['id'], 'pagos' => count($pagos));
             if ($posible_familiar) $fila['posibleFamiliar'] = $posible_familiar;
+            if ($paga_web_sin_match) $fila['pagaWebSinMatch'] = true;
             $resultado[] = $fila;
             continue;
         }
@@ -3897,6 +3916,7 @@ function superadmin_gestion_externos_importar($request) {
         }
         $fila = array('nombre' => $f['nombre'], 'accion' => 'nuevo', 'grupo' => trim($f['dia'] . ' ' . $f['horario']), 'pagos' => count($pagos));
         if ($posible_familiar) $fila['posibleFamiliar'] = $posible_familiar;
+        if ($paga_web_sin_match) $fila['pagaWebSinMatch'] = true;
         // Hermanos nuevos que comparten teléfono entre ellos (no con la web): no es un duplicado —
         // los dos se crean igual — pero se avisa como candidatos a bono familiar.
         if (($conteo_telefono[$f['telefono']] ?? 0) > 1) {
@@ -3906,13 +3926,14 @@ function superadmin_gestion_externos_importar($request) {
         $resultado[] = $fila;
     }
 
-    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0, 'noActivo' => 0, 'pendienteRevision' => 0, 'posibleFamiliar' => 0, 'hermanoEnLote' => 0);
+    $resumen = array('yaEnWeb' => 0, 'actualizaria_existente' => 0, 'nuevo' => 0, 'invalida' => 0, 'noActivo' => 0, 'pendienteRevision' => 0, 'posibleFamiliar' => 0, 'hermanoEnLote' => 0, 'pagaWebSinMatch' => 0);
     $mapa_accion = array('ya_en_web' => 'yaEnWeb', 'pendiente_revision' => 'pendienteRevision', 'no_activo' => 'noActivo');
     foreach ($resultado as $r) {
         $k = $mapa_accion[$r['accion']] ?? $r['accion'];
         if (isset($resumen[$k])) $resumen[$k]++;
         if (!empty($r['posibleFamiliar'])) $resumen['posibleFamiliar']++;
         if (!empty($r['hermanoEnLote'])) $resumen['hermanoEnLote']++;
+        if (!empty($r['pagaWebSinMatch'])) $resumen['pagaWebSinMatch']++;
     }
     return rest_ensure_response(array('success' => true, 'data' => array('simulado' => $simular, 'resumen' => $resumen, 'filas' => $resultado)));
 }
@@ -3921,10 +3942,11 @@ function superadmin_gestion_externos_importar($request) {
  * Marcar cobrado.
  * - Efectivo: NO toca WooCommerce ni genera factura — se apunta en una tabla propia
  *   (`wp_blokes_cobros_manuales`) y "Grupos"/ExcelMuerte lo cuentan como cobrado ese mes.
- * - Transferencia / Tarjeta (TPV roco) / Wellhub: completa la renovación pendiente (o crea una
- *   si no hay ninguna) y la reactiva — esto SÍ genera factura real (Verifactu/AEAT), igual que
- *   un cobro con tarjeta en la web. Rechaza las suscripciones de cobro automático por
- *   tarjeta/Redsys (409), para no duplicar el cobro.
+ * - Transferencia / Tarjeta (TPV roco) / Bizum / Wellhub: completa la renovación pendiente (o
+ *   crea una si no hay ninguna) y la reactiva — esto SÍ genera factura real (Verifactu/AEAT),
+ *   igual que un cobro con tarjeta en la web. Bizum entra por el banco, así que se trata igual
+ *   que transferencia (31/10, decisión de Ramiro). Rechaza las suscripciones de cobro automático
+ *   por tarjeta/Redsys (409), para no duplicar el cobro.
  */
 function superadmin_gestion_marcar_cobrado($request) {
     if (!function_exists('wcs_get_subscription')) {
@@ -3944,8 +3966,8 @@ function superadmin_gestion_marcar_cobrado($request) {
     if (!$sub_id || $importe <= 0 || !$metodo) {
         return new WP_Error('bad_request', 'Faltan sub_id, importe o metodo.', array('status' => 400));
     }
-    if (!in_array($metodo, array('transferencia', 'tarjeta', 'efectivo', 'wellhub'), true)) {
-        return new WP_Error('bad_request', 'Método no reconocido. Usa transferencia, tarjeta, efectivo o wellhub.', array('status' => 400));
+    if (!in_array($metodo, array('transferencia', 'tarjeta', 'efectivo', 'wellhub', 'bizum'), true)) {
+        return new WP_Error('bad_request', 'Método no reconocido. Usa transferencia, tarjeta, efectivo, bizum o wellhub.', array('status' => 400));
     }
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
@@ -3997,7 +4019,7 @@ function superadmin_gestion_marcar_cobrado($request) {
         return rest_ensure_response(array('success' => true, 'data' => $despues));
     }
 
-    // ── Transferencia / Tarjeta (TPV) / Wellhub: por WooCommerce, con factura ──
+    // ── Transferencia / Tarjeta (TPV) / Bizum / Wellhub: por WooCommerce, con factura ──
     if (method_exists($sub, 'is_manual') && !$sub->is_manual()) {
         return new WP_Error('cobro_automatico', 'Esta suscripción cobra sola por tarjeta/Redsys: no se puede marcar cobrado a mano (cobro doble).', array('status' => 409));
     }

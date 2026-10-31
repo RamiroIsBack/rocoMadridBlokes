@@ -948,14 +948,16 @@ const ESTADO_LABEL = {
 }
 const METODO_OPCIONES = [
   ['transferencia', 'Transferencia'], ['tarjeta', 'Tarjeta (TPV roco)'],
-  ['efectivo', 'Efectivo'], ['wellhub', 'Wellhub'],
+  ['bizum', 'Bizum'], ['efectivo', 'Efectivo'], ['wellhub', 'Wellhub'],
 ]
 // Efectivo: sin WooCommerce y sin factura, solo queda apuntado en Grupos (decisión de Ramiro,
-// 29/10). Los demás van por WooCommerce y SÍ generan factura real (Verifactu/AEAT).
+// 29/10). Los demás van por WooCommerce y SÍ generan factura real (Verifactu/AEAT). Bizum entra
+// por el banco, así que se trata igual que transferencia (decisión de Ramiro, 31/10).
 const METODO_CONSECUENCIA = {
   efectivo: 'Efectivo: no se toca WooCommerce ni se genera factura. Solo queda apuntado en Grupos.',
   transferencia: 'Se completará el pedido y se emitirá factura real (Verifactu/AEAT), con la fecha de hoy.',
   tarjeta: 'Se completará el pedido y se emitirá factura real (Verifactu/AEAT), con la fecha de hoy.',
+  bizum: 'Se completará el pedido y se emitirá factura real (Verifactu/AEAT), con la fecha de hoy.',
   wellhub: 'Se completará el pedido y se emitirá factura real (Verifactu/AEAT), con la fecha de hoy.',
 }
 const hoyISO = () => new Date().toISOString().slice(0, 10)
