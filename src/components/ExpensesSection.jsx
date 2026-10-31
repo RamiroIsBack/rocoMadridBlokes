@@ -182,11 +182,14 @@ function UploadPanel({ onSaved }) {
           setItems([])
           return
         }
-        // Deduplicate: same (fecha, concepto, importe) → keep first occurrence
+        // Deduplicate: same (fecha, concepto, importe, saldo) → keep first occurrence. El saldo
+        // (si el CSV lo trae) va en la clave porque dos movimientos reales y distintos pueden
+        // coincidir en fecha+concepto+importe (p. ej. dos alumnos transfiriendo la misma cuota
+        // el mismo día) y no por eso son el mismo — el saldo posterior sí es único por fila.
         const seen = new Set()
         let dupCount = 0
         const deduped = all.filter(item => {
-          const sig = `${item.fecha}||${item.concepto}||${item.importe}`
+          const sig = `${item.fecha}||${item.concepto}||${item.importe}||${item.saldo || ''}`
           if (seen.has(sig)) { dupCount++; return false }
           seen.add(sig)
           return true

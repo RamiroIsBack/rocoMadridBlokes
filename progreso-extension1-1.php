@@ -874,17 +874,14 @@ function blokes_exp_load_month($month, $entity) {
     return (is_array($saved) && is_array($saved['items'] ?? null)) ? $saved['items'] : array();
 }
 
-// Clave de un movimiento para no duplicarlo: mismo día (fecha y fecha valor), concepto e
-// importe. Se compara también contra el mes anterior y el siguiente, porque el mes ahora se
-// decide por fecha valor y un CSV que cruza fin de mes puede repetir, con fecha valor de otro
-// mes, un movimiento que una subida de antes (con fecha de operación) ya había guardado en el
-// mes vecino.
+// Clave de un movimiento para no duplicarlo: fecha de operación (no fecha valor — esa falta en
+// lo guardado antes de tenerla, así que no casaría con lo viejo), concepto, importe y saldo
+// posterior. El saldo es necesario porque fecha+concepto+importe no basta: dos transferencias
+// reales y distintas el mismo día por el mismo importe exacto (p. ej. dos alumnos pagando la
+// misma cuota) comparten esos tres datos y no son el mismo movimiento.
 function blokes_exp_item_key($item) {
-    $fecha  = $item['fecha'] ?? '';
-    // Lo guardado antes de tener fecha valor no tiene ese campo: usar la fecha de operación
-    // en ese caso para que siga emparejando con la misma fila si se vuelve a subir.
-    $valor  = ($item['fechaValor'] ?? '') !== '' ? $item['fechaValor'] : $fecha;
-    return $fecha . '|' . $valor . '|' . trim((string) ($item['concepto'] ?? '')) . '|' . round(floatval($item['importe'] ?? 0), 2);
+    $fecha = $item['fecha'] ?? '';
+    return $fecha . '|' . trim((string) ($item['concepto'] ?? '')) . '|' . round(floatval($item['importe'] ?? 0), 2) . '|' . ($item['saldo'] ?? '');
 }
 
 // Guarda los movimientos de un mes/entidad FUSIONANDO con lo que ya hubiera (por defecto):
@@ -909,6 +906,7 @@ function superadmin_save_expenses($request) {
             'fechaValor' => sanitize_text_field($item['fechaValor'] ?? ($item['fecha'] ?? '')),
             'concepto'   => sanitize_text_field($item['concepto'] ?? ''),
             'importe'    => floatval($item['importe']  ?? 0),
+            'saldo'      => sanitize_text_field((string) ($item['saldo'] ?? '')),
             'category'   => sanitize_text_field($item['category'] ?? 'otros'),
             'iva'        => intval($item['iva']      ?? 0),
             'excluded'   => (bool) ($item['excluded'] ?? false),

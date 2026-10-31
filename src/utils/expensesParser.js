@@ -168,6 +168,10 @@ function parseFlat(lines) {
     const concepto   = cols[3]?.trim()
     const cuenta     = hasCuentaCol ? (cols[4]?.trim() || '') : ''
     const importeRaw = cols[importeIdx]?.trim()
+    // Saldo tras el movimiento (si el formato lo trae, justo después del importe): único por
+    // movimiento, a diferencia de fecha+concepto+importe, que dos transferencias distintas del
+    // mismo día por el mismo importe exacto comparten (p. ej. dos alumnos pagando lo mismo).
+    const saldo = cols[importeIdx + 1]?.trim() || ''
     if (!fecha || !fecha.match(/^\d{1,2}\/\d{1,2}\/\d{4}/) || !concepto || !importeRaw) continue
     const importe = parseAmount(importeRaw)
     if (isNaN(importe) || importe === 0) continue
@@ -185,6 +189,7 @@ function parseFlat(lines) {
       concepto,
       cuenta,
       importe,
+      saldo,
       category: cat,
       iva:      CATEGORY_IVA[cat] ?? 21,
       excluded: isExcluded(concepto),
@@ -224,6 +229,7 @@ function parseSectioned(lines) {
       month:    parseMonth(fecha),
       concepto,
       importe,
+      saldo: '',
       category: cat,
       iva:      CATEGORY_IVA[cat] ?? 21,
       excluded: isExcluded(concepto),
