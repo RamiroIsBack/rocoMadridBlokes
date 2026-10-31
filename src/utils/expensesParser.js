@@ -14,9 +14,11 @@ function normStr(s) {
 // ── Category definitions ──────────────────────────────────────────────
 export const CATEGORIES = {
   alquiler:          'Alquiler',
+  comunidad:         'Comunidad',
   nominas:           'Nóminas',
   electricidad:      'Electricidad',
   gas:               'Gas',
+  agua:              'Agua',
   telecomunicaciones:'Telecom',
   bar:               'Bar/Café',
   comisiones_banco:  'Comisiones banco',
@@ -26,16 +28,22 @@ export const CATEGORIES = {
   marketing:         'Marketing',
   retirada_efectivo: 'Retirada efectivo',
   formacion:         'Formación',
+  material:          'Material/presas',
+  asesoria:          'Asesoría',
   tpv:               'Venta TPV',
+  bizum:             'Bizum',
+  wellhub:           'Wellhub',
   transferencia:     'Transferencia cliente',
   otros:             'Otros',
 }
 
 export const CATEGORY_IVA = {
   alquiler:          21,
+  comunidad:         21,
   nominas:           0,
   electricidad:      21,
   gas:               21,
+  agua:              21,
   telecomunicaciones:21,
   bar:               10,
   comisiones_banco:  0,
@@ -45,36 +53,60 @@ export const CATEGORY_IVA = {
   marketing:         21,
   retirada_efectivo: 0,
   formacion:         21,
+  material:          21,
+  asesoria:          21,
   tpv:               21,
+  bizum:             21,
+  wellhub:           21,
   transferencia:     21,
   otros:             21,
 }
 
 const EXPENSE_RULES = [
   { test: c => /ALQUILER/i.test(c),                                      cat: 'alquiler' },
-  { test: c => /REMESA DE NOMINAS|NOMINA|NÓMINA/i.test(c),               cat: 'nominas' },
-  { test: c => /IBERDROLA/i.test(c),                                      cat: 'electricidad' },
+  { test: c => /COMUNIDAD/i.test(c),                                      cat: 'comunidad' },
+  { test: c => /REMESA DE TRANSFERENCIAS|REMESA DE NOMINAS|NOMINA|NÓMINA/i.test(c), cat: 'nominas' },
+  { test: c => /IBERDROLA|OCTOPUS ENERGY/i.test(c),                        cat: 'electricidad' },
   { test: c => /COMERCIALIZADORA REGULADA|GAS POWER/i.test(c),           cat: 'gas' },
+  { test: c => /\bAGUA\b/i.test(c),                                       cat: 'agua' },
   { test: c => /TELCOM|DIGI SPAIN|TELEFON/i.test(c),                     cat: 'telecomunicaciones' },
   { test: c => /COCA COLA/i.test(c),                                      cat: 'bar' },
-  { test: c => /COM\.TAR\.|COM MTMO|LIQ\. OP\./i.test(c),               cat: 'comisiones_banco' },
-  { test: c => /DEV\.TAR\.|DEVOLUCION|DEVOLUCIÓN/i.test(c),              cat: 'devoluciones_tpv' },
+  { test: c => /COM\.TAR\.|COM MTMO|LIQ\. OP\.|COMISION TARJETAS|COMI BIZUM/i.test(c), cat: 'comisiones_banco' },
+  { test: c => /DEV\.TAR\.|DEVOLUC/i.test(c),                              cat: 'devoluciones_tpv' },
   { test: c => /RBO\.REGIMEN GENERAL|SEGURIDAD SOCIAL/i.test(c),         cat: 'ss' },
   { test: c => /^NRC\.|^RECAUD\.|AEAT|HACIENDA/i.test(c),               cat: 'hacienda' },
   { test: c => /SPOTIFY|MARKETING/i.test(c),                             cat: 'marketing' },
   { test: c => /CAJERO|RGRO\.TJTA/i.test(c),                             cat: 'retirada_efectivo' },
   { test: c => /ESCUELA|FORMACION|FORMACIÓN/i.test(c),                   cat: 'formacion' },
+  { test: c => /ARTUROFINANCIAL|ASESORIA|ASESORÍA|GESTORIA|GESTORÍA/i.test(c), cat: 'asesoria' },
+  { test: c => /LOTE DE PRESAS|EUROFER/i.test(c),                         cat: 'material' },
 ]
 
 const INCOME_RULES = [
-  { test: c => /VTA\.TAR\./i.test(c),   cat: 'tpv' },
-  { test: c => /DEV\.COM\./i.test(c),   cat: 'comisiones_banco' },
+  { test: c => /TOTAL TARJETAS|VTA\.TAR\./i.test(c), cat: 'tpv' },
+  { test: c => /VENTA BIZUM/i.test(c),                 cat: 'bizum' },
+  { test: c => /GYMPASS|WELLHUB/i.test(c),             cat: 'wellhub' },
+  { test: c => /DEV\.COM\./i.test(c),                  cat: 'comisiones_banco' },
 ]
 
 export function autoCategory(concepto, isIncome) {
   const rules = isIncome ? INCOME_RULES : EXPENSE_RULES
   for (const r of rules) { if (r.test(concepto)) return r.cat }
   return isIncome ? 'transferencia' : 'otros'
+}
+
+// Conceptos que no se pueden clasificar con confianza y conviene que alguien los mire a
+// mano (quedan en "otros", solo se marcan para resaltarlos en la vista previa).
+const REVIEW_PATTERNS = [/RECIBO VISA/i]
+export function needsReview(concepto) {
+  return REVIEW_PATTERNS.some(p => p.test(concepto))
+}
+
+// CSV de la cuenta del Club (CaixaBank): sin columna Cuenta, cabecera con "Saldo Posterior"
+// en vez de "Cuenta"/"Importe tras el movimiento". Para elegir la entidad por defecto cuando
+// el CSV no trae columna Cuenta (si la trae, se usa KNOWN_ACCOUNTS / selección manual).
+export function detectClubCaixaFormat(text) {
+  return /saldo posterior/i.test(text)
 }
 
 function isExcluded(concepto) {
@@ -132,6 +164,7 @@ function parseFlat(lines) {
   for (let i = 0; i < lines.length; i++) {
     const cols = lines[i].split(';')
     const fecha      = cols[1]?.trim()
+    const fechaValor = cols[2]?.trim()
     const concepto   = cols[3]?.trim()
     const cuenta     = hasCuentaCol ? (cols[4]?.trim() || '') : ''
     const importeRaw = cols[importeIdx]?.trim()
@@ -141,16 +174,20 @@ function parseFlat(lines) {
 
     const isIncome = importe > 0
     const cat      = autoCategory(concepto, isIncome)
+    // El mes se decide por fecha valor (cuándo entra/sale el dinero de verdad), no por fecha
+    // de operación: un cobro TPV del último día del mes puede valorarse al día siguiente, que
+    // ya caería en el mes que viene si se mirase la fecha de operación.
     const item = {
       id:       `${i}`,
       fecha,
-      month:    parseMonth(fecha),
+      month:    parseMonth(fechaValor) || parseMonth(fecha),
       concepto,
       cuenta,
       importe,
       category: cat,
       iva:      CATEGORY_IVA[cat] ?? 21,
       excluded: isExcluded(concepto),
+      needsReview: needsReview(concepto),
       section:  isIncome ? 'ingresos' : 'costes',
     }
     if (isIncome) ingresos.push(item)

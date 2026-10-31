@@ -825,7 +825,7 @@ add_action('rest_api_init', function() {
             'callback'            => 'superadmin_get_expenses',
             'permission_callback' => $sa_perm,
             'args'                => array(
-                'months'           => array('type' => 'integer', 'default' => 6),
+                'from'             => array('type' => 'string',  'default' => ''),
                 'entity'           => array('type' => 'string',  'default' => 'all'),
                 'exclude_internal' => array('type' => 'integer', 'default' => 1),
             ),
@@ -885,11 +885,15 @@ function superadmin_save_expenses($request) {
     return rest_ensure_response(array('success' => true, 'month' => $month));
 }
 
+// `from`: primer mes a incluir ('YYYY-MM', incluido) o vacío para no limitar ("Todo"). Se
+// compara como texto (los meses se guardan como 'YYYY-MM', que ordena igual como string que
+// como fecha) en vez de restar meses a una fecha, que con createFromFormat('Y-m', …) arrastra
+// el día de hoy y se desborda de mes en los días 29-31 de meses cortos.
 function superadmin_get_expenses($request) {
-    $months           = max(1, min(60, intval($request->get_param('months'))));
+    $from             = sanitize_text_field($request->get_param('from') ?: '');
     $entity_filter    = sanitize_text_field($request->get_param('entity') ?: 'all');
     $exclude_internal = (bool) intval($request->get_param('exclude_internal') ?? 1);
-    $start            = new DateTime("-{$months} months");
+    if ($from !== '' && !preg_match('/^\d{4}-\d{2}$/', $from)) $from = '';
 
     global $wpdb;
     $rows = $wpdb->get_results(
@@ -905,9 +909,8 @@ function superadmin_get_expenses($request) {
 
         $row_entity = $saved['entity'] ?? 'rocoteca';
         if ($entity_filter !== 'all' && $row_entity !== $entity_filter) continue;
-
-        $dt = DateTime::createFromFormat('Y-m', $saved['month']);
-        if (!$dt || $dt < $start) continue;
+        if (!preg_match('/^\d{4}-\d{2}$/', $saved['month'])) continue;
+        if ($from !== '' && $saved['month'] < $from) continue;
 
         $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0;
         $row_concepto  = array(); // expense concept totals for this entity-month

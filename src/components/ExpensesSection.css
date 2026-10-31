@@ -556,3 +556,33 @@
 .exp-history .recharts-tooltip-wrapper {
   translate: 0 -20px;
 }
+
+/* ── Remitentes de transferencias (ingresos sin categoría de concepto) ── */
+.exp-unidentified-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-left: 3px solid #444;
+  background: rgba(255,255,255,0.02);
+  margin-bottom: 4px;
+  border-radius: 0 6px 6px 0;
+}
+.exp-unidentified-row--pending { border-left-color: #ef4444; }
+.exp-unidentified-sender {
+  flex: 1;
+  font-size: 0.78rem;
+  color: #ddd;
+}
+.exp-unidentified-amount {
+  font-size: 0.78rem;
+  color: #999;
+  white-space: nowrap;
+}
+
+/* ── Conceptos a revisar a mano en la vista previa ── */
+.exp-cell--review {
+  color: #f5c842;
+  margin-left: 6px;
+  font-size: 0.7rem;
+}

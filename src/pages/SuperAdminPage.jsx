@@ -827,10 +827,10 @@ function fmtPLVal(v) {
 }
 
 function PLTab() {
-  const { data: expData, loading } = useExpenses(30, 'all', true)
+  const { data: expData, loading } = useExpenses('', 'all', true)
   const [metric,  setMetric ] = useState('ventas')
   const [view,    setView   ] = useState('comparativa')
-  const [showIva, setShowIva] = useState(false)
+  const [showIva, setShowIva] = useState(true)
 
   const live2026 = useMemo(() => {
     if (!expData) return {}

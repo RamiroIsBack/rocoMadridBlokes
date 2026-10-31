@@ -77,14 +77,15 @@ export const gestionExternoBorrar    = id           => gestionCall('DELETE', `/g
 export const gestionExternoPago      = (id, body)   => gestionPost(`/gestion/externos/${id}/pago`, body)
 export const gestionExternosImportar = body         => gestionPost('/gestion/externos/importar', body)
 
-export function useExpenses(months, entity = 'all', excludeInternal = true) {
+// `from`: primer mes a incluir ('YYYY-MM', incluido) o '' para no limitar ("Todo").
+export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)
   const [breakdown, setBreakdown] = useState(null)
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
 
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
-  const url = `${CLUB_URL}/wp-json/superadmin/v1/expenses?months=${months}&entity=${entity}&exclude_internal=${excludeInternal ? 1 : 0}`
+  const url = `${CLUB_URL}/wp-json/superadmin/v1/expenses?from=${from || ''}&entity=${entity}&exclude_internal=${excludeInternal ? 1 : 0}`
 
   useEffect(() => {
     setLoading(true)

@@ -203,7 +203,6 @@ function Normas({ ev, requests }) {
 // Gastos que dejan de pagarse con la sala cerrada; alquiler, nóminas, SS e
 // impuestos se pagan igual.
 const CATS_AHORRABLES = ['electricidad', 'gas', 'bar', 'comisiones_banco', 'devoluciones_tpv']
-const MESES_HISTORICO = 60
 
 function fmtMes(m) {
   const [y, mo] = m.split('-')
@@ -214,7 +213,7 @@ function fmtMes(m) {
 // «resultado» es siempre ventas − costes fijos (el mismo criterio que la previsión);
 // el resultado del Excel, que incluía otras partidas, va aparte en «resultadoExcel».
 function useHistoricoMeses() {
-  const exp = useExpenses(MESES_HISTORICO, 'all', true)
+  const exp = useExpenses('', 'all', true)
 
   const months = useMemo(() => {
     const acc = {}

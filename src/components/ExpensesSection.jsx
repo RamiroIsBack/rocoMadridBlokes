@@ -3,7 +3,7 @@ import {
   BarChart, Bar, ComposedChart, Line, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { parseExpensesCSV, CATEGORIES, CATEGORY_IVA, autoCategory } from '../utils/expensesParser'
+import { parseExpensesCSV, CATEGORIES, CATEGORY_IVA, autoCategory, detectClubCaixaFormat } from '../utils/expensesParser'
 import { useExpenses } from '../hooks/useSuperAdmin'
 import './ExpensesSection.css'
 
@@ -58,7 +58,10 @@ function PreviewTable({ items, section, onToggleExclude, onChangeCategory, onCha
                 />
               </td>
               <td className="exp-cell--date">{item.fecha}</td>
-              <td className="exp-cell--concept">{item.concepto}</td>
+              <td className="exp-cell--concept">
+                {item.concepto}
+                {item.needsReview && <span className="exp-cell--review" title="No se puede clasificar con confianza: revisar a mano">⚠ revisar</span>}
+              </td>
               {hasAccounts && <td className="exp-cell--account">···{item.cuenta?.slice(-4)}</td>}
               <td>
                 <select
@@ -123,6 +126,7 @@ function UploadPanel({ onSaved }) {
   const [saveProgress,   setSaveProgress]  = useState('')
   const [saved,          setSaved]         = useState(false)
   const [error,          setError]         = useState(null)
+  const [entityHint,     setEntityHint]    = useState(null)
 
   const uniqueMonths = useMemo(() => {
     const s = new Set(items.filter(i => i.month).map(i => i.month))
@@ -197,6 +201,15 @@ function UploadPanel({ onSaved }) {
         const map = {}
         accounts.forEach(a => { map[a] = KNOWN_ACCOUNTS[a] || 'rocoteca' })
         setAccountMap(map)
+        // Sin columna Cuenta: el CSV del Club (CaixaBank) no la lleva, así que se detecta por
+        // cabecera ("Saldo Posterior") y se propone esa entidad por defecto en vez de Rocoteca.
+        if (accounts.length === 0) {
+          const isClub = detectClubCaixaFormat(ev.target.result)
+          setSingleEntity(isClub ? 'club' : 'rocoteca')
+          setEntityHint(isClub ? 'Detectado como extracto del Club (sin columna Cuenta) — comprueba la entidad antes de guardar.' : null)
+        } else {
+          setEntityHint(null)
+        }
       } catch (err) {
         setError(`Error al leer el archivo: ${err.message}`)
       }
@@ -290,6 +303,7 @@ function UploadPanel({ onSaved }) {
                   <option value="rocoteca">Rocoteca</option>
                   <option value="club">Club</option>
                 </select>
+                {entityHint && <p className="exp-hint" style={{ margin: '4px 0 0' }}>ⓘ {entityHint}</p>}
               </div>
             )}
             <button className={`exp-save-btn${saved ? ' exp-save-btn--ok' : ''}`} onClick={handleSave} disabled={saving}>
@@ -369,6 +383,26 @@ const ENTITY_OPTIONS = [
   { v: 'rocoteca', l: 'Rocoteca' },
   { v: 'club',     l: 'Club' },
 ]
+
+// Periodo del historial: 12 meses rodantes, año en curso (desde enero), o todo lo guardado.
+const PERIOD_OPTIONS = [
+  { v: '12m',  l: '12 meses' },
+  { v: 'year', l: 'Año en curso' },
+  { v: 'all',  l: 'Todo' },
+]
+function periodFrom(period) {
+  if (period === 'all') return ''
+  if (period === 'year') return `${new Date().getFullYear()}-01`
+  const d = new Date()
+  d.setDate(1) // evita desbordar de mes al restar (día 29-31 en meses más cortos)
+  d.setMonth(d.getMonth() - 11)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+function periodLabel(period) {
+  if (period === 'all')  return 'todo'
+  if (period === 'year') return `${new Date().getFullYear()}`
+  return '12m'
+}
 
 // ── Variation detection helpers ───────────────────────────────────────
 const NOTES_KEY = 'blokes_exp_notes'
@@ -503,23 +537,56 @@ function VariationsPanel({ byMonth }) {
 }
 
 // ── Income categorisation ────────────────────────────────────────────
-const INCOME_CATS = ['Clases dirigidas', 'Ingresos Rocoteca', 'Eventos']
-const INCOME_COLORS = { 'Clases dirigidas': '#60a5fa', 'Ingresos Rocoteca': '#22c55e', 'Eventos': '#f97316' }
+// Primero por concepto (TPV, Bizum, Wellhub se reconocen solos); el resto son
+// transferencias, que no se pueden separar por importe (una alumna pagando varios meses de
+// golpe puede superar lo que paga un evento) — se decide a mano, una vez por remitente, y se
+// recuerda para los meses siguientes.
+const INCOME_CATS = ['TPV', 'Bizum', 'Wellhub', 'Clases', 'Eventos', 'Cumpleaños', 'Otros', 'Sin identificar']
+const INCOME_COLORS = {
+  TPV: '#60a5fa', Bizum: '#a78bfa', Wellhub: '#34d399',
+  Clases: '#22c55e', Eventos: '#f97316', 'Cumpleaños': '#f472b6', Otros: '#94a3b8',
+  'Sin identificar': '#ef4444',
+}
+const TRANSFER_OVERRIDE_OPTIONS = ['Clases', 'Eventos', 'Cumpleaños', 'Otros']
 
-function categorizeIncomeItem(concepto, amount, entity) {
-  if (entity === 'club') return 'Clases dirigidas'
-  // Rocoteca: fallback rule by amount
-  return amount >= 200 ? 'Eventos' : 'Ingresos Rocoteca'
+const INCOME_OVERRIDES_KEY = 'blokes_exp_income_overrides'
+function loadIncomeOverrides() { try { return JSON.parse(localStorage.getItem(INCOME_OVERRIDES_KEY) || '{}') } catch { return {} } }
+function saveIncomeOverrides(o) { try { localStorage.setItem(INCOME_OVERRIDES_KEY, JSON.stringify(o)) } catch {} }
+
+// "TRFI.DE:<nombre>" / "TRAF. DE: <nombre>" → nombre normalizado, para recordar la
+// clasificación de ese remitente de una vez para los meses siguientes.
+function extractSender(concepto) {
+  const m = concepto.match(/TRA?FI?\.?\s*DE[:.]?\s*(.+)/i)
+  return m ? m[1].trim().toUpperCase().replace(/\s+/g, ' ') : null
+}
+
+function categorizeIncomeItem(concepto, amount, entity, overrides = {}) {
+  const base = autoCategory(concepto, true) // 'tpv' | 'bizum' | 'wellhub' | 'transferencia'
+  if (base === 'tpv')     return 'TPV'
+  if (base === 'bizum')   return 'Bizum'
+  if (base === 'wellhub') return 'Wellhub'
+  const sender = extractSender(concepto)
+  if (sender && overrides[sender]) return overrides[sender]
+  return 'Sin identificar'
 }
 
 // ── History charts ────────────────────────────────────────────────────
-function HistoryView({ months, onDeleted }) {
+function HistoryView({ period, onDeleted }) {
+  const from  = useMemo(() => periodFrom(period), [period])
+  const label = periodLabel(period)
   const [entity, setEntity]                   = useState('all')
   const [excludeInternal, setExcludeInternal] = useState(true)
   const [showManager, setShowManager]         = useState(false)
   const [deletingKey, setDeletingKey]         = useState(null)
   const [expandedMonths, setExpandedMonths]   = useState(new Set())
   const [expandedCats,   setExpandedCats]     = useState(new Set())
+  const [incomeOverrides, setIncomeOverrides] = useState(loadIncomeOverrides)
+  const setSenderOverride = (sender, cat) => setIncomeOverrides(prev => {
+    const next = { ...prev }
+    cat ? next[sender] = cat : delete next[sender]
+    saveIncomeOverrides(next)
+    return next
+  })
   const toggleMonth = (month) => setExpandedMonths(prev => {
     const next = new Set(prev)
     next.has(month) ? next.delete(month) : next.add(month)
@@ -531,7 +598,7 @@ function HistoryView({ months, onDeleted }) {
     return next
   })
   const effectiveExclude = excludeInternal
-  const { data, breakdown, loading, error } = useExpenses(months, entity, effectiveExclude)
+  const { data, breakdown, loading, error } = useExpenses(from, entity, effectiveExclude)
 
   const handleDelete = async (month, ent) => {
     const key = `${month}·${ent}`
@@ -625,23 +692,30 @@ function HistoryView({ months, onDeleted }) {
       const row = { month: fmtMonth(r.month) }
       INCOME_CATS.forEach(c => { row[c] = 0 })
       r.ingresos_items.forEach(item => {
-        const cat = categorizeIncomeItem(item.concepto, item.importe, item.entity)
+        const cat = categorizeIncomeItem(item.concepto, item.importe, item.entity, incomeOverrides)
         row[cat] = (row[cat] || 0) + item.importe
       })
       return row
     })
-    // Totals per category
+    // Totals per category + remitentes de transferencias (identificados o no), para poder
+    // decidirlos o corregirlos a mano.
     const catTotals = {}
     INCOME_CATS.forEach(c => { catTotals[c] = 0 })
+    const transferSenders = {} // { sender: { total, count, cat } }
     byMonth.forEach(r => {
       r.ingresos_items.forEach(item => {
-        const cat = categorizeIncomeItem(item.concepto, item.importe, item.entity)
+        const cat = categorizeIncomeItem(item.concepto, item.importe, item.entity, incomeOverrides)
         catTotals[cat] = (catTotals[cat] || 0) + item.importe
+        if (['TPV', 'Bizum', 'Wellhub'].includes(cat)) return
+        const sender = extractSender(item.concepto) || item.concepto
+        if (!transferSenders[sender]) transferSenders[sender] = { total: 0, count: 0, cat }
+        transferSenders[sender].total += item.importe
+        transferSenders[sender].count++
       })
     })
     const hasData = Object.values(catTotals).some(v => v > 0)
-    return { chartRows, catTotals, hasData }
-  }, [byMonth])
+    return { chartRows, catTotals, hasData, transferSenders }
+  }, [byMonth, incomeOverrides])
 
   if (loading) return <div className="exp-loading">Cargando historial…</div>
   if (error)   return <div className="exp-error">Error: {error}</div>
@@ -671,15 +745,15 @@ function HistoryView({ months, onDeleted }) {
       <div className="exp-kpis">
         <div className="exp-kpi" style={{ '--c': '#ef4444' }}>
           <span className="exp-kpi__val">{fmtEur(totals.gastos)}</span>
-          <span className="exp-kpi__lbl">Gastos ({months}m)</span>
+          <span className="exp-kpi__lbl">Gastos ({label})</span>
         </div>
         <div className="exp-kpi" style={{ '--c': '#60a5fa' }}>
           <span className="exp-kpi__val">{fmtEur(totals.ingresos)}</span>
-          <span className="exp-kpi__lbl">Ingresos banco ({months}m)</span>
+          <span className="exp-kpi__lbl">Ingresos banco ({label})</span>
         </div>
         <div className="exp-kpi" style={{ '--c': '#f97316' }}>
           <span className="exp-kpi__val">{fmtEur(Math.abs(totals.iva_net))}</span>
-          <span className="exp-kpi__lbl">IVA neto {totals.iva_net >= 0 ? 'a pagar' : 'a favor'} ({months}m)</span>
+          <span className="exp-kpi__lbl">IVA neto {totals.iva_net >= 0 ? 'a pagar' : 'a favor'} ({label})</span>
         </div>
       </div>
 
@@ -899,9 +973,11 @@ function HistoryView({ months, onDeleted }) {
         <>
           <p className="exp-chart-title" style={{ marginTop: 24 }}>Desglose de ingresos por categoría</p>
           <p className="exp-income-legend">
-            <span style={{ color: INCOME_COLORS['Clases dirigidas'] }}>● Clases dirigidas</span> — entidad Club (cualquier concepto) &nbsp;·&nbsp;
-            <span style={{ color: INCOME_COLORS['Ingresos Rocoteca'] }}>● Ingresos Rocoteca</span> — Rocoteca &lt; 200 € &nbsp;·&nbsp;
-            <span style={{ color: INCOME_COLORS['Eventos'] }}>● Eventos</span> — Rocoteca ≥ 200 €
+            <span style={{ color: INCOME_COLORS['TPV'] }}>● TPV</span> — taquilla/tarjeta &nbsp;·&nbsp;
+            <span style={{ color: INCOME_COLORS['Bizum'] }}>● Bizum</span> &nbsp;·&nbsp;
+            <span style={{ color: INCOME_COLORS['Wellhub'] }}>● Wellhub</span> &nbsp;·&nbsp;
+            Transferencias clasificadas a mano por remitente: <span style={{ color: INCOME_COLORS['Clases'] }}>● Clases</span>, <span style={{ color: INCOME_COLORS['Eventos'] }}>● Eventos</span>, <span style={{ color: INCOME_COLORS['Cumpleaños'] }}>● Cumpleaños</span>, <span style={{ color: INCOME_COLORS['Otros'] }}>● Otros</span> &nbsp;·&nbsp;
+            <span style={{ color: INCOME_COLORS['Sin identificar'] }}>● Sin identificar</span> — pendientes de decidir, abajo
           </p>
 
           {/* KPIs por categoría */}
@@ -910,7 +986,7 @@ function HistoryView({ months, onDeleted }) {
               incomeBreakdown.catTotals[cat] > 0 && (
                 <div key={cat} className="exp-kpi" style={{ '--c': INCOME_COLORS[cat] }}>
                   <span className="exp-kpi__val">{fmtEur(incomeBreakdown.catTotals[cat])}</span>
-                  <span className="exp-kpi__lbl">{cat} ({months}m)</span>
+                  <span className="exp-kpi__lbl">{cat} ({label})</span>
                 </div>
               )
             ))}
@@ -928,11 +1004,39 @@ function HistoryView({ months, onDeleted }) {
                 formatter={(v, name) => [fmtEur(v), name]}
               />
               <Legend />
-              <Bar dataKey="Clases dirigidas"  stackId="i" fill={INCOME_COLORS['Clases dirigidas']}  radius={[0,0,0,0]} />
-              <Bar dataKey="Ingresos Rocoteca" stackId="i" fill={INCOME_COLORS['Ingresos Rocoteca']} radius={[0,0,0,0]} />
-              <Bar dataKey="Eventos"           stackId="i" fill={INCOME_COLORS['Eventos']}           radius={[3,3,0,0]} />
+              {INCOME_CATS.map((cat, i) => (
+                <Bar key={cat} dataKey={cat} stackId="i" fill={INCOME_COLORS[cat]} radius={i === INCOME_CATS.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]} />
+              ))}
             </BarChart>
           </ResponsiveContainer>
+
+          {/* Remitentes de transferencias: decidir una vez qué son, se recuerda para los
+              meses siguientes (y se puede corregir si algo se clasificó mal). */}
+          {Object.keys(incomeBreakdown.transferSenders).length > 0 && (
+            <div className="exp-unidentified">
+              <p className="exp-chart-title" style={{ marginTop: 16 }}>
+                Transferencias por remitente ({Object.keys(incomeBreakdown.transferSenders).length}
+                {incomeBreakdown.catTotals['Sin identificar'] > 0 ? `, ${Object.values(incomeBreakdown.transferSenders).filter(s => s.cat === 'Sin identificar').length} sin identificar` : ''})
+              </p>
+              <p className="exp-hint">Elige qué es cada remitente — se recuerda para los próximos meses (guardado en este navegador). "Sin identificar" los deja pendientes de decidir.</p>
+              {Object.entries(incomeBreakdown.transferSenders)
+                .sort((a, b) => (a[1].cat === 'Sin identificar' ? -1 : 1) - (b[1].cat === 'Sin identificar' ? -1 : 1) || b[1].total - a[1].total)
+                .map(([sender, { total, count, cat }]) => (
+                  <div key={sender} className={`exp-unidentified-row${cat === 'Sin identificar' ? ' exp-unidentified-row--pending' : ''}`}>
+                    <span className="exp-unidentified-sender">{sender}</span>
+                    <span className="exp-unidentified-amount">{fmtEur(total)}{count > 1 ? ` (${count})` : ''}</span>
+                    <select
+                      className="exp-select"
+                      value={cat === 'Sin identificar' ? '' : cat}
+                      onChange={e => setSenderOverride(sender, e.target.value || null)}
+                    >
+                      <option value="">Sin identificar</option>
+                      {TRANSFER_OVERRIDE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </div>
+                ))}
+            </div>
+          )}
 
           {/* Tabla desglosada por mes */}
           <div className="exp-table-wrap" style={{ maxHeight: 380, marginTop: 12 }}>
@@ -1032,7 +1136,7 @@ function HistoryView({ months, onDeleted }) {
 
 // ── Main section ──────────────────────────────────────────────────────
 export default function ExpensesSection() {
-  const [months, setMonths]     = useState(6)
+  const [period, setPeriod]     = useState('12m')
   const [refreshKey, setRefresh] = useState(0)
 
   return (
@@ -1040,12 +1144,12 @@ export default function ExpensesSection() {
       <div className="sa-section__header">
         <h2 className="sa-section-title">Gastos e ingresos banco</h2>
         <div className="sa-period">
-          {[3, 6, 12].map(m => (
+          {PERIOD_OPTIONS.map(o => (
             <button
-              key={m}
-              className={`sa-period__btn${months === m ? ' sa-period__btn--active' : ''}`}
-              onClick={() => setMonths(m)}
-            >{m} meses</button>
+              key={o.v}
+              className={`sa-period__btn${period === o.v ? ' sa-period__btn--active' : ''}`}
+              onClick={() => setPeriod(o.v)}
+            >{o.l}</button>
           ))}
         </div>
       </div>
@@ -1054,7 +1158,7 @@ export default function ExpensesSection() {
 
       <div className="exp-divider" />
 
-      <HistoryView key={refreshKey} months={months} onDeleted={() => setRefresh(k => k + 1)} />
+      <HistoryView key={refreshKey} period={period} onDeleted={() => setRefresh(k => k + 1)} />
     </section>
   )
 }
