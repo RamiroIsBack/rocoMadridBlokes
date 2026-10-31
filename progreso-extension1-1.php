@@ -901,6 +901,11 @@ add_action('rest_api_init', function() {
             'permission_callback' => $sa_perm,
         ),
     ));
+    register_rest_route('superadmin/v1', '/campanas/(?P<id>\d+)', array(
+        'methods'             => 'PUT',
+        'callback'            => 'superadmin_campanas_editar',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/campanas/(?P<id>\d+)/destinatarios', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_campanas_destinatarios',
@@ -4236,13 +4241,42 @@ function blokes_save_optin_whatsapp_checkout($order_id) {
 
 // 'actuales' | 'nuevos' | 'antiguos' | null (no se sabe: ni suscripción, ni externo, ni origen
 // reconocible — no entra en ninguna campaña hasta que alguien lo revise a mano).
+// Fecha del último pago de verdad (pedido padre o cualquier renovación), para distinguir un
+// "on-hold" de impago reciente (seguramente recuperable solo) de uno viejo (ya no viene). Mismo
+// patrón que usa superadmin_gestion_grupos() para la fecha de cada pago.
+function blokes_campanas_ultimo_pago_ts($sub_obj) {
+    $ids = array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal'));
+    $mejor = 0;
+    foreach ($ids as $oid) {
+        if (!$oid) continue;
+        $order = wc_get_order($oid);
+        if (!$order) continue;
+        $fecha = $order->get_date_paid() ?: $order->get_date_created();
+        if ($fecha && $fecha->getTimestamp() > $mejor) $mejor = $fecha->getTimestamp();
+    }
+    return $mejor;
+}
+
+// 'actuales' | 'nuevos' | 'en_espera' | 'antiguos' | null (no se sabe: no entra en ninguna
+// campaña hasta que alguien lo revise a mano).
 function blokes_campanas_clasificar($telefono, $subs_por_tel, $externos_por_tel, $contacto, $dias_nuevo = 60) {
     $sub = $subs_por_tel[$telefono] ?? null;
     $ext = $externos_por_tel[$telefono] ?? null;
 
     if ($sub && in_array($sub['status'], array('active', 'on-hold', 'pending'), true)) {
-        $alta_ts = false;
         $sub_obj = !empty($sub['id']) ? wcs_get_subscription(intval($sub['id'])) : null;
+
+        // "on-hold" en esta web es casi siempre impago, no una pausa de verdad (esa guarda
+        // _rm_pausa_motivo aparte — mismo criterio que el estado "en_espera" de Grupos). Sin
+        // motivo de pausa, solo cuenta como en vigor si el impago es reciente (~45 días);
+        // si no, ya se fue de verdad y pasa a antiguos.
+        if ($sub['status'] === 'on-hold' && $sub_obj && !get_post_meta($sub_obj->get_id(), '_rm_pausa_motivo', true)) {
+            $dias_impago = ($t = blokes_campanas_ultimo_pago_ts($sub_obj)) ? (time() - $t) / DAY_IN_SECONDS : 9999;
+            if ($dias_impago > 45) return 'antiguos';
+            return 'en_espera';
+        }
+
+        $alta_ts = false;
         if ($sub_obj) {
             $fc = $sub_obj->get_date('date_created');
             if ($fc) $alta_ts = strtotime($fc);
@@ -4252,10 +4286,15 @@ function blokes_campanas_clasificar($telefono, $subs_por_tel, $externos_por_tel,
     }
     if ($ext) return 'actuales';
     if ($sub && in_array($sub['status'], array('cancelled', 'pending-cancel'), true)) return 'antiguos';
+    // Nada en vigor ahora mismo: un "interesado" (nunca fue alumno) va a nuevos. Si el origen
+    // apunta a que alguna vez estuvo en clases (antiguo, o "actuales" de la carga inicial que ya
+    // no tiene suscripción ni externo en vigor), se trata como antiguos — no se queda "sin
+    // clasificar" solo porque su origen literal no contenga la palabra "antiguo". Un contacto sin
+    // ninguna pista (alta por opt-in o a mano, sin más dato) sí se deja sin clasificar.
     $origen = (string) ($contacto['origen'] ?? '');
-    if (strpos($origen, 'antiguo') !== false) return 'antiguos';
     if (strpos($origen, 'interesado') !== false) return 'nuevos';
-    return null;
+    if ($origen === '' || $origen === 'optin' || $origen === 'manual') return null;
+    return 'antiguos';
 }
 
 // Alta/importación de contactos: subida desde el navegador (xlsx/CSV parseado en cliente), o la
@@ -4265,11 +4304,17 @@ function blokes_campanas_clasificar($telefono, $subs_por_tel, $externos_por_tel,
 function superadmin_campanas_importar_contactos($request) {
     blokes_ensure_campanas_tables();
     global $wpdb;
-    $body  = $request->get_json_params();
-    $filas = is_array($body['filas'] ?? null) ? $body['filas'] : array();
+    $body    = $request->get_json_params();
+    $filas   = is_array($body['filas'] ?? null) ? $body['filas'] : array();
+    $simular = !empty($body['simular']);
     if (count($filas) > 1000) return new WP_Error('too_many', 'Máximo 1000 filas de golpe.', array('status' => 400));
 
+    $subs_por_tel     = $simular ? blokes_campanas_subs_por_telefono()     : array();
+    $externos_por_tel = $simular ? blokes_campanas_externos_por_telefono() : array();
+
     $nuevos = 0; $actualizados = 0; $sin_telefono = 0;
+    $resumen_listas = array('actuales' => 0, 'nuevos' => 0, 'en_espera' => 0, 'antiguos' => 0, 'sin_clasificar' => 0);
+    $vista_previa = array();
     foreach ($filas as $raw) {
         $tel = blokes_externos_normaliza_telefono($raw['telefono'] ?? '');
         if ($tel === '') { $sin_telefono++; continue; }
@@ -4284,6 +4329,16 @@ function superadmin_campanas_importar_contactos($request) {
         $existente = $wpdb->get_row($wpdb->prepare(
             "SELECT * FROM " . blokes_contactos_table() . " WHERE telefono = %s", $tel
         ), ARRAY_A);
+
+        if ($simular) {
+            $lista = blokes_campanas_clasificar($tel, $subs_por_tel, $externos_por_tel, array('origen' => $origen));
+            $resumen_listas[$lista ?: 'sin_clasificar']++;
+            if ($existente) $actualizados++; else $nuevos++;
+            if (count($vista_previa) < 50) {
+                $vista_previa[] = array('telefono' => $tel, 'nombres' => $nombres_in, 'accion' => $existente ? 'actualizaria' : 'nuevo', 'lista' => $lista ?: 'sin_clasificar');
+            }
+            continue;
+        }
 
         if ($existente) {
             $nombres_antes = json_decode($existente['nombres'], true);
@@ -4307,9 +4362,9 @@ function superadmin_campanas_importar_contactos($request) {
             $nuevos++;
         }
     }
-    return rest_ensure_response(array('success' => true, 'data' => array(
-        'nuevos' => $nuevos, 'actualizados' => $actualizados, 'sinTelefono' => $sin_telefono,
-    )));
+    $data = array('nuevos' => $nuevos, 'actualizados' => $actualizados, 'sinTelefono' => $sin_telefono);
+    if ($simular) { $data['simulado'] = true; $data['porLista'] = $resumen_listas; $data['vistaPrevia'] = $vista_previa; }
+    return rest_ensure_response(array('success' => true, 'data' => $data));
 }
 
 function blokes_campanas_contacto_fila($c, $subs_por_tel, $externos_por_tel) {
@@ -4336,7 +4391,7 @@ function superadmin_campanas_listar_contactos($request) {
 
     $rows = $wpdb->get_results("SELECT * FROM " . blokes_contactos_table() . " ORDER BY updated_at DESC", ARRAY_A);
     $out  = array();
-    $resumen = array('actuales' => 0, 'nuevos' => 0, 'antiguos' => 0, 'bajas' => 0, 'sin_clasificar' => 0);
+    $resumen = array('actuales' => 0, 'nuevos' => 0, 'en_espera' => 0, 'antiguos' => 0, 'bajas' => 0, 'sin_clasificar' => 0);
     foreach ($rows as $c) {
         $fila = blokes_campanas_contacto_fila($c, $subs_por_tel, $externos_por_tel);
         $clave = $fila['lista'] ?: 'sin_clasificar';
@@ -4387,7 +4442,7 @@ function superadmin_campanas_crear($request) {
     global $wpdb;
     $body = $request->get_json_params();
     $nombre = sanitize_text_field((string) ($body['nombre'] ?? ''));
-    $listas = is_array($body['listas'] ?? null) ? array_intersect($body['listas'], array('actuales', 'nuevos', 'antiguos')) : array();
+    $listas = is_array($body['listas'] ?? null) ? array_intersect($body['listas'], array('actuales', 'nuevos', 'en_espera', 'antiguos')) : array();
     if ($nombre === '' || empty($listas)) {
         return new WP_Error('bad_request', 'Falta el nombre o la lista (actuales/nuevos/antiguos).', array('status' => 400));
     }
@@ -4402,6 +4457,36 @@ function superadmin_campanas_crear($request) {
         'activa' => 1, 'created_at' => current_time('mysql'), 'created_by' => $u ? $u->user_login : '',
     ));
     return rest_ensure_response(array('success' => true, 'data' => array('id' => $wpdb->insert_id)));
+}
+
+// PUT /campanas/{id} — editar nombre/plantillas/remitente/listas/fecha fin, o archivar
+// (`activa: false`, para que deje de aparecer para enviar sin perder el historial de envíos).
+function superadmin_campanas_editar($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $id = intval($request['id']);
+    $actual = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_campanas_table() . " WHERE id = %d", $id), ARRAY_A);
+    if (!$actual) return new WP_Error('not_found', 'Campaña no encontrada.', array('status' => 404));
+
+    $body = $request->get_json_params();
+    $campos = array();
+    if (isset($body['nombre'])) $campos['nombre'] = sanitize_text_field((string) $body['nombre']);
+    if (isset($body['plantillaAdulto'])) $campos['plantilla_adulto'] = sanitize_textarea_field((string) $body['plantillaAdulto']);
+    if (isset($body['plantillaMenor']))  $campos['plantilla_menor']  = sanitize_textarea_field((string) $body['plantillaMenor']);
+    if (isset($body['remitente'])) $campos['remitente'] = sanitize_text_field((string) $body['remitente']);
+    if (isset($body['listas'])) {
+        $listas = is_array($body['listas']) ? array_intersect($body['listas'], array('actuales', 'nuevos', 'en_espera', 'antiguos')) : array();
+        if (empty($listas)) return new WP_Error('bad_request', 'Elige al menos una lista.', array('status' => 400));
+        $campos['listas'] = implode(',', $listas);
+    }
+    if (array_key_exists('fechaFin', $body)) {
+        $campos['fecha_fin'] = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['fechaFin']) ? $body['fechaFin'] : null;
+    }
+    if (isset($body['activa'])) $campos['activa'] = !empty($body['activa']) ? 1 : 0;
+    if (empty($campos)) return new WP_Error('bad_request', 'Nada que actualizar.', array('status' => 400));
+
+    $wpdb->update(blokes_campanas_table(), $campos, array('id' => $id));
+    return rest_ensure_response(array('success' => true));
 }
 
 // El saludo (nombre de pila elegido a mano, p. ej. de la carga inicial del xlsx) tiene

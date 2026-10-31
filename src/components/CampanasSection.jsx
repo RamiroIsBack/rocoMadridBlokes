@@ -2,14 +2,15 @@ import React, { useState, useEffect, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import {
   campanasContactosImportar, campanasContactosGet, campanasEnviosHoyGet,
-  campanasListar, campanasCrear, campanasDestinatarios, campanasMarcarAccion,
+  campanasListar, campanasCrear, campanasEditar, campanasDestinatarios, campanasMarcarAccion,
 } from '../hooks/useSuperAdmin'
 import './CampanasSection.css'
 
 const LISTA_LABEL = {
-  actuales: 'Actuales', nuevos: 'Nuevos', antiguos: 'Antiguos',
+  actuales: 'Actuales', nuevos: 'Nuevos', en_espera: 'En espera (impago reciente)', antiguos: 'Antiguos',
   bajas: 'Bajas de mensajes', sin_clasificar: 'Sin clasificar',
 }
+const CAMPANA_LISTAS = ['actuales', 'nuevos', 'en_espera', 'antiguos']
 
 // Hojas reconocidas del xlsx de campañas (cabecera fija: Nombre (saludo); Nombres en el
 // Excel; Teléfono; Grupos/pestañas; Observaciones; Email; Mensaje; Abrir WhatsApp; Revisado
@@ -70,29 +71,45 @@ function parseContactsWorkbook(arrayBuffer) {
 
 function UploadContactsPanel({ onImported, onPlantillasSugeridas }) {
   const fileRef = useRef()
-  const [resumen, setResumen] = useState(null)
+  const [pendiente, setPendiente] = useState(null) // { filas, porHoja, preview, plantillas }
+  const [confirmado, setConfirmado] = useState(null)
   const [error, setError]     = useState(null)
   const [loading, setLoading] = useState(false)
 
   const handleFile = async e => {
     const file = e.target.files[0]
     if (!file) return
-    setError(null); setResumen(null); setLoading(true)
+    setError(null); setConfirmado(null); setPendiente(null); setLoading(true)
     try {
       const buf = await file.arrayBuffer()
       const { filas, porHoja, plantillaAdulto, plantillaMenor, remitente } = parseContactsWorkbook(buf)
       if (!filas.length) { setError('No se encontraron contactos con teléfono en el archivo.'); setLoading(false); return }
-      const res = await campanasContactosImportar({ filas })
-      setResumen({ ...res, porHoja, total: filas.length })
-      if ((plantillaAdulto || plantillaMenor || remitente) && onPlantillasSugeridas) {
-        onPlantillasSugeridas({ plantillaAdulto, plantillaMenor, remitente })
-      }
-      if (onImported) onImported()
+      const preview = await campanasContactosImportar({ filas, simular: true })
+      setPendiente({ filas, porHoja, preview, plantillas: { plantillaAdulto, plantillaMenor, remitente } })
     } catch (err) {
       setError(err.message)
     } finally {
       setLoading(false)
       if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  const confirmar = async () => {
+    if (!pendiente) return
+    setLoading(true); setError(null)
+    try {
+      const res = await campanasContactosImportar({ filas: pendiente.filas })
+      setConfirmado({ ...res, porHoja: pendiente.porHoja })
+      const { plantillaAdulto, plantillaMenor, remitente } = pendiente.plantillas
+      if ((plantillaAdulto || plantillaMenor || remitente) && onPlantillasSugeridas) {
+        onPlantillasSugeridas(pendiente.plantillas)
+      }
+      setPendiente(null)
+      if (onImported) onImported()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -107,11 +124,30 @@ function UploadContactsPanel({ onImported, onPlantillasSugeridas }) {
         Fusiona por teléfono: no borra ni duplica contactos ya cargados.
       </p>
       {error && <p className="cmp-error">Error: {error}</p>}
-      {resumen && (
+
+      {pendiente && (
+        <div className="cmp-preview">
+          <p className="cmp-hint">
+            Revisar antes de confirmar: {pendiente.preview.nuevos} nuevos, {pendiente.preview.actualizados} actualizados
+            {pendiente.preview.sinTelefono ? `, ${pendiente.preview.sinTelefono} sin teléfono (se omiten)` : ''}.
+            {' '}Por hoja: {Object.entries(pendiente.porHoja).map(([h, n]) => `${h} (${n})`).join(' · ')}.
+          </p>
+          <p className="cmp-hint">
+            Listas resultantes: {Object.entries(pendiente.preview.porLista || {}).filter(([, n]) => n > 0).map(([k, n]) => `${LISTA_LABEL[k] || k}: ${n}`).join(' · ')}
+          </p>
+          <div className="cmp-acciones">
+            <button className="cmp-btn cmp-btn--primary" onClick={confirmar} disabled={loading}>
+              {loading ? 'Importando…' : `Confirmar: cargar ${pendiente.preview.nuevos + pendiente.preview.actualizados} contactos`}
+            </button>
+            <button className="cmp-btn" onClick={() => setPendiente(null)} disabled={loading}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {confirmado && (
         <p className="cmp-hint">
-          ✓ {resumen.nuevos} nuevos, {resumen.actualizados} actualizados
-          {resumen.sinTelefono ? `, ${resumen.sinTelefono} sin teléfono (omitidos)` : ''}.
-          {' '}Por hoja: {Object.entries(resumen.porHoja).map(([h, n]) => `${h} (${n})`).join(' · ')}
+          ✓ Importado: {confirmado.nuevos} nuevos, {confirmado.actualizados} actualizados
+          {confirmado.sinTelefono ? `, ${confirmado.sinTelefono} sin teléfono (omitidos)` : ''}.
         </p>
       )}
     </div>
@@ -197,37 +233,45 @@ function ContactosPanel({ onPlantillasSugeridas }) {
   )
 }
 
-function CrearCampanaPanel({ sugeridas, onCreated }) {
-  const [nombre, setNombre]               = useState('')
-  const [listas, setListas]               = useState({ actuales: false, nuevos: false, antiguos: true })
-  const [plantillaAdulto, setPlantillaAdulto] = useState('')
-  const [plantillaMenor, setPlantillaMenor]   = useState('')
-  const [remitente, setRemitente]         = useState('')
-  const [fechaFin, setFechaFin]           = useState('')
+function CrearCampanaPanel({ sugeridas, onCreated, editando, onEdited, onCancelEdit }) {
+  const base = editando || {}
+  const [nombre, setNombre]               = useState(base.nombre || '')
+  const [listas, setListas]               = useState(() => {
+    const init = { actuales: false, nuevos: false, en_espera: false, antiguos: true }
+    if (editando) { Object.keys(init).forEach(k => { init[k] = editando.listas.includes(k) }) }
+    return init
+  })
+  const [plantillaAdulto, setPlantillaAdulto] = useState(base.plantillaAdulto || '')
+  const [plantillaMenor, setPlantillaMenor]   = useState(base.plantillaMenor || '')
+  const [remitente, setRemitente]         = useState(base.remitente || '')
+  const [fechaFin, setFechaFin]           = useState(base.fechaFin || '')
   const [saving, setSaving]               = useState(false)
   const [error, setError]                 = useState(null)
 
   useEffect(() => {
-    if (!sugeridas) return
+    if (!sugeridas || editando) return
     if (sugeridas.plantillaAdulto && !plantillaAdulto) setPlantillaAdulto(sugeridas.plantillaAdulto)
     if (sugeridas.plantillaMenor  && !plantillaMenor)  setPlantillaMenor(sugeridas.plantillaMenor)
     if (sugeridas.remitente       && !remitente)       setRemitente(sugeridas.remitente)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sugeridas])
 
-  const handleCrear = async () => {
+  const handleGuardar = async () => {
     setError(null)
     const listasElegidas = Object.entries(listas).filter(([, v]) => v).map(([k]) => k)
     if (!nombre.trim()) { setError('Pon un nombre a la campaña.'); return }
     if (!listasElegidas.length) { setError('Elige al menos una lista.'); return }
     setSaving(true)
     try {
-      await campanasCrear({
-        nombre, listas: listasElegidas, plantillaAdulto, plantillaMenor, remitente,
-        fechaFin: fechaFin || null,
-      })
-      setNombre(''); setFechaFin('')
-      if (onCreated) onCreated()
+      const body = { nombre, listas: listasElegidas, plantillaAdulto, plantillaMenor, remitente, fechaFin: fechaFin || null }
+      if (editando) {
+        await campanasEditar(editando.id, body)
+        if (onEdited) onEdited()
+      } else {
+        await campanasCrear(body)
+        setNombre(''); setFechaFin('')
+        if (onCreated) onCreated()
+      }
     } catch (e) { setError(e.message) }
     finally { setSaving(false) }
   }
@@ -239,7 +283,7 @@ function CrearCampanaPanel({ sugeridas, onCreated }) {
       </label>
       <label className="cmp-field">Listas destinatarias
         <div className="cmp-checks">
-          {['actuales', 'nuevos', 'antiguos'].map(k => (
+          {CAMPANA_LISTAS.map(k => (
             <label key={k} className="cmp-check">
               <input type="checkbox" checked={listas[k]} onChange={e => setListas(l => ({ ...l, [k]: e.target.checked }))} />
               {LISTA_LABEL[k]}
@@ -260,9 +304,12 @@ function CrearCampanaPanel({ sugeridas, onCreated }) {
         <input className="cmp-input" type="date" value={fechaFin} onChange={e => setFechaFin(e.target.value)} />
       </label>
       {error && <p className="cmp-error">{error}</p>}
-      <button className="cmp-btn cmp-btn--primary" onClick={handleCrear} disabled={saving}>
-        {saving ? 'Creando…' : 'Crear campaña'}
-      </button>
+      <div className="cmp-acciones">
+        <button className="cmp-btn cmp-btn--primary" onClick={handleGuardar} disabled={saving}>
+          {saving ? 'Guardando…' : editando ? 'Guardar cambios' : 'Crear campaña'}
+        </button>
+        {editando && <button className="cmp-btn" onClick={onCancelEdit} disabled={saving}>Cancelar</button>}
+      </div>
     </div>
   )
 }
@@ -364,6 +411,8 @@ function CampanasPanel({ sugeridas }) {
   const [campanas, setCampanas] = useState(null)
   const [error, setError]       = useState(null)
   const [abierta, setAbierta]   = useState(null)
+  const [editando, setEditando] = useState(null)
+  const [verArchivadas, setVerArchivadas] = useState(false)
   const [refreshKey, setRefresh] = useState(0)
 
   const cargar = () => campanasListar().then(setCampanas).catch(e => setError(e.message))
@@ -373,18 +422,35 @@ function CampanasPanel({ sugeridas }) {
     return <DestinatariosPanel campana={abierta} onBack={() => { setAbierta(null); setRefresh(k => k + 1) }} onChanged={cargar} />
   }
 
+  const archivar = async (c, activa) => {
+    await campanasEditar(c.id, { activa })
+    setRefresh(k => k + 1)
+  }
+
+  const visibles = (campanas || []).filter(c => verArchivadas || c.activa)
+
   return (
     <div className="cmp-panel">
-      <h3 className="cmp-title">Nueva campaña</h3>
-      <CrearCampanaPanel sugeridas={sugeridas} onCreated={() => setRefresh(k => k + 1)} />
+      <h3 className="cmp-title">{editando ? 'Editar campaña' : 'Nueva campaña'}</h3>
+      <CrearCampanaPanel
+        sugeridas={sugeridas}
+        editando={editando}
+        onCreated={() => setRefresh(k => k + 1)}
+        onEdited={() => { setEditando(null); setRefresh(k => k + 1) }}
+        onCancelEdit={() => setEditando(null)}
+      />
       <div className="cmp-divider" />
       <h3 className="cmp-title">Campañas</h3>
+      <label className="cmp-check" style={{ marginBottom: 8 }}>
+        <input type="checkbox" checked={verArchivadas} onChange={e => setVerArchivadas(e.target.checked)} />
+        Ver también las archivadas
+      </label>
       {error && <p className="cmp-error">Error: {error}</p>}
-      {campanas && campanas.length === 0 && <p className="cmp-empty">Todavía no hay campañas creadas.</p>}
-      {campanas && campanas.map(c => (
-        <div key={c.id} className="cmp-campana-row">
+      {campanas && visibles.length === 0 && <p className="cmp-empty">Todavía no hay campañas creadas.</p>}
+      {visibles.map(c => (
+        <div key={c.id} className={`cmp-campana-row${!c.activa ? ' cmp-campana-row--archivada' : ''}`}>
           <div>
-            <strong>{c.nombre}</strong>
+            <strong>{c.nombre}</strong>{!c.activa && <span className="cmp-muted"> (archivada)</span>}
             <span className="cmp-muted"> — {c.listas.map(l => LISTA_LABEL[l]).join(', ')}</span>
           </div>
           <div className="cmp-campana-stats">
@@ -393,7 +459,11 @@ function CampanasPanel({ sugeridas }) {
             <span>Bajas: {c.bajas}</span>
             <span>Se apuntaron: {c.apuntados}</span>
           </div>
-          <button className="cmp-btn cmp-btn--primary" onClick={() => setAbierta(c)}>Enviar / ver destinatarios</button>
+          <div className="cmp-acciones">
+            <button className="cmp-btn cmp-btn--primary" onClick={() => setAbierta(c)}>Enviar / ver destinatarios</button>
+            <button className="cmp-btn" onClick={() => setEditando(c)}>Editar</button>
+            <button className="cmp-btn" onClick={() => archivar(c, !c.activa)}>{c.activa ? 'Archivar' : 'Reactivar'}</button>
+          </div>
         </div>
       ))}
     </div>

@@ -89,6 +89,7 @@ export const campanasContactosGet      = (lista, tipo)            => gestionCall
 export const campanasEnviosHoyGet      = ()                       => gestionCall('GET', '/campanas/envios-hoy')
 export const campanasListar            = ()                       => gestionCall('GET', '/campanas')
 export const campanasCrear             = body                     => gestionPost('/campanas', body)
+export const campanasEditar            = (id, body)                => gestionCall('PUT', `/campanas/${id}`, body)
 export const campanasDestinatarios     = id                       => gestionCall('GET', `/campanas/${id}/destinatarios`)
 export const campanasMarcarAccion      = (id, contactoId, accion) => gestionPost(`/campanas/${id}/contactos/${contactoId}/accion`, { accion })
 export const gestionBajasMotivo        = (meses = 12)              => gestionCall('GET', `/gestion/bajas-motivo?meses=${meses}`)
