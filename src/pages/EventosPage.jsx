@@ -38,6 +38,7 @@ function BookingForm({ initial, settings, onSave, onDelete, onClose }) {
   const [error, setError] = useState('')
   const set = (k, v) => setF(x => ({ ...x, [k]: v }))
   const m   = money(f, settings)
+  const esSocio = window.blokesSiteData?.userRole === 'socio'
 
   async function submit(e) {
     e.preventDefault()
@@ -85,15 +86,16 @@ function BookingForm({ initial, settings, onSave, onDelete, onClose }) {
           </div>
         ))}
         {field('Resto pagado', <input type="checkbox" checked={f.rest_paid} onChange={e => set('rest_paid', e.target.checked)} />)}
-        {field('Pago a monitores', <input type="number" min="0" step="0.01" className="pr-input ev-input" value={f.monitors_pay ?? ''} onChange={e => set('monitors_pay', toNum(e.target.value))} />)}
-        {field('Materiales', <input type="number" min="0" step="0.01" className="pr-input ev-input" value={f.materials ?? ''} onChange={e => set('materials', toNum(e.target.value))} />)}
+        {esSocio && field('Pago a monitores', <input type="number" min="0" step="0.01" className="pr-input ev-input" value={f.monitors_pay ?? ''} onChange={e => set('monitors_pay', toNum(e.target.value))} />)}
+        {esSocio && field('Materiales', <input type="number" min="0" step="0.01" className="pr-input ev-input" value={f.materials ?? ''} onChange={e => set('materials', toNum(e.target.value))} />)}
         {field('Monitores', <input className="pr-input ev-input" placeholder="Quién lo da" value={f.monitors} onChange={e => set('monitors', e.target.value)} />)}
         {field('Notas', <textarea className="sa-pay-textarea" rows={2} maxLength={2000} value={f.notes} onChange={e => set('notes', e.target.value)} />, true)}
       </div>
 
       <p className="ev-form__sum">
         Total <strong>{fmtEur(m.total)}</strong> · señal {fmtEur(m.deposit)} · cobrado {fmtEur(m.paid)} ·
-        pendiente <strong className={m.pending > 0 ? 'ev-warn' : ''}>{fmtEur(m.pending)}</strong> · ganancia <strong>{fmtEur(m.profit)}</strong>
+        pendiente <strong className={m.pending > 0 ? 'ev-warn' : ''}>{fmtEur(m.pending)}</strong>
+        {esSocio && <> · ganancia <strong>{fmtEur(m.profit)}</strong></>}
       </p>
       {error && <p className="sa-error">{error}</p>}
       <div className="sa-pay-actions">
@@ -473,7 +475,8 @@ export default function EventosPage() {
     <div className="sa-page">
       <h1 className="sa-page__title">Eventos</h1>
       <div className="sa-main-tabs">
-        {TABS.map(t => (
+        {/* "Cobros y rentabilidad" es dinero agregado (costes, ganancia) — solo socio. */}
+        {TABS.filter(t => t.key !== 'cobros' || window.blokesSiteData?.userRole === 'socio').map(t => (
           <button key={t.key} className={`sa-main-tab${tab === t.key ? ' sa-main-tab--active' : ''}`} onClick={() => setTab(t.key)}>{t.label}</button>
         ))}
       </div>

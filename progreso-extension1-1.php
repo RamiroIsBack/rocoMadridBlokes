@@ -96,6 +96,14 @@ function blokes_can_supervise() {
     return in_array(blokes_get_app_role(), array('profesor', 'gestion', 'socio', 'tablet'));
 }
 
+// Dinero AGREGADO del club (ingresos, ganancias, P&L, gastos, sueldos) es solo para socio —
+// nunca para gestion, profesor, tablet ni acceso de Eventos, aunque vean esa pantalla por otro
+// motivo (31/10, regla de Ramiro). Lo que debe/paga CADA alumno o reserva sí lo necesita
+// gestion para su trabajo y no entra en esta regla.
+function blokes_es_socio() {
+    return blokes_get_app_role() === 'socio';
+}
+
 // ── Profile helpers ──────────────────────────────────────────────────────────
 function blokes_is_profile_complete($user_id) {
     return (bool) get_user_meta((int) $user_id, '_blokes_profile_complete', true);
@@ -724,18 +732,21 @@ add_action('rest_api_init', function() {
     ));
 
     // ── Superadmin endpoints ──
-    $sa_perm = function() { return in_array(blokes_get_app_role(), array('socio', 'gestion')); };
+    $sa_perm    = function() { return in_array(blokes_get_app_role(), array('socio', 'gestion')); };
+    // Dinero agregado del club: solo socio, ni siquiera gestion (31/10, regla de Ramiro —
+    // ver NOTAS_PARA_CODE_privacidad_dinero.md).
+    $socio_perm = function() { return blokes_es_socio(); };
 
     register_rest_route('superadmin/v1', '/revenue', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_revenue',
-        'permission_callback' => $sa_perm,
+        'permission_callback' => $socio_perm,
         'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
     ));
     register_rest_route('superadmin/v1', '/products', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_products',
-        'permission_callback' => $sa_perm,
+        'permission_callback' => $socio_perm,
         'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
     ));
     register_rest_route('superadmin/v1', '/people-summary', array(
@@ -823,7 +834,7 @@ add_action('rest_api_init', function() {
         array(
             'methods'             => 'GET',
             'callback'            => 'superadmin_get_expenses',
-            'permission_callback' => $sa_perm,
+            'permission_callback' => $socio_perm,
             'args'                => array(
                 'from'             => array('type' => 'string',  'default' => ''),
                 'entity'           => array('type' => 'string',  'default' => 'all'),
@@ -833,12 +844,12 @@ add_action('rest_api_init', function() {
         array(
             'methods'             => 'POST',
             'callback'            => 'superadmin_save_expenses',
-            'permission_callback' => $sa_perm,
+            'permission_callback' => $socio_perm,
         ),
         array(
             'methods'             => 'DELETE',
             'callback'            => 'superadmin_delete_expenses',
-            'permission_callback' => $sa_perm,
+            'permission_callback' => $socio_perm,
             'args'                => array(
                 'month'  => array('type' => 'string', 'required' => false, 'default' => ''),
                 'entity' => array('type' => 'string', 'required' => false, 'default' => ''),
@@ -852,12 +863,12 @@ add_action('rest_api_init', function() {
         array(
             'methods'             => 'GET',
             'callback'            => 'superadmin_get_expense_senders',
-            'permission_callback' => $sa_perm,
+            'permission_callback' => $socio_perm,
         ),
         array(
             'methods'             => 'POST',
             'callback'            => 'superadmin_save_expense_sender',
-            'permission_callback' => $sa_perm,
+            'permission_callback' => $socio_perm,
         ),
     ));
 
@@ -3297,12 +3308,14 @@ function superadmin_people_summary($request) {
         $por_dias[$c['bucket']][$clave]++;
     }
 
-    return rest_ensure_response(array('success' => true, 'data' => array(
+    $data = array(
         'cuentas_total'      => count($cuentas),
         'por_dias'           => $por_dias,
         'sesiones_semana'    => $sesiones_semana,
-        'ingreso_mes_total'  => round($ingreso_mes_total, 2),
-    )));
+    );
+    // Dinero agregado del club: solo socio (31/10, regla de Ramiro).
+    if (blokes_es_socio()) $data['ingreso_mes_total'] = round($ingreso_mes_total, 2);
+    return rest_ensure_response(array('success' => true, 'data' => $data));
 }
 
 // Pantalla "Grupos" (sección 8.1): sustituye la lectura del Excel de Eva. Por ahora solo
@@ -9410,7 +9423,7 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/events/settings', array(
         'methods'             => 'PUT',
         'callback'            => 'events_save_settings',
-        'permission_callback' => $ev_perm,
+        'permission_callback' => $socio_perm,
     ));
 });
 
@@ -9606,9 +9619,20 @@ function events_ssa_sync() {
     delete_transient('blokes_ssa_sync_lock');
 }
 
+// Costes (pago a monitores, materiales) y la configuración de precios son dinero agregado del
+// negocio del club, no "lo que debe esta reserva" — solo socio (31/10, regla de Ramiro). Gestion
+// sigue viendo total/señal/pendiente de cada reserva, que sí necesita para cobrar.
+function events_filtrar_para_rol($bookings, $settings) {
+    if (blokes_es_socio()) return array($bookings, $settings);
+    foreach ($bookings as &$b) { unset($b['monitors_pay'], $b['materials']); }
+    foreach (array('price_per_kid', 'min_price', 'monitors_pay') as $k) unset($settings[$k]);
+    return array($bookings, $settings);
+}
+
 function events_list_bookings() {
     events_ssa_sync();
-    return rest_ensure_response(array('success' => true, 'bookings' => events_get_bookings(), 'settings' => events_get_settings()));
+    list($bookings, $settings) = events_filtrar_para_rol(events_get_bookings(), events_get_settings());
+    return rest_ensure_response(array('success' => true, 'bookings' => $bookings, 'settings' => $settings));
 }
 
 // Acepta una reserva o { bookings: [...] } para cargar varias de golpe (migración del Excel)
@@ -9641,7 +9665,9 @@ function events_update_booking($request) {
         if (!$b) return new WP_Error('invalid_booking', 'Falta la fecha o no es válida', array('status' => 400));
         $list[$i] = array_merge($x, $b, array('updated_at' => current_time('mysql'), 'updated_by' => timeoff_user_name()));
         events_save_bookings($list);
-        return rest_ensure_response(array('success' => true, 'booking' => $list[$i]));
+        $booking = $list[$i];
+        if (!blokes_es_socio()) unset($booking['monitors_pay'], $booking['materials']);
+        return rest_ensure_response(array('success' => true, 'booking' => $booking));
     }
     return new WP_Error('not_found', 'Reserva no encontrada', array('status' => 404));
 }

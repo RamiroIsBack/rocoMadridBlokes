@@ -642,11 +642,13 @@ function PeopleSummaryKpis() {
         <span className="sv-kpi__value">{data.sesiones_semana}</span>
         <span className="sv-kpi__label">Sesiones/semana ⓘ</span>
       </div>
-      <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }}
-        title="Ingreso mensual equivalente de todas las suscripciones en vigor: las trimestrales se dividen por 3 y las anuales por 12, para poder comparar con un mes normal.">
-        <span className="sv-kpi__value">{fmtEur(data.ingreso_mes_total)}</span>
-        <span className="sv-kpi__label">Ingreso mensual equiv. ⓘ</span>
-      </div>
+      {data.ingreso_mes_total != null && (
+        <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }}
+          title="Ingreso mensual equivalente de todas las suscripciones en vigor: las trimestrales se dividen por 3 y las anuales por 12, para poder comparar con un mes normal.">
+          <span className="sv-kpi__value">{fmtEur(data.ingreso_mes_total)}</span>
+          <span className="sv-kpi__label">Ingreso mensual equiv. ⓘ</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -1596,6 +1598,9 @@ function GruposTab() {
       {vista === 'campanas' && <CampanasSection />}
 
       {vista === 'grupos' && (<>
+      {/* Dinero AGREGADO (cobrado del mes, importe pendiente total) es solo para socio — ver
+          NOTAS_PARA_CODE_privacidad_dinero.md. Lo de cada alumno (quién debe y cuánto) sí lo ve
+          gestion, en la tabla de abajo. */}
       <div className="sv-kpis">
         <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }} title="Personas en vigor (activas o de baja a fin de mes) en este grupo — mismo criterio que «Cuentas en vigor» de ExcelMuerte. Las en espera/pausadas/pendientes de alta se cuentan aparte. En «Todos los grupos» cuenta por grupo: quien está en dos grupos distintos (p. ej. un grupo normal y Pilates/Yoga) suma 2, por eso puede ser algo más que las cuentas únicas de ExcelMuerte.">
           <span className="sv-kpi__value">{kpis.personas}{kpis.enEspera ? <span className="sv-ot-muted"> (+{kpis.enEspera} en espera)</span> : ''}</span>
@@ -1609,12 +1614,14 @@ function GruposTab() {
           <span className="sv-kpi__value">{kpis.plazas}</span>
           <span className="sv-kpi__label">Plazas ⓘ</span>
         </div>
-        <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }} title={`Cobrado en ${mesActual ? mesLabelGrp(mesActual) : 'este mes'}: suma de los pedidos de renovación/alta de ese mes que ya están pagados (de las suscripciones de clases, Pilates y Yoga; no incluye entradas sueltas ni bonos). Cambia día a día porque es en vivo: no es una foto fija, sino lo cobrado hasta ahora.`}>
-          <span className="sv-kpi__value">{fmtEur(kpis.cobradoMes)}</span>
-          <span className="sv-kpi__label">Cobrado del mes ⓘ</span>
-        </div>
+        {window.blokesSiteData?.userRole === 'socio' && (
+          <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }} title={`Cobrado en ${mesActual ? mesLabelGrp(mesActual) : 'este mes'}: suma de los pedidos de renovación/alta de ese mes que ya están pagados (de las suscripciones de clases, Pilates y Yoga; no incluye entradas sueltas ni bonos). Cambia día a día porque es en vivo: no es una foto fija, sino lo cobrado hasta ahora.`}>
+            <span className="sv-kpi__value">{fmtEur(kpis.cobradoMes)}</span>
+            <span className="sv-kpi__label">Cobrado del mes ⓘ</span>
+          </div>
+        )}
         <div className="sv-kpi" style={{ '--kpi-color': '#f87171' }} title="Tienen de verdad un pedido sin pagar (pendiente, fallido o en espera de pago), no solo «sin pedido este mes» — así no cuenta a quien paga trimestral y le toca más adelante. No incluye a quien ya está pausado, de baja o marcado exento/socio (*).">
-          <span className="sv-kpi__value">{kpis.pendienteMes} · {fmtEur(kpis.pendienteImporte)}</span>
+          <span className="sv-kpi__value">{kpis.pendienteMes}{window.blokesSiteData?.userRole === 'socio' ? ` · ${fmtEur(kpis.pendienteImporte)}` : ''}</span>
           <span className="sv-kpi__label">Pendiente del mes ⓘ</span>
         </div>
       </div>
