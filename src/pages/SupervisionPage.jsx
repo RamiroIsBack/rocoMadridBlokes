@@ -12,6 +12,7 @@ import { useClases } from '../hooks/useClases'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
+import CampanasSection from '../components/CampanasSection'
 import './SupervisionPage.css'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -972,6 +973,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const [nota, setNota]       = useState(alumno.notas || '')
   const [mantenerPausa, setMantenerPausa] = useState(true)
   const [modoBaja, setModoBaja] = useState('fin_mes')
+  const [motivoBajaCategoria, setMotivoBajaCategoria] = useState('')
   const [extNombre, setExtNombre]   = useState(alumno.alumno || '')
   const [extTelefono, setExtTelefono] = useState(alumno.telefono || '')
   const [extDia, setExtDia]         = useState(alumno.externoDia || '')
@@ -1014,7 +1016,8 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
       } else if (tipo === 'nota') {
         res = await gestionNota({ sub_id: alumno.subId, nota })
       } else if (tipo === 'dar_de_baja') {
-        res = await gestionDarDeBaja({ sub_id: alumno.subId, modo: modoBaja, motivo, simular: sim })
+        if (!motivoBajaCategoria) throw new Error('Elige un motivo.')
+        res = await gestionDarDeBaja({ sub_id: alumno.subId, modo: modoBaja, motivoCategoria: motivoBajaCategoria, motivo, simular: sim })
       } else if (tipo === 'fusionar') {
         res = await gestionFusionar({ sub_id_viejo: targetId, simular: sim })
       } else if (tipo === 'exento') {
@@ -1121,7 +1124,17 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
                   </select>
                 </label>
                 <label className="sv-grp-field">Motivo
-                  <input className="sv-tests-input" type="text" value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Opcional" />
+                  <select className="sv-tests-select" value={motivoBajaCategoria} onChange={e => setMotivoBajaCategoria(e.target.value)}>
+                    <option value="">Elige un motivo…</option>
+                    <option value="precio">Precio</option>
+                    <option value="horario">Horario</option>
+                    <option value="lesion">Lesión</option>
+                    <option value="mudanza">Mudanza</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </label>
+                <label className="sv-grp-field">Detalle (opcional)
+                  <input className="sv-tests-input" type="text" value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Se va a otro gimnasio…" />
                 </label>
               </>
             )}
@@ -1369,6 +1382,9 @@ function GruposTab() {
           <button className={`sv-tab-mini ${vista === 'duplicados' ? 'is-active' : ''}`} onClick={() => setVista('duplicados')}>
             Duplicados {duplicados.length ? `(${duplicados.length})` : ''}
           </button>
+          <button className={`sv-tab-mini ${vista === 'campanas' ? 'is-active' : ''}`} onClick={() => setVista('campanas')}>
+            Campañas
+          </button>
         </div>
         {vista === 'grupos' && (
           <div className="sv-controls-right">
@@ -1560,6 +1576,8 @@ function GruposTab() {
           {duplicados.length === 0 && <p className="sv-empty">Sin duplicados pendientes de fusionar.</p>}
         </>
       )}
+
+      {vista === 'campanas' && <CampanasSection />}
 
       {vista === 'grupos' && (<>
       <div className="sv-kpis">

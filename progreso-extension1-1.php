@@ -860,6 +860,50 @@ add_action('rest_api_init', function() {
             'permission_callback' => $sa_perm,
         ),
     ));
+
+    // ── Campañas de WhatsApp (fase a: envío manual wa.me) ──
+    register_rest_route('superadmin/v1', '/gestion/bajas-motivo', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_bajas_motivo',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/campanas/contactos/importar', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_campanas_importar_contactos',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/campanas/contactos', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_campanas_listar_contactos',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/campanas/envios-hoy', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_campanas_envios_hoy',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/campanas', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'superadmin_campanas_listar',
+            'permission_callback' => $sa_perm,
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'superadmin_campanas_crear',
+            'permission_callback' => $sa_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/campanas/(?P<id>\d+)/destinatarios', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_campanas_destinatarios',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/campanas/(?P<id>\d+)/contactos/(?P<contacto_id>\d+)/accion', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_campanas_marcar_accion',
+        'permission_callback' => $sa_perm,
+    ));
 });
 
 // ============================================================
@@ -4029,6 +4073,402 @@ function superadmin_gestion_externos_importar($request) {
     return rest_ensure_response(array('success' => true, 'data' => array('simulado' => $simular, 'resumen' => $resumen, 'filas' => $resultado)));
 }
 
+// ============================================================
+//  Campañas de WhatsApp (31/10, fase a: envío manual wa.me)
+// ============================================================
+// Listas que se mantienen solas a partir de Grupos/WooCommerce (no son listas fijas): un
+// contacto es "actuales" si tiene suscripción en vigor o es externo activo; "nuevos" si esa
+// suscripción es de los últimos 60 días, o si no tiene suscripción pero el contacto viene de
+// "interesados"; "antiguos" si se dio de baja de clases o viene de la carga inicial del xlsx de
+// antiguos alumnos; "bajas" (de mensajes) si respondió BAJA, y eso nunca se recalcula solo.
+
+function blokes_contactos_table()      { global $wpdb; return $wpdb->prefix . 'blokes_contactos'; }
+function blokes_campanas_table()       { global $wpdb; return $wpdb->prefix . 'blokes_campanas'; }
+function blokes_campana_envios_table() { global $wpdb; return $wpdb->prefix . 'blokes_campana_envios'; }
+
+function blokes_ensure_campanas_tables() {
+    global $wpdb;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE " . blokes_contactos_table() . " (
+        id                  bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        telefono            varchar(15)   NOT NULL DEFAULT '',
+        nombres             text          NOT NULL,
+        saludo              varchar(60)   NOT NULL DEFAULT '',
+        tipo                varchar(10)   NOT NULL DEFAULT 'adulto',
+        origen              varchar(40)   NOT NULL DEFAULT '',
+        email               varchar(190)  NOT NULL DEFAULT '',
+        notas               text          NOT NULL,
+        baja_mensajes       tinyint(1)    NOT NULL DEFAULT 0,
+        baja_mensajes_fecha datetime      NULL,
+        baja_mensajes_nota  text          NOT NULL,
+        optin_whatsapp      tinyint(1)    NOT NULL DEFAULT 0,
+        optin_fecha         datetime      NULL,
+        optin_canal         varchar(30)   NOT NULL DEFAULT '',
+        optin_texto         text          NOT NULL,
+        optin_quien         varchar(100)  NOT NULL DEFAULT '',
+        created_at          datetime      NOT NULL,
+        updated_at          datetime      NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY telefono (telefono)
+    ) {$charset};");
+    dbDelta("CREATE TABLE " . blokes_campanas_table() . " (
+        id                bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        nombre            varchar(190) NOT NULL DEFAULT '',
+        plantilla_adulto  text         NOT NULL,
+        plantilla_menor   text         NOT NULL,
+        remitente         varchar(60)  NOT NULL DEFAULT '',
+        listas            varchar(100) NOT NULL DEFAULT '',
+        fecha_fin         date         NULL,
+        activa            tinyint(1)   NOT NULL DEFAULT 1,
+        created_at        datetime     NOT NULL,
+        created_by        varchar(100) NOT NULL DEFAULT '',
+        PRIMARY KEY (id)
+    ) {$charset};");
+    dbDelta("CREATE TABLE " . blokes_campana_envios_table() . " (
+        id           bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        campana_id   bigint(20) UNSIGNED NOT NULL,
+        contacto_id  bigint(20) UNSIGNED NOT NULL,
+        enviado_at   datetime     NULL,
+        enviado_por  varchar(100) NOT NULL DEFAULT '',
+        respondio    tinyint(1)   NOT NULL DEFAULT 0,
+        baja         tinyint(1)   NOT NULL DEFAULT 0,
+        apuntado     tinyint(1)   NOT NULL DEFAULT 0,
+        updated_at   datetime     NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY campana_contacto (campana_id, contacto_id)
+    ) {$charset};");
+}
+
+// Última suscripción relevante de cada teléfono: gana la más "fuerte" (en vigor > de baja a
+// fin de mes > cancelada), para no clasificar mal a quien tiene varias suscripciones viejas.
+function blokes_campanas_subs_por_telefono() {
+    $prioridad = array('active' => 3, 'on-hold' => 3, 'pending' => 3, 'pending-cancel' => 2, 'cancelled' => 1);
+    $por_tel = array();
+    foreach (blokes_get_all_subscription_data() as $s) {
+        $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        if ($tel === '') continue;
+        $p = $prioridad[$s['status'] ?? ''] ?? 0;
+        if (!isset($por_tel[$tel]) || $p > $por_tel[$tel]['_prioridad']) {
+            $s['_prioridad'] = $p;
+            $por_tel[$tel] = $s;
+        }
+    }
+    return $por_tel;
+}
+
+function blokes_campanas_externos_por_telefono() {
+    $por_tel = array();
+    foreach (blokes_externos_todos() as $e) {
+        $tel = blokes_externos_normaliza_telefono($e['telefono'] ?? '');
+        if ($tel !== '') $por_tel[$tel] = $e;
+    }
+    return $por_tel;
+}
+
+// 'actuales' | 'nuevos' | 'antiguos' | null (no se sabe: ni suscripción, ni externo, ni origen
+// reconocible — no entra en ninguna campaña hasta que alguien lo revise a mano).
+function blokes_campanas_clasificar($telefono, $subs_por_tel, $externos_por_tel, $contacto, $dias_nuevo = 60) {
+    $sub = $subs_por_tel[$telefono] ?? null;
+    $ext = $externos_por_tel[$telefono] ?? null;
+
+    if ($sub && in_array($sub['status'], array('active', 'on-hold', 'pending'), true)) {
+        $alta_ts = false;
+        $sub_obj = !empty($sub['id']) ? wcs_get_subscription(intval($sub['id'])) : null;
+        if ($sub_obj) {
+            $fc = $sub_obj->get_date('date_created');
+            if ($fc) $alta_ts = strtotime($fc);
+        }
+        $dias = $alta_ts ? (time() - $alta_ts) / DAY_IN_SECONDS : 9999;
+        return $dias <= $dias_nuevo ? 'nuevos' : 'actuales';
+    }
+    if ($ext) return 'actuales';
+    if ($sub && in_array($sub['status'], array('cancelled', 'pending-cancel'), true)) return 'antiguos';
+    $origen = (string) ($contacto['origen'] ?? '');
+    if (strpos($origen, 'antiguo') !== false) return 'antiguos';
+    if (strpos($origen, 'interesado') !== false) return 'nuevos';
+    return null;
+}
+
+// Alta/importación de contactos: subida desde el navegador (xlsx/CSV parseado en cliente), o la
+// bandeja de "Grupos" cuando Eva marca un consentimiento a mano más adelante (fase b). Fusiona
+// por teléfono: si ya existe, añade los nombres nuevos a los que ya tenía (no los sustituye) y
+// solo rellena los campos que vengan informados.
+function superadmin_campanas_importar_contactos($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $body  = $request->get_json_params();
+    $filas = is_array($body['filas'] ?? null) ? $body['filas'] : array();
+    if (count($filas) > 1000) return new WP_Error('too_many', 'Máximo 1000 filas de golpe.', array('status' => 400));
+
+    $nuevos = 0; $actualizados = 0; $sin_telefono = 0;
+    foreach ($filas as $raw) {
+        $tel = blokes_externos_normaliza_telefono($raw['telefono'] ?? '');
+        if ($tel === '') { $sin_telefono++; continue; }
+        $nombres_in = is_array($raw['nombres'] ?? null) ? $raw['nombres'] : array_filter(array((string) ($raw['nombre'] ?? '')));
+        $nombres_in = array_values(array_unique(array_filter(array_map('sanitize_text_field', $nombres_in))));
+        $tipo    = in_array($raw['tipo'] ?? '', array('adulto', 'menor', 'mixto'), true) ? $raw['tipo'] : 'adulto';
+        $origen  = sanitize_text_field((string) ($raw['origen'] ?? 'manual'));
+        $email   = sanitize_email((string) ($raw['email'] ?? ''));
+        $notas   = sanitize_textarea_field((string) ($raw['notas'] ?? ''));
+        $saludo  = sanitize_text_field((string) ($raw['saludo'] ?? ''));
+
+        $existente = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM " . blokes_contactos_table() . " WHERE telefono = %s", $tel
+        ), ARRAY_A);
+
+        if ($existente) {
+            $nombres_antes = json_decode($existente['nombres'], true);
+            if (!is_array($nombres_antes)) $nombres_antes = array_filter(array($nombres_antes));
+            $nombres = array_values(array_unique(array_merge($nombres_antes, $nombres_in)));
+            $wpdb->update(blokes_contactos_table(), array(
+                'nombres'    => wp_json_encode($nombres),
+                'saludo'     => $saludo ?: $existente['saludo'],
+                'tipo'       => $tipo !== 'adulto' ? $tipo : $existente['tipo'],
+                'email'      => $email ?: $existente['email'],
+                'notas'      => $notas ?: $existente['notas'],
+                'updated_at' => current_time('mysql'),
+            ), array('id' => $existente['id']));
+            $actualizados++;
+        } else {
+            $wpdb->insert(blokes_contactos_table(), array(
+                'telefono' => $tel, 'nombres' => wp_json_encode($nombres_in ?: array('(sin nombre)')), 'saludo' => $saludo,
+                'tipo' => $tipo, 'origen' => $origen, 'email' => $email, 'notas' => $notas,
+                'created_at' => current_time('mysql'), 'updated_at' => current_time('mysql'),
+            ));
+            $nuevos++;
+        }
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'nuevos' => $nuevos, 'actualizados' => $actualizados, 'sinTelefono' => $sin_telefono,
+    )));
+}
+
+function blokes_campanas_contacto_fila($c, $subs_por_tel, $externos_por_tel) {
+    $tel = blokes_externos_normaliza_telefono($c['telefono']);
+    $nombres = json_decode($c['nombres'], true);
+    if (!is_array($nombres)) $nombres = array_filter(array($nombres));
+    return array(
+        'id' => intval($c['id']), 'telefono' => $tel, 'nombres' => $nombres, 'saludo' => $c['saludo'] ?? '', 'tipo' => $c['tipo'],
+        'origen' => $c['origen'], 'email' => $c['email'], 'notas' => $c['notas'],
+        'bajaMensajes' => (bool) $c['baja_mensajes'], 'optinWhatsapp' => (bool) $c['optin_whatsapp'],
+        'lista' => $c['baja_mensajes'] ? 'bajas' : blokes_campanas_clasificar($tel, $subs_por_tel, $externos_por_tel, $c),
+    );
+}
+
+// GET /campanas/contactos?lista=actuales|nuevos|antiguos|bajas|sin_clasificar|all&tipo=adulto|menor|all
+function superadmin_campanas_listar_contactos($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $lista = sanitize_key($request->get_param('lista') ?: 'all');
+    $tipo  = sanitize_key($request->get_param('tipo')  ?: 'all');
+
+    $subs_por_tel     = blokes_campanas_subs_por_telefono();
+    $externos_por_tel = blokes_campanas_externos_por_telefono();
+
+    $rows = $wpdb->get_results("SELECT * FROM " . blokes_contactos_table() . " ORDER BY updated_at DESC", ARRAY_A);
+    $out  = array();
+    $resumen = array('actuales' => 0, 'nuevos' => 0, 'antiguos' => 0, 'bajas' => 0, 'sin_clasificar' => 0);
+    foreach ($rows as $c) {
+        $fila = blokes_campanas_contacto_fila($c, $subs_por_tel, $externos_por_tel);
+        $clave = $fila['lista'] ?: 'sin_clasificar';
+        $resumen[$clave] = ($resumen[$clave] ?? 0) + 1;
+        if ($lista !== 'all' && $clave !== $lista) continue;
+        if ($tipo !== 'all' && $fila['tipo'] !== $tipo) continue;
+        $out[] = $fila;
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array('contactos' => $out, 'resumen' => $resumen)));
+}
+
+// GET /campanas/envios-hoy — para el aviso de ritmo (WhatsApp bloquea números que mandan
+// cientos de golpe): cuenta los "enviado" de hoy, de cualquier campaña.
+function superadmin_campanas_envios_hoy($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $hoy = current_time('Y-m-d');
+    $n = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM " . blokes_campana_envios_table() . " WHERE DATE(enviado_at) = %s", $hoy
+    ));
+    return rest_ensure_response(array('success' => true, 'data' => array('enviadosHoy' => $n, 'aviso' => $n >= 40)));
+}
+
+function superadmin_campanas_listar($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $rows = $wpdb->get_results("SELECT * FROM " . blokes_campanas_table() . " ORDER BY id DESC", ARRAY_A);
+    $out = array();
+    foreach ($rows as $r) {
+        $stats = $wpdb->get_row($wpdb->prepare(
+            "SELECT COUNT(*) total, SUM(enviado_at IS NOT NULL) enviados, SUM(respondio) respondidos, SUM(baja) bajas, SUM(apuntado) apuntados
+             FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d", $r['id']
+        ), ARRAY_A);
+        $out[] = array(
+            'id' => intval($r['id']), 'nombre' => $r['nombre'],
+            'plantillaAdulto' => $r['plantilla_adulto'], 'plantillaMenor' => $r['plantilla_menor'],
+            'remitente' => $r['remitente'], 'listas' => array_filter(explode(',', $r['listas'])),
+            'fechaFin' => $r['fecha_fin'], 'activa' => (bool) $r['activa'], 'createdAt' => $r['created_at'],
+            'enviados' => intval($stats['enviados'] ?? 0), 'respondidos' => intval($stats['respondidos'] ?? 0),
+            'bajas' => intval($stats['bajas'] ?? 0), 'apuntados' => intval($stats['apuntados'] ?? 0),
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+function superadmin_campanas_crear($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $body = $request->get_json_params();
+    $nombre = sanitize_text_field((string) ($body['nombre'] ?? ''));
+    $listas = is_array($body['listas'] ?? null) ? array_intersect($body['listas'], array('actuales', 'nuevos', 'antiguos')) : array();
+    if ($nombre === '' || empty($listas)) {
+        return new WP_Error('bad_request', 'Falta el nombre o la lista (actuales/nuevos/antiguos).', array('status' => 400));
+    }
+    $u = wp_get_current_user();
+    $wpdb->insert(blokes_campanas_table(), array(
+        'nombre' => $nombre,
+        'plantilla_adulto' => sanitize_textarea_field((string) ($body['plantillaAdulto'] ?? '')),
+        'plantilla_menor'  => sanitize_textarea_field((string) ($body['plantillaMenor']  ?? '')),
+        'remitente' => sanitize_text_field((string) ($body['remitente'] ?? '')),
+        'listas' => implode(',', $listas),
+        'fecha_fin' => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fechaFin'] ?? '')) ? $body['fechaFin'] : null,
+        'activa' => 1, 'created_at' => current_time('mysql'), 'created_by' => $u ? $u->user_login : '',
+    ));
+    return rest_ensure_response(array('success' => true, 'data' => array('id' => $wpdb->insert_id)));
+}
+
+// El saludo (nombre de pila elegido a mano, p. ej. de la carga inicial del xlsx) tiene
+// preferencia sobre el nombre completo del Excel para el "Hola {nombre}!" — es el que se usa
+// de verdad en los mensajes que ya escribió Ramiro.
+function blokes_campanas_personalizar($plantilla, $nombres, $remitente, $saludo = '') {
+    $nombre = $saludo ?: (count($nombres) > 1 ? implode(' y ', array_slice($nombres, 0, 2)) : ($nombres[0] ?? ''));
+    $txt = str_replace('{nombre}', $nombre, $plantilla);
+    $txt = str_replace('{remitente}', $remitente, $txt);
+    return $txt;
+}
+
+// GET /campanas/{id}/destinatarios — la lista de envío: contactos de la(s) lista(s) de esta
+// campaña, menos bajas de mensajes y menos quien ya tiene suscripción/externo en vigor ahora
+// mismo (red de seguridad aparte de la lista, para no mandar "¿te animas a volver?" a quien
+// ya está viniendo). Si alguien enviado ya está en vigor, se marca "apuntado" solo.
+function superadmin_campanas_destinatarios($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $id = intval($request['id']);
+    $campana = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_campanas_table() . " WHERE id = %d", $id), ARRAY_A);
+    if (!$campana) return new WP_Error('not_found', 'Campaña no encontrada.', array('status' => 404));
+    $listas = array_filter(explode(',', $campana['listas']));
+
+    $subs_por_tel     = blokes_campanas_subs_por_telefono();
+    $externos_por_tel = blokes_campanas_externos_por_telefono();
+    $envios_por_contacto = array();
+    foreach ($wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d", $id
+    ), ARRAY_A) as $e) { $envios_por_contacto[$e['contacto_id']] = $e; }
+
+    $contactos = $wpdb->get_results("SELECT * FROM " . blokes_contactos_table(), ARRAY_A);
+    $out = array();
+    foreach ($contactos as $c) {
+        if ($c['baja_mensajes']) continue;
+        $tel   = blokes_externos_normaliza_telefono($c['telefono']);
+        $lista = blokes_campanas_clasificar($tel, $subs_por_tel, $externos_por_tel, $c);
+        if (!in_array($lista, $listas, true)) continue;
+
+        $ya_en_vigor = isset($subs_por_tel[$tel]) && in_array($subs_por_tel[$tel]['status'], array('active', 'on-hold', 'pending'), true)
+            || isset($externos_por_tel[$tel]);
+
+        $nombres = json_decode($c['nombres'], true);
+        if (!is_array($nombres)) $nombres = array_filter(array($nombres));
+        $plantilla = $c['tipo'] === 'menor' ? $campana['plantilla_menor'] : $campana['plantilla_adulto'];
+        $envio = $envios_por_contacto[$c['id']] ?? null;
+
+        // Conversión automática: si ya está en vigor y se le había enviado algo, se marca
+        // apuntado solo (aunque nadie haya pulsado el botón a mano).
+        if ($ya_en_vigor && $envio && !empty($envio['enviado_at']) && !$envio['apuntado']) {
+            $wpdb->update(blokes_campana_envios_table(), array('apuntado' => 1, 'updated_at' => current_time('mysql')), array('id' => $envio['id']));
+            $envio['apuntado'] = 1;
+        }
+
+        $out[] = array(
+            'contactoId' => intval($c['id']), 'telefono' => $tel, 'nombres' => $nombres, 'tipo' => $c['tipo'],
+            'mensaje' => blokes_campanas_personalizar($plantilla, $nombres, $campana['remitente'], $c['saludo'] ?? ''),
+            'yaEnVigor' => (bool) $ya_en_vigor,
+            'enviado' => $envio && !empty($envio['enviado_at']) ? array('fecha' => $envio['enviado_at'], 'por' => $envio['enviado_por']) : null,
+            'respondio' => $envio ? (bool) $envio['respondio'] : false,
+            'baja' => $envio ? (bool) $envio['baja'] : false,
+            'apuntado' => $envio ? (bool) $envio['apuntado'] : false,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'campana' => array(
+            'id' => intval($campana['id']), 'nombre' => $campana['nombre'], 'listas' => $listas,
+            'remitente' => $campana['remitente'],
+        ),
+        'destinatarios' => $out,
+    )));
+}
+
+// POST /campanas/{id}/contactos/{contacto_id}/accion — { accion: enviado|respondio|baja|apuntado }
+function superadmin_campanas_marcar_accion($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $campana_id  = intval($request['id']);
+    $contacto_id = intval($request['contacto_id']);
+    $accion = sanitize_key($request->get_param('accion'));
+    if (!in_array($accion, array('enviado', 'respondio', 'baja', 'apuntado'), true)) {
+        return new WP_Error('bad_request', 'Acción no reconocida. Usa enviado, respondio, baja o apuntado.', array('status' => 400));
+    }
+    $u = wp_get_current_user();
+    $existente = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d AND contacto_id = %d", $campana_id, $contacto_id
+    ), ARRAY_A);
+
+    $campos = array('updated_at' => current_time('mysql'));
+    if ($accion === 'enviado')   { $campos['enviado_at'] = current_time('mysql'); $campos['enviado_por'] = $u ? $u->user_login : ''; }
+    if ($accion === 'respondio') $campos['respondio'] = 1;
+    if ($accion === 'baja')      $campos['baja'] = 1;
+    if ($accion === 'apuntado')  $campos['apuntado'] = 1;
+
+    if ($existente) {
+        $wpdb->update(blokes_campana_envios_table(), $campos, array('id' => $existente['id']));
+    } else {
+        $wpdb->insert(blokes_campana_envios_table(), array_merge(array(
+            'campana_id' => $campana_id, 'contacto_id' => $contacto_id,
+        ), $campos));
+    }
+
+    // BAJA: va a la lista global de bajas de mensajes, se respeta en todas las campañas futuras.
+    if ($accion === 'baja') {
+        $wpdb->update(blokes_contactos_table(), array(
+            'baja_mensajes' => 1, 'baja_mensajes_fecha' => current_time('mysql'),
+            'baja_mensajes_nota' => 'Respondió BAJA en campaña #' . $campana_id, 'updated_at' => current_time('mysql'),
+        ), array('id' => $contacto_id));
+    }
+    return rest_ensure_response(array('success' => true));
+}
+
+// GET /gestion/bajas-motivo — bajas de clases por mes y por motivo, para ver si una campaña de
+// WhatsApp recupera gente y a quién dirigir cada una (31/10).
+function superadmin_gestion_bajas_motivo($request) {
+    $meses = max(1, min(36, intval($request->get_param('meses') ?: 12)));
+    $desde = date('Y-m-d', strtotime("-{$meses} months"));
+    $metas = get_posts(array(
+        'post_type' => 'shop_subscription', 'post_status' => array('wc-cancelled', 'wc-pending-cancel'),
+        'posts_per_page' => -1, 'fields' => 'ids',
+        'meta_query' => array(array('key' => '_rm_baja_fecha', 'value' => $desde, 'compare' => '>=', 'type' => 'DATE')),
+    ));
+    $por_mes_motivo = array();
+    foreach ($metas as $sub_id) {
+        $fecha = get_post_meta($sub_id, '_rm_baja_fecha', true);
+        $cat   = get_post_meta($sub_id, '_rm_baja_categoria', true) ?: 'sin_categoria';
+        $mes   = substr((string) $fecha, 0, 7);
+        if (!preg_match('/^\d{4}-\d{2}$/', $mes)) continue;
+        if (!isset($por_mes_motivo[$mes])) $por_mes_motivo[$mes] = array();
+        $por_mes_motivo[$mes][$cat] = ($por_mes_motivo[$mes][$cat] ?? 0) + 1;
+    }
+    ksort($por_mes_motivo);
+    return rest_ensure_response(array('success' => true, 'data' => $por_mes_motivo));
+}
+
 /**
  * Marcar cobrado.
  * - Efectivo: NO toca WooCommerce ni genera factura — se apunta en una tabla propia
@@ -4264,6 +4704,14 @@ function superadmin_gestion_reanudar($request) {
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
+// Motivo de baja de clases (fijo, para poder agrupar bajas por motivo — campañas de WhatsApp,
+// 31/10) + un detalle libre opcional (sobre todo para "otro").
+const BLOKES_BAJA_MOTIVOS = array('precio', 'horario', 'lesion', 'mudanza', 'otro');
+function blokes_baja_motivo_label($cat) {
+    $map = array('precio' => 'Precio', 'horario' => 'Horario', 'lesion' => 'Lesión', 'mudanza' => 'Mudanza', 'otro' => 'Otro');
+    return $map[$cat] ?? '';
+}
+
 /**
  * Dar de baja: a fin de mes (pending-cancel, sigue viniendo hasta que se acabe lo pagado) o
  * inmediata (cancelled). Sin pedido ni factura ni email; solo cambia el estado.
@@ -4275,9 +4723,11 @@ function superadmin_gestion_dar_de_baja($request) {
     if (!function_exists('wcs_get_subscription')) {
         return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
     }
-    $sub_id  = intval($request->get_param('sub_id'));
-    $modo    = sanitize_key($request->get_param('modo')); // 'fin_mes' | 'inmediata'
-    $motivo  = sanitize_text_field($request->get_param('motivo'));
+    $sub_id    = intval($request->get_param('sub_id'));
+    $modo      = sanitize_key($request->get_param('modo')); // 'fin_mes' | 'inmediata'
+    $categoria = sanitize_key($request->get_param('motivoCategoria'));
+    if (!in_array($categoria, BLOKES_BAJA_MOTIVOS, true)) $categoria = '';
+    $motivo  = sanitize_text_field($request->get_param('motivo')); // detalle libre, opcional
     $simular = (bool) $request->get_param('simular');
 
     if (!$sub_id || !in_array($modo, array('fin_mes', 'inmediata'), true)) {
@@ -4293,21 +4743,25 @@ function superadmin_gestion_dar_de_baja($request) {
 
     if ($simular) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
-            'subId' => $sub_id, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => $estado_nuevo, 'motivo' => $motivo,
+            'subId' => $sub_id, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => $estado_nuevo,
+            'motivoCategoria' => $categoria, 'motivo' => $motivo,
             'modoForzadoInmediata' => $estaba_en_espera && $modo === 'fin_mes',
             'pedidosACancelar' => $pedidos_a_cancelar,
             'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
         )));
     }
 
+    $nota_motivo = trim(($categoria ? blokes_baja_motivo_label($categoria) : 'sin motivo') . ($motivo ? ": {$motivo}" : ''));
     $antes = array('status' => $sub->get_status());
-    blokes_gestion_sin_emails(function() use ($sub, $estado_nuevo, $motivo) {
-        $sub->update_status($estado_nuevo, 'ExcelMuerte: baja (' . ($motivo ?: 'sin motivo') . ') vía ExcelMuerte');
+    blokes_gestion_sin_emails(function() use ($sub, $estado_nuevo, $nota_motivo) {
+        $sub->update_status($estado_nuevo, 'ExcelMuerte: baja (' . $nota_motivo . ') vía ExcelMuerte');
     });
     update_post_meta($sub_id, '_rm_baja_motivo', $motivo);
+    update_post_meta($sub_id, '_rm_baja_categoria', $categoria);
+    update_post_meta($sub_id, '_rm_baja_fecha', current_time('Y-m-d'));
     $pedidos_cancelados = $estado_nuevo === 'cancelled' ? blokes_cancelar_pedidos_impagados($sub, false) : array();
 
-    $despues = array('status' => $estado_nuevo, 'motivo' => $motivo, 'pedidosCancelados' => $pedidos_cancelados);
+    $despues = array('status' => $estado_nuevo, 'motivoCategoria' => $categoria, 'motivo' => $motivo, 'pedidosCancelados' => $pedidos_cancelados);
     blokes_gestion_log($sub_id, 'dar_de_baja', $antes, $despues, array('modo' => $modo_real));
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));

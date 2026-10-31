@@ -82,6 +82,16 @@ export const gestionExternosImportar = body         => gestionPost('/gestion/ext
 export const gestionExpenseSendersGet = ()                       => gestionCall('GET', '/expenses/senders')
 export const gestionExpenseSenderSet  = (sender, category)      => gestionPost('/expenses/senders', { sender, category })
 
+// Campañas de WhatsApp (31/10, fase a: envío manual wa.me).
+export const campanasContactosImportar = body                     => gestionPost('/campanas/contactos/importar', body)
+export const campanasContactosGet      = (lista, tipo)            => gestionCall('GET', `/campanas/contactos?lista=${lista}&tipo=${tipo}`)
+export const campanasEnviosHoyGet      = ()                       => gestionCall('GET', '/campanas/envios-hoy')
+export const campanasListar            = ()                       => gestionCall('GET', '/campanas')
+export const campanasCrear             = body                     => gestionPost('/campanas', body)
+export const campanasDestinatarios     = id                       => gestionCall('GET', `/campanas/${id}/destinatarios`)
+export const campanasMarcarAccion      = (id, contactoId, accion) => gestionPost(`/campanas/${id}/contactos/${contactoId}/accion`, { accion })
+export const gestionBajasMotivo        = (meses = 12)              => gestionCall('GET', `/gestion/bajas-motivo?meses=${meses}`)
+
 // `from`: primer mes a incluir ('YYYY-MM', incluido) o '' para no limitar ("Todo").
 export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)
