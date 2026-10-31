@@ -180,6 +180,7 @@ function parseFlat(lines) {
     const item = {
       id:       `${i}`,
       fecha,
+      fechaValor: fechaValor || fecha,
       month:    parseMonth(fechaValor) || parseMonth(fecha),
       concepto,
       cuenta,
@@ -219,12 +220,14 @@ function parseSectioned(lines) {
     const item = {
       id:       `${i}`,
       fecha,
+      fechaValor: fecha,
       month:    parseMonth(fecha),
       concepto,
       importe,
       category: cat,
       iva:      CATEGORY_IVA[cat] ?? 21,
       excluded: isExcluded(concepto),
+      needsReview: needsReview(concepto),
       section,
     }
     if (isIncome) ingresos.push(item)

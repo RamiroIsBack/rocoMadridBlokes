@@ -77,6 +77,11 @@ export const gestionExternoBorrar    = id           => gestionCall('DELETE', `/g
 export const gestionExternoPago      = (id, body)   => gestionPost(`/gestion/externos/${id}/pago`, body)
 export const gestionExternosImportar = body         => gestionPost('/gestion/externos/importar', body)
 
+// Remitentes de transferencias (banco) ya clasificados a mano (Clases/Eventos/...),
+// compartido entre todos los superadmin en vez de guardarse por navegador.
+export const gestionExpenseSendersGet = ()                       => gestionCall('GET', '/expenses/senders')
+export const gestionExpenseSenderSet  = (sender, category)      => gestionPost('/expenses/senders', { sender, category })
+
 // `from`: primer mes a incluir ('YYYY-MM', incluido) o '' para no limitar ("Todo").
 export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)

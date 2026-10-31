@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   BarChart, Bar, ComposedChart, Line, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import { parseExpensesCSV, CATEGORIES, CATEGORY_IVA, autoCategory, detectClubCaixaFormat } from '../utils/expensesParser'
-import { useExpenses } from '../hooks/useSuperAdmin'
+import { useExpenses, gestionExpenseSendersGet, gestionExpenseSenderSet } from '../hooks/useSuperAdmin'
 import './ExpensesSection.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -276,6 +276,11 @@ function UploadPanel({ onSaved }) {
               <div className="exp-months-pills">
                 {uniqueMonths.map(m => <span key={m} className="exp-month-pill">{fmtMonth(m)}</span>)}
               </div>
+              {uniqueMonths.length > 1 && (
+                <p className="exp-hint" style={{ margin: '4px 0 0' }}>
+                  ⓘ El mes se decide por fecha valor: un extracto de un mes puede traer algún movimiento de otro (fin de mes). Guardar añade a lo que ya hubiera en cada mes, sin borrar nada — para sustituir un mes entero, bórralo primero desde "Gestionar".
+                </p>
+              )}
             </div>
             {uniqueAccounts.length > 0 ? (
               <div className="exp-field">
@@ -549,10 +554,6 @@ const INCOME_COLORS = {
 }
 const TRANSFER_OVERRIDE_OPTIONS = ['Clases', 'Eventos', 'Cumpleaños', 'Otros']
 
-const INCOME_OVERRIDES_KEY = 'blokes_exp_income_overrides'
-function loadIncomeOverrides() { try { return JSON.parse(localStorage.getItem(INCOME_OVERRIDES_KEY) || '{}') } catch { return {} } }
-function saveIncomeOverrides(o) { try { localStorage.setItem(INCOME_OVERRIDES_KEY, JSON.stringify(o)) } catch {} }
-
 // "TRFI.DE:<nombre>" / "TRAF. DE: <nombre>" → nombre normalizado, para recordar la
 // clasificación de ese remitente de una vez para los meses siguientes.
 function extractSender(concepto) {
@@ -580,13 +581,18 @@ function HistoryView({ period, onDeleted }) {
   const [deletingKey, setDeletingKey]         = useState(null)
   const [expandedMonths, setExpandedMonths]   = useState(new Set())
   const [expandedCats,   setExpandedCats]     = useState(new Set())
-  const [incomeOverrides, setIncomeOverrides] = useState(loadIncomeOverrides)
-  const setSenderOverride = (sender, cat) => setIncomeOverrides(prev => {
-    const next = { ...prev }
-    cat ? next[sender] = cat : delete next[sender]
-    saveIncomeOverrides(next)
-    return next
-  })
+  // Compartido entre todos los superadmin (wp_option), no por navegador: Eva y Ramiro ven y
+  // corrigen las mismas clasificaciones de remitente.
+  const [incomeOverrides, setIncomeOverrides] = useState({})
+  useEffect(() => { gestionExpenseSendersGet().then(setIncomeOverrides).catch(() => {}) }, [])
+  const setSenderOverride = (sender, cat) => {
+    setIncomeOverrides(prev => {
+      const next = { ...prev }
+      cat ? next[sender] = cat : delete next[sender]
+      return next
+    })
+    gestionExpenseSenderSet(sender, cat || '').catch(() => {})
+  }
   const toggleMonth = (month) => setExpandedMonths(prev => {
     const next = new Set(prev)
     next.has(month) ? next.delete(month) : next.add(month)

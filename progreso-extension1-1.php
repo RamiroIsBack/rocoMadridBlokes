@@ -845,17 +845,58 @@ add_action('rest_api_init', function() {
             ),
         ),
     ));
+
+    // Remitentes de transferencias ya clasificados a mano (Clases/Eventos/...), compartido
+    // entre Eva y Ramiro (antes vivía solo en el navegador de quien lo clasificó).
+    register_rest_route('superadmin/v1', '/expenses/senders', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'superadmin_get_expense_senders',
+            'permission_callback' => $sa_perm,
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'superadmin_save_expense_sender',
+            'permission_callback' => $sa_perm,
+        ),
+    ));
 });
 
 // ============================================================
 //  superadmin/v1 — expenses
 // ============================================================
 
+function blokes_exp_option_key($month, $entity) { return 'blokes_exp_' . str_replace('-', '_', $month) . '_' . $entity; }
+
+function blokes_exp_load_month($month, $entity) {
+    $raw   = get_option(blokes_exp_option_key($month, $entity));
+    $saved = $raw ? json_decode($raw, true) : null;
+    return (is_array($saved) && is_array($saved['items'] ?? null)) ? $saved['items'] : array();
+}
+
+// Clave de un movimiento para no duplicarlo: mismo día (fecha y fecha valor), concepto e
+// importe. Se compara también contra el mes anterior y el siguiente, porque el mes ahora se
+// decide por fecha valor y un CSV que cruza fin de mes puede repetir, con fecha valor de otro
+// mes, un movimiento que una subida de antes (con fecha de operación) ya había guardado en el
+// mes vecino.
+function blokes_exp_item_key($item) {
+    $fecha  = $item['fecha'] ?? '';
+    // Lo guardado antes de tener fecha valor no tiene ese campo: usar la fecha de operación
+    // en ese caso para que siga emparejando con la misma fila si se vuelve a subir.
+    $valor  = ($item['fechaValor'] ?? '') !== '' ? $item['fechaValor'] : $fecha;
+    return $fecha . '|' . $valor . '|' . trim((string) ($item['concepto'] ?? '')) . '|' . round(floatval($item['importe'] ?? 0), 2);
+}
+
+// Guarda los movimientos de un mes/entidad FUSIONANDO con lo que ya hubiera (por defecto):
+// una subida de octubre no puede borrar lo que ya había en septiembre o machacar noviembre,
+// algo que con fecha valor pasa en casi cualquier CSV que cruce fin de mes. Para sustituir el
+// mes entero a propósito, hay que borrarlo primero desde "Gestionar" (o mandar `replace: true`).
 function superadmin_save_expenses($request) {
-    $body   = $request->get_json_params();
-    $month  = sanitize_text_field($body['month']  ?? '');
-    $entity = sanitize_text_field($body['entity'] ?? 'rocoteca');
-    $items  = is_array($body['items'] ?? null) ? $body['items'] : array();
+    $body    = $request->get_json_params();
+    $month   = sanitize_text_field($body['month']  ?? '');
+    $entity  = sanitize_text_field($body['entity'] ?? 'rocoteca');
+    $items   = is_array($body['items'] ?? null) ? $body['items'] : array();
+    $replace = !empty($body['replace']);
 
     if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
         return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
@@ -864,25 +905,46 @@ function superadmin_save_expenses($request) {
     $clean = array();
     foreach ($items as $item) {
         $clean[] = array(
-            'fecha'    => sanitize_text_field($item['fecha']    ?? ''),
-            'concepto' => sanitize_text_field($item['concepto'] ?? ''),
-            'importe'  => floatval($item['importe']  ?? 0),
-            'category' => sanitize_text_field($item['category'] ?? 'otros'),
-            'iva'      => intval($item['iva']      ?? 0),
-            'excluded' => (bool) ($item['excluded'] ?? false),
-            'section'  => in_array($item['section'], array('ingresos','costes')) ? $item['section'] : 'costes',
+            'fecha'      => sanitize_text_field($item['fecha']      ?? ''),
+            'fechaValor' => sanitize_text_field($item['fechaValor'] ?? ($item['fecha'] ?? '')),
+            'concepto'   => sanitize_text_field($item['concepto'] ?? ''),
+            'importe'    => floatval($item['importe']  ?? 0),
+            'category'   => sanitize_text_field($item['category'] ?? 'otros'),
+            'iva'        => intval($item['iva']      ?? 0),
+            'excluded'   => (bool) ($item['excluded'] ?? false),
+            'section'    => in_array($item['section'], array('ingresos','costes'), true) ? $item['section'] : 'costes',
         );
     }
 
-    $key  = 'blokes_exp_' . str_replace('-', '_', $month) . '_' . $entity;
+    if ($replace) {
+        $merged = $clean;
+    } else {
+        $vecino_keys = array();
+        $dt = DateTime::createFromFormat('Y-m-d', $month . '-01');
+        foreach (array('-1 month', '+1 month') as $delta) {
+            $vecino = $dt ? (clone $dt)->modify($delta)->format('Y-m') : null;
+            if (!$vecino) continue;
+            foreach (blokes_exp_load_month($vecino, $entity) as $it) { $vecino_keys[blokes_exp_item_key($it)] = true; }
+        }
+        $by_key = array();
+        foreach (blokes_exp_load_month($month, $entity) as $it) { $by_key[blokes_exp_item_key($it)] = $it; }
+        foreach ($clean as $it) {
+            $k = blokes_exp_item_key($it);
+            if (isset($vecino_keys[$k]) && !isset($by_key[$k])) continue; // ya guardado en el mes de al lado
+            $by_key[$k] = $it; // nuevo, o ya existía aquí: se actualiza categoría/IVA/excluido
+        }
+        $merged = array_values($by_key);
+    }
+
+    $key = blokes_exp_option_key($month, $entity);
     update_option($key, wp_json_encode(array(
         'month'  => $month,
         'entity' => $entity,
-        'items'  => $clean,
+        'items'  => $merged,
         'saved'  => (new DateTime())->format('c'),
     )), false);
 
-    return rest_ensure_response(array('success' => true, 'month' => $month));
+    return rest_ensure_response(array('success' => true, 'month' => $month, 'total' => count($merged)));
 }
 
 // `from`: primer mes a incluir ('YYYY-MM', incluido) o vacío para no limitar ("Todo"). Se
@@ -997,6 +1059,34 @@ function superadmin_delete_expenses($request) {
     ));
     foreach ($keys as $key) { delete_option($key); }
     return rest_ensure_response(array('success' => true, 'deleted' => $keys));
+}
+
+// Remitente de transferencia (nombre normalizado en mayúsculas) → categoría elegida a mano
+// (Clases/Eventos/Cumpleaños/Otros). Antes vivía en el localStorage de quien lo clasificaba
+// (Ramiro o Eva no se veían el uno al otro); ahora es una sola `wp_option` compartida.
+const BLOKES_EXP_SENDERS_OPTION = 'blokes_exp_remitentes';
+
+function superadmin_get_expense_senders($request) {
+    $raw = get_option(BLOKES_EXP_SENDERS_OPTION);
+    $map = $raw ? json_decode($raw, true) : array();
+    return rest_ensure_response(array('success' => true, 'data' => is_array($map) ? $map : array()));
+}
+
+function superadmin_save_expense_sender($request) {
+    $body     = $request->get_json_params();
+    $sender   = mb_strtoupper(trim(sanitize_text_field((string) ($body['sender'] ?? ''))));
+    $category = sanitize_text_field((string) ($body['category'] ?? ''));
+    if ($sender === '') return new WP_Error('bad_request', 'Falta el remitente.', array('status' => 400));
+
+    $raw = get_option(BLOKES_EXP_SENDERS_OPTION);
+    $map = $raw ? json_decode($raw, true) : array();
+    if (!is_array($map)) $map = array();
+
+    if ($category === '') unset($map[$sender]);
+    else $map[$sender] = $category;
+
+    update_option(BLOKES_EXP_SENDERS_OPTION, wp_json_encode($map), false);
+    return rest_ensure_response(array('success' => true, 'data' => $map));
 }
 
 // ============================================================
