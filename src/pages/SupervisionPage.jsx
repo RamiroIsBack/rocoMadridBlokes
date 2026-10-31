@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno,
+  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
@@ -1400,12 +1400,94 @@ function WaMark({ alumno, onClick }) {
   )
 }
 
+const ESTADO_BUSQUEDA_LABEL = {
+  activo: 'Activo', en_espera_o_pausado: 'En espera / pausado', pendiente_pago: 'Pendiente de pago', baja: 'De baja',
+  externo: 'Externo (fuera de la web)', externo_baja: 'Externo, de baja',
+}
+
+// Primer paso de "Añadir alumno" (grupos_como_excel.md, punto 5): buscar dónde está alguien
+// ahora. "Transferir aquí" / "Añadir a este grupo" / "Crear alumno nuevo" quedan para la
+// siguiente ronda — ver la nota en NOTAS_PARA_CODE_mananas_y_datos.md sobre por qué.
+function BuscarAlumnoModal({ onClose }) {
+  const [q, setQ]           = useState('')
+  const [resultados, setResultados] = useState(null)
+  const [buscando, setBuscando]     = useState(false)
+  const [err, setErr]       = useState(null)
+
+  async function buscar() {
+    if (q.trim().length < 2) { setErr('Escribe al menos 2 caracteres.'); return }
+    setBuscando(true); setErr(null)
+    try {
+      const data = await gestionBuscarAlumno(q.trim())
+      setResultados(data)
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setBuscando(false)
+    }
+  }
+
+  return (
+    <div className="sv-grp-overlay" onClick={onClose}>
+      <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
+        <h3>Añadir alumno — buscar primero</h3>
+        <p className="sv-note">
+          Busca por nombre, teléfono o email en suscripciones (de cualquier estado, también antiguos alumnos),
+          externos y usuarios de WordPress. De momento solo enseña dónde está cada uno — "Transferir aquí",
+          "Añadir a este grupo" y "Crear alumno nuevo" llegan en la siguiente ronda.
+        </p>
+        <label className="sv-grp-field">Nombre, teléfono o email
+          <input
+            className="sv-tests-input" type="text" value={q} autoFocus
+            onChange={e => setQ(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') buscar() }}
+            placeholder="Ej. Marta, 6xxxxxxxx, marta@…"
+          />
+        </label>
+        {err && <p className="sv-to-warn-txt">{err}</p>}
+        <div className="sv-grp-modal__actions">
+          <button className="sv-tests-select" onClick={onClose}>Cerrar</button>
+          <button className="sv-tests-save" disabled={buscando} onClick={buscar}>{buscando ? 'Buscando…' : 'Buscar'}</button>
+        </div>
+
+        {resultados !== null && (
+          resultados.length === 0 ? (
+            <p className="sv-empty">Nadie coincide con «{q}». Puede ser alumno nuevo de verdad.</p>
+          ) : (
+            <ul className="sv-grp-preview">
+              {resultados.map((p, i) => (
+                <li key={i} style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
+                  <strong>{p.nombre || '(sin nombre)'}</strong>
+                  <span className="sv-ot-muted">{p.telefono || '—'}{p.email ? ` · ${p.email}` : ''}</span>
+                  {(p.tutorNombre || p.tutorTelefono) && (
+                    <span className="sv-ot-muted">👪 Tutor: {p.tutorNombre || '—'}{p.tutorTelefono ? ` · ${p.tutorTelefono}` : ''}</span>
+                  )}
+                  {p.grupos.length === 0 ? (
+                    <span className="sv-to-warn-txt">Registrado en WordPress, sin ninguna clase activa ni externo.</span>
+                  ) : (
+                    p.grupos.map((g, j) => (
+                      <span key={j} className="sv-ot-muted">
+                        {g.label || '(sin grupo)'} · {g.edad} — {ESTADO_BUSQUEDA_LABEL[g.estado] || g.estado}
+                      </span>
+                    ))
+                  )}
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+      </div>
+    </div>
+  )
+}
+
 function GruposTab() {
   const { data, loading, error, refetch } = useGestionGrupos(4)
   const [grupoKey, setGrupoKey] = useState('')
   const [vista, setVista]     = useState('grupos') // 'grupos' | 'duplicados' | 'cobrar' | 'pausados' | 'bajas' | 'sindatos'
   const [menuFor, setMenuFor] = useState(null)   // alumno con el menú de acciones abierto
   const [accion, setAccion]   = useState(null)   // { alumno, tipo } con el modal abierto
+  const [buscador, setBuscador] = useState(false) // modal de "Añadir alumno" (buscar)
 
   const grupos = data?.grupos || []
   const meses  = data?.meses || []
@@ -1503,9 +1585,12 @@ function GruposTab() {
                 return <option key={key} value={key}>{g.label} — {nVigor}{nEspera ? ` (+${nEspera} en espera)` : ''}</option>
               })}
             </select>
+            <button className="sv-tab-mini" onClick={() => setBuscador(true)}>🔎 Añadir alumno</button>
           </div>
         )}
       </div>
+
+      {buscador && <BuscarAlumnoModal onClose={() => setBuscador(false)} />}
 
       {vista === 'cobrar' && (
         <>

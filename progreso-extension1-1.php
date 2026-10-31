@@ -819,6 +819,13 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_editar_alumno',
         'permission_callback' => $sa_perm,
     ));
+    // Buscar alumno (nombre, teléfono o email) en suscripciones, externos y usuarios de
+    // WordPress, para el botón "Añadir alumno" de cada grupo (grupos_como_excel.md, punto 5).
+    register_rest_route('superadmin/v1', '/gestion/buscar-alumno', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_buscar_alumno',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/externos', array(
         array('methods' => 'GET',  'callback' => 'superadmin_gestion_externos_get',   'permission_callback' => $sa_perm),
         array('methods' => 'POST', 'callback' => 'superadmin_gestion_externos_crear', 'permission_callback' => $sa_perm),
@@ -5389,6 +5396,94 @@ function superadmin_gestion_editar_alumno($request) {
     blokes_gestion_log($sub_id, 'editar_alumno', $antes, $despues);
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// Buscar por nombre, teléfono o email en suscripciones (cualquier estado, para encontrar
+// también antiguos alumnos de baja), externos y, si no aparece en ninguno de los dos, en los
+// usuarios de WordPress (registrado sin ninguna clase). Primer paso del botón "Añadir alumno"
+// de cada grupo: de momento solo busca y enseña dónde está cada uno — "Transferir aquí" y
+// "Añadir a este grupo" quedan para cuando se confirme con el catálogo real si el producto de
+// Clases ya tiene variaciones de 1 día (no solo las parejas de 2 días), ver la nota en
+// NOTAS_PARA_CODE_mananas_y_datos.md.
+function superadmin_gestion_buscar_alumno($request) {
+    if (!function_exists('wcs_get_subscription') || !class_exists('RocoMadrid_SF_Stats')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions no disponible. Llama a este endpoint en el subsitio del club.', array('status' => 503));
+    }
+    $q = trim((string) $request->get_param('q'));
+    if (mb_strlen($q) < 2) {
+        return new WP_Error('bad_request', 'Escribe al menos 2 caracteres (nombre, teléfono o email).', array('status' => 400));
+    }
+    $q_norm  = blokes_externos_normaliza_nombre($q);
+    $q_tel   = blokes_externos_normaliza_telefono($q);
+    $q_tel_valida = strlen($q_tel) >= 6;
+    $q_email = mb_strtolower($q);
+
+    $coincide = function($nombre, $telefono, $email) use ($q_norm, $q_tel, $q_tel_valida, $q_email) {
+        if ($q_norm !== '' && strpos(blokes_externos_normaliza_nombre((string) $nombre), $q_norm) !== false) return true;
+        if ($q_tel_valida && $telefono && strpos(blokes_externos_normaliza_telefono((string) $telefono), $q_tel) !== false) return true;
+        if ($q_email !== '' && $email && strpos(mb_strtolower((string) $email), $q_email) !== false) return true;
+        return false;
+    };
+
+    $personas = array();
+
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (empty($sub['id'])) continue;
+        $sub_obj = wcs_get_subscription(intval($sub['id']));
+        if (!$sub_obj) continue;
+        $telefono = $sub_obj->get_billing_phone() ?: ($sub['telefono'] ?? '');
+        $nombre   = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) ?: ($sub['cliente'] ?? '');
+        $email    = $sub_obj->get_billing_email() ?: ($sub['email'] ?? '');
+        if (!$coincide($nombre, $telefono, $email)) continue;
+
+        $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
+        $key = $uid ? "u{$uid}" : ('s' . intval($sub['id']));
+        if (!isset($personas[$key])) {
+            $personas[$key] = array(
+                'uid' => $uid ?: null, 'nombre' => $nombre, 'telefono' => $telefono, 'email' => $email,
+                'tutorNombre'   => get_post_meta($sub_obj->get_id(), '_rm_tutor_nombre', true) ?: '',
+                'tutorTelefono' => get_post_meta($sub_obj->get_id(), '_rm_tutor_telefono', true) ?: '',
+                'grupos' => array(),
+            );
+        }
+        $status = $sub['status'] ?? '';
+        $estado = $status === 'active' ? 'activo'
+            : ($status === 'on-hold' ? 'en_espera_o_pausado' : ($status === 'pending' ? 'pendiente_pago' : ($status === 'cancelled' ? 'baja' : $status)));
+        $personas[$key]['grupos'][] = array(
+            'subId' => intval($sub['id']), 'dia' => $sub['dia'] ?? '', 'horario' => $sub['horario'] ?? '', 'edad' => $sub['edad'] ?: 'Adultos',
+            'estado' => $estado, 'label' => trim(($sub['dia'] ?? '') . ' · ' . ($sub['horario'] ?? ''), ' ·'),
+        );
+    }
+
+    foreach (blokes_externos_todos() as $ext) {
+        if (!$coincide($ext['nombre'], $ext['telefono'], '')) continue;
+        $personas['ext' . $ext['id']] = array(
+            'uid' => null, 'externoId' => intval($ext['id']), 'nombre' => $ext['nombre'], 'telefono' => $ext['telefono'], 'email' => '',
+            'tutorNombre' => $ext['tutor_nombre'] ?: '', 'tutorTelefono' => $ext['tutor_telefono'] ?: '',
+            'grupos' => array(array(
+                'externoId' => intval($ext['id']), 'dia' => $ext['dia'], 'horario' => $ext['horario'], 'edad' => $ext['edad'] ?: 'Adultos',
+                'estado' => $ext['activo'] ? 'externo' : 'externo_baja', 'label' => trim($ext['dia'] . ' · ' . $ext['horario'], ' ·'),
+            )),
+        );
+    }
+
+    // Usuarios de WordPress que no han salido ya por tener suscripción o externo propio
+    // (alumno antiguo, o registrado desde la web sin apuntarse a ninguna clase).
+    $args = $q_tel_valida
+        ? array('number' => 15, 'meta_query' => array(array('key' => 'billing_phone', 'value' => $q_tel, 'compare' => 'LIKE')))
+        : array('number' => 15, 'search' => '*' . $q . '*', 'search_columns' => array('user_login', 'user_email', 'display_name'));
+    foreach (get_users($args) as $u) {
+        $key = "u{$u->ID}";
+        if (isset($personas[$key])) continue;
+        $nombre = trim($u->first_name . ' ' . $u->last_name) ?: $u->display_name;
+        if (!$coincide($nombre, get_user_meta($u->ID, 'billing_phone', true), $u->user_email)) continue;
+        $personas[$key] = array(
+            'uid' => $u->ID, 'nombre' => $nombre, 'telefono' => get_user_meta($u->ID, 'billing_phone', true), 'email' => $u->user_email,
+            'tutorNombre' => '', 'tutorTelefono' => '', 'grupos' => array(),
+        );
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array_values($personas)));
 }
 
 function superadmin_classes($request) {
