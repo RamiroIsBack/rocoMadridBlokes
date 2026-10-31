@@ -947,6 +947,9 @@
   font-weight: 600;
 }
 
+.sv-grp-tutor { font-size: 0.68rem; margin-top: 2px; }
+.sv-grp-profesor { margin: 0 0 10px; }
+
 .sv-to-timeline-wrap {
   overflow-x: auto;
   margin-bottom: 8px;

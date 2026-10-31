@@ -3147,7 +3147,9 @@ function _superadmin_orders_for_blog($start_date) {
 
 function superadmin_revenue($request) {
     $months     = max(1, min(60, intval($request->get_param('months'))));
-    $start_date = (new DateTime("-{$months} months"))->format('Y-m-d');
+    // Día 1 del mes antes de restar (ver superadmin_gestion_grupos): si no, los días 29-31 se
+    // desbordan al mes siguiente.
+    $start_date = (new DateTime("first day of this month -{$months} months"))->format('Y-m-d');
 
     $exclude_transfer  = (bool) $request->get_param('exclude_transfer');
 
@@ -3195,7 +3197,7 @@ function superadmin_revenue($request) {
 
 function superadmin_products($request) {
     $months     = max(1, min(60, intval($request->get_param('months'))));
-    $start_date = (new DateTime("-{$months} months"))->format('Y-m-d');
+    $start_date = (new DateTime("first day of this month -{$months} months"))->format('Y-m-d');
 
     $products = array(); // "blog_id|name" => [name, store, units, revenue, history]
 
@@ -3532,6 +3534,8 @@ function superadmin_gestion_grupos($request) {
             // Sin nombre de facturación ni en el perfil de WordPress: lo que se ve es el
             // nombre de usuario de la cuenta, no un nombre real.
             'sinNombre'   => $nombre_fact === '',
+            'tutorNombre'   => get_post_meta($sub_obj->get_id(), '_rm_tutor_nombre', true) ?: '',
+            'tutorTelefono' => get_post_meta($sub_obj->get_id(), '_rm_tutor_telefono', true) ?: '',
         );
 
         if (!isset($grupos[$gkey]['personas'][$persona_key])) $grupos[$gkey]['personas'][$persona_key] = array();
@@ -3563,6 +3567,7 @@ function superadmin_gestion_grupos($request) {
             'manual' => true, 'importeCatalogo' => 0, 'exento' => (bool) $ext['exento'], 'pagos' => $pagos_ext,
             'pendiente' => null, 'notas' => $ext['notas'], 'sinNombre' => false, 'esExterno' => true,
             'externoId' => intval($ext['id']), 'externoDia' => $dia_ext, 'externoHorario' => $horario_ext, 'externoEdad' => $edad_ext,
+            'tutorNombre' => $ext['tutor_nombre'] ?: '', 'tutorTelefono' => $ext['tutor_telefono'] ?: '',
         );
     }
 
@@ -3760,6 +3765,8 @@ function blokes_ensure_externos_tables() {
         telefono    varchar(30)         NOT NULL DEFAULT '',
         exento      tinyint(1)          NOT NULL DEFAULT 0,
         notas       varchar(500)        NOT NULL DEFAULT '',
+        tutor_nombre   varchar(190)     NOT NULL DEFAULT '',
+        tutor_telefono varchar(30)      NOT NULL DEFAULT '',
         activo      tinyint(1)          NOT NULL DEFAULT 1,
         user_login  varchar(100)        NOT NULL DEFAULT '',
         created_at  datetime            NOT NULL,
@@ -3954,6 +3961,8 @@ function blokes_externos_limpia($body, $defaults = array()) {
         'telefono' => blokes_externos_normaliza_telefono($body['telefono'] ?? ''),
         'exento'   => !empty($body['exento']) ? 1 : 0,
         'notas'    => mb_substr(sanitize_text_field((string) ($body['notas'] ?? '')), 0, 500),
+        'tutor_nombre'   => mb_substr(sanitize_text_field((string) ($body['tutorNombre'] ?? $defaults['tutor_nombre'] ?? '')), 0, 190),
+        'tutor_telefono' => blokes_externos_normaliza_telefono($body['tutorTelefono'] ?? $defaults['tutor_telefono'] ?? ''),
     );
 }
 
@@ -5344,7 +5353,9 @@ function superadmin_gestion_editar_alumno($request) {
     $nombre    = sanitize_text_field((string) $request->get_param('nombre'));
     $apellidos = sanitize_text_field((string) $request->get_param('apellidos'));
     $telefono  = sanitize_text_field((string) $request->get_param('telefono'));
-    if (!$sub_id || ($nombre === '' && $apellidos === '' && $telefono === '')) {
+    $tutor_nombre   = sanitize_text_field((string) $request->get_param('tutorNombre'));
+    $tutor_telefono = sanitize_text_field((string) $request->get_param('tutorTelefono'));
+    if (!$sub_id || ($nombre === '' && $apellidos === '' && $telefono === '' && $tutor_nombre === '' && $tutor_telefono === '')) {
         return new WP_Error('bad_request', 'Falta sub_id y al menos un dato que cambiar.', array('status' => 400));
     }
     $sub = wcs_get_subscription($sub_id);
@@ -5353,6 +5364,7 @@ function superadmin_gestion_editar_alumno($request) {
     $antes = array(
         'nombre' => $sub->get_billing_first_name(), 'apellidos' => $sub->get_billing_last_name(),
         'telefono' => $sub->get_billing_phone(),
+        'tutorNombre' => get_post_meta($sub_id, '_rm_tutor_nombre', true), 'tutorTelefono' => get_post_meta($sub_id, '_rm_tutor_telefono', true),
     );
     if ($nombre !== '')    $sub->set_billing_first_name($nombre);
     if ($apellidos !== '') $sub->set_billing_last_name($apellidos);
@@ -5365,8 +5377,15 @@ function superadmin_gestion_editar_alumno($request) {
         if ($apellidos !== '') update_user_meta($uid, 'billing_last_name', $apellidos);
         if ($telefono !== '')  update_user_meta($uid, 'billing_phone', $telefono);
     }
+    // Tutor (padre/madre de un menor): campo propio de la suscripción, no de facturación.
+    // Igual que nombre/apellidos/teléfono: deja el campo en blanco para no cambiarlo.
+    if ($tutor_nombre !== '')   update_post_meta($sub_id, '_rm_tutor_nombre', $tutor_nombre);
+    if ($tutor_telefono !== '') update_post_meta($sub_id, '_rm_tutor_telefono', blokes_externos_normaliza_telefono($tutor_telefono) ?: $tutor_telefono);
 
-    $despues = array('nombre' => $sub->get_billing_first_name(), 'apellidos' => $sub->get_billing_last_name(), 'telefono' => $sub->get_billing_phone());
+    $despues = array(
+        'nombre' => $sub->get_billing_first_name(), 'apellidos' => $sub->get_billing_last_name(), 'telefono' => $sub->get_billing_phone(),
+        'tutorNombre' => get_post_meta($sub_id, '_rm_tutor_nombre', true), 'tutorTelefono' => get_post_meta($sub_id, '_rm_tutor_telefono', true),
+    );
     blokes_gestion_log($sub_id, 'editar_alumno', $antes, $despues);
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
@@ -5374,7 +5393,7 @@ function superadmin_gestion_editar_alumno($request) {
 
 function superadmin_classes($request) {
     $months   = max(1, min(60, intval($request->get_param('months'))));
-    $start_dt = new DateTime("-{$months} months");
+    $start_dt = new DateTime("first day of this month -{$months} months");
     $start_ym = $start_dt->format('Y-m');
     $now_ym   = date('Y-m');
 

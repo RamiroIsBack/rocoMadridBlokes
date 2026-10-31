@@ -13,7 +13,25 @@ import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue }
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
 import CampanasSection from '../components/CampanasSection'
+import { BASE as STAFF_BASE, PROF_ORDER } from '../data/staffSchedule'
 import './SupervisionPage.css'
+
+// Profesor(es) de un grupo de Grupos, a partir del horario de referencia de staffSchedule.js
+// (Horario Marzo 2026.xlsx) — no hay un campo propio en WooCommerce, así que es una pista por
+// día + hora de clase, no un dato garantizado (sustituciones, cambios de horario no reflejados
+// aquí, etc. no se ven).
+const DIA_A_STAFFKEY = { Lunes: 'Lunes', Martes: 'Martes', Miercoles: 'Miercoles', 'Miércoles': 'Miercoles', Jueves: 'Jueves', Viernes: 'Viernes' }
+function profesoresDeGrupo(diaPareja, horario) {
+  if (!diaPareja || !horario) return []
+  const horaNorm = horario.trim().slice(0, 5)
+  const dias = diaPareja.split(/[-–]/).map(d => DIA_A_STAFFKEY[d.trim()]).filter(Boolean)
+  if (!dias.length) return []
+  const porDia = dias.map(dia => {
+    const profs = PROF_ORDER.filter(prof => (STAFF_BASE[prof]?.[dia] || []).some(s => s.tipo === 'clase' && s.start === horaNorm))
+    return { dia, profs }
+  })
+  return porDia.filter(d => d.profs.length)
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const WEEKDAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes']
@@ -980,8 +998,12 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const [editNombre, setEditNombre]     = useState('')
   const [editApellidos, setEditApellidos] = useState('')
   const [editTelefono, setEditTelefono] = useState(alumno.telefono || '')
+  const [editTutorNombre, setEditTutorNombre]     = useState(alumno.tutorNombre || '')
+  const [editTutorTelefono, setEditTutorTelefono] = useState(alumno.tutorTelefono || '')
   const [extNombre, setExtNombre]   = useState(alumno.alumno || '')
   const [extTelefono, setExtTelefono] = useState(alumno.telefono || '')
+  const [extTutorNombre, setExtTutorNombre]     = useState(alumno.tutorNombre || '')
+  const [extTutorTelefono, setExtTutorTelefono] = useState(alumno.tutorTelefono || '')
   const [extDia, setExtDia]         = useState(alumno.externoDia || '')
   const [extHorario, setExtHorario] = useState(alumno.externoHorario || '')
   const [extEdad, setExtEdad]       = useState(alumno.externoEdad || 'Adultos')
@@ -1042,7 +1064,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
       } else if (tipo === 'ext_editar') {
         if (!extNombre.trim()) throw new Error('Pon el nombre.')
         if (!extDia.trim() && !extHorario.trim()) throw new Error('Pon el grupo (día y/u horario).')
-        const body = { dia: extDia, horario: extHorario, edad: extEdad, nombre: extNombre, telefono: extTelefono, notas: nota, exento: alumno.exento }
+        const body = { dia: extDia, horario: extHorario, edad: extEdad, nombre: extNombre, telefono: extTelefono, notas: nota, exento: alumno.exento, tutorNombre: extTutorNombre, tutorTelefono: extTutorTelefono }
         res = alumno.externoId ? await gestionExternoActualizar(alumno.externoId, body) : await gestionExternoCrear(body)
       } else if (tipo === 'ext_borrar') {
         res = await gestionExternoBorrar(alumno.externoId)
@@ -1050,8 +1072,8 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
         if (!alumno.telefono) throw new Error('Esta persona no tiene teléfono guardado.')
         res = await gestionOptinWhatsapp({ telefono: alumno.telefono, valor: optinWhatsappValor, nombre: alumno.alumno })
       } else if (tipo === 'editar_alumno') {
-        if (!editNombre.trim() && !editApellidos.trim() && !editTelefono.trim()) throw new Error('Rellena al menos un dato.')
-        res = await gestionEditarAlumno({ sub_id: alumno.subId, nombre: editNombre, apellidos: editApellidos, telefono: editTelefono })
+        if (!editNombre.trim() && !editApellidos.trim() && !editTelefono.trim() && !editTutorNombre.trim() && !editTutorTelefono.trim()) throw new Error('Rellena al menos un dato.')
+        res = await gestionEditarAlumno({ sub_id: alumno.subId, nombre: editNombre, apellidos: editApellidos, telefono: editTelefono, tutorNombre: editTutorNombre, tutorTelefono: editTutorTelefono })
       }
       if (sim) setPreview(res)
       else onDone()
@@ -1194,6 +1216,13 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
                 <label className="sv-grp-field">Teléfono
                   <input className="sv-tests-input" type="text" value={editTelefono} onChange={e => setEditTelefono(e.target.value)} placeholder="Teléfono" />
                 </label>
+                <p className="sv-note">Si es menor de edad, nombre y teléfono del padre/madre/tutor (opcional):</p>
+                <label className="sv-grp-field">Tutor — nombre
+                  <input className="sv-tests-input" type="text" value={editTutorNombre} onChange={e => setEditTutorNombre(e.target.value)} placeholder="Nombre del tutor" />
+                </label>
+                <label className="sv-grp-field">Tutor — teléfono
+                  <input className="sv-tests-input" type="text" value={editTutorTelefono} onChange={e => setEditTutorTelefono(e.target.value)} placeholder="Teléfono del tutor" />
+                </label>
               </>
             )}
 
@@ -1271,6 +1300,13 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
                 </label>
                 <label className="sv-grp-field">Notas
                   <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} />
+                </label>
+                <p className="sv-note">Si es menor de edad, nombre y teléfono del padre/madre/tutor (opcional):</p>
+                <label className="sv-grp-field">Tutor — nombre
+                  <input className="sv-tests-input" type="text" value={extTutorNombre} onChange={e => setExtTutorNombre(e.target.value)} placeholder="Nombre del tutor" />
+                </label>
+                <label className="sv-grp-field">Tutor — teléfono
+                  <input className="sv-tests-input" type="text" value={extTutorTelefono} onChange={e => setExtTutorTelefono(e.target.value)} placeholder="Teléfono del tutor" />
                 </label>
               </>
             )}
@@ -1650,6 +1686,19 @@ function GruposTab() {
       {vista === 'campanas' && <CampanasSection />}
 
       {vista === 'grupos' && (<>
+      {grupo && (() => {
+        const profesores = profesoresDeGrupo(grupo.dia, grupo.horario)
+        if (!profesores.length) return null
+        const mismo = profesores.every(d => d.profs.length === 1 && d.profs[0] === profesores[0].profs[0])
+        const texto = mismo
+          ? profesores[0].profs.join(', ')
+          : profesores.map(d => `${d.dia}: ${d.profs.join('/')}`).join(' · ')
+        return (
+          <p className="sv-note sv-grp-profesor" title="Sacado del horario de referencia (staffSchedule.js) por día y hora de clase: puede no reflejar sustituciones o cambios recientes.">
+            👤 Profesor{profesores.some(d => d.profs.length > 1) || !mismo ? 'es' : ''}: {texto}
+          </p>
+        )
+      })()}
       {/* Dinero AGREGADO (cobrado del mes, importe pendiente total) es solo para socio — ver
           NOTAS_PARA_CODE_privacidad_dinero.md. Lo de cada alumno (quién debe y cuánto) sí lo ve
           gestion, en la tabla de abajo. */}
@@ -1699,6 +1748,11 @@ function GruposTab() {
                     {a.exento && <span title="Exento/socio: no se le pide cobro">*</span>}
                     {a.otrasSubs?.length > 0 && (
                       <span title={`${a.otrasSubs.length} suscripción(es) antigua(s) colgando en este grupo (duplicado)`}> ⚠</span>
+                    )}
+                    {(a.edad || '').includes('Menores') && (
+                      a.tutorNombre || a.tutorTelefono
+                        ? <div className="sv-ot-muted sv-grp-tutor">👪 {a.tutorNombre || '—'}{a.tutorTelefono ? ` · ${a.tutorTelefono}` : ''}</div>
+                        : <div className="sv-to-warn-txt sv-grp-tutor">👪 falta el tutor</div>
                     )}
                   </td>
                   <td className="sv-ot-muted">{a.telefono || '—'}</td>
