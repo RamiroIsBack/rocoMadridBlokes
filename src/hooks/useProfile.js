@@ -23,7 +23,8 @@ export function useProfile() {
   const [nickname, setNickname]   = useState(() => sd.userNickname || '')
   const [avatarType, setAvatarType] = useState(() => sd.userAvatarType || '')
   const [avatarData, setAvatarData] = useState(() => sd.userAvatarData || {})
-  const [optinWhatsapp, setOptinWhatsapp] = useState(false)
+  // null = sin preguntar · 'si' · 'no'.
+  const [optinWhatsapp, setOptinWhatsapp] = useState(null)
   const [saving, setSaving]       = useState(false)
   const [saveError, setSaveError] = useState(null)
   const [verified, setVerified]   = useState(profileComplete)
@@ -44,7 +45,7 @@ export function useProfile() {
           if (data.nickname)   setNickname(data.nickname)
           if (data.avatarType) setAvatarType(data.avatarType)
           if (data.avatarData) setAvatarData(data.avatarData)
-          setOptinWhatsapp(!!data.optinWhatsapp)
+          setOptinWhatsapp(data.optinWhatsapp || null)
           if (window.blokesSiteData) {
             window.blokesSiteData.profileComplete = !!data.profileComplete
             window.blokesSiteData.userNickname    = data.nickname   || ''

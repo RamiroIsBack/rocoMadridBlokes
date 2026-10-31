@@ -100,6 +100,11 @@
 .cmp-badge--bajas          { background: rgba(239,68,68,0.15); color: #ef4444; }
 .cmp-badge--sin_clasificar { background: rgba(148,163,184,0.15); color: #94a3b8; }
 
+.cmp-wa { font-size: 0.68rem; font-weight: 700; margin-left: 4px; }
+.cmp-wa--si  { color: #22c55e; }
+.cmp-wa--no  { color: #ef4444; }
+.cmp-wa--sin { color: #888; }
+
 .cmp-preview {
   border: 1px solid #3a3020;
   background: rgba(245,200,66,0.04);

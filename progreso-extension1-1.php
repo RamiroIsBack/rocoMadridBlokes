@@ -4136,7 +4136,7 @@ function blokes_ensure_campanas_tables() {
         baja_mensajes       tinyint(1)    NOT NULL DEFAULT 0,
         baja_mensajes_fecha datetime      NULL,
         baja_mensajes_nota  text          NOT NULL,
-        optin_whatsapp      tinyint(1)    NOT NULL DEFAULT 0,
+        optin_whatsapp      varchar(5)    NULL     DEFAULT NULL,
         optin_fecha         datetime      NULL,
         optin_canal         varchar(30)   NOT NULL DEFAULT '',
         optin_texto         text          NOT NULL,
@@ -4172,6 +4172,15 @@ function blokes_ensure_campanas_tables() {
         PRIMARY KEY (id),
         UNIQUE KEY campana_contacto (campana_id, contacto_id)
     ) {$charset};");
+
+    // Migración única 0/1 → 'si'/NULL (31/10): antes de los tres estados, "0" solo significaba
+    // "sin preguntar todavía", nunca un "no" expreso — así que se convierte en NULL, no en 'no'.
+    if (!get_option('blokes_optin_whatsapp_tres_estados')) {
+        global $wpdb;
+        $wpdb->query("UPDATE " . blokes_contactos_table() . " SET optin_whatsapp = 'si' WHERE optin_whatsapp = '1'");
+        $wpdb->query("UPDATE " . blokes_contactos_table() . " SET optin_whatsapp = NULL WHERE optin_whatsapp = '0' OR optin_whatsapp = ''");
+        update_option('blokes_optin_whatsapp_tres_estados', 1, false);
+    }
 }
 
 // Última suscripción relevante de cada teléfono: gana la más "fuerte" (en vigor > de baja a
@@ -4200,22 +4209,29 @@ function blokes_campanas_externos_por_telefono() {
     return $por_tel;
 }
 
-// Consentimiento de WhatsApp (31/10, fase b): se registra en dos sitios — el user meta (si hay
-// un usuario de WordPress detrás) y la fila de `wp_blokes_contactos` por teléfono (para que
-// Campañas lo vea sin depender de que esa persona tenga cuenta). $telefono puede venir vacío
-// (p. ej. un usuario sin billing_phone); en ese caso solo se guarda en el user meta.
+// Consentimiento de WhatsApp, con TRES estados (31/10, Ramiro 17:17): null = sin preguntar ·
+// 'si' · 'no'. No marcar la casilla del checkout no es un "no" — sigue null, solo es "no" si lo
+// dice expresamente (o pide BAJA). Se registra en dos sitios — el user meta (si hay un usuario
+// de WordPress detrás) y la fila de `wp_blokes_contactos` por teléfono (para que Campañas lo vea
+// sin depender de que esa persona tenga cuenta). $telefono puede venir vacío (p. ej. un usuario
+// sin billing_phone); en ese caso solo se guarda en el user meta.
 // El contacto solo guarda el estado ACTUAL (se sobrescribe en cada alta/retirada); el histórico
 // completo — cuándo y con qué texto se dio o se retiró cada vez — queda aparte en
 // `blokes_gestion_log` (RGPD: tiene que poder reconstruirse aunque hoy esté retirado).
 function blokes_registrar_optin_whatsapp($telefono, $user_id, $valor, $canal, $texto, $quien, $nombre_si_nuevo = '') {
+    $valor = in_array($valor, array('si', 'no'), true) ? $valor : null;
     $tel = blokes_externos_normaliza_telefono((string) $telefono);
     $ahora = current_time('mysql');
 
     $antes_user = $user_id ? get_user_meta($user_id, 'optin_whatsapp', true) : null;
     if ($user_id) {
-        update_user_meta($user_id, 'optin_whatsapp', $valor ? '1' : '0');
-        update_user_meta($user_id, 'optin_whatsapp_fecha', $ahora);
-        update_user_meta($user_id, 'optin_whatsapp_canal', $canal);
+        if ($valor) {
+            update_user_meta($user_id, 'optin_whatsapp', $valor);
+            update_user_meta($user_id, 'optin_whatsapp_fecha', $ahora);
+            update_user_meta($user_id, 'optin_whatsapp_canal', $canal);
+        } else {
+            delete_user_meta($user_id, 'optin_whatsapp');
+        }
     }
 
     $antes_contacto = null;
@@ -4225,9 +4241,9 @@ function blokes_registrar_optin_whatsapp($telefono, $user_id, $valor, $canal, $t
         $existente = $wpdb->get_row($wpdb->prepare(
             "SELECT id, optin_whatsapp FROM " . blokes_contactos_table() . " WHERE telefono = %s", $tel
         ), ARRAY_A);
-        $antes_contacto = $existente ? (bool) $existente['optin_whatsapp'] : null;
+        $antes_contacto = $existente ? $existente['optin_whatsapp'] : null;
         $campos = array(
-            'optin_whatsapp' => $valor ? 1 : 0, 'optin_fecha' => $ahora, 'optin_canal' => $canal,
+            'optin_whatsapp' => $valor, 'optin_fecha' => $ahora, 'optin_canal' => $canal,
             'optin_texto' => $texto, 'optin_quien' => $quien, 'updated_at' => $ahora,
         );
         if ($existente) {
@@ -4241,7 +4257,7 @@ function blokes_registrar_optin_whatsapp($telefono, $user_id, $valor, $canal, $t
     }
 
     blokes_gestion_log(0, 'optin_whatsapp',
-        array('optinWhatsapp' => $antes_contacto ?? ($antes_user === '1')),
+        array('optinWhatsapp' => $antes_contacto ?? ($antes_user ?: null)),
         array('optinWhatsapp' => $valor),
         array('telefono' => $tel, 'userId' => $user_id, 'canal' => $canal, 'texto' => $texto, 'quien' => $quien)
     );
@@ -4271,9 +4287,9 @@ function blokes_save_optin_whatsapp_checkout($order, $data) {
 }
 add_action('woocommerce_checkout_order_processed', 'blokes_registrar_optin_whatsapp_checkout', 20, 3);
 function blokes_registrar_optin_whatsapp_checkout($order_id, $posted_data, $order) {
-    if (!$order || $order->get_meta('_optin_whatsapp') !== '1') return; // RGPD: no registrar nada si no lo marcó, ni siquiera "no"
+    if (!$order || $order->get_meta('_optin_whatsapp') !== '1') return; // RGPD: no marcada = sigue "sin preguntar" (null), nunca se registra como "no"
     blokes_registrar_optin_whatsapp(
-        $order->get_billing_phone(), $order->get_customer_id(), true, 'checkout',
+        $order->get_billing_phone(), $order->get_customer_id(), 'si', 'checkout',
         BLOKES_OPTIN_WHATSAPP_TEXTO, 'checkout pedido #' . $order_id,
         trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name())
     );
@@ -4414,7 +4430,7 @@ function blokes_campanas_contacto_fila($c, $subs_por_tel, $externos_por_tel) {
     return array(
         'id' => intval($c['id']), 'telefono' => $tel, 'nombres' => $nombres, 'saludo' => $c['saludo'] ?? '', 'tipo' => $c['tipo'],
         'origen' => $c['origen'], 'email' => $c['email'], 'notas' => $c['notas'],
-        'bajaMensajes' => (bool) $c['baja_mensajes'], 'optinWhatsapp' => (bool) $c['optin_whatsapp'],
+        'bajaMensajes' => (bool) $c['baja_mensajes'], 'optinWhatsapp' => $c['optin_whatsapp'] ?: null,
         'lista' => $c['baja_mensajes'] ? 'bajas' : blokes_campanas_clasificar($tel, $subs_por_tel, $externos_por_tel, $c),
     );
 }
@@ -4432,15 +4448,18 @@ function superadmin_campanas_listar_contactos($request) {
     $rows = $wpdb->get_results("SELECT * FROM " . blokes_contactos_table() . " ORDER BY updated_at DESC", ARRAY_A);
     $out  = array();
     $resumen = array('actuales' => 0, 'nuevos' => 0, 'en_espera' => 0, 'antiguos' => 0, 'bajas' => 0, 'sin_clasificar' => 0);
+    // Consentimiento de WhatsApp (tres estados), aparte de la lista: sí / no / sin preguntar.
+    $resumenOptin = array('si' => 0, 'no' => 0, 'sin_preguntar' => 0);
     foreach ($rows as $c) {
         $fila = blokes_campanas_contacto_fila($c, $subs_por_tel, $externos_por_tel);
         $clave = $fila['lista'] ?: 'sin_clasificar';
         $resumen[$clave] = ($resumen[$clave] ?? 0) + 1;
+        $resumenOptin[$fila['optinWhatsapp'] ?: 'sin_preguntar']++;
         if ($lista !== 'all' && $clave !== $lista) continue;
         if ($tipo !== 'all' && $fila['tipo'] !== $tipo) continue;
         $out[] = $fila;
     }
-    return rest_ensure_response(array('success' => true, 'data' => array('contactos' => $out, 'resumen' => $resumen)));
+    return rest_ensure_response(array('success' => true, 'data' => array('contactos' => $out, 'resumen' => $resumen, 'resumenOptin' => $resumenOptin)));
 }
 
 // GET /campanas/envios-hoy — para el aviso de ritmo (WhatsApp bloquea números que mandan
@@ -4561,7 +4580,10 @@ function superadmin_campanas_destinatarios($request) {
     $contactos = $wpdb->get_results("SELECT * FROM " . blokes_contactos_table(), ARRAY_A);
     $out = array();
     foreach ($contactos as $c) {
-        if ($c['baja_mensajes']) continue;
+        // "no" o BAJA: fuera de TODAS las campañas, también las manuales por wa.me (oposición a
+        // comunicaciones comerciales — Ramiro, 31/10 17:17). "Sin preguntar" (null) sí entra,
+        // porque son clientes/antiguos clientes y esto es envío manual con línea de BAJA.
+        if ($c['baja_mensajes'] || $c['optin_whatsapp'] === 'no') continue;
         $tel   = blokes_externos_normaliza_telefono($c['telefono']);
         $lista = blokes_campanas_clasificar($tel, $subs_por_tel, $externos_por_tel, $c);
         if (!in_array($lista, $listas, true)) continue;
@@ -4584,7 +4606,7 @@ function superadmin_campanas_destinatarios($request) {
         $out[] = array(
             'contactoId' => intval($c['id']), 'telefono' => $tel, 'nombres' => $nombres, 'tipo' => $c['tipo'],
             'mensaje' => blokes_campanas_personalizar($plantilla, $nombres, $campana['remitente'], $c['saludo'] ?? ''),
-            'yaEnVigor' => (bool) $ya_en_vigor,
+            'yaEnVigor' => (bool) $ya_en_vigor, 'optinWhatsapp' => $c['optin_whatsapp'] ?: null,
             'enviado' => $envio && !empty($envio['enviado_at']) ? array('fecha' => $envio['enviado_at'], 'por' => $envio['enviado_por']) : null,
             'respondio' => $envio ? (bool) $envio['respondio'] : false,
             'baja' => $envio ? (bool) $envio['baja'] : false,
@@ -4639,7 +4661,7 @@ function superadmin_campanas_marcar_accion($request) {
         ), array('id' => $contacto_id));
         $contacto = $wpdb->get_row($wpdb->prepare("SELECT telefono FROM " . blokes_contactos_table() . " WHERE id = %d", $contacto_id), ARRAY_A);
         if ($contacto) {
-            blokes_registrar_optin_whatsapp($contacto['telefono'], 0, false, 'respuesta BAJA', '', 'campaña #' . $campana_id);
+            blokes_registrar_optin_whatsapp($contacto['telefono'], 0, 'no', 'respuesta BAJA', '', 'campaña #' . $campana_id);
         }
     }
     return rest_ensure_response(array('success' => true));
@@ -4669,19 +4691,20 @@ function superadmin_gestion_bajas_motivo($request) {
     return rest_ensure_response(array('success' => true, 'data' => $por_mes_motivo));
 }
 
-// POST /gestion/optin-whatsapp — { telefono, valor, nombre? } — para que Eva lo marque desde
-// la ficha de Grupos cuando alguien dice que sí (o retira el consentimiento) en persona o por
-// WhatsApp.
+// POST /gestion/optin-whatsapp — { telefono, valor: 'si'|'no'|null, nombre? } — para que Eva lo
+// marque desde la ficha de Grupos cuando alguien dice que sí o que no (en persona o por
+// WhatsApp), o lo deje en "sin preguntar".
 function superadmin_gestion_optin_whatsapp($request) {
     $body     = $request->get_json_params();
     $telefono = sanitize_text_field((string) ($body['telefono'] ?? ''));
-    $valor    = (bool) ($body['valor'] ?? false);
+    $valor    = sanitize_key((string) ($body['valor'] ?? ''));
+    if (!in_array($valor, array('si', 'no'), true)) $valor = null;
     $nombre   = sanitize_text_field((string) ($body['nombre'] ?? ''));
     if ($telefono === '') return new WP_Error('bad_request', 'Falta el teléfono.', array('status' => 400));
 
     $u = wp_get_current_user();
     blokes_registrar_optin_whatsapp(
-        $telefono, 0, $valor, 'grupos', $valor ? BLOKES_OPTIN_WHATSAPP_TEXTO : '',
+        $telefono, 0, $valor, 'grupos', $valor === 'si' ? BLOKES_OPTIN_WHATSAPP_TEXTO : '',
         'Grupos: ' . ($u ? $u->user_login : ''), $nombre
     );
     return rest_ensure_response(array('success' => true));
@@ -5916,19 +5939,22 @@ function blokes_api_get_profile() {
         'avatarType'      => $av['type'],
         'avatarData'      => $av['data'],
         'profileComplete' => blokes_is_profile_complete($uid),
-        'optinWhatsapp'   => get_user_meta($uid, 'optin_whatsapp', true) === '1',
+        // null = sin preguntar · 'si' · 'no'.
+        'optinWhatsapp'   => get_user_meta($uid, 'optin_whatsapp', true) ?: null,
     ));
 }
 
-// Casilla de WhatsApp en el perfil (31/10, fase b): aparte de guardar perfil (nickname/avatar),
-// para poder marcarla o quitarla cuando quiera sin tocar lo demás.
+// Casilla/diálogo de WhatsApp en el perfil (31/10, fase b; tres estados desde 17:17): aparte de
+// guardar perfil (nickname/avatar), para poder decir que sí, que no, o volver a "sin preguntar"
+// (sin preguntar también sirve para borrar un "no" puesto por error) sin tocar lo demás.
 function blokes_api_save_optin_whatsapp($request) {
     $uid = get_current_user_id();
-    $valor = (bool) $request->get_param('optinWhatsapp');
+    $valor = sanitize_key((string) $request->get_param('optinWhatsapp'));
+    if (!in_array($valor, array('si', 'no'), true)) $valor = null;
     $telefono = get_user_meta($uid, 'billing_phone', true);
     $user = get_userdata($uid);
     blokes_registrar_optin_whatsapp(
-        $telefono, $uid, $valor, 'perfil', $valor ? BLOKES_OPTIN_WHATSAPP_TEXTO : '',
+        $telefono, $uid, $valor, 'perfil', $valor === 'si' ? BLOKES_OPTIN_WHATSAPP_TEXTO : '',
         'perfil propio', $user ? $user->display_name : ''
     );
     return rest_ensure_response(array('success' => true, 'optinWhatsapp' => $valor));

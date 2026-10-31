@@ -976,7 +976,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const [mantenerPausa, setMantenerPausa] = useState(true)
   const [modoBaja, setModoBaja] = useState('fin_mes')
   const [motivoBajaCategoria, setMotivoBajaCategoria] = useState('')
-  const [optinWhatsappValor, setOptinWhatsappValor] = useState(false)
+  const [optinWhatsappValor, setOptinWhatsappValor] = useState(alumno.optinWhatsapp || '')
   const [extNombre, setExtNombre]   = useState(alumno.alumno || '')
   const [extTelefono, setExtTelefono] = useState(alumno.telefono || '')
   const [extDia, setExtDia]         = useState(alumno.externoDia || '')
@@ -1160,10 +1160,13 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
 
             {tipo === 'optin_whatsapp' && (
               <>
-                <p className="sv-note">Marca esto cuando esta persona haya dicho que sí (en persona o por WhatsApp) a recibir avisos y promociones por WhatsApp — o quítalo si pide darse de baja. Teléfono: {alumno.telefono || '—'}.</p>
-                <label className="sv-grp-field" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <input type="checkbox" checked={optinWhatsappValor} onChange={e => setOptinWhatsappValor(e.target.checked)} />
-                  Acepta recibir avisos y promociones por WhatsApp
+                <p className="sv-note">Marca lo que haya dicho esta persona (en persona o por WhatsApp) sobre recibir avisos y promociones por WhatsApp. Teléfono: {alumno.telefono || '—'}.</p>
+                <label className="sv-grp-field">Consentimiento
+                  <select className="sv-tests-select" value={optinWhatsappValor} onChange={e => setOptinWhatsappValor(e.target.value)}>
+                    <option value="">Sin preguntar</option>
+                    <option value="si">Sí, acepta</option>
+                    <option value="no">No, o pidió BAJA</option>
+                  </select>
                 </label>
               </>
             )}

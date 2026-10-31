@@ -12,6 +12,14 @@ const LISTA_LABEL = {
 }
 const CAMPANA_LISTAS = ['actuales', 'nuevos', 'en_espera', 'antiguos']
 
+// Marca de consentimiento de WhatsApp, igual en Contactos y en la lista de envío de una
+// campaña: gris = sin preguntar, verde = sí, rojo = no/BAJA.
+function WaMark({ value }) {
+  const cls = value === 'si' ? 'cmp-wa--si' : value === 'no' ? 'cmp-wa--no' : 'cmp-wa--sin'
+  const label = value === 'si' ? 'Sí' : value === 'no' ? 'No/BAJA' : 'Sin preguntar'
+  return <span className={`cmp-wa ${cls}`} title={`WhatsApp: ${label}`}>(WA)</span>
+}
+
 // Hojas reconocidas del xlsx de campañas (cabecera fija: Nombre (saludo); Nombres en el
 // Excel; Teléfono; Grupos/pestañas; Observaciones; Email; Mensaje; Abrir WhatsApp; Revisado
 // web; Enviado; Respuesta/BAJA). "Sin teléfono" y "LEEME" no se importan como contactos.
@@ -157,7 +165,7 @@ function UploadContactsPanel({ onImported, onPlantillasSugeridas }) {
 function ContactosPanel({ onPlantillasSugeridas }) {
   const [lista, setLista]       = useState('all')
   const [tipo, setTipo]         = useState('all')
-  const [soloOptin, setSoloOptin] = useState(false)
+  const [soloOptin, setSoloOptin] = useState('all')
   const [data, setData]         = useState(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(null)
@@ -198,10 +206,12 @@ function ContactosPanel({ onPlantillasSugeridas }) {
           <option value="menor">Menores</option>
         </select>
         {data && (
-          <label className="cmp-check">
-            <input type="checkbox" checked={soloOptin} onChange={e => setSoloOptin(e.target.checked)} />
-            Solo con consentimiento WhatsApp ({data.contactos.filter(c => c.optinWhatsapp).length})
-          </label>
+          <select className="cmp-select" value={soloOptin} onChange={e => setSoloOptin(e.target.value)}>
+            <option value="all">Consentimiento: todos</option>
+            <option value="si">Sí ({data.resumenOptin?.si || 0})</option>
+            <option value="no">No / BAJA ({data.resumenOptin?.no || 0})</option>
+            <option value="sin_preguntar">Sin preguntar ({data.resumenOptin?.sin_preguntar || 0})</option>
+          </select>
         )}
       </div>
 
@@ -211,17 +221,17 @@ function ContactosPanel({ onPlantillasSugeridas }) {
         <div className="cmp-table-wrap">
           <table className="cmp-table">
             <thead>
-              <tr><th>Teléfono</th><th>Nombres</th><th>Tipo</th><th>Lista</th><th>Origen</th><th>Consiente</th></tr>
+              <tr><th>Teléfono</th><th>Nombres</th><th>Tipo</th><th>Lista</th><th>Origen</th><th>WhatsApp</th></tr>
             </thead>
             <tbody>
-              {data.contactos.filter(c => !soloOptin || c.optinWhatsapp).map(c => (
+              {data.contactos.filter(c => soloOptin === 'all' || (c.optinWhatsapp || 'sin_preguntar') === soloOptin).map(c => (
                 <tr key={c.id}>
                   <td>{c.telefono}</td>
                   <td>{c.nombres.join(', ')}</td>
                   <td>{c.tipo}</td>
                   <td><span className={`cmp-badge cmp-badge--${c.lista || 'sin_clasificar'}`}>{LISTA_LABEL[c.lista || 'sin_clasificar']}</span></td>
                   <td className="cmp-muted">{c.origen}</td>
-                  <td>{c.optinWhatsapp ? '✓' : <span className="cmp-muted">—</span>}</td>
+                  <td><WaMark value={c.optinWhatsapp} /></td>
                 </tr>
               ))}
             </tbody>
@@ -383,7 +393,7 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
             {visibles.map(d => (
               <tr key={d.contactoId}>
                 <td>{d.telefono}</td>
-                <td>{d.nombres.join(', ')}</td>
+                <td>{d.nombres.join(', ')} <WaMark value={d.optinWhatsapp} /></td>
                 <td className="cmp-mensaje">{d.mensaje}</td>
                 <td>
                   {d.apuntado && <span className="cmp-badge cmp-badge--actuales">Se apuntó</span>}
