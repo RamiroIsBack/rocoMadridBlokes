@@ -3371,6 +3371,7 @@ function superadmin_gestion_grupos($request) {
     $all    = blokes_get_all_subscription_data();
     $grupos = array();
     $cobros_manuales = blokes_cobros_manuales_todos(); // efectivo apuntado desde "Marcar cobrado", sin WooCommerce
+    $optin_por_tel = blokes_optin_por_telefono(); // marca (WA) junto al nombre
     $hoy_ym = date('Y-m');
 
     foreach ($all as $sub) {
@@ -3488,6 +3489,7 @@ function superadmin_gestion_grupos($request) {
             'subId'       => intval($sub['id']),
             'alumno'      => $alumno_nombre,
             'telefono'    => $telefono,
+            'optinWhatsapp' => $telefono ? ($optin_por_tel[blokes_externos_normaliza_telefono($telefono)] ?? null) : null,
             'dias'        => count($dias_sub) ?: 1,
             'estado'      => $estado,
             'enVigor'     => $en_vigor,
@@ -3528,6 +3530,7 @@ function superadmin_gestion_grupos($request) {
         $persona_key_ext = 'ext' . $ext['id'];
         $grupos[$gkey_ext]['personas'][$persona_key_ext][] = array(
             'subId' => 'ext-' . $ext['id'], 'alumno' => $ext['nombre'], 'telefono' => $ext['telefono'],
+            'optinWhatsapp' => $ext['telefono'] ? ($optin_por_tel[blokes_externos_normaliza_telefono($ext['telefono'])] ?? null) : null,
             'dias' => 1, 'estado' => 'externo', 'enVigor' => true, 'pausaMotivo' => '', 'pausaHasta' => '',
             'manual' => true, 'importeCatalogo' => 0, 'exento' => (bool) $ext['exento'], 'pagos' => $pagos_ext,
             'pendiente' => null, 'notas' => $ext['notas'], 'sinNombre' => false, 'esExterno' => true,
@@ -4213,6 +4216,21 @@ function blokes_campanas_externos_por_telefono() {
     foreach (blokes_externos_todos() as $e) {
         $tel = blokes_externos_normaliza_telefono($e['telefono'] ?? '');
         if ($tel !== '') $por_tel[$tel] = $e;
+    }
+    return $por_tel;
+}
+
+// Teléfono → consentimiento de WhatsApp ('si'/'no'/null), en una sola consulta — para la marca
+// (WA) de Grupos (31/10, NOTAS_PARA_CODE_grupos_como_excel.md) sin mirar la tabla de contactos
+// fila a fila.
+function blokes_optin_por_telefono() {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $por_tel = array();
+    $rows = $wpdb->get_results("SELECT telefono, optin_whatsapp FROM " . blokes_contactos_table() . " WHERE optin_whatsapp IS NOT NULL", ARRAY_A);
+    foreach ($rows as $r) {
+        $tel = blokes_externos_normaliza_telefono($r['telefono']);
+        if ($tel !== '') $por_tel[$tel] = $r['optin_whatsapp'];
     }
     return $por_tel;
 }

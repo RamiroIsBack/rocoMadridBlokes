@@ -1343,6 +1343,19 @@ const MES_CORTO_GRP = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', '
 const mesLabelGrp = ym => { const [y, m] = ym.split('-'); return `${MES_CORTO_GRP[Number(m) - 1]} ${y.slice(2)}` }
 const PAGO_PENDIENTE = new Set(['pending', 'on-hold', 'failed'])
 
+// Marca de consentimiento de WhatsApp junto al nombre: gris = sin preguntar, verde = sí, rojo =
+// no/BAJA. Al pulsarla abre el mismo diálogo de "Consentimiento WhatsApp" (Ramiro, 31/10 17:17).
+function WaMark({ alumno, onClick }) {
+  const v = alumno.optinWhatsapp
+  const cls = v === 'si' ? 'sv-wa--si' : v === 'no' ? 'sv-wa--no' : 'sv-wa--sin'
+  const label = v === 'si' ? 'Sí' : v === 'no' ? 'No/BAJA' : 'Sin preguntar'
+  return (
+    <button type="button" className={`sv-wa ${cls}`} title={`WhatsApp: ${label} — pulsa para cambiar`} onClick={e => { e.stopPropagation(); onClick() }}>
+      (WA)
+    </button>
+  )
+}
+
 function GruposTab() {
   const { data, loading, error, refetch } = useGestionGrupos(4)
   const [grupoKey, setGrupoKey] = useState('')
@@ -1671,6 +1684,7 @@ function GruposTab() {
                 <tr key={a.subId}>
                   <td>
                     {a.alumno || <span className="sv-ot-muted">—</span>}
+                    {a.telefono && <WaMark alumno={a} onClick={() => setAccion({ alumno: a, tipo: 'optin_whatsapp' })} />}
                     {a.sinNombre && <span className="sv-to-warn-txt" title="No es un nombre real: es el usuario de la cuenta (sin dirección de facturación). Pulsa ⋯ → «Editar nombre/teléfono» para arreglarlo."> ⚠ no es nombre real</span>}
                     {a.exento && <span title="Exento/socio: no se le pide cobro">*</span>}
                     {a.otrasSubs?.length > 0 && (

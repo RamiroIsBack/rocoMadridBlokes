@@ -927,6 +927,20 @@
 .sv-to-bad      { color: #f87171 !important; font-weight: 700; }
 .sv-to-warn-txt { color: #f5c842 !important; }
 
+.sv-wa {
+  background: none;
+  border: none;
+  font-size: 0.68rem;
+  font-weight: 700;
+  margin-left: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+}
+.sv-wa--si  { color: #22c55e; }
+.sv-wa--no  { color: #ef4444; }
+.sv-wa--sin { color: #888; }
+
 .sv-to-timeline-wrap {
   overflow-x: auto;
   margin-bottom: 8px;
