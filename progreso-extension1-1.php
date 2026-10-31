@@ -3446,6 +3446,34 @@ function superadmin_gestion_grupos($request) {
         }
         if ($pendiente) unset($pendiente['ts']);
 
+        // Trimestrales y anuales (Ramiro, 31/10 17:11): un pago cubre varios meses de golpe, así
+        // que los meses siguientes al del cobro (hasta el que viene antes de la próxima
+        // renovación) se marcan "cubierto por" ese pago, no "—". Antes de la fecha de renovación
+        // nunca hay pendiente de verdad (no hay pedido sin pagar), así que esto es solo para que
+        // la tabla no parezca que esos meses no se pagaron.
+        $meses_por_ciclo = 1;
+        $periodo_fact = $sub_obj->get_billing_period();
+        $intervalo_fact = max(1, intval($sub_obj->get_billing_interval()));
+        if ($periodo_fact === 'year') $meses_por_ciclo = $intervalo_fact * 12;
+        elseif ($periodo_fact === 'month') $meses_por_ciclo = $intervalo_fact;
+        if ($meses_por_ciclo > 1) {
+            $meses_idx = array_values($meses);
+            foreach ($meses_idx as $idx => $ym) {
+                if (empty($pagos[$ym]) || ($pagos[$ym]['estadoPedido'] ?? '') !== 'completed' || !empty($pagos[$ym]['cubierto'])) continue;
+                for ($k = 1; $k < $meses_por_ciclo; $k++) {
+                    if (!isset($meses_idx[$idx + $k])) break;
+                    $ym_cubierto = $meses_idx[$idx + $k];
+                    if (!empty($pagos[$ym_cubierto])) continue; // ya tiene su propio registro: no se pisa
+                    $pagos[$ym_cubierto] = array(
+                        'cubierto' => true, 'cubiertoPor' => $ym,
+                        'importe' => $pagos[$ym]['importe'], 'metodo' => $pagos[$ym]['metodo'], 'fecha' => $pagos[$ym]['fecha'],
+                        'tipo' => $meses_por_ciclo === 3 ? 'TRI' : ($meses_por_ciclo === 12 ? 'ANUAL' : null),
+                        'estadoPedido' => 'completed',
+                    );
+                }
+            }
+        }
+
         // Fusiona los cobros en efectivo apuntados a mano (sin WooCommerce): ganan sobre un
         // pedido de la web para ese mes, y si hay uno de este mes, ya no hay nada "pendiente"
         // aunque quede un pedido viejo sin pagar colgando.
@@ -3739,12 +3767,13 @@ function blokes_ensure_externos_tables() {
         PRIMARY KEY (id)
     ) {$charset};");
     dbDelta("CREATE TABLE " . blokes_externos_pagos_table() . " (
-        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-        externo_id  bigint(20) UNSIGNED NOT NULL,
-        periodo     varchar(7)          NOT NULL,
-        importe     decimal(10,2)       NOT NULL,
-        metodo      varchar(30)         NOT NULL DEFAULT '',
-        fecha       date                NOT NULL,
+        id           bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        externo_id   bigint(20) UNSIGNED NOT NULL,
+        periodo      varchar(7)          NOT NULL,
+        importe      decimal(10,2)       NOT NULL,
+        metodo       varchar(30)         NOT NULL DEFAULT '',
+        fecha        date                NOT NULL,
+        cubre_meses  tinyint(2) UNSIGNED NOT NULL DEFAULT 1,
         PRIMARY KEY (id),
         UNIQUE KEY externo_periodo (externo_id, periodo)
     ) {$charset};");
@@ -3811,17 +3840,34 @@ function blokes_externos_paga_por_web($pagos, $periodo_sep, $periodo_oct) {
     return false;
 }
 
-// Todos los externos activos, con sus pagos anidados por periodo (YYYY-MM).
+// Todos los externos activos, con sus pagos anidados por periodo (YYYY-MM). Un pago con
+// `cubre_meses` > 1 (trimestral/anual, "cubre hasta" al marcar cobrado) añade también los meses
+// siguientes como "cubierto por" ese pago, igual que las suscripciones trimestrales/anuales de
+// la web (Ramiro, 31/10 17:11).
 function blokes_externos_todos() {
     blokes_ensure_externos_tables();
     global $wpdb;
     $filas = $wpdb->get_results("SELECT * FROM " . blokes_externos_table() . " WHERE activo = 1", ARRAY_A);
-    $pagos_rows = $wpdb->get_results("SELECT * FROM " . blokes_externos_pagos_table(), ARRAY_A);
+    $pagos_rows = $wpdb->get_results("SELECT * FROM " . blokes_externos_pagos_table() . " ORDER BY periodo ASC", ARRAY_A);
     $pagos_por_externo = array();
     foreach ($pagos_rows as $p) {
-        $pagos_por_externo[$p['externo_id']][$p['periodo']] = array(
+        $periodo = $p['periodo'];
+        $pagos_por_externo[$p['externo_id']][$periodo] = array(
             'importe' => floatval($p['importe']), 'metodo' => $p['metodo'], 'fecha' => date('d/m/Y', strtotime($p['fecha'])),
         );
+        $cubre = max(1, intval($p['cubre_meses'] ?? 1));
+        if ($cubre > 1) {
+            $dt = DateTime::createFromFormat('Y-m-d', $periodo . '-01');
+            for ($k = 1; $k < $cubre; $k++) {
+                $ym_cubierto = (clone $dt)->modify("+{$k} months")->format('Y-m');
+                if (isset($pagos_por_externo[$p['externo_id']][$ym_cubierto])) continue; // ya tiene su propio pago
+                $pagos_por_externo[$p['externo_id']][$ym_cubierto] = array(
+                    'cubierto' => true, 'cubiertoPor' => $periodo,
+                    'importe' => floatval($p['importe']), 'metodo' => $p['metodo'], 'fecha' => date('d/m/Y', strtotime($p['fecha'])),
+                    'tipo' => $cubre === 3 ? 'TRI' : ($cubre === 12 ? 'ANUAL' : null),
+                );
+            }
+        }
     }
     foreach ($filas as &$f) {
         $f['pagos'] = $pagos_por_externo[$f['id']] ?? array();
@@ -3963,12 +4009,15 @@ function superadmin_gestion_externos_pago($request) {
     $importe = floatval($body['importe'] ?? 0);
     $metodo  = blokes_gestion_metodo_label(sanitize_text_field((string) ($body['metodo'] ?? '')));
     $fecha   = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fecha'] ?? '')) ? $body['fecha'] : current_time('Y-m-d');
+    // "Cubre hasta" (trimestral/anual): cuántos meses cubre este pago, empezando por $periodo.
+    $cubre_meses = intval($body['cubreMeses'] ?? 1);
+    if (!in_array($cubre_meses, array(1, 3, 12), true)) $cubre_meses = 1;
     $wpdb->query($wpdb->prepare(
-        "INSERT INTO " . blokes_externos_pagos_table() . " (externo_id, periodo, importe, metodo, fecha) VALUES (%d, %s, %f, %s, %s)
-         ON DUPLICATE KEY UPDATE importe = %f, metodo = %s, fecha = %s",
-        $id, $periodo, $importe, $metodo, $fecha, $importe, $metodo, $fecha
+        "INSERT INTO " . blokes_externos_pagos_table() . " (externo_id, periodo, importe, metodo, fecha, cubre_meses) VALUES (%d, %s, %f, %s, %s, %d)
+         ON DUPLICATE KEY UPDATE importe = %f, metodo = %s, fecha = %s, cubre_meses = %d",
+        $id, $periodo, $importe, $metodo, $fecha, $cubre_meses, $importe, $metodo, $fecha, $cubre_meses
     ));
-    blokes_gestion_log($id, 'externo_pago', null, array('periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo));
+    blokes_gestion_log($id, 'externo_pago', null, array('periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo, 'cubreMeses' => $cubre_meses));
     return rest_ensure_response(array('success' => true));
 }
 

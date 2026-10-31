@@ -941,6 +941,12 @@
 .sv-wa--no  { color: #ef4444; }
 .sv-wa--sin { color: #888; }
 
+.sv-pago-cubierto {
+  color: #22c55e;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 .sv-to-timeline-wrap {
   overflow-x: auto;
   margin-bottom: 8px;

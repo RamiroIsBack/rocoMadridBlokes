@@ -986,6 +986,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const [extHorario, setExtHorario] = useState(alumno.externoHorario || '')
   const [extEdad, setExtEdad]       = useState(alumno.externoEdad || 'Adultos')
   const [extPeriodo, setExtPeriodo] = useState(hoyISO().slice(0, 7))
+  const [extCubreMeses, setExtCubreMeses] = useState(1)
   const [grupoNuevo, setGrupoNuevo] = useState('') // "dia|horario|edad" del <select>
   const { clases: catalogoClases } = useClases(tipo === 'cambiar_grupo')
   // Marcar cobrado y cambiar de grupo pueden generar factura/cambio de precio de verdad: por
@@ -1037,7 +1038,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
         res = await gestionCambiarGrupo({ sub_id: alumno.subId, dia, horario, edad, simular: sim })
       } else if (tipo === 'ext_cobrar') {
         if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
-        res = await gestionExternoPago(alumno.externoId, { periodo: extPeriodo, importe: Number(importe), metodo, fecha })
+        res = await gestionExternoPago(alumno.externoId, { periodo: extPeriodo, importe: Number(importe), metodo, fecha, cubreMeses: Number(extCubreMeses) })
       } else if (tipo === 'ext_editar') {
         if (!extNombre.trim()) throw new Error('Pon el nombre.')
         if (!extDia.trim() && !extHorario.trim()) throw new Error('Pon el grupo (día y/u horario).')
@@ -1241,6 +1242,13 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
                 <label className="sv-grp-field">Fecha
                   <input className="sv-tests-input" type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
                 </label>
+                <label className="sv-grp-field">Cubre hasta
+                  <select className="sv-tests-select" value={extCubreMeses} onChange={e => setExtCubreMeses(e.target.value)}>
+                    <option value={1}>1 mes (solo este)</option>
+                    <option value={3}>Trimestre (este mes + 2)</option>
+                    <option value={12}>Año (este mes + 11)</option>
+                  </select>
+                </label>
               </>
             )}
 
@@ -1398,7 +1406,9 @@ function GruposTab() {
         k.enEspera++
       }
       const pago = mesActual ? a.pagos[mesActual] : null
-      if (pago && !PAGO_PENDIENTE.has(pago.estadoPedido)) k.cobradoMes += pago.importe
+      // "cubierto" = mes ya pagado por un trimestral/anual de un mes anterior, no un cobro
+      // nuevo de este mes: no se suma otra vez (si no, se contaría el mismo pago 2-3 veces).
+      if (pago && !pago.cubierto && !PAGO_PENDIENTE.has(pago.estadoPedido)) k.cobradoMes += pago.importe
       if (a.pendiente && !a.exento && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes') {
         k.pendienteMes++
         k.pendienteImporte += a.pendiente.importe
@@ -1697,6 +1707,13 @@ function GruposTab() {
                   {meses.map(m => {
                     const p = a.pagos[m]
                     if (!p) return <td key={m} className="sv-ot-muted">—</td>
+                    if (p.cubierto) {
+                      return (
+                        <td key={m} className="sv-pago-cubierto" title={`Cubierto por el pago del ${p.fecha} (${fmtEur(p.importe)}, ${p.metodo})`}>
+                          Pagado ({p.tipo || '…'})
+                        </td>
+                      )
+                    }
                     const pendiente = PAGO_PENDIENTE.has(p.estadoPedido)
                     return (
                       <td key={m} className={pendiente ? 'sv-to-bad' : ''} title={`${p.metodo} · ${p.fecha}`}>
