@@ -3820,9 +3820,15 @@ function blokes_externos_buscar_en_web($telefono, $nombre, $dia = '', $horario =
     $edad_f      = blokes_normalizar_edad($edad) ?: 'Adultos';
     $all         = blokes_get_all_subscription_data();
     $familiar    = null;
+    // Yoga y Pilates son actividades propias, no un grupo de escalada: alguien con una
+    // suscripción de escalada puede, aparte, ir a yoga por su cuenta (apuntado en el Excel,
+    // sin suscripción propia de yoga) — no por eso "ya está en la web" para yoga. Sin esto, su
+    // suscripción de escalada confirmaba por nombre/teléfono sin mirar la actividad.
+    $actividad_exclusiva = in_array($dia_f, array('Yoga', 'Pilates'), true) ? $dia_f : null;
 
     foreach ($all as $s) {
         if (!in_array($s['status'] ?? '', array('active', 'on-hold', 'pending'), true)) continue;
+        if ($actividad_exclusiva && ($s['producto'] ?? '') !== $actividad_exclusiva) continue;
         $sub_obj = wcs_get_subscription(intval($s['id']));
         if (!$sub_obj) continue;
 
@@ -4182,34 +4188,47 @@ function blokes_campanas_externos_por_telefono() {
 // un usuario de WordPress detrás) y la fila de `wp_blokes_contactos` por teléfono (para que
 // Campañas lo vea sin depender de que esa persona tenga cuenta). $telefono puede venir vacío
 // (p. ej. un usuario sin billing_phone); en ese caso solo se guarda en el user meta.
+// El contacto solo guarda el estado ACTUAL (se sobrescribe en cada alta/retirada); el histórico
+// completo — cuándo y con qué texto se dio o se retiró cada vez — queda aparte en
+// `blokes_gestion_log` (RGPD: tiene que poder reconstruirse aunque hoy esté retirado).
 function blokes_registrar_optin_whatsapp($telefono, $user_id, $valor, $canal, $texto, $quien, $nombre_si_nuevo = '') {
     $tel = blokes_externos_normaliza_telefono((string) $telefono);
     $ahora = current_time('mysql');
 
+    $antes_user = $user_id ? get_user_meta($user_id, 'optin_whatsapp', true) : null;
     if ($user_id) {
         update_user_meta($user_id, 'optin_whatsapp', $valor ? '1' : '0');
         update_user_meta($user_id, 'optin_whatsapp_fecha', $ahora);
         update_user_meta($user_id, 'optin_whatsapp_canal', $canal);
     }
 
-    if ($tel === '') return;
-    blokes_ensure_campanas_tables();
-    global $wpdb;
-    $existente = $wpdb->get_row($wpdb->prepare(
-        "SELECT id FROM " . blokes_contactos_table() . " WHERE telefono = %s", $tel
-    ), ARRAY_A);
-    $campos = array(
-        'optin_whatsapp' => $valor ? 1 : 0, 'optin_fecha' => $ahora, 'optin_canal' => $canal,
-        'optin_texto' => $texto, 'optin_quien' => $quien, 'updated_at' => $ahora,
-    );
-    if ($existente) {
-        $wpdb->update(blokes_contactos_table(), $campos, array('id' => $existente['id']));
-    } else {
-        $wpdb->insert(blokes_contactos_table(), array_merge($campos, array(
-            'telefono' => $tel, 'nombres' => wp_json_encode(array_filter(array($nombre_si_nuevo)) ?: array('(sin nombre)')),
-            'origen' => 'optin', 'created_at' => $ahora,
-        )));
+    $antes_contacto = null;
+    if ($tel !== '') {
+        blokes_ensure_campanas_tables();
+        global $wpdb;
+        $existente = $wpdb->get_row($wpdb->prepare(
+            "SELECT id, optin_whatsapp FROM " . blokes_contactos_table() . " WHERE telefono = %s", $tel
+        ), ARRAY_A);
+        $antes_contacto = $existente ? (bool) $existente['optin_whatsapp'] : null;
+        $campos = array(
+            'optin_whatsapp' => $valor ? 1 : 0, 'optin_fecha' => $ahora, 'optin_canal' => $canal,
+            'optin_texto' => $texto, 'optin_quien' => $quien, 'updated_at' => $ahora,
+        );
+        if ($existente) {
+            $wpdb->update(blokes_contactos_table(), $campos, array('id' => $existente['id']));
+        } else {
+            $wpdb->insert(blokes_contactos_table(), array_merge($campos, array(
+                'telefono' => $tel, 'nombres' => wp_json_encode(array_filter(array($nombre_si_nuevo)) ?: array('(sin nombre)')),
+                'origen' => 'optin', 'created_at' => $ahora,
+            )));
+        }
     }
+
+    blokes_gestion_log(0, 'optin_whatsapp',
+        array('optinWhatsapp' => $antes_contacto ?? ($antes_user === '1')),
+        array('optinWhatsapp' => $valor),
+        array('telefono' => $tel, 'userId' => $user_id, 'canal' => $canal, 'texto' => $texto, 'quien' => $quien)
+    );
 }
 
 const BLOKES_OPTIN_WHATSAPP_TEXTO = 'Acepto recibir avisos y promociones de RocoMadrid por WhatsApp. Puedo darme de baja cuando quiera respondiendo BAJA.';
@@ -4225,13 +4244,18 @@ function blokes_render_optin_whatsapp_checkbox() {
         'label' => BLOKES_OPTIN_WHATSAPP_TEXTO, 'required' => false,
     ), WC()->checkout->get_value('optin_whatsapp'));
 }
-add_action('woocommerce_checkout_update_order_meta', 'blokes_save_optin_whatsapp_checkout');
-function blokes_save_optin_whatsapp_checkout($order_id) {
+// HPOS está activado en este sitio (los pedidos no son post de WordPress): guardar el estado en
+// el propio pedido tiene que ir por `$order->update_meta_data()` + `save()` (o, como aquí,
+// dejando que WooCommerce lo guarde solo al crear el pedido), nunca por `update_post_meta()`,
+// que con HPOS no escribe en ningún sitio que WooCommerce luego lea.
+add_action('woocommerce_checkout_create_order', 'blokes_save_optin_whatsapp_checkout', 20, 2);
+function blokes_save_optin_whatsapp_checkout($order, $data) {
     $marcado = !empty($_POST['optin_whatsapp']);
-    update_post_meta($order_id, '_optin_whatsapp', $marcado ? '1' : '0');
-    if (!$marcado) return; // RGPD: no registrar nada si no lo marca, ni siquiera "no"
-    $order = wc_get_order($order_id);
-    if (!$order) return;
+    $order->update_meta_data('_optin_whatsapp', $marcado ? '1' : '0');
+}
+add_action('woocommerce_checkout_order_processed', 'blokes_registrar_optin_whatsapp_checkout', 20, 3);
+function blokes_registrar_optin_whatsapp_checkout($order_id, $posted_data, $order) {
+    if (!$order || $order->get_meta('_optin_whatsapp') !== '1') return; // RGPD: no registrar nada si no lo marcó, ni siquiera "no"
     blokes_registrar_optin_whatsapp(
         $order->get_billing_phone(), $order->get_customer_id(), true, 'checkout',
         BLOKES_OPTIN_WHATSAPP_TEXTO, 'checkout pedido #' . $order_id,
@@ -4590,11 +4614,17 @@ function superadmin_campanas_marcar_accion($request) {
     }
 
     // BAJA: va a la lista global de bajas de mensajes, se respeta en todas las campañas futuras.
+    // También retira el consentimiento de WhatsApp si lo tenía — si el día de mañana se manda
+    // por la API a "quien tiene consentimiento", quien dijo BAJA no puede seguir colándose ahí.
     if ($accion === 'baja') {
         $wpdb->update(blokes_contactos_table(), array(
             'baja_mensajes' => 1, 'baja_mensajes_fecha' => current_time('mysql'),
             'baja_mensajes_nota' => 'Respondió BAJA en campaña #' . $campana_id, 'updated_at' => current_time('mysql'),
         ), array('id' => $contacto_id));
+        $contacto = $wpdb->get_row($wpdb->prepare("SELECT telefono FROM " . blokes_contactos_table() . " WHERE id = %d", $contacto_id), ARRAY_A);
+        if ($contacto) {
+            blokes_registrar_optin_whatsapp($contacto['telefono'], 0, false, 'respuesta BAJA', '', 'campaña #' . $campana_id);
+        }
     }
     return rest_ensure_response(array('success' => true));
 }
