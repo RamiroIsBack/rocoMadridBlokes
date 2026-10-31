@@ -811,6 +811,14 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_cambiar_grupo',
         'permission_callback' => $sa_perm,
     ));
+    // Nombre real y teléfono del alumno, editables desde Grupos sin tocar wp-admin (31/10,
+    // NOTAS_PARA_CODE_grupos_como_excel.md) — para cuando la suscripción se dio de alta sin
+    // dirección de facturación y solo se ve el usuario de la cuenta de WordPress, no un nombre real.
+    register_rest_route('superadmin/v1', '/gestion/editar-alumno', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_editar_alumno',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/externos', array(
         array('methods' => 'GET',  'callback' => 'superadmin_gestion_externos_get',   'permission_callback' => $sa_perm),
         array('methods' => 'POST', 'callback' => 'superadmin_gestion_externos_crear', 'permission_callback' => $sa_perm),
@@ -5254,6 +5262,47 @@ function superadmin_gestion_cambiar_grupo($request) {
     blokes_gestion_log($sub_id, 'cambiar_grupo', $antes, $despues);
 
     return rest_ensure_response(array('success' => true, 'data' => array('subId' => $sub_id, 'antes' => $antes, 'despues' => $despues)));
+}
+
+// Nombre real (facturación) y teléfono del alumno, editable desde Grupos sin tocar wp-admin —
+// para las suscripciones dadas de alta sin dirección de facturación, que solo enseñan el
+// usuario de la cuenta de WordPress, no un nombre real. Actualiza la dirección de facturación de ESTA
+// suscripción (de donde la lee Grupos) y, si hay un usuario detrás, también su perfil, para que
+// el resto de la web (otras suscripciones suyas, WooCommerce) vea lo mismo.
+function superadmin_gestion_editar_alumno($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id    = intval($request->get_param('sub_id'));
+    $nombre    = sanitize_text_field((string) $request->get_param('nombre'));
+    $apellidos = sanitize_text_field((string) $request->get_param('apellidos'));
+    $telefono  = sanitize_text_field((string) $request->get_param('telefono'));
+    if (!$sub_id || ($nombre === '' && $apellidos === '' && $telefono === '')) {
+        return new WP_Error('bad_request', 'Falta sub_id y al menos un dato que cambiar.', array('status' => 400));
+    }
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    $antes = array(
+        'nombre' => $sub->get_billing_first_name(), 'apellidos' => $sub->get_billing_last_name(),
+        'telefono' => $sub->get_billing_phone(),
+    );
+    if ($nombre !== '')    $sub->set_billing_first_name($nombre);
+    if ($apellidos !== '') $sub->set_billing_last_name($apellidos);
+    if ($telefono !== '')  $sub->set_billing_phone(blokes_externos_normaliza_telefono($telefono) ?: $telefono);
+    $sub->save();
+
+    $uid = intval(get_post_meta($sub_id, '_customer_user', true));
+    if ($uid) {
+        if ($nombre !== '')    update_user_meta($uid, 'billing_first_name', $nombre);
+        if ($apellidos !== '') update_user_meta($uid, 'billing_last_name', $apellidos);
+        if ($telefono !== '')  update_user_meta($uid, 'billing_phone', $telefono);
+    }
+
+    $despues = array('nombre' => $sub->get_billing_first_name(), 'apellidos' => $sub->get_billing_last_name(), 'telefono' => $sub->get_billing_phone());
+    blokes_gestion_log($sub_id, 'editar_alumno', $antes, $despues);
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
 function superadmin_classes($request) {

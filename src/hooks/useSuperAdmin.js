@@ -69,6 +69,7 @@ export const gestionFusionar      = body => gestionPost('/gestion/fusionar', bod
 export const gestionExento        = body => gestionPost('/gestion/exento', body)
 export const gestionCambiarGrupo  = body => gestionPost('/gestion/cambiar-grupo', body)
 export const gestionOptinWhatsapp = body => gestionPost('/gestion/optin-whatsapp', body)
+export const gestionEditarAlumno  = body => gestionPost('/gestion/editar-alumno', body)
 
 // 8.4: alumnos que pagan fuera de la web (sin suscripción de WooCommerce).
 export const gestionExternosGet      = ()           => gestionCall('GET', '/gestion/externos')

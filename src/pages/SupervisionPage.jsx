@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp,
+  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
@@ -977,6 +977,9 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const [modoBaja, setModoBaja] = useState('fin_mes')
   const [motivoBajaCategoria, setMotivoBajaCategoria] = useState('')
   const [optinWhatsappValor, setOptinWhatsappValor] = useState(alumno.optinWhatsapp || '')
+  const [editNombre, setEditNombre]     = useState('')
+  const [editApellidos, setEditApellidos] = useState('')
+  const [editTelefono, setEditTelefono] = useState(alumno.telefono || '')
   const [extNombre, setExtNombre]   = useState(alumno.alumno || '')
   const [extTelefono, setExtTelefono] = useState(alumno.telefono || '')
   const [extDia, setExtDia]         = useState(alumno.externoDia || '')
@@ -999,7 +1002,7 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
     exento: alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio',
     cambiar_grupo: 'Cambiar de grupo/horario',
     ext_cobrar: 'Marcar cobrado (fuera de la web)', ext_editar: alumno.externoId ? 'Editar datos' : 'Alta de alumno externo', ext_borrar: 'Eliminar alumno externo',
-    optin_whatsapp: 'Consentimiento WhatsApp',
+    optin_whatsapp: 'Consentimiento WhatsApp', editar_alumno: 'Editar nombre/teléfono',
   }
   const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'dar_de_baja', 'fusionar', 'cambiar_grupo'].includes(tipo)
   const clasesSemanales = (catalogoClases || []).filter(c => c.tipo === 'classes')
@@ -1045,6 +1048,9 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
       } else if (tipo === 'optin_whatsapp') {
         if (!alumno.telefono) throw new Error('Esta persona no tiene teléfono guardado.')
         res = await gestionOptinWhatsapp({ telefono: alumno.telefono, valor: optinWhatsappValor, nombre: alumno.alumno })
+      } else if (tipo === 'editar_alumno') {
+        if (!editNombre.trim() && !editApellidos.trim() && !editTelefono.trim()) throw new Error('Rellena al menos un dato.')
+        res = await gestionEditarAlumno({ sub_id: alumno.subId, nombre: editNombre, apellidos: editApellidos, telefono: editTelefono })
       }
       if (sim) setPreview(res)
       else onDone()
@@ -1167,6 +1173,25 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
                     <option value="si">Sí, acepta</option>
                     <option value="no">No, o pidió BAJA</option>
                   </select>
+                </label>
+              </>
+            )}
+
+            {tipo === 'editar_alumno' && (
+              <>
+                <p className="sv-note">
+                  {alumno.sinNombre
+                    ? 'Esta suscripción no tiene nombre de facturación: se ve el usuario de la cuenta, no un nombre real. Rellena el nombre y apellidos de verdad.'
+                    : `Nombre actual: ${alumno.alumno || '—'}. Deja un campo en blanco para no cambiarlo.`}
+                </p>
+                <label className="sv-grp-field">Nombre
+                  <input className="sv-tests-input" type="text" value={editNombre} onChange={e => setEditNombre(e.target.value)} placeholder="Nombre" />
+                </label>
+                <label className="sv-grp-field">Apellidos
+                  <input className="sv-tests-input" type="text" value={editApellidos} onChange={e => setEditApellidos(e.target.value)} placeholder="Apellidos" />
+                </label>
+                <label className="sv-grp-field">Teléfono
+                  <input className="sv-tests-input" type="text" value={editTelefono} onChange={e => setEditTelefono(e.target.value)} placeholder="Teléfono" />
                 </label>
               </>
             )}
@@ -1305,6 +1330,7 @@ function AccionMenu({ alumno, onPick, onClose }) {
         <button onClick={() => onPick('exento')}>{alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio'}</button>
         <button onClick={() => onPick('cambiar_grupo')}>Cambiar de grupo/horario</button>
         <button onClick={() => onPick('optin_whatsapp')}>Consentimiento WhatsApp</button>
+        <button onClick={() => onPick('editar_alumno')}>Editar nombre/teléfono</button>
         {alumno.otrasSubs?.map(s => (
           <button key={s.subId} onClick={() => onPick('fusionar', s.subId)}>Fusionar — cancelar #{s.subId}</button>
         ))}
@@ -1645,6 +1671,7 @@ function GruposTab() {
                 <tr key={a.subId}>
                   <td>
                     {a.alumno || <span className="sv-ot-muted">—</span>}
+                    {a.sinNombre && <span className="sv-to-warn-txt" title="No es un nombre real: es el usuario de la cuenta (sin dirección de facturación). Pulsa ⋯ → «Editar nombre/teléfono» para arreglarlo."> ⚠ no es nombre real</span>}
                     {a.exento && <span title="Exento/socio: no se le pide cobro">*</span>}
                     {a.otrasSubs?.length > 0 && (
                       <span title={`${a.otrasSubs.length} suscripción(es) antigua(s) colgando en este grupo (duplicado)`}> ⚠</span>
