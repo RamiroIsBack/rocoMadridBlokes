@@ -1828,7 +1828,9 @@ function GruposTab() {
                 <tr key={a.subId}>
                   <td>
                     {a.alumno || <span className="sv-ot-muted">—</span>}
-                    {a.telefono && <WaMark alumno={a} onClick={() => setAccion({ alumno: a, tipo: 'optin_whatsapp' })} />}
+                    {a.telefono
+                      ? <WaMark alumno={a} onClick={() => setAccion({ alumno: a, tipo: 'optin_whatsapp' })} />
+                      : <span className="sv-wa sv-wa--sin" title="No se puede pedir el consentimiento de WhatsApp sin teléfono guardado">(sin tlf)</span>}
                     {a.sinNombre && <span className="sv-to-warn-txt" title="No es un nombre real: es el usuario de la cuenta (sin dirección de facturación). Pulsa ⋯ → «Editar nombre/teléfono» para arreglarlo."> ⚠ no es nombre real</span>}
                     {a.exento && <span title="Exento/socio: no se le pide cobro">*</span>}
                     {a.otrasSubs?.length > 0 && (
