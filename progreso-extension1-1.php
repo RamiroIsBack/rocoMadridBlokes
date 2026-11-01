@@ -97,7 +97,16 @@ function blokes_get_app_role() {
     $real = blokes_get_app_role_real();
     if ($real === 'socio') {
         $ver_como = isset($_SERVER['HTTP_X_BLOKES_VER_COMO']) ? sanitize_key($_SERVER['HTTP_X_BLOKES_VER_COMO']) : '';
-        if (in_array($ver_como, array('gestion', 'profesor'), true)) return $ver_como;
+        if (in_array($ver_como, array('gestion', 'profesor'), true)) {
+            // Respaldo del filtro rest_pre_dispatch: en algunos namespaces (progreso/v1) no
+            // corta la escritura a tiempo, así que lo repetimos aquí dentro, que se llama
+            // desde todos los permission_callback de todos los namespaces sin excepción.
+            $metodo = isset($_SERVER['REQUEST_METHOD']) ? strtoupper($_SERVER['REQUEST_METHOD']) : 'GET';
+            if (in_array($metodo, array('POST', 'PUT', 'PATCH', 'DELETE'), true) && defined('REST_REQUEST') && REST_REQUEST) {
+                wp_send_json(array('code' => 'ver_como_solo_lectura', 'message' => 'Estás en modo "Ver como": vuelve a Socio para cambiar cosas.'), 403);
+            }
+            return $ver_como;
+        }
     }
     return $real;
 }
@@ -665,6 +674,9 @@ add_action('rest_api_init', function() {
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
         'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_week', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)/limpiar-retrasadas-falsas', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_limpiar_retrasadas_falsas', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/assignments/(?P<id>\d+)', array(
         'methods' => 'PUT', 'callback' => 'progreso_equip_update_assignment', 'permission_callback' => $equip_perm,
@@ -8662,7 +8674,14 @@ function progreso_equip_autocrear_semanas() {
     if (!$lead) return;
 
     $hoy = current_time('Y-m-d');
-    $semana_actual = progreso_equip_monday_of($hoy);
+    // "Semana actual" en sábado/domingo no puede ser la que ya terminó (lunes-viernes ya
+    // pasados): en ese caso la "actual" es la del lunes que viene — cowork, 1/11 18:25, un
+    // domingo creó la semana del lunes anterior entera en el pasado, y el barrido la arrastró
+    // como "retrasada" a la semana siguiente sin que esos días hubieran existido nunca.
+    $dow = (int) date('N', strtotime($hoy)); // ISO: 1 = lunes .. 7 = domingo
+    $semana_actual = ($dow >= 6)
+        ? date('Y-m-d', strtotime($hoy) + (8 - $dow) * 86400)
+        : progreso_equip_monday_of($hoy);
     $semana_siguiente = date('Y-m-d', strtotime($semana_actual) + 7 * 86400);
 
     foreach (array($semana_actual, $semana_siguiente) as $monday) {
@@ -9597,10 +9616,11 @@ function progreso_equip_delete_week($request) {
     global $wpdb;
     $week_id = intval($request['id']);
     $force = (bool) $request->get_param('force'); // borrado forzado (limpieza manual de semanas de prueba)
-    $is_test = (bool) $wpdb->get_var($wpdb->prepare(
-        "SELECT is_test FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $week_id
-    ));
-    if ($is_test) $force = true;
+    $semana = $wpdb->get_row($wpdb->prepare(
+        "SELECT is_test, auto FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $week_id
+    ), ARRAY_A);
+    if ($semana && $semana['is_test']) $force = true;
+    $es_auto = $semana && (bool) $semana['auto'];
     $tasks_table = progreso_equip_table('tasks');
     $assignment_ids = $wpdb->get_col($wpdb->prepare(
         "SELECT id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d", $week_id
@@ -9620,7 +9640,11 @@ function progreso_equip_delete_week($request) {
         $task_ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM {$tasks_table} WHERE assignment_id IN ($ph)", ...$assignment_ids));
     }
 
-    if ($force || ($done_tasks === 0 && $blocks_count === 0 && $retrasada_tasks === 0)) {
+    // Una semana creada sola (`auto`) en la que nadie ha hecho nada de verdad se borra del
+    // todo, aunque alguna de sus tareas quedara marcada "retrasada" al arrastrarse hacia otra
+    // semana — eso no es "trabajo perdido", es la propia semana la que no debió crearse así
+    // (cowork, 1/11 18:25).
+    if ($force || ($es_auto && $done_tasks === 0) || ($done_tasks === 0 && $blocks_count === 0 && $retrasada_tasks === 0)) {
         if ($task_ids) {
             // Las tareas de otras semanas que tenían esta semana como destino
             // (retrasada → aquí) vuelven a quedar sueltas, listas para que la
@@ -9642,6 +9666,29 @@ function progreso_equip_delete_week($request) {
 
     $wpdb->update(progreso_equip_table('weeks'), array('archived' => 1), array('id' => $week_id), array('%d'), array('%d'));
     return rest_ensure_response(array('success' => true, 'mode' => 'archived', 'doneTasks' => $done_tasks, 'blocks' => $blocks_count, 'retrasadaTasks' => $retrasada_tasks));
+}
+
+// POST /equipacion/weeks/{id}/limpiar-retrasadas-falsas — arreglo puntual (cowork, 1/11 18:25 y
+// 18:45): el cálculo de "semana actual" en domingo creó una semana ya pasada, y su barrido
+// arrastró tareas a la semana siguiente marcándolas "retrasada ×1" sin que ese retraso hubiera
+// existido nunca. Deja esas tareas (las que no están hechas) como si se hubieran repartido
+// normal esta semana: sin contador de retraso, con su propia fecha como original, sin ninguna
+// referencia a una tarea "de origen" que en realidad nunca debió crearse.
+function progreso_equip_limpiar_retrasadas_falsas($request) {
+    global $wpdb;
+    $week_id = intval($request['id']);
+    $tasks_table = progreso_equip_table('tasks');
+    $assignments_table = progreso_equip_table('assignments');
+    $assignment_ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM {$assignments_table} WHERE week_id = %d", $week_id));
+    if (!$assignment_ids) return new WP_Error('not_found', 'Semana sin asignaciones.', array('status' => 404));
+
+    $afectadas = $wpdb->query(
+        "UPDATE {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id
+         SET t.status = 'pendiente', t.postponed_count = 0, t.original_date = t.task_date,
+             t.moved_to_task_id = NULL, t.original_worker_id = a.worker_id
+         WHERE t.assignment_id IN (" . implode(',', array_map('intval', $assignment_ids)) . ") AND t.done = 0"
+    );
+    return rest_ensure_response(array('success' => true, 'afectadas' => intval($afectadas)));
 }
 
 function progreso_equip_get_today($request) {
