@@ -56,11 +56,13 @@ function detectBasename() {
   return m ? m[1] : (import.meta.env.VITE_ROUTER_BASENAME || '/blokes')
 }
 
+// Verde/azul/rojo oscurecidos para que el número en blanco tenga contraste real (antes
+// #22c55e/#3b82f6/#ef4444 daban 2,28/3,68/3,76:1 — NOTAS_PARA_CODE_contraste.md).
 const COLOR_BUBBLE = {
-  green:  { bg: '#22c55e', text: '#fff' },
-  blue:   { bg: '#3b82f6', text: '#fff' },
+  green:  { bg: '#15803d', text: '#fff' },
+  blue:   { bg: '#2563eb', text: '#fff' },
   yellow: { bg: '#eab308', text: '#1a1a1a' },
-  red:    { bg: '#ef4444', text: '#fff' },
+  red:    { bg: '#dc2626', text: '#fff' },
   black:  { bg: '#1f2937', text: '#fff' },
   blanco: { bg: '#e5e7eb', text: '#1f2937' },
 }

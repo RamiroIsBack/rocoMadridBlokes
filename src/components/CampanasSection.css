@@ -1,19 +1,22 @@
 .cmp-section { margin-top: 10px; }
 .cmp-divider { height: 1px; background: #2a2015; margin: 16px 0; }
 
+/* Campañas vive en el fondo claro de la página: los colores de abajo estaban pensados para
+   fondo oscuro (1,05 a 2,46:1 medidos, NOTAS_PARA_CODE_contraste.md). Recoloreado con los
+   tokens de :root (index.css) — igual aspecto, contraste real. */
 .cmp-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
 .cmp-tab {
   padding: 6px 14px;
   background: none;
   border: 1px solid #3a3020;
-  color: #aaa;
+  color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
   letter-spacing: 0.04em;
   font-family: inherit;
 }
-.cmp-tab--active { border-color: #f5c842; color: #f5c842; }
+.cmp-tab--active { border-color: #f5c842; color: var(--state-warn); }
 
 .cmp-upload { margin-bottom: 8px; }
 .cmp-file-btn {
@@ -23,7 +26,7 @@
   padding: 6px 14px;
   background: none;
   border: 1px solid #3a3020;
-  color: #aaa;
+  color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
@@ -32,14 +35,14 @@
   user-select: none;
   margin-bottom: 8px;
 }
-.cmp-file-btn:hover { border-color: #f5c842; color: #f5c842; }
+.cmp-file-btn:hover { border-color: #f5c842; color: var(--state-warn); }
 
 .cmp-hint  { font-size: 0.7rem; color: #555; margin: 0 0 8px; }
-.cmp-error { color: #ef4444; font-size: 0.78rem; margin: 4px 0 8px; }
-.cmp-warn  { color: #f5c842; font-size: 0.8rem; margin: 4px 0 10px; background: rgba(245,200,66,0.08); padding: 8px 12px; border-left: 3px solid #f5c842; }
+.cmp-error { color: var(--state-bad); font-size: 0.78rem; margin: 4px 0 8px; }
+.cmp-warn  { color: var(--state-warn); font-size: 0.8rem; margin: 4px 0 10px; background: rgba(245,200,66,0.08); padding: 8px 12px; border-left: 3px solid #f5c842; }
 .cmp-empty { color: #555; font-size: 0.82rem; font-style: italic; }
 .cmp-muted { color: #666; font-size: 0.78rem; }
-.cmp-title { font-size: 0.95rem; color: #f5c842; margin: 10px 0; }
+.cmp-title { font-size: 0.95rem; color: var(--state-warn); margin: 10px 0; }
 
 .cmp-kpis { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .cmp-kpi-btn {
@@ -55,8 +58,8 @@
   font-family: inherit;
 }
 .cmp-kpi-btn--active { border-color: #f5c842; background: rgba(245,200,66,0.06); }
-.cmp-kpi-btn__val { font-size: 1.1rem; font-weight: 700; color: #f5f5f5; }
-.cmp-kpi-btn__lbl { font-size: 0.68rem; color: #999; text-transform: uppercase; letter-spacing: 0.05em; }
+.cmp-kpi-btn__val { font-size: 1.1rem; font-weight: 700; color: var(--color-text-primary); }
+.cmp-kpi-btn__lbl { font-size: 0.68rem; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
 
 .cmp-filters { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .cmp-select, .cmp-input, .cmp-textarea {
@@ -75,14 +78,14 @@
 .cmp-table th {
   text-align: left;
   padding: 6px 8px;
-  color: #888;
+  color: var(--color-text-secondary);
   border-bottom: 1px solid #3a3020;
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 .cmp-table td { padding: 6px 8px; border-bottom: 1px solid #1e1a12; vertical-align: top; }
-.cmp-mensaje { max-width: 360px; white-space: pre-wrap; color: #aaa; font-size: 0.74rem; }
+.cmp-mensaje { max-width: 360px; white-space: pre-wrap; color: var(--color-text-secondary); font-size: 0.74rem; }
 
 .cmp-badge {
   display: inline-block;
@@ -93,17 +96,17 @@
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
-.cmp-badge--actuales       { background: rgba(34,197,94,0.15); color: #22c55e; }
-.cmp-badge--nuevos         { background: rgba(96,165,250,0.15); color: #60a5fa; }
-.cmp-badge--en_espera      { background: rgba(245,200,66,0.15); color: #f5c842; }
-.cmp-badge--antiguos       { background: rgba(249,115,22,0.15); color: #f97316; }
-.cmp-badge--bajas          { background: rgba(239,68,68,0.15); color: #ef4444; }
-.cmp-badge--sin_clasificar { background: rgba(148,163,184,0.15); color: #94a3b8; }
+.cmp-badge--actuales       { background: rgba(34,197,94,0.15); color: var(--state-ok); }
+.cmp-badge--nuevos         { background: rgba(96,165,250,0.15); color: var(--state-info); }
+.cmp-badge--en_espera      { background: rgba(245,200,66,0.15); color: var(--state-warn); }
+.cmp-badge--antiguos       { background: rgba(249,115,22,0.15); color: var(--state-orange); }
+.cmp-badge--bajas          { background: rgba(239,68,68,0.15); color: var(--state-bad); }
+.cmp-badge--sin_clasificar { background: rgba(148,163,184,0.15); color: var(--color-text-secondary); }
 
 .cmp-wa { font-size: 0.68rem; font-weight: 700; margin-left: 4px; }
-.cmp-wa--si  { color: #22c55e; }
-.cmp-wa--no  { color: #ef4444; }
-.cmp-wa--sin { color: #888; }
+.cmp-wa--si  { color: var(--state-ok); }
+.cmp-wa--no  { color: var(--state-bad); }
+.cmp-wa--sin { color: var(--color-text-secondary); }
 
 .cmp-preview {
   border: 1px solid #3a3020;
@@ -116,23 +119,23 @@
 .cmp-crear { display: flex; flex-direction: column; gap: 10px; max-width: 560px; margin-bottom: 10px; }
 .cmp-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #666; }
 .cmp-checks { display: flex; gap: 14px; flex-wrap: wrap; }
-.cmp-check { display: flex; align-items: center; gap: 5px; font-size: 0.78rem; font-weight: 400; text-transform: none; letter-spacing: 0; color: #ccc; }
+.cmp-check { display: flex; align-items: center; gap: 5px; font-size: 0.78rem; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--color-text-primary); }
 
 .cmp-btn {
   padding: 6px 14px;
   background: none;
   border: 1px solid #3a3020;
-  color: #aaa;
+  color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
 }
-.cmp-btn:hover { border-color: #f5c842; color: #f5c842; }
+.cmp-btn:hover { border-color: #f5c842; color: var(--state-warn); }
 .cmp-btn--sm { padding: 4px 8px; font-size: 0.68rem; }
 .cmp-btn--primary { background: #2a2015; border-color: #f5c842; color: #f5c842; }
 .cmp-btn--primary:hover { background: #3a3020; }
-.cmp-btn--danger { border-color: #ef4444; color: #ef4444; }
+.cmp-btn--danger { border-color: #ef4444; color: var(--state-bad); }
 .cmp-btn--danger:hover { background: rgba(239,68,68,0.1); }
 .cmp-btn:disabled { opacity: 0.5; cursor: default; }
 
@@ -148,7 +151,7 @@
   border: 1px solid #2a2015;
   margin-bottom: 8px;
 }
-.cmp-campana-stats { display: flex; gap: 12px; font-size: 0.72rem; color: #999; }
+.cmp-campana-stats { display: flex; gap: 12px; font-size: 0.72rem; color: var(--color-text-secondary); }
 
 @media (max-width: 700px) {
   .cmp-kpis { flex-direction: column; }

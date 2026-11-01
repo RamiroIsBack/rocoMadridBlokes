@@ -8,7 +8,7 @@
 .sv-page__title {
   font-size: 1.5rem;
   font-weight: 800;
-  color: #34d399;
+  color: var(--state-ok);
   margin: 0 0 20px;
   letter-spacing: -0.02em;
 }
@@ -18,7 +18,7 @@
   max-width: 360px;
   margin: 80px auto;
   text-align: center;
-  color: #666;
+  color: var(--color-text-secondary);
 }
 .sv-forbidden__icon { font-size: 2.5rem; display: block; margin-bottom: 12px; }
 
@@ -35,7 +35,7 @@
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: #666;
+  color: var(--color-text-secondary);
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
@@ -44,8 +44,8 @@
   transition: color 0.15s, border-color 0.15s;
   margin-bottom: -1px;
 }
-.sv-tab:hover { color: #ccc; }
-.sv-tab--active { color: #34d399; border-bottom-color: #34d399; }
+.sv-tab:hover { color: var(--color-text-primary); }
+.sv-tab--active { color: var(--state-ok); border-bottom-color: var(--state-ok); }
 
 /* ── Tab panel ── */
 .sv-tab-panel { display: flex; flex-direction: column; }
@@ -101,6 +101,15 @@
 .sv-period__btn:hover { color: #ccc; border-color: #555; }
 .sv-period__btn--active { background: #2a2015; color: #f5c842; border-color: #f5c842; }
 
+/* Estos 3 controles se reutilizan tanto en fondo claro (Grupos, Campañas, ExcelMuerte — la
+   mayoría) como en fondo oscuro (.sv-section de CTRL Time Off): el color base de arriba vale
+   para el oscuro, y aquí se oscurece solo donde de verdad hace falta (NOTAS_PARA_CODE_contraste.md). */
+.sv-tab-panel:not(.sv-to-root) .sv-tab-mini      { color: var(--color-text-secondary); }
+.sv-tab-panel:not(.sv-to-root) .sv-filter-btn    { color: var(--color-text-secondary); }
+.sv-tab-panel:not(.sv-to-root) .sv-filter-btn:hover { color: var(--color-text-primary); }
+.sv-tab-panel:not(.sv-to-root) .sv-period__btn   { color: var(--color-text-secondary); }
+.sv-tab-panel:not(.sv-to-root) .sv-period__btn:hover { color: var(--color-text-primary); }
+
 /* ── Section ── */
 .sv-section {
   margin-bottom: 24px;
@@ -128,6 +137,10 @@
 .sv-loading { color: #666; font-style: italic; padding: 40px 0; text-align: center; font-size: 0.85rem; }
 .sv-error   { color: #f97316; padding: 12px 0; font-size: 0.82rem; }
 .sv-empty   { color: #555; font-style: italic; font-size: 0.82rem; padding: 16px 0; margin: 0; }
+/* .sv-error también vive en fondo claro (Grupos, Campañas, ExcelMuerte): #f97316 ahí da 2,46:1
+   (NOTAS_PARA_CODE_contraste.md). Los modales/menús oscuros mantienen el naranja original. */
+.sv-tab-panel:not(.sv-to-root) .sv-error { color: var(--state-orange); }
+.sv-grp-modal .sv-error, .sv-grp-menu .sv-error { color: #f97316 !important; }
 
 /* ── Legend ── */
 .sv-legend {
@@ -265,6 +278,12 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
 }
+/* El valor del KPI en fondo claro (Grupos, Campañas, ExcelMuerte sin sección oscura) no puede
+   llevar el color del KPI: ratios de 1,39 a 2,43 medidos (NOTAS_PARA_CODE_contraste.md). El
+   color decorativo se queda solo en el borde (arriba); en fondo oscuro (.sv-section) sigue
+   como estaba, que ahí ya tenía contraste de sobra. */
+.sv-tab-panel:not(.sv-to-root) .sv-kpi__value { color: var(--color-text-primary); }
+.sv-tab-panel .sv-section .sv-kpi__value { color: var(--kpi-color, #34d399) !important; }
 .sv-kpi__label {
   display: block;
   font-size: 0.65rem;
@@ -859,7 +878,11 @@
 .sv-tests-add:disabled { opacity: 0.4; cursor: default; }
 .sv-ot-type-select { font-size: 0.72rem; padding: 2px 4px; }
 .sv-ot-row--empty td { color: #666; }
-.sv-ot-muted { color: #777 !important; font-size: 0.75rem; }
+/* #777 era para fondo oscuro; la mayoría de usos (Grupos, Campañas…) están sobre el fondo
+   claro de la página — 1054 elementos a 3,9:1 (NOTAS_PARA_CODE_contraste.md). Los modales
+   oscuros (sv-grp-modal) mantienen su gris claro justo debajo. */
+.sv-ot-muted { color: var(--color-text-secondary) !important; font-size: 0.75rem; }
+.sv-grp-modal .sv-ot-muted, .sv-grp-menu .sv-ot-muted { color: #999 !important; }
 .sv-ot-tag--inline { margin-left: 6px; }
 
 /* ── CTRL Time Off ── */
@@ -926,6 +949,12 @@
 .sv-to-warn--warn { border-color: #f5c842; color: #fde68a; }
 .sv-to-bad      { color: #f87171 !important; font-weight: 700; }
 .sv-to-warn-txt { color: #f5c842 !important; }
+/* .sv-to-bad/.sv-to-warn-txt se reutilizan en Grupos (fondo claro) y en CTRL Time Off/modales
+   oscuros (fondo oscuro, donde el color de arriba ya está bien) — NOTAS_PARA_CODE_contraste.md. */
+.sv-tab-panel:not(.sv-to-root) .sv-to-bad      { color: var(--state-bad) !important; }
+.sv-tab-panel:not(.sv-to-root) .sv-to-warn-txt { color: var(--state-warn) !important; }
+.sv-tab-panel .sv-grp-modal .sv-to-bad,      .sv-tab-panel .sv-grp-menu .sv-to-bad      { color: #f87171 !important; }
+.sv-tab-panel .sv-grp-modal .sv-to-warn-txt, .sv-tab-panel .sv-grp-menu .sv-to-warn-txt { color: #f5c842 !important; }
 
 .sv-wa {
   background: none;
@@ -937,12 +966,14 @@
   font-family: inherit;
   padding: 0;
 }
-.sv-wa--si  { color: #22c55e; }
-.sv-wa--no  { color: #ef4444; }
-.sv-wa--sin { color: #888; }
+/* (WA) y Grupos viven en el fondo claro de la página — recoloreado para contraste real
+   (NOTAS_PARA_CODE_contraste.md, 1/11 08:10). */
+.sv-wa--si  { color: var(--state-ok); }
+.sv-wa--no  { color: var(--state-bad); }
+.sv-wa--sin { color: var(--color-text-secondary); }
 
 .sv-pago-cubierto {
-  color: #22c55e;
+  color: var(--state-good);
   font-size: 0.72rem;
   font-weight: 600;
 }
@@ -951,7 +982,7 @@
 .sv-grp-profesor { margin: 0 0 10px; }
 .sv-grp-bloque { margin-bottom: 24px; padding-top: 14px; border-top: 1px solid #2a2015; }
 .sv-grp-bloque:first-child { padding-top: 0; border-top: none; }
-.sv-grp-bloque__titulo { color: #f5c842; font-size: 0.92rem; margin: 0 0 4px; }
+.sv-grp-bloque__titulo { color: var(--state-warn); font-size: 0.92rem; margin: 0 0 4px; }
 
 .sv-to-timeline-wrap {
   overflow-x: auto;
@@ -1023,6 +1054,10 @@
   gap: 3px;
   font-weight: 700;
   font-size: 0.72rem;
+  /* Sin esto heredaba el texto oscuro por defecto (--color-text-primary) dentro del fondo
+     oscuro de .sv-section: 1,25:1 medido (NOTAS_PARA_CODE_contraste.md) — al revés que el
+     resto de casos de esta nota, aquí lo que faltaba era un color claro propio. */
+  color: #f0ece0;
 }
 .sv-to-tl-cell--camp   { background: #f0ece0; }
 .sv-to-tl-cell--closed { background: #1e1b14; }
@@ -1083,6 +1118,10 @@
 .sv-to-root .sv-to-tl-date,
 .sv-to-root .sv-to-tl-num { color: var(--to-text-3); }
 .sv-to-root .sv-ot-muted { color: var(--to-text-3) !important; }
+/* <SyncStatus> ("lo real"/"el simulador") vive fuera de cualquier .sv-section, en fondo
+   claro: 2,28:1 con --to-text-3 (NOTAS_PARA_CODE_contraste.md). Solo este texto, la variable
+   general sigue para el resto de CTRL Time Off que sí está en fondo oscuro. */
+.sv-to-root .sv-to-sync { color: var(--color-text-secondary) !important; }
 .sv-to-root .sv-to-subtitle,
 .sv-to-root .sv-to-tl-head,
 .sv-to-root .sv-to-rules,
@@ -1118,14 +1157,17 @@
 .sv-to-subtab {
   background: transparent;
   border: 1px solid #2a2015;
-  color: var(--to-text-2, #c8c0ae);
+  /* El toggle Vacaciones/Simulador vive fuera de cualquier .sv-section (fondo claro): 1,59:1
+     medido con #c8c0ae (NOTAS_PARA_CODE_contraste.md). Solo este botón, no --to-text-2 en
+     general (esa variable sigue usándose dentro de fondo oscuro). */
+  color: var(--color-text-secondary);
   font-size: 0.85rem;
   font-weight: 700;
   padding: 8px 16px;
   border-radius: 3px;
   cursor: pointer;
 }
-.sv-to-subtab:hover { border-color: #555; color: #f0ece0; }
+.sv-to-subtab:hover { border-color: #555; color: var(--color-text-primary); }
 .sv-to-subtab--active { border-color: #f5c842; color: #f5c842; background: #2a2015; }
 .sv-to-subtab .sv-ot-muted { font-weight: 400; margin-left: 4px; }
 

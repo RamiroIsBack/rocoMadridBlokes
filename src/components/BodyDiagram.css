@@ -14,9 +14,10 @@
 
 .body-diagram__zone-btn {
   padding: 9px 16px;
-  border: 2px solid #f97316;
+  border: 2px solid #c2410c;
   background: transparent;
-  color: #f97316;
+  /* antes #f97316: 2,46:1 sobre el fondo claro — NOTAS_PARA_CODE_contraste.md */
+  color: #c2410c;
   font-size: 0.8rem;
   font-weight: 700;
   cursor: pointer;
@@ -28,12 +29,12 @@
 }
 
 .body-diagram__zone-btn--active {
-  background: #f97316;
+  background: #c2410c;
   color: #fff;
 }
 
 .body-diagram__zone-btn:hover:not(.body-diagram__zone-btn--active) {
-  background: rgba(249, 115, 22, 0.1);
+  background: rgba(194, 65, 12, 0.1);
 }
 
 .body-diagram__img-wrap {
@@ -112,7 +113,7 @@
 
 /* ── Test info button ── */
 .test-info-btn {
-  background: #f97316;
+  background: #c2410c; /* antes #f97316, 2,8:1 con el texto blanco — NOTAS_PARA_CODE_contraste.md */
   border: none;
   cursor: pointer;
   color: #fff;

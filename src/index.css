@@ -28,6 +28,21 @@
   --color-accent: #d19d02;        /* golden yellow — primary CTA on rocomadrid.com */
   --color-accent-hover: #846400;  /* darker gold on hover */
 
+  /* Estado — contraste ≥ 4,5:1 sobre --color-bg (#f4f0e4), para KPIs/pestañas/avisos de
+     Supervisión, Campañas y CTRL Time Off (NOTAS_PARA_CODE_contraste.md, 1/11 08:10): los
+     colores "para fondo oscuro" (amarillo/menta/azul claros) eran casi invisibles en el fondo
+     claro real de la página. Mismos tonos, oscurecidos para que el texto se lea. Para mantener
+     un color decorativo (barra lateral de un KPI, fondo de una pestaña activa), no para texto.
+  */
+  --state-ok:      #047857;  /* menta → verde oscuro */
+  --state-good:    #166534;  /* verde "Pagado" (4,4:1 con #15803d no llega a 4,5 en texto normal) */
+  --state-warn:    #92400e;  /* amarillo/ámbar */
+  --state-info:    #1d4ed8;  /* azul */
+  --state-purple:  #6d28d9;  /* lila */
+  --state-bad:     #b91c1c;  /* rojo */
+  --state-orange:  #c2410c;  /* naranja */
+  /* "Muted"/inactivo con contraste real — usar en vez de #777/#888/#999/#aaa/#bbb */
+
   /* Category badge colors */
   --color-puzle: #8e44ad;
   --color-tecnico: #2980b9;

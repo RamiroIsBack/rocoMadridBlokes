@@ -124,7 +124,7 @@
 .app-header__logout-btn {
   background: none;
   border: none;
-  color: #555;
+  color: #b5b5b5; /* antes #555 (2,21:1 sobre la cabecera oscura) — NOTAS_PARA_CODE_contraste.md */
   font-size: 0.64rem;
   font-weight: 600;
   cursor: pointer;
@@ -333,7 +333,7 @@
 
 .app-header__link-hint {
   font-size: 9px;
-  color: #777;
+  color: #b5b5b5; /* antes #777 (3,68:1 sobre la cabecera oscura) — NOTAS_PARA_CODE_contraste.md */
   letter-spacing: 0.04em;
   text-transform: none;
   text-align: center;

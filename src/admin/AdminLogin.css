@@ -51,7 +51,7 @@
 .admin-login__submit {
     width: 100%;
     padding: 14px 20px;
-    background-color: #667eea;
+    background-color: #4c56c9; /* antes #667eea, 3,66:1 con el texto blanco — NOTAS_PARA_CODE_contraste.md */
     color: white;
     border: none;
     border-radius: 8px;
@@ -63,7 +63,7 @@
 }
 
 .admin-login__submit:hover {
-    background-color: #5a67d8;
+    background-color: #3f49b8;
 }
 
 .admin-login__submit:disabled {

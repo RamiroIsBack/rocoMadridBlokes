@@ -73,13 +73,13 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #9ca3af;
+  color: #6b7280; /* antes #9ca3af, 2,54:1 sobre blanco — NOTAS_PARA_CODE_contraste.md */
   line-height: 1;
 }
 
 .event-card__done-count--locked {
   cursor: pointer;
-  color: #9ca3af;
+  color: #6b7280;
   background: #f9fafb;
   letter-spacing: 0.02em;
 }
@@ -95,7 +95,7 @@
   border-radius: 0 50% 50% 0;
   border: 2px solid #d1d5db;
   background: #fff;
-  color: #9ca3af;
+  color: #6b7280;
   font-size: 18px;
   font-weight: 700;
   cursor: pointer;
@@ -370,7 +370,7 @@
 
 /* Intro: oval with green background and text */
 .event-card__color--intro {
-    background-color: #10b981;
+    background-color: #047857; /* antes #10b981, 2,54:1 con el texto blanco — NOTAS_PARA_CODE_contraste.md */
     border: 3px solid #059669;
     display: inline-flex;
     align-items: center;

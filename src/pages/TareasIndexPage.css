@@ -24,7 +24,7 @@
   min-height: 48px;
   text-align: center;
   text-decoration: none;
-  color: #9ca3af;
+  color: #6b7280; /* antes #9ca3af, 2,54:1 sobre blanco — NOTAS_PARA_CODE_contraste.md */
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;

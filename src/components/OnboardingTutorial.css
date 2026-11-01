@@ -31,7 +31,7 @@
   right: 16px;
   background: none;
   border: none;
-  color: #888;
+  color: #a3a3a3; /* antes #888, 4,05:1 — NOTAS_PARA_CODE_contraste.md */
   font-size: 0.78rem;
   cursor: pointer;
   padding: 4px;
