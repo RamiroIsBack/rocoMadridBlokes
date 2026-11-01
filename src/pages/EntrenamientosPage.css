@@ -539,6 +539,24 @@
 .entrena__tests-advanced { margin-top: 10px; padding: 12px; background: rgba(0,0,0,0.03); border: 1px dashed var(--color-border); }
 .entrena__hint { font-size: 0.8rem; color: var(--color-text-secondary); margin: 0 0 12px; }
 
+/* Las clases .sv-tests-* vienen de Supervisión, donde conviven fondo claro y fondo oscuro
+   (modales/CTRL Time Off) — aquí siempre es fondo claro, así que se corrigen aparte en vez de
+   tocar la regla compartida (Ramiro, 1/11 16:45: "nada de inputs negros sobre beige con texto
+   verde claro" — los inputs en sí ya llevan su propio fondo oscuro y están bien; lo que fallaba
+   eran los textos sueltos directamente sobre el beige). */
+.entrena__tests-manager .sv-tests-table th    { color: var(--color-text-secondary); }
+.entrena__tests-manager .sv-tests-none        { color: var(--color-text-secondary); }
+.entrena__tests-manager .sv-tests-clear       { color: var(--color-text-secondary); }
+.entrena__tests-manager .sv-tests-clear:hover { color: var(--state-bad); }
+.entrena__tests-manager .sv-tests-add         { color: var(--color-text-secondary); border-color: var(--color-border); }
+.entrena__tests-manager .sv-tests-add:hover   { color: var(--color-accent-hover); border-color: var(--color-accent-hover); }
+.entrena__tests-manager .sv-tests-cancel      { color: var(--color-text-secondary); border-color: var(--color-border); }
+.entrena__tests-manager .sv-tests-cancel:hover { color: var(--color-text-primary); border-color: var(--color-text-secondary); }
+.entrena__tests-manager .sv-tests-feedback    { color: var(--state-ok); }
+.entrena__tests-manager .sv-tests-mock-val    { color: var(--state-ok); }
+.entrena__tests-manager .sv-tests-danger      { color: var(--state-bad); border-color: var(--state-bad); }
+.entrena__tests-manager .sv-tests-confirm-msg { color: var(--state-bad); }
+
 /* ── Inline panel row (alumno mode) ── */
 .entrena__inline-panel td {
   padding: 0 !important;
