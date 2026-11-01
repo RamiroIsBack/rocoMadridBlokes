@@ -102,6 +102,13 @@ export const campanasDestinatarios     = id                       => gestionCall
 export const campanasMarcarAccion      = (id, contactoId, accion) => gestionPost(`/campanas/${id}/contactos/${contactoId}/accion`, { accion })
 export const gestionBajasMotivo        = (meses = 12)              => gestionCall('GET', `/gestion/bajas-motivo?meses=${meses}`)
 
+// Calendario de días especiales del club (NOTAS_PARA_CODE_calendario.md): festivos, cierres y
+// horarios especiales, con una decisión (pendiente/abre/abre_horario_especial/cierra) por día.
+export const clubDaysGet    = (desde = '', hasta = '') => gestionCall('GET', `/gestion/club-days${desde || hasta ? `?desde=${desde}&hasta=${hasta}` : ''}`)
+export const clubDaysCrear  = body       => gestionPost('/gestion/club-days', body)
+export const clubDaysEditar = (id, body) => gestionCall('PUT', `/gestion/club-days/${id}`, body)
+export const clubDaysBorrar = id         => gestionCall('DELETE', `/gestion/club-days/${id}`)
+
 // `from`: primer mes a incluir ('YYYY-MM', incluido) o '' para no limitar ("Todo").
 export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)

@@ -1153,6 +1153,11 @@
   white-space: pre-wrap;
 }
 .sv-to-code { font-size: 0.72rem; color: #f0ece0; background: #0b0a07; padding: 1px 6px; border-radius: 3px; word-break: break-all; }
+
+.sv-cd-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+.sv-cd-acciones { display: flex; gap: 4px; flex-wrap: wrap; }
+.sv-cd-row--pendiente { background: rgba(245, 200, 66, 0.08); }
+
 .sv-to-subtabs { display: flex; gap: 6px; margin: 0 0 16px; flex-wrap: wrap; }
 .sv-to-subtab {
   background: transparent;

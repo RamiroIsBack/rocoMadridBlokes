@@ -873,6 +873,19 @@ add_action('rest_api_init', function() {
         'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_pestana', 'permission_callback' => $sa_perm,
     ));
 
+    // Calendario de días especiales del club (NOTAS_PARA_CODE_calendario.md): festivos, cierres
+    // y horarios especiales, con una decisión por día. Ver y listar: cualquiera con acceso a
+    // Supervisión (gestión incluida). Decidir (marcar abre/cierra/horario especial) es solo del
+    // rol socio, como pide Ramiro en la nota.
+    register_rest_route('superadmin/v1', '/gestion/club-days', array(
+        array('methods' => 'GET',  'callback' => 'superadmin_club_days_listar', 'permission_callback' => $sa_perm),
+        array('methods' => 'POST', 'callback' => 'superadmin_club_days_crear',  'permission_callback' => $socio_perm),
+    ));
+    register_rest_route('superadmin/v1', '/gestion/club-days/(?P<id>\d+)', array(
+        array('methods' => 'PUT',    'callback' => 'superadmin_club_days_editar', 'permission_callback' => $socio_perm),
+        array('methods' => 'DELETE', 'callback' => 'superadmin_club_days_borrar', 'permission_callback' => $socio_perm),
+    ));
+
     register_rest_route('superadmin/v1', '/expenses', array(
         array(
             'methods'             => 'GET',
@@ -4614,6 +4627,166 @@ function superadmin_sync_grupos_pestana($request) {
         }, $r['filas']);
     }
     return rest_ensure_response(array('success' => true, 'data' => $r));
+}
+
+// ============================================================
+//  Calendario de días especiales del club (NOTAS_PARA_CODE_calendario.md)
+// ============================================================
+
+function blokes_club_days_table() { global $wpdb; return $wpdb->prefix . 'blokes_club_days'; }
+
+function blokes_ensure_club_days_table() {
+    global $wpdb;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE " . blokes_club_days_table() . " (
+        id             bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        fecha          date         NOT NULL,
+        tipo           varchar(30)  NOT NULL DEFAULT 'festivo_nacional',
+        nombre         varchar(190) NOT NULL DEFAULT '',
+        decision       varchar(30)  NOT NULL DEFAULT 'pendiente',
+        horario        text         NOT NULL DEFAULT '',
+        origen         varchar(20)  NOT NULL DEFAULT 'manual',
+        decidido_por   varchar(100) NOT NULL DEFAULT '',
+        fecha_decision datetime     NULL,
+        created_at     datetime     NOT NULL,
+        updated_at     datetime     NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY fecha (fecha)
+    ) {$charset};");
+
+    // Semilla única: los festivos que ya estaban fijos en `coverage.js › FESTIVOS_BASE` (ya
+    // tratados como cierre en la app, así que se dan por decididos) más los que la nota de
+    // calendario (27/10) señaló que Notion tiene y la lista fija no — esos se dejan `pendiente`
+    // para que decida Ramiro, no se decide aquí por él.
+    if (!get_option('blokes_club_days_seed')) {
+        $filas = array(
+            array('2026-12-08', 'festivo_madrid',    'Inmaculada Concepción',              'cierra',    'manual'),
+            array('2026-12-25', 'festivo_nacional',  'Navidad',                             'cierra',    'manual'),
+            array('2027-01-01', 'festivo_nacional',  'Año Nuevo',                           'cierra',    'manual'),
+            array('2027-01-06', 'festivo_nacional',  'Reyes',                               'cierra',    'manual'),
+            array('2027-08-15', 'festivo_nacional',  'Asunción',                            'cierra',    'manual'),
+            array('2027-12-06', 'festivo_nacional',  'Constitución',                        'cierra',    'manual'),
+            array('2027-12-08', 'festivo_madrid',    'Inmaculada Concepción',               'cierra',    'manual'),
+            array('2027-12-25', 'festivo_nacional',  'Navidad',                             'cierra',    'manual'),
+            array('2028-01-01', 'festivo_nacional',  'Año Nuevo',                           'cierra',    'manual'),
+            array('2028-01-06', 'festivo_nacional',  'Reyes',                               'cierra',    'manual'),
+            array('2026-11-02', 'festivo_local',     'Todos los Santos (trasladado)',       'pendiente', 'notion'),
+            array('2026-12-07', 'festivo_local',     'Día de la Constitución (trasladado)', 'pendiente', 'notion'),
+            array('2026-12-24', 'evento',            'Festivos Navidad',                    'pendiente', 'notion'),
+        );
+        $ahora = current_time('mysql');
+        foreach ($filas as $f) {
+            list($fecha, $tipo, $nombre, $decision, $origen) = $f;
+            $wpdb->query($wpdb->prepare(
+                "INSERT IGNORE INTO " . blokes_club_days_table() . " (fecha, tipo, nombre, decision, origen, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                $fecha, $tipo, $nombre, $decision, $origen, $ahora, $ahora
+            ));
+        }
+        update_option('blokes_club_days_seed', 1, false);
+    }
+}
+
+// GET /gestion/club-days?desde&hasta — lista ordenada por fecha, opcionalmente filtrada.
+function superadmin_club_days_listar($request) {
+    blokes_ensure_club_days_table();
+    global $wpdb;
+    $desde = sanitize_text_field((string) $request->get_param('desde'));
+    $hasta = sanitize_text_field((string) $request->get_param('hasta'));
+    $where = array(); $args = array();
+    if ($desde !== '') { $where[] = 'fecha >= %s'; $args[] = $desde; }
+    if ($hasta !== '') { $where[] = 'fecha <= %s'; $args[] = $hasta; }
+    $sql = "SELECT * FROM " . blokes_club_days_table() . (count($where) ? ' WHERE ' . implode(' AND ', $where) : '') . ' ORDER BY fecha ASC';
+    $rows = $args ? $wpdb->get_results($wpdb->prepare($sql, $args), ARRAY_A) : $wpdb->get_results($sql, ARRAY_A);
+    $out = array_map('blokes_club_day_fila', $rows);
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+function blokes_club_day_fila($r) {
+    return array(
+        'id' => intval($r['id']), 'fecha' => $r['fecha'], 'tipo' => $r['tipo'], 'nombre' => $r['nombre'],
+        'decision' => $r['decision'], 'horario' => $r['horario'], 'origen' => $r['origen'],
+        'decididoPor' => $r['decidido_por'] ?: null, 'fechaDecision' => $r['fecha_decision'] ?: null,
+    );
+}
+
+// POST /gestion/club-days — { fecha, tipo, nombre, horario? } — entrada manual (p. ej. un
+// cierre suelto que decide Ramiro, o un evento que no viene de Notion/9to5).
+function superadmin_club_days_crear($request) {
+    blokes_ensure_club_days_table();
+    global $wpdb;
+    $tipos = array('festivo_nacional', 'festivo_madrid', 'festivo_local', 'cierre', 'horario_especial', 'evento');
+    $body = $request->get_json_params();
+    $fecha = sanitize_text_field((string) ($body['fecha'] ?? ''));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha)) return new WP_Error('bad_request', 'fecha debe ser YYYY-MM-DD.', array('status' => 400));
+    $tipo = sanitize_key($body['tipo'] ?? 'evento');
+    if (!in_array($tipo, $tipos, true)) $tipo = 'evento';
+    $nombre = sanitize_text_field((string) ($body['nombre'] ?? ''));
+    $horario = sanitize_text_field((string) ($body['horario'] ?? ''));
+    $u = wp_get_current_user();
+    $ahora = current_time('mysql');
+
+    $existente = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . blokes_club_days_table() . " WHERE fecha = %s", $fecha), ARRAY_A);
+    if ($existente) return new WP_Error('duplicado', 'Ya hay un día especial en esa fecha (edítalo en vez de crear otro).', array('status' => 409));
+
+    $wpdb->insert(blokes_club_days_table(), array(
+        'fecha' => $fecha, 'tipo' => $tipo, 'nombre' => $nombre, 'decision' => 'pendiente', 'horario' => $horario,
+        'origen' => 'manual', 'decidido_por' => '', 'created_at' => $ahora, 'updated_at' => $ahora,
+    ));
+    blokes_gestion_log(0, 'club_day_crear', null, array('fecha' => $fecha, 'tipo' => $tipo, 'nombre' => $nombre), 'Alta manual en el calendario del club');
+    return rest_ensure_response(array('success' => true, 'data' => blokes_club_day_fila($wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM " . blokes_club_days_table() . " WHERE id = %d", $wpdb->insert_id
+    ), ARRAY_A))));
+}
+
+// PUT /gestion/club-days/{id} — cambia la decisión (abre/abre_horario_especial/cierra) y/o el
+// horario/nombre/tipo. Solo rol socio (la decisión de abrir o cerrar es suya, no de gestión).
+function superadmin_club_days_editar($request) {
+    blokes_ensure_club_days_table();
+    global $wpdb;
+    $tipos = array('festivo_nacional', 'festivo_madrid', 'festivo_local', 'cierre', 'horario_especial', 'evento');
+    $decisiones = array('pendiente', 'abre', 'abre_horario_especial', 'cierra');
+    $id = intval($request['id']);
+    $antes = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_club_days_table() . " WHERE id = %d", $id), ARRAY_A);
+    if (!$antes) return new WP_Error('not_found', 'Día no encontrado.', array('status' => 404));
+
+    $body = $request->get_json_params();
+    $campos = array('updated_at' => current_time('mysql'));
+    if (isset($body['decision'])) {
+        $decision = sanitize_key($body['decision']);
+        if (!in_array($decision, $decisiones, true)) {
+            return new WP_Error('bad_request', 'decision debe ser pendiente, abre, abre_horario_especial o cierra.', array('status' => 400));
+        }
+        $campos['decision'] = $decision;
+        $u = wp_get_current_user();
+        $campos['decidido_por'] = $u ? $u->user_login : '';
+        $campos['fecha_decision'] = current_time('mysql');
+    }
+    if (isset($body['tipo'])) {
+        $tipo = sanitize_key($body['tipo']);
+        if (in_array($tipo, $tipos, true)) $campos['tipo'] = $tipo;
+    }
+    if (isset($body['nombre']))  $campos['nombre']  = sanitize_text_field((string) $body['nombre']);
+    if (isset($body['horario'])) $campos['horario'] = sanitize_text_field((string) $body['horario']);
+
+    $wpdb->update(blokes_club_days_table(), $campos, array('id' => $id));
+    $despues = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_club_days_table() . " WHERE id = %d", $id), ARRAY_A);
+    if (isset($body['decision'])) {
+        blokes_gestion_log(0, 'club_day_decidir', array('decision' => $antes['decision']), array('decision' => $despues['decision']), array('fecha' => $despues['fecha']));
+    }
+    return rest_ensure_response(array('success' => true, 'data' => blokes_club_day_fila($despues)));
+}
+
+// DELETE /gestion/club-days/{id} — solo para entradas manuales que no debieron crearse.
+function superadmin_club_days_borrar($request) {
+    blokes_ensure_club_days_table();
+    global $wpdb;
+    $id = intval($request['id']);
+    $fila = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_club_days_table() . " WHERE id = %d", $id), ARRAY_A);
+    if (!$fila) return new WP_Error('not_found', 'Día no encontrado.', array('status' => 404));
+    $wpdb->delete(blokes_club_days_table(), array('id' => $id));
+    blokes_gestion_log(0, 'club_day_borrar', $fila, null, 'Borrado del calendario del club');
+    return rest_ensure_response(array('success' => true));
 }
 
 /**

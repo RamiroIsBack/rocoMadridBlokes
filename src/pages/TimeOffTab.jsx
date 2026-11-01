@@ -7,7 +7,7 @@ import {
   CAMP_DEFAULT, CAMP_MESES, normalizeCamp, lunesDelMes,
 } from '../utils/coverage'
 import { equilibrioCamp, tablaCamp } from '../utils/campamento'
-import { useExpenses } from '../hooks/useSuperAdmin'
+import { useExpenses, clubDaysGet, clubDaysCrear, clubDaysEditar, clubDaysBorrar } from '../hooks/useSuperAdmin'
 import { useCostes, FACTOR_COSTE } from '../hooks/useCostes'
 import { autoCategory } from '../utils/expensesParser'
 import { PL_DATA } from '../data/plHistorico'
@@ -1618,6 +1618,112 @@ class FalloSeguro extends Component {
   }
 }
 
+// ─── Fiestas y cierres (NOTAS_PARA_CODE_calendario.md) ──────────────────────
+// Calendario único de días especiales del club: festivos, cierres sueltos, horarios especiales
+// y eventos, cada uno con una decisión (pendiente/abre/abre_horario_especial/cierra). Un día
+// marcado "cierra" aquí entra en `festivos` (ver `festivosKey` más abajo) y por tanto no gasta
+// vacaciones ni cuenta como "sin cubrir" en la cobertura, igual que un festivo nacional — eso
+// ya funciona de verdad. "Abre con horario especial" solo se registra: la cobertura día a día
+// todavía no sabe usar un horario distinto al habitual (pendiente, es un cambio más profundo).
+const CLUB_DAY_TIPO_LABEL = {
+  festivo_nacional: 'Festivo nacional', festivo_madrid: 'Festivo Madrid', festivo_local: 'Festivo local',
+  cierre: 'Cierre', horario_especial: 'Horario especial', evento: 'Evento',
+}
+const CLUB_DAY_DECISION_LABEL = { pendiente: 'Pendiente', abre: 'Abre', abre_horario_especial: 'Abre (horario especial)', cierra: 'Cierra' }
+const CLUB_DAY_FORM_INICIAL = { fecha: '', tipo: 'evento', nombre: '', horario: '' }
+
+function FiestasCierres({ clubDays, onReload }) {
+  const [form, setForm] = useState(CLUB_DAY_FORM_INICIAL)
+  const [busy, setBusy] = useState(false)
+
+  const decidir = async (dia, decision) => {
+    if (decision === 'cierra' && !window.confirm(
+      `¿Marcar ${dia.fecha} (${dia.nombre || CLUB_DAY_TIPO_LABEL[dia.tipo]}) como CIERRE? Ese día no gastará vacaciones de nadie y no contará como "sin cubrir" en la cobertura.`
+    )) return
+    try { await clubDaysEditar(dia.id, { decision }); onReload() } catch (e) { alert(e.message) }
+  }
+  const crear = async e => {
+    e.preventDefault()
+    if (!form.fecha) return
+    setBusy(true)
+    try { await clubDaysCrear(form); setForm(CLUB_DAY_FORM_INICIAL); onReload() }
+    catch (e) { alert(e.message) } finally { setBusy(false) }
+  }
+  const borrar = async dia => {
+    if (dia.origen !== 'manual') { alert('Solo se pueden borrar los días añadidos a mano — los demás vienen de la lista oficial o de Notion.'); return }
+    if (!window.confirm(`¿Quitar ${dia.fecha} del calendario?`)) return
+    await clubDaysBorrar(dia.id); onReload()
+  }
+
+  const pendientes = clubDays.filter(d => d.decision === 'pendiente')
+
+  return (
+    <div className="sv-section">
+      <h3 className="sv-section-title">Fiestas y cierres</h3>
+      <p className="sv-note">
+        Un día marcado <strong>Cierra</strong> no gasta vacaciones de nadie y no cuenta como "sin cubrir" en la cobertura —
+        se trata igual que un festivo. <strong>Abre con horario especial</strong> queda registrado aquí, pero de momento la
+        cobertura día a día no usa ese horario distinto todavía. Solo el rol socio puede decidir.
+      </p>
+      {pendientes.length > 0 && (
+        <p className="sv-note sv-to-warn-txt">
+          ⚠ {pendientes.length} día{pendientes.length > 1 ? 's' : ''} sin decidir: {pendientes.map(d => fmtShort(d.fecha)).join(', ')}
+        </p>
+      )}
+
+      <form onSubmit={crear} className="sv-cd-form">
+        <label className="sv-grp-field">Fecha
+          <input className="sv-tests-input" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} required />
+        </label>
+        <label className="sv-grp-field">Tipo
+          <select className="sv-tests-select" value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
+            {Object.entries(CLUB_DAY_TIPO_LABEL).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </label>
+        <label className="sv-grp-field">Nombre
+          <input className="sv-tests-input" type="text" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} placeholder="p. ej. Visita del ACE" />
+        </label>
+        <label className="sv-grp-field">Horario (si es especial)
+          <input className="sv-tests-input" type="text" value={form.horario} onChange={e => setForm(f => ({ ...f, horario: e.target.value }))} placeholder="10:00–14:00" />
+        </label>
+        <button className="sv-tests-save" type="submit" disabled={busy}>Añadir día</button>
+      </form>
+
+      {clubDays.length === 0 ? (
+        <p className="sv-empty">No hay ningún día especial cargado todavía.</p>
+      ) : (
+        <div className="sv-tests-scroll">
+          <table className="sv-tests-table">
+            <thead>
+              <tr><th>Fecha</th><th>Tipo</th><th>Nombre</th><th>Decisión</th><th>Horario</th><th>Decidido por</th><th></th></tr>
+            </thead>
+            <tbody>
+              {clubDays.map(d => (
+                <tr key={d.id} className={d.decision === 'pendiente' ? 'sv-cd-row--pendiente' : undefined}>
+                  <td>{DAY_LABEL[weekdayOf(d.fecha)]?.slice(0, 3) || ''} {fmtShort(d.fecha)}</td>
+                  <td className="sv-ot-muted">{CLUB_DAY_TIPO_LABEL[d.tipo] || d.tipo}</td>
+                  <td>{d.nombre || '—'}</td>
+                  <td className={d.decision === 'pendiente' ? 'sv-to-warn-txt' : d.decision === 'cierra' ? 'sv-to-bad' : ''}>
+                    {CLUB_DAY_DECISION_LABEL[d.decision] || d.decision}
+                  </td>
+                  <td className="sv-ot-muted">{d.horario || '—'}</td>
+                  <td className="sv-ot-muted">{d.decididoPor ? `${d.decididoPor} · ${(d.fechaDecision || '').slice(0, 10)}` : '—'}</td>
+                  <td className="sv-cd-acciones">
+                    <button className="sv-tests-select" onClick={() => decidir(d, 'abre')}>Abre</button>
+                    <button className="sv-tests-select" onClick={() => decidir(d, 'abre_horario_especial')}>Horario especial</button>
+                    <button className="sv-tests-select" onClick={() => decidir(d, 'cierra')}>Cierra</button>
+                    {d.origen === 'manual' && <button className="sv-tests-remove" onClick={() => borrar(d)}>Eliminar</button>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function TimeOffTab() {
   const [vista, setVista] = useState('real')
   const [anio, setAnioState] = useState(anioVistaInicial)
@@ -1659,12 +1765,23 @@ export default function TimeOffTab() {
     syncNueve(false).then(setNueve).catch(() => { /* el error queda en last_error */ })
   }, [nueve?.configured])
 
-  // Festivos de 9to5 (los que no se trabajan); sin conexión, la lista básica
+  // Calendario de días especiales del club (festivos/cierres/horarios especiales, con decisión).
+  const [clubDays, setClubDays] = useState([])
+  const cargarClubDays = () => clubDaysGet().then(setClubDays).catch(() => setClubDays([]))
+  useEffect(cargarClubDays, [])
+
+  // Festivos de 9to5 (los que no se trabajan) más los días del calendario del club decididos
+  // como "cierra" (un cierre suelto cuenta exactamente igual que un festivo nacional); sin
+  // conexión a 9to5, la lista básica de siempre. "Abre con horario especial" NO entra aquí: el
+  // club sigue abierto ese día, solo cambia el horario (la cobertura día a día aún no lo sabe
+  // usar — NOTAS_PARA_CODE_calendario.md).
   const festivosKey = useMemo(() => {
-    const list = (nueve?.holidays || []).filter(h => !h.workable).map(h => h.date)
+    const nueve9to5 = (nueve?.holidays || []).filter(h => !h.workable).map(h => h.date)
+    const cierres = clubDays.filter(d => d.decision === 'cierra').map(d => d.fecha)
+    const list = Array.from(new Set([...nueve9to5, ...cierres]))
     setFestivos(list)
     return list.join()
-  }, [nueve?.holidays])
+  }, [nueve?.holidays, clubDays])
 
   // Lo real del año que se ve (y del siguiente, para el resumen); el simulador, sin solicitudes
   const realAnio = useMemo(() => ({ ...real, year: anio }), [real, anio])
@@ -1726,6 +1843,9 @@ export default function TimeOffTab() {
         <button className={`sv-to-subtab sv-to-subtab--sim${vista === 'sim' ? ' sv-to-subtab--active' : ''}`} onClick={() => setVista('sim')}>
           Simulador <span className="sv-ot-muted">supuestos</span>
         </button>
+        <button className={`sv-to-subtab${vista === 'fiestas' ? ' sv-to-subtab--active' : ''}`} onClick={() => setVista('fiestas')}>
+          Fiestas y cierres {clubDays.some(d => d.decision === 'pendiente') && <span className="sv-to-warn-txt">●</span>}
+        </button>
       </div>
 
       {cargando ? (
@@ -1745,7 +1865,7 @@ export default function TimeOffTab() {
           <ConflictMatrix keys={real.keys} ctx={ctxReal} />
           <TimeOffIntegration nueve={nueve} onChange={setNueve} connected={connected} />
         </>
-      ) : (
+      ) : vista === 'sim' ? (
         <FalloSeguro que="el simulador"><div className="sv-to-simwrap">
           <SyncStatus sync={syncSim} que="el simulador" />
           <Calculadora state={sim} setState={setSim} costes={costes} clases={clasesReal.clases} ev={evSim} sugerido={sugerido} onDesdeReal={desdeReal} onGuardarAnterior={guardarAnterior} />
@@ -1763,6 +1883,10 @@ export default function TimeOffTab() {
           <Escenarios scenarios={scenarios} setScenarios={setScenarios} state={sim} coste={costes.mes} requests={[]}
             connected={connected} toPlain={toPlain} hydrate={hydrate} onLoad={cargarEscenario} />
         </div></FalloSeguro>
+      ) : (
+        <FalloSeguro que="fiestas y cierres">
+          <FiestasCierres clubDays={clubDays} onReload={cargarClubDays} />
+        </FalloSeguro>
       )}
     </div>
   )
