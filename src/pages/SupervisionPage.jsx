@@ -8,6 +8,7 @@ import {
   gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
+  histPagosImportar,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
 import OvertimeTab from './OvertimeTab'
@@ -751,7 +752,83 @@ function ClasesTab() {
           <TrendCharts data={data} months={months} selectedKey={selectedClassKey} onSelectKey={setSelectedClassKey} />
         </>
       )}
+
+      {window.blokesSiteData?.userRole === 'socio' && <HistPagosImportPanel />}
     </div>
+  )
+}
+
+// Importar el histórico de pagos antiguo (HV Control de Clientes) desde el JSON que ya tiene
+// cowork — su entorno no puede subir/pegar 0,9 MB a mano, así que lo hace la interfaz: elige
+// el fichero, lee "pagos", simula primero (cuenta nuevas/duplicadas/inválidas sin escribir) y
+// solo entonces deja importar de verdad (NOTAS_PARA_CODE_hv_control_clientes.md, 1/11 18:35).
+function HistPagosImportPanel() {
+  const [fileName, setFileName] = useState('')
+  const [pagos, setPagos] = useState(null)
+  const [resultado, setResultado] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  const onFile = e => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setError(null); setResultado(null); setPagos(null); setFileName(file.name)
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const json = JSON.parse(reader.result)
+        const lista = Array.isArray(json?.pagos) ? json.pagos : (Array.isArray(json) ? json : null)
+        if (!lista) throw new Error('El JSON no tiene un array "pagos".')
+        setPagos(lista)
+      } catch (err) { setError(`No se pudo leer el archivo: ${err.message}`) }
+    }
+    reader.onerror = () => setError('No se pudo leer el archivo.')
+    reader.readAsText(file)
+  }
+
+  const simular = async () => {
+    setBusy(true); setError(null)
+    try { setResultado(await histPagosImportar({ pagos, simular: true })) }
+    catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+  const importarDeVerdad = async (forzar = false) => {
+    if (!window.confirm(`¿Importar de verdad ${pagos.length} filas de pago histórico? No se puede deshacer desde aquí.`)) return
+    setBusy(true); setError(null)
+    try { setResultado(await histPagosImportar({ pagos, simular: false, forzar })) }
+    catch (e) {
+      // Ya se había importado antes de este mismo origen: ofrece repetir forzando, en vez de
+      // dejarlo en un callejón sin salida.
+      if (/ya hay.*fila/i.test(e.message) && !forzar) {
+        if (window.confirm(`${e.message}\n\n¿Forzar la importación de todos modos?`)) return importarDeVerdad(true)
+      }
+      setError(e.message)
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <section className="sv-section" style={{ marginTop: 24 }}>
+      <h2 className="sv-section-title">Importar histórico de pagos (HV Control de Clientes)</h2>
+      <p className="sv-note">
+        Solo lectura: esto nunca crea ni modifica pedidos, suscripciones ni facturas de WooCommerce.
+        Elige el archivo <code className="sv-to-code">hv_control_clientes.json</code>, comprueba primero con «Simular» y solo luego «Importar de verdad».
+      </p>
+      <input type="file" accept="application/json" onChange={onFile} />
+      {fileName && <p className="sv-note sv-to-small">{fileName}{pagos ? ` — ${pagos.length} fila(s) leídas` : ''}</p>}
+      {error && <p className="sv-error">{error}</p>}
+      {pagos && (
+        <div className="cmp-acciones" style={{ marginTop: 10 }}>
+          <button className="sv-filter-btn" onClick={simular} disabled={busy}>{busy ? 'Comprobando...' : 'Simular'}</button>
+          {resultado?.simulado && (
+            <button className="sv-filter-btn" onClick={() => importarDeVerdad(false)} disabled={busy}>{busy ? 'Importando...' : 'Importar de verdad'}</button>
+          )}
+        </div>
+      )}
+      {resultado && (
+        <p className="sv-note" style={{ marginTop: 10 }}>
+          {resultado.simulado ? 'Simulación' : 'Importado'}: <strong>{resultado.nuevas}</strong> nueva(s), {resultado.duplicadas} ya estaban, {resultado.invalidas} sin fecha válida (de {resultado.total} filas).
+        </p>
+      )}
+    </section>
   )
 }
 

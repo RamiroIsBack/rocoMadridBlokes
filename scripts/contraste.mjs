@@ -37,7 +37,7 @@ const MIN_LARGE = 3;
 
 // Rutas públicas (no exigen login) y protegidas (exigen login real de socio/gestión).
 const RUTAS_PUBLICAS = ['/', '/progreso', '/ligas', '/entrenamientos', '/tareas', '/eventos', '/calendario'];
-const RUTAS_PROTEGIDAS = ['/superadmin', '/supervision'];
+const RUTAS_PROTEGIDAS = ['/superadmin', '/supervision', '/entrenamientos'];
 
 // Dentro de /supervision, qué pestañas (y subpestañas) recorrer. El selector es lo que hay
 // que pulsar; si no se encuentra, se omite sin fallar el resto.
@@ -205,6 +205,23 @@ async function main() {
                     if (await boton.count() === 0) { console.log(`  · (omitido, no encontrado: ${click})`); continue; }
                     await boton.click().catch(() => {});
                     await comprobarPagina(page, `/supervision → ${click}`, fallosTotal);
+                }
+            }
+
+            // Definiciones y elección de tests (solo socio ve la gestión completa) y su
+            // desplegable "Avanzado" — cowork lo pidió tras encontrar fallos aquí (1/11 18:30).
+            if (ruta === '/entrenamientos') {
+                const defBtn = page.locator('button:has-text("Definiciones")').first();
+                if (await defBtn.count() > 0) {
+                    await defBtn.click().catch(() => {});
+                    await comprobarPagina(page, '/entrenamientos → Definiciones', fallosTotal);
+                    const avanzadoBtn = page.locator('button:has-text("Avanzado")').first();
+                    if (await avanzadoBtn.count() > 0) {
+                        await avanzadoBtn.click().catch(() => {});
+                        await comprobarPagina(page, '/entrenamientos → Definiciones → Avanzado', fallosTotal);
+                    }
+                } else {
+                    console.log('  · (omitido, no encontrado: botón Definiciones)');
                 }
             }
         }

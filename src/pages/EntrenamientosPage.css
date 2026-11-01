@@ -477,7 +477,9 @@
   font-family: var(--font-serif);
   font-size: 1.1rem;
   font-weight: 700;
-  color: var(--zone-color, #2a2015);
+  /* El color de zona (azul/naranja/morado) se queda solo en el borde, decorativo — como texto
+     daba 2,46-3,47:1 sobre el beige (cowork, 1/11 18:30). */
+  color: var(--color-text-primary);
   margin: 0 0 12px;
   padding-bottom: 6px;
   border-bottom: 1.5px solid var(--zone-color, #c8bc9a);
@@ -556,6 +558,7 @@
 .entrena__tests-manager .sv-tests-mock-val    { color: var(--state-ok); }
 .entrena__tests-manager .sv-tests-danger      { color: var(--state-bad); border-color: var(--state-bad); }
 .entrena__tests-manager .sv-tests-confirm-msg { color: var(--state-bad); }
+.entrena__tests-manager .sv-tests-remove      { color: var(--state-bad); border-color: var(--state-bad); }
 
 /* ── Inline panel row (alumno mode) ── */
 .entrena__inline-panel td {

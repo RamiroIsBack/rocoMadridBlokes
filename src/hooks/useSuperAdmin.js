@@ -109,6 +109,11 @@ export const clubDaysCrear  = body       => gestionPost('/gestion/club-days', bo
 export const clubDaysEditar = (id, body) => gestionCall('PUT', `/gestion/club-days/${id}`, body)
 export const clubDaysBorrar = id         => gestionCall('DELETE', `/gestion/club-days/${id}`)
 
+// Histórico de pagos importado (NOTAS_PARA_CODE_hv_control_clientes.md) — solo lectura, nunca
+// toca WooCommerce.
+export const histPagosImportar = body => gestionPost('/gestion/hist-pagos/importar', body)
+export const histPagosResumen  = (desde = '', hasta = '') => gestionCall('GET', `/gestion/hist-pagos/resumen${desde || hasta ? `?desde=${desde}&hasta=${hasta}` : ''}`)
+
 // `from`: primer mes a incluir ('YYYY-MM', incluido) o '' para no limitar ("Todo").
 export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)
