@@ -4590,6 +4590,12 @@ function superadmin_sync_grupos_resumen($request) {
                 if ($en_rango($ym)) { $exentos++; break; }
             }
         }
+        // Sin NINGÚN pago ni exento dentro del rango pedido: pestaña inactiva ese periodo (grupo
+        // que ya no da clase, o que todavía no se ha puesto a cobrar) — fuera de los totales,
+        // igual que una pestaña sin ningún mes en rango (cowork, 1/11 09:30: Pilates/Zumba
+        // interés/Ent. Funcional/L-X 10.30/V 9:00/V 19.00/L-X-M-J 21.00/M-J 20.00 sin actividad
+        // real en sep-oct 2026, aunque sí tengan esas columnas de mes).
+        if (($desde || $hasta) && $con_pago === 0 && $exentos === 0) continue;
         $total_filas += count($r['filas']);
         $total_con_pago += $con_pago;
         foreach ($por_mes as $ym => $n) $total_por_mes[$ym] = ($total_por_mes[$ym] ?? 0) + $n;
@@ -4684,6 +4690,37 @@ function blokes_ensure_club_days_table() {
             ));
         }
         update_option('blokes_club_days_seed', 1, false);
+    }
+
+    // Decisión de Ramiro (1/11, por chat, recogida por cowork a las 09:40): festivo en día
+    // laborable = cierra por defecto; vísperas = abre. Aplica esa decisión a los festivos que ya
+    // estaban cargados (quedaban `pendiente` o sin atribuir) y añade los dos que faltaban del
+    // todo: Almudena (9/11, festivo local de Madrid) y la víspera de Año Nuevo (31/12).
+    if (!get_option('blokes_club_days_decision_ramiro_1')) {
+        $ahora = current_time('mysql');
+        $decidir = function($fecha, $decision) use ($wpdb, $ahora) {
+            $wpdb->update(blokes_club_days_table(), array(
+                'decision' => $decision, 'decidido_por' => 'ramiro', 'fecha_decision' => $ahora, 'updated_at' => $ahora,
+            ), array('fecha' => $fecha));
+        };
+        foreach (array('2026-11-02', '2026-12-07', '2026-12-08', '2026-12-25', '2027-01-01', '2027-01-06') as $f) $decidir($f, 'cierra');
+        $decidir('2026-12-24', 'abre');
+
+        $faltan = array(
+            array('2026-11-09', 'festivo_local', 'Almudena',             'cierra'),
+            array('2026-12-31', 'festivo_local',  'Nochevieja (víspera)', 'abre'),
+        );
+        foreach ($faltan as $f) {
+            list($fecha, $tipo, $nombre, $decision) = $f;
+            $existe = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . blokes_club_days_table() . " WHERE fecha = %s", $fecha), ARRAY_A);
+            if ($existe) { $decidir($fecha, $decision); continue; }
+            $wpdb->insert(blokes_club_days_table(), array(
+                'fecha' => $fecha, 'tipo' => $tipo, 'nombre' => $nombre, 'decision' => $decision, 'horario' => '',
+                'origen' => 'manual', 'decidido_por' => 'ramiro', 'fecha_decision' => $ahora,
+                'created_at' => $ahora, 'updated_at' => $ahora,
+            ));
+        }
+        update_option('blokes_club_days_decision_ramiro_1', 1, false);
     }
 }
 
