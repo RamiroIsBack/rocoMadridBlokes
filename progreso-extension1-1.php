@@ -4287,7 +4287,7 @@ function blokes_sync_grupos_a1_pestana($tab) {
 // Excel). UNFORMATTED_VALUE + FORMATTED_STRING para que los números lleguen como número de
 // PHP y las fechas como texto legible, igual que openpyxl distingue int/float de datetime.
 function blokes_sync_grupos_leer_valores($sheet_id, $tab) {
-    $rango = blokes_sync_grupos_a1_pestana($tab) . '!A1:Z1000';
+    $rango = blokes_sync_grupos_a1_pestana($tab) . '!A1:ZZ1000';
     $path  = '/values/' . rawurlencode($rango) . '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING';
     $data  = blokes_sync_grupos_get($sheet_id, $path);
     if (is_wp_error($data)) return $data;
@@ -4300,7 +4300,7 @@ function blokes_sync_grupos_leer_valores($sheet_id, $tab) {
 function blokes_sync_grupos_leer_valores_lote($sheet_id, $tabs) {
     $query = array();
     foreach ($tabs as $tab) {
-        $query[] = 'ranges=' . rawurlencode(blokes_sync_grupos_a1_pestana($tab) . '!A1:Z1000');
+        $query[] = 'ranges=' . rawurlencode(blokes_sync_grupos_a1_pestana($tab) . '!A1:ZZ1000');
     }
     $query[] = 'valueRenderOption=UNFORMATTED_VALUE';
     $query[] = 'dateTimeRenderOption=FORMATTED_STRING';
@@ -4317,17 +4317,26 @@ function blokes_sync_grupos_es_numero($v) {
     return is_int($v) || is_float($v);
 }
 
-// Cabeceras de mes reconocidas en la fila 2 (índice 1): [{col, mes}], col 0-indexada.
+// Cabeceras de mes reconocidas en la fila 2 (índice 1): [{col, mes, anio, ym}], col 0-indexada.
+// Cada pestaña tiene VARIAS temporadas seguidas en columnas (septiembre→agosto de 2023-24,
+// luego de 2024-25, de 2025-26...) y el nombre del mes se repite — sin año no se puede saber
+// cuál es el bloque de verdad (cowork, 1/11 07:55). El año de la primera temporada está en C2
+// (fila 2, columna C); cada ENERO que aparece suma uno (empieza la segunda mitad de esa
+// temporada). Las cabeceras con texto de más («ENERO 60€») se normalizan a su primera palabra.
 function blokes_sync_grupos_meses_cabecera($valores) {
-    $meses = array('ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE');
+    $meses = array(
+        'ENERO' => 1, 'FEBRERO' => 2, 'MARZO' => 3, 'ABRIL' => 4, 'MAYO' => 5, 'JUNIO' => 6,
+        'JULIO' => 7, 'AGOSTO' => 8, 'SEPTIEMBRE' => 9, 'OCTUBRE' => 10, 'NOVIEMBRE' => 11, 'DICIEMBRE' => 12,
+    );
     $fila2 = $valores[1] ?? array();
+    $anio = intval($valores[1][2] ?? 0); // C2: año de la primera temporada (p. ej. 2023)
     $out = array();
     foreach ($fila2 as $idx => $v) {
-        if (!is_string($v)) continue;
-        $vv = mb_strtoupper(trim($v));
-        foreach ($meses as $m) {
-            if (mb_strpos($vv, $m) === 0) { $out[] = array('col' => $idx, 'mes' => $m); break; }
-        }
+        if (!is_string($v) || trim($v) === '') continue;
+        $primera_palabra = mb_strtoupper(trim(preg_split('/\s+/', trim($v))[0]));
+        if (!isset($meses[$primera_palabra])) continue;
+        if ($primera_palabra === 'ENERO') $anio++;
+        $out[] = array('col' => $idx, 'mes' => $primera_palabra, 'anio' => $anio, 'ym' => sprintf('%04d-%02d', $anio, $meses[$primera_palabra]));
     }
     return $out;
 }
@@ -4421,7 +4430,7 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
     foreach ($meses_cab as $i => $mc) {
         $siguiente = $meses_cab[$i + 1]['col'] ?? null;
         $width = $siguiente !== null ? ($siguiente - $mc['col']) : 3;
-        $bloques[] = array('mes' => $mc['mes'], 'layout' => blokes_sync_grupos_layout_bloque($valores, $mc['col'], $width));
+        $bloques[] = array('ym' => $mc['ym'], 'layout' => blokes_sync_grupos_layout_bloque($valores, $mc['col'], $width));
     }
 
     $cols = blokes_sync_grupos_detectar_columnas($valores, $meses_cab[0]['col']);
@@ -4463,24 +4472,35 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
         foreach ($bloques as $b) {
             list($pago, $exento) = blokes_sync_grupos_leer_pago($valores, $r, $b['layout']);
             if ($exento) $fila['exento'] = true;
-            if ($pago) $fila['pagos'][$b['mes']] = $pago;
+            if ($pago) $fila['pagos'][$b['ym']] = $pago; // 'YYYY-MM' real, no solo el nombre del mes (se repite cada temporada)
         }
         $filas[] = $fila;
         $r++;
     }
 
-    return array('filas' => $filas, 'bloques' => array_map(function($b) { return $b['mes']; }, $bloques));
+    return array('filas' => $filas, 'bloques' => array_map(function($b) { return $b['ym']; }, $bloques));
 }
 
 // Resumen de TODAS las pestañas de la Hoja de PRUEBA: filas, con pago y exentos por pestaña,
 // y el total — para comparar con los 262 de _parse.py. Las pestañas sin bloques de mes
 // reconocidos (Balance, Bonos de 10...) se omiten del resumen, igual que _parse.py las omitía
 // por no encontrar el par septiembre→octubre.
-function superadmin_sync_grupos_resumen() {
+function superadmin_sync_grupos_resumen($request) {
     $sheet_id = get_option('blokes_sync_grupos_sheet_prueba_id', '');
     if (!$sheet_id) {
         return new WP_Error('falta_config', 'Falta configurar el ID de la Hoja de PRUEBA (POST /gestion/sync-grupos/config con sheetPruebaId).', array('status' => 400));
     }
+    // Filtra "conPago"/"exentos" a un rango de meses (YYYY-MM, inclusive) — p. ej.
+    // ?desde=2026-09&hasta=2026-10 para comparar exactamente con _parse.py. Sin filtro, cuenta
+    // cualquier pago de cualquier temporada (para ver de un vistazo qué meses hay en la hoja).
+    $desde = sanitize_text_field((string) $request->get_param('desde'));
+    $hasta = sanitize_text_field((string) $request->get_param('hasta'));
+    $en_rango = function($ym) use ($desde, $hasta) {
+        if ($desde && $ym < $desde) return false;
+        if ($hasta && $ym > $hasta) return false;
+        return true;
+    };
+
     $meta = blokes_sync_grupos_get($sheet_id, '?fields=sheets.properties.title');
     if (is_wp_error($meta)) return new WP_Error($meta->get_error_code(), $meta->get_error_message(), array('status' => 502));
     $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
@@ -4495,21 +4515,28 @@ function superadmin_sync_grupos_resumen() {
         if (empty($r['bloques'])) continue;
         $con_pago = 0; $exentos = 0;
         foreach ($r['filas'] as $f) {
-            if (!empty($f['pagos'])) $con_pago++;
+            $pago_en_rango = false;
+            foreach (array_keys($f['pagos']) as $ym) if ($en_rango($ym)) { $pago_en_rango = true; break; }
+            if ($pago_en_rango) $con_pago++;
             if ($f['exento']) $exentos++;
         }
         $total_filas += count($r['filas']);
         $total_con_pago += $con_pago;
-        $resumen[] = array('pestana' => $tab, 'filas' => count($r['filas']), 'conPago' => $con_pago, 'exentos' => $exentos, 'meses' => $r['bloques']);
+        $resumen[] = array(
+            'pestana' => $tab, 'filas' => count($r['filas']), 'conPago' => $con_pago, 'exentos' => $exentos,
+            'mesesDetectados' => array_values(array_unique($r['bloques'])),
+        );
     }
 
     return rest_ensure_response(array('success' => true, 'data' => array(
-        'totalFilas' => $total_filas, 'totalConPago' => $total_con_pago, 'pestanas' => $resumen,
+        'totalFilas' => $total_filas, 'totalConPago' => $total_con_pago, 'filtro' => array('desde' => $desde ?: null, 'hasta' => $hasta ?: null),
+        'pestanas' => $resumen,
     )));
 }
 
 // Detalle de una sola pestaña (con nombre/teléfono/notas/pagos de cada fila) — para comparar
-// a mano con el Excel cuando el resumen no cuadre en alguna pestaña concreta.
+// a mano con el Excel cuando el resumen no cuadre en alguna pestaña concreta. Con `mes`
+// (YYYY-MM) enseña solo los pagos de ese mes en vez de todas las temporadas encontradas.
 function superadmin_sync_grupos_pestana($request) {
     $sheet_id = get_option('blokes_sync_grupos_sheet_prueba_id', '');
     if (!$sheet_id) {
@@ -4517,9 +4544,17 @@ function superadmin_sync_grupos_pestana($request) {
     }
     $tab = sanitize_text_field((string) $request->get_param('tab'));
     if ($tab === '') return new WP_Error('bad_request', 'Falta el parámetro tab (nombre exacto de la pestaña).', array('status' => 400));
+    $mes = sanitize_text_field((string) $request->get_param('mes'));
     $valores = blokes_sync_grupos_leer_valores($sheet_id, $tab);
     if (is_wp_error($valores)) return new WP_Error($valores->get_error_code(), $valores->get_error_message(), array('status' => 502));
-    return rest_ensure_response(array('success' => true, 'data' => blokes_sync_grupos_leer_pestana_filas($valores)));
+    $r = blokes_sync_grupos_leer_pestana_filas($valores);
+    if ($mes !== '') {
+        $r['filas'] = array_map(function($f) use ($mes) {
+            $f['pagos'] = array_intersect_key($f['pagos'], array($mes => true));
+            return $f;
+        }, $r['filas']);
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $r));
 }
 
 /**
