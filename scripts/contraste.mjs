@@ -47,6 +47,11 @@ const PESTANAS_SUPERVISION = [
     { click: 'button:has-text("Campañas")' },                        // subpestaña de Grupos
     { click: 'button:has-text("Lista de espera")' },                 // subpestaña de Grupos
     { click: 'button:has-text("Cobrar este mes")' },                 // subpestaña de Grupos
+    { click: 'button:has-text("Pausados")' },                        // subpestaña de Grupos
+    { click: 'button:has-text("Bajas a fin de mes")' },              // subpestaña de Grupos
+    { click: 'button:has-text("Sin datos")' },                       // subpestaña de Grupos
+    { click: 'button:has-text("Pagan fuera de la web")' },           // subpestaña de Grupos
+    { click: 'button:has-text("Duplicados")' },                      // subpestaña de Grupos
     { click: 'button:has-text("CTRL Time Off")' },
     { click: 'button:has-text("Simulador")' },                       // subpestaña de CTRL Time Off
     { click: 'button:has-text("Sala y mañanas")' },                  // pestaña del simulador

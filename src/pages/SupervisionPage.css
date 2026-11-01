@@ -104,7 +104,26 @@
 /* Estos 3 controles se reutilizan tanto en fondo claro (Grupos, Campañas, ExcelMuerte — la
    mayoría) como en fondo oscuro (.sv-section de CTRL Time Off): el color base de arriba vale
    para el oscuro, y aquí se oscurece solo donde de verdad hace falta (NOTAS_PARA_CODE_contraste.md). */
-.sv-tab-panel:not(.sv-to-root) .sv-tab-mini      { color: var(--color-text-secondary); }
+/* El submenú de Grupos (Cobrar este mes/Pausados/Bajas/Sin datos/...) seguía casi ilegible
+   después del primer pase: la activa perdía su texto blanco porque esta regla scoped (3
+   clases de especificidad) ganaba a `.sv-tab-mini.is-active` (2 clases) y le dejaba el texto
+   oscuro encima del azul; las inactivas tenían fondo/borde casi invisibles sobre el beige
+   (Ramiro, 1/11 16:45). Fondo/borde visibles ahora también en este contexto claro, y la
+   activa tiene su propia regla, más específica que las dos anteriores, para no perder el
+   blanco otra vez. */
+.sv-tab-panel:not(.sv-to-root) .sv-tab-mini {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+.sv-tab-panel:not(.sv-to-root) .sv-tab-mini:hover { background: #efe9d8; }
+.sv-tab-panel:not(.sv-to-root) .sv-tab-mini.is-active {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  color: #fff;
+}
+.sv-tab-mini__count { color: var(--color-text-secondary); font-weight: 400; }
+.sv-tab-mini.is-active .sv-tab-mini__count { color: rgba(255,255,255,0.9); }
 .sv-tab-panel:not(.sv-to-root) .sv-filter-btn    { color: var(--color-text-secondary); }
 .sv-tab-panel:not(.sv-to-root) .sv-filter-btn:hover { color: var(--color-text-primary); }
 .sv-tab-panel:not(.sv-to-root) .sv-period__btn   { color: var(--color-text-secondary); }

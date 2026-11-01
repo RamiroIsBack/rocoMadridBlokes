@@ -1651,22 +1651,22 @@ function GruposTab() {
         <div className="sv-controls-left">
           <button className={`sv-tab-mini ${vista === 'grupos' ? 'is-active' : ''}`} onClick={() => setVista('grupos')}>Grupos</button>
           <button className={`sv-tab-mini ${vista === 'cobrar' ? 'is-active' : ''}`} onClick={() => setVista('cobrar')}>
-            Cobrar este mes {porCobrar.length ? `(${porCobrar.length})` : ''}
+            Cobrar este mes {porCobrar.length ? <span className="sv-tab-mini__count">({porCobrar.length})</span> : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'pausados' ? 'is-active' : ''}`} onClick={() => setVista('pausados')}>
-            Pausados {pausados.length ? `(${pausados.length})` : ''}
+            Pausados {pausados.length ? <span className="sv-tab-mini__count">({pausados.length})</span> : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'bajas' ? 'is-active' : ''}`} onClick={() => setVista('bajas')}>
-            Bajas a fin de mes {bajas.length ? `(${bajas.length})` : ''}
+            Bajas a fin de mes {bajas.length ? <span className="sv-tab-mini__count">({bajas.length})</span> : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'sindatos' ? 'is-active' : ''}`} onClick={() => setVista('sindatos')}>
-            Sin datos {sinDatos.length ? `(${sinDatos.length})` : ''}
+            Sin datos {sinDatos.length ? <span className="sv-tab-mini__count">({sinDatos.length})</span> : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'externos' ? 'is-active' : ''}`} onClick={() => setVista('externos')}>
-            Pagan fuera de la web {pagaFuera.length ? `(${pagaFuera.length})` : ''}
+            Pagan fuera de la web {pagaFuera.length ? <span className="sv-tab-mini__count">({pagaFuera.length})</span> : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'duplicados' ? 'is-active' : ''}`} onClick={() => setVista('duplicados')}>
-            Duplicados {duplicados.length ? `(${duplicados.length})` : ''}
+            Duplicados {duplicados.length ? <span className="sv-tab-mini__count">({duplicados.length})</span> : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'espera' ? 'is-active' : ''}`} onClick={abrirEspera}>
             Lista de espera
