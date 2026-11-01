@@ -15,7 +15,7 @@ import {
   DIAS_ANUALES, HOY_PARO, MES_LABEL, MESES_ANUALES, MANANAS_MODO, MANANAS_DISPOSICION, eur, inactivosMes,
   evaluarPlan, defaultYear, todayISO, repartirVacaciones, BLOQUE_VERANO, MAX_BLOQUES, CIERRE_EXTRA,
   normalizeMananas, horasMananaPorPersona, ingresosMananaDeClases, cuentasMananas, equilibrioManana, disposicionDe,
-  mesesCerradosManana,
+  mesesCerradosManana, yaEnParoEsteMes,
 } from '../utils/timeoffPlan'
 import { useTimeOffData, savePlan, saveReal, syncNueve, addScenario } from '../hooks/useTimeOff'
 import { useClases } from '../hooks/useClases'
@@ -781,12 +781,18 @@ function ConfigMananas({ state, update, costes, clases }) {
                         </td>
                         {meses.map(mes => (
                           <td key={mes}>
-                            <select className="sv-tests-select" value={disposicionDe(mananas, p, mes)}
-                              onChange={e => setMananas({ disposicion: {
-                                ...mananas.disposicion, [p]: { ...(mananas.disposicion?.[p] || {}), [mes]: e.target.value },
-                              } })}>
-                              {Object.entries(MANANAS_DISPOSICION).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                            </select>
+                            {yaEnParoEsteMes(state.paro, p, mes) ? (
+                              <span className="sv-ot-muted sv-to-small" title="Ya está en paro ese mes por la sección de vacaciones/paro de arriba: su ahorro ya se cuenta ahí, no aquí otra vez.">
+                                Ya en paro (contado arriba)
+                              </span>
+                            ) : (
+                              <select className="sv-tests-select" value={disposicionDe(mananas, p, mes)}
+                                onChange={e => setMananas({ disposicion: {
+                                  ...mananas.disposicion, [p]: { ...(mananas.disposicion?.[p] || {}), [mes]: e.target.value },
+                                } })}>
+                                {Object.entries(MANANAS_DISPOSICION).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                              </select>
+                            )}
                           </td>
                         ))}
                       </tr>
@@ -820,18 +826,18 @@ function ConfigMananas({ state, update, costes, clases }) {
               })}
             </div>
           )}
-          <MananasCuentas mananas={mananas} costes={costes} clases={clases} horas={horas} />
+          <MananasCuentas mananas={mananas} costes={costes} clases={clases} horas={horas} paro={state.paro} />
         </>
       )}
     </>
   )
 }
 
-function MananasCuentas({ mananas, costes, clases, horas }) {
+function MananasCuentas({ mananas, costes, clases, horas, paro }) {
   const ingresosManana = useMemo(() => ingresosMananaDeClases(clases, mananas.corteHora), [clases, mananas.corteHora])
-  const ctx = { ingresosManana, coste: costes.mes, horasManana: horas }
-  const r = useMemo(() => cuentasMananas(mananas, ctx), [mananas, ingresosManana, costes.mes, horas])
-  const eq = useMemo(() => equilibrioManana(mananas, ctx), [mananas, ingresosManana, costes.mes, horas])
+  const ctx = { ingresosManana, coste: costes.mes, horasManana: horas, paro }
+  const r = useMemo(() => cuentasMananas(mananas, ctx), [mananas, ingresosManana, costes.mes, horas, paro])
+  const eq = useMemo(() => equilibrioManana(mananas, ctx), [mananas, ingresosManana, costes.mes, horas, paro])
   const cls = n => (n > 0 ? 'sv-to-good' : n < 0 ? 'sv-to-bad' : '')
   if (!r.cerrados.length) return null
   const lineas = [
@@ -963,7 +969,7 @@ function AvisosAgrupados({ ev }) {
 }
 
 // Veredicto del supuesto en una frase, en verde, ámbar o rojo
-function Veredicto({ ev, nombre }) {
+function Veredicto({ ev, nombre, mananasAnio = 0 }) {
   const bloquea = ev.warnings.filter(w => w.lvl === 'bad')
   const acuerdo = [...new Set(ev.acuerdos.filter(a => !a.registrado).map(a => a.p))]
   const revisar = ev.warnings.filter(w => w.lvl === 'warn' && !w.abrir).length
@@ -982,6 +988,11 @@ function Veredicto({ ev, nombre }) {
       <div className="sv-to-verdict__name">{nombre}</div>
       <div className="sv-to-verdict__text">
         {b > 0 ? <>Ahorra <strong>{eur(b)}/año</strong> frente a hoy.</> : b < 0 ? <>Cuesta <strong>{eur(-b)}/año</strong> más que hoy.</> : <>Mismo dinero que hoy.</>}
+        {mananasAnio !== 0 && (
+          <> {' '}<span className={cls(mananasAnio)} title="Resultado de cerrar por la mañana (sección 3): no está sumado al número de arriba, que es solo vacaciones/paro/campamento.">
+            + mañanas: {mananasAnio > 0 ? '+' : ''}{eur(mananasAnio)}/año
+          </span>.</>
+        )}
         {' '}{acuerdo.length
           ? <>Necesita el acuerdo de <strong>{acuerdo.length} {acuerdo.length === 1 ? 'persona' : 'personas'}</strong> ({acuerdo.join(', ')}).</>
           : <>No necesita acuerdos.</>}
@@ -1284,6 +1295,16 @@ function Calculadora({ state, setState, costes, clases, ev, sugerido, onDesdeRea
   const modificado = activo && state.preset.firma !== firmaPlan(state)
   const nombre = activo ? `${activo[1]}${modificado ? ' (modificado)' : ''}` : 'Plan propio'
 
+  // Resultado de "Mañanas" (sección 3) aparte del de vacaciones/paro/campamento (ev.eco.balance):
+  // se enseña al lado en el veredicto, no sumado, para no mezclar dos cálculos distintos.
+  const mananasCfg = normalizeMananas(state.mananas)
+  const horasManana = useMemo(() => horasMananaPorPersona(mananasCfg.corteHora), [mananasCfg.corteHora])
+  const ingresosManana = useMemo(() => ingresosMananaDeClases(clases, mananasCfg.corteHora), [clases, mananasCfg.corteHora])
+  const mananasAnio = useMemo(
+    () => (mananasCfg.modo === 'abiertas' ? 0 : cuentasMananas(mananasCfg, { ingresosManana, coste: costes.mes, horasManana, paro }).resultadoAnio),
+    [mananasCfg, ingresosManana, costes.mes, horasManana, paro]
+  )
+
   // Si el plan actual no es un supuesto sin tocar, se guarda antes como «Plan anterior»
   const aplicarPreset = async id => {
     const label = PRESETS.find(([k]) => k === id)[1]
@@ -1303,7 +1324,7 @@ function Calculadora({ state, setState, costes, clases, ev, sugerido, onDesdeRea
         Un plan de prueba para decidir quién pasa a paro, si se cierra en verano o cómo se reparten las vacaciones. No toca lo real.
       </p>
 
-      <Veredicto ev={ev} nombre={nombre} />
+      <Veredicto ev={ev} nombre={nombre} mananasAnio={mananasAnio} />
 
       <Paso n="1" titulo="Año y punto de partida"
         nota="Elige un supuesto: se carga su configuración y se reparten las vacaciones automáticamente. Después puedes tocar lo que quieras.">

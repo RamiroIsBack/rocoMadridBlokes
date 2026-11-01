@@ -192,6 +192,14 @@ export function disposicionDe(mananas, persona, mes) {
   return 'tarde'
 }
 
+// ¿Esta persona ya está en paro ese mes por la sección de vacaciones/paro general (fijo
+// discontinuo)? Si es así, su coste ya se cuenta en el "Ahorro/año" general del plan: en
+// Mañanas no se vuelve a contar aunque también esté puesta "paro" ahí — si no, se cuenta el
+// mismo ahorro dos veces (cowork, 1/11 07:50).
+export function yaEnParoEsteMes(paro, persona, mes) {
+  return (PARO_MESES[paro?.[persona] || 'no'] || []).includes(mes)
+}
+
 // Meses (1-12) cerrados por la mañana con esta configuración
 export function mesesCerradosManana(mananas) {
   const m = normalizeMananas(mananas)
@@ -253,7 +261,7 @@ function ingresosDelMesManana(mananas, mes, ingresosManana) {
 // ahorro de personal (de quien se pone en paro/baja; quien pasa sus horas a la tarde no
 // ahorra nada) y de sala — por cada mes cerrado (cada uno con su propio histórico de
 // alumnos/ingresos y su propia disposición por persona) y resumido en el año.
-export function cuentasMananas(mananas, { ingresosManana, coste = {}, horasManana }) {
+export function cuentasMananas(mananas, { ingresosManana, coste = {}, horasManana, paro = {} }) {
   const m = normalizeMananas(mananas)
   const cerrados = mesesCerradosManana(m)
   const horas = horasManana || horasMananaPorPersona(m.corteHora)
@@ -264,6 +272,7 @@ export function cuentasMananas(mananas, { ingresosManana, coste = {}, horasManan
     const perdidaBruta = ing.ingresos
     const perdidaNeta = perdidaBruta * (1 - (m.pctTarde || 0) / 100)
     const ahorroPersonal = personas.reduce((s, p) => {
+      if (yaEnParoEsteMes(paro, p, mes)) return s // ya contado en el "Ahorro/año" general del plan
       const disp = disposicionDe(m, p, mes)
       if (disp === 'tarde') return s
       const frac = Math.min(1, horas[p] / (PROF_META[p]?.horasSem || horas[p] || 1))
