@@ -190,6 +190,8 @@ function HoyView({ config, workers, workerId, onChooseWorker }) {
             )}
           </section>
 
+          <MiParteCompes workerId={workerId} config={config} />
+
           <section className="org__section">
             <h3 className="org__section-title">Bloques puestos</h3>
             {data.blocks.length === 0 ? (
@@ -216,6 +218,56 @@ function HoyView({ config, workers, workerId, onChooseWorker }) {
         </>
       )}
     </div>
+  )
+}
+
+// "Mi parte" dentro de Hoy (Ramiro, 1/11 17:20): las tareas del plan de cualquier competición
+// que le toquen a esta persona, igual que las tareas normales del día pero sin filtrar por
+// fecha — una compe tiene semanas de antelación y conviene verlas todas, no solo las de hoy.
+function MiParteCompes({ workerId, config }) {
+  const [competitions, setCompetitions] = useState([])
+  const [plans, setPlans] = useState({})
+  const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
+
+  useEffect(() => {
+    api('GET', '/equipacion/competitions').then(r => setCompetitions(r.data || [])).catch(() => {})
+  }, [])
+  useEffect(() => {
+    competitions.forEach(c => {
+      api('GET', `/equipacion/competitions/${c.id}/plan`).then(r => setPlans(p => ({ ...p, [c.id]: r.data }))).catch(() => {})
+    })
+  }, [competitions])
+
+  const toggleDone = async (taskId, done, compId) => {
+    setPlans(p => ({ ...p, [compId]: { ...p[compId], tasks: p[compId].tasks.map(t => t.id === taskId ? { ...t, done } : t) } }))
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch {}
+  }
+
+  const sections = competitions
+    .map(c => ({ comp: c, mine: (plans[c.id]?.tasks || []).filter(t => String(t.workerId) === String(workerId)) }))
+    .filter(s => s.mine.length > 0)
+  if (sections.length === 0) return null
+
+  return (
+    <section className="org__section">
+      <h3 className="org__section-title">Mi parte de la compe</h3>
+      {sections.map(({ comp, mine }) => (
+        <div key={comp.id}>
+          {sections.length > 1 && <p className="org__hint">{comp.name}</p>}
+          <ul className="org__task-list">
+            {mine.map(t => (
+              <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}`}>
+                <label>
+                  <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked, comp.id)} />
+                  <span className="org__task-name">{taskTypeById[t.taskTypeId]?.name || t.taskTypeId}</span>
+                  <span className="org__task-params">{dayLabel(t.date)}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </section>
   )
 }
 
@@ -1033,11 +1085,15 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const [blocks, setBlocks] = useState(comp.blocks)
   const [selectedToPlace, setSelectedToPlace] = useState(null)
+  const [editingBlockId, setEditingBlockId] = useState(null)
+  const [holdsets, setHoldsets] = useState([])
   const dragIdRef = useRef(null)
+  const dragStartRef = useRef(null)
   const [trayDrag, setTrayDrag] = useState(null)
   const trayPointerRef = useRef(null)
 
   useEffect(() => { setBlocks(comp.blocks) }, [comp])
+  useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
 
   const clampPct = v => Math.max(2, Math.min(98, v))
   const posFromClient = (clientX, clientY) => {
@@ -1051,17 +1107,26 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
   const startDrag = id => e => {
     e.preventDefault()
     dragIdRef.current = id
+    dragStartRef.current = { x: e.clientX, y: e.clientY, moved: false }
     e.currentTarget.setPointerCapture?.(e.pointerId)
   }
   const onWrapMove = e => {
     if (dragIdRef.current == null) return
+    const st = dragStartRef.current
+    if (st && !st.moved && Math.hypot(e.clientX - st.x, e.clientY - st.y) > 6) st.moved = true
     const { x, y } = posFromClient(e.clientX, e.clientY)
     setBlocks(cur => cur.map(b => b.id === dragIdRef.current ? { ...b, xPct: x, yPct: y } : b))
   }
+  // Un toque sin apenas movimiento (umbral de 6px, igual que la bandeja) abre la ficha del
+  // bloque en vez de "guardar posición" — así un simple toque no hace falta distinguirlo de
+  // un arrastre con un botón aparte (Ramiro, 1/11 17:20: "Álvaro no va a usar la API").
   const onWrapUp = async () => {
     const id = dragIdRef.current
+    const moved = dragStartRef.current?.moved
     dragIdRef.current = null
+    dragStartRef.current = null
     if (id == null) return
+    if (!moved) { setEditingBlockId(id); return }
     const b = blocks.find(x => x.id === id)
     if (b) { try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: b.xPct, yPct: b.yPct }) } catch {} }
   }
@@ -1155,11 +1220,11 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
         {placed.map(b => (
           <div
             key={b.id}
-            className="org__comp-bubble"
-            style={{ left: `${b.xPct}%`, top: `${b.yPct}%` }}
+            className={`org__comp-bubble${b.tested ? ' org__comp-bubble--tested' : ''}`}
+            style={{ left: `${b.xPct}%`, top: `${b.yPct}%`, borderColor: b.grade ? (GRADE_COLOR[b.grade] || '#fff') : undefined }}
             onPointerDown={startDrag(b.id)}
             onDoubleClick={() => unplace(b.id)}
-            title="Arrastra para mover, doble clic para quitar del mapa"
+            title="Toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa"
           >{b.number}</div>
         ))}
         {trayDrag && (
@@ -1168,9 +1233,123 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
           </div>
         )}
       </div>
-      <p className="org__hint">{placed.length} de {blocks.length} bloques colocados. Doble clic en una burbuja para quitarla del mapa.</p>
+      <p className="org__hint">{placed.length} de {blocks.length} bloques colocados. Toca una burbuja para su ficha, doble clic para quitarla del mapa.</p>
+
+      {editingBlockId != null && (
+        <CompBlockFicha
+          block={blocks.find(b => b.id === editingBlockId)}
+          config={config} holdsets={holdsets}
+          onClose={() => setEditingBlockId(null)}
+          onSaved={patch => { setBlocks(cur => cur.map(b => b.id === editingBlockId ? { ...b, ...patch } : b)) }}
+        />
+      )}
 
       <CompePlanView compId={comp.id} taskTypeById={taskTypeById} workers={workers || []} />
+    </div>
+  )
+}
+
+// Ficha de un bloque de compe: subzona, color, presas, volúmenes, equipador, foto (subida
+// desde el móvil) y probado sí/no — Álvaro la rellena tocando una burbuja del mapa (Ramiro,
+// 1/11 17:20).
+function CompBlockFicha({ block, config, holdsets, onClose, onSaved }) {
+  const [subzone, setSubzone] = useState(block.subzone ?? '')
+  const [grade, setGrade] = useState(block.grade || '')
+  const [holdSetIds, setHoldSetIds] = useState(block.holdSetIds || [])
+  const [volumes, setVolumes] = useState(block.volumes || '')
+  const [equipador, setEquipador] = useState(block.equipador || '')
+  const [tested, setTested] = useState(!!block.tested)
+  const [photoUrl, setPhotoUrl] = useState(block.photoUrl || '')
+  const [uploading, setUploading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const toggleHoldSet = id => setHoldSetIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+
+  const uploadPhoto = async e => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/equipacion/comp-blocks/${block.id}/photo`, {
+        method: 'POST', credentials: 'include', headers: getAuthHeaders(), body: formData,
+      })
+      const json = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(json?.message || `Error ${res.status}`)
+      setPhotoUrl(json.photoUrl)
+    } catch (err) {
+      window.alert(err.message)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await api('PUT', `/equipacion/comp-blocks/${block.id}`, {
+        subzone: subzone === '' ? null : Number(subzone), grade, holdSetIds, volumes, equipador, tested,
+      })
+      onSaved({ subzone: subzone === '' ? null : Number(subzone), grade, holdSetIds, volumes, equipador, tested, photoUrl })
+      onClose()
+    } catch (e) {
+      window.alert(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="org__add-form">
+      <div className="org__semana-actions">
+        <p className="org__section-title" style={{ margin: 0 }}>Bloque #{block.number}</p>
+        <button className="org__link-btn" onClick={onClose}>Cerrar</button>
+      </div>
+      <div className="org__add-row">
+        <label>Subzona</label>
+        <select value={subzone} onChange={e => setSubzone(e.target.value)}>
+          <option value="">Sin asignar</option>
+          {config.subzones.map(s => <option key={s} value={s}>#{s}</option>)}
+        </select>
+      </div>
+      <div className="org__add-row">
+        <label>Color</label>
+        <select value={grade} onChange={e => setGrade(e.target.value)}>
+          <option value="">Sin asignar</option>
+          {config.grades.map(g => <option key={g.color} value={g.color}>{g.color} ({g.range})</option>)}
+        </select>
+      </div>
+      <div className="org__add-row org__add-row--holdsets">
+        <label>Juego(s) de presas</label>
+        <div className="org__holdset-chips">
+          {holdsets.map(h => (
+            <button key={h.id} type="button" className={`org__holdset-chip${holdSetIds.includes(h.id) ? ' org__holdset-chip--on' : ''}`} onClick={() => toggleHoldSet(h.id)}>{h.name}</button>
+          ))}
+        </div>
+      </div>
+      <div className="org__add-row">
+        <label>Volúmenes</label>
+        <textarea value={volumes} onChange={e => setVolumes(e.target.value)} placeholder="Tipo, tamaño o nombre de los volúmenes de este bloque" />
+      </div>
+      <div className="org__add-row">
+        <label>Equipador</label>
+        <input type="text" value={equipador} onChange={e => setEquipador(e.target.value)} />
+      </div>
+      <div className="org__add-row">
+        <label>Foto</label>
+        {photoUrl && <img src={photoUrl} alt={`Bloque #${block.number}`} className="org__comp-block-photo" />}
+        <input type="file" accept="image/*" capture="environment" onChange={uploadPhoto} disabled={uploading} />
+        {uploading && <span className="org__hint">Subiendo...</span>}
+      </div>
+      <label className="org__add-row org__add-row--check">
+        <input type="checkbox" checked={tested} onChange={e => setTested(e.target.checked)} />
+        <span>Probado (forerunning)</span>
+      </label>
+      <div className="org__add-actions">
+        <button className="org__btn org__btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button>
+        <button className="org__btn" onClick={save} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
+      </div>
     </div>
   )
 }

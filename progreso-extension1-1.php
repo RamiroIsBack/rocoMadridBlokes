@@ -672,6 +672,9 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)', array(
         'methods' => 'PUT', 'callback' => 'progreso_equip_update_comp_block', 'permission_callback' => $equip_perm,
     ));
+    register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)/photo', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_upload_comp_block_photo', 'permission_callback' => $equip_perm,
+    ));
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/generate-plan', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_competition_generate_plan', 'permission_callback' => $equip_perm,
     ));
@@ -4731,6 +4734,20 @@ function blokes_ensure_club_days_table() {
         }
         update_option('blokes_club_days_decision_ramiro_1', 1, false);
     }
+
+    // Visita del ACE Tetuán (confirmada por Ramiro, 1/11 17:20): el club sigue abierto ese día,
+    // ocupa toda la sala por la mañana — es un `evento`, no un cierre. El plan de la compe (y
+    // cualquier otra tarea que mire el calendario) la lee de aquí, no de texto suelto.
+    if (!get_option('blokes_club_days_evento_ace')) {
+        $ahora = current_time('mysql');
+        $wpdb->insert(blokes_club_days_table(), array(
+            'fecha' => '2026-11-25', 'tipo' => 'evento', 'nombre' => 'Visita ACE Tetuán (ESO)',
+            'decision' => 'abre', 'horario' => '10:00 · 45 alumnos + 3 profesores · ocupa toda la sala por la mañana',
+            'origen' => 'manual', 'decidido_por' => 'ramiro', 'fecha_decision' => $ahora,
+            'created_at' => $ahora, 'updated_at' => $ahora,
+        ));
+        update_option('blokes_club_days_evento_ace', 1, false);
+    }
 }
 
 // GET /gestion/club-days?desde&hasta — lista ordenada por fecha, opcionalmente filtrada.
@@ -8548,6 +8565,8 @@ function progreso_equip_seed_comp_task_types_if_missing() {
         array('id' => 'comp_limpieza_presas', 'name' => 'Compe: limpieza de presas'),
         array('id' => 'comp_puntuacion', 'name' => 'Compe: preparar hojas de puntuación / sistema de resultados'),
         array('id' => 'comp_inscripciones', 'name' => 'Compe: inscripciones y categorías'),
+        array('id' => 'comp_prep_montaje', 'name' => 'Compe: preparar montaje de zona de público y premios'),
+        array('id' => 'comp_decidir_forerunners', 'name' => 'Compe: decidir lista de forerunners'),
         array('id' => 'comp_desequipar_cueva', 'name' => 'Compe: desequipar — primero la Cueva'),
         array('id' => 'comp_desequipar_resto', 'name' => 'Compe: desequipar — resto de zonas'),
         array('id' => 'comp_equipar_bloques', 'name' => 'Compe: equipar los 16 bloques'),
@@ -9450,18 +9469,14 @@ function progreso_equip_postpone_task($request) {
         return rest_ensure_response(array('success' => true, 'queued' => true));
     }
 
-    $wpdb->insert($tasks_table, array(
-        'assignment_id'      => intval($lead_assignment['id']),
-        'task_type_id'       => $task['task_type_id'],
-        'task_date'          => $next_start,
-        'params'             => $task['params'],
-        'done'               => 0,
-        'status'             => 'pendiente',
-        'original_date'      => $task['original_date'] ?: $task['task_date'],
-        'postponed_count'    => intval($task['postponed_count']) + 1,
-        'original_worker_id' => $task['original_worker_id'] ? intval($task['original_worker_id']) : intval($task['worker_id']),
-    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%d'));
-    $new_task_id = $wpdb->insert_id;
+    // Igual que el barrido y el arrastre al crear semana: si en la semana siguiente ya hay una
+    // tarjeta pendiente de este mismo tipo, se junta con ella (sube su ×n) en vez de crear una
+    // segunda tarjeta del mismo tipo esa semana (cowork, 1/11 17:20 — «regar» salía duplicada).
+    $new_task_id = progreso_equip_merge_rolled_task(
+        intval($next_week['id']), intval($lead_assignment['id']), $task['task_type_id'], $next_start, $task['params'],
+        intval($task['postponed_count']), $task['original_date'] ?: $task['task_date'],
+        $task['original_worker_id'] ? intval($task['original_worker_id']) : intval($task['worker_id'])
+    );
 
     $wpdb->update($tasks_table,
         array('status' => 'retrasada', 'moved_to_task_id' => $new_task_id),
@@ -9673,6 +9688,29 @@ function progreso_equip_update_comp_block($request) {
     return rest_ensure_response(array('success' => true));
 }
 
+// POST /equipacion/comp-blocks/{id}/photo — sube la foto del bloque desde el móvil (Álvaro no
+// va a usar la API para pegar una URL, Ramiro 1/11 17:20). Misma mecánica que el avatar del
+// perfil (`blokes_api_upload_avatar`): `media_handle_upload` a la mediateca de WordPress.
+function progreso_equip_upload_comp_block_photo($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id));
+    if (!$existe) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
+
+    $files = $request->get_file_params();
+    if (empty($files['file'])) return new WP_Error('no_file', 'Falta el fichero.', array('status' => 400));
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/media.php';
+    require_once ABSPATH . 'wp-admin/includes/image.php';
+
+    $attachment_id = media_handle_upload('file', 0);
+    if (is_wp_error($attachment_id)) return $attachment_id;
+    $url = wp_get_attachment_url($attachment_id);
+
+    $wpdb->update(progreso_equip_table('comp_blocks'), array('photo_url' => $url), array('id' => $id), array('%s'), array('%d'));
+    return rest_ensure_response(array('success' => true, 'photoUrl' => $url));
+}
+
 function progreso_equip_monday_of($date) {
     $ts = strtotime($date);
     $dow = (int) date('N', $ts); // ISO: 1 = lunes .. 7 = domingo
@@ -9687,17 +9725,29 @@ function progreso_equip_dia_cerrado($fecha) {
 // Asegura que exista una semana de Organización para ese lunes, con una asignación del
 // responsable — si la semana ya existe (de mantenimiento normal u otra fase del mismo plan),
 // se reutiliza. OJO: esto NO reparte las tareas de mantenimiento semanal normal para esa
-// semana (eso solo lo hace progreso_equip_create_week) — si esa semana también necesita
-// mantenimiento normal, de momento hay que crearlo o repartirlo a mano.
-function progreso_equip_ensure_week_for_lead($monday, $lead, &$warnings) {
+// semana (eso solo lo hace progreso_equip_create_week, y de hecho no podrá: el `startDate`
+// único ya ocupado por esta semana haría que esa llamada fallara con 409) — es a propósito,
+// Ramiro confirmó (1/11) que la semana de la compe es solo compe, sin mantenimiento normal.
+// `$is_test` hereda el de la propia competición: el plan de una compe de prueba tiene que
+// crear semanas de prueba, nunca semanas reales (cowork, 1/11 17:20).
+function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warnings) {
     global $wpdb;
-    $week_id = $wpdb->get_var($wpdb->prepare(
-        "SELECT id FROM " . progreso_equip_table('weeks') . " WHERE start_date = %s", $monday
-    ));
+    $existing = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, is_test FROM " . progreso_equip_table('weeks') . " WHERE start_date = %s", $monday
+    ), ARRAY_A);
+    if ($existing && (bool) $existing['is_test'] !== (bool) $is_test) {
+        // Una compe de prueba no debe tocar una semana real que ya exista esa fecha (ni al
+        // revés) — se avisa y esa fase se salta entera, en vez de mezclar datos de prueba con
+        // datos reales en la misma semana (cowork, 1/11 17:20).
+        $warnings[] = "Semana del {$monday} ya existe como " . ($existing['is_test'] ? 'de prueba' : 'real') . ": no se tocó (la compe es " . ($is_test ? 'de prueba' : 'real') . ").";
+        return array(null, null);
+    }
+    $week_id = $existing ? intval($existing['id']) : null;
     if (!$week_id) {
         $wpdb->insert(progreso_equip_table('weeks'), array(
-            'start_date' => $monday, 'subzones' => '', 'notes' => 'Generada por el plan de una competición.',
-            'is_test' => 0, 'created_at' => current_time('mysql'),
+            'start_date' => $monday, 'subzones' => '',
+            'notes' => 'Generada por el plan de una competición — esta semana es solo compe, sin mantenimiento normal.',
+            'is_test' => $is_test ? 1 : 0, 'created_at' => current_time('mysql'),
         ), array('%s', '%s', '%s', '%d', '%s'));
         $week_id = $wpdb->insert_id;
         $warnings[] = "Semana del {$monday} creada para el plan de la competición.";
@@ -9748,11 +9798,14 @@ function progreso_equip_competition_generate_plan($request) {
     $comp_end = $comp['comp_end_date'] ?: $comp_date;
     $comp_monday = progreso_equip_monday_of($comp_date);
     $s0_monday = date('Y-m-d', strtotime($comp_monday) - 7 * 86400);
+    $s1_monday = date('Y-m-d', strtotime($s0_monday) - 7 * 86400);
     $s2_monday = date('Y-m-d', strtotime($s0_monday) - 14 * 86400);
     $s3_monday = date('Y-m-d', strtotime($s0_monday) - 21 * 86400);
     $after_monday = date('Y-m-d', strtotime($comp_monday) + 7 * 86400);
     // Si la semana de diseño ya ha pasado (no queda runway desde hoy), se junta con la de
-    // limpieza/inscripciones en vez de crear tareas ya vencidas desde el primer día.
+    // limpieza/inscripciones en vez de crear tareas ya vencidas desde el primer día — confirmado
+    // con cowork (1/11 17:20) como regla general, aunque para esta compe en concreto sí hay
+    // margen y las 4 semanas de antes quedan separadas, una por semana.
     $diseno_monday = (strtotime($s3_monday) < strtotime($today)) ? $s2_monday : $s3_monday;
 
     $fases = array();
@@ -9762,18 +9815,32 @@ function progreso_equip_competition_generate_plan($request) {
         $fases[] = array('monday' => $diseno_monday, 'tipos' => array('comp_disenar_bloques', 'comp_revisar_material'));
         $fases[] = array('monday' => $s2_monday, 'tipos' => array('comp_limpieza_presas', 'comp_puntuacion', 'comp_inscripciones'));
     }
-    // Semana antes de la compe: lunes/martes desequipar la Cueva, miércoles en adelante el
-    // resto (y seguir equipando) — mismo reparto que la directriz real de Ramiro para esta
-    // compe (Cueva primero, resto desde el día del evento a mitad de semana).
-    $fases[] = array('monday' => $s0_monday, 'dias' => array(0, 1), 'tipos' => array('comp_desequipar_cueva'));
-    $fases[] = array('monday' => $s0_monday, 'dias' => array(2, 3, 4), 'tipos' => array('comp_desequipar_resto', 'comp_equipar_bloques', 'comp_numeracion', 'comp_foto_bloque', 'comp_forerunning', 'comp_montaje_zona'));
+    // S-1: preparar el montaje de la zona de público/premios y decidir quién prueba los
+    // bloques (forerunners), confirmado con cowork — antes no estaba.
+    $fases[] = array('monday' => $s1_monday, 'tipos' => array('comp_prep_montaje', 'comp_decidir_forerunners'));
+    // Semana antes de la compe: desequipar primero, luego equipar. El corte de qué días son
+    // "primero" ya no es un día fijo (miércoles): se lee de `club_days` — si hay un `evento`
+    // dentro de esta semana (p. ej. la visita del ACE), ese es el corte real; sin evento, se
+    // mantiene el reparto por defecto lunes-martes / miércoles-viernes (Ramiro, 1/11 17:20:
+    // "que el plan lo lea de ahí, no como texto").
+    $s0_friday = date('Y-m-d', strtotime($s0_monday) + 4 * 86400);
+    $evento_s0 = $wpdb->get_var($wpdb->prepare(
+        "SELECT MIN(fecha) FROM " . blokes_club_days_table() . " WHERE tipo = 'evento' AND fecha BETWEEN %s AND %s",
+        $s0_monday, $s0_friday
+    ));
+    $corte_offset = $evento_s0 ? (int) round((strtotime($evento_s0) - strtotime($s0_monday)) / 86400) : 2;
+    $corte_offset = max(1, min(4, $corte_offset)); // siempre deja al menos un día antes y uno después
+    $fases[] = array('monday' => $s0_monday, 'dias' => range(0, $corte_offset - 1), 'tipos' => array('comp_desequipar_cueva'));
+    $fases[] = array('monday' => $s0_monday, 'dias' => range($corte_offset, 4), 'tipos' => array('comp_desequipar_resto', 'comp_equipar_bloques', 'comp_numeracion', 'comp_foto_bloque', 'comp_forerunning', 'comp_montaje_zona'));
     $fases[] = array('monday' => $comp_monday, 'rango' => array($comp_date, $comp_end), 'tipos' => array('comp_dia_abrir', 'comp_dia_juzgar', 'comp_dia_cerrar'));
     $fases[] = array('monday' => $after_monday, 'tipos' => array('comp_desmontar', 'comp_fotos_redes', 'comp_resultados_web'));
 
     $warnings = array();
     $creadas = 0;
+    $is_test = (bool) $comp['is_test'];
     foreach ($fases as $fase) {
-        list($week_id, $assignment_id) = progreso_equip_ensure_week_for_lead($fase['monday'], $lead, $warnings);
+        list($week_id, $assignment_id) = progreso_equip_ensure_week_for_lead($fase['monday'], $lead, $is_test, $warnings);
+        if (!$assignment_id) continue; // semana real/prueba en conflicto: ya avisado, se salta
 
         if (isset($fase['rango'])) {
             $d = $fase['rango'][0];

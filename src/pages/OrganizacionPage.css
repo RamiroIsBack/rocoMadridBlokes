@@ -270,6 +270,8 @@
 }
 .org__comp-bubble:active { cursor: grabbing; }
 .org__comp-bubble--ghost { opacity: 0.6; pointer-events: none; border-style: dashed; }
+.org__comp-bubble--tested { box-shadow: 0 0 0 2px #22c55e, 0 2px 4px rgba(0,0,0,0.4); }
+.org__comp-block-photo { max-width: 160px; display: block; margin-bottom: 6px; border: 1px solid #c8bc9a; }
 
 /* ── Mover tarea (Semana, detalle) / editar periodicidad (Normas) ── */
 .org__task-move {
