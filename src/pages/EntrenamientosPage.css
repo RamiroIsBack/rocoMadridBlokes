@@ -534,6 +534,11 @@
   color: var(--color-text-secondary);
 }
 
+/* ── Gestión de tests (antes Supervisión › Tests) ── */
+.entrena__tests-manager { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--color-border); }
+.entrena__tests-advanced { margin-top: 10px; padding: 12px; background: rgba(0,0,0,0.03); border: 1px dashed var(--color-border); }
+.entrena__hint { font-size: 0.8rem; color: var(--color-text-secondary); margin: 0 0 12px; }
+
 /* ── Inline panel row (alumno mode) ── */
 .entrena__inline-panel td {
   padding: 0 !important;

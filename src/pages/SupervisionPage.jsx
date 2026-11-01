@@ -10,7 +10,6 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
-import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
 import CampanasSection from '../components/CampanasSection'
@@ -752,209 +751,6 @@ function ClasesTab() {
           <TrendCharts data={data} months={months} selectedKey={selectedClassKey} onSelectKey={setSelectedClassKey} />
         </>
       )}
-    </div>
-  )
-}
-
-// ─── CTRL Training Tests ──────────────────────────────────────────────────────
-
-const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
-
-function getTrainingHeaders() {
-  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
-  return nonce ? { 'X-WP-Nonce': nonce } : {}
-}
-
-function CtrlTestsTab() {
-  const [config, setConfig]       = useState(() => getConfig())
-  const [mockInputs, setMockInputs] = useState({})
-  const [feedback, setFeedback]   = useState('')
-  const [confirmClear, setConfirmClear] = useState(false)
-  const [clearing, setClearing]   = useState(false)
-
-  function flash(msg) {
-    setFeedback(msg)
-    setTimeout(() => setFeedback(''), 2800)
-  }
-
-  async function handleClearAllDB() {
-    setClearing(true)
-    setConfirmClear(false)
-    try {
-      const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/training/all`, {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: getTrainingHeaders(),
-      })
-      const json = await res.json()
-      if (res.ok) flash('✓ BD vaciada — el mock es ahora la única fuente')
-      else flash(`✗ Error: ${json.message || res.status}`)
-    } catch (e) {
-      flash(`✗ Error de red: ${e.message}`)
-    } finally {
-      setClearing(false)
-    }
-  }
-
-  function handleTestChange(index, field, value) {
-    setConfig(prev => ({
-      ...prev,
-      tests: prev.tests.map((t, i) => i === index ? { ...t, [field]: value } : t),
-    }))
-  }
-
-  function handleRemoveTest(index) {
-    setConfig(prev => ({
-      ...prev,
-      tests: prev.tests.filter((_, i) => i !== index),
-    }))
-  }
-
-  async function handleSaveTests() {
-    saveTests(config.tests)
-    setConfig(getConfig())
-    flash('Guardando...')
-    const ok = await saveTestsToServer()
-    flash(ok ? '✓ Guardado en servidor' : '✓ Local (sin acceso al servidor)')
-  }
-
-  function handleAddTest() {
-    const newId = Date.now()
-    setConfig(prev => ({
-      ...prev,
-      tests: [...prev.tests, { id: newId, name: '', unit: 'reps', zone: 'lower', desc: '' }],
-    }))
-  }
-
-  async function handleApplyMock(testId) {
-    const val = parseFloat(mockInputs[testId])
-    if (isNaN(val) || val <= 0) return
-    setMockValue(testId, val)
-    setMockInputs(prev => ({ ...prev, [testId]: '' }))
-    setConfig(getConfig())
-    flash('Guardando...')
-    const ok = await saveTestsToServer()
-    flash(ok ? '✓ Mock guardado en servidor' : '✓ Mock aplicado (solo local)')
-  }
-
-  function handleClearMock(testId) {
-    clearMockValue(testId)
-    setConfig(getConfig())
-    flash('✓ Mock eliminado')
-  }
-
-  return (
-    <div className="sv-ctrl-tests">
-      <h2 className="sv-section-title">Tests de entrenamiento</h2>
-      <p className="sv-note">Edita nombre, unidad y zona. "Aplicar" genera datos de comunidad para los últimos 6 meses a partir del valor de referencia.</p>
-
-      <div className="sv-tests-scroll">
-        <table className="sv-tests-table">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Descripción</th>
-              <th>Unidad</th>
-              <th>Zona</th>
-              <th>Mock activo</th>
-              <th>Nuevo valor ref.</th>
-              <th></th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {config.tests.map((t, i) => (
-              <tr key={t.id}>
-                <td>
-                  <input
-                    className="sv-tests-input"
-                    value={t.name}
-                    onChange={e => handleTestChange(i, 'name', e.target.value)}
-                  />
-                </td>
-                <td>
-                  <textarea
-                    className="sv-tests-input sv-tests-input--desc"
-                    value={t.desc || ''}
-                    onChange={e => handleTestChange(i, 'desc', e.target.value)}
-                    placeholder="Cómo se mide este test"
-                    rows={2}
-                  />
-                </td>
-                <td>
-                  <input
-                    className="sv-tests-input sv-tests-input--unit"
-                    value={t.unit}
-                    onChange={e => handleTestChange(i, 'unit', e.target.value)}
-                  />
-                </td>
-                <td>
-                  <select
-                    className="sv-tests-select"
-                    value={t.zone}
-                    onChange={e => handleTestChange(i, 'zone', e.target.value)}
-                  >
-                    <option value="lower">Inferior</option>
-                    <option value="upper">Superior</option>
-                    <option value="fingers">Dedos</option>
-                  </select>
-                </td>
-                <td className="sv-tests-mock-cell">
-                  {config.mockValues[t.id] != null ? (
-                    <>
-                      <span className="sv-tests-mock-val">{config.mockValues[t.id]} {t.unit}</span>
-                      <button className="sv-tests-clear" onClick={() => handleClearMock(t.id)} title="Eliminar mock">×</button>
-                    </>
-                  ) : (
-                    <span className="sv-tests-none">—</span>
-                  )}
-                </td>
-                <td>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    className="sv-tests-input sv-tests-input--num"
-                    value={mockInputs[t.id] || ''}
-                    onChange={e => setMockInputs(prev => ({ ...prev, [t.id]: e.target.value }))}
-                    placeholder="ej. 12"
-                  />
-                </td>
-                <td>
-                  <button
-                    className="sv-tests-apply"
-                    disabled={!mockInputs[t.id]}
-                    onClick={() => handleApplyMock(t.id)}
-                  >Aplicar</button>
-                </td>
-                <td>
-                  <button
-                    className="sv-tests-remove"
-                    onClick={() => handleRemoveTest(i)}
-                    title="Borrar test"
-                  >🗑</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="sv-tests-actions">
-        <button className="sv-tests-add" onClick={handleAddTest}>+ Añadir test</button>
-        <button className="sv-tests-save" onClick={handleSaveTests}>Guardar nombres/unidades</button>
-        {!confirmClear
-          ? <button className="sv-tests-danger" onClick={() => setConfirmClear(true)}>Vaciar BD tests</button>
-          : <>
-              <span className="sv-tests-confirm-msg">¿Seguro? Borra todos los registros</span>
-              <button className="sv-tests-danger sv-tests-danger--confirm" onClick={handleClearAllDB} disabled={clearing}>
-                {clearing ? 'Borrando…' : 'Sí, borrar todo'}
-              </button>
-              <button className="sv-tests-cancel" onClick={() => setConfirmClear(false)}>Cancelar</button>
-            </>
-        }
-        {feedback && <span className="sv-tests-feedback">{feedback}</span>}
-      </div>
     </div>
   )
 }
@@ -2016,7 +1812,6 @@ export default function SupervisionPage() {
   const TABS = [
     { id: 'excelmuerte', label: 'ExcelMuerte'   },
     { id: 'grupos',      label: 'Grupos'        },
-    { id: 'ctrltests',   label: 'Tests'          },
     { id: 'horasextra',  label: 'Horas extra'    },
     // Lleva sueldos, nóminas y P&L: solo socios
     ...(role === 'socio' ? [{ id: 'timeoff', label: 'CTRL Time Off' }] : []),
@@ -2049,7 +1844,6 @@ export default function SupervisionPage() {
 
       {tab === 'excelmuerte' && <ClasesTab />}
       {tab === 'grupos'      && <GruposTab />}
-      {tab === 'ctrltests'   && <CtrlTestsTab />}
       {tab === 'horasextra'  && <OvertimeTab />}
       {tab === 'timeoff'     && role === 'socio' && <TimeOffTab />}
     </div>

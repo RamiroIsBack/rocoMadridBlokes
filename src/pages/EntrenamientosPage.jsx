@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, Fragment } from 'react'
 import TrainingPanel from '../components/TrainingPanel'
 import { useAlumnoTraining } from '../hooks/useTraining'
 import { ZONES, TESTS as TEST_MAP } from '../components/BodyDiagram'
+import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import { normalizeName, consolidateAlumnos } from '../utils/alumnoUtils'
 import '../admin/AdminLogin.css'
 import './EntrenamientosPage.css'
@@ -181,7 +182,7 @@ function TestModeRow({ alumno, testId, ambiguousActive, faltantes, onLogged }) {
 }
 
 // ─── Definiciones de los tests ─────────────────────────────────────
-function DefinicionesList() {
+function DefinicionesList({ esSocio }) {
   return (
     <div className="entrena__defs">
       {Object.entries(ZONES).map(([zoneKey, zone]) => (
@@ -206,6 +207,158 @@ function DefinicionesList() {
           </div>
         </div>
       ))}
+      {esSocio && <TestsManager />}
+    </div>
+  )
+}
+
+// Gestión del catálogo de tests: antes vivía en Supervisión › Tests (pestaña aparte, con mal
+// contraste y sin relación visible con Entrenamientos). Única fuente en la BD (`trainingConfig`
+// ya sincroniza con el servidor y BodyDiagram reacciona al cambio); esto solo mueve la edición
+// aquí, añade la casilla «En uso» que faltaba, y esconde lo avanzado (Ramiro, 1/11 16:45).
+function TestsManager() {
+  const [config, setConfig] = useState(() => getConfig())
+  const [mockInputs, setMockInputs] = useState({})
+  const [feedback, setFeedback] = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
+  function flash(msg) {
+    setFeedback(msg)
+    setTimeout(() => setFeedback(''), 2800)
+  }
+
+  function handleTestChange(index, field, value) {
+    setConfig(prev => ({ ...prev, tests: prev.tests.map((t, i) => i === index ? { ...t, [field]: value } : t) }))
+  }
+  function handleRemoveTest(index) {
+    setConfig(prev => ({ ...prev, tests: prev.tests.filter((_, i) => i !== index) }))
+  }
+  function handleAddTest() {
+    const newId = Date.now()
+    setConfig(prev => ({ ...prev, tests: [...prev.tests, { id: newId, name: '', unit: 'reps', zone: 'lower', desc: '', visible: true }] }))
+  }
+  async function handleSaveTests() {
+    saveTests(config.tests)
+    setConfig(getConfig())
+    flash('Guardando...')
+    const ok = await saveTestsToServer()
+    flash(ok ? '✓ Guardado en servidor' : '✓ Local (sin acceso al servidor)')
+  }
+  async function handleApplyMock(testId) {
+    const val = parseFloat(mockInputs[testId])
+    if (isNaN(val) || val <= 0) return
+    setMockValue(testId, val)
+    setMockInputs(prev => ({ ...prev, [testId]: '' }))
+    setConfig(getConfig())
+    flash('Guardando...')
+    const ok = await saveTestsToServer()
+    flash(ok ? '✓ Mock guardado en servidor' : '✓ Mock aplicado (solo local)')
+  }
+  function handleClearMock(testId) {
+    clearMockValue(testId)
+    setConfig(getConfig())
+    flash('✓ Mock eliminado')
+  }
+  async function handleClearAllDB() {
+    setClearing(true)
+    setConfirmClear(false)
+    try {
+      const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/training/all`, {
+        method: 'DELETE', credentials: 'include', headers: getAuthHeaders(),
+      })
+      const json = await res.json()
+      flash(res.ok ? '✓ BD vaciada — el mock es ahora la única fuente' : `✗ Error: ${json.message || res.status}`)
+    } catch (e) {
+      flash(`✗ Error de red: ${e.message}`)
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  return (
+    <div className="entrena__tests-manager">
+      <h2 className="entrena__defs-zone-title">Gestión de tests</h2>
+      <p className="entrena__hint">
+        Marca «En uso» los tests que deben salir en Entrenamientos (modo alumno y modo test), en el
+        registro de resultados y en las definiciones de arriba — es la única lista, no hay otra separada.
+        Desmarcar uno no borra sus resultados ya guardados; si se vuelve a marcar, su histórico reaparece.
+      </p>
+      <div className="sv-tests-scroll">
+        <table className="sv-tests-table">
+          <thead>
+            <tr><th>En uso</th><th>Nombre</th><th>Descripción</th><th>Unidad</th><th>Zona</th><th></th></tr>
+          </thead>
+          <tbody>
+            {config.tests.map((t, i) => (
+              <tr key={t.id}>
+                <td>
+                  <input type="checkbox" checked={t.visible !== false} onChange={e => handleTestChange(i, 'visible', e.target.checked)} title="En uso" />
+                </td>
+                <td><input className="sv-tests-input" value={t.name} onChange={e => handleTestChange(i, 'name', e.target.value)} /></td>
+                <td><textarea className="sv-tests-input sv-tests-input--desc" value={t.desc || ''} onChange={e => handleTestChange(i, 'desc', e.target.value)} placeholder="Cómo se mide este test" rows={2} /></td>
+                <td><input className="sv-tests-input sv-tests-input--unit" value={t.unit} onChange={e => handleTestChange(i, 'unit', e.target.value)} /></td>
+                <td>
+                  <select className="sv-tests-select" value={t.zone} onChange={e => handleTestChange(i, 'zone', e.target.value)}>
+                    <option value="lower">Inferior</option>
+                    <option value="upper">Superior</option>
+                    <option value="fingers">Dedos</option>
+                  </select>
+                </td>
+                <td><button className="sv-tests-remove" onClick={() => handleRemoveTest(i)} title="Borrar test">🗑</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="sv-tests-actions">
+        <button className="sv-tests-add" onClick={handleAddTest}>+ Añadir test</button>
+        <button className="sv-tests-save" onClick={handleSaveTests}>Guardar</button>
+        {feedback && <span className="sv-tests-feedback">{feedback}</span>}
+      </div>
+
+      <button className="entrena__mode-btn" onClick={() => setShowAdvanced(s => !s)} style={{ marginTop: 16 }}>
+        {showAdvanced ? '▾' : '▸'} Avanzado (solo socio)
+      </button>
+      {showAdvanced && (
+        <div className="entrena__tests-advanced">
+          <p className="entrena__hint">Datos de comunidad simulados por test, para probar gráficas sin esperar resultados reales.</p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead><tr><th>Test</th><th>Mock activo</th><th>Nuevo valor ref.</th><th></th></tr></thead>
+              <tbody>
+                {config.tests.map(t => (
+                  <tr key={t.id}>
+                    <td>{t.name}</td>
+                    <td className="sv-tests-mock-cell">
+                      {config.mockValues[t.id] != null ? (
+                        <><span className="sv-tests-mock-val">{config.mockValues[t.id]} {t.unit}</span>
+                          <button className="sv-tests-clear" onClick={() => handleClearMock(t.id)} title="Eliminar mock">×</button></>
+                      ) : <span className="sv-tests-none">—</span>}
+                    </td>
+                    <td>
+                      <input type="number" min="0" step="any" className="sv-tests-input sv-tests-input--num"
+                        value={mockInputs[t.id] || ''} onChange={e => setMockInputs(prev => ({ ...prev, [t.id]: e.target.value }))} placeholder="ej. 12" />
+                    </td>
+                    <td><button className="sv-tests-apply" disabled={!mockInputs[t.id]} onClick={() => handleApplyMock(t.id)}>Aplicar</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="sv-tests-actions">
+            {!confirmClear
+              ? <button className="sv-tests-danger" onClick={() => setConfirmClear(true)}>Vaciar BD tests</button>
+              : <>
+                  <span className="sv-tests-confirm-msg">¿Seguro? Borra todos los registros</span>
+                  <button className="sv-tests-danger sv-tests-danger--confirm" onClick={handleClearAllDB} disabled={clearing}>{clearing ? 'Borrando…' : 'Sí, borrar todo'}</button>
+                  <button className="sv-tests-cancel" onClick={() => setConfirmClear(false)}>Cancelar</button>
+                </>
+            }
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -213,6 +366,7 @@ function DefinicionesList() {
 // ─── Main page ───────────────────────────────────────────────────────
 export default function EntrenamientosPage() {
   const isAuthenticated = ['profesor', 'gestion', 'socio'].includes(window.blokesSiteData?.userRole)
+  const esSocio = window.blokesSiteData?.userRole === 'socio'
   const [viewMode, setViewMode]         = useState('alumno') // 'alumno' | 'test' | 'definiciones'
   const [filters, setFilters]           = useState(EMPTY_FILTERS)
   const [allClases, setAllClases]       = useState([])
@@ -477,10 +631,10 @@ export default function EntrenamientosPage() {
         <button
           className={`entrena__mode-btn${viewMode === 'definiciones' ? ' entrena__mode-btn--active' : ''}`}
           onClick={() => setViewMode('definiciones')}
-        >Definiciones</button>
+        >{esSocio ? 'Definiciones y elección de tests' : 'Definiciones'}</button>
       </div>
 
-      {viewMode === 'definiciones' && <DefinicionesList />}
+      {viewMode === 'definiciones' && <DefinicionesList esSocio={esSocio} />}
 
       {viewMode !== 'definiciones' && (<>
 
