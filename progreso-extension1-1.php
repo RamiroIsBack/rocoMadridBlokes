@@ -4718,6 +4718,16 @@ function blokes_campana_envios_table() { global $wpdb; return $wpdb->prefix . 'b
 
 function blokes_ensure_campanas_tables() {
     global $wpdb;
+    // Diagnóstico de cowork (1/11 09:15): el ALTER a utf8mb4 de las tablas no bastó, el emoji
+    // seguía guardándose como "?". Las tablas ya están en utf8mb4, pero la CONEXIÓN de $wpdb
+    // seguía negociando utf8 (3 bytes) — probablemente por `DB_CHARSET` en wp-config.php — así
+    // que MySQL mutila el emoji ANTES de escribirlo; el charset de la tabla no puede salvar un
+    // byte que ya llegó roto. `SET NAMES` fuerza la conexión de ESTA petición a utf8mb4 sin
+    // tocar wp-config.php, y las dos propiedades siguientes son las que usa
+    // `get_charset_collate()` para que el CREATE de abajo también salga en utf8mb4.
+    $wpdb->query("SET NAMES utf8mb4");
+    $wpdb->charset = 'utf8mb4';
+    $wpdb->collate = 'utf8mb4_unicode_520_ci';
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta("CREATE TABLE " . blokes_contactos_table() . " (
