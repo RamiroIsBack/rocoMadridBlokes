@@ -4327,6 +4327,18 @@ function superadmin_sync_grupos_config_get() {
     )));
 }
 
+// Devuelve el ID de la Hoja que hay que leer según el interruptor `usarReal` — hasta ahora
+// `test`/`resumen`/`pestana` ignoraban el interruptor y siempre leían la de PRUEBA (cowork,
+// 1/11 19:00: puse usarReal=true y siguieron leyendo la de prueba). También dice cuál usó,
+// para que la respuesta deje claro contra qué Hoja se ha leído.
+function blokes_sync_grupos_sheet_activa() {
+    $usar_real = (bool) get_option('blokes_sync_grupos_usar_real', false);
+    $id = $usar_real
+        ? get_option('blokes_sync_grupos_sheet_real_id', '')
+        : get_option('blokes_sync_grupos_sheet_prueba_id', '');
+    return array('id' => $id, 'cual' => $usar_real ? 'real' : 'prueba');
+}
+
 function superadmin_sync_grupos_config_set($request) {
     $body = $request->get_json_params();
     if (isset($body['sheetPruebaId'])) update_option('blokes_sync_grupos_sheet_prueba_id', sanitize_text_field((string) $body['sheetPruebaId']), false);
@@ -4340,17 +4352,17 @@ function superadmin_sync_grupos_config_set($request) {
 // real, mientras esto se desarrolla) — para confirmar que las credenciales y la firma del JWT
 // funcionan antes de construir nada que lea o escriba filas de verdad.
 function superadmin_sync_grupos_test() {
-    $sheet_id = get_option('blokes_sync_grupos_sheet_prueba_id', '');
-    if (!$sheet_id) {
-        return new WP_Error('falta_config', 'Falta configurar el ID de la Hoja de PRUEBA (POST /gestion/sync-grupos/config con sheetPruebaId).', array('status' => 400));
+    $activa = blokes_sync_grupos_sheet_activa();
+    if (!$activa['id']) {
+        return new WP_Error('falta_config', 'Falta configurar el ID de la Hoja de ' . ($activa['cual'] === 'real' ? 'REAL' : 'PRUEBA') . ' (POST /gestion/sync-grupos/config).', array('status' => 400));
     }
-    $data = blokes_sync_grupos_get($sheet_id, '?fields=properties.title,sheets.properties.title');
+    $data = blokes_sync_grupos_get($activa['id'], '?fields=properties.title,sheets.properties.title');
     if (is_wp_error($data)) {
         return new WP_Error($data->get_error_code(), $data->get_error_message(), array('status' => 502));
     }
     $pestanas = array_map(function($s) { return $s['properties']['title'] ?? '?'; }, $data['sheets'] ?? array());
     return rest_ensure_response(array('success' => true, 'data' => array(
-        'hoja' => $data['properties']['title'] ?? '?', 'pestanas' => $pestanas, 'total' => count($pestanas),
+        'hoja' => $data['properties']['title'] ?? '?', 'pestanas' => $pestanas, 'total' => count($pestanas), 'hojaUsada' => $activa['cual'],
     )));
 }
 
@@ -4607,9 +4619,10 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
 // reconocidos (Balance, Bonos de 10...) se omiten del resumen, igual que _parse.py las omitía
 // por no encontrar el par septiembre→octubre.
 function superadmin_sync_grupos_resumen($request) {
-    $sheet_id = get_option('blokes_sync_grupos_sheet_prueba_id', '');
+    $activa = blokes_sync_grupos_sheet_activa();
+    $sheet_id = $activa['id'];
     if (!$sheet_id) {
-        return new WP_Error('falta_config', 'Falta configurar el ID de la Hoja de PRUEBA (POST /gestion/sync-grupos/config con sheetPruebaId).', array('status' => 400));
+        return new WP_Error('falta_config', 'Falta configurar el ID de la Hoja de ' . ($activa['cual'] === 'real' ? 'REAL' : 'PRUEBA') . ' (POST /gestion/sync-grupos/config).', array('status' => 400));
     }
     // Filtra "conPago"/"exentos" a un rango de meses (YYYY-MM, inclusive) — p. ej.
     // ?desde=2026-09&hasta=2026-10 para comparar exactamente con _parse.py. Sin filtro, cuenta
@@ -4681,7 +4694,7 @@ function superadmin_sync_grupos_resumen($request) {
     return rest_ensure_response(array('success' => true, 'data' => array(
         'totalFilas' => $total_filas, 'totalConPago' => $total_con_pago, 'totalConPagoPorMes' => $total_por_mes,
         'filtro' => array('desde' => $desde ?: null, 'hasta' => $hasta ?: null),
-        'pestanas' => $resumen,
+        'pestanas' => $resumen, 'hojaUsada' => $activa['cual'],
     )));
 }
 
@@ -4689,9 +4702,10 @@ function superadmin_sync_grupos_resumen($request) {
 // a mano con el Excel cuando el resumen no cuadre en alguna pestaña concreta. Con `mes`
 // (YYYY-MM) enseña solo los pagos de ese mes en vez de todas las temporadas encontradas.
 function superadmin_sync_grupos_pestana($request) {
-    $sheet_id = get_option('blokes_sync_grupos_sheet_prueba_id', '');
+    $activa = blokes_sync_grupos_sheet_activa();
+    $sheet_id = $activa['id'];
     if (!$sheet_id) {
-        return new WP_Error('falta_config', 'Falta configurar el ID de la Hoja de PRUEBA (POST /gestion/sync-grupos/config con sheetPruebaId).', array('status' => 400));
+        return new WP_Error('falta_config', 'Falta configurar el ID de la Hoja de ' . ($activa['cual'] === 'real' ? 'REAL' : 'PRUEBA') . ' (POST /gestion/sync-grupos/config).', array('status' => 400));
     }
     $tab = sanitize_text_field((string) $request->get_param('tab'));
     if ($tab === '') return new WP_Error('bad_request', 'Falta el parámetro tab (nombre exacto de la pestaña).', array('status' => 400));
@@ -4705,6 +4719,7 @@ function superadmin_sync_grupos_pestana($request) {
             return $f;
         }, $r['filas']);
     }
+    $r['hojaUsada'] = $activa['cual'];
     return rest_ensure_response(array('success' => true, 'data' => $r));
 }
 
