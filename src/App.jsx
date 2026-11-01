@@ -18,6 +18,7 @@ import TimeOffPage from './pages/TimeOffPage'
 import LeaguesPage from './pages/LeaguesPage'
 import EventosPage from './pages/EventosPage'
 import CalendarioPage from './pages/CalendarioPage'
+import { setVerComo, clearVerComo } from './utils/verComo'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
 import { useProfile } from './hooks/useProfile'
@@ -163,6 +164,7 @@ export default function App() {
   return (
     <BrowserRouter basename={detectBasename()}>
       <div className="app">
+        <VerComoBanner sd={sd} />
         <header className="app-header">
           <div className="app-header__logo-section">
             <a href="https://rocomadrid.com" >
@@ -202,6 +204,7 @@ export default function App() {
                       className="app-header__logout-btn"
                       onClick={() => setLogoutOpen(true)}
                     >× Log out</button>
+                    {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
                   </div>
                 </div>
                 {sd.subscription && (
@@ -388,5 +391,37 @@ export default function App() {
         )}
       </div>
     </BrowserRouter>
+  )
+}
+
+const VER_COMO_LABEL = { gestion: 'Eva (gestión)', profesor: 'Profe' }
+
+// Selector "Ver como" (Ramiro, 1/11 18:30), solo para socio — al lado de Log out. Cambiar de
+// rol recarga la página: es la forma más simple de que TODA la app (decenas de sitios que leen
+// `window.blokesSiteData.userRole` directamente) refleje el rol simulado sin tener que convertir
+// cada uno de ellos a un estado de React.
+function VerComoSelector({ sd }) {
+  const actual = sd.userRole !== sd.userRoleReal ? sd.userRole : ''
+  const cambiar = e => {
+    const valor = e.target.value
+    if (valor) setVerComo(valor); else clearVerComo()
+    window.location.reload()
+  }
+  return (
+    <select className="app-header__ver-como" value={actual} onChange={cambiar} title="Ver como">
+      <option value="">Ver como: Socio</option>
+      <option value="gestion">Ver como: Eva (gestión)</option>
+      <option value="profesor">Ver como: Profe</option>
+    </select>
+  )
+}
+
+function VerComoBanner({ sd }) {
+  if (sd.userRoleReal !== 'socio' || sd.userRole === sd.userRoleReal) return null
+  const volver = () => { clearVerComo(); window.location.reload() }
+  return (
+    <div className="app-ver-como-banner">
+      👁 Viendo como {VER_COMO_LABEL[sd.userRole] || sd.userRole} — <button onClick={volver}>Volver a Socio</button>
+    </div>
   )
 }

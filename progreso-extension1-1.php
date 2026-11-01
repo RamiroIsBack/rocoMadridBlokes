@@ -78,7 +78,7 @@ function blokes_get_email_lists() {
  *   'member'   → usuario logueado sin permisos de gestión
  *   'guest'    → no logueado
  */
-function blokes_get_app_role() {
+function blokes_get_app_role_real() {
     if (!is_user_logged_in()) return 'guest';
     $email = strtolower(trim(wp_get_current_user()->user_email));
     $lists = blokes_get_email_lists();
@@ -87,6 +87,19 @@ function blokes_get_app_role() {
     if (in_array($email, array_map('strtolower', $lists['profesores']))) return 'profesor';
     if (in_array($email, array_map('strtolower', $lists['tablets'])))    return 'tablet';
     return 'member';
+}
+
+// "Ver como" (Ramiro, 1/11 18:30): un socio puede probar la app como si fuera gestion o
+// profesor de verdad — también lo que responde el servidor (p. ej. la privacidad del dinero),
+// no solo lo que se pinta. Solo restringe, nunca amplía: la cabecera solo se respeta si el rol
+// REAL es socio; para cualquier otro rol se ignora sin más, así que no sirve para ganar acceso.
+function blokes_get_app_role() {
+    $real = blokes_get_app_role_real();
+    if ($real === 'socio') {
+        $ver_como = isset($_SERVER['HTTP_X_BLOKES_VER_COMO']) ? sanitize_key($_SERVER['HTTP_X_BLOKES_VER_COMO']) : '';
+        if (in_array($ver_como, array('gestion', 'profesor'), true)) return $ver_como;
+    }
+    return $real;
 }
 
 // "Puede actuar en nombre de un alumno": medir, crear manuales, y ahora
@@ -103,6 +116,18 @@ function blokes_can_supervise() {
 function blokes_es_socio() {
     return blokes_get_app_role() === 'socio';
 }
+
+// "Ver como" (continuación): mientras esté activo, cualquier escritura en la REST API se
+// rechaza — es solo para mirar, nunca para actuar en nombre de otro rol por accidente. Se
+// comprueba el ROL REAL directamente (no `blokes_get_app_role()`) para no depender de que
+// ningún otro filtro se haya ejecutado antes.
+add_filter('rest_pre_dispatch', function($result, $server, $request) {
+    if (!in_array($request->get_method(), array('POST', 'PUT', 'PATCH', 'DELETE'), true)) return $result;
+    $ver_como = isset($_SERVER['HTTP_X_BLOKES_VER_COMO']) ? sanitize_key($_SERVER['HTTP_X_BLOKES_VER_COMO']) : '';
+    if (!in_array($ver_como, array('gestion', 'profesor'), true)) return $result;
+    if (blokes_get_app_role_real() !== 'socio') return $result; // la cabecera no sirve para nadie más
+    return new WP_Error('ver_como_solo_lectura', 'Estás en modo "Ver como": vuelve a Socio para cambiar cosas.', array('status' => 403));
+}, 10, 3);
 
 // ── Profile helpers ──────────────────────────────────────────────────────────
 function blokes_is_profile_complete($user_id) {
@@ -309,6 +334,9 @@ add_action('wp_head', function() {
         'subscription' => $subscription,
         'appBasename'      => '/' . $app_slug,
         'userRole'         => blokes_get_app_role(),
+        // Identidad real, sin "ver como" — nunca se simula (el header que lo activa no llega
+        // en una carga normal de página, así que esto ya sale correcto de por sí).
+        'userRoleReal'     => blokes_get_app_role_real(),
         'canSupervise'     => blokes_can_supervise(),
         'emailLists'       => in_array(blokes_get_app_role(), array('socio', 'superadmin')) ? blokes_get_email_lists() : null,
         'fichajeEmbedUrl'  => '',
