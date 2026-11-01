@@ -324,12 +324,52 @@ function CrearCampanaPanel({ sugeridas, onCreated, editando, onEdited, onCancelE
   )
 }
 
+// Para que buscar "Ana" o "612345678" encuentre "Ana" / "+34 612 345 678" sin tener que
+// escribir espacios, el prefijo del país o las tildes exactas.
+function normalizarBusqueda(s) {
+  return (s || '').toString()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\+?34/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
+}
+
+function formatearFechaHora(iso) {
+  if (!iso) return ''
+  const d = new Date(iso.replace(' ', 'T'))
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) + ' '
+    + d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+}
+
+function QuienCuando({ info }) {
+  if (!info || !info.por) return null
+  return <div className="cmp-quien">{info.por} · {formatearFechaHora(info.fecha)}</div>
+}
+
+const FILTROS_DESTINATARIOS = [
+  { id: 'pendientes',   label: 'Sin enviar' },
+  { id: 'enviados',     label: 'Enviados (esperando respuesta)' },
+  { id: 'respondieron', label: 'Respondieron' },
+  { id: 'bajas',        label: 'Bajas' },
+  { id: 'apuntados',    label: 'Se apuntaron' },
+]
+
+function clasificarDestinatario(d) {
+  if (d.baja) return 'bajas'
+  if (d.apuntado) return 'apuntados'
+  if (d.respondio) return 'respondieron'
+  if (d.enviado) return 'enviados'
+  return 'pendientes'
+}
+
 function DestinatariosPanel({ campana, onBack, onChanged }) {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
   const [enviadosHoy, setEnviadosHoy] = useState(0)
-  const [filtro, setFiltro]   = useState('pendientes') // pendientes | todos
+  const [filtro, setFiltro]   = useState('pendientes')
+  const [busqueda, setBusqueda] = useState('')
 
   const cargar = () => {
     setLoading(true)
@@ -354,14 +394,25 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
     accion(d.contactoId, 'enviado')
   }
 
+  const marcarBaja = (d) => {
+    const nombre = d.nombres.join(', ') || d.telefono
+    if (!window.confirm(`¿Marcar a ${nombre} como BAJA? No volverá a recibir campañas.`)) return
+    accion(d.contactoId, 'baja')
+  }
+
   if (loading) return <p className="cmp-hint">Cargando destinatarios…</p>
   if (error)   return <p className="cmp-error">Error: {error}</p>
   if (!data)   return null
 
-  const visibles = (data.destinatarios || []).filter(d => {
-    if (d.yaEnVigor || d.baja) return false
-    if (filtro === 'pendientes') return !d.enviado
-    return true
+  const base = (data.destinatarios || []).filter(d => !d.yaEnVigor)
+  const porEstado = { pendientes: 0, enviados: 0, respondieron: 0, bajas: 0, apuntados: 0 }
+  base.forEach(d => { porEstado[clasificarDestinatario(d)]++ })
+
+  const q = normalizarBusqueda(busqueda)
+  const visibles = base.filter(d => {
+    if (clasificarDestinatario(d) !== filtro) return false
+    if (!q) return true
+    return normalizarBusqueda(d.telefono).includes(q) || d.nombres.some(n => normalizarBusqueda(n).includes(q))
   })
 
   return (
@@ -374,14 +425,26 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
       {enviadosHoy >= 40 && (
         <p className="cmp-warn">⚠ Ya se han enviado {enviadosHoy} mensajes hoy desde este número — pasar de 40/día puede hacer que WhatsApp lo bloquee. Considera seguir mañana.</p>
       )}
-      {enviadosHoy > 0 && enviadosHoy < 40 && <p className="cmp-hint">Enviados hoy: {enviadosHoy}</p>}
+      {enviadosHoy > 0 && enviadosHoy < 40 && <p className="cmp-hint">Enviados hoy: {enviadosHoy}/40</p>}
+
+      <input
+        className="cmp-buscar"
+        type="text"
+        placeholder="Buscar por nombre o teléfono…"
+        value={busqueda}
+        onChange={e => setBusqueda(e.target.value)}
+      />
 
       <div className="cmp-filters">
-        <select className="cmp-select" value={filtro} onChange={e => setFiltro(e.target.value)}>
-          <option value="pendientes">Pendientes de enviar</option>
-          <option value="todos">Todos (menos ya en vigor / bajas)</option>
-        </select>
-        <span className="cmp-muted">{visibles.length} de {data.destinatarios.length} destinatarios</span>
+        {FILTROS_DESTINATARIOS.map(f => (
+          <button
+            key={f.id}
+            className={`cmp-filtro-btn${filtro === f.id ? ' cmp-filtro-btn--active' : ''}`}
+            onClick={() => setFiltro(f.id)}
+          >
+            {f.label} ({porEstado[f.id]})
+          </button>
+        ))}
       </div>
 
       <div className="cmp-table-wrap">
@@ -397,21 +460,27 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
                 <td className="cmp-mensaje">{d.mensaje}</td>
                 <td>
                   {d.apuntado && <span className="cmp-badge cmp-badge--actuales">Se apuntó</span>}
-                  {!d.apuntado && d.respondio && <span className="cmp-badge cmp-badge--nuevos">Respondió</span>}
-                  {!d.apuntado && !d.respondio && d.enviado && <span className="cmp-badge cmp-badge--sin_clasificar">Enviado {d.enviado.fecha?.slice(0, 10)}</span>}
-                  {!d.enviado && <span className="cmp-muted">Sin enviar</span>}
+                  {!d.apuntado && d.baja && <span className="cmp-badge cmp-badge--bajas">BAJA</span>}
+                  {!d.apuntado && !d.baja && d.respondio && <span className="cmp-badge cmp-badge--nuevos">Respondió</span>}
+                  {!d.apuntado && !d.baja && !d.respondio && d.enviado && <span className="cmp-badge cmp-badge--sin_clasificar">Enviado {d.enviado.fecha?.slice(0, 10)}</span>}
+                  {!d.enviado && !d.baja && <span className="cmp-muted">Sin enviar</span>}
+                  <QuienCuando info={d.baja || d.apuntado || d.respondio || d.enviado} />
                 </td>
                 <td className="cmp-acciones">
                   <button className="cmp-btn cmp-btn--sm cmp-btn--primary" onClick={() => abrirWhatsapp(d)}>Abrir WhatsApp</button>
                   <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'respondio')}>Respondió</button>
                   <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'apuntado')}>Se apuntó</button>
-                  <button className="cmp-btn cmp-btn--sm cmp-btn--danger" onClick={() => accion(d.contactoId, 'baja')}>BAJA</button>
+                  {d.baja ? (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'baja_deshacer')}>Deshacer baja</button>
+                  ) : (
+                    <button className="cmp-btn cmp-btn--sm cmp-btn--danger" onClick={() => marcarBaja(d)}>BAJA</button>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-        {visibles.length === 0 && <p className="cmp-empty">Nada que mostrar con este filtro.</p>}
+        {visibles.length === 0 && <p className="cmp-empty">Nada que mostrar con este filtro{busqueda ? ' y esta búsqueda' : ''}.</p>}
       </div>
     </div>
   )

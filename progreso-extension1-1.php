@@ -4756,15 +4756,21 @@ function blokes_ensure_campanas_tables() {
         PRIMARY KEY (id)
     ) {$charset};");
     dbDelta("CREATE TABLE " . blokes_campana_envios_table() . " (
-        id           bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-        campana_id   bigint(20) UNSIGNED NOT NULL,
-        contacto_id  bigint(20) UNSIGNED NOT NULL,
-        enviado_at   datetime     NULL,
-        enviado_por  varchar(100) NOT NULL DEFAULT '',
-        respondio    tinyint(1)   NOT NULL DEFAULT 0,
-        baja         tinyint(1)   NOT NULL DEFAULT 0,
-        apuntado     tinyint(1)   NOT NULL DEFAULT 0,
-        updated_at   datetime     NOT NULL,
+        id            bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        campana_id    bigint(20) UNSIGNED NOT NULL,
+        contacto_id   bigint(20) UNSIGNED NOT NULL,
+        enviado_at    datetime     NULL,
+        enviado_por   varchar(100) NOT NULL DEFAULT '',
+        respondio     tinyint(1)   NOT NULL DEFAULT 0,
+        respondio_at  datetime     NULL,
+        respondio_por varchar(100) NOT NULL DEFAULT '',
+        baja          tinyint(1)   NOT NULL DEFAULT 0,
+        baja_at       datetime     NULL,
+        baja_por      varchar(100) NOT NULL DEFAULT '',
+        apuntado      tinyint(1)   NOT NULL DEFAULT 0,
+        apuntado_at   datetime     NULL,
+        apuntado_por  varchar(100) NOT NULL DEFAULT '',
+        updated_at    datetime     NOT NULL,
         PRIMARY KEY (id),
         UNIQUE KEY campana_contacto (campana_id, contacto_id)
     ) {$charset};");
@@ -5205,13 +5211,16 @@ function superadmin_campanas_destinatarios($request) {
     $contactos = $wpdb->get_results("SELECT * FROM " . blokes_contactos_table(), ARRAY_A);
     $out = array();
     foreach ($contactos as $c) {
-        // "no" o BAJA: fuera de TODAS las campañas, también las manuales por wa.me (oposición a
-        // comunicaciones comerciales — Ramiro, 31/10 17:17). "Sin preguntar" (null) sí entra,
-        // porque son clientes/antiguos clientes y esto es envío manual con línea de BAJA.
-        if ($c['baja_mensajes'] || $c['optin_whatsapp'] === 'no') continue;
+        $envio = $envios_por_contacto[$c['id']] ?? null;
+        // "no" o BAJA: fuera de TODAS las campañas NUEVAS, también las manuales por wa.me
+        // (oposición a comunicaciones comerciales — Ramiro, 31/10 17:17). "Sin preguntar" (null)
+        // sí entra, porque son clientes/antiguos clientes y esto es envío manual con línea de
+        // BAJA. Si ya hay histórico en ESTA campaña (p. ej. aquí mismo se marcó BAJA), se queda
+        // para poder verlo en la pestaña "Bajas" y deshacerlo si fue un error.
+        if (($c['baja_mensajes'] || $c['optin_whatsapp'] === 'no') && !$envio) continue;
         $tel   = blokes_externos_normaliza_telefono($c['telefono']);
         $lista = blokes_campanas_clasificar($tel, $subs_por_tel, $externos_por_tel, $c);
-        if (!in_array($lista, $listas, true)) continue;
+        if (!in_array($lista, $listas, true) && !$envio) continue;
 
         $ya_en_vigor = isset($subs_por_tel[$tel]) && in_array($subs_por_tel[$tel]['status'], array('active', 'on-hold', 'pending'), true)
             || isset($externos_por_tel[$tel]);
@@ -5219,13 +5228,13 @@ function superadmin_campanas_destinatarios($request) {
         $nombres = json_decode($c['nombres'], true);
         if (!is_array($nombres)) $nombres = array_filter(array($nombres));
         $plantilla = $c['tipo'] === 'menor' ? $campana['plantilla_menor'] : $campana['plantilla_adulto'];
-        $envio = $envios_por_contacto[$c['id']] ?? null;
 
         // Conversión automática: si ya está en vigor y se le había enviado algo, se marca
         // apuntado solo (aunque nadie haya pulsado el botón a mano).
         if ($ya_en_vigor && $envio && !empty($envio['enviado_at']) && !$envio['apuntado']) {
-            $wpdb->update(blokes_campana_envios_table(), array('apuntado' => 1, 'updated_at' => current_time('mysql')), array('id' => $envio['id']));
+            $wpdb->update(blokes_campana_envios_table(), array('apuntado' => 1, 'apuntado_at' => current_time('mysql'), 'updated_at' => current_time('mysql')), array('id' => $envio['id']));
             $envio['apuntado'] = 1;
+            $envio['apuntado_at'] = current_time('mysql');
         }
 
         $out[] = array(
@@ -5233,9 +5242,9 @@ function superadmin_campanas_destinatarios($request) {
             'mensaje' => blokes_campanas_personalizar($plantilla, $nombres, $campana['remitente'], $c['saludo'] ?? ''),
             'yaEnVigor' => (bool) $ya_en_vigor, 'optinWhatsapp' => $c['optin_whatsapp'] ?: null,
             'enviado' => $envio && !empty($envio['enviado_at']) ? array('fecha' => $envio['enviado_at'], 'por' => $envio['enviado_por']) : null,
-            'respondio' => $envio ? (bool) $envio['respondio'] : false,
-            'baja' => $envio ? (bool) $envio['baja'] : false,
-            'apuntado' => $envio ? (bool) $envio['apuntado'] : false,
+            'respondio' => $envio && $envio['respondio'] ? array('fecha' => $envio['respondio_at'], 'por' => $envio['respondio_por']) : false,
+            'baja' => $envio && $envio['baja'] ? array('fecha' => $envio['baja_at'], 'por' => $envio['baja_por']) : false,
+            'apuntado' => $envio && $envio['apuntado'] ? array('fecha' => $envio['apuntado_at'], 'por' => $envio['apuntado_por']) : false,
         );
     }
     return rest_ensure_response(array('success' => true, 'data' => array(
@@ -5254,19 +5263,23 @@ function superadmin_campanas_marcar_accion($request) {
     $campana_id  = intval($request['id']);
     $contacto_id = intval($request['contacto_id']);
     $accion = sanitize_key($request->get_param('accion'));
-    if (!in_array($accion, array('enviado', 'respondio', 'baja', 'apuntado'), true)) {
-        return new WP_Error('bad_request', 'Acción no reconocida. Usa enviado, respondio, baja o apuntado.', array('status' => 400));
+    if (!in_array($accion, array('enviado', 'respondio', 'baja', 'baja_deshacer', 'apuntado'), true)) {
+        return new WP_Error('bad_request', 'Acción no reconocida. Usa enviado, respondio, baja, baja_deshacer o apuntado.', array('status' => 400));
     }
     $u = wp_get_current_user();
+    $quien = $u ? $u->user_login : '';
     $existente = $wpdb->get_row($wpdb->prepare(
         "SELECT * FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d AND contacto_id = %d", $campana_id, $contacto_id
     ), ARRAY_A);
 
     $campos = array('updated_at' => current_time('mysql'));
-    if ($accion === 'enviado')   { $campos['enviado_at'] = current_time('mysql'); $campos['enviado_por'] = $u ? $u->user_login : ''; }
-    if ($accion === 'respondio') $campos['respondio'] = 1;
-    if ($accion === 'baja')      $campos['baja'] = 1;
-    if ($accion === 'apuntado')  $campos['apuntado'] = 1;
+    if ($accion === 'enviado')   { $campos['enviado_at'] = current_time('mysql'); $campos['enviado_por'] = $quien; }
+    if ($accion === 'respondio') { $campos['respondio'] = 1; $campos['respondio_at'] = current_time('mysql'); $campos['respondio_por'] = $quien; }
+    if ($accion === 'baja')      { $campos['baja'] = 1; $campos['baja_at'] = current_time('mysql'); $campos['baja_por'] = $quien; }
+    if ($accion === 'apuntado')  { $campos['apuntado'] = 1; $campos['apuntado_at'] = current_time('mysql'); $campos['apuntado_por'] = $quien; }
+    // Deshacer BAJA: se queda el histórico de quién/cuándo la marcó al principio (por si hace
+    // falta reconstruirlo), solo se apaga el flag — así vuelve a entrar en campañas futuras.
+    if ($accion === 'baja_deshacer') $campos['baja'] = 0;
 
     if ($existente) {
         $wpdb->update(blokes_campana_envios_table(), $campos, array('id' => $existente['id']));
@@ -5287,6 +5300,18 @@ function superadmin_campanas_marcar_accion($request) {
         $contacto = $wpdb->get_row($wpdb->prepare("SELECT telefono FROM " . blokes_contactos_table() . " WHERE id = %d", $contacto_id), ARRAY_A);
         if ($contacto) {
             blokes_registrar_optin_whatsapp($contacto['telefono'], 0, 'no', 'respuesta BAJA', '', 'campaña #' . $campana_id);
+        }
+    }
+    // Deshacer BAJA (fue un error): quita la baja global de mensajes y deja el consentimiento
+    // "sin preguntar" otra vez, en vez de darlo por "si" sin que nadie lo haya confirmado.
+    if ($accion === 'baja_deshacer') {
+        $wpdb->update(blokes_contactos_table(), array(
+            'baja_mensajes' => 0, 'baja_mensajes_fecha' => null,
+            'baja_mensajes_nota' => 'BAJA deshecha (error) en campaña #' . $campana_id, 'updated_at' => current_time('mysql'),
+        ), array('id' => $contacto_id));
+        $contacto = $wpdb->get_row($wpdb->prepare("SELECT telefono FROM " . blokes_contactos_table() . " WHERE id = %d", $contacto_id), ARRAY_A);
+        if ($contacto) {
+            blokes_registrar_optin_whatsapp($contacto['telefono'], 0, null, 'deshacer BAJA (error)', '', 'campaña #' . $campana_id);
         }
     }
     return rest_ensure_response(array('success' => true));

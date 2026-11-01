@@ -61,7 +61,37 @@
 .cmp-kpi-btn__val { font-size: 1.1rem; font-weight: 700; color: var(--color-text-primary); }
 .cmp-kpi-btn__lbl { font-size: 0.68rem; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
 
-.cmp-filters { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.cmp-buscar {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  background: #0e0c08;
+  border: 1px solid #3a3020;
+  color: #ccc;
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+.cmp-buscar:focus { outline: none; border-color: #f5c842; }
+
+.cmp-filters { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.cmp-filtro-btn {
+  padding: 5px 10px;
+  background: none;
+  border: 1px solid #3a3020;
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.cmp-filtro-btn:hover { border-color: #f5c842; color: var(--state-warn); }
+.cmp-filtro-btn--active { border-color: #f5c842; color: var(--state-warn); background: rgba(245,200,66,0.08); }
+
+.cmp-quien { font-size: 0.65rem; color: var(--color-text-secondary); margin-top: 2px; }
+
 .cmp-select, .cmp-input, .cmp-textarea {
   padding: 5px 8px;
   background: #0e0c08;
