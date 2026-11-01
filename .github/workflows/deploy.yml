@@ -69,6 +69,22 @@ jobs:
               "ftp://$FTP_HOST:21/" || true
           done <<< "$listing"
 
+      - name: Upload PWA files (manifest, service worker, icons)
+        # Vite los copia de public/ a la raíz de dist/; el paso de assets no los sube.
+        env:
+          FTP_HOST: ${{ secrets.SFTP_HOST }}
+          FTP_USER: ${{ secrets.SFTP_USERNAME }}
+          FTP_PASS: ${{ secrets.SFTP_PASSWORD }}
+        run: |
+          for f in dist/manifest.webmanifest dist/sw.js dist/icons/*; do
+            [ -f "$f" ] || continue
+            rel="${f#dist/}"
+            echo "Uploading $rel"
+            curl -sk --ssl-reqd --ftp-create-dirs --fail \
+              --user "$FTP_USER:$FTP_PASS" \
+              -T "$f" "ftp://$FTP_HOST:21${FTP_PATH}$rel" || { echo "FAILED: $rel"; exit 1; }
+          done
+
       - name: Upload index.php and .htaccess
         # Esto SÍ corre en las dos ramas: cada una tiene su propia ruta ($FTP_PATH, blokes vs
         # blokes-dev), así que no hay nada compartido que una rama pueda pisarle a la otra aquí.
