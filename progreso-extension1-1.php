@@ -835,6 +835,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_marcar_cobrado',
         'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/adelantados', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_adelantados_listar',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/pausar', array(
         'methods'             => 'POST',
         'callback'            => 'superadmin_gestion_pausar',
@@ -3843,6 +3848,101 @@ function blokes_cobros_manuales_todos() {
     return $out;
 }
 
+// "Pagado por adelantado" (Ramiro, 1/11 18:55): pago por transferencia/bizum/tarjeta/wellhub
+// apuntado ANTES de que WooCommerce Subscriptions genere la renovación del día 3 — no se crea
+// el pedido a mano (podría duplicarse cuando WCS genere el suyo), se guarda aquí y se aplica
+// solo cuando ese pedido exista de verdad.
+function blokes_adelantados_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_adelantados';
+}
+
+function blokes_ensure_adelantados_table() {
+    global $wpdb;
+    $table = blokes_adelantados_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        id               bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        sub_id           bigint(20) UNSIGNED NOT NULL,
+        periodo          varchar(7)          NOT NULL,
+        importe          decimal(10,2)       NOT NULL,
+        metodo           varchar(30)         NOT NULL,
+        fecha_banco      date                NOT NULL,
+        nota             varchar(255)        NOT NULL DEFAULT '',
+        user_id          bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        user_login       varchar(100)        NOT NULL DEFAULT '',
+        created_at       datetime            NOT NULL,
+        aplicado_at      datetime            NULL,
+        aplicado_order_id bigint(20) UNSIGNED NULL,
+        revisar          tinyint(1)          NOT NULL DEFAULT 0,
+        PRIMARY KEY (id),
+        KEY sub_id (sub_id),
+        KEY periodo (periodo)
+    ) {$charset};";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+
+// El adelantado más antiguo sin aplicar y sin marcar "a revisar" de una suscripción — es el
+// que debería cubrir la próxima renovación real que genere WooCommerce Subscriptions.
+function blokes_adelantado_pendiente($sub_id) {
+    global $wpdb;
+    blokes_ensure_adelantados_table();
+    return $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM " . blokes_adelantados_table() . "
+         WHERE sub_id = %d AND aplicado_at IS NULL AND revisar = 0
+         ORDER BY periodo ASC, id ASC LIMIT 1", $sub_id
+    ), ARRAY_A);
+}
+
+// Se dispara cuando WooCommerce Subscriptions genera de verdad la renovación (normalmente el
+// día 3, el cron de WCS) — si hay un adelantado esperando a esta suscripción y el importe
+// coincide con el del pedido, lo completa solo (mismo criterio que marcar-cobrado a mano, sin
+// emails) y lo marca aplicado. Si no coincide, lo deja para revisión manual en vez de adivinar.
+// OJO: `wcs_renewal_order_created` es un FILTRO (apply_filters), no una acción — hay que
+// devolver siempre $order, o cualquier otro filtro encadenado (y la propia creación del pedido
+// para TODAS las suscripciones del club) se quedaría con null.
+function blokes_aplicar_adelantado_si_hay($order, $subscription) {
+    $sub_id = $subscription->get_id();
+    $adelantado = blokes_adelantado_pendiente($sub_id);
+    if (!$adelantado) return $order;
+
+    global $wpdb;
+    $coincide = abs(floatval($adelantado['importe']) - floatval($order->get_total())) < 0.01;
+    if (!$coincide) {
+        $wpdb->update(blokes_adelantados_table(), array('revisar' => 1), array('id' => intval($adelantado['id'])), array('%d'), array('%d'));
+        blokes_gestion_log($sub_id, 'adelantado_no_coincide', array('importePedido' => $order->get_total()), $adelantado);
+        return $order;
+    }
+
+    $metodo_label = blokes_gestion_metodo_label($adelantado['metodo']);
+    $fecha_ts = strtotime($adelantado['fecha_banco'] . ' 12:00:00');
+    blokes_gestion_sin_emails(function() use ($order, $metodo_label, $adelantado, $fecha_ts) {
+        $order->set_payment_method_title($metodo_label);
+        $nota_txt = sprintf(
+            'ExcelMuerte: cobrado por adelantado %s € (%s) el %s, aplicado automáticamente al generarse esta renovación.%s',
+            number_format(floatval($adelantado['importe']), 2, ',', '.'), $metodo_label,
+            date_i18n('d/m/Y', $fecha_ts), $adelantado['nota'] ? ' ' . $adelantado['nota'] : ''
+        );
+        $order->add_order_note($nota_txt);
+        $order->save();
+        update_post_meta($order->get_id(), '_rm_importe_cobrado', floatval($adelantado['importe']));
+        update_post_meta($order->get_id(), '_rm_metodo_cobro', $adelantado['metodo']);
+        $order->payment_complete();
+        $order->update_status('completed', 'ExcelMuerte: pedido completado automáticamente (pago por adelantado).');
+        $order->set_date_paid($fecha_ts);
+        $order->save();
+    });
+
+    $wpdb->update(blokes_adelantados_table(), array(
+        'aplicado_at' => current_time('mysql'), 'aplicado_order_id' => $order->get_id(),
+    ), array('id' => intval($adelantado['id'])), array('%s', '%d'), array('%d'));
+    blokes_gestion_log($sub_id, 'adelantado_aplicado', null, array('orderId' => $order->get_id(), 'periodo' => $adelantado['periodo']));
+    return $order;
+}
+add_filter('wcs_renewal_order_created', 'blokes_aplicar_adelantado_si_hay', 10, 2);
+
 // Pedidos sin pagar (pending/failed/on-hold) de la suscripción: se listan siempre, y si
 // $simular es false se cancelan de verdad (cancelar un pedido sin pagar no genera factura ni
 // email). Se usa al dar de baja, fusionar o reactivar por efectivo, para que el pedido viejo no
@@ -5976,6 +6076,14 @@ function superadmin_gestion_marcar_cobrado($request) {
         if ($o && in_array($o->get_status(), array('pending', 'on-hold', 'failed'), true)) { $order = $o; break; }
     }
 
+    // Decisión de Ramiro (1/11 18:55): si todavía NO existe el pedido de renovación (todas las
+    // renovaciones son el día 3), no se crea a mano — se guarda como "pagado por adelantado" y
+    // se aplica solo cuando WooCommerce Subscriptions genere ese pedido de verdad
+    // (blokes_aplicar_adelantado_si_hay), para no arriesgar un pedido/factura doble.
+    $next_payment_mysql = method_exists($sub, 'get_date') ? $sub->get_date('next_payment') : '';
+    $next_payment_ts = $next_payment_mysql ? strtotime($next_payment_mysql) : null;
+    $periodo_cubre = $next_payment_ts ? date('Y-m', $next_payment_ts) : date('Y-m');
+
     // Modo simulación: ni crea ni completa ningún pedido, ni toca la suscripción — para poder
     // probar contra un caso real (secciones 6b/7) viendo qué pasaría, sin generar factura/AEAT
     // ni ningún otro efecto. Nada de lo de abajo se ejecuta.
@@ -5984,20 +6092,37 @@ function superadmin_gestion_marcar_cobrado($request) {
             'subId'           => $sub_id,
             'estadoAntes'     => $antes['status'],
             'pedidoExistente' => $order ? $order->get_id() : null,
-            'seCrearaPedido'  => !$order,
+            'proximoPago'     => $next_payment_ts ? date_i18n('d/m/Y', $next_payment_ts) : 'desconocido',
+            'mesQueCubre'     => $periodo_cubre,
+            'completaraPedidoExistente' => (bool) $order,
+            'seGuardaraComoAdelantado'  => !$order,
             'pasaAActiva'     => !($estaba_pausada && $mantener_pausa),
             'mantienePausa'   => $estaba_pausada && $mantener_pausa,
             'importe'         => $importe, 'metodo' => $metodo_label, 'fecha' => $fecha_txt, 'parcial' => $parcial,
-            'aviso'           => 'Simulación: no se ha escrito nada en WooCommerce. De confirmarlo, SE EMITIRÁ FACTURA y se enviará a Hacienda (Verifactu).',
+            'aviso'           => $order
+                ? 'Simulación: no se ha escrito nada en WooCommerce. De confirmarlo, SE EMITIRÁ FACTURA y se enviará a Hacienda (Verifactu).'
+                : 'Simulación: todavía no existe el pedido de renovación. De confirmarlo, se guardará como "pagado por adelantado" (sin factura) y se aplicará solo cuando WooCommerce genere esa renovación.',
         );
         blokes_gestion_log($sub_id, 'marcar_cobrado_simulado', $antes, null, $preview);
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $preview));
     }
 
-    if (!$order && function_exists('wcs_create_renewal_order')) {
-        $order = wcs_create_renewal_order($sub);
+    if (!$order) {
+        blokes_ensure_adelantados_table();
+        global $wpdb;
+        $user = wp_get_current_user();
+        $wpdb->insert(blokes_adelantados_table(), array(
+            'sub_id' => $sub_id, 'periodo' => $periodo_cubre, 'importe' => $importe, 'metodo' => $metodo,
+            'fecha_banco' => date('Y-m-d', $fecha_ts), 'nota' => $nota,
+            'user_id' => $user ? $user->ID : 0, 'user_login' => $user ? $user->user_login : '',
+            'created_at' => current_time('mysql'),
+        ));
+        $despues = array('adelantado' => true, 'periodo' => $periodo_cubre, 'importe' => $importe, 'metodo' => $metodo);
+        blokes_gestion_log($sub_id, 'marcar_cobrado_adelantado', $antes, $despues, array('fecha' => $fecha_txt, 'nota' => $nota));
+        return rest_ensure_response(array('success' => true, 'adelantado' => true, 'data' => array_merge($despues, array(
+            'aviso' => 'Guardado como pago por adelantado. Se aplicará automáticamente cuando se genere la renovación del día 3; no se crea factura todavía.',
+        ))));
     }
-    if (!$order) return new WP_Error('no_order', 'No se ha podido encontrar ni crear el pedido de renovación.', array('status' => 500));
 
     blokes_gestion_sin_emails(function() use ($order, $metodo_label, $importe, $fecha_ts, $fecha_txt, $parcial, $nota) {
         $order->set_payment_method_title($metodo_label);
@@ -6041,6 +6166,22 @@ function superadmin_gestion_marcar_cobrado($request) {
     ));
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// Lista de adelantados sin aplicar (pendientes de que WooCommerce genere la renovación) y los
+// que no coincidieron en importe (a revisar a mano) — para el contador de "Cobrar este mes".
+function superadmin_gestion_adelantados_listar() {
+    global $wpdb;
+    blokes_ensure_adelantados_table();
+    $rows = $wpdb->get_results(
+        "SELECT * FROM " . blokes_adelantados_table() . " WHERE aplicado_at IS NULL ORDER BY periodo ASC, id ASC", ARRAY_A
+    );
+    $pendientes = array_values(array_filter($rows, function($r) { return !$r['revisar']; }));
+    $a_revisar  = array_values(array_filter($rows, function($r) { return (bool) $r['revisar']; }));
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'pendientes' => $pendientes, 'aRevisar' => $a_revisar,
+        'totalPendientes' => count($pendientes), 'totalARevisar' => count($a_revisar),
+    )));
 }
 
 /**
