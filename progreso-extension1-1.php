@@ -8611,12 +8611,52 @@ function progreso_equip_rules() {
 }
 
 function progreso_equip_get_config() {
+    // Al abrir Organización: asegura que la semana actual y la siguiente existan solas (paso 3
+    // del encargo del 28/10), sin esperar al cron diario.
+    progreso_equip_autocrear_semanas();
     return rest_ensure_response(array('success' => true, 'data' => array(
         'subzones'  => progreso_equip_subzones(),
         'grades'    => progreso_equip_grades(),
         'taskTypes' => progreso_equip_task_types(),
         'rules'     => progreso_equip_rules(),
     )));
+}
+
+// Crea la semana actual y la siguiente si no existen todavía (ni reales ni de prueba), con
+// todas las tareas al responsable (`auto = 1`) para que las reparta arrastrando — usa el mismo
+// `progreso_equip_create_week` de siempre, así que respeta periodicidad, recoge retrasadas y
+// nunca duplica (si Álvaro ya la creó a mano, `create_week` simplemente la encuentra y no hace
+// nada más). Si no hay ningún responsable configurado, no hace nada (no hay a quién asignarlo).
+function progreso_equip_autocrear_semanas() {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $lead = $wpdb->get_row("SELECT * FROM " . progreso_equip_table('workers') . " WHERE is_lead = 1 AND active = 1 ORDER BY id ASC LIMIT 1", ARRAY_A);
+    if (!$lead) return;
+
+    $hoy = current_time('Y-m-d');
+    $semana_actual = progreso_equip_monday_of($hoy);
+    $semana_siguiente = date('Y-m-d', strtotime($semana_actual) + 7 * 86400);
+
+    foreach (array($semana_actual, $semana_siguiente) as $monday) {
+        $existe = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM " . progreso_equip_table('weeks') . " WHERE start_date = %s", $monday
+        ));
+        if ($existe) continue;
+
+        $req = new WP_REST_Request('POST', '/progreso/v1/equipacion/weeks');
+        $req->set_param('startDate', $monday);
+        $req->set_param('subzones', array());
+        $req->set_param('assignments', array(array('workerId' => intval($lead['id']))));
+        $req->set_param('isAuto', true);
+        $res = progreso_equip_create_week($req);
+        if (is_wp_error($res)) continue;
+        $data = $res->get_data();
+        if (!empty($data['week_id'])) {
+            $wpdb->update(progreso_equip_table('weeks'),
+                array('notes' => 'Semana creada automáticamente: reparte las tareas arrastrándolas.'),
+                array('id' => intval($data['week_id'])), array('%s'), array('%d'));
+        }
+    }
 }
 
 function progreso_equip_table($name) {
@@ -8634,7 +8674,9 @@ function progreso_equip_ensure_tables() {
     // tarea, para poder borrar/filtrar su plan como un bloque).
     // v7: task_types.description/preferred_day/subzone/duration_min/active (creador de tareas
     // de Álvaro, Ramiro 1/11 17:20) — nunca se borra un tipo, solo se desactiva (histórico).
-    $version = '7';
+    // v8: weeks.auto (semana creada sola por el cron/al abrir Organización, paso 3 del encargo
+    // del 28/10 — "si Álvaro no hace nada, la semana existe igual").
+    $version = '8';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -8665,6 +8707,7 @@ function progreso_equip_ensure_tables() {
         notes      text                NULL,
         archived   tinyint(1)          NOT NULL DEFAULT 0,
         is_test    tinyint(1)          NOT NULL DEFAULT 0,
+        auto       tinyint(1)          NOT NULL DEFAULT 0,
         created_at datetime            NOT NULL,
         PRIMARY KEY (id)
     ) {$charset};");
@@ -8996,7 +9039,7 @@ function progreso_equip_get_weeks($request = null) {
         return array(
             'id' => intval($r['id']), 'startDate' => $r['start_date'],
             'subzones' => array_values(array_filter(array_map('intval', explode(',', $r['subzones'])))),
-            'notes' => $r['notes'], 'isTest' => (bool) $r['is_test'],
+            'notes' => $r['notes'], 'isTest' => (bool) $r['is_test'], 'isAuto' => (bool) $r['auto'],
         );
     }, $rows)));
 }
@@ -9200,11 +9243,12 @@ function progreso_equip_create_week($request) {
         return new WP_Error('invalid_data', 'Falta al menos una asignación de trabajador.', array('status' => 400));
     }
     $is_test = $request->get_param('isTest') ? 1 : 0;
+    $is_auto = $request->get_param('isAuto') ? 1 : 0;
 
     $wpdb->insert(progreso_equip_table('weeks'), array(
         'start_date' => $start_date, 'subzones' => implode(',', $subzones),
-        'notes' => $notes, 'is_test' => $is_test, 'created_at' => current_time('mysql'),
-    ), array('%s', '%s', '%s', '%d', '%s'));
+        'notes' => $notes, 'is_test' => $is_test, 'auto' => $is_auto, 'created_at' => current_time('mysql'),
+    ), array('%s', '%s', '%s', '%d', '%d', '%s'));
     $week_id = $wpdb->insert_id;
 
     $day_offset         = array('mon' => 0, 'tue' => 1, 'wed' => 2, 'thu' => 3, 'fri' => 4, 'sat' => 5, 'sun' => 6);
@@ -9482,7 +9526,7 @@ function progreso_equip_get_week_detail($request) {
     return rest_ensure_response(array('success' => true, 'data' => array(
         'id' => intval($week['id']), 'startDate' => $week['start_date'],
         'subzones' => array_values(array_filter(array_map('intval', explode(',', $week['subzones'])))),
-        'notes' => $week['notes'], 'isTest' => (bool) $week['is_test'], 'assignments' => $out_assignments,
+        'notes' => $week['notes'], 'isTest' => (bool) $week['is_test'], 'isAuto' => (bool) $week['auto'], 'assignments' => $out_assignments,
     )));
 }
 
@@ -10454,6 +10498,16 @@ add_action('rest_api_init', function() {
 add_action('init', function() {
     if (!wp_next_scheduled('blokes_9to5_sync')) wp_schedule_event(time() + 300, 'hourly', 'blokes_9to5_sync');
 });
+
+// Semana actual y la siguiente de Organización, creadas solas si nadie lo hizo a mano (paso 3
+// del encargo de Equipación del 28/10: "si Álvaro no hace nada, la semana existe igual"). La
+// propia función es idempotente (no toca nada si la semana ya existe), así que basta con
+// comprobarlo una vez al día — no hace falta que sea justo el domingo, solo que nunca falte.
+// También se dispara al abrir Organización (progreso_equip_get_config), por si el cron tarda.
+add_action('init', function() {
+    if (!wp_next_scheduled('blokes_equip_autocrear_semanas')) wp_schedule_event(time() + 600, 'daily', 'blokes_equip_autocrear_semanas');
+});
+add_action('blokes_equip_autocrear_semanas', 'progreso_equip_autocrear_semanas');
 add_action('blokes_9to5_sync', function() {
     $c = nueve_config();
     if (!empty($c['api_key'])) nueve_sync(false);

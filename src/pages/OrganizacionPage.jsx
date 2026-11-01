@@ -509,6 +509,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
           <button className="org__link-btn" onClick={deleteWeek}>Borrar semana</button>
         </div>
         <h3 className="org__section-title">Semana del {detail.startDate} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
+        {detail.isAuto && <p className="org__hint org__hint--auto">Semana creada automáticamente: reparte las tareas arrastrándolas.</p>}
         <p className="org__hint">Arrastra una tarjeta a otra persona (o a otro día de esa persona) para reasignarla.</p>
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
           {detail.assignments.map(a => {
@@ -614,7 +615,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
       <ul className="org__week-list">
         {weeks.map(w => (
           <li key={w.id} className="org__week-row" onClick={() => openWeek(w.id)}>
-            <span>Semana del {w.startDate}</span>
+            <span>Semana del {w.startDate}{w.isAuto ? ' · automática' : ''}</span>
             <span className="org__week-subzones">{w.subzones.map(s => `#${s}`).join(', ')}</span>
           </li>
         ))}

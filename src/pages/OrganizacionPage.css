@@ -8,6 +8,7 @@
   font-size: 0.9rem;
   color: var(--color-text-secondary);
 }
+.org__hint--auto { color: var(--color-accent-hover); font-weight: 600; }
 
 .org__switch {
   display: flex;
