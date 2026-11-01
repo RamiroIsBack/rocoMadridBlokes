@@ -4777,6 +4777,20 @@ function blokes_ensure_campanas_tables() {
         $wpdb->query("UPDATE " . blokes_contactos_table() . " SET optin_whatsapp = NULL WHERE optin_whatsapp = '0' OR optin_whatsapp = ''");
         update_option('blokes_optin_whatsapp_tres_estados', 1, false);
     }
+
+    // Migración única a utf8mb4 (1/11, cowork 08:10): estas tres tablas se crearon con un
+    // charset de 3 bytes (utf8/utf8mb3), que no puede guardar emojis (👋, de 4 bytes) — MySQL
+    // los sustituye por "?" al escribir. `dbDelta` no convierte el charset de una tabla que ya
+    // existe, solo columnas/índices, así que hace falta este ALTER explícito una sola vez.
+    // Los mensajes ya guardados con "?" no se pueden recuperar (el emoji original se perdió al
+    // escribir): hay que volver a guardar esas plantillas después de este arreglo.
+    if (!get_option('blokes_campanas_utf8mb4')) {
+        global $wpdb;
+        foreach (array(blokes_contactos_table(), blokes_campanas_table(), blokes_campana_envios_table()) as $tabla) {
+            $wpdb->query("ALTER TABLE {$tabla} CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci");
+        }
+        update_option('blokes_campanas_utf8mb4', 1, false);
+    }
 }
 
 // Última suscripción relevante de cada teléfono: gana la más "fuerte" (en vigor > de baja a
