@@ -12,10 +12,10 @@ import { useCostes, FACTOR_COSTE } from '../hooks/useCostes'
 import { autoCategory } from '../utils/expensesParser'
 import { PL_DATA } from '../data/plHistorico'
 import {
-  DIAS_ANUALES, HOY_PARO, MES_LABEL, MESES_ANUALES, MANANAS_MODO, MANANAS_DISPOSICION, eur, inactivosMes,
+  DIAS_ANUALES, HOY_PARO, MES_LABEL, MESES_ANUALES, MANANAS_MODO, MANANAS_CORTE_DEFECTO, eur, inactivosMes,
   evaluarPlan, defaultYear, todayISO, repartirVacaciones, BLOQUE_VERANO, MAX_BLOQUES, CIERRE_EXTRA,
-  normalizeMananas, horasMananaPorPersona, ingresosMananaDeClases, cuentasMananas, equilibrioManana, disposicionDe,
-  mesesCerradosManana, yaEnParoEsteMes,
+  normalizeMananas, ingresosMananaDeClases, cuentasMananas, equilibrioManana,
+  mesesCerradosManana, PERSONA_MES_ESTADOS, estadoPersonaMes, paroDesdePersonasMes, personasMesDesdeParo,
 } from '../utils/timeoffPlan'
 import { useTimeOffData, savePlan, saveReal, syncNueve, addScenario } from '../hooks/useTimeOff'
 import { useClases } from '../hooks/useClases'
@@ -105,8 +105,9 @@ function conReparto(st) {
 }
 
 function defaultState(year = defaultYear()) {
+  const base = presetPlan('hoy', year)
   return {
-    ...presetPlan('hoy', year),
+    ...base,
     periods: [],
     keys: [...KEY_HOLDERS_DEFAULT],
     dias: Object.fromEntries(PROF_ORDER.map(p => [p, DIAS_ANUALES])),
@@ -115,6 +116,10 @@ function defaultState(year = defaultYear()) {
     gastosSala:   { 7: 0, 8: 0 },
     ingresosSala: { 7: 0, 8: 0 },
     mananas: normalizeMananas(),
+    // Personas × mes (pestaña "Personas"): única fuente de quién está en paro/tarde/vacaciones
+    // cada mes. `paro` se deriva de aquí siempre que se edite, pero se guarda igual por
+    // compatibilidad con todo el motor de convenio/cobertura de coverage.js.
+    personasMes: personasMesDesdeParo(base.paro),
     preset: null,
   }
 }
@@ -125,6 +130,9 @@ function hydrate(plain) {
   st.periods = (plain.periods || []).map(p => ({ ...p, id: nextId++ }))
   st.camp = normalizeCamp(plain.camp)
   st.mananas = normalizeMananas(plain.mananas)
+  // Planes guardados antes de la pestaña "Personas" solo traían `paro`: se deriva la tabla
+  // por mes de ahí la primera vez que se abren.
+  st.personasMes = plain.personasMes || personasMesDesdeParo(st.paro)
   // Planes guardados con la huella anterior: si no se había tocado, se pasa a la nueva
   if (st.preset?.firma?.includes('"paro":{')) {
     const pv = plain.pactoVerano
@@ -523,18 +531,19 @@ function rellenarCierre(st, sugerido) {
 
 // Sala en verano, días de cierre que pasan de 15 y campamento. Con `conDinero`, también
 // ingresos/gastos de la sala y plazas/precio del campamento (solo en el simulador).
-function ConfigVerano({ state, update, ev, conDinero, sugerido }) {
+// Sala por la tarde en verano: abierta/cerrada y, cerrada, lo que se pierde/ahorra por mes.
+// Separado del campamento (su propia pestaña en el simulador) y de Mañanas (cierre solo de
+// las clases de mañana, independiente de este cierre de todo el día).
+function ConfigSalaVerano({ state, update, ev, conDinero, sugerido }) {
   const { cierre, gastosSala = {}, ingresosSala = {} } = state
-  const camp = normalizeCamp(state.camp)
   const cierreExtra = state.cierreExtra || 'pagados'
-  const setCamp = patch => update({ camp: { ...camp, ...patch } })
   const cambiarCierre = c => update(conDinero ? rellenarCierre({ ...state, cierre: c }, sugerido) : { cierre: c })
   const delHistorico = m => sugerido && ingresosSala[m] === sugerido.ingresos[m] && gastosSala[m] === sugerido.ahorrable[m]
   return (
     <>
       <div className="sv-to-form">
         <label className="sv-to-inline">
-          Sala en verano
+          Sala por la tarde en verano
           <select className="sv-tests-select" value={cierre} onChange={e => cambiarCierre(e.target.value)}>
             {Object.entries(CIERRE_VERANO).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
@@ -547,10 +556,6 @@ function ConfigVerano({ state, update, ev, conDinero, sugerido }) {
             </select>
           </label>
         )}
-        <label className="sv-to-inline">
-          <input type="checkbox" checked={camp.activo} onChange={() => setCamp({ activo: !camp.activo })} />
-          Campamento por la mañana
-        </label>
       </div>
       {conDinero && cierre !== 'abierto' && (
         <div className="sv-to-form">
@@ -568,7 +573,23 @@ function ConfigVerano({ state, update, ev, conDinero, sugerido }) {
           ))}
         </div>
       )}
-      {camp.activo && <CampConfig camp={camp} setCamp={setCamp} y={ev.y} cierre={cierre} conDinero={conDinero} ev={ev} />}
+    </>
+  )
+}
+
+// Campamento: activo/no + su configuración (semanas, plazas, precio, monitores, cuentas).
+// Visible siempre (no escondido detrás de un acordeón) para que no quede activado sin que se
+// note (calculadora_simple.md, 1/11, punto 4 de "por qué confunde").
+function ConfigCampamento({ state, update, ev, conDinero }) {
+  const camp = normalizeCamp(state.camp)
+  const setCamp = patch => update({ camp: { ...camp, ...patch } })
+  return (
+    <>
+      <label className="sv-to-inline">
+        <input type="checkbox" checked={camp.activo} onChange={() => setCamp({ activo: !camp.activo })} />
+        Campamento por la mañana {camp.activo ? <strong className="sv-to-good">· activado</strong> : <span className="sv-ot-muted">· no activado</span>}
+      </label>
+      {camp.activo && <CampConfig camp={camp} setCamp={setCamp} y={ev.y} cierre={state.cierre} conDinero={conDinero} ev={ev} />}
     </>
   )
 }
@@ -717,10 +738,9 @@ function CampCuentas({ ev }) {
 }
 
 // ─── Mañanas: cerrar antes de una hora de corte, todo el año o algunos meses ─────────────
-function ConfigMananas({ state, update, costes, clases }) {
+function ConfigMananas({ state, update, clases }) {
   const mananas = normalizeMananas(state.mananas)
   const setMananas = patch => update({ mananas: { ...mananas, ...patch } })
-  const horas = useMemo(() => horasMananaPorPersona(mananas.corteHora), [mananas.corteHora])
   const cerrado = mananas.modo !== 'abiertas'
   return (
     <>
@@ -764,45 +784,10 @@ function ConfigMananas({ state, update, costes, clases }) {
               €/mes
             </label>
           </div>
-          {Object.keys(horas).length > 0 && (() => {
-            const meses = mesesCerradosManana(mananas)
-            return (
-              <div className="sv-tests-scroll">
-                <span className="sv-to-inline">Si se cierra, cada persona que da clase por la mañana (puede ser distinto cada mes):</span>
-                <table className="sv-tests-table">
-                  <thead>
-                    <tr><th>Persona</th>{meses.map(mes => <th key={mes}>{MESES_ANUALES[mes]}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {Object.keys(horas).map(p => (
-                      <tr key={p}>
-                        <td style={{ color: PROF_META[p]?.color }}>
-                          {p} ({horas[p]} h/sem · {eur(costes.mes[p] || 0)}/mes{!costes.nomina[p] ? ', de la ficha' : ''})
-                        </td>
-                        {meses.map(mes => (
-                          <td key={mes}>
-                            {yaEnParoEsteMes(state.paro, p, mes) ? (
-                              <span className="sv-ot-muted sv-to-small" title="Ya está en paro ese mes por la sección de vacaciones/paro de arriba: su ahorro ya se cuenta ahí, no aquí otra vez.">
-                                Ya en paro (contado arriba)
-                              </span>
-                            ) : (
-                              <select className="sv-tests-select" value={disposicionDe(mananas, p, mes)}
-                                onChange={e => setMananas({ disposicion: {
-                                  ...mananas.disposicion, [p]: { ...(mananas.disposicion?.[p] || {}), [mes]: e.target.value },
-                                } })}>
-                                {Object.entries(MANANAS_DISPOSICION).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                              </select>
-                            )}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <span className="sv-ot-muted sv-to-small">La decisión laboral es de Ramiro; esto solo pone números.</span>
-              </div>
-            )
-          })()}
+          <p className="sv-note sv-to-small">
+            Quién pasa a la tarde, está en paro o de vacaciones cada mes está en la pestaña <strong>Personas</strong> — es lo
+            único que decide el ahorro de personal, aquí no hace falta repetirlo.
+          </p>
           {mesesCerradosManana(mananas).length > 0 && (
             <div className="sv-to-form sv-to-wrap">
               <span className="sv-to-inline">
@@ -826,23 +811,22 @@ function ConfigMananas({ state, update, costes, clases }) {
               })}
             </div>
           )}
-          <MananasCuentas mananas={mananas} costes={costes} clases={clases} horas={horas} paro={state.paro} />
+          <MananasCuentas mananas={mananas} clases={clases} />
         </>
       )}
     </>
   )
 }
 
-function MananasCuentas({ mananas, costes, clases, horas, paro }) {
+function MananasCuentas({ mananas, clases }) {
   const ingresosManana = useMemo(() => ingresosMananaDeClases(clases, mananas.corteHora), [clases, mananas.corteHora])
-  const ctx = { ingresosManana, coste: costes.mes, horasManana: horas, paro }
-  const r = useMemo(() => cuentasMananas(mananas, ctx), [mananas, ingresosManana, costes.mes, horas, paro])
-  const eq = useMemo(() => equilibrioManana(mananas, ctx), [mananas, ingresosManana, costes.mes, horas, paro])
+  const ctx = { ingresosManana }
+  const r = useMemo(() => cuentasMananas(mananas, ctx), [mananas, ingresosManana])
+  const eq = useMemo(() => equilibrioManana(mananas, ctx), [mananas, ingresosManana])
   const cls = n => (n > 0 ? 'sv-to-good' : n < 0 ? 'sv-to-bad' : '')
   if (!r.cerrados.length) return null
   const lineas = [
     [`Ingresos de mañana que se pierden (de ${r.alumnosManana} alumnos, ${mananas.pctTarde}% se pasa a la tarde)`, -r.perdidaNeta],
-    r.ahorroPersonal > 0 && ['Personal que no trabaja esa mañana', r.ahorroPersonal],
     r.ahorroSala > 0 && ['Gasto de sala', r.ahorroSala],
   ].filter(Boolean)
   const variaPorMes = r.porMes.length > 1 && r.porMes.some(x => x.alumnos !== r.porMes[0].alumnos || x.resultadoMes !== r.porMes[0].resultadoMes)
@@ -905,33 +889,59 @@ function Indicadores({ ev }) {
 }
 
 // Dinero del verano frente a hoy, con signo y una línea por concepto (solo simulador)
-function Dinero({ ev, state }) {
+// Tabla única de Resultados (pestaña 5): un mes por columna y el total — cada partida sale de
+// un solo sitio (sala/paro de la sección 2, mañanas de la 1, campamento de la 3), así que
+// sumar las columnas nunca duplica nada (calculadora_simple.md, 1/11).
+const LINEAS_RESULTADO = [
+  ['mananaPerdida', 'Clases de mañana que se pierden'],
+  ['salaPerdida',   'Entradas/bonos de sala que se pierden'],
+  ['campamento',    'Campamento'],
+  ['personal',      'Ahorro de personal'],
+  ['salaAhorro',    'Gastos de sala ahorrados'],
+]
+function Dinero({ ev, resultadosPorMes, resultadoTotal }) {
   const { eco } = ev
-  const cerrados = ev.mesesCerradosList
-  const perdidas = cerrados.reduce((n, m) => n + (state.ingresosSala?.[m] || 0), 0)
-  const ahorrados = cerrados.reduce((n, m) => n + (state.gastosSala?.[m] || 0), 0)
-  const lineas = [
-    eco.personal !== 0 && ['Sueldos de los meses en paro (frente a hoy)', eco.personal],
-    cerrados.length > 0 && [`Ventas que se pierden al cerrar ${cerrados.map(m => MES_LABEL[m].toLowerCase()).join(' y ')}`, -perdidas],
-    cerrados.length > 0 && ['Gastos de la sala que se ahorran', ahorrados],
-    eco.campRes.semanas > 0 && ['Campamento: lo que pagan las familias', eco.campRes.ingresos],
-    eco.campRes.semanas > 0 && ['Campamento: monitores, seguro, material y comida', -eco.campRes.costes],
-  ].filter(Boolean)
+  // Julio y agosto siempre, aunque algún mes esté a 0 (igual que la tabla que pedía Ramiro) —
+  // solo se oculta el mes si no hay ni mañanas cerradas, ni cierre, ni campamento, ni paro ahí.
+  const meses = resultadosPorMes.filter(x => x.mananaPerdida || x.salaPerdida || x.salaAhorro || x.campamento || x.personal || ev.mesesCerradosList.includes(x.mes))
+  const filas = LINEAS_RESULTADO.filter(([k]) => resultadosPorMes.some(m => m[k] !== 0))
   return (
     <div className="sv-to-money">
-      <div className={`sv-to-money__total ${eco.balance > 0 ? 'sv-to-good' : eco.balance < 0 ? 'sv-to-bad' : ''}`}>
-        Resultado del verano frente a hoy: <strong>{signo(eco.balance)}</strong>
-        {eco.balance > 0 ? ' (mejor)' : eco.balance < 0 ? ' (peor)' : ' (igual)'}
+      <div className={`sv-to-money__total ${resultadoTotal > 0 ? 'sv-to-good' : resultadoTotal < 0 ? 'sv-to-bad' : ''}`}>
+        Resultado del verano frente a hoy: <strong>{signo(resultadoTotal)}</strong>
+        {resultadoTotal > 0 ? ' (mejor)' : resultadoTotal < 0 ? ' (peor)' : ' (igual)'}
       </div>
-      {lineas.length > 0 && (
-        <ul className="sv-to-money__lines">
-          {lineas.map(([txt, n]) => (
-            <li key={txt}><span>{txt}</span><span className={n > 0 ? 'sv-to-good' : n < 0 ? 'sv-to-bad' : ''}>{signo(n)}</span></li>
-          ))}
-        </ul>
+      {meses.length > 0 && filas.length > 0 && (
+        <div className="sv-tests-scroll">
+          <table className="sv-tests-table">
+            <thead>
+              <tr><th></th>{meses.map(m => <th key={m.mes}>{MES_LABEL[m.mes]}</th>)}<th>Total</th></tr>
+            </thead>
+            <tbody>
+              {filas.map(([k, label]) => (
+                <tr key={k}>
+                  <td>{label}{k === 'mananaPerdida' && meses.some(m => m.alumnosManana != null) && (
+                    <span className="sv-ot-muted sv-to-small"> ⓘ {meses.filter(m => m.alumnosManana != null).map(m => `${MES_LABEL[m.mes]}: ${m.alumnosManana} alumnos${m.fuenteManana ? ` (${m.fuenteManana})` : ''}`).join(' · ')}</span>
+                  )}</td>
+                  {meses.map(m => (
+                    <td key={m.mes} className={m[k] > 0 ? 'sv-to-good' : m[k] < 0 ? 'sv-to-bad' : 'sv-ot-muted'}>{m[k] ? signo(m[k]) : '—'}</td>
+                  ))}
+                  <td className={meses.reduce((s, m) => s + m[k], 0) > 0 ? 'sv-to-good' : meses.reduce((s, m) => s + m[k], 0) < 0 ? 'sv-to-bad' : 'sv-ot-muted'}>
+                    {signo(meses.reduce((s, m) => s + m[k], 0))}
+                  </td>
+                </tr>
+              ))}
+              <tr>
+                <td><strong>Resultado</strong></td>
+                {meses.map(m => <td key={m.mes} className={m.resultado > 0 ? 'sv-to-good' : m.resultado < 0 ? 'sv-to-bad' : ''}><strong>{signo(m.resultado)}</strong></td>)}
+                <td className={resultadoTotal > 0 ? 'sv-to-good' : resultadoTotal < 0 ? 'sv-to-bad' : ''}><strong>{signo(resultadoTotal)}</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       )}
-      {cerrados.length > 0 && perdidas === 0 && (
-        <p className="sv-to-warn-txt sv-to-small">Las ventas perdidas están a 0: el cierre parece gratis. Rellénalas o usa las medias del histórico.</p>
+      {ev.mesesCerradosList.length > 0 && meses.filter(m => ev.mesesCerradosList.includes(m.mes)).every(m => !m.salaPerdida) && (
+        <p className="sv-to-warn-txt sv-to-small">Las ventas de sala perdidas están a 0 en los meses cerrados: el cierre parece gratis. Rellénalas en la pestaña "Sala y mañanas".</p>
       )}
       {eco.diasOciosos > 0 && (
         <p className="sv-ot-muted sv-to-small">
@@ -969,7 +979,7 @@ function AvisosAgrupados({ ev }) {
 }
 
 // Veredicto del supuesto en una frase, en verde, ámbar o rojo
-function Veredicto({ ev, nombre, mananasAnio = 0 }) {
+function Veredicto({ ev, nombre, resultadoTotal = null }) {
   const bloquea = ev.warnings.filter(w => w.lvl === 'bad')
   const acuerdo = [...new Set(ev.acuerdos.filter(a => !a.registrado).map(a => a.p))]
   const revisar = ev.warnings.filter(w => w.lvl === 'warn' && !w.abrir).length
@@ -977,7 +987,9 @@ function Veredicto({ ev, nombre, mananasAnio = 0 }) {
   // está cubierta hasta que alguien con llave se encargue
   const sinQuienAbra = ev.warnings.reduce((n, w) => n + (w.abrir || 0), 0)
   const nivel = bloquea.length ? 'rojo' : acuerdo.length || sinQuienAbra ? 'ambar' : 'verde'
-  const b = ev.eco.balance
+  // Un único total (pestaña Resultados): vacaciones/paro/campamento + mañanas, nunca dos
+  // cifras que no se suman (calculadora_simple.md, 1/11).
+  const b = resultadoTotal != null ? resultadoTotal : ev.eco.balance
   const perdidas = ev.kpi.perdidas
   const cr = ev.eco.campRes
   const campSinDatos = cr.c.activo && cr.semanas > 0 && !cr.ingresos
@@ -988,11 +1000,6 @@ function Veredicto({ ev, nombre, mananasAnio = 0 }) {
       <div className="sv-to-verdict__name">{nombre}</div>
       <div className="sv-to-verdict__text">
         {b > 0 ? <>Ahorra <strong>{eur(b)}/año</strong> frente a hoy.</> : b < 0 ? <>Cuesta <strong>{eur(-b)}/año</strong> más que hoy.</> : <>Mismo dinero que hoy.</>}
-        {mananasAnio !== 0 && (
-          <> {' '}<span className={cls(mananasAnio)} title="Resultado de cerrar por la mañana (sección 3): no está sumado al número de arriba, que es solo vacaciones/paro/campamento.">
-            + mañanas: {mananasAnio > 0 ? '+' : ''}{eur(mananasAnio)}/año
-          </span>.</>
-        )}
         {' '}{acuerdo.length
           ? <>Necesita el acuerdo de <strong>{acuerdo.length} {acuerdo.length === 1 ? 'persona' : 'personas'}</strong> ({acuerdo.join(', ')}).</>
           : <>No necesita acuerdos.</>}
@@ -1016,7 +1023,7 @@ function Veredicto({ ev, nombre, mananasAnio = 0 }) {
 }
 
 // Tabla por persona. En lo real, «Aprobadas»; en el simulador, las del plan.
-function PersonasTabla({ ev, state, update, costes, conDinero, etiquetaVacaciones }) {
+function PersonasTabla({ ev, state, update, costes, conDinero, etiquetaVacaciones, ocultarParo = false }) {
   const { paro, keys, dias } = state
   const cierreExtra = state.cierreExtra || 'pagados'
   const y = ev.y
@@ -1028,7 +1035,7 @@ function PersonasTabla({ ev, state, update, costes, conDinero, etiquetaVacacione
           <thead>
             <tr>
               <th>Persona</th>
-              <th title="Qué meses de verano no trabaja (fijo discontinuo)">Paro en verano</th>
+              {!ocultarParo && <th title="Qué meses de verano no trabaja (fijo discontinuo)">Paro en verano</th>}
               <th title="Puede abrir y cerrar la sala">Llave</th>
               <th title="Días de vacaciones al año por convenio (23). Cámbialo solo si alguien tiene otro acuerdo.">Días convenio ⓘ</th>
               <th title="Días por convenio menos la parte de los meses en paro (21 si para un mes, 19 si para dos)">Le tocan {y} ⓘ</th>
@@ -1045,12 +1052,14 @@ function PersonasTabla({ ev, state, update, costes, conDinero, etiquetaVacacione
                 <td style={{ color: PROF_META[r.p].color, fontWeight: 700 }}>
                   {r.p}{r.p === COMODIN_VERANO && <span className="sv-ot-muted"> · recepción</span>}
                 </td>
-                <td>
-                  <select className="sv-tests-select" value={r.op}
-                    onChange={e => update({ paro: { ...paro, [r.p]: e.target.value } })}>
-                    {Object.entries(PARO_VERANO).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                  </select>
-                </td>
+                {!ocultarParo && (
+                  <td>
+                    <select className="sv-tests-select" value={r.op}
+                      onChange={e => update({ paro: { ...paro, [r.p]: e.target.value } })}>
+                      {Object.entries(PARO_VERANO).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                    </select>
+                  </td>
+                )}
                 <td><input type="checkbox" checked={keys.includes(r.p)} onChange={() => update({ keys: toggleIn(keys, r.p) })} /></td>
                 <td>
                   <input className="sv-tests-input sv-tests-input--unit" type="number" min="0" max="40" value={dias[r.p]}
@@ -1098,6 +1107,54 @@ function PersonasTabla({ ev, state, update, costes, conDinero, etiquetaVacacione
         </p>
       )}
     </>
+  )
+}
+
+// ─── Personas × mes: única fuente de qué hace cada persona (calculadora_simple.md, 1/11) ──
+// Sustituye "Paro en verano" (arriba, por persona) y la vieja tabla de disposición de Mañanas
+// (que eran dos sitios para lo mismo y se podía contar el ahorro dos veces). Escribe
+// `personasMes` y, a la vez, el `paro` derivado que sigue usando todo el motor de convenio.
+const MESES_VERANO = [7, 8]
+function PersonasMesTabla({ state, update, costes }) {
+  const personasMes = state.personasMes || {}
+  const setEstado = (p, mes, estado) => {
+    const next = { ...personasMes, [p]: { ...(personasMes[p] || {}), [mes]: estado } }
+    update({ personasMes: next, paro: paroDesdePersonasMes(next) })
+  }
+  return (
+    <div className="sv-tests-scroll">
+      <table className="sv-tests-table">
+        <thead>
+          <tr><th>Persona</th><th>Coste/mes</th>{MESES_VERANO.map(m => <th key={m}>{MES_LABEL[m]}</th>)}</tr>
+        </thead>
+        <tbody>
+          {PROF_ORDER.map(p => (
+            <tr key={p}>
+              <td style={{ color: PROF_META[p]?.color, fontWeight: 700 }}>{p}</td>
+              <td className="sv-ot-muted" title={costes.nomina[p]
+                ? `Nómina ${eur(costes.nomina[p].banco)}${costes.nomina[p].efectivo ? ` + efectivo ${eur(costes.nomina[p].efectivo)}` : ''} · ficha ${eur(costes.ficha[p])}`
+                : 'Coste de la ficha (marzo 2026)'}>
+                {eur(costes.mes[p] || 0)}{!costes.nomina[p] && ' *'}
+              </td>
+              {MESES_VERANO.map(mes => (
+                <td key={mes}>
+                  <select className="sv-tests-select" value={estadoPersonaMes(personasMes, p, mes)}
+                    onChange={e => setEstado(p, mes, e.target.value)}>
+                    {Object.entries(PERSONA_MES_ESTADOS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                  </select>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="sv-note sv-to-small">
+        Única fuente de quién está en paro, pasa a la tarde o de vacaciones cada mes de verano — el ahorro de personal
+        de "Resultados" sale entero de aquí. "Paro" ahorra el coste del mes completo; "tarde" y "normal" no ahorran nada
+        (siguen cobrando igual, solo cambia dónde trabajan). "Vacaciones" es solo para verlo de un vistazo: las fechas
+        de verdad se reparten en la pestaña Vacaciones y no cambian el dinero.
+      </p>
+    </div>
   )
 }
 
@@ -1265,7 +1322,8 @@ function VacacionesReales({ real, setReal, ev }) {
         Aquí solo cuentan las vacaciones <strong>aprobadas</strong> y la configuración real. Es lo que se usa para comprobar
         las solicitudes. Para probar otras opciones, usa el Simulador: lo que hagas allí no cambia nada de aquí.
       </p>
-      <ConfigVerano state={real} update={update} ev={ev} conDinero={false} />
+      <ConfigSalaVerano state={real} update={update} ev={ev} conDinero={false} />
+      <ConfigCampamento state={real} update={update} ev={ev} conDinero={false} />
       <Indicadores ev={ev} />
       <AvisosAgrupados ev={ev} />
       <PersonasTabla ev={ev} state={real} update={update} conDinero={false} etiquetaVacaciones="Aprobadas" />
@@ -1295,15 +1353,33 @@ function Calculadora({ state, setState, costes, clases, ev, sugerido, onDesdeRea
   const modificado = activo && state.preset.firma !== firmaPlan(state)
   const nombre = activo ? `${activo[1]}${modificado ? ' (modificado)' : ''}` : 'Plan propio'
 
-  // Resultado de "Mañanas" (sección 3) aparte del de vacaciones/paro/campamento (ev.eco.balance):
-  // se enseña al lado en el veredicto, no sumado, para no mezclar dos cálculos distintos.
+  // Resultados unificados (pestaña 5): un solo total, nunca dos que no se suman. Mañanas se
+  // suma al de vacaciones/paro/campamento (ev.eco.balance) en vez de enseñarse aparte
+  // (calculadora_simple.md, 1/11 — "el titular de arriba es siempre el total de la pestaña 5").
   const mananasCfg = normalizeMananas(state.mananas)
-  const horasManana = useMemo(() => horasMananaPorPersona(mananasCfg.corteHora), [mananasCfg.corteHora])
   const ingresosManana = useMemo(() => ingresosMananaDeClases(clases, mananasCfg.corteHora), [clases, mananasCfg.corteHora])
-  const mananasAnio = useMemo(
-    () => (mananasCfg.modo === 'abiertas' ? 0 : cuentasMananas(mananasCfg, { ingresosManana, coste: costes.mes, horasManana, paro }).resultadoAnio),
-    [mananasCfg, ingresosManana, costes.mes, horasManana, paro]
+  const mananasRes = useMemo(
+    () => (mananasCfg.modo === 'abiertas' ? { porMes: [], resultadoAnio: 0 } : cuentasMananas(mananasCfg, { ingresosManana })),
+    [mananasCfg, ingresosManana]
   )
+  const resultadosPorMes = useMemo(() => MESES_VERANO.map(m => {
+    const manM = mananasRes.porMes.find(x => x.mes === m)
+    const mananaPerdida = manM ? -manM.perdidaNeta : 0
+    const salaCerrada   = ev.mesesCerradosList.includes(m)
+    const salaPerdida   = salaCerrada ? -(state.ingresosSala?.[m] || 0) : 0
+    // Gastos de sala ahorrados: los del cierre de todo el día (sección "Sala en verano") más
+    // los de cerrar solo la mañana (campo "gasto de sala" de Mañanas) — las dos son formas de
+    // ahorrar gasto de sala, nunca se activan por el mismo euro, así que se suman sin pisarse.
+    const salaAhorro    = (salaCerrada ? (state.gastosSala?.[m] || 0) : 0) + (manM ? manM.ahorroSala : 0)
+    const campamento    = ev.eco.campMes(m)
+    const personal      = ev.eco.personalMes(m)
+    const resultado = mananaPerdida + salaPerdida + salaAhorro + campamento + personal
+    return {
+      mes: m, mananaPerdida, salaPerdida, salaAhorro, campamento, personal, resultado,
+      alumnosManana: manM?.alumnos ?? null, fuenteManana: manM?.fuente || '',
+    }
+  }), [mananasRes, ev, state.ingresosSala, state.gastosSala])
+  const resultadoTotal = ev.eco.balance + mananasRes.resultadoAnio
 
   // Si el plan actual no es un supuesto sin tocar, se guarda antes como «Plan anterior»
   const aplicarPreset = async id => {
@@ -1313,9 +1389,19 @@ function Calculadora({ state, setState, costes, clases, ev, sugerido, onDesdeRea
       await onGuardarAnterior()
     }
     const st = conReparto(rellenarCierre({ ...state, ...presetPlan(id, y), pactoVerano: {} }, sugerido))
+    st.personasMes = personasMesDesdeParo(st.paro)
     setState({ ...st, preset: { id, firma: firmaPlan(st) } })
   }
-  const aplicarParo = p => setState(s => conReparto({ ...s, paro: p }))
+  const aplicarParo = p => setState(s => conReparto({ ...s, paro: p, personasMes: personasMesDesdeParo(p) }))
+
+  const [tab, setTab] = useState('salaManana')
+  const TABS = [
+    ['salaManana', 'Sala y mañanas'],
+    ['personas',   'Personas'],
+    ['campamento', 'Campamento'],
+    ['vacaciones', 'Vacaciones'],
+    ['resultados', 'Resultados'],
+  ]
 
   return (
     <div className="sv-section sv-to-sim">
@@ -1324,93 +1410,111 @@ function Calculadora({ state, setState, costes, clases, ev, sugerido, onDesdeRea
         Un plan de prueba para decidir quién pasa a paro, si se cierra en verano o cómo se reparten las vacaciones. No toca lo real.
       </p>
 
-      <Veredicto ev={ev} nombre={nombre} mananasAnio={mananasAnio} />
+      <Veredicto ev={ev} nombre={nombre} resultadoTotal={resultadoTotal} />
 
-      <Paso n="1" titulo="Año y punto de partida"
-        nota="Elige un supuesto: se carga su configuración y se reparten las vacaciones automáticamente. Después puedes tocar lo que quieras.">
-        <div className="sv-to-form">
-          <YearSelector y={y} onChange={yr => update({ year: yr })} />
-          <button className="sv-filter-btn" onClick={onDesdeReal}>Empezar desde lo real</button>
-        </div>
-        <div className="sv-filter-group sv-to-wrap">
-          {PRESETS.map(([id, label]) => (
-            <button key={id} className={`sv-filter-btn${state.preset?.id === id ? ' sv-filter-btn--active' : ''}`} onClick={() => aplicarPreset(id)}>
-              {label}{state.preset?.id === id && modificado ? ' · modificado' : ''}
-            </button>
-          ))}
-        </div>
-      </Paso>
+      <div className="sv-to-form">
+        <YearSelector y={y} onChange={yr => update({ year: yr })} />
+        <button className="sv-filter-btn" onClick={onDesdeReal}>Empezar desde lo real</button>
+      </div>
+      <div className="sv-filter-group sv-to-wrap">
+        {PRESETS.map(([id, label]) => (
+          <button key={id} className={`sv-filter-btn${state.preset?.id === id ? ' sv-filter-btn--active' : ''}`} onClick={() => aplicarPreset(id)}>
+            {label}{state.preset?.id === id && modificado ? ' · modificado' : ''}
+          </button>
+        ))}
+      </div>
 
-      <Paso n="2" titulo="Verano: sala y paro"
-        nota="Si cierras, las ventas que se pierden y los gastos que se ahorran se rellenan con la media del histórico.">
-        <ConfigVerano state={state} update={update} ev={ev} conDinero sugerido={sugerido} />
-        <PersonasTabla ev={ev} state={state} update={update} costes={costes} conDinero etiquetaVacaciones="Vacaciones" />
-        <ExploradorParo paro={paro} cierre={cierre} keys={keys} coste={costes.mes} onApply={aplicarParo} />
-      </Paso>
+      <div className="sv-controls-left sv-to-tabs">
+        {TABS.map(([id, label]) => (
+          <button key={id} className={`sv-tab-mini ${tab === id ? 'is-active' : ''}`} onClick={() => setTab(id)}>{label}</button>
+        ))}
+      </div>
 
-      <Paso n="3" titulo="Mañanas"
-        nota="Cerrar antes de la hora de corte en los meses elegidos. Los ingresos de mañana son los reales de las clases con suscripción (de la tienda), no una cifra fija.">
-        <ConfigMananas state={state} update={update} costes={costes} clases={clases} />
-      </Paso>
+      {tab === 'salaManana' && (
+        <Paso n="1" titulo="Sala y mañanas"
+          nota="Qué abre cada mes de verano. Si cierras, las ventas que se pierden y los gastos que se ahorran se rellenan con la media del histórico.">
+          <ConfigSalaVerano state={state} update={update} ev={ev} conDinero sugerido={sugerido} />
+          <ConfigMananas state={state} update={update} clases={clases} />
+        </Paso>
+      )}
 
-      <Paso n="4" titulo="Vacaciones"
-        nota="«Repartir vacaciones» coloca a cada uno su bloque de 15 en verano (si el cierre no se lo da) y el resto en Navidad y primavera, buscando las fechas con menos choques y con los menos días sin quien abra posibles (si está fuera quien abre ese día, hay que decidir quién abre).">
-        <div className="sv-to-form">
-          <button className="sv-tests-add" onClick={() => setState(s => conReparto(s))}>Repartir vacaciones automáticamente</button>
-          <button className="sv-filter-btn" onClick={() => update({ periods: [...periods, period(PROF_ORDER[0], `${y}-06-01`, 5)] })}>+ Añadir periodo a mano</button>
-        </div>
-        <details className="sv-to-fold">
-          <summary>Periodos simulados ({periods.filter(p => p.start?.startsWith(`${y}-`)).length} en {y})</summary>
-          <div className="sv-tests-scroll">
-            <table className="sv-tests-table">
-              <thead><tr><th>Persona</th><th>Desde</th><th>Días laborables</th><th>Hasta</th><th title="Cuándo se le diría a la persona (2 meses de antelación)">Comunicado ⓘ</th><th title="Pactado con la persona: vale aunque no cumpla la antelación, los bloques o el día de inicio">Acuerdo expreso ⓘ</th><th>Nota</th><th></th></tr></thead>
-              <tbody>
-                {[...periods].sort((a, b) => a.start.localeCompare(b.start)).map(x => {
-                  const ds = x.start && x.n > 0 ? laborablesFrom(x.start, x.n) : []
-                  return (
-                    <tr key={x.id}>
-                      <td>
-                        <select className="sv-tests-select" value={x.prof} onChange={e => setPeriod(x.id, { prof: e.target.value })}
-                          style={{ color: PROF_META[x.prof]?.color }}>
-                          {PROF_ORDER.map(p => <option key={p} value={p}>{p}</option>)}
-                        </select>
-                      </td>
-                      <td><input className="sv-tests-input" type="date" lang="es" value={x.start} onChange={e => setPeriod(x.id, { start: e.target.value })} /></td>
-                      <td>
-                        <input className="sv-tests-input sv-tests-input--unit" type="number" min="1" max="40" value={x.n}
-                          onChange={e => setPeriod(x.id, { n: num(e.target.value, 1) })} />
-                      </td>
-                      <td className="sv-ot-muted">{ds.length ? fmtShort(ds[ds.length - 1]) : ''}</td>
-                      <td>
-                        <input className={`sv-tests-input${ev.antelacion.some(a => a.p === x.prof && a.start === x.start) ? ' sv-to-input--bad' : ''}`}
-                          type="date" lang="es" value={x.comunicado || ''}
-                          onChange={e => setPeriod(x.id, { comunicado: e.target.value })} />
-                      </td>
-                      <td><input type="checkbox" checked={!!x.acuerdo} onChange={() => setPeriod(x.id, { acuerdo: !x.acuerdo })} /></td>
-                      <td>
-                        <input className="sv-tests-input sv-tests-input--desc" value={x.nota || ''} maxLength={120} placeholder="—"
-                          onChange={e => setPeriod(x.id, { nota: e.target.value })} />
-                      </td>
-                      <td><button className="sv-tests-remove" onClick={() => update({ periods: periods.filter(p => p.id !== x.id) })}>✕</button></td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+      {tab === 'personas' && (
+        <Paso n="2" titulo="Personas"
+          nota="Qué hace cada persona cada mes: única fuente de quién está en paro, pasa a la tarde o de vacaciones (ver también sus días de convenio y bloques abajo).">
+          <PersonasMesTabla state={state} update={update} costes={costes} />
+          <PersonasTabla ev={ev} state={state} update={update} costes={costes} conDinero etiquetaVacaciones="Vacaciones" ocultarParo />
+          <ExploradorParo paro={paro} cierre={cierre} keys={keys} coste={costes.mes} onApply={aplicarParo} />
+        </Paso>
+      )}
+
+      {tab === 'campamento' && (
+        <Paso n="3" titulo="Campamento">
+          <ConfigCampamento state={state} update={update} ev={ev} conDinero />
+        </Paso>
+      )}
+
+      {tab === 'vacaciones' && (
+        <Paso n="4" titulo="Vacaciones"
+          nota="«Repartir vacaciones» coloca a cada uno su bloque de 15 en verano (si el cierre no se lo da) y el resto en Navidad y primavera, buscando las fechas con menos choques y con los menos días sin quien abra posibles (si está fuera quien abre ese día, hay que decidir quién abre). No cambia el dinero: eso sale de Personas y Resultados.">
+          <div className="sv-to-form">
+            <button className="sv-tests-add" onClick={() => setState(s => conReparto(s))}>Repartir vacaciones automáticamente</button>
+            <button className="sv-filter-btn" onClick={() => update({ periods: [...periods, period(PROF_ORDER[0], `${y}-06-01`, 5)] })}>+ Añadir periodo a mano</button>
           </div>
-        </details>
-        <Calendario ev={ev} titulo="Calendario del supuesto" />
-      </Paso>
+          <details className="sv-to-fold">
+            <summary>Periodos simulados ({periods.filter(p => p.start?.startsWith(`${y}-`)).length} en {y})</summary>
+            <div className="sv-tests-scroll">
+              <table className="sv-tests-table">
+                <thead><tr><th>Persona</th><th>Desde</th><th>Días laborables</th><th>Hasta</th><th title="Cuándo se le diría a la persona (2 meses de antelación)">Comunicado ⓘ</th><th title="Pactado con la persona: vale aunque no cumpla la antelación, los bloques o el día de inicio">Acuerdo expreso ⓘ</th><th>Nota</th><th></th></tr></thead>
+                <tbody>
+                  {[...periods].sort((a, b) => a.start.localeCompare(b.start)).map(x => {
+                    const ds = x.start && x.n > 0 ? laborablesFrom(x.start, x.n) : []
+                    return (
+                      <tr key={x.id}>
+                        <td>
+                          <select className="sv-tests-select" value={x.prof} onChange={e => setPeriod(x.id, { prof: e.target.value })}
+                            style={{ color: PROF_META[x.prof]?.color }}>
+                            {PROF_ORDER.map(p => <option key={p} value={p}>{p}</option>)}
+                          </select>
+                        </td>
+                        <td><input className="sv-tests-input" type="date" lang="es" value={x.start} onChange={e => setPeriod(x.id, { start: e.target.value })} /></td>
+                        <td>
+                          <input className="sv-tests-input sv-tests-input--unit" type="number" min="1" max="40" value={x.n}
+                            onChange={e => setPeriod(x.id, { n: num(e.target.value, 1) })} />
+                        </td>
+                        <td className="sv-ot-muted">{ds.length ? fmtShort(ds[ds.length - 1]) : ''}</td>
+                        <td>
+                          <input className={`sv-tests-input${ev.antelacion.some(a => a.p === x.prof && a.start === x.start) ? ' sv-to-input--bad' : ''}`}
+                            type="date" lang="es" value={x.comunicado || ''}
+                            onChange={e => setPeriod(x.id, { comunicado: e.target.value })} />
+                        </td>
+                        <td><input type="checkbox" checked={!!x.acuerdo} onChange={() => setPeriod(x.id, { acuerdo: !x.acuerdo })} /></td>
+                        <td>
+                          <input className="sv-tests-input sv-tests-input--desc" value={x.nota || ''} maxLength={120} placeholder="—"
+                            onChange={e => setPeriod(x.id, { nota: e.target.value })} />
+                        </td>
+                        <td><button className="sv-tests-remove" onClick={() => update({ periods: periods.filter(p => p.id !== x.id) })}>✕</button></td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </details>
+          <Calendario ev={ev} titulo="Calendario del supuesto" />
+        </Paso>
+      )}
 
-      <Paso n="5" titulo="Resultado">
-        <Dinero ev={ev} state={state} />
-        <Indicadores ev={ev} />
-        <AvisosAgrupados ev={ev} />
-        <p className="sv-note sv-to-small">
-          Pasar a fijo discontinuo requiere que la persona firme el cambio de contrato y el paro depende de lo que haya
-          cotizado: confirmarlo con la gestoría antes de proponerlo.
-        </p>
-      </Paso>
+      {tab === 'resultados' && (
+        <Paso n="5" titulo="Resultados">
+          <Dinero ev={ev} resultadosPorMes={resultadosPorMes} resultadoTotal={resultadoTotal} />
+          <Indicadores ev={ev} />
+          <AvisosAgrupados ev={ev} />
+          <p className="sv-note sv-to-small">
+            Pasar a fijo discontinuo requiere que la persona firme el cambio de contrato y el paro depende de lo que haya
+            cotizado: confirmarlo con la gestoría antes de proponerlo.
+          </p>
+        </Paso>
+      )}
     </div>
   )
 }

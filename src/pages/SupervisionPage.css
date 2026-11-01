@@ -1217,6 +1217,8 @@
 .sv-to-verdict__months { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px; font-size: 0.85rem; color: #f0ece0; }
 .sv-to-camp { border-left: 3px solid #f0ece0; padding: 4px 0 4px 12px; margin: 8px 0 12px; }
 
+.sv-to-tabs { margin: 12px 0 4px; }
+
 /* Pasos */
 .sv-to-step { border-top: 1px solid #2a2015; padding-top: 14px; margin-top: 16px; }
 .sv-to-step__title { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; font-weight: 800; color: #f0ece0; margin: 0 0 8px; }

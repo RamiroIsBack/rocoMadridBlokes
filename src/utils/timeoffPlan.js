@@ -46,6 +46,48 @@ export const CIERRE_EXTRA = {
   pagados:   'Se pagan sin trabajar (no hace falta acuerdo)',
   descontar: 'Se descuentan de sus vacaciones (hace falta acuerdo)',
 }
+
+// ─── Personas × mes: única fuente de qué hace cada persona cada mes ─────────────────────
+// Antes "paro en verano" (sección de vacaciones) y "disposición" (solo Mañanas) eran dos
+// controles separados y el mismo ahorro se podía contar dos veces (cowork, 1/11 07:50 —
+// NOTAS_PARA_CODE_calculadora_simple.md). Ahora hay un solo sitio donde se dice qué hace cada
+// persona cada mes de verano: `state.personasMes[persona][mes] = estado`. El único estado que
+// cambia el dinero es 'paro' (ahorra su coste ese mes); 'tarde'/'normal' no ahorran nada
+// (siguen cobrando igual, solo cambia dónde trabajan); 'vacaciones' es solo informativo (las
+// fechas de verdad siguen en la pestaña Vacaciones, con sus propios periodos).
+export const PERSONA_MES_ESTADOS = {
+  normal:     'Trabaja normal',
+  tarde:      'Pasa sus horas a la tarde',
+  paro:       'Paro (fijo discontinuo)',
+  vacaciones: 'Vacaciones (ver pestaña Vacaciones)',
+}
+
+export function estadoPersonaMes(personasMes, persona, mes) {
+  return personasMes?.[persona]?.[mes] || 'normal'
+}
+
+// state.paro (el que ya usa todo el motor de convenio/cobertura en coverage.js) derivado de
+// personasMes, para no tocar ese motor: julio y agosto en paro → 'verano', solo uno → su
+// nombre, ninguno → 'no'.
+export function paroDesdePersonasMes(personasMes) {
+  const out = {}
+  PROF_ORDER.forEach(p => {
+    const j = estadoPersonaMes(personasMes, p, 7) === 'paro'
+    const a = estadoPersonaMes(personasMes, p, 8) === 'paro'
+    out[p] = j && a ? 'verano' : j ? 'julio' : a ? 'agosto' : 'no'
+  })
+  return out
+}
+
+// Al revés: cargar un preset o un plan antiguo (que solo trae `paro`) en la tabla por mes.
+export function personasMesDesdeParo(paro) {
+  const out = {}
+  PROF_ORDER.forEach(p => {
+    const meses = PARO_MESES[paro?.[p] || 'no'] || []
+    out[p] = { 7: meses.includes(7) ? 'paro' : 'normal', 8: meses.includes(8) ? 'paro' : 'normal' }
+  })
+  return out
+}
 const DAY_SHORT = { Lunes: 'L', Martes: 'M', Miercoles: 'X', Jueves: 'J', Viernes: 'V' }
 
 export const eur = n => `${Math.round(n).toLocaleString('es-ES')} €`
@@ -257,39 +299,32 @@ function ingresosDelMesManana(mananas, mes, ingresosManana) {
   return { alumnos: ingresosManana?.alumnos || 0, ingresos: ingresosManana?.ingresos || 0, fuente: '' }
 }
 
-// Cuentas de cerrar por la mañana: ingreso que se pierde (neto del % que pasa a la tarde),
-// ahorro de personal (de quien se pone en paro/baja; quien pasa sus horas a la tarde no
-// ahorra nada) y de sala — por cada mes cerrado (cada uno con su propio histórico de
-// alumnos/ingresos y su propia disposición por persona) y resumido en el año.
-export function cuentasMananas(mananas, { ingresosManana, coste = {}, horasManana, paro = {} }) {
+// Cuentas de cerrar por la mañana: ingreso que se pierde (neto del % que pasa a la tarde) y
+// gasto de sala que se ahorra — por cada mes cerrado (cada uno con su propio histórico de
+// alumnos/ingresos) y resumido en el año. El ahorro de PERSONAL ya no sale de aquí: desde la
+// unificación en la pestaña "Personas" (quién está en paro cada mes es una sola tabla, no dos),
+// ese ahorro sale entero de `ev.eco.personalMes` — contarlo también aquí lo duplicaría
+// (cowork, 1/11 07:50).
+export function cuentasMananas(mananas, { ingresosManana }) {
   const m = normalizeMananas(mananas)
   const cerrados = mesesCerradosManana(m)
-  const horas = horasManana || horasMananaPorPersona(m.corteHora)
-  const personas = Object.keys(horas)
 
   const porMes = cerrados.map(mes => {
     const ing = ingresosDelMesManana(m, mes, ingresosManana)
     const perdidaBruta = ing.ingresos
     const perdidaNeta = perdidaBruta * (1 - (m.pctTarde || 0) / 100)
-    const ahorroPersonal = personas.reduce((s, p) => {
-      if (yaEnParoEsteMes(paro, p, mes)) return s // ya contado en el "Ahorro/año" general del plan
-      const disp = disposicionDe(m, p, mes)
-      if (disp === 'tarde') return s
-      const frac = Math.min(1, horas[p] / (PROF_META[p]?.horasSem || horas[p] || 1))
-      return s + frac * (coste[p] || 0)
-    }, 0)
     const ahorroSala = m.gastoSala || 0
-    const resultadoMes = -perdidaNeta + ahorroPersonal + ahorroSala
-    return { mes, alumnos: ing.alumnos, fuente: ing.fuente, perdidaBruta, perdidaNeta, ahorroPersonal, ahorroSala, resultadoMes }
+    const resultadoMes = -perdidaNeta + ahorroSala
+    return { mes, alumnos: ing.alumnos, fuente: ing.fuente, perdidaBruta, perdidaNeta, ahorroSala, resultadoMes }
   })
 
   const n = porMes.length || 1
   const suma = k => porMes.reduce((s, x) => s + x[k], 0)
   const resultadoAnio = suma('resultadoMes')
   return {
-    cerrados, personas, horas, porMes,
+    cerrados, porMes,
     perdidaBruta: suma('perdidaBruta') / n, perdidaNeta: suma('perdidaNeta') / n,
-    ahorroPersonal: suma('ahorroPersonal') / n, ahorroSala: suma('ahorroSala') / n,
+    ahorroSala: suma('ahorroSala') / n,
     resultadoMes: resultadoAnio / n, resultadoAnio,
     alumnosManana: porMes.length ? suma('alumnos') / n : (ingresosManana?.alumnos || 0),
   }
