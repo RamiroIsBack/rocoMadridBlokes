@@ -9899,11 +9899,11 @@ function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warning
     return array(intval($week_id), intval($assignment_id));
 }
 
-function progreso_equip_insert_comp_task($assignment_id, $task_type_id, $date, $competition_id) {
+function progreso_equip_insert_comp_task($assignment_id, $task_type_id, $date, $competition_id, $params = array()) {
     global $wpdb;
     $wpdb->insert(progreso_equip_table('tasks'), array(
         'assignment_id' => $assignment_id, 'task_type_id' => $task_type_id, 'task_date' => $date,
-        'params' => wp_json_encode(array()), 'done' => 0, 'status' => 'pendiente',
+        'params' => wp_json_encode($params), 'done' => 0, 'status' => 'pendiente',
         'original_date' => $date, 'competition_id' => $competition_id,
     ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d'));
 }
@@ -9952,20 +9952,28 @@ function progreso_equip_competition_generate_plan($request) {
     // S-1: preparar el montaje de la zona de público/premios y decidir quién prueba los
     // bloques (forerunners), confirmado con cowork — antes no estaba.
     $fases[] = array('monday' => $s1_monday, 'tipos' => array('comp_prep_montaje', 'comp_decidir_forerunners'));
-    // Semana antes de la compe: desequipar primero, luego equipar. El corte de qué días son
-    // "primero" ya no es un día fijo (miércoles): se lee de `club_days` — si hay un `evento`
-    // dentro de esta semana (p. ej. la visita del ACE), ese es el corte real; sin evento, se
-    // mantiene el reparto por defecto lunes-martes / miércoles-viernes (Ramiro, 1/11 17:20:
-    // "que el plan lo lea de ahí, no como texto").
-    $s0_friday = date('Y-m-d', strtotime($s0_monday) + 4 * 86400);
-    $evento_s0 = $wpdb->get_var($wpdb->prepare(
-        "SELECT MIN(fecha) FROM " . blokes_club_days_table() . " WHERE tipo = 'evento' AND fecha BETWEEN %s AND %s",
-        $s0_monday, $s0_friday
+    // Semana antes de la compe: orden fijo confirmado por cowork tras probar el primer reparto
+    // (1/11 18:00) — zona por zona (desequipar y volver a equipar esa misma zona antes de pasar
+    // a la siguiente), no "desequipar todo y luego equipar todo": eso dejaba la foto de un
+    // bloque antes de que estuviera equipado. Si el miércoles de esa semana hay un `evento` que
+    // ocupa la sala por la mañana (p. ej. la visita del ACE), se avisa en la propia tarea para
+    // que el desequipado del resto de zonas se haga por la tarde (Ramiro, 1/11 17:20: que lo lea
+    // del calendario, no un día fijo en texto).
+    $dias_s0 = array();
+    for ($i = 0; $i < 5; $i++) $dias_s0[] = date('Y-m-d', strtotime($s0_monday) + $i * 86400);
+    $evento_miercoles = $wpdb->get_row($wpdb->prepare(
+        "SELECT nombre, horario FROM " . blokes_club_days_table() . " WHERE tipo = 'evento' AND fecha = %s", $dias_s0[2]
+    ), ARRAY_A);
+    $nota_resto = $evento_miercoles ? trim("Por la tarde: {$evento_miercoles['nombre']} ({$evento_miercoles['horario']})") : '';
+    $fases[] = array('monday' => $s0_monday, 'items' => array(
+        array('date' => $dias_s0[0], 'tipo' => 'comp_desequipar_cueva'),
+        array('date' => $dias_s0[1], 'tipo' => 'comp_equipar_bloques', 'params' => array('notas' => 'Cueva')),
+        array('date' => $dias_s0[2], 'tipo' => 'comp_desequipar_resto', 'params' => $nota_resto ? array('notas' => $nota_resto) : array()),
+        array('date' => $dias_s0[3], 'tipo' => 'comp_equipar_bloques', 'params' => array('notas' => 'resto de zonas')),
+        array('date' => $dias_s0[4], 'tipo' => 'comp_numeracion'),
+        array('date' => $dias_s0[4], 'tipo' => 'comp_forerunning'),
+        array('date' => $dias_s0[4], 'tipo' => 'comp_foto_bloque'),
     ));
-    $corte_offset = $evento_s0 ? (int) round((strtotime($evento_s0) - strtotime($s0_monday)) / 86400) : 2;
-    $corte_offset = max(1, min(4, $corte_offset)); // siempre deja al menos un día antes y uno después
-    $fases[] = array('monday' => $s0_monday, 'dias' => range(0, $corte_offset - 1), 'tipos' => array('comp_desequipar_cueva'));
-    $fases[] = array('monday' => $s0_monday, 'dias' => range($corte_offset, 4), 'tipos' => array('comp_desequipar_resto', 'comp_equipar_bloques', 'comp_numeracion', 'comp_foto_bloque', 'comp_forerunning', 'comp_montaje_zona'));
     $fases[] = array('monday' => $comp_monday, 'rango' => array($comp_date, $comp_end), 'tipos' => array('comp_dia_abrir', 'comp_dia_juzgar', 'comp_dia_cerrar'));
     $fases[] = array('monday' => $after_monday, 'tipos' => array('comp_desmontar', 'comp_fotos_redes', 'comp_resultados_web'));
 
@@ -9985,6 +9993,20 @@ function progreso_equip_competition_generate_plan($request) {
                     $warnings[] = "{$d} está marcado como cierre en el calendario del club: sin tareas de compe ese día.";
                 }
                 $d = date('Y-m-d', strtotime($d) + 86400);
+            }
+            continue;
+        }
+
+        // Orden explícito (día + tipo fijados uno a uno), para fases donde importa la secuencia
+        // — de momento solo la semana de desequipar/equipar.
+        if (isset($fase['items'])) {
+            foreach ($fase['items'] as $item) {
+                if (progreso_equip_dia_cerrado($item['date'])) {
+                    $warnings[] = "{$item['date']} está marcado como cierre en el calendario del club: sin tareas de compe ese día.";
+                    continue;
+                }
+                progreso_equip_insert_comp_task($assignment_id, $item['tipo'], $item['date'], $id, $item['params'] ?? array());
+                $creadas++;
             }
             continue;
         }
