@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
-  useEventsAccess, useBookings, createBooking, importBookings, updateBooking, deleteBooking, saveEventSettings, getSsaInspect,
+  useEventsAccess, useBookings, createBooking, importBookings, updateBooking, deleteBooking, saveEventSettings,
+  getSsaBlock, setSsaBlock, createSsaTest, deleteSsaTest,
   TYPES, STATUSES, ORIGINS, typeOf, statusOf, originOf, money, counts, depositDue, emptyBooking,
 } from '../hooks/useEvents'
 import { fmtEur } from '../utils/monthFormat'
@@ -347,28 +348,75 @@ function Money({ bookings, settings, onSettings }) {
         <p className="sa-pay-note">Ganancia = total − pago a monitores − materiales. No cuentan las reservas canceladas.</p>
       </div>
       <SettingsPanel settings={settings} onSaved={onSettings} />
-      {window.blokesSiteData?.userRole === 'socio' && <SsaInspect />}
+      {window.blokesSiteData?.userRole === 'socio' && <SsaBlockPanel slots={settings.slots ?? []} />}
     </>
   )
 }
 
-// Diagnóstico temporal (fase B): cómo guarda SSA los huecos libres. Sin datos de clientes.
-function SsaInspect() {
-  const [out, setOut]   = useState('')
-  const [busy, setBusy] = useState(false)
-  async function run() {
-    setBusy(true)
-    try { setOut(JSON.stringify(await getSsaInspect(), null, 2)) } catch (e) { setOut(`✗ ${e.message}`) }
+// Bloquear en la web (SSA) los huecos de las reservas de Eventos. Con una prueba antes de activarlo.
+const WEB_BOOKING_URL = 'https://rocomadrid.com/otras-actividades/'
+
+function SsaBlockPanel({ slots }) {
+  const [state, setState] = useState(null)
+  const [date, setDate]   = useState('')
+  const [time, setTime]   = useState(slots[0] || '11:00')
+  const [busy, setBusy]   = useState(false)
+  const [msg, setMsg]     = useState('')
+
+  useEffect(() => { getSsaBlock().then(setState).catch(e => setMsg(`✗ ${e.message}`)) }, [])
+
+  async function run(fn, ok) {
+    setBusy(true); setMsg('')
+    try { setState(await fn()); if (ok) setMsg(ok) } catch (e) { setMsg(`✗ ${e.message}`) }
     setBusy(false)
   }
+  const toggle = () => {
+    const on = !state.enabled
+    if (on && !window.confirm('Se ocuparán en la web los huecos de todas las reservas de Eventos de hoy en adelante. ¿Activar?')) return
+    run(() => setSsaBlock(on), on ? '✓ Activado: los huecos de Eventos ya están ocupados en la web' : '✓ Desactivado')
+  }
+
+  if (!state) return msg ? <div className="sa-section"><p className="sa-error">{msg}</p></div> : null
   return (
     <div className="sa-section">
-      <div className="sa-section__header"><h2 className="sa-section-title">Reservas de la web · diagnóstico 2</h2></div>
-      <div className="sa-pay-actions">
-        <button className="sa-list-save__btn" onClick={run} disabled={busy}>{busy ? 'Leyendo…' : 'Leer configuración de SSA'}</button>
-        {out && <button className="sa-pay-action" onClick={() => navigator.clipboard?.writeText(out)}>Copiar</button>}
-      </div>
-      {out && <pre className="ev-debug">{out}</pre>}
+      <div className="sa-section__header"><h2 className="sa-section-title">Bloquear huecos en la web</h2></div>
+      <p className="sa-pay-note">
+        Cada reserva de Eventos con hora ocupa su hueco en el formulario de reservas de la web, sin mandar emails.
+        Si se cambia de día u hora, el hueco se mueve; si se cancela o se borra, se libera.
+      </p>
+      <label className="ev-ssa-switch">
+        <input type="checkbox" checked={state.enabled} onChange={toggle} disabled={busy || !state.ready} />
+        {state.enabled ? 'Activado' : 'Desactivado'}
+      </label>
+
+      <h3 className="ev-ssa-sub">Prueba</h3>
+      {state.test ? (
+        <>
+          <p className="sa-pay-note">
+            Hay un bloqueo de prueba el <strong>{fmtDay(state.test.date)} a las {state.test.time}</strong>.
+            Mira en <a href={WEB_BOOKING_URL} target="_blank" rel="noreferrer">la web de reservas ↗</a> que ese hueco ya no sale
+            (recarga la página). Después quítalo y comprueba que vuelve.
+          </p>
+          <div className="sa-pay-actions">
+            <button className="sa-list-save__btn" onClick={() => run(deleteSsaTest, '✓ Bloqueo de prueba quitado')} disabled={busy}>Quitar bloqueo de prueba</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="sa-pay-note">
+            Elige un sábado o domingo libre, con más de 2 días de margen (la web no deja reservar antes), y comprueba
+            en <a href={WEB_BOOKING_URL} target="_blank" rel="noreferrer">la web de reservas ↗</a> que ese hueco sale libre.
+          </p>
+          <div className="sa-pay-actions">
+            <input type="date" className="pr-input ev-input" value={date} min={today()} onChange={e => setDate(e.target.value)} />
+            <select className="pr-select ev-input" value={time} onChange={e => setTime(e.target.value)}>
+              {(slots.length ? slots : ['11:00', '17:00']).map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <button className="sa-list-save__btn" onClick={() => run(() => createSsaTest(date, time), '✓ Bloqueo de prueba creado')} disabled={busy || !date}>Crear bloqueo de prueba</button>
+          </div>
+        </>
+      )}
+      {msg && <p className="sa-pay-feedback">{msg}</p>}
     </div>
   )
 }

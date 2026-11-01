@@ -10554,48 +10554,31 @@ add_action('rest_api_init', function() {
         'callback'            => 'events_save_settings',
         'permission_callback' => $socio_perm,
     ));
-    register_rest_route('superadmin/v1', '/events/ssa-inspect', array(
-        'methods'             => 'GET',
-        'callback'            => 'events_ssa_inspect',
-        'permission_callback' => $socio_perm,
+    register_rest_route('superadmin/v1', '/events/ssa-block', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'events_ssa_block_status',
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'events_ssa_block_toggle',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+    register_rest_route('superadmin/v1', '/events/ssa-block/test', array(
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'events_ssa_test_create',
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'DELETE',
+            'callback'            => 'events_ssa_test_delete',
+            'permission_callback' => $socio_perm,
+        ),
     ));
 });
-
-// Diagnóstico temporal (solo lectura, sin datos de clientes) para la fase B: cómo calcula y
-// guarda SSA los huecos libres, para poder bloquearlos desde Eventos sin romper nada.
-function events_ssa_inspect() {
-    global $wpdb;
-    $p   = $wpdb->get_blog_prefix(1);
-    $out = array(
-        'blog_id'        => get_current_blog_id(),
-        'ssa_loaded'     => function_exists('ssa'),
-        'network_plugin' => is_multisite() ? array_keys((array) get_site_option('active_sitewide_plugins', array())) : array(),
-    );
-    $av = $p . 'ssa_availability';
-    $out['availability_groups'] = $wpdb->get_results("SELECT type, subtype, status, availability_type, appointment_type_id, is_available, COUNT(*) AS n, MIN(start_date) AS first, MAX(end_date) AS last, MAX(date_modified) AS modified FROM `$av` GROUP BY type, subtype, status, availability_type, appointment_type_id, is_available", ARRAY_A);
-    $out['availability_sample'] = $wpdb->get_results("SELECT id, start_date, end_date, capacity_available, capacity_reserved, buffer_available, buffer_reserved, LEFT(capacity_meta, 200) AS capacity_meta, appointment_type_id, staff_id, resource_group_id, type, subtype, status, is_all_day, cache_key, cache_args_hash, date_created, date_modified, availability_type, is_available, availability_score FROM `$av` ORDER BY date_modified DESC LIMIT 6", ARRAY_A);
-    $out['async_groups']    = $wpdb->get_results("SELECT hook, action, object_type, COUNT(*) AS n, MAX(date_created) AS last FROM `{$p}ssa_async_actions` GROUP BY hook, action, object_type", ARRAY_A);
-    $out['revision_groups'] = $wpdb->get_results("SELECT action, context, COUNT(*) AS n FROM `{$p}ssa_revisions` GROUP BY action, context", ARRAY_A);
-    $out['meta_keys']       = $wpdb->get_results("SELECT meta_key, COUNT(*) AS n FROM `{$p}ssa_appointment_meta` GROUP BY meta_key", ARRAY_A);
-
-    $keep = array('id', 'capacity', 'capacity_type', 'staff_capacity', 'buffer_before', 'duration', 'buffer_after', 'min_booking_notice',
-        'max_booking_notice', 'max_event_count', 'availability_type', 'availability', 'availability_increment', 'timezone_style', 'status');
-    $out['type'] = $wpdb->get_row("SELECT `" . implode('`, `', $keep) . "` FROM `{$p}ssa_appointment_types` WHERE id = 1", ARRAY_A);
-    $out['appointment_columns_sample'] = $wpdb->get_row("SELECT id, appointment_type_id, group_id, author_id, customer_id, customer_timezone, customer_locale, start_date, end_date, status, date_created, date_modified, expiration_date FROM `{$p}ssa_appointments` ORDER BY id DESC LIMIT 1", ARRAY_A);
-
-    // Nombres de las opciones y transitorios de SSA en el sitio principal (sin valores)
-    $out['options'] = $wpdb->get_results("SELECT option_name, LENGTH(option_value) AS size, autoload FROM `{$p}options` WHERE option_name LIKE '%ssa%' ORDER BY option_name LIMIT 80", ARRAY_A);
-    $settings = maybe_unserialize($wpdb->get_var("SELECT option_value FROM `{$p}options` WHERE option_name = 'ssa_settings_json'"));
-    $settings = is_string($settings) ? json_decode($settings, true) : $settings;
-    if (is_array($settings)) {
-        $out['settings_sections'] = array_keys($settings);
-        foreach (array('blackout_dates', 'advanced_scheduling', 'global') as $k) {
-            if (isset($settings[$k])) $out['settings'][$k] = $settings[$k];
-        }
-        unset($out['settings']['global']['admin_email'], $out['settings']['global']['admin_phone']);
-    }
-    return rest_ensure_response($out);
-}
 
 // Cualquiera puede preguntar si tiene acceso (para enseñar o no el menú); la lista solo la ve un socio.
 function events_get_access() {
@@ -10693,55 +10676,188 @@ function events_clean_booking($b) {
     );
 }
 
-// Reservas de la web: Simply Schedule Appointments vive en el sitio principal (blog 1) y guarda
-// las horas en UTC. Cada vez que se abren Eventos o el Calendario:
+// Reservas de la web: Simply Schedule Appointments (SSA) vive en el sitio principal (blog 1), no se
+// carga en el del club y guarda las horas en UTC. Se lee y se escribe directamente en sus tablas;
+// así no se dispara ningún email de SSA.
+//
+// Fase A (siempre). Cada vez que se abren Eventos o el Calendario:
 //  - una cita nueva con fecha de hoy en adelante entra como Solicitud · Web (con ssa_id). Si ya
 //    había una reserva sin ssa_id ese día a esa hora (apuntada a mano), solo se enlaza;
-//  - si una cita enlazada se cancela en la web, la reserva pasa a Cancelada.
-// No se toca nada más, para no pisar lo que edite Juan. Las citas ya vistas se recuerdan
-// (blokes_events_ssa_seen): si Juan borra una reserva importada, no vuelve a entrar.
+//  - si el cliente cancela o cambia de día una cita enlazada, la reserva se cancela o se mueve.
+// Las citas ya vistas se recuerdan (blokes_events_ssa_seen): si Juan borra una reserva importada,
+// no vuelve a entrar.
+//
+// Fase B (con el interruptor blokes_events_ssa_block). Cada reserva de Eventos con hora, de hoy en
+// adelante y sin cancelar, ocupa su hueco en SSA: las apuntadas a mano con una cita «Ocupado
+// (Eventos)» (ssa_block); si se cambia de día u hora en Eventos, su cita se mueve; si se cancela o
+// se borra, el hueco se libera. Cada reserva enlazada recuerda lo último sincronizado (ssa_status,
+// ssa_start) para saber si un cambio vino de la web o de Eventos.
+function events_ssa_table($name = 'appointments') {
+    global $wpdb;
+    return $wpdb->get_blog_prefix(1) . 'ssa_' . $name;
+}
+
+function events_ssa_ready() {
+    global $wpdb;
+    $t = events_ssa_table();
+    return $wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($t))) === $t;
+}
+
+function events_ssa_block_on() {
+    return (bool) get_option('blokes_events_ssa_block', false);
+}
+
+function events_ssa_is_booked($status) {
+    return in_array($status, array('booked', 'pending_form', 'pending_payment'), true);
+}
+
+// Fecha y hora locales de una reserva → inicio y fin en UTC ('Y-m-d H:i:s'). Sin hora fija no hay hueco.
+function events_ssa_range($date, $time, $end_time = '') {
+    if (!preg_match('/^\d{2}:\d{2}$/', (string) $time)) return null;
+    try { $s = new DateTime("$date $time", wp_timezone()); } catch (Exception $e) { return null; }
+    $e = clone $s;
+    if (preg_match('/^\d{2}:\d{2}$/', (string) $end_time) && $end_time > $time) {
+        $e = new DateTime("$date $end_time", wp_timezone());
+    } else {
+        $e->modify('+180 minutes');
+    }
+    $utc = new DateTimeZone('UTC');
+    return array($s->setTimezone($utc)->format('Y-m-d H:i:s'), $e->setTimezone($utc)->format('Y-m-d H:i:s'));
+}
+
+// SSA guarda los huecos libres ya calculados (tabla de disponibilidad y transitorios del sitio
+// principal). Se borran para que los recalcule con las citas nuevas; no se pierde nada.
+function events_ssa_flush_cache() {
+    global $wpdb;
+    $wpdb->query('DELETE FROM `' . events_ssa_table('availability') . '` WHERE appointment_type_id = 1');
+    $wpdb->query("DELETE FROM `{$wpdb->get_blog_prefix(1)}options` WHERE option_name LIKE '\\_transient\\_ssa/%' OR option_name LIKE '\\_transient\\_timeout\\_ssa/%'");
+}
+
+function events_ssa_insert_block($start, $end, $note) {
+    global $wpdb;
+    $now = gmdate('Y-m-d H:i:s');
+    $ok  = $wpdb->insert(events_ssa_table(), array(
+        'appointment_type_id'             => 1,
+        'rescheduled_from_appointment_id' => 0,
+        'rescheduled_to_appointment_id'   => 0,
+        'group_id'                        => 0,
+        'author_id'                       => 0,
+        'customer_id'                     => 0,
+        'customer_information'            => wp_json_encode(array('Name' => 'Ocupado (Eventos)', 'Email' => '', 'Phone' => '', 'Notes' => $note)),
+        'customer_timezone'               => 'Europe/Madrid',
+        'customer_locale'                 => 'es_ES',
+        'start_date'                      => $start,
+        'end_date'                        => $end,
+        'title'                           => '',
+        'description'                     => $note,
+        'payment_method'                  => '',
+        'payment_received'                => 0,
+        'mailchimp_list_id'               => '',
+        'google_calendar_id'              => '',
+        'google_calendar_event_id'        => '',
+        'web_meeting_password'            => '',
+        'web_meeting_id'                  => '',
+        'web_meeting_url'                 => '',
+        'allow_sms'                       => '',
+        'status'                          => 'booked',
+        'date_created'                    => $now,
+        'date_modified'                   => $now,
+        'expiration_date'                 => '0000-00-00 00:00:00',
+    ));
+    return $ok ? intval($wpdb->insert_id) : 0;
+}
+
+function events_ssa_update($sid, $fields) {
+    global $wpdb;
+    $fields['date_modified'] = gmdate('Y-m-d H:i:s');
+    return $wpdb->update(events_ssa_table(), $fields, array('id' => intval($sid))) !== false;
+}
+
 function events_ssa_sync() {
     global $wpdb;
-    $table = $wpdb->get_blog_prefix(1) . 'ssa_appointments';
-    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $wpdb->esc_like($table))) !== $table) return;
+    if (!events_ssa_ready()) return;
     if (get_transient('blokes_ssa_sync_lock')) return;
     set_transient('blokes_ssa_sync_lock', 1, 30);
 
-    $rows = $wpdb->get_results("SELECT id, status, start_date, end_date, customer_information FROM `$table`", ARRAY_A) ?: array();
-    $list = events_get_bookings();
-    $seen = get_option('blokes_events_ssa_seen', array());
-    $seen = is_array($seen) ? $seen : array();
-    $tz   = wp_timezone();
-    $now  = wp_date('Y-m-d');
+    $table = events_ssa_table();
+    $rows  = array();
+    foreach ($wpdb->get_results("SELECT id, status, start_date, end_date, customer_information FROM `$table`", ARRAY_A) ?: array() as $r) {
+        $rows[intval($r['id'])] = $r;
+    }
+    $list  = events_get_bookings();
+    $seen  = get_option('blokes_events_ssa_seen', array());
+    $seen  = is_array($seen) ? $seen : array();
+    $tz    = wp_timezone();
+    $now   = wp_date('Y-m-d');
+    $block = events_ssa_block_on();
     $changed = false;
+    $flush   = false;
 
     $local = function($utc) use ($tz) {
         try { $d = new DateTime($utc, new DateTimeZone('UTC')); } catch (Exception $e) { return null; }
         $d->setTimezone($tz);
         return $d;
     };
+    $active = function($b) { return in_array($b['status'], array('solicitud', 'confirmada'), true); };
+    $stamp  = function(&$b, $note = '') {
+        if ($note) $b['notes'] = trim($b['notes'] . "\n" . $note . ' (' . wp_date('d/m/Y H:i') . ').');
+        $b['updated_at'] = current_time('mysql');
+        $b['updated_by'] = 'Web (SSA)';
+    };
 
-    $by_ssa = array();
-    foreach ($list as $i => $b) if (!empty($b['ssa_id'])) $by_ssa[intval($b['ssa_id'])] = $i;
+    // 1. Reservas ya enlazadas con una cita de SSA
+    $linked = array();
+    foreach ($list as $i => &$b) {
+        if (empty($b['ssa_id'])) continue;
+        $sid = intval($b['ssa_id']);
+        $linked[$sid] = true;
+        if (!isset($rows[$sid])) continue;
+        $r = $rows[$sid];
+        $booked = events_ssa_is_booked($r['status']);
+        $known  = isset($b['ssa_status']);
+        $from_web = !$known || $r['status'] !== $b['ssa_status'] || $r['start_date'] !== ($b['ssa_start'] ?? '');
 
-    foreach ($rows as $r) {
-        $sid    = intval($r['id']);
-        $booked = in_array($r['status'], array('booked', 'pending_form', 'pending_payment'), true);
-
-        // Cancelada (o cambiada de día) en la web
-        if (isset($by_ssa[$sid])) {
-            $i = $by_ssa[$sid];
-            if (!$booked && in_array($list[$i]['status'], array('solicitud', 'confirmada'), true)) {
-                $list[$i]['status']     = 'cancelada';
-                $list[$i]['notes']      = trim($list[$i]['notes'] . "\nCancelada en la web (" . wp_date('d/m/Y H:i') . ').');
-                $list[$i]['updated_at'] = current_time('mysql');
-                $list[$i]['updated_by'] = 'Web (SSA)';
-                $changed = true;
+        // Lo cambiaron en la web (el cliente). Los bloqueos «Ocupado» son de Eventos: no se hace caso.
+        if ($from_web && empty($b['ssa_block'])) {
+            if (!$booked && $active($b)) {
+                $b['status'] = 'cancelada';
+                $stamp($b, 'Cancelada en la web');
+            } elseif ($booked && $known && $r['start_date'] !== ($b['ssa_start'] ?? '')) {
+                $s = $local($r['start_date']);
+                $e = $local($r['end_date']);
+                if ($s) {
+                    $b['date']     = $s->format('Y-m-d');
+                    $b['time']     = $s->format('H:i');
+                    $b['end_time'] = $e ? $e->format('H:i') : $b['end_time'];
+                    $stamp($b, 'Cambiada de día u hora en la web');
+                }
             }
+            $b['ssa_status'] = $r['status'];
+            $b['ssa_start']  = $r['start_date'];
+            $changed = true;
             continue;
         }
-        if (in_array($sid, $seen, true) || !$booked) continue;
+        if (!$block) continue;
 
+        // Lo cambiaron en Eventos: la cita de SSA sigue a la reserva (solo de hoy en adelante)
+        if ($b['date'] < $now) continue;
+        $range = $active($b) ? events_ssa_range($b['date'], $b['time'], $b['end_time']) : null;
+        if ($range && (!$booked || $r['start_date'] !== $range[0] || $r['end_date'] !== $range[1])) {
+            events_ssa_update($sid, array('status' => 'booked', 'start_date' => $range[0], 'end_date' => $range[1]));
+            $b['ssa_status'] = 'booked';
+            $b['ssa_start']  = $range[0];
+            $changed = $flush = true;
+        } elseif (!$range && $booked) {
+            events_ssa_update($sid, array('status' => 'canceled'));
+            $b['ssa_status'] = 'canceled';
+            $changed = $flush = true;
+        }
+    }
+    unset($b);
+
+    // 2. Citas nuevas de la web
+    foreach ($rows as $sid => $r) {
+        if (isset($linked[$sid]) || in_array($sid, $seen, true) || !events_ssa_is_booked($r['status'])) continue;
         $start = $local($r['start_date']);
         $end   = $local($r['end_date']);
         if (!$start || $start->format('Y-m-d') < $now) continue;
@@ -10756,7 +10872,9 @@ function events_ssa_sync() {
             if (empty($b['ssa_id']) && $b['date'] === $date && $b['time'] === $time && $b['status'] !== 'cancelada') { $match = $i; break; }
         }
         if ($match !== null) {
-            $list[$match]['ssa_id'] = $sid;
+            $list[$match]['ssa_id']     = $sid;
+            $list[$match]['ssa_status'] = $r['status'];
+            $list[$match]['ssa_start']  = $r['start_date'];
             continue;
         }
 
@@ -10777,16 +10895,83 @@ function events_ssa_sync() {
         if (!$b) continue;
         $b['id']         = wp_generate_uuid4();
         $b['ssa_id']     = $sid;
+        $b['ssa_status'] = $r['status'];
+        $b['ssa_start']  = $r['start_date'];
         $b['created_at'] = current_time('mysql');
         $b['created_by'] = 'Web (SSA)';
         $list[] = $b;
+    }
+
+    // 3. Reservas apuntadas a mano sin cita en SSA: se ocupa su hueco
+    if ($block) {
+        foreach ($list as &$b) {
+            if (!empty($b['ssa_id']) || $b['date'] < $now || !$active($b)) continue;
+            $range = events_ssa_range($b['date'], $b['time'], $b['end_time']);
+            if (!$range) continue;
+            $sid = events_ssa_insert_block($range[0], $range[1], 'Reserva apuntada en Eventos (Blokes). No borrar desde aquí: se libera sola al cancelarla en Eventos.');
+            if (!$sid) continue;
+            $seen[]          = $sid;
+            $b['ssa_id']     = $sid;
+            $b['ssa_block']  = true;
+            $b['ssa_status'] = 'booked';
+            $b['ssa_start']  = $range[0];
+            $changed = $flush = true;
+        }
+        unset($b);
     }
 
     if ($changed) {
         events_save_bookings($list);
         update_option('blokes_events_ssa_seen', array_values(array_unique($seen)), false);
     }
+    if ($flush) events_ssa_flush_cache();
     delete_transient('blokes_ssa_sync_lock');
+}
+
+// Al borrar una reserva de Eventos con su hueco ocupado en la web, se libera (con el interruptor).
+function events_ssa_release($b) {
+    if (!events_ssa_block_on() || empty($b['ssa_id']) || !events_ssa_ready() || ($b['date'] ?? '') < wp_date('Y-m-d')) return;
+    if (events_ssa_update($b['ssa_id'], array('status' => 'canceled'))) events_ssa_flush_cache();
+}
+
+function events_ssa_block_status() {
+    $test = get_option('blokes_events_ssa_test', null);
+    return rest_ensure_response(array('enabled' => events_ssa_block_on(), 'ready' => events_ssa_ready(), 'test' => is_array($test) ? $test : null));
+}
+
+function events_ssa_block_toggle($request) {
+    $on = !empty($request->get_json_params()['enabled']);
+    update_option('blokes_events_ssa_block', $on, false);
+    if ($on) events_ssa_sync();
+    return events_ssa_block_status();
+}
+
+// Bloqueo de prueba: ocupa un hueco para comprobar en la web que desaparece, y se quita después.
+function events_ssa_test_create($request) {
+    if (!events_ssa_ready()) return new WP_Error('no_ssa', 'No se encuentran las tablas de reservas de la web', array('status' => 500));
+    if (get_option('blokes_events_ssa_test')) return new WP_Error('test_exists', 'Ya hay un bloqueo de prueba: quítalo antes de crear otro', array('status' => 400));
+    $body = $request->get_json_params();
+    $date = (string) ($body['date'] ?? '');
+    $time = (string) ($body['time'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || $date < wp_date('Y-m-d')) return new WP_Error('bad_date', 'Elige una fecha de hoy en adelante', array('status' => 400));
+    $range = events_ssa_range($date, $time);
+    if (!$range) return new WP_Error('bad_time', 'Elige una hora', array('status' => 400));
+    $sid = events_ssa_insert_block($range[0], $range[1], 'Prueba de bloqueo desde Blokes · Eventos');
+    if (!$sid) return new WP_Error('insert_failed', 'No se pudo crear el bloqueo en la web', array('status' => 500));
+    $seen   = get_option('blokes_events_ssa_seen', array());
+    $seen[] = $sid;
+    update_option('blokes_events_ssa_seen', array_values(array_unique($seen)), false);
+    update_option('blokes_events_ssa_test', array('ssa_id' => $sid, 'date' => $date, 'time' => $time), false);
+    events_ssa_flush_cache();
+    return events_ssa_block_status();
+}
+
+function events_ssa_test_delete() {
+    $test = get_option('blokes_events_ssa_test');
+    if (is_array($test) && !empty($test['ssa_id'])) events_ssa_update($test['ssa_id'], array('status' => 'canceled'));
+    delete_option('blokes_events_ssa_test');
+    events_ssa_flush_cache();
+    return events_ssa_block_status();
 }
 
 // Costes (pago a monitores, materiales) y la configuración de precios son dinero agregado del
@@ -10823,6 +11008,7 @@ function events_create_bookings($request) {
     }
     if (!$added) return new WP_Error('invalid_booking', 'Falta la fecha o no es válida', array('status' => 400));
     events_save_bookings($list);
+    if (events_ssa_block_on()) events_ssa_sync();
     return rest_ensure_response(array('success' => true, 'added' => $added, 'bookings' => events_get_bookings()));
 }
 
@@ -10835,6 +11021,7 @@ function events_update_booking($request) {
         if (!$b) return new WP_Error('invalid_booking', 'Falta la fecha o no es válida', array('status' => 400));
         $list[$i] = array_merge($x, $b, array('updated_at' => current_time('mysql'), 'updated_by' => timeoff_user_name()));
         events_save_bookings($list);
+        if (events_ssa_block_on()) events_ssa_sync();
         $booking = $list[$i];
         if (!blokes_es_socio()) unset($booking['monitors_pay'], $booking['materials']);
         return rest_ensure_response(array('success' => true, 'booking' => $booking));
@@ -10844,7 +11031,9 @@ function events_update_booking($request) {
 
 function events_delete_booking($request) {
     $id   = $request['id'];
-    $list = array_values(array_filter(events_get_bookings(), function($x) use ($id) { return $x['id'] !== $id; }));
+    $all  = events_get_bookings();
+    foreach ($all as $x) if ($x['id'] === $id) events_ssa_release($x);
+    $list = array_values(array_filter($all, function($x) use ($id) { return $x['id'] !== $id; }));
     events_save_bookings($list);
     return rest_ensure_response(array('success' => true));
 }

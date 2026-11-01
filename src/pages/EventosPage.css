@@ -150,5 +150,8 @@
   .ev-month .ev-free { font-size: 0.58rem; padding: 1px 2px; }
 }
 
-/* Diagnóstico de SSA (temporal) */
-.ev-debug { max-height: 420px; overflow: auto; margin: 12px 0 0; padding: 10px; background: #100e09; color: #ddd; font-size: 0.72rem; white-space: pre-wrap; word-break: break-word; border: 1px solid #2a2015; border-radius: 4px; }
+
+/* Bloquear huecos en la web (SSA) */
+.ev-ssa-switch { display: inline-flex; align-items: center; gap: 8px; margin: 4px 0 8px; font-size: 0.85rem; font-weight: 600; color: #ddd; cursor: pointer; }
+.ev-ssa-switch input { width: 18px; height: 18px; accent-color: #34d399; }
+.ev-ssa-sub { margin: 16px 0 4px; font-size: 0.8rem; font-weight: 700; color: #f0ece0; }

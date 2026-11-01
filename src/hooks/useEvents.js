@@ -34,7 +34,10 @@ export function useEventsAccess() {
   return can
 }
 
-export const getSsaInspect    = ()       => request('/events/ssa-inspect')
+export const getSsaBlock      = ()           => request('/events/ssa-block')
+export const setSsaBlock      = (enabled)    => request('/events/ssa-block', 'PUT', { enabled })
+export const createSsaTest    = (date, time) => request('/events/ssa-block/test', 'POST', { date, time })
+export const deleteSsaTest    = ()           => request('/events/ssa-block/test', 'DELETE')
 export const getEventsAccess  = ()       => request('/events/access')
 export const saveEventsAccess = (emails) => request('/events/access', 'PUT', { emails }).then(json => json.emails)
 
