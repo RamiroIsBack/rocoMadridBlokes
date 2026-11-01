@@ -167,11 +167,29 @@ function minsOf(hhmm) {
 }
 
 export function normalizeMananas(m) {
-  return {
+  const raw = {
     modo: 'abiertas', meses: [], corteHora: MANANAS_CORTE_DEFECTO,
-    pctTarde: MANANAS_PCT_TARDE_DEFECTO, gastoSala: 0, disposicion: {},
+    pctTarde: MANANAS_PCT_TARDE_DEFECTO, gastoSala: 0, disposicion: {}, historico: {},
     ...(m || {}),
   }
+  // Migración: antes `disposicion` era un único valor por persona que aplicaba a TODOS los
+  // meses cerrados; ahora puede ser distinto cada mes (p. ej. tarde en julio, paro en agosto).
+  // Si ya llega como objeto por mes se deja igual; si es el valor antiguo (string), se guarda
+  // bajo la clave `_todos` para que siga aplicando a cualquier mes sin preguntar de nuevo.
+  const disposicion = {}
+  Object.entries(raw.disposicion || {}).forEach(([p, v]) => {
+    disposicion[p] = (v && typeof v === 'object') ? v : { _todos: v }
+  })
+  return { ...raw, disposicion }
+}
+
+// Disposición de una persona en un mes concreto (1-12): 'tarde' (por defecto), 'paro' o 'baja'.
+export function disposicionDe(mananas, persona, mes) {
+  const d = mananas.disposicion?.[persona]
+  if (!d) return 'tarde'
+  if (d[mes] != null) return d[mes]
+  if (d._todos != null) return d._todos
+  return 'tarde'
 }
 
 // Meses (1-12) cerrados por la mañana con esta configuración
@@ -218,28 +236,53 @@ export function ingresosMananaDeClases(clases, corteHora = MANANAS_CORTE_DEFECTO
     }, { alumnos: 0, ingresos: 0, detalle: [] })
 }
 
+// Alumnos/ingresos de mañana de un mes cerrado concreto: el valor a mano en
+// `mananas.historico[mes]` (con su nota de fuente), o si no hay, los alumnos de HOY de
+// /progreso/v1/clases como aproximación — en verano hay muchos menos que en el resto del año,
+// así que ese valor de respaldo infla el ingreso perdido de julio/agosto si no se corrige a
+// mano (Ramiro/cowork, 1/11).
+function ingresosDelMesManana(mananas, mes, ingresosManana) {
+  const h = mananas.historico?.[mes]
+  if (h && (h.alumnos != null || h.ingresos != null)) {
+    return { alumnos: Number(h.alumnos) || 0, ingresos: Number(h.ingresos) || 0, fuente: h.fuente || '' }
+  }
+  return { alumnos: ingresosManana?.alumnos || 0, ingresos: ingresosManana?.ingresos || 0, fuente: '' }
+}
+
 // Cuentas de cerrar por la mañana: ingreso que se pierde (neto del % que pasa a la tarde),
 // ahorro de personal (de quien se pone en paro/baja; quien pasa sus horas a la tarde no
-// ahorra nada) y de sala, por mes cerrado y en el año.
+// ahorra nada) y de sala — por cada mes cerrado (cada uno con su propio histórico de
+// alumnos/ingresos y su propia disposición por persona) y resumido en el año.
 export function cuentasMananas(mananas, { ingresosManana, coste = {}, horasManana }) {
   const m = normalizeMananas(mananas)
   const cerrados = mesesCerradosManana(m)
   const horas = horasManana || horasMananaPorPersona(m.corteHora)
-  const perdidaBruta = ingresosManana?.ingresos || 0
-  const perdidaNeta = perdidaBruta * (1 - (m.pctTarde || 0) / 100)
   const personas = Object.keys(horas)
-  const ahorroPersonal = personas.reduce((s, p) => {
-    const disp = m.disposicion?.[p] || 'tarde'
-    if (disp === 'tarde') return s
-    const frac = Math.min(1, horas[p] / (PROF_META[p]?.horasSem || horas[p] || 1))
-    return s + frac * (coste[p] || 0)
-  }, 0)
-  const ahorroSala = m.gastoSala || 0
-  const resultadoMes = -perdidaNeta + ahorroPersonal + ahorroSala
+
+  const porMes = cerrados.map(mes => {
+    const ing = ingresosDelMesManana(m, mes, ingresosManana)
+    const perdidaBruta = ing.ingresos
+    const perdidaNeta = perdidaBruta * (1 - (m.pctTarde || 0) / 100)
+    const ahorroPersonal = personas.reduce((s, p) => {
+      const disp = disposicionDe(m, p, mes)
+      if (disp === 'tarde') return s
+      const frac = Math.min(1, horas[p] / (PROF_META[p]?.horasSem || horas[p] || 1))
+      return s + frac * (coste[p] || 0)
+    }, 0)
+    const ahorroSala = m.gastoSala || 0
+    const resultadoMes = -perdidaNeta + ahorroPersonal + ahorroSala
+    return { mes, alumnos: ing.alumnos, fuente: ing.fuente, perdidaBruta, perdidaNeta, ahorroPersonal, ahorroSala, resultadoMes }
+  })
+
+  const n = porMes.length || 1
+  const suma = k => porMes.reduce((s, x) => s + x[k], 0)
+  const resultadoAnio = suma('resultadoMes')
   return {
-    cerrados, personas, horas, perdidaBruta, perdidaNeta, ahorroPersonal, ahorroSala,
-    resultadoMes, resultadoAnio: resultadoMes * cerrados.length,
-    alumnosManana: ingresosManana?.alumnos || 0,
+    cerrados, personas, horas, porMes,
+    perdidaBruta: suma('perdidaBruta') / n, perdidaNeta: suma('perdidaNeta') / n,
+    ahorroPersonal: suma('ahorroPersonal') / n, ahorroSala: suma('ahorroSala') / n,
+    resultadoMes: resultadoAnio / n, resultadoAnio,
+    alumnosManana: porMes.length ? suma('alumnos') / n : (ingresosManana?.alumnos || 0),
   }
 }
 

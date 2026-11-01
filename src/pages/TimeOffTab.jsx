@@ -14,7 +14,8 @@ import { PL_DATA } from '../data/plHistorico'
 import {
   DIAS_ANUALES, HOY_PARO, MES_LABEL, MESES_ANUALES, MANANAS_MODO, MANANAS_DISPOSICION, eur, inactivosMes,
   evaluarPlan, defaultYear, todayISO, repartirVacaciones, BLOQUE_VERANO, MAX_BLOQUES, CIERRE_EXTRA,
-  normalizeMananas, horasMananaPorPersona, ingresosMananaDeClases, cuentasMananas, equilibrioManana,
+  normalizeMananas, horasMananaPorPersona, ingresosMananaDeClases, cuentasMananas, equilibrioManana, disposicionDe,
+  mesesCerradosManana,
 } from '../utils/timeoffPlan'
 import { useTimeOffData, savePlan, saveReal, syncNueve, addScenario } from '../hooks/useTimeOff'
 import { useClases } from '../hooks/useClases'
@@ -84,8 +85,15 @@ function firmaPlan(st) {
     pacto: PROF_ORDER.filter(p => st.pactoVerano?.[p]),
     mananas: (() => {
       const mn = normalizeMananas(st.mananas)
-      return mn.modo === 'abiertas' ? null : [mn.modo, [...mn.meses].sort(), mn.corteHora, mn.pctTarde, mn.gastoSala,
-        PROF_ORDER.filter(p => mn.disposicion?.[p] && mn.disposicion[p] !== 'tarde').map(p => [p, mn.disposicion[p]])]
+      if (mn.modo === 'abiertas') return null
+      const disposicionTocada = PROF_ORDER.filter(p => {
+        const d = mn.disposicion?.[p]
+        return d && Object.values(d).some(v => v !== 'tarde')
+      }).map(p => [p, mn.disposicion[p]])
+      const historicoTocado = Object.entries(mn.historico || {})
+        .filter(([, h]) => h && (h.alumnos != null || h.ingresos != null))
+        .sort(([a], [b]) => Number(a) - Number(b))
+      return [mn.modo, [...mn.meses].sort(), mn.corteHora, mn.pctTarde, mn.gastoSala, disposicionTocada, historicoTocado]
     })(),
   })
 }
@@ -756,19 +764,60 @@ function ConfigMananas({ state, update, costes, clases }) {
               €/mes
             </label>
           </div>
-          {Object.keys(horas).length > 0 && (
-            <div className="sv-to-form">
-              <span className="sv-to-inline">Si se cierra, cada persona que da clase por la mañana:</span>
-              {Object.keys(horas).map(p => (
-                <label key={p} className="sv-to-inline" style={{ color: PROF_META[p]?.color }}>
-                  {p} ({horas[p]} h/sem de mañana · coste {eur(costes.mes[p] || 0)}/mes{!costes.nomina[p] ? ', de la ficha' : ''})
-                  <select className="sv-tests-select" value={mananas.disposicion?.[p] || 'tarde'}
-                    onChange={e => setMananas({ disposicion: { ...mananas.disposicion, [p]: e.target.value } })}>
-                    {Object.entries(MANANAS_DISPOSICION).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-                  </select>
-                </label>
-              ))}
-              <span className="sv-ot-muted sv-to-small">La decisión laboral es de Ramiro; esto solo pone números.</span>
+          {Object.keys(horas).length > 0 && (() => {
+            const meses = mesesCerradosManana(mananas)
+            return (
+              <div className="sv-tests-scroll">
+                <span className="sv-to-inline">Si se cierra, cada persona que da clase por la mañana (puede ser distinto cada mes):</span>
+                <table className="sv-tests-table">
+                  <thead>
+                    <tr><th>Persona</th>{meses.map(mes => <th key={mes}>{MESES_ANUALES[mes]}</th>)}</tr>
+                  </thead>
+                  <tbody>
+                    {Object.keys(horas).map(p => (
+                      <tr key={p}>
+                        <td style={{ color: PROF_META[p]?.color }}>
+                          {p} ({horas[p]} h/sem · {eur(costes.mes[p] || 0)}/mes{!costes.nomina[p] ? ', de la ficha' : ''})
+                        </td>
+                        {meses.map(mes => (
+                          <td key={mes}>
+                            <select className="sv-tests-select" value={disposicionDe(mananas, p, mes)}
+                              onChange={e => setMananas({ disposicion: {
+                                ...mananas.disposicion, [p]: { ...(mananas.disposicion?.[p] || {}), [mes]: e.target.value },
+                              } })}>
+                              {Object.entries(MANANAS_DISPOSICION).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                            </select>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <span className="sv-ot-muted sv-to-small">La decisión laboral es de Ramiro; esto solo pone números.</span>
+              </div>
+            )
+          })()}
+          {mesesCerradosManana(mananas).length > 0 && (
+            <div className="sv-to-form sv-to-wrap">
+              <span className="sv-to-inline">
+                Alumnos/ingresos de mañana por mes, a mano con la fuente al lado (en blanco usa los alumnos de HOY —
+                en verano hay muchos menos, así que mejor rellenar julio/agosto con el histórico real):
+              </span>
+              {mesesCerradosManana(mananas).map(mes => {
+                const h = mananas.historico?.[mes] || {}
+                const setHist = patch => setMananas({ historico: { ...mananas.historico, [mes]: { ...h, ...patch } } })
+                return (
+                  <div key={mes} className="sv-to-inline">
+                    <strong>{MESES_ANUALES[mes]}</strong>
+                    <input className="sv-tests-input sv-tests-input--num" type="number" min="0" placeholder="alumnos"
+                      value={h.alumnos ?? ''} onChange={e => setHist({ alumnos: e.target.value === '' ? null : num(e.target.value) })} />
+                    <input className="sv-tests-input sv-tests-input--num" type="number" min="0" placeholder="ingresos €/mes"
+                      value={h.ingresos ?? ''} onChange={e => setHist({ ingresos: e.target.value === '' ? null : num(e.target.value) })} />
+                    <input className="sv-tests-input" type="text" placeholder="fuente (ej. jul 25: 20 · jul 24: 22)"
+                      value={h.fuente || ''} onChange={e => setHist({ fuente: e.target.value })} style={{ minWidth: 220 }} />
+                  </div>
+                )
+              })}
             </div>
           )}
           <MananasCuentas mananas={mananas} costes={costes} clases={clases} horas={horas} />
@@ -790,10 +839,11 @@ function MananasCuentas({ mananas, costes, clases, horas }) {
     r.ahorroPersonal > 0 && ['Personal que no trabaja esa mañana', r.ahorroPersonal],
     r.ahorroSala > 0 && ['Gasto de sala', r.ahorroSala],
   ].filter(Boolean)
+  const variaPorMes = r.porMes.length > 1 && r.porMes.some(x => x.alumnos !== r.porMes[0].alumnos || x.resultadoMes !== r.porMes[0].resultadoMes)
   return (
     <div className="sv-to-money">
       <div className={`sv-to-money__total ${cls(r.resultadoMes)}`}>
-        Mañanas {r.resultadoMes >= 0 ? 'compensa' : 'no compensa'}: <strong>{signo(r.resultadoMes)}/mes</strong> en los {r.cerrados.length} {r.cerrados.length === 1 ? 'mes cerrado' : 'meses cerrados'}
+        Mañanas {r.resultadoMes >= 0 ? 'compensa' : 'no compensa'} de media: <strong>{signo(r.resultadoMes)}/mes</strong> en los {r.cerrados.length} {r.cerrados.length === 1 ? 'mes cerrado' : 'meses cerrados'}
         {' '}({signo(r.resultadoAnio)}/año)
       </div>
       <ul className="sv-to-money__lines">
@@ -801,13 +851,23 @@ function MananasCuentas({ mananas, costes, clases, horas }) {
           <li key={txt}><span>{txt}</span><span className={n > 0 ? 'sv-to-good' : n < 0 ? 'sv-to-bad' : ''}>{signo(n)}</span></li>
         ))}
       </ul>
+      {variaPorMes && (
+        <ul className="sv-to-money__lines sv-to-small">
+          {r.porMes.map(x => (
+            <li key={x.mes}>
+              <span>{MESES_ANUALES[x.mes]} ({x.alumnos} alumnos{x.fuente ? ` · ${x.fuente}` : ''})</span>
+              <span className={cls(x.resultadoMes)}>{signo(x.resultadoMes)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {ingresosManana.ingresos === 0 && (
         <p className="sv-to-warn-txt sv-to-small">No se han encontrado ingresos reales de clases de mañana (revisa la conexión con la tienda).</p>
       )}
       <p className="sv-note sv-to-small">
         {eq != null && eq > 0
-          ? <>A partir de que un <strong>{eq}%</strong> de los alumnos de mañana se pase a la tarde, cerrar compensa con este ahorro.</>
-          : <>Con este ahorro, cerrar compensa aunque nadie se pase a la tarde.</>}
+          ? <>A partir de que un <strong>{eq}%</strong> de los alumnos de mañana se pase a la tarde, cerrar compensa de media con este ahorro.</>
+          : <>Con este ahorro, cerrar compensa de media aunque nadie se pase a la tarde.</>}
       </p>
     </div>
   )
