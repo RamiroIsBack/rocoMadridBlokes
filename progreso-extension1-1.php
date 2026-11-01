@@ -10517,7 +10517,48 @@ add_action('rest_api_init', function() {
         'callback'            => 'events_save_settings',
         'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/events/ssa-inspect', array(
+        'methods'             => 'GET',
+        'callback'            => 'events_ssa_inspect',
+        'permission_callback' => $socio_perm,
+    ));
 });
+
+// Diagnóstico temporal (solo lectura, sin datos de clientes) para la fase B: cómo calcula y
+// guarda SSA los huecos libres, para poder bloquearlos desde Eventos sin romper nada.
+function events_ssa_inspect() {
+    global $wpdb;
+    $p   = $wpdb->get_blog_prefix(1);
+    $out = array(
+        'blog_id'        => get_current_blog_id(),
+        'ssa_loaded'     => function_exists('ssa'),
+        'network_plugin' => is_multisite() ? array_keys((array) get_site_option('active_sitewide_plugins', array())) : array(),
+    );
+    $av = $p . 'ssa_availability';
+    $out['availability_groups'] = $wpdb->get_results("SELECT type, subtype, status, availability_type, appointment_type_id, is_available, COUNT(*) AS n, MIN(start_date) AS first, MAX(end_date) AS last, MAX(date_modified) AS modified FROM `$av` GROUP BY type, subtype, status, availability_type, appointment_type_id, is_available", ARRAY_A);
+    $out['availability_sample'] = $wpdb->get_results("SELECT id, start_date, end_date, capacity_available, capacity_reserved, buffer_available, buffer_reserved, LEFT(capacity_meta, 200) AS capacity_meta, appointment_type_id, staff_id, resource_group_id, type, subtype, status, is_all_day, cache_key, cache_args_hash, date_created, date_modified, availability_type, is_available, availability_score FROM `$av` ORDER BY date_modified DESC LIMIT 6", ARRAY_A);
+    $out['async_groups']    = $wpdb->get_results("SELECT hook, action, object_type, COUNT(*) AS n, MAX(date_created) AS last FROM `{$p}ssa_async_actions` GROUP BY hook, action, object_type", ARRAY_A);
+    $out['revision_groups'] = $wpdb->get_results("SELECT action, context, COUNT(*) AS n FROM `{$p}ssa_revisions` GROUP BY action, context", ARRAY_A);
+    $out['meta_keys']       = $wpdb->get_results("SELECT meta_key, COUNT(*) AS n FROM `{$p}ssa_appointment_meta` GROUP BY meta_key", ARRAY_A);
+
+    $keep = array('id', 'capacity', 'capacity_type', 'staff_capacity', 'buffer_before', 'duration', 'buffer_after', 'min_booking_notice',
+        'max_booking_notice', 'max_event_count', 'availability_type', 'availability', 'availability_increment', 'timezone_style', 'status');
+    $out['type'] = $wpdb->get_row("SELECT `" . implode('`, `', $keep) . "` FROM `{$p}ssa_appointment_types` WHERE id = 1", ARRAY_A);
+    $out['appointment_columns_sample'] = $wpdb->get_row("SELECT id, appointment_type_id, group_id, author_id, customer_id, customer_timezone, customer_locale, start_date, end_date, status, date_created, date_modified, expiration_date FROM `{$p}ssa_appointments` ORDER BY id DESC LIMIT 1", ARRAY_A);
+
+    // Nombres de las opciones y transitorios de SSA en el sitio principal (sin valores)
+    $out['options'] = $wpdb->get_results("SELECT option_name, LENGTH(option_value) AS size, autoload FROM `{$p}options` WHERE option_name LIKE '%ssa%' ORDER BY option_name LIMIT 80", ARRAY_A);
+    $settings = maybe_unserialize($wpdb->get_var("SELECT option_value FROM `{$p}options` WHERE option_name = 'ssa_settings_json'"));
+    $settings = is_string($settings) ? json_decode($settings, true) : $settings;
+    if (is_array($settings)) {
+        $out['settings_sections'] = array_keys($settings);
+        foreach (array('blackout_dates', 'advanced_scheduling', 'global') as $k) {
+            if (isset($settings[$k])) $out['settings'][$k] = $settings[$k];
+        }
+        unset($out['settings']['global']['admin_email'], $out['settings']['global']['admin_phone']);
+    }
+    return rest_ensure_response($out);
+}
 
 // Cualquiera puede preguntar si tiene acceso (para enseñar o no el menú); la lista solo la ve un socio.
 function events_get_access() {
