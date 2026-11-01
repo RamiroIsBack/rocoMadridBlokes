@@ -703,14 +703,17 @@
 .sv-grp-modal {
   background: #1a1a1a; border: 1px solid rgba(255,255,255,0.12); border-radius: 10px;
   padding: 20px; min-width: 300px; max-width: 420px; display: flex; flex-direction: column; gap: 10px;
+  color: #ffffff;
 }
-.sv-grp-modal h3 { margin: 0 0 6px; font-size: 15px; }
-.sv-grp-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #bbb; }
+.sv-grp-modal h3 { margin: 0 0 6px; font-size: 15px; color: #ffffff; }
+.sv-grp-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #d6d3d1; }
 .sv-grp-field--check { flex-direction: row; align-items: center; gap: 8px; }
 .sv-grp-modal__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .sv-grp-preview { list-style: none; margin: 0; padding: 0; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
 .sv-grp-preview li { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); padding: 3px 0; }
-.sv-grp-preview li span:first-child { color: #999; }
+.sv-grp-preview li span:first-child { color: #d6d3d1; }
+.sv-grp-preview li span:last-child { color: #ffffff; }
+.sv-grp-preview li strong { color: #ffffff; }
 
 /* ── Group summary ── */
 .sv-group-summary {

@@ -206,6 +206,25 @@ async function main() {
                     await boton.click().catch(() => {});
                     await comprobarPagina(page, `/supervision → ${click}`, fallosTotal);
                 }
+
+                // Menú de acciones (⋯) y modal "Marcar cobrado" de Grupos — Ramiro los vio
+                // ilegibles en una prueba real (1/11 18:50): valores en gris oscuro sobre
+                // fondo casi negro. Se abren sobre una fila real, así que si no hay ninguna
+                // fila con ese botón en pantalla, se omite sin fallar el resto.
+                const menuBtn = page.locator('button[title="Acciones"]').first();
+                if (await menuBtn.count() > 0) {
+                    await menuBtn.click().catch(() => {});
+                    await comprobarPagina(page, '/supervision → Grupos → menú ⋯', fallosTotal);
+                    const marcarCobrado = page.locator('.sv-grp-menu button:has-text("Marcar cobrado")').first();
+                    if (await marcarCobrado.count() > 0) {
+                        await marcarCobrado.click().catch(() => {});
+                        await comprobarPagina(page, '/supervision → Grupos → modal Marcar cobrado', fallosTotal);
+                    }
+                    await page.keyboard.press('Escape').catch(() => {});
+                    await page.locator('.sv-grp-overlay').first().click({ force: true }).catch(() => {});
+                } else {
+                    console.log('  · (omitido, no encontrado: botón ⋯ de Grupos)');
+                }
             }
 
             // Definiciones y elección de tests (solo socio ve la gestión completa) y su
