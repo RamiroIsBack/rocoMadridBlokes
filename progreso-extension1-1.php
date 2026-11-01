@@ -857,6 +857,16 @@ add_action('rest_api_init', function() {
         array('methods' => 'DELETE', 'callback' => 'superadmin_gestion_lista_espera_borrar',      'permission_callback' => $sa_perm),
     ));
 
+    // Sincronización Grupos ⇄ Google Sheets (NOTAS_PARA_CODE_sync_grupos.md) — de momento solo
+    // configuración y una prueba de conexión de solo lectura contra la Hoja de PRUEBA.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/config', array(
+        array('methods' => 'GET',  'callback' => 'superadmin_sync_grupos_config_get', 'permission_callback' => $sa_perm),
+        array('methods' => 'POST', 'callback' => 'superadmin_sync_grupos_config_set', 'permission_callback' => $sa_perm),
+    ));
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/test', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_test', 'permission_callback' => $sa_perm,
+    ));
+
     register_rest_route('superadmin/v1', '/expenses', array(
         array(
             'methods'             => 'GET',
@@ -4133,6 +4143,123 @@ function superadmin_gestion_lista_espera_borrar($request) {
     $wpdb->delete(blokes_lista_espera_table(), array('id' => $id));
     blokes_gestion_log($id, 'lista_espera_borrar', null, null);
     return rest_ensure_response(array('success' => true));
+}
+
+// ─── Sincronización Grupos ⇄ Google Sheets (NOTAS_PARA_CODE_sync_grupos.md) ───────────────
+// Cuenta de servicio de Google Cloud, sin Composer (este plugin es un único fichero PHP, sin
+// vendor/): se firma el JWT a mano con openssl_sign y se cambia por un access_token en el
+// endpoint de OAuth de Google. El ID de cada Hoja (prueba y real) se guarda en wp_options, no
+// en el código — el repo es público — y se configura con /gestion/sync-grupos/config.
+// IMPORTANTE: mientras esto se desarrolla, el endpoint de prueba SOLO lee la Hoja de prueba.
+// La Hoja real (la que usa Eva) no se toca hasta que cowork confirme las pruebas y Ramiro dé
+// el OK — ver NOTAS_PARA_CODE_sync_grupos.md.
+
+function blokes_sync_grupos_credenciales() {
+    $json = null;
+    if (defined('BLOKES_SYNC_GROUPS_SA_JSON') && BLOKES_SYNC_GROUPS_SA_JSON) {
+        $json = BLOKES_SYNC_GROUPS_SA_JSON;
+    } elseif (defined('BLOKES_SYNC_GROUPS_SA_PATH') && BLOKES_SYNC_GROUPS_SA_PATH && file_exists(BLOKES_SYNC_GROUPS_SA_PATH)) {
+        $json = file_get_contents(BLOKES_SYNC_GROUPS_SA_PATH);
+    }
+    if (!$json) return null;
+    $data = json_decode($json, true);
+    if (!is_array($data) || empty($data['private_key']) || empty($data['client_email'])) return null;
+    return $data;
+}
+
+function blokes_sync_grupos_base64url($data) {
+    return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+}
+
+// Access token de corta duración (1h) para llamar a la Sheets API, cacheado en un transient
+// para no firmar un JWT nuevo en cada petición.
+function blokes_sync_grupos_access_token() {
+    $cached = get_transient('blokes_sync_grupos_token');
+    if ($cached) return $cached;
+
+    $cred = blokes_sync_grupos_credenciales();
+    if (!$cred) {
+        return new WP_Error('sin_credenciales', 'Falta la clave de la cuenta de servicio: define BLOKES_SYNC_GROUPS_SA_JSON (el JSON entero) o BLOKES_SYNC_GROUPS_SA_PATH (ruta al fichero) en wp-config.php.');
+    }
+    $now = time();
+    $header = blokes_sync_grupos_base64url(wp_json_encode(array('alg' => 'RS256', 'typ' => 'JWT')));
+    $claims = blokes_sync_grupos_base64url(wp_json_encode(array(
+        'iss'   => $cred['client_email'],
+        'scope' => 'https://www.googleapis.com/auth/spreadsheets',
+        'aud'   => 'https://oauth2.googleapis.com/token',
+        'exp'   => $now + 3600,
+        'iat'   => $now,
+    )));
+    $unsigned = $header . '.' . $claims;
+    $signature = '';
+    if (!openssl_sign($unsigned, $signature, $cred['private_key'], 'sha256WithRSAEncryption')) {
+        return new WP_Error('firma_fallida', 'No se pudo firmar el JWT con la clave privada de la cuenta de servicio.');
+    }
+    $jwt = $unsigned . '.' . blokes_sync_grupos_base64url($signature);
+
+    $res = wp_remote_post('https://oauth2.googleapis.com/token', array(
+        'timeout' => 15,
+        'body'    => array('grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'assertion' => $jwt),
+    ));
+    if (is_wp_error($res)) return $res;
+    $body = json_decode(wp_remote_retrieve_body($res), true);
+    if (empty($body['access_token'])) {
+        return new WP_Error('sin_token', 'Google no devolvió access_token. Respuesta: ' . wp_remote_retrieve_body($res));
+    }
+    set_transient('blokes_sync_grupos_token', $body['access_token'], max(60, intval($body['expires_in'] ?? 3600) - 60));
+    return $body['access_token'];
+}
+
+// Llamada GET genérica a la Sheets API v4 (solo lectura). $path es relativo a
+// https://sheets.googleapis.com/v4/spreadsheets/{sheetId}...
+function blokes_sync_grupos_get($sheet_id, $path) {
+    $token = blokes_sync_grupos_access_token();
+    if (is_wp_error($token)) return $token;
+    $url = 'https://sheets.googleapis.com/v4/spreadsheets/' . rawurlencode($sheet_id) . $path;
+    $res = wp_remote_get($url, array('timeout' => 20, 'headers' => array('Authorization' => 'Bearer ' . $token)));
+    if (is_wp_error($res)) return $res;
+    $code = wp_remote_retrieve_response_code($res);
+    $body = json_decode(wp_remote_retrieve_body($res), true);
+    if ($code >= 300) {
+        return new WP_Error('sheets_api_error', 'Google Sheets API devolvió ' . $code . ': ' . ($body['error']['message'] ?? wp_remote_retrieve_body($res)));
+    }
+    return $body;
+}
+
+function superadmin_sync_grupos_config_get() {
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'sheetPruebaId' => get_option('blokes_sync_grupos_sheet_prueba_id', ''),
+        'sheetRealId'   => get_option('blokes_sync_grupos_sheet_real_id', ''),
+        'usarReal'      => (bool) get_option('blokes_sync_grupos_usar_real', false),
+        'credencialesConfiguradas' => (bool) blokes_sync_grupos_credenciales(),
+    )));
+}
+
+function superadmin_sync_grupos_config_set($request) {
+    $body = $request->get_json_params();
+    if (isset($body['sheetPruebaId'])) update_option('blokes_sync_grupos_sheet_prueba_id', sanitize_text_field((string) $body['sheetPruebaId']), false);
+    if (isset($body['sheetRealId']))   update_option('blokes_sync_grupos_sheet_real_id',   sanitize_text_field((string) $body['sheetRealId']),   false);
+    if (isset($body['usarReal']))      update_option('blokes_sync_grupos_usar_real', !empty($body['usarReal']), false);
+    blokes_gestion_log(0, 'sync_grupos_config', null, $body);
+    return rest_ensure_response(array('success' => true));
+}
+
+// Prueba de conexión: lee solo los nombres de las pestañas de la Hoja de PRUEBA (nunca la
+// real, mientras esto se desarrolla) — para confirmar que las credenciales y la firma del JWT
+// funcionan antes de construir nada que lea o escriba filas de verdad.
+function superadmin_sync_grupos_test() {
+    $sheet_id = get_option('blokes_sync_grupos_sheet_prueba_id', '');
+    if (!$sheet_id) {
+        return new WP_Error('falta_config', 'Falta configurar el ID de la Hoja de PRUEBA (POST /gestion/sync-grupos/config con sheetPruebaId).', array('status' => 400));
+    }
+    $data = blokes_sync_grupos_get($sheet_id, '?fields=properties.title,sheets.properties.title');
+    if (is_wp_error($data)) {
+        return new WP_Error($data->get_error_code(), $data->get_error_message(), array('status' => 502));
+    }
+    $pestanas = array_map(function($s) { return $s['properties']['title'] ?? '?'; }, $data['sheets'] ?? array());
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'hoja' => $data['properties']['title'] ?? '?', 'pestanas' => $pestanas, 'total' => count($pestanas),
+    )));
 }
 
 /**
