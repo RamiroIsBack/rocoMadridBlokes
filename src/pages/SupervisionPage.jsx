@@ -1434,6 +1434,21 @@ function BuscarAlumnoModal({ onClose }) {
   )
 }
 
+// Buscador de Grupos (Ramiro, 1/11 18:50): tolerante a tildes/mayúsculas en el nombre, y el
+// teléfono se compara sin +34/espacios/puntos para que dé igual cómo se haya escrito.
+function sgNormalizarTexto(s) {
+  return (s || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+function sgNormalizarTelefono(s) {
+  return (s || '').toString().replace(/[^\d]/g, '').replace(/^34(?=.{9,})/, '')
+}
+function sgCoincideBusqueda(a, termino, tel) {
+  if (!termino) return true
+  if (sgNormalizarTexto(a.alumno).includes(termino)) return true
+  if (tel && sgNormalizarTelefono(a.telefono).includes(tel)) return true
+  return false
+}
+
 function GruposTab() {
   const { data, loading, error, refetch } = useGestionGrupos(4)
   const [grupoKey, setGrupoKey] = useState('')
@@ -1441,6 +1456,7 @@ function GruposTab() {
   const [menuFor, setMenuFor] = useState(null)   // alumno con el menú de acciones abierto
   const [accion, setAccion]   = useState(null)   // { alumno, tipo } con el modal abierto
   const [buscador, setBuscador] = useState(false) // modal de "Añadir alumno" (buscar)
+  const [busqueda, setBusqueda] = useState('') // buscador de arriba: filtra todas las tablas de Grupos a la vez
   const [espera, setEspera] = useState(null) // lista de espera (8.5), cargada al entrar en esa vista
   const [esperaForm, setEsperaForm] = useState({ dia: '', horario: '', edad: 'Adultos', nombre: '', telefono: '', notas: '' })
   const [esperaBusy, setEsperaBusy] = useState(false)
@@ -1468,19 +1484,25 @@ function GruposTab() {
   // grupo/horario" sepa cuál es el grupo actual sin tener que repartirlo por props aparte.
   const conGrupoDatos = g => g.alumnos.map(a => ({ ...a, grupoLabel: g.label, dia: g.dia, horario: g.horario, edad: g.edad }))
   const grupo = grupoKey ? grupos.find(g => `${g.dia}|${g.horario}|${g.edad}` === grupoKey) : null
-  const alumnos = grupo ? conGrupoDatos(grupo) : grupos.flatMap(conGrupoDatos)
+  // Con el buscador escrito, se busca en TODOS los grupos (no solo el elegido en el
+  // desplegable) — Ramiro, 1/11 18:50.
+  const terminoBusq = sgNormalizarTexto(busqueda.trim())
+  const telBusq = sgNormalizarTelefono(busqueda)
+  const coincide = a => sgCoincideBusqueda(a, terminoBusq, telBusq)
+  const alumnosBase = (terminoBusq || telBusq) ? grupos.flatMap(conGrupoDatos) : (grupo ? conGrupoDatos(grupo) : grupos.flatMap(conGrupoDatos))
+  const alumnos = alumnosBase.filter(coincide)
   // Bandejas 8.3: las mismas filas de siempre, filtradas y aplanadas de todos los grupos a la
   // vez, para que Eva no tenga que ir grupo por grupo buscando a quién le toca cada cosa.
   const conGrupo = useMemo(() => grupos.flatMap(conGrupoDatos), [grupos])
-  const duplicados  = useMemo(() => conGrupo.filter(a => a.otrasSubs?.length > 0), [conGrupo])
-  const porCobrar    = useMemo(() => conGrupo.filter(a => a.pendiente && !a.exento && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes'), [conGrupo])
+  const duplicados  = useMemo(() => conGrupo.filter(a => a.otrasSubs?.length > 0).filter(coincide), [conGrupo, terminoBusq, telBusq])
+  const porCobrar    = useMemo(() => conGrupo.filter(a => a.pendiente && !a.exento && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes').filter(coincide), [conGrupo, terminoBusq, telBusq])
   const pausados      = useMemo(
-    () => conGrupo.filter(a => a.estado === 'pausado').sort((a, b) => (a.pausaHasta || '9999') < (b.pausaHasta || '9999') ? -1 : 1),
-    [conGrupo]
+    () => conGrupo.filter(a => a.estado === 'pausado').filter(coincide).sort((a, b) => (a.pausaHasta || '9999') < (b.pausaHasta || '9999') ? -1 : 1),
+    [conGrupo, terminoBusq, telBusq]
   )
-  const bajas          = useMemo(() => conGrupo.filter(a => a.estado === 'baja_fin_mes'), [conGrupo])
-  const sinDatos        = useMemo(() => conGrupo.filter(a => !a.telefono || a.sinNombre), [conGrupo])
-  const pagaFuera        = useMemo(() => conGrupo.filter(a => a.esExterno), [conGrupo])
+  const bajas          = useMemo(() => conGrupo.filter(a => a.estado === 'baja_fin_mes').filter(coincide), [conGrupo, terminoBusq, telBusq])
+  const sinDatos        = useMemo(() => conGrupo.filter(a => !a.telefono || a.sinNombre).filter(coincide), [conGrupo, terminoBusq, telBusq])
+  const pagaFuera        = useMemo(() => conGrupo.filter(a => a.esExterno).filter(coincide), [conGrupo, terminoBusq, telBusq])
 
   const kpis = useMemo(() => {
     const k = { personas: 0, enEspera: 0, dia1: 0, dia2: 0, dia3: 0, plazas: 0, cobradoMes: 0, pendienteMes: 0, pendienteImporte: 0 }
@@ -1548,8 +1570,15 @@ function GruposTab() {
             Campañas
           </button>
         </div>
-        {vista === 'grupos' && (
-          <div className="sv-controls-right">
+        <div className="sv-controls-right">
+          <input
+            className="sv-tests-input sv-grp-buscar"
+            type="text"
+            placeholder="🔎 Buscar alumno (nombre o teléfono)"
+            value={busqueda}
+            onChange={e => setBusqueda(e.target.value)}
+          />
+          {vista === 'grupos' && (
             <select className="sv-tests-select" value={grupoKey} onChange={e => setGrupoKey(e.target.value)}>
               <option value="">Todos los grupos</option>
               {grupos.map(g => {
@@ -1559,9 +1588,11 @@ function GruposTab() {
                 return <option key={key} value={key}>{g.label} — {nVigor}{nEspera ? ` (+${nEspera} en espera)` : ''}</option>
               })}
             </select>
-            <button className="sv-tab-mini" onClick={() => setBuscador(true)}>🔎 Añadir alumno</button>
-          </div>
-        )}
+          )}
+          {vista === 'grupos' && (
+            <button className="sv-tab-mini" onClick={() => setBuscador(true)}>+ Añadir alumno</button>
+          )}
+        </div>
       </div>
 
       {buscador && <BuscarAlumnoModal onClose={() => setBuscador(false)} />}
