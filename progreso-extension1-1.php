@@ -910,6 +910,15 @@ add_action('rest_api_init', function() {
         array('methods' => 'DELETE', 'callback' => 'superadmin_club_days_borrar', 'permission_callback' => $socio_perm),
     ));
 
+    // Histórico de pagos importado (HV Control de Clientes, NOTAS_PARA_CODE_hv_control_clientes.md)
+    // — solo socio, es dinero agregado/datos de clientes antiguos.
+    register_rest_route('superadmin/v1', '/gestion/hist-pagos/importar', array(
+        'methods' => 'POST', 'callback' => 'superadmin_hist_pagos_importar', 'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/hist-pagos/resumen', array(
+        'methods' => 'GET', 'callback' => 'superadmin_hist_pagos_resumen', 'permission_callback' => $socio_perm,
+    ));
+
     register_rest_route('superadmin/v1', '/expenses', array(
         array(
             'methods'             => 'GET',
@@ -5031,6 +5040,130 @@ function superadmin_gestion_externos_importar($request) {
 // suscripción es de los últimos 60 días, o si no tiene suscripción pero el contacto viene de
 // "interesados"; "antiguos" si se dio de baja de clases o viene de la carga inicial del xlsx de
 // antiguos alumnos; "bajas" (de mensajes) si respondió BAJA, y eso nunca se recalcula solo.
+
+// ============================================================
+//  Histórico de pagos importado (HV Control de Clientes, 1/11 17:40) — tabla de SOLO LECTURA,
+//  nunca toca pedidos ni facturas de WooCommerce. Fuente para el histórico real de la
+//  calculadora de mañanas y, más adelante, para completar Grupos y Estadísticas.
+// ============================================================
+
+function blokes_hist_pagos_table() { global $wpdb; return $wpdb->prefix . 'blokes_hist_pagos'; }
+
+function blokes_ensure_hist_pagos_table() {
+    global $wpdb;
+    if (get_option('blokes_hist_pagos_tabla_v1')) return;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE " . blokes_hist_pagos_table() . " (
+        id            bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        origen        varchar(40)   NOT NULL DEFAULT '',
+        codigo        varchar(20)   NOT NULL DEFAULT '',
+        clase         varchar(190)  NOT NULL DEFAULT '',
+        nombre        varchar(190)  NOT NULL DEFAULT '',
+        importe       decimal(8,2)  NOT NULL DEFAULT 0,
+        duracion      varchar(40)   NOT NULL DEFAULT '',
+        metodo        varchar(40)   NOT NULL DEFAULT '',
+        fecha         date          NULL,
+        profesor      varchar(100)  NOT NULL DEFAULT '',
+        telefono      varchar(20)   NOT NULL DEFAULT '',
+        email         varchar(190)  NOT NULL DEFAULT '',
+        observaciones text          NOT NULL DEFAULT '',
+        estatus       varchar(40)   NOT NULL DEFAULT '',
+        created_at    datetime      NOT NULL,
+        PRIMARY KEY (id),
+        KEY fecha (fecha), KEY telefono (telefono), KEY codigo (codigo)
+    ) {$charset};");
+    update_option('blokes_hist_pagos_tabla_v1', 1, false);
+}
+
+// POST /gestion/hist-pagos/importar — { origen?, pagos: [...], simular?, forzar? } — solo
+// socio. `simular: true` no escribe nada, solo cuenta nuevas/duplicadas/inválidas. Una fila se
+// considera "ya importada" si coincide origen+código+fecha+importe (no hay un id natural en el
+// Excel de origen). Si ya hay filas de ese `origen` y no se manda `simular` ni `forzar`, para en
+// seco — para no repetir un volcado de 3000 filas por accidente.
+function superadmin_hist_pagos_importar($request) {
+    global $wpdb;
+    blokes_ensure_hist_pagos_table();
+    $body = $request->get_json_params();
+    $origen = sanitize_key((string) ($body['origen'] ?? 'hv_control_clientes'));
+    $pagos = is_array($body['pagos'] ?? null) ? $body['pagos'] : array();
+    if (!$pagos) return new WP_Error('invalid_data', 'Falta el array "pagos".', array('status' => 400));
+    if (count($pagos) > 5000) return new WP_Error('too_many', 'Máximo 5000 filas de golpe.', array('status' => 400));
+    $simular = !empty($body['simular']);
+
+    $existe_ya = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM " . blokes_hist_pagos_table() . " WHERE origen = %s", $origen
+    ));
+    if ($existe_ya > 0 && !$simular && empty($body['forzar'])) {
+        return new WP_Error('ya_importado', "Ya hay {$existe_ya} fila(s) importada(s) de '{$origen}'. Manda forzar:true si quieres añadir más (no se duplican por código+fecha+importe).", array('status' => 409));
+    }
+
+    $nuevas = 0; $duplicadas = 0; $invalidas = 0;
+    $ahora = current_time('mysql');
+    foreach ($pagos as $p) {
+        $codigo = sanitize_text_field((string) ($p['codigo'] ?? ''));
+        $fecha_raw = (string) ($p['fecha'] ?? '');
+        $fecha = ($fecha_raw && strtotime($fecha_raw)) ? date('Y-m-d', strtotime($fecha_raw)) : null;
+        $importe = isset($p['importe']) ? round(floatval($p['importe']), 2) : 0;
+        if (!$fecha) { $invalidas++; continue; }
+
+        $dup = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM " . blokes_hist_pagos_table() . " WHERE origen = %s AND codigo = %s AND fecha = %s AND importe = %f",
+            $origen, $codigo, $fecha, $importe
+        ));
+        if ($dup) { $duplicadas++; continue; }
+
+        $nuevas++;
+        if ($simular) continue;
+        $wpdb->insert(blokes_hist_pagos_table(), array(
+            'origen' => $origen, 'codigo' => $codigo,
+            'clase' => sanitize_text_field((string) ($p['clase'] ?? '')),
+            'nombre' => sanitize_text_field((string) ($p['nombre'] ?? '')),
+            'importe' => $importe, 'duracion' => sanitize_text_field((string) ($p['duracion'] ?? '')),
+            'metodo' => sanitize_text_field((string) ($p['metodo'] ?? '')), 'fecha' => $fecha,
+            'profesor' => sanitize_text_field((string) ($p['profesor'] ?? '')),
+            'telefono' => blokes_externos_normaliza_telefono((string) ($p['telefono'] ?? '')),
+            'email' => sanitize_email((string) ($p['email'] ?? '')),
+            'observaciones' => sanitize_textarea_field((string) ($p['observaciones'] ?? '')),
+            'estatus' => sanitize_text_field((string) ($p['estatus'] ?? '')),
+            'created_at' => $ahora,
+        ), array('%s', '%s', '%s', '%s', '%f', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s'));
+    }
+
+    if (!$simular && $nuevas > 0) {
+        blokes_gestion_log(0, 'hist_pagos_importar', null, array('origen' => $origen, 'nuevas' => $nuevas), "Importación de {$origen}");
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'simulado' => $simular, 'nuevas' => $nuevas, 'duplicadas' => $duplicadas, 'invalidas' => $invalidas, 'total' => count($pagos),
+    )));
+}
+
+// GET /gestion/hist-pagos/resumen?desde&hasta — alumnos únicos e importe por mes (histórico
+// real para la calculadora de mañanas y, más adelante, Estadísticas). Nunca devuelve nombre o
+// teléfono: solo los agregados.
+function superadmin_hist_pagos_resumen($request) {
+    global $wpdb;
+    blokes_ensure_hist_pagos_table();
+    $desde = sanitize_text_field((string) $request->get_param('desde'));
+    $hasta = sanitize_text_field((string) $request->get_param('hasta'));
+    $where = array('1=1'); $args = array();
+    if ($desde) { $where[] = 'fecha >= %s'; $args[] = $desde; }
+    if ($hasta) { $where[] = 'fecha <= %s'; $args[] = $hasta; }
+    $sql = "SELECT fecha, importe, telefono, nombre FROM " . blokes_hist_pagos_table() . " WHERE " . implode(' AND ', $where) . " ORDER BY fecha ASC";
+    $rows = $args ? $wpdb->get_results($wpdb->prepare($sql, $args), ARRAY_A) : $wpdb->get_results($sql, ARRAY_A);
+    $por_mes = array();
+    foreach ($rows as $r) {
+        $mes = substr($r['fecha'], 0, 7);
+        if (!isset($por_mes[$mes])) $por_mes[$mes] = array('alumnos' => array(), 'importe' => 0);
+        $clave = $r['telefono'] ?: $r['nombre'];
+        $por_mes[$mes]['alumnos'][$clave] = true;
+        $por_mes[$mes]['importe'] += floatval($r['importe']);
+    }
+    $out = array();
+    foreach ($por_mes as $mes => $d) { $out[$mes] = array('alumnos' => count($d['alumnos']), 'importe' => round($d['importe'], 2)); }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
 
 function blokes_contactos_table()      { global $wpdb; return $wpdb->prefix . 'blokes_contactos'; }
 function blokes_campanas_table()       { global $wpdb; return $wpdb->prefix . 'blokes_campanas'; }
