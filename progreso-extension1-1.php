@@ -4317,26 +4317,61 @@ function blokes_sync_grupos_es_numero($v) {
     return is_int($v) || is_float($v);
 }
 
+// Año de la temporada en curso AHORA (el curso de clases empieza en septiembre y acaba en
+// agosto del año siguiente).
+function blokes_sync_grupos_anio_actual_temporada() {
+    $anio = intval(current_time('Y'));
+    $mes  = intval(current_time('n'));
+    return $mes >= 9 ? $anio : $anio - 1;
+}
+
 // Cabeceras de mes reconocidas en la fila 2 (índice 1): [{col, mes, anio, ym}], col 0-indexada.
 // Cada pestaña tiene VARIAS temporadas seguidas en columnas (septiembre→agosto de 2023-24,
 // luego de 2024-25, de 2025-26...) y el nombre del mes se repite — sin año no se puede saber
-// cuál es el bloque de verdad (cowork, 1/11 07:55). El año de la primera temporada está en C2
-// (fila 2, columna C); cada ENERO que aparece suma uno (empieza la segunda mitad de esa
-// temporada). Las cabeceras con texto de más («ENERO 60€») se normalizan a su primera palabra.
+// cuál es el bloque de verdad. Las cabeceras con texto de más («ENERO 60€») se normalizan a su
+// primera palabra.
+//
+// Ancla cada bloque por su posición, NO por la celda C2 (cowork comprobó el 1/11 09:10 que C2
+// falta en algunas pestañas, o está mal, y el año sale disparatado o desplazado): el ÚLTIMO
+// SEPTIEMBRE de la fila es SIEMPRE la temporada que está en curso ahora mismo, y cada SEPTIEMBRE
+// anterior, yendo hacia la izquierda, es un año menos — da igual cuántas temporadas tenga la
+// pestaña o si falta el año en C2. Dentro de un bloque, ENERO..AGOSTO caen en el año siguiente al
+// de su SEPTIEMBRE (el curso que empieza en septiembre de un año acaba en agosto del siguiente).
 function blokes_sync_grupos_meses_cabecera($valores) {
     $meses = array(
         'ENERO' => 1, 'FEBRERO' => 2, 'MARZO' => 3, 'ABRIL' => 4, 'MAYO' => 5, 'JUNIO' => 6,
         'JULIO' => 7, 'AGOSTO' => 8, 'SEPTIEMBRE' => 9, 'OCTUBRE' => 10, 'NOVIEMBRE' => 11, 'DICIEMBRE' => 12,
     );
     $fila2 = $valores[1] ?? array();
-    $anio = intval($valores[1][2] ?? 0); // C2: año de la primera temporada (p. ej. 2023)
-    $out = array();
+    $detectadas = array();
     foreach ($fila2 as $idx => $v) {
         if (!is_string($v) || trim($v) === '') continue;
         $primera_palabra = mb_strtoupper(trim(preg_split('/\s+/', trim($v))[0]));
         if (!isset($meses[$primera_palabra])) continue;
-        if ($primera_palabra === 'ENERO') $anio++;
-        $out[] = array('col' => $idx, 'mes' => $primera_palabra, 'anio' => $anio, 'ym' => sprintf('%04d-%02d', $anio, $meses[$primera_palabra]));
+        $detectadas[] = array('col' => $idx, 'mes' => $primera_palabra);
+    }
+    if (!$detectadas) return array();
+
+    $indices_septiembre = array();
+    foreach ($detectadas as $i => $d) if ($d['mes'] === 'SEPTIEMBRE') $indices_septiembre[] = $i;
+
+    $anio_por_indice = array(); // índice en $detectadas de cada SEPTIEMBRE => año de ese bloque
+    if ($indices_septiembre) {
+        $anio_actual = blokes_sync_grupos_anio_actual_temporada();
+        $n = count($indices_septiembre);
+        foreach ($indices_septiembre as $pos => $i) $anio_por_indice[$i] = $anio_actual - ($n - 1 - $pos);
+    }
+
+    // Columnas antes del primer SEPTIEMBRE detectado (si las hay): son la cola de un bloque
+    // anterior que no tiene su propio SEPTIEMBRE en la hoja — se les asigna el año del primer
+    // bloque encontrado (que es lo mismo que les tocaría si ese bloque anterior existiera).
+    $anio_bloque = $indices_septiembre ? $anio_por_indice[$indices_septiembre[0]] : blokes_sync_grupos_anio_actual_temporada();
+
+    $out = array();
+    foreach ($detectadas as $i => $d) {
+        if (isset($anio_por_indice[$i])) $anio_bloque = $anio_por_indice[$i];
+        $anio = $meses[$d['mes']] <= 8 ? $anio_bloque + 1 : $anio_bloque;
+        $out[] = array('col' => $d['col'], 'mes' => $d['mes'], 'anio' => $anio, 'ym' => sprintf('%04d-%02d', $anio, $meses[$d['mes']]));
     }
     return $out;
 }
@@ -4468,10 +4503,10 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
             }
         }
 
-        $fila = array('nombre' => $nombre, 'telefono' => $tel, 'notas' => $notas, 'exento' => false, 'pagos' => array());
+        $fila = array('nombre' => $nombre, 'telefono' => $tel, 'notas' => $notas, 'exento' => false, 'exentoMeses' => array(), 'pagos' => array());
         foreach ($bloques as $b) {
             list($pago, $exento) = blokes_sync_grupos_leer_pago($valores, $r, $b['layout']);
-            if ($exento) $fila['exento'] = true;
+            if ($exento) { $fila['exento'] = true; $fila['exentoMeses'][] = $b['ym']; }
             if ($pago) $fila['pagos'][$b['ym']] = $pago; // 'YYYY-MM' real, no solo el nombre del mes (se repite cada temporada)
         }
         $filas[] = $fila;
@@ -4509,27 +4544,51 @@ function superadmin_sync_grupos_resumen($request) {
     $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($sheet_id, $pestanas);
     if (is_wp_error($valores_por_pestana)) return new WP_Error($valores_por_pestana->get_error_code(), $valores_por_pestana->get_error_message(), array('status' => 502));
 
-    $resumen = array(); $total_filas = 0; $total_con_pago = 0;
+    // Pestañas que no son un grupo de clase aunque tengan columnas con nombre de mes (cowork,
+    // 1/11 09:10): "Balance" es un resumen de caja, no una lista de alumnado.
+    $no_son_grupo = array('balance');
+
+    $resumen = array(); $total_filas = 0; $total_con_pago = 0; $total_por_mes = array();
     foreach ($pestanas as $tab) {
+        if (in_array(mb_strtolower(trim($tab)), $no_son_grupo, true)) continue;
         $r = blokes_sync_grupos_leer_pestana_filas($valores_por_pestana[$tab] ?? array());
         if (empty($r['bloques'])) continue;
-        $con_pago = 0; $exentos = 0;
+
+        $meses_detectados = array_values(array_unique($r['bloques']));
+        $meses_en_rango = array_values(array_filter($meses_detectados, $en_rango));
+        // Sin ningún mes dentro del rango pedido: esta pestaña no aporta nada a la comparación
+        // (otra temporada, un grupo que no dio clase esos meses) — fuera de los totales, para no
+        // inflar `totalFilas` con gente que no pertenece al periodo que se está comprobando
+        // (cowork, 1/11 09:10: 353 pestañas-filas contadas de más frente a los 262 esperados).
+        if (($desde || $hasta) && !$meses_en_rango) continue;
+
+        $con_pago = 0; $exentos = 0; $por_mes = array();
         foreach ($r['filas'] as $f) {
             $pago_en_rango = false;
-            foreach (array_keys($f['pagos']) as $ym) if ($en_rango($ym)) { $pago_en_rango = true; break; }
+            foreach ($f['pagos'] as $ym => $pago) {
+                if (!$en_rango($ym)) continue;
+                $pago_en_rango = true;
+                $por_mes[$ym] = ($por_mes[$ym] ?? 0) + 1;
+            }
             if ($pago_en_rango) $con_pago++;
-            if ($f['exento']) $exentos++;
+            // Exento solo cuenta si lo es en algún mes DENTRO del rango pedido — antes contaba
+            // si estaba exento en cualquier temporada, aunque fuera de hace años.
+            foreach ($f['exentoMeses'] as $ym) {
+                if ($en_rango($ym)) { $exentos++; break; }
+            }
         }
         $total_filas += count($r['filas']);
         $total_con_pago += $con_pago;
+        foreach ($por_mes as $ym => $n) $total_por_mes[$ym] = ($total_por_mes[$ym] ?? 0) + $n;
         $resumen[] = array(
             'pestana' => $tab, 'filas' => count($r['filas']), 'conPago' => $con_pago, 'exentos' => $exentos,
-            'mesesDetectados' => array_values(array_unique($r['bloques'])),
+            'conPagoPorMes' => $por_mes, 'mesesDetectados' => $meses_detectados,
         );
     }
 
     return rest_ensure_response(array('success' => true, 'data' => array(
-        'totalFilas' => $total_filas, 'totalConPago' => $total_con_pago, 'filtro' => array('desde' => $desde ?: null, 'hasta' => $hasta ?: null),
+        'totalFilas' => $total_filas, 'totalConPago' => $total_con_pago, 'totalConPagoPorMes' => $total_por_mes,
+        'filtro' => array('desde' => $desde ?: null, 'hasta' => $hasta ?: null),
         'pestanas' => $resumen,
     )));
 }
