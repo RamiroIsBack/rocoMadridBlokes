@@ -626,6 +626,9 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
         'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_week', 'permission_callback' => $equip_perm,
     ));
+    register_rest_route('progreso/v1', '/equipacion/assignments/(?P<id>\d+)', array(
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_assignment', 'permission_callback' => $equip_perm,
+    ));
 
     register_rest_route('progreso/v1', '/equipacion/today', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_today', 'permission_callback' => $equip_perm,
@@ -668,6 +671,12 @@ add_action('rest_api_init', function() {
     ));
     register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)', array(
         'methods' => 'PUT', 'callback' => 'progreso_equip_update_comp_block', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/generate-plan', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_competition_generate_plan', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/plan', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_competition_plan', 'permission_callback' => $equip_perm,
     ));
 
     register_rest_route('progreso/v1', '/training/me', array(
@@ -4747,6 +4756,19 @@ function blokes_club_day_fila($r) {
     );
 }
 
+// Fechas (YYYY-MM-DD → true) marcadas "cierra" en el calendario del club dentro de [desde,
+// hasta] (inclusive) — las usa Organización (Equipación) para no repartir tareas esos días,
+// igual que ya pasa con el fin de semana (NOTAS_PARA_CODE_calendario.md, 1/11).
+function blokes_club_days_cerrados($desde, $hasta) {
+    global $wpdb;
+    blokes_ensure_club_days_table();
+    $fechas = $wpdb->get_col($wpdb->prepare(
+        "SELECT fecha FROM " . blokes_club_days_table() . " WHERE decision = 'cierra' AND fecha BETWEEN %s AND %s",
+        $desde, $hasta
+    ));
+    return array_flip($fechas);
+}
+
 // POST /gestion/club-days — { fecha, tipo, nombre, horario? } — entrada manual (p. ej. un
 // cierre suelto que decide Ramiro, o un evento que no viene de Notion/9to5).
 function superadmin_club_days_crear($request) {
@@ -8285,6 +8307,7 @@ function progreso_equip_task_types() {
             'params' => array_values(array_filter(explode(',', $r['params']))),
             'lead_only' => (bool) $r['lead_only'],
             'periodicityWeeks' => intval($r['periodicity_weeks']),
+            'recurring' => (bool) $r['recurring'],
         );
     }, $rows);
 }
@@ -8336,7 +8359,13 @@ function progreso_equip_table($name) {
 
 function progreso_equip_ensure_tables() {
     global $wpdb;
-    $version = '5'; // v5: original_worker_id (a quién se le retrasó, no a quién la hereda)
+    // v6: is_test (semanas/compes de prueba, borrables del todo y fuera de la lista normal),
+    // assignments.work_days (día de trabajo editable por persona y semana, no solo el fijo del
+    // trabajador — vacaciones o cambios puntuales), competitions.comp_end_date (una compe dura
+    // varios días, no uno), task_types.recurring (0 = tarea de un proyecto puntual como una
+    // compe, nunca se propone sola cada semana) y tasks.competition_id (qué compe generó esta
+    // tarea, para poder borrar/filtrar su plan como un bloque).
+    $version = '6';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -8366,6 +8395,7 @@ function progreso_equip_ensure_tables() {
         subzones   varchar(50)         NOT NULL DEFAULT '',
         notes      text                NULL,
         archived   tinyint(1)          NOT NULL DEFAULT 0,
+        is_test    tinyint(1)          NOT NULL DEFAULT 0,
         created_at datetime            NOT NULL,
         PRIMARY KEY (id)
     ) {$charset};");
@@ -8377,6 +8407,7 @@ function progreso_equip_ensure_tables() {
         subzones   varchar(50)         NOT NULL DEFAULT '',
         blocks_min tinyint(3)          NOT NULL DEFAULT 1,
         blocks_max tinyint(3)          NOT NULL DEFAULT 2,
+        work_days  varchar(50)         NOT NULL DEFAULT '',
         status     varchar(20)         NOT NULL DEFAULT 'pendiente',
         PRIMARY KEY (id),
         KEY week_id (week_id),
@@ -8396,6 +8427,7 @@ function progreso_equip_ensure_tables() {
         postponed_count   tinyint(3)          NOT NULL DEFAULT 0,
         moved_to_task_id  bigint(20) UNSIGNED NULL,
         original_worker_id bigint(20) UNSIGNED NULL,
+        competition_id    bigint(20) UNSIGNED NULL,
         PRIMARY KEY (id),
         KEY assignment_id (assignment_id),
         KEY task_date (task_date)
@@ -8416,25 +8448,33 @@ function progreso_equip_ensure_tables() {
     ) {$charset};");
 
     dbDelta("CREATE TABLE " . progreso_equip_table('competitions') . " (
-        id         bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-        name       varchar(190)        NOT NULL,
-        comp_date  date                NOT NULL,
-        lead_weeks tinyint(3)          NOT NULL DEFAULT 3,
-        created_at datetime            NOT NULL,
+        id            bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        name          varchar(190)        NOT NULL,
+        comp_date     date                NOT NULL,
+        comp_end_date date                NULL,
+        lead_weeks    tinyint(3)          NOT NULL DEFAULT 3,
+        is_test       tinyint(1)          NOT NULL DEFAULT 0,
+        created_at    datetime            NOT NULL,
         PRIMARY KEY (id)
     ) {$charset};");
 
     // Posición en el mapa guardada como % (x_pct/y_pct, 0-100) para que
     // funcione con la imagen a cualquier tamaño de pantalla. NULL = todavía
-    // sin colocar en el mapa.
+    // sin colocar en el mapa. subzone/volumes/equipador/photo_url/tested son
+    // la "ficha de bloque de compe" (encargo Preparador de compes, 1/11).
     dbDelta("CREATE TABLE " . progreso_equip_table('comp_blocks') . " (
         id             bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         competition_id bigint(20) UNSIGNED NOT NULL,
         number         tinyint(3)          NOT NULL,
         x_pct          decimal(5,2)        NULL,
         y_pct          decimal(5,2)        NULL,
+        subzone        tinyint(3)          NULL,
         grade_color    varchar(20)         NOT NULL DEFAULT '',
         hold_set_ids   varchar(100)        NOT NULL DEFAULT '',
+        volumes        text                NOT NULL DEFAULT '',
+        equipador      varchar(60)         NOT NULL DEFAULT '',
+        photo_url      varchar(255)        NOT NULL DEFAULT '',
+        tested         tinyint(1)          NOT NULL DEFAULT 0,
         status         varchar(20)         NOT NULL DEFAULT 'planeado',
         PRIMARY KEY (id),
         KEY competition_id (competition_id)
@@ -8442,13 +8482,17 @@ function progreso_equip_ensure_tables() {
 
     // Catálogo de tareas en tabla propia (antes hardcoded) para que la
     // periodicidad se pueda ajustar sin tocar código: cada cuántas semanas
-    // toca esa tarea, independientemente de quién la haga.
+    // toca esa tarea, independientemente de quién la haga. `recurring = 0`
+    // son tareas de un proyecto puntual (p. ej. una compe): nunca se
+    // proponen solas al crear una semana normal, solo las crea el generador
+    // de plan de esa compe.
     dbDelta("CREATE TABLE " . progreso_equip_table('task_types') . " (
         id                varchar(40)  NOT NULL,
         name              varchar(190) NOT NULL,
         params            varchar(100) NOT NULL DEFAULT '',
         lead_only         tinyint(1)   NOT NULL DEFAULT 0,
         periodicity_weeks tinyint(3)   NOT NULL DEFAULT 1,
+        recurring         tinyint(1)   NOT NULL DEFAULT 1,
         sort_order        tinyint(3)   NOT NULL DEFAULT 0,
         PRIMARY KEY (id)
     ) {$charset};");
@@ -8456,6 +8500,7 @@ function progreso_equip_ensure_tables() {
     update_option('blokes_equip_tables_version', $version);
     progreso_equip_seed_if_empty();
     progreso_equip_seed_task_types_if_empty();
+    progreso_equip_seed_comp_task_types_if_missing();
 }
 
 // Semilla del catálogo de tareas — mismo orden de trabajo natural que
@@ -8486,6 +8531,44 @@ function progreso_equip_seed_task_types_if_empty() {
             'id' => $t['id'], 'name' => $t['name'], 'params' => implode(',', $t['params']),
             'lead_only' => !empty($t['lead_only']) ? 1 : 0, 'periodicity_weeks' => 1, 'sort_order' => $i,
         ), array('%s', '%s', '%s', '%d', '%d', '%d'));
+    }
+}
+
+// Tareas de una compe (encargo "Preparador de compes", 1/11): proyecto puntual, no
+// mantenimiento semanal — `recurring = 0` para que `progreso_equip_create_week()` nunca las
+// proponga solas en una semana normal. Solo las crea `progreso_equip_competition_generate_plan()`.
+// Se insertan una a una (no depende de que la tabla esté vacía) para no chocar con el catálogo
+// normal ya sembrado.
+function progreso_equip_seed_comp_task_types_if_missing() {
+    global $wpdb;
+    $table = progreso_equip_table('task_types');
+    $seed = array(
+        array('id' => 'comp_disenar_bloques', 'name' => 'Compe: diseñar los 16 bloques (zona, dificultad, presas, volúmenes)'),
+        array('id' => 'comp_revisar_material', 'name' => 'Compe: revisar presas y tornillería, pedir lo que falte'),
+        array('id' => 'comp_limpieza_presas', 'name' => 'Compe: limpieza de presas'),
+        array('id' => 'comp_puntuacion', 'name' => 'Compe: preparar hojas de puntuación / sistema de resultados'),
+        array('id' => 'comp_inscripciones', 'name' => 'Compe: inscripciones y categorías'),
+        array('id' => 'comp_desequipar_cueva', 'name' => 'Compe: desequipar — primero la Cueva'),
+        array('id' => 'comp_desequipar_resto', 'name' => 'Compe: desequipar — resto de zonas'),
+        array('id' => 'comp_equipar_bloques', 'name' => 'Compe: equipar los 16 bloques'),
+        array('id' => 'comp_numeracion', 'name' => 'Compe: numeración y cintas'),
+        array('id' => 'comp_foto_bloque', 'name' => 'Compe: foto de cada bloque'),
+        array('id' => 'comp_forerunning', 'name' => 'Compe: prueba de bloques (forerunning)'),
+        array('id' => 'comp_montaje_zona', 'name' => 'Compe: montaje de zona de público / música / premios'),
+        array('id' => 'comp_dia_abrir', 'name' => 'Compe: día de competición — abrir'),
+        array('id' => 'comp_dia_juzgar', 'name' => 'Compe: día de competición — juzgar / anotar'),
+        array('id' => 'comp_dia_cerrar', 'name' => 'Compe: día de competición — cerrar y resultados'),
+        array('id' => 'comp_desmontar', 'name' => 'Compe: desmontar'),
+        array('id' => 'comp_fotos_redes', 'name' => 'Compe: fotos y redes'),
+        array('id' => 'comp_resultados_web', 'name' => 'Compe: resultados en la web'),
+    );
+    foreach ($seed as $i => $t) {
+        $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$table} WHERE id = %s", $t['id']));
+        if ($existe) continue;
+        $wpdb->insert($table, array(
+            'id' => $t['id'], 'name' => $t['name'], 'params' => 'notas',
+            'lead_only' => 0, 'periodicity_weeks' => 1, 'recurring' => 0, 'sort_order' => 90 + $i,
+        ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d'));
     }
 }
 
@@ -8612,16 +8695,22 @@ function progreso_equip_delete_holdset($request) {
     return rest_ensure_response(array('success' => true));
 }
 
-function progreso_equip_get_weeks() {
+// Las semanas de prueba (`isTest`) no salen aquí por defecto — son las que usa cowork para
+// probar sin molestar al equipo real; con `?test=1` se ven solo esas, para gestionarlas.
+function progreso_equip_get_weeks($request = null) {
     global $wpdb;
     progreso_equip_ensure_tables();
     progreso_equip_sweep_overdue_into_current_week();
-    $rows = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('weeks') . " WHERE archived = 0 ORDER BY start_date DESC LIMIT 20", ARRAY_A);
+    $solo_prueba = $request ? (bool) $request->get_param('test') : false;
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . progreso_equip_table('weeks') . " WHERE archived = 0 AND is_test = %d ORDER BY start_date DESC LIMIT 20",
+        $solo_prueba ? 1 : 0
+    ), ARRAY_A);
     return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
         return array(
             'id' => intval($r['id']), 'startDate' => $r['start_date'],
             'subzones' => array_values(array_filter(array_map('intval', explode(',', $r['subzones'])))),
-            'notes' => $r['notes'],
+            'notes' => $r['notes'], 'isTest' => (bool) $r['is_test'],
         );
     }, $rows)));
 }
@@ -8742,7 +8831,7 @@ function progreso_equip_sweep_overdue_into_current_week() {
     if (!$pending) return;
 
     $assignments = $wpdb->get_results($wpdb->prepare(
-        "SELECT a.*, w.is_lead, w.work_days FROM {$assignments_table} a
+        "SELECT a.*, w.is_lead, w.work_days AS worker_work_days FROM {$assignments_table} a
          JOIN " . progreso_equip_table('workers') . " w ON w.id = a.worker_id
          WHERE a.week_id = %d", $week_id
     ), ARRAY_A);
@@ -8752,12 +8841,13 @@ function progreso_equip_sweep_overdue_into_current_week() {
     if (!$target) $target = $assignments[0];
 
     $day_offset = array('mon' => 0, 'tue' => 1, 'wed' => 2, 'thu' => 3, 'fri' => 4, 'sat' => 5, 'sun' => 6);
-    $work_days = array_filter(explode(',', $target['work_days']));
+    $cerrados = blokes_club_days_cerrados($week['start_date'], date('Y-m-d', strtotime($week['start_date']) + 6 * 86400));
+    $work_days = array_filter(explode(',', $target['work_days'] !== '' ? $target['work_days'] : $target['worker_work_days']));
     $dates = array();
     foreach ($work_days as $wd) {
         if (!isset($day_offset[$wd])) continue;
         $d = date('Y-m-d', strtotime($week['start_date']) + $day_offset[$wd] * 86400);
-        if ($d >= $today) $dates[] = $d;
+        if ($d >= $today && !isset($cerrados[$d])) $dates[] = $d;
     }
     sort($dates);
     if (empty($dates)) $dates[] = $today;
@@ -8823,17 +8913,22 @@ function progreso_equip_create_week($request) {
     if (!is_array($assignments_in) || empty($assignments_in)) {
         return new WP_Error('invalid_data', 'Falta al menos una asignación de trabajador.', array('status' => 400));
     }
+    $is_test = $request->get_param('isTest') ? 1 : 0;
 
     $wpdb->insert(progreso_equip_table('weeks'), array(
         'start_date' => $start_date, 'subzones' => implode(',', $subzones),
-        'notes' => $notes, 'created_at' => current_time('mysql'),
-    ), array('%s', '%s', '%s', '%s'));
+        'notes' => $notes, 'is_test' => $is_test, 'created_at' => current_time('mysql'),
+    ), array('%s', '%s', '%s', '%d', '%s'));
     $week_id = $wpdb->insert_id;
 
     $day_offset         = array('mon' => 0, 'tue' => 1, 'wed' => 2, 'thu' => 3, 'fri' => 4, 'sat' => 5, 'sun' => 6);
     $task_types         = progreso_equip_task_types(); // ya viene en orden natural (sort_order)
     $assignments_table  = progreso_equip_table('assignments');
     $tasks_table        = progreso_equip_table('tasks');
+    // Festivos/cierres decididos del calendario del club: esos días no se reparten tareas,
+    // igual que ya pasa con el fin de semana (cowork, nota de calendario — "días de trabajo
+    // editables... leyendo club_days: un festivo cierra no tiene tareas").
+    $cerrados = blokes_club_days_cerrados($start_date, date('Y-m-d', strtotime($start_date) + 6 * 86400));
 
     // 1. Una fila de asignación por trabajador + sus días reales de trabajo.
     $crew = array();
@@ -8849,19 +8944,25 @@ function progreso_equip_create_week($request) {
         $a_subzones = is_array($a['subzones'] ?? null) ? array_map('intval', $a['subzones']) : $subzones;
         $blocks_min = intval($a['blocksMin'] ?? $worker['blocks_min']);
         $blocks_max = intval($a['blocksMax'] ?? $worker['blocks_max']);
+        // Días de trabajo de ESTA semana: si se manda `workDays` en la asignación (vacaciones o
+        // un cambio puntual esa semana) se guarda y se usa en vez del fijo del trabajador.
+        $a_work_days_in = $a['workDays'] ?? null;
+        $work_days_override = is_array($a_work_days_in) ? implode(',', array_map('sanitize_text_field', $a_work_days_in)) : '';
 
         $wpdb->insert($assignments_table, array(
             'week_id' => $week_id, 'worker_id' => $worker_id, 'subzones' => implode(',', $a_subzones),
-            'blocks_min' => $blocks_min, 'blocks_max' => $blocks_max, 'status' => 'pendiente',
-        ), array('%d', '%d', '%s', '%d', '%d', '%s'));
+            'blocks_min' => $blocks_min, 'blocks_max' => $blocks_max, 'work_days' => $work_days_override, 'status' => 'pendiente',
+        ), array('%d', '%d', '%s', '%d', '%d', '%s', '%s'));
         $assignment_id = $wpdb->insert_id;
         $created_assignments[] = $assignment_id;
 
-        $work_days = array_filter(explode(',', $worker['work_days']));
+        $work_days = array_filter(explode(',', $work_days_override !== '' ? $work_days_override : $worker['work_days']));
         $dates = array();
         foreach ($work_days as $wd) {
             if (!isset($day_offset[$wd])) continue;
-            $dates[] = date('Y-m-d', strtotime($start_date) + $day_offset[$wd] * 86400);
+            $d = date('Y-m-d', strtotime($start_date) + $day_offset[$wd] * 86400);
+            if (isset($cerrados[$d])) continue; // festivo/cierre decidido: sin tareas ese día
+            $dates[] = $d;
         }
         sort($dates);
 
@@ -8944,6 +9045,7 @@ function progreso_equip_create_week($request) {
 
     $due_types = array();
     foreach ($task_types as $type) {
+        if (empty($type['recurring'])) continue; // tarea de proyecto puntual (compe): nunca se propone sola
         if (isset($rolled_type_ids[$type['id']])) continue;
         $weeks_n = max(1, intval($type['periodicityWeeks']));
         if ($weeks_n <= 1) { $due_types[] = $type; continue; }
@@ -9086,6 +9188,7 @@ function progreso_equip_get_week_detail($request) {
             'id' => $id, 'workerId' => intval($a['worker_id']), 'workerName' => $a['worker_name'], 'isLead' => (bool) $a['is_lead'],
             'subzones' => array_values(array_filter(array_map('intval', explode(',', $a['subzones'])))),
             'blocksMin' => intval($a['blocks_min']), 'blocksMax' => intval($a['blocks_max']), 'status' => $a['status'],
+            'workDays' => array_values(array_filter(explode(',', $a['work_days']))),
             'tasks' => $tasks_by_assignment[$id] ?? array(), 'blocks' => $blocks_by_assignment[$id] ?? array(),
         );
     }, $assignments);
@@ -9093,8 +9196,35 @@ function progreso_equip_get_week_detail($request) {
     return rest_ensure_response(array('success' => true, 'data' => array(
         'id' => intval($week['id']), 'startDate' => $week['start_date'],
         'subzones' => array_values(array_filter(array_map('intval', explode(',', $week['subzones'])))),
-        'notes' => $week['notes'], 'assignments' => $out_assignments,
+        'notes' => $week['notes'], 'isTest' => (bool) $week['is_test'], 'assignments' => $out_assignments,
     )));
+}
+
+// PUT /equipacion/assignments/{id} — cambiar los días de trabajo de ESTA semana (vacaciones o
+// un cambio puntual), sin tocar el valor por defecto del trabajador, más subzonas/objetivo.
+// Con `workDays: []` vuelve a usar el valor por defecto del trabajador (quita el cambio puntual).
+function progreso_equip_update_assignment($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('assignments') . " WHERE id = %d", $id));
+    if (!$existe) return new WP_Error('not_found', 'Asignación no encontrada.', array('status' => 404));
+
+    $upd = array(); $fmt = array();
+    if ($request->get_param('workDays') !== null) {
+        $wd = $request->get_param('workDays');
+        $upd['work_days'] = is_array($wd) ? implode(',', array_map('sanitize_text_field', $wd)) : '';
+        $fmt[] = '%s';
+    }
+    if ($request->get_param('subzones') !== null) {
+        $sz = $request->get_param('subzones');
+        $upd['subzones'] = is_array($sz) ? implode(',', array_map('intval', $sz)) : '';
+        $fmt[] = '%s';
+    }
+    if ($request->get_param('blocksMin') !== null) { $upd['blocks_min'] = intval($request->get_param('blocksMin')); $fmt[] = '%d'; }
+    if ($request->get_param('blocksMax') !== null) { $upd['blocks_max'] = intval($request->get_param('blocksMax')); $fmt[] = '%d'; }
+    if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    $wpdb->update(progreso_equip_table('assignments'), $upd, array('id' => $id), $fmt, array('%d'));
+    return rest_ensure_response(array('success' => true));
 }
 
 // Borrar semana: si no tiene nada hecho ni ningún bloque, se borra de
@@ -9102,11 +9232,17 @@ function progreso_equip_get_week_detail($request) {
 // se pierde el histórico: se archiva (desaparece de la lista principal,
 // queda en "Histórico") y sus tareas sin hacer se tratan como cualquier
 // tarea de una semana vieja — las recoge progreso_equip_create_week la
-// próxima vez que se cree una semana.
+// próxima vez que se cree una semana. Las semanas de prueba (`isTest`) se
+// borran siempre de verdad, aunque tengan hechas/retrasadas — cowork
+// (1/11) las necesita para poder probar sin dejar residuos en producción.
 function progreso_equip_delete_week($request) {
     global $wpdb;
     $week_id = intval($request['id']);
     $force = (bool) $request->get_param('force'); // borrado forzado (limpieza manual de semanas de prueba)
+    $is_test = (bool) $wpdb->get_var($wpdb->prepare(
+        "SELECT is_test FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $week_id
+    ));
+    if ($is_test) $force = true;
     $tasks_table = progreso_equip_table('tasks');
     $assignment_ids = $wpdb->get_col($wpdb->prepare(
         "SELECT id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d", $week_id
@@ -9402,17 +9538,25 @@ function progreso_equip_delete_block($request) {
 // adicionales las va dando el usuario sobre la marcha).
 const PROGRESO_EQUIP_COMP_BLOCK_COUNT = 16;
 
-function progreso_equip_get_competitions() {
+// Las de prueba (`isTest`) no salen aquí por defecto, igual que las semanas de prueba.
+function progreso_equip_get_competitions($request = null) {
     global $wpdb;
     progreso_equip_ensure_tables();
-    $rows = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('competitions') . " ORDER BY comp_date DESC", ARRAY_A);
-    return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
-        return array(
-            'id' => intval($r['id']), 'name' => $r['name'], 'compDate' => $r['comp_date'],
-            'leadWeeks' => intval($r['lead_weeks']),
-            'tasksStartDate' => date('Y-m-d', strtotime($r['comp_date']) - intval($r['lead_weeks']) * 7 * 86400),
-        );
-    }, $rows)));
+    $solo_prueba = $request ? (bool) $request->get_param('test') : false;
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . progreso_equip_table('competitions') . " WHERE is_test = %d ORDER BY comp_date DESC",
+        $solo_prueba ? 1 : 0
+    ), ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array_map('progreso_equip_competition_fila', $rows)));
+}
+
+function progreso_equip_competition_fila($r) {
+    return array(
+        'id' => intval($r['id']), 'name' => $r['name'], 'compDate' => $r['comp_date'],
+        'compEndDate' => $r['comp_end_date'] ?: $r['comp_date'],
+        'leadWeeks' => intval($r['lead_weeks']), 'isTest' => (bool) $r['is_test'],
+        'tasksStartDate' => date('Y-m-d', strtotime($r['comp_date']) - intval($r['lead_weeks']) * 7 * 86400),
+    );
 }
 
 function progreso_equip_create_competition($request) {
@@ -9423,14 +9567,19 @@ function progreso_equip_create_competition($request) {
     if (!$comp_date || !strtotime($comp_date)) {
         return new WP_Error('invalid_data', 'Falta la fecha de la competición.', array('status' => 400));
     }
+    $comp_date = date('Y-m-d', strtotime($comp_date));
+    $comp_end_date_in = sanitize_text_field((string) $request->get_param('compEndDate'));
+    $comp_end_date = ($comp_end_date_in && strtotime($comp_end_date_in) >= strtotime($comp_date))
+        ? date('Y-m-d', strtotime($comp_end_date_in)) : $comp_date;
     $lead_weeks = intval($request->get_param('leadWeeks')) ?: 3;
+    $is_test = $request->get_param('isTest') ? 1 : 0;
 
     $wpdb->insert(progreso_equip_table('competitions'), array(
         'name' => sanitize_text_field($name),
-        'comp_date' => date('Y-m-d', strtotime($comp_date)),
-        'lead_weeks' => $lead_weeks,
+        'comp_date' => $comp_date, 'comp_end_date' => $comp_end_date,
+        'lead_weeks' => $lead_weeks, 'is_test' => $is_test,
         'created_at' => current_time('mysql'),
-    ), array('%s', '%s', '%d', '%s'));
+    ), array('%s', '%s', '%s', '%d', '%d', '%s'));
     $comp_id = $wpdb->insert_id;
 
     // 16 burbujas numeradas, sin colocar todavía — se arrastran al mapa.
@@ -9453,21 +9602,21 @@ function progreso_equip_get_competition_detail($request) {
         "SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $id
     ), ARRAY_A);
 
-    return rest_ensure_response(array('success' => true, 'data' => array(
-        'id' => intval($comp['id']), 'name' => $comp['name'], 'compDate' => $comp['comp_date'],
-        'leadWeeks' => intval($comp['lead_weeks']),
-        'tasksStartDate' => date('Y-m-d', strtotime($comp['comp_date']) - intval($comp['lead_weeks']) * 7 * 86400),
-        'blocks' => array_map(function($b) {
-            return array(
-                'id' => intval($b['id']), 'number' => intval($b['number']),
-                'xPct' => $b['x_pct'] !== null ? floatval($b['x_pct']) : null,
-                'yPct' => $b['y_pct'] !== null ? floatval($b['y_pct']) : null,
-                'grade' => $b['grade_color'],
-                'holdSetIds' => array_values(array_filter(array_map('intval', explode(',', $b['hold_set_ids'])))),
-                'status' => $b['status'],
-            );
-        }, $blocks),
-    )));
+    $data = progreso_equip_competition_fila($comp);
+    $data['blocks'] = array_map(function($b) {
+        return array(
+            'id' => intval($b['id']), 'number' => intval($b['number']),
+            'xPct' => $b['x_pct'] !== null ? floatval($b['x_pct']) : null,
+            'yPct' => $b['y_pct'] !== null ? floatval($b['y_pct']) : null,
+            'subzone' => $b['subzone'] !== null ? intval($b['subzone']) : null,
+            'grade' => $b['grade_color'],
+            'holdSetIds' => array_values(array_filter(array_map('intval', explode(',', $b['hold_set_ids'])))),
+            'volumes' => $b['volumes'], 'equipador' => $b['equipador'],
+            'photoUrl' => $b['photo_url'], 'tested' => (bool) $b['tested'],
+            'status' => $b['status'],
+        );
+    }, $blocks);
+    return rest_ensure_response(array('success' => true, 'data' => $data));
 }
 
 function progreso_equip_update_competition($request) {
@@ -9476,15 +9625,19 @@ function progreso_equip_update_competition($request) {
     $upd = array(); $fmt = array();
     if ($request->get_param('name') !== null)      { $upd['name']      = sanitize_text_field($request->get_param('name'));             $fmt[] = '%s'; }
     if ($request->get_param('compDate') !== null)  { $upd['comp_date'] = date('Y-m-d', strtotime($request->get_param('compDate')));     $fmt[] = '%s'; }
+    if ($request->get_param('compEndDate') !== null) { $upd['comp_end_date'] = date('Y-m-d', strtotime($request->get_param('compEndDate'))); $fmt[] = '%s'; }
     if ($request->get_param('leadWeeks') !== null)  { $upd['lead_weeks'] = intval($request->get_param('leadWeeks'));                     $fmt[] = '%d'; }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     $wpdb->update(progreso_equip_table('competitions'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
 }
 
+// Borra también las tareas que hubiera generado el plan de esta compe (si lo hubo), para no
+// dejar huérfanas tareas "Compe: ..." sin ninguna competición a la que pertenezcan.
 function progreso_equip_delete_competition($request) {
     global $wpdb;
     $id = intval($request['id']);
+    $wpdb->delete(progreso_equip_table('tasks'), array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('comp_blocks'), array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('competitions'), array('id' => $id), array('%d'));
     return rest_ensure_response(array('success' => true));
@@ -9501,6 +9654,11 @@ function progreso_equip_update_comp_block($request) {
         ));
         return rest_ensure_response(array('success' => true));
     }
+    if ($request->get_param('subzone') !== null) { $upd['subzone'] = intval($request->get_param('subzone')); $fmt[] = '%d'; }
+    if ($request->get_param('volumes') !== null) { $upd['volumes'] = sanitize_textarea_field((string) $request->get_param('volumes')); $fmt[] = '%s'; }
+    if ($request->get_param('equipador') !== null) { $upd['equipador'] = sanitize_text_field((string) $request->get_param('equipador')); $fmt[] = '%s'; }
+    if ($request->get_param('photoUrl') !== null) { $upd['photo_url'] = sanitize_text_field((string) $request->get_param('photoUrl')); $fmt[] = '%s'; }
+    if ($request->get_param('tested') !== null) { $upd['tested'] = $request->get_param('tested') ? 1 : 0; $fmt[] = '%d'; }
     if ($request->get_param('xPct') !== null) { $upd['x_pct'] = floatval($request->get_param('xPct')); $fmt[] = '%f'; }
     if ($request->get_param('yPct') !== null) { $upd['y_pct'] = floatval($request->get_param('yPct')); $fmt[] = '%f'; }
     if ($request->get_param('grade') !== null) { $upd['grade_color'] = sanitize_text_field($request->get_param('grade')); $fmt[] = '%s'; }
@@ -9513,6 +9671,166 @@ function progreso_equip_update_comp_block($request) {
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     $wpdb->update(progreso_equip_table('comp_blocks'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
+}
+
+function progreso_equip_monday_of($date) {
+    $ts = strtotime($date);
+    $dow = (int) date('N', $ts); // ISO: 1 = lunes .. 7 = domingo
+    return date('Y-m-d', $ts - ($dow - 1) * 86400);
+}
+
+function progreso_equip_dia_cerrado($fecha) {
+    $set = blokes_club_days_cerrados($fecha, $fecha);
+    return isset($set[$fecha]);
+}
+
+// Asegura que exista una semana de Organización para ese lunes, con una asignación del
+// responsable — si la semana ya existe (de mantenimiento normal u otra fase del mismo plan),
+// se reutiliza. OJO: esto NO reparte las tareas de mantenimiento semanal normal para esa
+// semana (eso solo lo hace progreso_equip_create_week) — si esa semana también necesita
+// mantenimiento normal, de momento hay que crearlo o repartirlo a mano.
+function progreso_equip_ensure_week_for_lead($monday, $lead, &$warnings) {
+    global $wpdb;
+    $week_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('weeks') . " WHERE start_date = %s", $monday
+    ));
+    if (!$week_id) {
+        $wpdb->insert(progreso_equip_table('weeks'), array(
+            'start_date' => $monday, 'subzones' => '', 'notes' => 'Generada por el plan de una competición.',
+            'is_test' => 0, 'created_at' => current_time('mysql'),
+        ), array('%s', '%s', '%s', '%d', '%s'));
+        $week_id = $wpdb->insert_id;
+        $warnings[] = "Semana del {$monday} creada para el plan de la competición.";
+    }
+    $assignment_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d AND worker_id = %d",
+        intval($week_id), intval($lead['id'])
+    ));
+    if (!$assignment_id) {
+        $wpdb->insert(progreso_equip_table('assignments'), array(
+            'week_id' => intval($week_id), 'worker_id' => intval($lead['id']), 'subzones' => '', 'status' => 'pendiente',
+        ), array('%d', '%d', '%s', '%s'));
+        $assignment_id = $wpdb->insert_id;
+    }
+    return array(intval($week_id), intval($assignment_id));
+}
+
+function progreso_equip_insert_comp_task($assignment_id, $task_type_id, $date, $competition_id) {
+    global $wpdb;
+    $wpdb->insert(progreso_equip_table('tasks'), array(
+        'assignment_id' => $assignment_id, 'task_type_id' => $task_type_id, 'task_date' => $date,
+        'params' => wp_json_encode(array()), 'done' => 0, 'status' => 'pendiente',
+        'original_date' => $date, 'competition_id' => $competition_id,
+    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d'));
+}
+
+// POST /equipacion/competitions/{id}/generate-plan — plan inverso automático (encargo
+// "Preparador de compes", Ramiro 1/11): diseño/material, limpieza/inscripciones, desequipar
+// (Cueva primero, resto desde el miércoles) y equipar la semana antes, los días de la propia
+// compe, y el cierre después — todo a Álvaro (responsable), que lo reparte arrastrando como el
+// resto de Organización. Respeta `club_days` (un festivo "cierra" no lleva tareas) y no manda
+// nada a nadie fuera del equipo. Si ya había un plan generado, se borra y se vuelve a crear
+// (no duplica si se pulsa dos veces).
+function progreso_equip_competition_generate_plan($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $id = intval($request['id']);
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $id), ARRAY_A);
+    if (!$comp) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+
+    $lead = $wpdb->get_row("SELECT * FROM " . progreso_equip_table('workers') . " WHERE is_lead = 1 AND active = 1 ORDER BY id ASC LIMIT 1", ARRAY_A);
+    if (!$lead) return new WP_Error('no_lead', 'No hay ningún responsable (is_lead) activo configurado en Equipación.', array('status' => 400));
+
+    $wpdb->delete(progreso_equip_table('tasks'), array('competition_id' => $id), array('%d'));
+
+    $today = current_time('Y-m-d');
+    $comp_date = $comp['comp_date'];
+    $comp_end = $comp['comp_end_date'] ?: $comp_date;
+    $comp_monday = progreso_equip_monday_of($comp_date);
+    $s0_monday = date('Y-m-d', strtotime($comp_monday) - 7 * 86400);
+    $s2_monday = date('Y-m-d', strtotime($s0_monday) - 14 * 86400);
+    $s3_monday = date('Y-m-d', strtotime($s0_monday) - 21 * 86400);
+    $after_monday = date('Y-m-d', strtotime($comp_monday) + 7 * 86400);
+    // Si la semana de diseño ya ha pasado (no queda runway desde hoy), se junta con la de
+    // limpieza/inscripciones en vez de crear tareas ya vencidas desde el primer día.
+    $diseno_monday = (strtotime($s3_monday) < strtotime($today)) ? $s2_monday : $s3_monday;
+
+    $fases = array();
+    if ($diseno_monday === $s2_monday) {
+        $fases[] = array('monday' => $diseno_monday, 'tipos' => array('comp_disenar_bloques', 'comp_revisar_material', 'comp_limpieza_presas', 'comp_puntuacion', 'comp_inscripciones'));
+    } else {
+        $fases[] = array('monday' => $diseno_monday, 'tipos' => array('comp_disenar_bloques', 'comp_revisar_material'));
+        $fases[] = array('monday' => $s2_monday, 'tipos' => array('comp_limpieza_presas', 'comp_puntuacion', 'comp_inscripciones'));
+    }
+    // Semana antes de la compe: lunes/martes desequipar la Cueva, miércoles en adelante el
+    // resto (y seguir equipando) — mismo reparto que la directriz real de Ramiro para esta
+    // compe (Cueva primero, resto desde el día del evento a mitad de semana).
+    $fases[] = array('monday' => $s0_monday, 'dias' => array(0, 1), 'tipos' => array('comp_desequipar_cueva'));
+    $fases[] = array('monday' => $s0_monday, 'dias' => array(2, 3, 4), 'tipos' => array('comp_desequipar_resto', 'comp_equipar_bloques', 'comp_numeracion', 'comp_foto_bloque', 'comp_forerunning', 'comp_montaje_zona'));
+    $fases[] = array('monday' => $comp_monday, 'rango' => array($comp_date, $comp_end), 'tipos' => array('comp_dia_abrir', 'comp_dia_juzgar', 'comp_dia_cerrar'));
+    $fases[] = array('monday' => $after_monday, 'tipos' => array('comp_desmontar', 'comp_fotos_redes', 'comp_resultados_web'));
+
+    $warnings = array();
+    $creadas = 0;
+    foreach ($fases as $fase) {
+        list($week_id, $assignment_id) = progreso_equip_ensure_week_for_lead($fase['monday'], $lead, $warnings);
+
+        if (isset($fase['rango'])) {
+            $d = $fase['rango'][0];
+            while (strtotime($d) <= strtotime($fase['rango'][1])) {
+                if (!progreso_equip_dia_cerrado($d)) {
+                    foreach ($fase['tipos'] as $tipo) { progreso_equip_insert_comp_task($assignment_id, $tipo, $d, $id); $creadas++; }
+                } else {
+                    $warnings[] = "{$d} está marcado como cierre en el calendario del club: sin tareas de compe ese día.";
+                }
+                $d = date('Y-m-d', strtotime($d) + 86400);
+            }
+            continue;
+        }
+
+        $offsets = $fase['dias'] ?? range(0, 4); // lun-vie por defecto
+        $fechas = array();
+        foreach ($offsets as $offset) {
+            $d = date('Y-m-d', strtotime($fase['monday']) + $offset * 86400);
+            if (!progreso_equip_dia_cerrado($d)) $fechas[] = $d;
+        }
+        if (empty($fechas)) { $fechas[] = $fase['monday']; $warnings[] = "Semana del {$fase['monday']}: todos sus días estaban cerrados, se usó el lunes igualmente."; }
+        $n = count($fechas);
+        foreach ($fase['tipos'] as $i => $tipo) { progreso_equip_insert_comp_task($assignment_id, $tipo, $fechas[$i % $n], $id); $creadas++; }
+    }
+
+    return rest_ensure_response(array('success' => true, 'tasksCreated' => $creadas, 'warnings' => $warnings));
+}
+
+// GET /equipacion/competitions/{id}/plan — el plan generado, para "Mi parte" (cada persona
+// filtra lo suyo por workerId) y el tablero de Álvaro (% hecho, retrasado en rojo).
+function progreso_equip_get_competition_plan($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $tasks = $wpdb->get_results($wpdb->prepare(
+        "SELECT t.*, a.worker_id, w.name as worker_name, wk.start_date as week_start FROM " . progreso_equip_table('tasks') . " t
+         JOIN " . progreso_equip_table('assignments') . " a ON a.id = t.assignment_id
+         JOIN " . progreso_equip_table('workers') . " w ON w.id = a.worker_id
+         JOIN " . progreso_equip_table('weeks') . " wk ON wk.id = a.week_id
+         WHERE t.competition_id = %d ORDER BY t.task_date ASC, t.id ASC", $id
+    ), ARRAY_A);
+    $today = current_time('Y-m-d');
+    $hechas = 0; $retrasadas = 0;
+    $out = array();
+    foreach ($tasks as $t) {
+        if ($t['done']) $hechas++;
+        elseif (strtotime($t['task_date']) < strtotime($today)) $retrasadas++;
+        $out[] = array(
+            'id' => intval($t['id']), 'taskTypeId' => $t['task_type_id'], 'date' => $t['task_date'],
+            'weekStart' => $t['week_start'], 'workerId' => intval($t['worker_id']), 'workerName' => $t['worker_name'],
+            'done' => (bool) $t['done'], 'assignmentId' => intval($t['assignment_id']),
+        );
+    }
+    $total = count($tasks);
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'tasks' => $out, 'total' => $total, 'hechas' => $hechas, 'retrasadas' => $retrasadas,
+        'pctHecho' => $total ? round($hechas / $total * 100) : 0,
+    )));
 }
 
 // ============================================================

@@ -132,6 +132,8 @@
 }
 .org__add-row { display: flex; flex-direction: column; gap: 4px; }
 .org__add-row label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-secondary); }
+.org__add-row--check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+.org__add-row--check span { font-size: 0.82rem; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--color-text-primary); }
 .org__add-row select, .org__add-row input[type="date"] {
   padding: 8px; border: 1.5px solid #c8bc9a; background: #fff; font-size: 0.9rem;
 }

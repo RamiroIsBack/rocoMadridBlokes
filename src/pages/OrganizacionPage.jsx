@@ -98,7 +98,7 @@ export default function OrganizacionPage() {
       )}
       {view === 'semana' && <SemanaView config={config} workers={workers} onWorkersChanged={reloadWorkers} />}
       {view === 'normas' && <NormasView config={config} onConfigChanged={reloadConfig} />}
-      {view === 'compe' && <CompeView />}
+      {view === 'compe' && <CompeView config={config} workers={workers} />}
     </div>
   )
 }
@@ -318,10 +318,13 @@ function SemanaView({ config, workers, onWorkersChanged }) {
   const [showCreate, setShowCreate] = useState(false)
   const [showWorkers, setShowWorkers] = useState(false)
   const [showHistorico, setShowHistorico] = useState(false)
+  // Las semanas de prueba no salen en la lista normal del equipo (cowork las necesita para
+  // probar sin dejar residuos) — este botón las enseña aparte para poder gestionarlas.
+  const [showTest, setShowTest] = useState(false)
 
   const reloadWeeks = useCallback(() => {
-    api('GET', '/equipacion/weeks').then(r => setWeeks(r.data || [])).catch(() => {})
-  }, [])
+    api('GET', `/equipacion/weeks${showTest ? '?test=1' : ''}`).then(r => setWeeks(r.data || [])).catch(() => {})
+  }, [showTest])
   useEffect(() => { reloadWeeks() }, [reloadWeeks])
 
   const openWeek = id => api('GET', `/equipacion/weeks/${id}`).then(r => setDetail(r.data)).catch(() => {})
@@ -356,6 +359,13 @@ function SemanaView({ config, workers, onWorkersChanged }) {
     try { await api('POST', `/equipacion/tasks/${taskId}/postpone`) } catch {}
     await openWeek(detail.id)
     setPostponing(null)
+  }
+
+  const [editingDaysFor, setEditingDaysFor] = useState(null)
+  const saveAssignmentDays = async (assignmentId, days) => {
+    try { await api('PUT', `/equipacion/assignments/${assignmentId}`, { workDays: days }) } catch (e) { window.alert(e.message); return }
+    setEditingDaysFor(null)
+    await openWeek(detail.id)
   }
 
   const deleteWeek = async () => {
@@ -427,7 +437,8 @@ function SemanaView({ config, workers, onWorkersChanged }) {
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
           {detail.assignments.map(a => {
             const worker = workerById[a.workerId]
-            const workerDates = (worker?.workDays || []).map(d => addDays(detail.startDate, DAY_OFFSET[d]))
+            const effectiveDays = a.workDays?.length ? a.workDays : (worker?.workDays || [])
+            const workerDates = effectiveDays.map(d => addDays(detail.startDate, DAY_OFFSET[d]))
             const taskDates = a.tasks.map(t => t.date)
             const allDates = Array.from(new Set([...workerDates, ...taskDates])).sort()
             return (
@@ -437,7 +448,23 @@ function SemanaView({ config, workers, onWorkersChanged }) {
                 data-assignment-id={a.id}
               >
                 <p className="org__board-col-title">{a.workerName}{a.isLead ? ' · responsable' : ''}</p>
-                <p className="org__board-col-meta">subzonas {a.subzones.map(s => `#${s}`).join(', ')} · bloques {a.blocksMin}-{a.blocksMax}</p>
+                <p className="org__board-col-meta">
+                  subzonas {a.subzones.map(s => `#${s}`).join(', ')} · bloques {a.blocksMin}-{a.blocksMax}
+                  {a.workDays?.length > 0 && <> · días cambiados esta semana</>}
+                  {' '}<button className="org__link-btn" onClick={() => setEditingDaysFor(cur => cur === a.id ? null : a.id)}>editar días</button>
+                </p>
+                {editingDaysFor === a.id && (
+                  <div className="org__holdset-chips">
+                    {ALL_WEEK_DAYS.map(d => (
+                      <button
+                        key={d} type="button"
+                        className={`org__holdset-chip${effectiveDays.includes(d) ? ' org__holdset-chip--on' : ''}`}
+                        onClick={() => saveAssignmentDays(a.id, effectiveDays.includes(d) ? effectiveDays.filter(x => x !== d) : [...effectiveDays, d])}
+                      >{DAY_LABEL[d]}</button>
+                    ))}
+                    <button className="org__link-btn" onClick={() => saveAssignmentDays(a.id, [])}>usar lo de siempre</button>
+                  </div>
+                )}
                 {allDates.map(date => {
                   const tasksOnDate = a.tasks.filter(t => t.date === date)
                   return (
@@ -483,6 +510,9 @@ function SemanaView({ config, workers, onWorkersChanged }) {
         </button>
         <button className="org__link-btn" onClick={() => setShowHistorico(s => !s)}>
           {showHistorico ? 'Ocultar histórico' : 'Ver histórico'}
+        </button>
+        <button className="org__link-btn" onClick={() => setShowTest(s => !s)}>
+          {showTest ? 'Ver semanas normales' : 'Ver semanas de prueba'}
         </button>
       </div>
       {showWorkers && <WorkersAdmin workers={workers} onChanged={onWorkersChanged} />}
@@ -622,15 +652,27 @@ function WorkersAdmin({ workers, onChanged }) {
   )
 }
 
+const ALL_WEEK_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+
 function CreateWeekForm({ config, workers, onDone, onCancel }) {
   const [startDate, setStartDate] = useState(mondayOf(todayStr()))
   const [subzones, setSubzones] = useState([])
   const [included, setIncluded] = useState({})
+  const [isTest, setIsTest] = useState(false)
+  // Días de trabajo de ESTA semana por persona: vacío = usar el fijo del trabajador.
+  // Vacaciones o un cambio puntual se marcan aquí sin tocar su valor por defecto.
+  const [workDaysOverride, setWorkDaysOverride] = useState({})
+  const [editingDays, setEditingDays] = useState(null)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
 
   const toggleSubzone = s => setSubzones(cur => cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s])
   const chosenWorkers = workers.filter(w => included[w.id])
+  const toggleDayOverride = (workerId, day) => setWorkDaysOverride(cur => {
+    const current = cur[workerId] ?? workers.find(w => w.id === workerId)?.workDays ?? []
+    const next = current.includes(day) ? current.filter(d => d !== day) : [...current, day]
+    return { ...cur, [workerId]: next }
+  })
 
   const submit = async () => {
     if (saving) return
@@ -638,10 +680,11 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
     try {
       const assignments = chosenWorkers.map(w => ({
         workerId: w.id, subzones, blocksMin: w.blocksMin, blocksMax: w.blocksMax,
+        ...(workDaysOverride[w.id] ? { workDays: workDaysOverride[w.id] } : {}),
       }))
       if (!subzones.length) throw new Error('Elige al menos una subzona')
       if (!assignments.length) throw new Error('Elige al menos un trabajador')
-      const res = await api('POST', '/equipacion/weeks', { startDate, subzones, assignments })
+      const res = await api('POST', '/equipacion/weeks', { startDate, subzones, assignments, isTest })
       if (res.warnings?.length) window.alert(res.warnings.join('\n'))
       onDone()
     } catch (e) {
@@ -672,10 +715,37 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
               key={w.id} type="button"
               className={`org__holdset-chip${included[w.id] ? ' org__holdset-chip--on' : ''}`}
               onClick={() => setIncluded(cur => ({ ...cur, [w.id]: !cur[w.id] }))}
-            >{w.name} ({w.workDays.map(d => DAY_LABEL[d]).join('/')})</button>
+            >{w.name} ({(workDaysOverride[w.id] || w.workDays).map(d => DAY_LABEL[d]).join('/')})</button>
           ))}
         </div>
       </div>
+      {chosenWorkers.length > 0 && (
+        <div className="org__add-row org__add-row--holdsets">
+          <label>Días esta semana <span className="org__hint">(vacaciones o un cambio puntual, sin tocar lo de siempre)</span></label>
+          <div className="org__holdset-chips">
+            {chosenWorkers.map(w => (
+              <button key={w.id} type="button" className="org__link-btn" onClick={() => setEditingDays(cur => cur === w.id ? null : w.id)}>
+                {w.name}: editar días
+              </button>
+            ))}
+          </div>
+          {editingDays != null && (
+            <div className="org__holdset-chips">
+              {ALL_WEEK_DAYS.map(d => (
+                <button
+                  key={d} type="button"
+                  className={`org__holdset-chip${(workDaysOverride[editingDays] ?? workers.find(w => w.id === editingDays)?.workDays ?? []).includes(d) ? ' org__holdset-chip--on' : ''}`}
+                  onClick={() => toggleDayOverride(editingDays, d)}
+                >{DAY_LABEL[d]}</button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <label className="org__add-row org__add-row--check">
+        <input type="checkbox" checked={isTest} onChange={e => setIsTest(e.target.checked)} />
+        <span>Semana de prueba (no sale en la lista normal del equipo; se puede borrar del todo aunque tenga algo hecho)</span>
+      </label>
       {error && <p className="org__error">{error}</p>}
       <p className="org__hint">
         {chosenWorkers.length === 0
@@ -802,7 +872,7 @@ function NormasView({ config, onConfigChanged }) {
 // Organización de una competición: fecha, semanas de antelación para las
 // tareas de equipación, y dónde va cada uno de los 16 bloques en el mapa.
 // Más reglas (categorías, puntuación...) se añaden sobre la marcha.
-function CompeView() {
+function CompeView({ config, workers }) {
   const [competitions, setCompetitions] = useState([])
   const [current, setCurrent] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -818,7 +888,7 @@ function CompeView() {
   if (current) {
     return (
       <CompeMapEditor
-        comp={current}
+        comp={current} config={config} workers={workers}
         onBack={() => { setCurrent(null); reload() }}
         onRefresh={() => openComp(current.id)}
       />
@@ -839,7 +909,7 @@ function CompeView() {
       <ul className="org__week-list">
         {competitions.map(c => (
           <li key={c.id} className="org__week-row" onClick={() => openComp(c.id)}>
-            <span>{c.name} — {c.compDate}</span>
+            <span>{c.name} — {c.compDate}{c.compEndDate !== c.compDate ? ` al ${c.compEndDate}` : ''}{c.isTest ? ' (prueba)' : ''}</span>
             <span className="org__week-subzones">tareas desde {c.tasksStartDate}</span>
           </li>
         ))}
@@ -852,14 +922,16 @@ function CompeView() {
 function CreateCompForm({ onDone, onCancel }) {
   const [name, setName] = useState('Competición')
   const [compDate, setCompDate] = useState('2026-11-30')
+  const [compEndDate, setCompEndDate] = useState('2026-12-04')
   const [leadWeeks, setLeadWeeks] = useState(3)
+  const [isTest, setIsTest] = useState(false)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
 
   const submit = async () => {
     setSaving(true); setError(null)
     try {
-      const res = await api('POST', '/equipacion/competitions', { name, compDate, leadWeeks })
+      const res = await api('POST', '/equipacion/competitions', { name, compDate, compEndDate, leadWeeks, isTest })
       onDone(res.id)
     } catch (e) {
       setError(e.message)
@@ -871,8 +943,13 @@ function CreateCompForm({ onDone, onCancel }) {
   return (
     <div className="org__add-form">
       <div className="org__add-row"><label>Nombre</label><input type="text" value={name} onChange={e => setName(e.target.value)} /></div>
-      <div className="org__add-row"><label>Fecha de la competición</label><input type="date" value={compDate} onChange={e => setCompDate(e.target.value)} /></div>
+      <div className="org__add-row"><label>Empieza</label><input type="date" value={compDate} onChange={e => setCompDate(e.target.value)} /></div>
+      <div className="org__add-row"><label>Termina</label><input type="date" value={compEndDate} min={compDate} onChange={e => setCompEndDate(e.target.value)} /></div>
       <div className="org__add-row"><label>Semanas de antelación para las tareas</label><input type="number" min="1" max="12" value={leadWeeks} onChange={e => setLeadWeeks(Number(e.target.value))} /></div>
+      <label className="org__add-row org__add-row--check">
+        <input type="checkbox" checked={isTest} onChange={e => setIsTest(e.target.checked)} />
+        <span>Competición de prueba (no sale en la lista normal; se puede borrar del todo)</span>
+      </label>
       {error && <p className="org__error">{error}</p>}
       <div className="org__add-actions">
         <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
@@ -882,11 +959,78 @@ function CreateCompForm({ onDone, onCancel }) {
   )
 }
 
+// Vista "Mi parte"/tablero del plan generado de una compe: % hecho, lo retrasado en rojo, y un
+// filtro por persona para que cada uno vea solo lo suyo (encargo "Preparador de compes", 1/11).
+function CompePlanView({ compId, taskTypeById, workers }) {
+  const [plan, setPlan] = useState(null)
+  const [filterWorker, setFilterWorker] = useState('')
+  const [generating, setGenerating] = useState(false)
+
+  const reload = useCallback(() => {
+    api('GET', `/equipacion/competitions/${compId}/plan`).then(r => setPlan(r.data)).catch(() => setPlan(null))
+  }, [compId])
+  useEffect(() => { reload() }, [reload])
+
+  const generate = async () => {
+    if (!window.confirm('¿Generar (o regenerar) el plan de tareas de esta compe? Si ya había uno, se sustituye por el nuevo.')) return
+    setGenerating(true)
+    try {
+      const res = await api('POST', `/equipacion/competitions/${compId}/generate-plan`)
+      if (res.warnings?.length) window.alert(res.warnings.join('\n'))
+      await reload()
+    } catch (e) { window.alert(e.message) } finally { setGenerating(false) }
+  }
+
+  const toggleDone = async (taskId, done) => {
+    setPlan(p => ({ ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, done } : t) }))
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch {} finally { reload() }
+  }
+
+  const tasks = (plan?.tasks || []).filter(t => !filterWorker || String(t.workerId) === filterWorker)
+  const byWeek = {}
+  tasks.forEach(t => { (byWeek[t.weekStart] = byWeek[t.weekStart] || []).push(t) })
+  const today = todayStr()
+
+  return (
+    <div className="org__section">
+      <h4 className="org__section-title">Plan de la compe</h4>
+      {(!plan || plan.total === 0) ? (
+        <p className="org__hint">Todavía no hay un plan generado.</p>
+      ) : (
+        <p className="org__hint">{plan.pctHecho}% hecho ({plan.hechas}/{plan.total}) · {plan.retrasadas} retrasada(s)</p>
+      )}
+      <div className="org__add-actions">
+        <button className="org__btn" onClick={generate} disabled={generating}>{generating ? 'Generando...' : (plan?.total ? 'Regenerar plan' : 'Generar plan')}</button>
+        <select value={filterWorker} onChange={e => setFilterWorker(e.target.value)}>
+          <option value="">Tablero completo</option>
+          {workers.map(w => <option key={w.id} value={w.id}>Mi parte: {w.name}</option>)}
+        </select>
+      </div>
+      {Object.keys(byWeek).sort().map(weekStart => (
+        <div key={weekStart} className="org__historico-row">
+          <p className="org__historico-title">Semana del {weekStart}</p>
+          <ul className="org__task-list">
+            {byWeek[weekStart].map(t => (
+              <li key={t.id} className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}`}>
+                <label>
+                  <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
+                  {' '}{taskTypeById[t.taskTypeId]?.name || t.taskTypeId} — {t.workerName} ({dayLabel(t.date)})
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // Arrastra una burbuja ya colocada para moverla, o toca un número sin
 // colocar y luego el sitio del mapa — pensado para funcionar igual con
 // ratón que con el dedo en la tablet.
-function CompeMapEditor({ comp, onBack }) {
+function CompeMapEditor({ comp, config, workers, onBack }) {
   const wrapRef = useRef(null)
+  const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const [blocks, setBlocks] = useState(comp.blocks)
   const [selectedToPlace, setSelectedToPlace] = useState(null)
   const dragIdRef = useRef(null)
@@ -980,7 +1124,7 @@ function CompeMapEditor({ comp, onBack }) {
         <button className="org__link-btn" onClick={onBack}>← Volver a competiciones</button>
         <button className="org__link-btn" onClick={removeComp}>Borrar competición</button>
       </div>
-      <h3 className="org__section-title">{comp.name} — {comp.compDate}</h3>
+      <h3 className="org__section-title">{comp.name} — {comp.compDate}{comp.compEndDate && comp.compEndDate !== comp.compDate ? ` al ${comp.compEndDate}` : ''}</h3>
       <p className="org__hint">Las tareas de equipación para esta compe empiezan el {comp.tasksStartDate}.</p>
 
       {unplaced.length > 0 && (
@@ -1025,6 +1169,8 @@ function CompeMapEditor({ comp, onBack }) {
         )}
       </div>
       <p className="org__hint">{placed.length} de {blocks.length} bloques colocados. Doble clic en una burbuja para quitarla del mapa.</p>
+
+      <CompePlanView compId={comp.id} taskTypeById={taskTypeById} workers={workers || []} />
     </div>
   )
 }
