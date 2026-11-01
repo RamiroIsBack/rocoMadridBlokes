@@ -47,6 +47,12 @@ function dayLabel(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   return `${DOW_LABEL[new Date(y, m - 1, d).getDay()]} ${d}/${m}`
 }
+// Una tarea suelta con texto libre (sin tipo de catálogo) se guarda como taskTypeId "custom"
+// con el texto en params.texto (creador de tareas de Álvaro, Ramiro 1/11 17:20).
+function taskLabel(t, taskTypeById) {
+  if (t.taskTypeId === 'custom') return t.params?.texto || 'Tarea'
+  return taskTypeById[t.taskTypeId]?.name || t.taskTypeId
+}
 
 export default function OrganizacionPage() {
   const [config, setConfig] = useState(null)
@@ -78,6 +84,13 @@ export default function OrganizacionPage() {
     setWorkerId(id)
     try { localStorage.setItem(WHOAMI_KEY, String(id)) } catch {}
   }
+  // Quién puede crear/editar el catálogo de tareas y añadir tareas sueltas: el responsable
+  // (Álvaro) o un socio — el resto solo ve y marca hecho (Ramiro, 1/11 17:20). La identidad de
+  // "quién soy" en Organización es de toda la vida solo un selector local (no hay cuenta por
+  // persona), así que esto es un permiso de interfaz, no una comprobación de seguridad real —
+  // igual que el resto de "quién soy" aquí.
+  const currentWorker = workers.find(w => w.id === workerId)
+  const canManage = !!currentWorker?.isLead || window.blokesSiteData?.userRole === 'socio'
 
   if (loading) return <div className="org"><p className="org__hint">Cargando...</p></div>
 
@@ -93,21 +106,22 @@ export default function OrganizacionPage() {
       {view === 'hoy' && (
         <HoyView
           config={config} workers={workers}
-          workerId={workerId} onChooseWorker={chooseWorker}
+          workerId={workerId} onChooseWorker={chooseWorker} canManage={canManage}
         />
       )}
-      {view === 'semana' && <SemanaView config={config} workers={workers} onWorkersChanged={reloadWorkers} />}
-      {view === 'normas' && <NormasView config={config} onConfigChanged={reloadConfig} />}
+      {view === 'semana' && <SemanaView config={config} workers={workers} canManage={canManage} onWorkersChanged={reloadWorkers} />}
+      {view === 'normas' && <NormasView config={config} canManage={canManage} onConfigChanged={reloadConfig} />}
       {view === 'compe' && <CompeView config={config} workers={workers} />}
     </div>
   )
 }
 
 // ─── Hoy ──────────────────────────────────────────────────────────────
-function HoyView({ config, workers, workerId, onChooseWorker }) {
+function HoyView({ config, workers, workerId, onChooseWorker, canManage }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [showAddBlock, setShowAddBlock] = useState(false)
+  const [showAddTask, setShowAddTask] = useState(false)
   const [holdsets, setHoldsets] = useState([])
 
   const worker = workers.find(w => w.id === workerId)
@@ -162,14 +176,13 @@ function HoyView({ config, workers, workerId, onChooseWorker }) {
             ) : (
               <ul className="org__task-list">
                 {data.tasks.map(t => {
-                  const type = taskTypeById[t.taskTypeId]
-                  const params = Object.entries(t.params || {}).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' · ')
+                  const params = Object.entries(t.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
                   const isRetrasada = t.status === 'retrasada'
                   const movedAway = isRetrasada && t.movedToTaskId
                   if (movedAway) {
                     return (
                       <li key={t.id} className="org__task org__task--moved">
-                        <span className="org__task-name">{type?.name || t.taskTypeId}</span>
+                        <span className="org__task-name">{taskLabel(t, taskTypeById)}</span>
                         {params && <span className="org__task-params">{params}</span>}
                         <span className="org__tile-badge">→ pasada a la semana del {dayLabel(t.movedToDate)}</span>
                       </li>
@@ -179,7 +192,7 @@ function HoyView({ config, workers, workerId, onChooseWorker }) {
                     <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}${isRetrasada ? ' org__task--retrasada' : ''}`}>
                       <label>
                         <input type="checkbox" checked={t.done} onChange={e => toggleTask(t.id, e.target.checked)} />
-                        <span className="org__task-name">{type?.name || t.taskTypeId}</span>
+                        <span className="org__task-name">{taskLabel(t, taskTypeById)}</span>
                         {params && <span className="org__task-params">{params}</span>}
                         {isRetrasada && <span className="org__tile-badge">RETRASADA{t.postponedCount > 1 ? ` ×${t.postponedCount}` : ''}</span>}
                       </label>
@@ -187,6 +200,16 @@ function HoyView({ config, workers, workerId, onChooseWorker }) {
                   )
                 })}
               </ul>
+            )}
+            {canManage && data.assignmentId && !showAddTask && (
+              <button className="org__link-btn" onClick={() => setShowAddTask(true)}>+ Tarea</button>
+            )}
+            {showAddTask && (
+              <LooseTaskForm
+                config={config} assignmentId={data.assignmentId} defaultDate={todayStr()}
+                onDone={() => { setShowAddTask(false); reload() }}
+                onCancel={() => setShowAddTask(false)}
+              />
             )}
           </section>
 
@@ -364,7 +387,7 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
 }
 
 // ─── Semana ───────────────────────────────────────────────────────────
-function SemanaView({ config, workers, onWorkersChanged }) {
+function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   const [weeks, setWeeks] = useState([])
   const [detail, setDetail] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -414,6 +437,7 @@ function SemanaView({ config, workers, onWorkersChanged }) {
   }
 
   const [editingDaysFor, setEditingDaysFor] = useState(null)
+  const [addingTaskFor, setAddingTaskFor] = useState(null)
   const saveAssignmentDays = async (assignmentId, days) => {
     try { await api('PUT', `/equipacion/assignments/${assignmentId}`, { workDays: days }) } catch (e) { window.alert(e.message); return }
     setEditingDaysFor(null)
@@ -517,6 +541,17 @@ function SemanaView({ config, workers, onWorkersChanged }) {
                     <button className="org__link-btn" onClick={() => saveAssignmentDays(a.id, [])}>usar lo de siempre</button>
                   </div>
                 )}
+                {canManage && (
+                  <button className="org__link-btn" onClick={() => setAddingTaskFor(cur => cur === a.id ? null : a.id)}>+ Tarea</button>
+                )}
+                {addingTaskFor === a.id && (
+                  <LooseTaskForm
+                    config={config} weekStart={detail.startDate}
+                    onDone={() => { setAddingTaskFor(null); openWeek(detail.id) }}
+                    onCancel={() => setAddingTaskFor(null)}
+                    assignmentId={a.id}
+                  />
+                )}
                 {allDates.map(date => {
                   const tasksOnDate = a.tasks.filter(t => t.date === date)
                   return (
@@ -526,7 +561,7 @@ function SemanaView({ config, workers, onWorkersChanged }) {
                         <TaskTile
                           key={t.id}
                           task={t}
-                          typeName={taskTypeById[t.taskTypeId]?.name || t.taskTypeId}
+                          typeName={taskLabel(t, taskTypeById)}
                           isMissed={!t.done && t.date < todayS && t.status !== 'retrasada'}
                           dragging={dragTaskId === t.id}
                           postponing={postponing === t.id}
@@ -705,6 +740,7 @@ function WorkersAdmin({ workers, onChanged }) {
 }
 
 const ALL_WEEK_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+const ALL_WEEK_DAYS_5 = ['mon', 'tue', 'wed', 'thu', 'fri']
 
 function CreateWeekForm({ config, workers, onDone, onCancel }) {
   const [startDate, setStartDate] = useState(mondayOf(todayStr()))
@@ -812,13 +848,56 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
   )
 }
 
+// Tarea suelta para un día concreto, del catálogo o con texto libre (creador de tareas de
+// Álvaro, Ramiro 1/11 17:20) — se usa igual en el tablero de Semana y en Hoy.
+function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, onDone, onCancel }) {
+  const [taskTypeId, setTaskTypeId] = useState('')
+  const [customText, setCustomText] = useState('')
+  const [date, setDate] = useState(defaultDate || weekStart || todayStr())
+  const [notas, setNotas] = useState('')
+  const [error, setError] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    if (!taskTypeId && !customText.trim()) { setError('Elige un tipo del catálogo o escribe un texto.'); return }
+    setSaving(true); setError(null)
+    try {
+      await api('POST', '/equipacion/tasks', { assignmentId, date, taskTypeId, customText: customText.trim(), notas })
+      onDone()
+    } catch (e) { setError(e.message) } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="org__add-form">
+      <div className="org__add-row">
+        <label>Tipo (del catálogo)</label>
+        <select value={taskTypeId} onChange={e => { setTaskTypeId(e.target.value); if (e.target.value) setCustomText('') }}>
+          <option value="">— elige uno o escribe texto libre abajo —</option>
+          {(config.taskTypes || []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+      </div>
+      <div className="org__add-row">
+        <label>O texto libre</label>
+        <input type="text" value={customText} onChange={e => { setCustomText(e.target.value); if (e.target.value) setTaskTypeId('') }} placeholder="p. ej. arreglar una presa suelta" />
+      </div>
+      <div className="org__add-row"><label>Día</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
+      {taskTypeId && <div className="org__add-row"><label>Notas (opcional)</label><input type="text" value={notas} onChange={e => setNotas(e.target.value)} /></div>}
+      {error && <p className="org__error">{error}</p>}
+      <div className="org__add-actions">
+        <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
+        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Añadiendo...' : 'Añadir tarea'}</button>
+      </div>
+    </div>
+  )
+}
+
 // Tile visual de una tarea: checklist incorporado (checkbox) + info de la
 // tarea (subzona, objetivo...) + arrastrable a otra persona/día. Las tareas
 // no se cancelan, solo se mueven a la semana siguiente ("→ Semana
 // siguiente"), y quedan marcadas "retrasada" para que no se pierda el
 // histórico de lo que se fue quedando atrás.
 function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone }) {
-  const params = Object.entries(task.params || {}).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' · ')
+  const params = Object.entries(task.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
   const movedAway = task.status === 'retrasada' && task.movedToTaskId
   const isRetrasada = task.status === 'retrasada'
   const canPostpone = !task.done && !movedAway
@@ -855,15 +934,41 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
 }
 
 // ─── Normas ───────────────────────────────────────────────────────────
-function NormasView({ config, onConfigChanged }) {
-  const [editing, setEditing] = useState(null) // id del tipo de tarea que se está editando
-  const [value, setValue] = useState(1)
+function NormasView({ config, canManage, onConfigChanged }) {
+  const [allTypes, setAllTypes] = useState(null) // incluye inactivas, solo si canManage
+  const [editing, setEditing] = useState(null) // id del tipo que se está editando entero
+  const [editForm, setEditForm] = useState(null)
+  const [showCreate, setShowCreate] = useState(false)
 
-  const startEdit = t => { setEditing(t.id); setValue(t.periodicityWeeks ?? 1) }
+  const reloadAll = useCallback(() => {
+    if (!canManage) return
+    api('GET', '/equipacion/task-types/all').then(r => setAllTypes(r.data || [])).catch(() => {})
+  }, [canManage])
+  useEffect(() => { reloadAll() }, [reloadAll])
+
+  const types = canManage && allTypes ? allTypes : (config.taskTypes || [])
+
+  const startEdit = t => {
+    setEditing(t.id)
+    setEditForm({
+      name: t.name, description: t.description || '', periodicityWeeks: t.periodicityWeeks ?? 1,
+      preferredDay: t.preferredDay || '', subzone: t.subzone ?? '', durationMin: t.durationMin ?? '',
+      leadOnly: !!t.leadOnly,
+    })
+  }
   const save = async id => {
-    try { await api('PUT', `/equipacion/task-types/${id}`, { periodicityWeeks: value }) } catch {}
-    setEditing(null)
-    onConfigChanged()
+    try {
+      await api('PUT', `/equipacion/task-types/${id}`, editForm)
+    } catch (e) { window.alert(e.message) }
+    setEditing(null); setEditForm(null)
+    onConfigChanged(); reloadAll()
+  }
+  const toggleActive = async t => {
+    try {
+      if (t.active) await api('DELETE', `/equipacion/task-types/${t.id}`)
+      else await api('PUT', `/equipacion/task-types/${t.id}`, { active: true })
+    } catch (e) { window.alert(e.message) }
+    onConfigChanged(); reloadAll()
   }
 
   return (
@@ -871,27 +976,34 @@ function NormasView({ config, onConfigChanged }) {
       <section className="org__section">
         <h3 className="org__section-title">Catálogo de tareas</h3>
         <p className="org__hint">
-          El sistema propone solo las tareas que tocan según su periodicidad, y elige a quien más
-          la haya hecho antes. Cambia aquí cada cuántas semanas vuelve a tocar.
+          El sistema propone solo las tareas activas que tocan según su periodicidad, y elige a quien más
+          la haya hecho antes. {canManage ? 'Puedes crear tareas nuevas, editarlas o desactivarlas (nunca se borran, para no perder el histórico).' : 'Solo el responsable o un socio pueden crear o editar tareas del catálogo.'}
         </p>
         <ul className="org__task-list">
-          {(config.taskTypes || []).map(t => (
-            <li key={t.id} className="org__task">
-              <span className="org__task-name">{t.name}</span>
+          {types.map(t => (
+            <li key={t.id} className={`org__task${t.active === false ? ' org__task--inactive' : ''}`}>
               {editing === t.id ? (
-                <span className="org__periodicity-edit">
-                  cada <input type="number" min="1" max="12" value={value} onChange={e => setValue(Number(e.target.value))} /> semana(s)
-                  <button className="org__link-btn" onClick={() => save(t.id)}>Guardar</button>
-                  <button className="org__link-btn" onClick={() => setEditing(null)}>Cancelar</button>
-                </span>
+                <TaskTypeEditForm form={editForm} setForm={setEditForm} config={config} onSave={() => save(t.id)} onCancel={() => { setEditing(null); setEditForm(null) }} />
               ) : (
-                <button className="org__link-btn" onClick={() => startEdit(t)}>
-                  cada {t.periodicityWeeks ?? 1} semana(s)
-                </button>
+                <>
+                  <span className="org__task-name">{t.name}{t.active === false ? ' (desactivada)' : ''}</span>
+                  {t.description && <span className="org__task-params">{t.description}</span>}
+                  <span className="org__task-params">cada {t.periodicityWeeks ?? 1} semana(s){t.preferredDay ? ` · ${DAY_LABEL[t.preferredDay] || t.preferredDay}` : ''}{t.subzone ? ` · subzona #${t.subzone}` : ''}{t.durationMin ? ` · ${t.durationMin} min` : ''}{t.leadOnly ? ' · siempre al responsable' : ''}</span>
+                  {canManage && (
+                    <span className="org__periodicity-edit">
+                      <button className="org__link-btn" onClick={() => startEdit(t)}>Editar</button>
+                      <button className="org__link-btn" onClick={() => toggleActive(t)}>{t.active === false ? 'Reactivar' : 'Desactivar'}</button>
+                    </span>
+                  )}
+                </>
               )}
             </li>
           ))}
         </ul>
+        {canManage && !showCreate && <button className="org__add-btn" onClick={() => setShowCreate(true)}>+ Nueva tarea</button>}
+        {canManage && showCreate && (
+          <CreateTaskTypeForm config={config} onDone={() => { setShowCreate(false); onConfigChanged(); reloadAll() }} onCancel={() => setShowCreate(false)} />
+        )}
       </section>
       <section className="org__section">
         <h3 className="org__section-title">Escala de dificultad</h3>
@@ -916,6 +1028,86 @@ function NormasView({ config, onConfigChanged }) {
           ))}
         </ul>
       </section>
+    </div>
+  )
+}
+
+function TaskTypeEditForm({ form, setForm, config, onSave, onCancel }) {
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  return (
+    <div className="org__add-form">
+      <div className="org__add-row"><label>Nombre</label><input type="text" value={form.name} onChange={e => set('name', e.target.value)} /></div>
+      <div className="org__add-row"><label>Descripción / instrucciones</label><textarea value={form.description} onChange={e => set('description', e.target.value)} /></div>
+      <div className="org__add-row"><label>Periodicidad</label>
+        <span>cada <input type="number" min="1" max="12" value={form.periodicityWeeks} onChange={e => set('periodicityWeeks', Number(e.target.value))} /> semana(s)</span>
+      </div>
+      <div className="org__add-row"><label>Día preferido</label>
+        <select value={form.preferredDay} onChange={e => set('preferredDay', e.target.value)}>
+          <option value="">Cualquiera</option>
+          {ALL_WEEK_DAYS_5.map(d => <option key={d} value={d}>{DAY_LABEL[d]}</option>)}
+        </select>
+      </div>
+      <div className="org__add-row"><label>Subzona (opcional)</label>
+        <select value={form.subzone} onChange={e => set('subzone', e.target.value)}>
+          <option value="">Sin asignar</option>
+          {config.subzones.map(s => <option key={s} value={s}>#{s}</option>)}
+        </select>
+      </div>
+      <div className="org__add-row"><label>Duración estimada (min)</label><input type="number" min="0" value={form.durationMin} onChange={e => set('durationMin', e.target.value)} /></div>
+      <label className="org__add-row org__add-row--check">
+        <input type="checkbox" checked={form.leadOnly} onChange={e => set('leadOnly', e.target.checked)} />
+        <span>Siempre al responsable (él la reparte)</span>
+      </label>
+      <div className="org__add-actions">
+        <button className="org__btn org__btn--ghost" onClick={onCancel}>Cancelar</button>
+        <button className="org__btn" onClick={onSave}>Guardar</button>
+      </div>
+    </div>
+  )
+}
+
+function CreateTaskTypeForm({ config, onDone, onCancel }) {
+  const [form, setForm] = useState({ name: '', description: '', periodicityWeeks: 1, preferredDay: '', subzone: '', durationMin: '', leadOnly: false })
+  const [error, setError] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const submit = async () => {
+    if (!form.name.trim()) { setError('Falta el nombre.'); return }
+    setSaving(true); setError(null)
+    try { await api('POST', '/equipacion/task-types', form); onDone() }
+    catch (e) { setError(e.message) } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="org__add-form">
+      <div className="org__add-row"><label>Nombre</label><input type="text" value={form.name} onChange={e => set('name', e.target.value)} /></div>
+      <div className="org__add-row"><label>Descripción / instrucciones</label><textarea value={form.description} onChange={e => set('description', e.target.value)} /></div>
+      <div className="org__add-row"><label>Periodicidad</label>
+        <span>cada <input type="number" min="1" max="12" value={form.periodicityWeeks} onChange={e => set('periodicityWeeks', Number(e.target.value))} /> semana(s) (o deja «sola una vez» marcando la tarea a mano, sin pedirla aquí)</span>
+      </div>
+      <div className="org__add-row"><label>Día preferido</label>
+        <select value={form.preferredDay} onChange={e => set('preferredDay', e.target.value)}>
+          <option value="">Cualquiera</option>
+          {ALL_WEEK_DAYS_5.map(d => <option key={d} value={d}>{DAY_LABEL[d]}</option>)}
+        </select>
+      </div>
+      <div className="org__add-row"><label>Subzona (opcional)</label>
+        <select value={form.subzone} onChange={e => set('subzone', e.target.value)}>
+          <option value="">Sin asignar</option>
+          {config.subzones.map(s => <option key={s} value={s}>#{s}</option>)}
+        </select>
+      </div>
+      <div className="org__add-row"><label>Duración estimada (min)</label><input type="number" min="0" value={form.durationMin} onChange={e => set('durationMin', e.target.value)} /></div>
+      <label className="org__add-row org__add-row--check">
+        <input type="checkbox" checked={form.leadOnly} onChange={e => set('leadOnly', e.target.checked)} />
+        <span>Siempre al responsable (él la reparte)</span>
+      </label>
+      {error && <p className="org__error">{error}</p>}
+      <div className="org__add-actions">
+        <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
+        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Creando...' : 'Crear tarea'}</button>
+      </div>
     </div>
   )
 }

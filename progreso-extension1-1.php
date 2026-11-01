@@ -587,8 +587,20 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/config', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_config', 'permission_callback' => $equip_perm,
     ));
-    register_rest_route('progreso/v1', '/equipacion/task-types/(?P<id>[a-z_]+)', array(
+    register_rest_route('progreso/v1', '/equipacion/task-types/all', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_all_task_types', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/task-types', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_task_type', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/task-types/(?P<id>[a-z0-9_-]+)', array(
         'methods' => 'PUT', 'callback' => 'progreso_equip_update_task_type', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/task-types/(?P<id>[a-z0-9_-]+)', array(
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_deactivate_task_type', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/tasks', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_loose_task', 'permission_callback' => $equip_perm,
     ));
 
     register_rest_route('progreso/v1', '/equipacion/workers', array(
@@ -8314,19 +8326,63 @@ function progreso_equip_grades() {
 
 // Orden de trabajo natural: quitar → volúmenes → bloques → densidad/travesías
 // → limpiar/ordenar/regar → subir webapp. El reparto por días sigue este orden.
-function progreso_equip_task_types() {
+// `$incluir_inactivas`: false (por defecto) para el uso normal — el reparto automático y las
+// pantallas de trabajo nunca deben ver (ni proponer) una tarea que alguien desactivó; true solo
+// para la administración en Normas, donde hace falta poder reactivarla.
+function progreso_equip_task_types($incluir_inactivas = false) {
     global $wpdb;
     progreso_equip_ensure_tables();
-    $rows = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('task_types') . " ORDER BY sort_order ASC", ARRAY_A);
-    return array_map(function($r) {
-        return array(
-            'id' => $r['id'], 'name' => $r['name'],
-            'params' => array_values(array_filter(explode(',', $r['params']))),
-            'lead_only' => (bool) $r['lead_only'],
-            'periodicityWeeks' => intval($r['periodicity_weeks']),
-            'recurring' => (bool) $r['recurring'],
-        );
-    }, $rows);
+    $where = $incluir_inactivas ? '' : 'WHERE active = 1';
+    $rows = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('task_types') . " {$where} ORDER BY sort_order ASC", ARRAY_A);
+    return array_map('progreso_equip_task_type_fila', $rows);
+}
+
+function progreso_equip_task_type_fila($r) {
+    return array(
+        'id' => $r['id'], 'name' => $r['name'], 'description' => $r['description'] ?? '',
+        'params' => array_values(array_filter(explode(',', $r['params']))),
+        'lead_only' => (bool) $r['lead_only'],
+        'periodicityWeeks' => intval($r['periodicity_weeks']),
+        'preferredDay' => $r['preferred_day'] ?: null,
+        'subzone' => $r['subzone'] !== null ? intval($r['subzone']) : null,
+        'durationMin' => $r['duration_min'] !== null ? intval($r['duration_min']) : null,
+        'recurring' => (bool) $r['recurring'],
+        'active' => (bool) ($r['active'] ?? 1),
+    );
+}
+
+// GET /equipacion/task-types/all — catálogo completo (activas e inactivas), solo para la
+// administración en Normas (reactivar algo que alguien desactivó por error).
+function progreso_equip_get_all_task_types() {
+    return rest_ensure_response(array('success' => true, 'data' => progreso_equip_task_types(true)));
+}
+
+// POST /equipacion/task-types — nueva tarea de catálogo sin tocar código (creador de tareas de
+// Álvaro, Ramiro 1/11 17:20). El id es un slug derivado del nombre.
+function progreso_equip_create_task_type($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $name = trim((string) $request->get_param('name'));
+    if ($name === '') return new WP_Error('invalid_data', 'Falta el nombre.', array('status' => 400));
+    $table = progreso_equip_table('task_types');
+    $slug = sanitize_title($name);
+    $id = $slug ?: 'tarea';
+    $n = 1;
+    while ($wpdb->get_var($wpdb->prepare("SELECT id FROM {$table} WHERE id = %s", $id))) { $id = $slug . '-' . (++$n); }
+    $max_sort = (int) $wpdb->get_var("SELECT MAX(sort_order) FROM {$table}");
+    $subzone = $request->get_param('subzone');
+    $duration = $request->get_param('durationMin');
+    $wpdb->insert($table, array(
+        'id' => $id, 'name' => sanitize_text_field($name),
+        'description' => sanitize_textarea_field((string) $request->get_param('description')),
+        'params' => '', 'lead_only' => $request->get_param('leadOnly') ? 1 : 0,
+        'periodicity_weeks' => max(1, intval($request->get_param('periodicityWeeks')) ?: 1),
+        'preferred_day' => sanitize_text_field((string) $request->get_param('preferredDay')),
+        'subzone' => ($subzone !== null && $subzone !== '') ? intval($subzone) : null,
+        'duration_min' => ($duration !== null && $duration !== '') ? intval($duration) : null,
+        'recurring' => 1, 'active' => 1, 'sort_order' => $max_sort + 1,
+    ), array('%s', '%s', '%s', '%s', '%d', '%d', '%s', '%d', '%d', '%d', '%d', '%d'));
+    return rest_ensure_response(array('success' => true, 'id' => $id));
 }
 
 function progreso_equip_update_task_type($request) {
@@ -8338,9 +8394,70 @@ function progreso_equip_update_task_type($request) {
         $fmt[] = '%d';
     }
     if ($request->get_param('name') !== null) { $upd['name'] = sanitize_text_field($request->get_param('name')); $fmt[] = '%s'; }
+    if ($request->get_param('description') !== null) { $upd['description'] = sanitize_textarea_field((string) $request->get_param('description')); $fmt[] = '%s'; }
+    if ($request->get_param('preferredDay') !== null) { $upd['preferred_day'] = sanitize_text_field((string) $request->get_param('preferredDay')); $fmt[] = '%s'; }
+    if ($request->get_param('subzone') !== null) {
+        $sz = $request->get_param('subzone');
+        $upd['subzone'] = ($sz === '' ? null : intval($sz)); $fmt[] = '%d';
+    }
+    if ($request->get_param('durationMin') !== null) {
+        $dm = $request->get_param('durationMin');
+        $upd['duration_min'] = ($dm === '' ? null : intval($dm)); $fmt[] = '%d';
+    }
+    if ($request->get_param('leadOnly') !== null) { $upd['lead_only'] = $request->get_param('leadOnly') ? 1 : 0; $fmt[] = '%d'; }
+    // Nunca se borra un tipo (rompería el histórico de tareas que ya lo usaron): "borrar" desde
+    // la interfaz manda `active: false`, que lo saca del reparto automático sin perder nada.
+    if ($request->get_param('active') !== null) { $upd['active'] = $request->get_param('active') ? 1 : 0; $fmt[] = '%d'; }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     $wpdb->update(progreso_equip_table('task_types'), $upd, array('id' => $id), $fmt, array('%s'));
     return rest_ensure_response(array('success' => true));
+}
+
+// DELETE /equipacion/task-types/{id} — "borrar" desde la interfaz es desactivar, nunca se
+// borra el tipo de verdad (el histórico de tareas ya hechas con ese tipo se quedaría sin
+// nombre). Reactivable después con PUT { active: true }.
+function progreso_equip_deactivate_task_type($request) {
+    global $wpdb;
+    $id = sanitize_text_field((string) $request['id']);
+    $wpdb->update(progreso_equip_table('task_types'), array('active' => 0), array('id' => $id), array('%d'), array('%s'));
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /equipacion/tasks — tarea suelta para un día y persona concretos, sin esperar al
+// reparto automático (p. ej. arreglar una presa, comprar tornillos) — creador de tareas de
+// Álvaro (Ramiro, 1/11 17:20). `taskTypeId` de un tipo del catálogo, o `customText` libre (se
+// guarda con el tipo especial "custom" y el texto en `params.texto`).
+function progreso_equip_create_loose_task($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $assignment_id = intval($request->get_param('assignmentId'));
+    if (!$assignment_id) return new WP_Error('invalid_data', 'Falta assignmentId.', array('status' => 400));
+    $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('assignments') . " WHERE id = %d", $assignment_id));
+    if (!$existe) return new WP_Error('not_found', 'Asignación no encontrada.', array('status' => 404));
+
+    $date = sanitize_text_field((string) $request->get_param('date'));
+    if (!$date || !strtotime($date)) return new WP_Error('invalid_data', 'Fecha no válida.', array('status' => 400));
+    $date = date('Y-m-d', strtotime($date));
+
+    $custom_text = trim((string) $request->get_param('customText'));
+    $task_type_id = sanitize_text_field((string) $request->get_param('taskTypeId'));
+    if ($custom_text !== '') {
+        $task_type_id = 'custom';
+        $params = array('texto' => sanitize_text_field($custom_text));
+    } else {
+        if ($task_type_id === '') return new WP_Error('invalid_data', 'Elige un tipo del catálogo o escribe un texto.', array('status' => 400));
+        $params = array();
+        $subzona = $request->get_param('subzona');
+        if ($subzona !== null && $subzona !== '') $params['subzona'] = intval($subzona);
+        $notas = trim((string) $request->get_param('notas'));
+        if ($notas !== '') $params['notas'] = sanitize_text_field($notas);
+    }
+
+    $wpdb->insert(progreso_equip_table('tasks'), array(
+        'assignment_id' => $assignment_id, 'task_type_id' => $task_type_id, 'task_date' => $date,
+        'params' => wp_json_encode($params), 'done' => 0, 'status' => 'pendiente', 'original_date' => $date,
+    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s'));
+    return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
 }
 
 function progreso_equip_rules() {
@@ -8382,7 +8499,9 @@ function progreso_equip_ensure_tables() {
     // varios días, no uno), task_types.recurring (0 = tarea de un proyecto puntual como una
     // compe, nunca se propone sola cada semana) y tasks.competition_id (qué compe generó esta
     // tarea, para poder borrar/filtrar su plan como un bloque).
-    $version = '6';
+    // v7: task_types.description/preferred_day/subzone/duration_min/active (creador de tareas
+    // de Álvaro, Ramiro 1/11 17:20) — nunca se borra un tipo, solo se desactiva (histórico).
+    $version = '7';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -8506,10 +8625,15 @@ function progreso_equip_ensure_tables() {
     dbDelta("CREATE TABLE " . progreso_equip_table('task_types') . " (
         id                varchar(40)  NOT NULL,
         name              varchar(190) NOT NULL,
+        description       text         NOT NULL DEFAULT '',
         params            varchar(100) NOT NULL DEFAULT '',
         lead_only         tinyint(1)   NOT NULL DEFAULT 0,
         periodicity_weeks tinyint(3)   NOT NULL DEFAULT 1,
+        preferred_day     varchar(10)  NOT NULL DEFAULT '',
+        subzone           tinyint(3)   NULL,
+        duration_min      smallint(5)  NULL,
         recurring         tinyint(1)   NOT NULL DEFAULT 1,
+        active            tinyint(1)   NOT NULL DEFAULT 1,
         sort_order        tinyint(3)   NOT NULL DEFAULT 0,
         PRIMARY KEY (id)
     ) {$charset};");
@@ -8518,6 +8642,16 @@ function progreso_equip_ensure_tables() {
     progreso_equip_seed_if_empty();
     progreso_equip_seed_task_types_if_empty();
     progreso_equip_seed_comp_task_types_if_missing();
+
+    // Periodicidades reales de Ramiro (1/11 17:20): se habían quedado todas a 1 (cowork
+    // sospecha que un reseed del 29/10 las pisó). Una sola vez, no vuelve a tocarlas si alguien
+    // las cambia después desde Normas.
+    if (!get_option('blokes_equip_periodicidades_ramiro_1')) {
+        foreach (array('regar', 'limpiar', 'ordenar') as $tipo_id) {
+            $wpdb->update(progreso_equip_table('task_types'), array('periodicity_weeks' => 2), array('id' => $tipo_id), array('%d'), array('%s'));
+        }
+        update_option('blokes_equip_periodicidades_ramiro_1', 1, false);
+    }
 }
 
 // Semilla del catálogo de tareas — mismo orden de trabajo natural que

@@ -287,7 +287,7 @@
   font-size: 0.75rem;
 }
 .org__task label { gap: 0; }
-.org__task { display: flex; align-items: center; gap: 10px; }
+.org__task { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 .org__periodicity-edit {
   display: flex;
@@ -379,6 +379,7 @@
 .org__task--retrasada { border-color: #c8961e; background: #fdf0d8; }
 .org__task--moved { opacity: 0.6; }
 .org__task--moved .org__task-name { text-decoration: line-through; }
+.org__task--inactive { opacity: 0.55; }
 
 /* ── Semana: histórico ── */
 .org__historico {
