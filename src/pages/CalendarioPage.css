@@ -7,7 +7,7 @@
 /* Bloque oscuro con la barra y los filtros (la página va sobre fondo crema) */
 .cal-controls { margin-bottom: 24px; padding: 14px 16px; }
 .cal-controls .ev-toolbar { margin: 0 0 12px; }
-.cal-controls .cal-token-link { color: #777; }
+.cal-controls .cal-token-link { color: #888; }
 
 /* Filtros por categoría */
 .cal-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
