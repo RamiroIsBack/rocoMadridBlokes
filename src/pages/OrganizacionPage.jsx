@@ -438,6 +438,19 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
 
   const [editingDaysFor, setEditingDaysFor] = useState(null)
   const [addingTaskFor, setAddingTaskFor] = useState(null)
+  // Añadir a alguien a una semana que ya existe (Álvaro/cowork, 2/11 12:55: el plan de una compe
+  // la crea solo con el responsable). Solo la asignación, sin tareas de mantenimiento — sus
+  // tareas de esta semana se añaden sueltas (+Tarea) o arrastrando, como siempre.
+  const [addingPerson, setAddingPerson] = useState(false)
+  const [addPersonBusy, setAddPersonBusy] = useState(false)
+  const addPerson = async workerId => {
+    setAddPersonBusy(true)
+    try {
+      await api('POST', `/equipacion/weeks/${detail.id}/assignments`, { workerId: Number(workerId) })
+      setAddingPerson(false)
+      await openWeek(detail.id)
+    } catch (e) { window.alert(e.message) } finally { setAddPersonBusy(false) }
+  }
   const saveAssignmentDays = async (assignmentId, days) => {
     try { await api('PUT', `/equipacion/assignments/${assignmentId}`, { workDays: days }) } catch (e) { window.alert(e.message); return }
     setEditingDaysFor(null)
@@ -507,6 +520,20 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
         <div className="org__semana-actions">
           <button className="org__link-btn" onClick={() => setDetail(null)}>← Volver a semanas</button>
           <button className="org__link-btn" onClick={deleteWeek}>Borrar semana</button>
+          {canManage && (addingPerson ? (
+            <select
+              autoFocus value="" disabled={addPersonBusy}
+              onChange={e => { if (e.target.value) addPerson(e.target.value) }}
+              onBlur={() => setAddingPerson(false)}
+            >
+              <option value="">— elige a quién añadir —</option>
+              {workers.filter(w => !detail.assignments.some(a => a.workerId === w.id)).map(w => (
+                <option key={w.id} value={w.id}>{w.name}</option>
+              ))}
+            </select>
+          ) : (
+            <button className="org__link-btn" onClick={() => setAddingPerson(true)}>+ Persona</button>
+          ))}
         </div>
         <h3 className="org__section-title">Semana del {detail.startDate} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
         {detail.isAuto && <p className="org__hint org__hint--auto">Semana creada automáticamente: reparte las tareas arrastrándolas.</p>}

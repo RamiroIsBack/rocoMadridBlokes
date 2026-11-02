@@ -678,6 +678,9 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)/limpiar-retrasadas-falsas', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_limpiar_retrasadas_falsas', 'permission_callback' => $equip_perm,
     ));
+    register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)/assignments', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_week_add_assignment', 'permission_callback' => $equip_perm,
+    ));
     register_rest_route('progreso/v1', '/equipacion/assignments/(?P<id>\d+)', array(
         'methods' => 'PUT', 'callback' => 'progreso_equip_update_assignment', 'permission_callback' => $equip_perm,
     ));
@@ -979,6 +982,9 @@ add_action('rest_api_init', function() {
     ));
     register_rest_route('superadmin/v1', '/gestion/hist-pagos/resumen', array(
         'methods' => 'GET', 'callback' => 'superadmin_hist_pagos_resumen', 'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/hist-pagos/resumen-mananas', array(
+        'methods' => 'GET', 'callback' => 'superadmin_hist_pagos_resumen_mananas', 'permission_callback' => $socio_perm,
     ));
 
     register_rest_route('superadmin/v1', '/expenses', array(
@@ -5698,6 +5704,47 @@ function superadmin_hist_pagos_resumen($request) {
     return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
+// ¿Esta clase del histórico es de "mañana" (antes de las 15:00, sin infantiles ni sábados)?
+// Comprobado a mano contra los números de Ramiro (jun-25 31/2108€, jul-25 19/1517€, ago-25
+// 3/148€, sep-25 9/693€, jun-26 10/670€, jul-26 5/370€): coinciden exactos con esta regla.
+// `null` = la clase no tiene hora (Pilates, Yoga, Mensualidad Libre…) — no se puede clasificar,
+// así que no cuenta ni como mañana ni como tarde.
+function blokes_hist_pago_es_manana($clase) {
+    $c = (string) $clase;
+    if (stripos($c, 'infantil') !== false || stripos($c, 'kids') !== false) return false;
+    if (preg_match('/s.bados?/ui', $c)) return false;
+    if (!preg_match('/(\d{1,2})[:.](\d{2})/', $c, $m)) return null;
+    return intval($m[1]) < 15;
+}
+
+// GET /gestion/hist-pagos/resumen-mananas?desde&hasta — el histórico real de "mañanas" para la
+// calculadora (NOTAS_PARA_CODE_hv_control_clientes.md, punto 2), en vez de los números a mano.
+// Mismo formato que /resumen (alumnos únicos + importe por mes, sin nombres ni teléfonos), pero
+// solo con las clases de mañana de verdad.
+function superadmin_hist_pagos_resumen_mananas($request) {
+    global $wpdb;
+    blokes_ensure_hist_pagos_table();
+    $desde = sanitize_text_field((string) $request->get_param('desde'));
+    $hasta = sanitize_text_field((string) $request->get_param('hasta'));
+    $where = array('1=1'); $args = array();
+    if ($desde) { $where[] = 'fecha >= %s'; $args[] = $desde; }
+    if ($hasta) { $where[] = 'fecha <= %s'; $args[] = $hasta; }
+    $sql = "SELECT fecha, importe, telefono, nombre, clase FROM " . blokes_hist_pagos_table() . " WHERE " . implode(' AND ', $where) . " ORDER BY fecha ASC";
+    $rows = $args ? $wpdb->get_results($wpdb->prepare($sql, $args), ARRAY_A) : $wpdb->get_results($sql, ARRAY_A);
+    $por_mes = array();
+    foreach ($rows as $r) {
+        if (blokes_hist_pago_es_manana($r['clase']) !== true) continue;
+        $mes = substr($r['fecha'], 0, 7);
+        if (!isset($por_mes[$mes])) $por_mes[$mes] = array('alumnos' => array(), 'importe' => 0);
+        $clave = $r['telefono'] ?: $r['nombre'];
+        $por_mes[$mes]['alumnos'][$clave] = true;
+        $por_mes[$mes]['importe'] += floatval($r['importe']);
+    }
+    $out = array();
+    foreach ($por_mes as $mes => $d) { $out[$mes] = array('alumnos' => count($d['alumnos']), 'importe' => round($d['importe'], 2)); }
+    return rest_ensure_response(array('success' => true, 'data' => array('porMes' => $out, 'fuente' => 'HV')));
+}
+
 function blokes_contactos_table()      { global $wpdb; return $wpdb->prefix . 'blokes_contactos'; }
 function blokes_campanas_table()       { global $wpdb; return $wpdb->prefix . 'blokes_campanas'; }
 function blokes_campana_envios_table() { global $wpdb; return $wpdb->prefix . 'blokes_campana_envios'; }
@@ -10175,6 +10222,39 @@ function progreso_equip_update_assignment($request) {
     return rest_ensure_response(array('success' => true));
 }
 
+// POST /equipacion/weeks/{id}/assignments — añade a alguien a una semana que ya existe
+// (Álvaro/cowork, 2/11 12:55: una semana de compe se crea solo con el responsable y hacía falta
+// meter a más gente a mano). Solo crea la fila de asignación — adrede sin generar ningún
+// mantenimiento automático, igual que cuando se crea la semana entera con alguien nuevo que no
+// tenía tareas antes: las tareas de esta persona esta semana se añaden sueltas (+Tarea) o
+// arrastrando, como siempre.
+function progreso_equip_week_add_assignment($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $week_id = intval($request['id']);
+    $week = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $week_id), ARRAY_A);
+    if (!$week) return new WP_Error('not_found', 'Semana no encontrada.', array('status' => 404));
+
+    $worker_id = intval($request->get_param('workerId'));
+    if (!$worker_id) return new WP_Error('invalid_data', 'Falta workerId.', array('status' => 400));
+    $worker = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('workers') . " WHERE id = %d", $worker_id), ARRAY_A);
+    if (!$worker) return new WP_Error('not_found', 'Trabajador no encontrado.', array('status' => 404));
+
+    $existe = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d AND worker_id = %d", $week_id, $worker_id
+    ));
+    if ($existe) return new WP_Error('duplicate', 'Esa persona ya tiene una asignación esta semana.', array('status' => 409, 'assignmentId' => intval($existe)));
+
+    $work_days_in = $request->get_param('workDays');
+    $work_days = is_array($work_days_in) ? implode(',', array_map('sanitize_text_field', $work_days_in)) : '';
+    $wpdb->insert(progreso_equip_table('assignments'), array(
+        'week_id' => $week_id, 'worker_id' => $worker_id, 'subzones' => '',
+        'blocks_min' => intval($worker['blocks_min']), 'blocks_max' => intval($worker['blocks_max']),
+        'work_days' => $work_days, 'status' => 'pendiente',
+    ), array('%d', '%d', '%s', '%d', '%d', '%s', '%s'));
+    return rest_ensure_response(array('success' => true, 'assignmentId' => $wpdb->insert_id));
+}
+
 // Borrar semana: si no tiene nada hecho ni ningún bloque, se borra de
 // verdad (sirve para semanas creadas por error). Si tiene algo hecho, no
 // se pierde el histórico: se archiva (desaparece de la lista principal,
@@ -10687,7 +10767,12 @@ function progreso_equip_dia_cerrado($fecha) {
 // Ramiro confirmó (1/11) que la semana de la compe es solo compe, sin mantenimiento normal.
 // `$is_test` hereda el de la propia competición: el plan de una compe de prueba tiene que
 // crear semanas de prueba, nunca semanas reales (cowork, 1/11 17:20).
-function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warnings) {
+// $solo_compe: true para las semanas de "compe intensiva" (desequipar/equipar la de antes, y los
+// días de la propia compe) — esas sí son solo del responsable, como siempre. Para el resto
+// (diseño, limpieza, prep. montaje, cierre/redes) lleva ADEMÁS el reparto normal de
+// mantenimiento (Ramiro, 2/11 12:55: la del 16/11 "no es de compe intensiva" y se había creado
+// solo con el responsable, sin el resto del equipo).
+function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warnings, $solo_compe = true) {
     global $wpdb;
     $existing = $wpdb->get_row($wpdb->prepare(
         "SELECT id, is_test FROM " . progreso_equip_table('weeks') . " WHERE start_date = %s", $monday
@@ -10700,6 +10785,26 @@ function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warning
         return array(null, null);
     }
     $week_id = $existing ? intval($existing['id']) : null;
+
+    if (!$week_id && !$solo_compe) {
+        // Semana nueva "normal": se crea con el reparto de mantenimiento de siempre (todo el
+        // equipo activo), igual que si alguien la hubiera creado a mano — las tareas de compe se
+        // añaden encima, debajo en esta misma función.
+        $activos = $wpdb->get_results("SELECT id FROM " . progreso_equip_table('workers') . " WHERE active = 1", ARRAY_A);
+        if ($activos) {
+            $req = new WP_REST_Request('POST', '/progreso/v1/equipacion/weeks');
+            $req->set_param('startDate', $monday);
+            $req->set_param('subzones', array());
+            $req->set_param('assignments', array_map(function($w) { return array('workerId' => intval($w['id'])); }, $activos));
+            $req->set_param('isTest', $is_test);
+            $res = progreso_equip_create_week($req);
+            if (!is_wp_error($res)) {
+                $data = $res->get_data();
+                $week_id = intval($data['week_id'] ?? 0) ?: null;
+                if ($week_id) $warnings[] = "Semana del {$monday} creada con el reparto normal de mantenimiento, más las tareas de la compe.";
+            }
+        }
+    }
     if (!$week_id) {
         $wpdb->insert(progreso_equip_table('weeks'), array(
             'start_date' => $monday, 'subzones' => '',
@@ -10708,7 +10813,25 @@ function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warning
         ), array('%s', '%s', '%s', '%d', '%s'));
         $week_id = $wpdb->insert_id;
         $warnings[] = "Semana del {$monday} creada para el plan de la competición.";
+    } elseif (!$solo_compe) {
+        // Semana que ya existía (p. ej. creada antes solo con el responsable): se completa con
+        // quien falte del equipo activo. Solo la asignación — sin generar sus tareas de
+        // mantenimiento con retraso, que se reparten a mano como el resto (+Tarea o arrastrando).
+        $activos = $wpdb->get_results("SELECT id, name FROM " . progreso_equip_table('workers') . " WHERE active = 1", ARRAY_A);
+        $ya_asignados = $wpdb->get_col($wpdb->prepare("SELECT worker_id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d", intval($week_id)));
+        $anadidos = array();
+        foreach ($activos as $w) {
+            if (in_array(intval($w['id']), array_map('intval', $ya_asignados), true)) continue;
+            $wpdb->insert(progreso_equip_table('assignments'), array(
+                'week_id' => intval($week_id), 'worker_id' => intval($w['id']), 'subzones' => '', 'status' => 'pendiente',
+            ), array('%d', '%d', '%s', '%s'));
+            $anadidos[] = $w['name'];
+        }
+        if ($anadidos) {
+            $warnings[] = "Semana del {$monday}: añadido al reparto normal " . implode(', ', $anadidos) . " (sin tareas de mantenimiento automáticas, repártelas a mano).";
+        }
     }
+
     $assignment_id = $wpdb->get_var($wpdb->prepare(
         "SELECT id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d AND worker_id = %d",
         intval($week_id), intval($lead['id'])
@@ -10804,7 +10927,11 @@ function progreso_equip_competition_generate_plan($request) {
     $creadas = 0;
     $is_test = (bool) $comp['is_test'];
     foreach ($fases as $fase) {
-        list($week_id, $assignment_id) = progreso_equip_ensure_week_for_lead($fase['monday'], $lead, $is_test, $warnings);
+        // Solo S0 (desequipar/equipar, con 'items') y los propios días de la compe (con
+        // 'rango') son semanas de compe intensiva — solo el responsable, como siempre. El resto
+        // (diseño, limpieza, prep. montaje, cierre/redes) lleva también el reparto normal.
+        $solo_compe = isset($fase['items']) || isset($fase['rango']);
+        list($week_id, $assignment_id) = progreso_equip_ensure_week_for_lead($fase['monday'], $lead, $is_test, $warnings, $solo_compe);
         if (!$assignment_id) continue; // semana real/prueba en conflicto: ya avisado, se salta
 
         if (isset($fase['rango'])) {
