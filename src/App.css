@@ -124,7 +124,7 @@
 .app-header__logout-btn {
   background: none;
   border: none;
-  color: #555;
+  color: #b5b5b5; /* antes #555 (2,21:1 sobre la cabecera oscura) — NOTAS_PARA_CODE_contraste.md */
   font-size: 0.64rem;
   font-weight: 600;
   cursor: pointer;
@@ -136,6 +136,40 @@
   transition: color 0.15s;
 }
 .app-header__logout-btn:hover { color: #ccc; }
+
+.app-header__ver-como {
+  background: #2a2015;
+  border: 1px solid #f5c842;
+  color: #f5c842;
+  font-size: 0.64rem;
+  font-weight: 600;
+  padding: 2px 4px;
+  margin-top: 4px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.app-ver-como-banner {
+  background: #7c2d12;
+  color: #fff;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 8px 12px;
+}
+.app-ver-como-banner button {
+  background: none;
+  border: 1px solid #fff;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 2px 10px;
+  margin-left: 6px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: inherit;
+}
+.app-ver-como-banner button:hover { background: rgba(255,255,255,0.15); }
 .app-header__user-x {
   background: none;
   border: none;
@@ -333,7 +367,7 @@
 
 .app-header__link-hint {
   font-size: 9px;
-  color: #777;
+  color: #b5b5b5; /* antes #777 (3,68:1 sobre la cabecera oscura) — NOTAS_PARA_CODE_contraste.md */
   letter-spacing: 0.04em;
   text-transform: none;
   text-align: center;

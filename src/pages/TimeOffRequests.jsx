@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { PROF_META, PROF_ORDER } from '../data/staffSchedule'
 import { laborablesBetween, fmtShort } from '../utils/coverage'
-import { impactoSolicitud } from '../utils/timeoffPlan'
+import { impactoSolicitud, choquesEnSimulador } from '../utils/timeoffPlan'
 import { addRequests, updateRequest, deleteRequest } from '../hooks/useTimeOff'
 
 // Solicitudes de vacaciones. Hoy llegan por la app de fichaje externa (fichero
@@ -46,13 +46,19 @@ function splitLine(line, sep) {
   return out.map(x => x.trim())
 }
 
+// Cabeceras reconocidas, en español o en inglés (9to5 exporta en el idioma de quien descarga:
+// ID; Employee ID; Employee; Username (tax ID); Type; Status; From; To; …; Comment; …)
 const COLS = {
-  person: /nombre|persona|empleado|trabajador|usuario|profe/,
-  from:   /desde|inicio|comienzo|from|start|fecha ini|primer/,
-  to:     /hasta|fin|final|to$|end|ultimo|último/,
+  extId:  /^id$|^id solicitud|^identificador/,
+  person: /nombre|persona|empleado|employee|trabajador|usuario|profe|^name$/,
+  from:   /^desde|inicio|comienzo|^from$|start|fecha ini|primer/,
+  to:     /^hasta|^fin$|fecha fin|final|^to$|^end$|end date|ultimo dia/,
   status: /estado|status|situaci/,
-  nota:   /nota|coment|motivo|observ|descrip|tipo/,
+  tipo:   /^tipo|^type/,
+  nota:   /nota|coment|comment|motivo|observ|descrip/,
 }
+// Columnas que nunca son la persona: ids y documentos (el export de 9to5 trae el DNI)
+const NO_PERSONA = /\bid\b|nif|dni|nie|tax|^username/
 
 // CSV (o texto pegado de Excel, separado por tabuladores) → filas de solicitud
 export function parseRequestsText(text) {
@@ -62,7 +68,8 @@ export function parseRequestsText(text) {
   const head = splitLine(lines[0], sep).map(norm)
   const idx = {}
   Object.entries(COLS).forEach(([k, re]) => {
-    const i = head.findIndex((h, j) => re.test(h) && !Object.values(idx).includes(j))
+    const i = head.findIndex((h, j) => re.test(h) && !Object.values(idx).includes(j) && !(k === 'person' && NO_PERSONA.test(h))
+      && !(k === 'nota' && /revis|review/.test(h)))
     if (i >= 0) idx[k] = i
   })
   if (idx.person == null || idx.from == null) {
@@ -74,10 +81,15 @@ export function parseRequestsText(text) {
     const from = parseDate(c[idx.from])
     const to = idx.to != null ? (parseDate(c[idx.to]) || from) : from
     const st = norm(idx.status != null ? c[idx.status] : '')
-    const status = /aprob|acept|concedid|ok/.test(st) ? 'aprobada' : /rechaz|denegad|anulad|cancel/.test(st) ? 'rechazada' : 'pendiente'
+    // Primero lo rechazado: «Revoked» contiene «ok»
+    const status = /rechaz|reject|denegad|denied|anulad|cancel|revo/.test(st) ? 'rechazada'
+      : /aprob|approv|acept|concedid|^ok$/.test(st) ? 'aprobada' : 'pendiente'
     const person = matchPerson(raw)
-    const error = !raw ? 'sin nombre' : !from ? 'fecha no válida' : to < from ? 'fin antes del inicio' : null
-    return { line: n + 2, raw, person: person || raw, known: !!person, from, to, status, canal: 'fichero', nota: idx.nota != null ? c[idx.nota] : '', error }
+    const tipo = idx.tipo != null ? c[idx.tipo] : ''
+    const extId = idx.extId != null ? parseInt(c[idx.extId], 10) || null : null
+    const error = !raw ? 'sin nombre' : !from ? 'fecha no válida' : to < from ? 'fin antes del inicio'
+      : tipo && !/vacac|vacation|holiday/.test(norm(tipo)) ? `no es de vacaciones (${tipo})` : null
+    return { line: n + 2, raw, person: person || raw, known: !!person, from, to, status, canal: 'fichero', nota: idx.nota != null ? c[idx.nota] : '', extId, error }
   })
   return { rows, error: null }
 }
@@ -123,7 +135,8 @@ function downloadIcs(requests) {
 
 const emptyForm = () => ({ person: PROF_ORDER[0], from: '', to: '', canal: 'mensaje', status: 'pendiente', nota: '' })
 
-export default function TimeOffRequests({ requests, setRequests, state, coste, connected }) {
+// state: la configuración real (contra la que se aprueba); simState: el plan del simulador (solo informativo)
+export default function TimeOffRequests({ requests, setRequests, state, simState, coste, connected }) {
   const [form, setForm]       = useState(emptyForm)
   const [preview, setPreview] = useState(null)
   const [filtro, setFiltro]   = useState('abiertas')
@@ -137,7 +150,7 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
     try { await fn() } catch (e) { flash(`✗ ${e.message}`) } finally { setBusy(false) }
   }
 
-  // Impacto de cada solicitud abierta (pendiente o aprobada) sobre el plan
+  // Impacto de cada solicitud abierta sobre lo real (las demás aprobadas y la configuración real)
   const impactos = useMemo(() => {
     const res = {}
     requests.filter(r => r.status !== 'rechazada' && PROF_ORDER.includes(r.person)).forEach(r => {
@@ -145,6 +158,16 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
     })
     return res
   }, [requests, state, coste])
+
+  // Solo para las pendientes: con quién coincidiría en el plan del simulador
+  const enSimulador = useMemo(() => {
+    const res = {}
+    if (!simState) return res
+    requests.filter(r => r.status === 'pendiente' && PROF_ORDER.includes(r.person)).forEach(r => {
+      res[r.id] = choquesEnSimulador(simState, coste, r).filter(c => c.level === 'rojo')
+    })
+    return res
+  }, [requests, simState, coste])
 
   const lista = [...requests]
     .filter(r => filtro === 'todas' || (filtro === 'abiertas' ? r.status !== 'rechazada' : r.status === filtro))
@@ -157,14 +180,21 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
     e.target.value = ''
     if (!f) return
     const reader = new FileReader()
-    reader.onload = ev => setPreview({ name: f.name, ...parseRequestsText(String(ev.target.result)) })
+    // Las que ya están (por el id de 9to5 o por persona y fechas) no se vuelven a importar
+    const yaEsta = r => requests.some(x => (r.extId && Number(x.ext_id) === r.extId)
+      || (x.person === r.person && x.from === r.from && x.to === r.to))
+    reader.onload = ev => {
+      const res = parseRequestsText(String(ev.target.result))
+      res.rows = res.rows.map(r => (!r.error && yaEsta(r) ? { ...r, error: 'ya estaba', yaEstaba: true } : r))
+      setPreview({ name: f.name, ...res })
+    }
     reader.readAsText(f, 'utf-8')
   }
 
   function importar() {
     const ok = preview.rows.filter(r => !r.error)
     run(async () => {
-      const res = await addRequests(ok.map(({ person, from, to, status, canal, nota }) => ({ person, from, to, status, canal, nota })))
+      const res = await addRequests(ok.map(({ person, from, to, status, canal, nota, extId }) => ({ person, from, to, status, canal, nota, ext_id: extId })))
       setRequests(res.requests)
       setPreview(null)
       flash(`✓ ${res.added.length} importadas${res.skipped ? ` · ${res.skipped} ya estaban` : ''}${res.invalid ? ` · ${res.invalid} no válidas` : ''}`)
@@ -184,12 +214,23 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
     })
   }
 
-  const setStatus = (r, status) => run(async () => {
-    const upd = await updateRequest(r.id, { status })
-    setRequests(requests.map(x => (x.id === r.id ? upd : x)))
-  })
+  // Las de 9to5 se aprueban/rechazan también allí, con un comentario que ve el trabajador
+  const setStatus = (r, status) => {
+    let review_comment = ''
+    if (r.ext_source === '9to5') {
+      const c = window.prompt(`${status === 'aprobada' ? 'Aprobar' : 'Rechazar'} en 9to5 la solicitud de ${r.person}. Comentario para el trabajador (opcional):`, '')
+      if (c === null) return
+      review_comment = c.trim()
+    }
+    run(async () => {
+      const upd = await updateRequest(r.id, { status, review_comment })
+      setRequests(requests.map(x => (x.id === r.id ? upd : x)))
+      if (r.ext_source === '9to5') flash(`✓ ${status === 'aprobada' ? 'Aprobada' : 'Rechazada'} también en 9to5`)
+    })
+  }
   const borrar = r => {
-    if (!window.confirm(`¿Borrar la solicitud de ${r.person} (${fmtShort(r.from)} – ${fmtShort(r.to)})?`)) return
+    const aviso = r.ext_source === '9to5' ? '\n\nViene de 9to5: solo se borra aquí y volverá a aparecer si se trae todo de nuevo.' : ''
+    if (!window.confirm(`¿Borrar la solicitud de ${r.person} (${fmtShort(r.from)} – ${fmtShort(r.to)})?${aviso}`)) return
     run(async () => {
       await deleteRequest(r.id)
       setRequests(requests.filter(x => x.id !== r.id))
@@ -200,10 +241,11 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
     <div className="sv-section">
       <h3 className="sv-section-title">Solicitudes de vacaciones {pendientes > 0 && <span className="sv-to-badge">{pendientes} pendientes</span>}</h3>
       <p className="sv-note">
-        Las piden por la app de fichaje: sube el fichero que exporta (CSV, o Excel guardado como CSV) o añádelas a mano si
-        llegan por mensaje o llamada. Cada solicitud se comprueba contra el plan: choques con quien no debe coincidir,
-        días que le quedan y cobertura. Al aprobarla cuenta en el calendario y en los avisos de la calculadora. Como la pide
-        la propia persona, cuenta como acuerdo (no necesita los 2 meses de antelación).
+        Las piden por 9to5: con la conexión activa llegan solas (y al aprobar o rechazar aquí, el trabajador lo ve en 9to5).
+        Sin conexión, sube el fichero que exporta 9to5 (Empresa › Datos de la empresa › Exportar datos, CSV) o añádelas a
+        mano si llegan por mensaje o llamada. Cada solicitud se comprueba, en su año, contra <strong>lo real</strong>: las
+        vacaciones ya aprobadas y la configuración del año (paro, llaves, cierre). No cuenta lo que se esté probando en el
+        Simulador. Como la pide la propia persona, cuenta como acuerdo (no necesita los 2 meses de antelación).
       </p>
       {!connected && <p className="sv-error">Sin conexión con el servidor: no se pueden guardar solicitudes.</p>}
 
@@ -237,7 +279,7 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
                         <td>{r.to ? fmtShort(r.to) : '—'}</td>
                         <td>{ESTADOS[r.status]}</td>
                         <td className="sv-ot-muted">{r.nota}</td>
-                        <td className={r.error ? 'sv-to-bad' : 'sv-to-good'}>{r.error || '✓'}</td>
+                        <td className={r.yaEstaba ? 'sv-ot-muted' : r.error ? 'sv-to-bad' : 'sv-to-good'}>{r.error || '✓'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -259,8 +301,8 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
           style={{ color: PROF_META[form.person]?.color }}>
           {PROF_ORDER.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
-        <label className="sv-to-inline">Desde <input className="sv-tests-input" type="date" value={form.from} onChange={e => setForm({ ...form, from: e.target.value })} /></label>
-        <label className="sv-to-inline">Hasta <input className="sv-tests-input" type="date" value={form.to} min={form.from} onChange={e => setForm({ ...form, to: e.target.value })} /></label>
+        <label className="sv-to-inline">Desde <input className="sv-tests-input" type="date" lang="es" value={form.from} onChange={e => setForm({ ...form, from: e.target.value })} /></label>
+        <label className="sv-to-inline">Hasta <input className="sv-tests-input" type="date" lang="es" value={form.to} min={form.from} onChange={e => setForm({ ...form, to: e.target.value })} /></label>
         <select className="sv-tests-select" value={form.canal} onChange={e => setForm({ ...form, canal: e.target.value })}>
           {Object.entries(CANALES).filter(([k]) => k !== 'fichero').map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select>
@@ -296,8 +338,19 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
                     </td>
                     <td>{fmtShort(r.from)}{r.to !== r.from && <> – {fmtShort(r.to)}</>}</td>
                     <td>{laborablesBetween(r.from, r.to).length}</td>
-                    <td className="sv-ot-muted" title={r.nota || ''}>{CANALES[r.canal] || r.canal}{r.nota ? ' · 💬' : ''}</td>
-                    <td className={r.status === 'aprobada' ? 'sv-to-good' : r.status === 'rechazada' ? 'sv-ot-muted' : 'sv-to-warn-txt'}>{ESTADOS[r.status]}</td>
+                    <td className="sv-ot-muted">
+                      {r.ext_source === '9to5' ? <span className="sv-to-badge sv-to-badge--ext">9to5</span> : (CANALES[r.canal] || r.canal)}
+                      {r.nota && <div className="sv-to-small"><strong>Motivo:</strong> {r.nota}</div>}
+                    </td>
+                    <td className={r.status === 'aprobada' ? 'sv-to-good' : r.status === 'rechazada' ? 'sv-ot-muted' : 'sv-to-warn-txt'}>
+                      {ESTADOS[r.status]}
+                      {r.ext_status && ['cancelled', 'revoked'].includes(r.ext_status) && <span className="sv-ot-muted"> ({r.ext_status === 'cancelled' ? 'cancelada' : 'revocada'})</span>}
+                      {r.review_comment && (
+                        <div className="sv-ot-muted sv-to-small">
+                          <strong>Revisión{r.reviewed_by ? ` (${r.reviewed_by.replace(/^API:\s*/, 'app · ')})` : ''}:</strong> {r.review_comment}
+                        </div>
+                      )}
+                    </td>
                     <td className="sv-to-check">
                       {!imp ? <span className="sv-ot-muted">—</span> : (
                         <>
@@ -305,7 +358,9 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
                           {rojos.length > 0 && <div className="sv-to-bad">Coincide con {parejas(rojos)} ({rojos.length} días)</div>}
                           {ambar.length > 0 && <div className="sv-to-warn-txt">Evitar: {parejas(ambar)} ({ambar.length} días)</div>}
                           {imp.restan != null && imp.restan < 0 && <div className="sv-to-bad">Se pasa {-imp.restan} días de lo que le toca</div>}
-                          {imp.otroAnio && <div className="sv-ot-muted">Es de otro año: cambia el año de la calculadora para ver sus días.</div>}
+                          {enSimulador[r.id]?.length > 0 && (
+                            <div className="sv-ot-muted">En el simulador coincidiría con {parejas(enSimulador[r.id])}</div>
+                          )}
                           {imp.nuevos.filter(w => !w.text.startsWith('Coinciden')).map((w, i) => (
                             <div key={i} className={w.lvl === 'bad' ? 'sv-to-bad' : 'sv-to-warn-txt'}>{w.text}</div>
                           ))}
@@ -313,11 +368,29 @@ export default function TimeOffRequests({ requests, setRequests, state, coste, c
                       )}
                     </td>
                     <td className="sv-to-actions">
-                      {r.status !== 'aprobada' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'aprobada')}>Aprobar</button>}
-                      {r.status !== 'rechazada' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'rechazada')}>Rechazar</button>}
-                      {r.status !== 'pendiente' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'pendiente')}>A pendiente</button>}
-                      {r.status === 'aprobada' && <a className="sv-filter-btn" href={gcalLink(r)} target="_blank" rel="noreferrer">Google Calendar</a>}
-                      <button className="sv-tests-remove" disabled={busy} onClick={() => borrar(r)}>✕</button>
+                      {r.status === 'pendiente' ? (
+                        <>
+                          <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'aprobada')}>Aprobar</button>
+                          <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'rechazada')}>Rechazar</button>
+                          {r.ext_source !== '9to5' && <button className="sv-tests-remove" disabled={busy} onClick={() => borrar(r)} title="Borrar">✕</button>}
+                        </>
+                      ) : (
+                        <>
+                          {r.status === 'aprobada' && <a className="sv-filter-btn" href={gcalLink(r)} target="_blank" rel="noreferrer">Google Calendar</a>}
+                          {/* Las ya resueltas: cambiar o borrar, en un menú para no hacerlo sin querer */}
+                          <details className="sv-to-menu">
+                            <summary title="Más acciones">⋯</summary>
+                            <div className="sv-to-menu__list">
+                              {r.status !== 'aprobada' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'aprobada')}>Aprobar</button>}
+                              {r.status !== 'rechazada' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'rechazada')}>Rechazar</button>}
+                              {r.ext_source !== '9to5' && <button className="sv-filter-btn" disabled={busy} onClick={() => setStatus(r, 'pendiente')}>Volver a pendiente</button>}
+                              {r.ext_source !== '9to5'
+                                ? <button className="sv-tests-remove" disabled={busy} onClick={() => borrar(r)}>Borrar</button>
+                                : <span className="sv-ot-muted sv-to-small">Viene de 9to5: se gestiona allí</span>}
+                            </div>
+                          </details>
+                        </>
+                      )}
                     </td>
                   </tr>
                 )

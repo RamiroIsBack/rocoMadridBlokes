@@ -287,6 +287,25 @@ blancas (`socios`/`gestion`/`profesores`) — pídele a Ramiro que te añada o u
   agosto puede fijar ahí el bloque de 15; los días de cierre que pasan de 15 se pagan o se
   pactan. La calculadora trabaja por año natural y marca quién tiene que dar su acuerdo.
   Pendiente de confirmar con la asesoría: si el bloque de 15 aplica a los fijos discontinuos.
+- **Integración con 9to5 (26/10/2026).** La app de fichaje 9to5.click tiene API
+  (https://9to5.click/api/v1/docs). La clave y el secreto del webhook se guardan solo en el
+  servidor (opción `blokes_9to5_config`, desde CTRL Time Off › Conexión con 9to5) y nunca se
+  devuelven al navegador. Se sincronizan las solicitudes de tipo Vacaciones (al abrir la
+  pestaña, cada hora por WP-Cron y al momento por webhook `timeoff/v1/9to5-webhook`, firmado
+  con HMAC); al aprobar/rechazar aquí se aprueba/rechaza en 9to5. También se traen empleados,
+  festivos y saldos. Ana no está dada de alta en 9to5 (a 26/10/2026).
+- **CTRL Time Off: lo real separado del simulador (26/10/2026).** Dos subpestañas.
+  *Vacaciones*: configuración real del año (opción `blokes_timeoff_real`: paro, llaves,
+  días, cierre) + solicitudes aprobadas; contra esto se comprueba cada solicitud, siempre en
+  su propio año. *Simulador*: el plan de prueba (`blokes_timeoff_plan`), escenarios,
+  histórico y previsión; solo pasa a lo real la configuración (botón), nunca los periodos.
+- **Campamento de verano en el simulador (28/10/2026).** Va por la mañana con la sala
+  abierta (por la tarde) o cerrada: semanas y plazas por mes desde el primer lunes de julio y
+  de agosto, ocupación, precio, descuento, ratio de monitores y costes por niño. Las cuentas
+  están en `src/utils/campamento.js`: la plantilla que lo lleva no cuesta más con la sala
+  cerrada; con la sala abierta son horas de más, y si mañana + tarde pasan de 9 h sale un aviso
+  rojo. El formato antiguo (`start` + `semanas`) se convierte con `normalizeCamp`. La huella
+  del supuesto activo (`firmaPlan`) va normalizada porque PHP devuelve `{}` como `[]`.
 - **Colaboración.** El repo es `RamiroIsBack/rocoMadridBlokes`. Cualquier push a `dev`
   despliega automáticamente, lo haga quien lo haga (la cuenta `ClubRocomadrid7a` ya ha
   desplegado con éxito). El `CLAUDE.md` pide confirmar antes de crear/modificar ficheros

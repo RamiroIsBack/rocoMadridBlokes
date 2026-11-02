@@ -23,6 +23,8 @@ export function useProfile() {
   const [nickname, setNickname]   = useState(() => sd.userNickname || '')
   const [avatarType, setAvatarType] = useState(() => sd.userAvatarType || '')
   const [avatarData, setAvatarData] = useState(() => sd.userAvatarData || {})
+  // null = sin preguntar · 'si' · 'no'.
+  const [optinWhatsapp, setOptinWhatsapp] = useState(null)
   const [saving, setSaving]       = useState(false)
   const [saveError, setSaveError] = useState(null)
   const [verified, setVerified]   = useState(profileComplete)
@@ -43,6 +45,7 @@ export function useProfile() {
           if (data.nickname)   setNickname(data.nickname)
           if (data.avatarType) setAvatarType(data.avatarType)
           if (data.avatarData) setAvatarData(data.avatarData)
+          setOptinWhatsapp(data.optinWhatsapp || null)
           if (window.blokesSiteData) {
             window.blokesSiteData.profileComplete = !!data.profileComplete
             window.blokesSiteData.userNickname    = data.nickname   || ''
@@ -105,6 +108,21 @@ export function useProfile() {
     }
   }, [])
 
+  const saveOptinWhatsapp = useCallback(async (value) => {
+    try {
+      const res = await fetch(`${WP_URL}/wp-json/blokes/v1/profile/optin-whatsapp`, {
+        method: 'POST',
+        headers: getHeaders(true),
+        body: JSON.stringify({ optinWhatsapp: value }),
+      })
+      if (!res.ok) return false
+      setOptinWhatsapp(value)
+      return true
+    } catch {
+      return false
+    }
+  }, [])
+
   const uploadPhoto = useCallback(async (file) => {
     const formData = new FormData()
     formData.append('file', file)
@@ -130,5 +148,7 @@ export function useProfile() {
     saveProfile,
     checkNickname,
     uploadPhoto,
+    optinWhatsapp,
+    saveOptinWhatsapp,
   }
 }

@@ -44,3 +44,13 @@ export const deleteScenario = id            => request(`/scenarios/${id}`, 'DELE
 export const addRequests    = requests      => request('/requests', 'POST', { requests })
 export const updateRequest  = (id, fields)  => request(`/requests/${id}`, 'PUT', fields).then(j => j.request)
 export const deleteRequest  = id            => request(`/requests/${id}`, 'DELETE')
+
+// ─── 9to5 (la clave vive en el servidor; aquí nunca se recibe) ──────────────
+// fields: { api_key?, webhook_secret?, employee_map?, clear? } → { nueve, requests }
+export const saveNueve = fields => request('/9to5', 'PUT', fields)
+export const testNueve = ()     => request('/9to5/test', 'POST', {})
+// → { added, updated, requests, nueve }
+export const syncNueve = (full = false) => request('/9to5/sync', 'POST', { full })
+
+// Configuración real del año (la que se usa para comprobar y aprobar solicitudes)
+export const saveReal = real => request('/real', 'PUT', { real }).then(j => j.real_meta)

@@ -20,21 +20,41 @@ async function request(path, method = 'GET', body) {
   return json
 }
 
-// Tareas de Notion ("Funciones Rocomadrid") entre dos fechas. El servidor las guarda 5 min;
-// reload(true) se salta esa caché.
-export function useCalendar(from, to) {
+// ¿Puede ver el Calendario? Socio, gestión y profes siempre; el resto, si su email está en la lista.
+// full: socio y gestión lo ven entero; los demás, sin contactos, teléfonos ni importes.
+export function useCalendarAccess() {
+  const role  = window.blokesSiteData?.userRole
+  const staff = ['socio', 'gestion'].includes(role)
+  const known = staff || role === 'profesor'
+  const [access, setAccess] = useState({ can: known, full: staff })
+
+  useEffect(() => {
+    if (known || !window.blokesSiteData?.isLoggedIn) return
+    request('/calendar/access').then(json => setAccess({ can: !!json.can, full: !!json.full })).catch(() => {})
+  }, [known])
+
+  return access
+}
+
+export const getCalendarAccess  = ()       => request('/calendar/access')
+export const saveCalendarAccess = (emails) => request('/calendar/access', 'PUT', { emails }).then(json => json.emails)
+
+// Tareas de Notion ("Funciones Rocomadrid") y reservas de Eventos entre dos fechas. El servidor
+// guarda lo de Notion 5 min; reload(true) se salta esa caché.
+export function useCalendar(from, to, enabled = true) {
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(null)
 
   const reload = useCallback((refresh = false) => {
+    if (!enabled) return Promise.resolve()
     setLoading(true)
     setError(null)
     return request(`/calendar?from=${from}&to=${to}${refresh ? '&refresh=1' : ''}`)
       .then(json => setData(json))
       .catch(e   => setError(e.message))
       .finally(() => setLoading(false))
-  }, [from, to])
+  }, [from, to, enabled])
 
   useEffect(() => { reload() }, [reload])
 
@@ -42,7 +62,6 @@ export function useCalendar(from, to) {
 }
 
 export const saveNotionToken = (token) => request('/calendar/token', 'PUT', { token })
-export const getBookings     = ()      => request('/events/bookings').then(json => json.bookings)
 
 // Colores de Notion en el tema oscuro de la web
 const NOTION_COLORS = {

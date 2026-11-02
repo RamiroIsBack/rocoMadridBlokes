@@ -843,7 +843,7 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-pay-tag {
   font-size: 0.62rem;
-  color: #777;
+  color: #888;
   border: 1px solid #333;
   border-radius: 10px;
   padding: 1px 6px;
@@ -945,7 +945,7 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-pay-file__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .sa-pay-file__title { margin: 0; font-size: 0.92rem; font-weight: 700; color: #f0ece0; }
-.sa-pay-file__meta  { margin: 3px 0 0; font-size: 0.74rem; color: #777; }
+.sa-pay-file__meta  { margin: 3px 0 0; font-size: 0.74rem; color: #888; }
 .sa-pay-file__meta strong { color: #ddd; font-variant-numeric: tabular-nums; }
 .sa-pay-file__grid {
   display: grid;
@@ -982,7 +982,7 @@ details[open] .sa-collapsible__arrow {
 .sa-pay-filter__clear {
   background: none;
   border: none;
-  color: #777;
+  color: #888;
   cursor: pointer;
   font-size: 0.75rem;
   padding: 0 2px;
@@ -1182,7 +1182,7 @@ details[open] .sa-collapsible__arrow {
 .sa-partial__note { display: block; margin-top: 10px; }
 .sa-pay-partial { margin-top: 3px; font-size: 0.72rem; color: #bbb; white-space: nowrap; }
 .sa-pay-partial__note {
-  color: #777;
+  color: #888;
   display: inline-block;
   max-width: 180px;
   overflow: hidden;

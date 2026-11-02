@@ -143,19 +143,30 @@ export function pairConflict(a, b, opts = {}) {
   const single = new Set([...gapDays(onlyA), ...gapDays(onlyB)])
   const extraGaps = [...gapDays(both)].filter(g => !single.has(g)).length
   const extraComodin = both.comodin - Math.max(onlyA.comodin, onlyB.comodin)
+  // En verano, además, la regla de 2 profes + Eva: si la pareja deja menos de 2 profes
+  // (o a ninguno), hay que evitarla aunque las clases se cubran
+  const profesQuedan = opts.season === 'verano'
+    ? PROF_ORDER.filter(p => p !== COMODIN_VERANO && p !== a && p !== b && !(opts.inactive || []).includes(p)).length
+    : null
   let level = 'verde'
-  if (extraGaps > 0 || both.lost.length >= 12 || (opts.season === 'verano' && both.lost.length > 0)) level = 'rojo'
-  else if (extraLost > 0 || both.lost.length >= 8 || extraComodin > 0) level = 'ambar'
-  return { a, b, lost: both.lost.length, comodin: both.comodin, extraLost, extraGaps, sinAbrir: both.sinAbrir, sinCerrar: both.sinCerrar, level }
+  if (extraGaps > 0 || both.lost.length >= 12 || (opts.season === 'verano' && (both.lost.length > 0 || profesQuedan === 0))) level = 'rojo'
+  else if (extraLost > 0 || both.lost.length >= 8 || extraComodin > 0 || (profesQuedan !== null && profesQuedan < 2 && (a !== COMODIN_VERANO && b !== COMODIN_VERANO))) level = 'ambar'
+  return { a, b, lost: both.lost.length, comodin: both.comodin, extraLost, extraGaps, sinAbrir: both.sinAbrir, sinCerrar: both.sinCerrar, profesQuedan, level }
 }
 
 // ─── Calendario ──────────────────────────────────────────────────────────────
 
 // Festivos nacionales/Madrid en las ventanas que planificamos (no cuentan como vacaciones)
-export const FESTIVOS = [
+const FESTIVOS_BASE = [
   '2026-12-08', '2026-12-25', '2027-01-01', '2027-01-06',
   '2027-08-15', '2027-12-06', '2027-12-08', '2027-12-25', '2028-01-01', '2028-01-06',
 ]
+let festivos = new Set(FESTIVOS_BASE)
+
+// Festivos de 9to5 (nacionales, de Madrid y locales). Sin ellos, la lista básica de arriba.
+export function setFestivos(dates) {
+  festivos = new Set(dates && dates.length ? dates : FESTIVOS_BASE)
+}
 
 const JS_DAY = [null, 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', null]
 
@@ -173,7 +184,7 @@ export function weekdayOf(iso) {
 }
 
 export function isLaborable(iso) {
-  return !!weekdayOf(iso) && !FESTIVOS.includes(iso)
+  return !!weekdayOf(iso) && !festivos.has(iso)
 }
 
 export function isSummer(iso) {
@@ -268,10 +279,60 @@ export function combinacionesParo({ cierre = 'abierto', keys = KEY_HOLDERS_DEFAU
   return res.sort((x, y) => y.ahorro - x.ahorro || x.cambios - y.cambios)
 }
 
-// Días de campamento: semanas laborables desde `start`, solo dentro del cierre
-export function campDates(camp, cierre) {
-  if (!camp?.activo || !camp.start || !(camp.semanas > 0)) return new Set()
-  return new Set(laborablesFrom(camp.start, camp.semanas * 5).filter(d => isClosed(d, cierre)))
+// ─── Campamento de verano ────────────────────────────────────────────────────
+// Por la mañana, con la sala abierta (por la tarde) o cerrada. Semanas de lunes a viernes
+// desde el primer lunes de julio y de agosto. Precios y costes: por niño y semana.
+export const CAMP_MESES = [7, 8]
+export const CAMP_DEFAULT = {
+  activo: false,
+  meses: { 7: { semanas: 4, plazas: 15 }, 8: { semanas: 0, plazas: 15 } },
+  ocupacion: 100, precio: 150, descuento: 0,
+  horaInicio: '09:00', horaFin: '13:00',
+  ratio: 8,                  // niños por monitor
+  staff: [],                 // de la plantilla; el resto, monitores de fuera
+  eurHora: 15,               // monitor de fuera, coste por hora
+  seguro: 3, material: 7, comida: 0,
+}
+
+// Acepta el formato anterior (fecha de inicio + semanas seguidas + plazas)
+export function normalizeCamp(c) {
+  if (!c) return { ...CAMP_DEFAULT, meses: { ...CAMP_DEFAULT.meses } }
+  if (c.meses) {
+    return {
+      ...CAMP_DEFAULT, ...c,
+      meses: Object.fromEntries(CAMP_MESES.map(m => [m, { ...CAMP_DEFAULT.meses[m], ...(c.meses[m] || {}) }])),
+      staff: Array.isArray(c.staff) ? c.staff : [],
+    }
+  }
+  const { start, semanas = 4, plazas = 0, ...rest } = c
+  const enAgosto = start && monthOf(start) === 8
+  const meses = {
+    7: { semanas: enAgosto ? 0 : Math.min(semanas, 4), plazas },
+    8: { semanas: enAgosto ? Math.min(semanas, 5) : Math.max(0, Math.min(semanas - 4, 5)), plazas },
+  }
+  return { ...CAMP_DEFAULT, ...rest, meses, staff: Array.isArray(rest.staff) ? rest.staff : [] }
+}
+
+export function lunesDelMes(y, m) {
+  const res = []
+  const d = new Date(y, m - 1, 1)
+  while (d.getDay() !== 1) d.setDate(d.getDate() + 1)
+  while (d.getMonth() === m - 1) { res.push(isoDate(d)); d.setDate(d.getDate() + 7) }
+  return res
+}
+
+// Semanas del campamento en el año `y`: [{ m, lunes, dias }] (laborables del mes)
+export function campWeeks(camp, y) {
+  const c = normalizeCamp(camp)
+  if (!c.activo || !y) return []
+  return CAMP_MESES.flatMap(m => lunesDelMes(y, m).slice(0, c.meses[m].semanas).map(lunes => {
+    const v = parseISO(lunes); v.setDate(v.getDate() + 4)
+    return { m, lunes, dias: laborablesBetween(lunes, isoDate(v)).filter(d => monthOf(d) === m) }
+  }))
+}
+
+export function campDates(camp, y) {
+  return new Set(campWeeks(camp, y).flatMap(w => w.dias))
 }
 
 // periods: [{ prof, start, n }] → { prof: Set(fechas) }
@@ -289,7 +350,8 @@ export function expandPeriods(periods) {
 // necesitan cobertura; en verano no cuenta quien no está disponible ese mes.
 export function simulatePlan(dates, { periods, paro = {}, cierre = 'abierto', camp, keys }) {
   const off = expandPeriods(periods)
-  const campSet = campDates(camp, cierre)
+  const years = [...new Set(dates.map(d => Number(d.slice(0, 4))))]
+  const campSet = new Set(years.flatMap(y => [...campDates(camp, y)]))
   return dates.map(date => {
     if (isClosed(date, cierre)) {
       return {
@@ -306,6 +368,6 @@ export function simulatePlan(dates, { periods, paro = {}, cierre = 'abierto', ca
       season: summer ? 'verano' : 'invierno',
       keys,
     })
-    return { ...r, date, out }
+    return { ...r, date, out, camp: campSet.has(date) }
   })
 }

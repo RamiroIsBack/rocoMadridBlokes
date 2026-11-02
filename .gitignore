@@ -34,3 +34,11 @@ coverage/
 *.bak
 *.tmp
 .cache/
+
+# Notas de trabajo con datos reales de alumnos/clientes/personal (nombres, teléfonos, pagos):
+# el repo es público, esto no se sube nunca. Antes solo se ignoraba mananas_y_datos.md; ahora
+# todas, incluida equipacion.md (que ya estaba trackeada con nombres de personal en el historial).
+NOTAS_PARA_CODE_*.md
+
+# Datos personales (copias de Excel de Eva, exportaciones) — no subir
+datos_privados/

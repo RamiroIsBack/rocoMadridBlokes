@@ -7,8 +7,10 @@ import { useRevenue, useProducts, useExpenses, useClasses } from '../hooks/useSu
 import ExpensesSection from '../components/ExpensesSection'
 import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
 import PayrollSection from '../components/PayrollSection'
+import PresupuestosSection from '../components/PresupuestosSection'
 import ProjectsSection from '../components/ProjectsSection'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
+import { getCalendarAccess, saveCalendarAccess } from '../hooks/useCalendar'
 import './SuperAdminPage.css'
 
 const PERIOD_OPTIONS = [
@@ -825,10 +827,10 @@ function fmtPLVal(v) {
 }
 
 function PLTab() {
-  const { data: expData, loading } = useExpenses(30, 'all', true)
+  const { data: expData, loading } = useExpenses('', 'all', true)
   const [metric,  setMetric ] = useState('ventas')
   const [view,    setView   ] = useState('comparativa')
-  const [showIva, setShowIva] = useState(false)
+  const [showIva, setShowIva] = useState(true)
 
   const live2026 = useMemo(() => {
     if (!expData) return {}
@@ -1099,6 +1101,7 @@ export default function SuperAdminPage() {
     { key: 'pl',       label: 'P&L' },
     { key: 'nominas',  label: 'Nóminas' },
     { key: 'acceso',   label: 'Acceso' },
+    { key: 'presupuestos', label: 'Presupuestos' },
     { key: 'proyectos', label: 'Proyectos' },
   ]
 
@@ -1123,6 +1126,7 @@ export default function SuperAdminPage() {
       {saTab === 'pl'       && <PLTab />}
       {saTab === 'nominas'  && <PayrollSection />}
       {saTab === 'acceso'   && <ListasSection />}
+      {saTab === 'presupuestos' && <PresupuestosSection />}
       {saTab === 'proyectos' && <ProjectsSection />}
     </div>
   )
@@ -1232,7 +1236,14 @@ function ListasSection() {
                 </div>
               )
             })}
-            <EventsAccessGroup />
+            <SectionAccessGroup
+              name="Eventos" color="#f87171" load={getEventsAccess} save={saveEventsAccess}
+              note="Solo la sección Eventos (gestión y socios ya entran)"
+            />
+            <SectionAccessGroup
+              name="Calendario" color="#a78bfa" load={getCalendarAccess} save={saveCalendarAccess}
+              note="Ven el Calendario sin teléfonos, contactos ni importes (los profes ya entran así; gestión y socios lo ven entero)"
+            />
           </div>
         </div>
       </details>
@@ -1240,15 +1251,16 @@ function ListasSection() {
   )
 }
 
-// Lista de Eventos: se guarda aparte (superadmin/v1), para dar acceso solo a Eventos (p. ej. Juan)
-function EventsAccessGroup() {
+// Listas de una sola sección (Eventos, Calendario): se guardan aparte (superadmin/v1),
+// para dar acceso solo a esa sección (p. ej. Juan o Carolina)
+function SectionAccessGroup({ name, color, note, load, save: saveList }) {
   const [emails, setEmails] = useState(null)
   const [input,  setInput]  = useState('')
   const [status, setStatus] = useState('')   // '', 'saving', 'saved' o mensaje de error
 
   useEffect(() => {
-    getEventsAccess().then(json => setEmails(json.emails || [])).catch(e => { setEmails([]); setStatus(e.message) })
-  }, [])
+    load().then(json => setEmails(json.emails || [])).catch(e => { setEmails([]); setStatus(e.message) })
+  }, [load])
 
   const add = () => {
     const email = input.trim().toLowerCase()
@@ -1259,7 +1271,7 @@ function EventsAccessGroup() {
   const save = async () => {
     setStatus('saving')
     try {
-      setEmails(await saveEventsAccess(emails))
+      setEmails(await saveList(emails))
       setStatus('saved')
       setTimeout(() => setStatus(''), 3000)
     } catch (e) {
@@ -1269,10 +1281,10 @@ function EventsAccessGroup() {
 
   if (!emails) return null
   return (
-    <div className="sa-list-group" style={{ '--list-color': '#f87171' }}>
+    <div className="sa-list-group" style={{ '--list-color': color }}>
       <div className="sa-list-group__header">
-        <span className="sa-list-group__name">Eventos</span>
-        <span className="sa-list-group__acceso">Solo la sección Eventos (gestión y socios ya entran)</span>
+        <span className="sa-list-group__name">{name}</span>
+        <span className="sa-list-group__acceso">{note}</span>
       </div>
       <div className="sa-list-group__emails">
         {emails.map(email => (

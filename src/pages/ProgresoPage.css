@@ -280,14 +280,15 @@
 }
 
 .progreso__color-tab--active {
-  border-color: #f97316;
-  background: #f97316;
+  /* antes #f97316: 2,8:1 con el texto blanco — NOTAS_PARA_CODE_contraste.md */
+  border-color: #c2410c;
+  background: #c2410c;
   color: #fff;
 }
 
 .progreso__color-tab:hover:not(.progreso__color-tab--active) {
-  border-color: #f97316;
-  color: #f97316;
+  border-color: #c2410c;
+  color: #c2410c;
 }
 
 .progreso__month-select {

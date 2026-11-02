@@ -122,6 +122,16 @@ header('Content-Type: text/html; charset=UTF-8');
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
+<title>Blokes — Rocoteca Madrid</title>
+<!-- App instalable (PWA): manifest + iconos + service worker (lo registra main.jsx) -->
+<link rel="manifest" href="<?php echo esc_url($app_url . 'manifest.webmanifest'); ?>">
+<meta name="theme-color" content="#1f1f1f">
+<link rel="icon" type="image/png" sizes="32x32" href="<?php echo esc_url($app_url . 'icons/favicon-32.png'); ?>">
+<link rel="apple-touch-icon" href="<?php echo esc_url($app_url . 'icons/apple-touch-icon.png'); ?>">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Blokes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <?php if ($css_url): ?>
 <link rel="stylesheet" href="<?php echo esc_url($css_url); ?>">
 <?php endif; ?>

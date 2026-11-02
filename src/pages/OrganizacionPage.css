@@ -8,6 +8,7 @@
   font-size: 0.9rem;
   color: var(--color-text-secondary);
 }
+.org__hint--auto { color: var(--color-accent-hover); font-weight: 600; }
 
 .org__switch {
   display: flex;
@@ -132,6 +133,8 @@
 }
 .org__add-row { display: flex; flex-direction: column; gap: 4px; }
 .org__add-row label { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-secondary); }
+.org__add-row--check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+.org__add-row--check span { font-size: 0.82rem; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--color-text-primary); }
 .org__add-row select, .org__add-row input[type="date"] {
   padding: 8px; border: 1.5px solid #c8bc9a; background: #fff; font-size: 0.9rem;
 }
@@ -232,6 +235,7 @@
   font-weight: 700;
   color: #2a2015;
   cursor: pointer;
+  touch-action: none;
 }
 .org__comp-chip--selected { background: #2a2015; color: #f5c842; }
 
@@ -266,6 +270,9 @@
   box-shadow: 0 2px 4px rgba(0,0,0,0.4);
 }
 .org__comp-bubble:active { cursor: grabbing; }
+.org__comp-bubble--ghost { opacity: 0.6; pointer-events: none; border-style: dashed; }
+.org__comp-bubble--tested { box-shadow: 0 0 0 2px #22c55e, 0 2px 4px rgba(0,0,0,0.4); }
+.org__comp-block-photo { max-width: 160px; display: block; margin-bottom: 6px; border: 1px solid #c8bc9a; }
 
 /* ── Mover tarea (Semana, detalle) / editar periodicidad (Normas) ── */
 .org__task-move {
@@ -281,7 +288,7 @@
   font-size: 0.75rem;
 }
 .org__task label { gap: 0; }
-.org__task { display: flex; align-items: center; gap: 10px; }
+.org__task { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 .org__periodicity-edit {
   display: flex;
@@ -371,6 +378,9 @@
 }
 .org__tile-postpone:disabled { opacity: 0.6; cursor: default; }
 .org__task--retrasada { border-color: #c8961e; background: #fdf0d8; }
+.org__task--moved { opacity: 0.6; }
+.org__task--moved .org__task-name { text-decoration: line-through; }
+.org__task--inactive { opacity: 0.55; }
 
 /* ── Semana: histórico ── */
 .org__historico {

@@ -34,6 +34,10 @@ export function useEventsAccess() {
   return can
 }
 
+export const getSsaBlock      = ()           => request('/events/ssa-block')
+export const setSsaBlock      = (enabled)    => request('/events/ssa-block', 'PUT', { enabled })
+export const createSsaTest    = (date, time) => request('/events/ssa-block/test', 'POST', { date, time })
+export const deleteSsaTest    = ()           => request('/events/ssa-block/test', 'DELETE')
 export const getEventsAccess  = ()       => request('/events/access')
 export const saveEventsAccess = (emails) => request('/events/access', 'PUT', { emails }).then(json => json.emails)
 
@@ -104,6 +108,8 @@ export function money(b, s) {
 }
 
 export const counts = b => b.status !== 'cancelada'
+// Señal por cobrar: sin pagar, o marcada como pagada pero a 0 € (no hay total ni niños: casi seguro que no se ha cobrado)
+export const depositDue = (b, s) => counts(b) && b.status !== 'celebrada' && (!b.deposit_paid || money(b, s).deposit < 0.01)
 
 export function emptyBooking(s, date = '', time = '') {
   return {

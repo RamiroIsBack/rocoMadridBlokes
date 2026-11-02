@@ -18,11 +18,13 @@ import TimeOffPage from './pages/TimeOffPage'
 import LeaguesPage from './pages/LeaguesPage'
 import EventosPage from './pages/EventosPage'
 import CalendarioPage from './pages/CalendarioPage'
+import { setVerComo, clearVerComo } from './utils/verComo'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
 import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import { useEventsAccess } from './hooks/useEvents'
+import { useCalendarAccess } from './hooks/useCalendar'
 import './App.css'
 
 const PRODUCT_NAMES = { 'Classes': 'Clases', 'Single Days': 'Días sueltos' }
@@ -55,11 +57,13 @@ function detectBasename() {
   return m ? m[1] : (import.meta.env.VITE_ROUTER_BASENAME || '/blokes')
 }
 
+// Verde/azul/rojo oscurecidos para que el número en blanco tenga contraste real (antes
+// #22c55e/#3b82f6/#ef4444 daban 2,28/3,68/3,76:1 — NOTAS_PARA_CODE_contraste.md).
 const COLOR_BUBBLE = {
-  green:  { bg: '#22c55e', text: '#fff' },
-  blue:   { bg: '#3b82f6', text: '#fff' },
+  green:  { bg: '#15803d', text: '#fff' },
+  blue:   { bg: '#2563eb', text: '#fff' },
   yellow: { bg: '#eab308', text: '#1a1a1a' },
-  red:    { bg: '#ef4444', text: '#fff' },
+  red:    { bg: '#dc2626', text: '#fff' },
   black:  { bg: '#1f2937', text: '#fff' },
   blanco: { bg: '#e5e7eb', text: '#1f2937' },
 }
@@ -77,9 +81,10 @@ export default function App() {
   const lastScrollY = useRef(0)
   const sd = window.blokesSiteData || {}
   const canEvents = useEventsAccess()
+  const canCalendar = useCalendarAccess().can
 
   // Profile modal state
-  const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto } = useProfile()
+  const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto, optinWhatsapp, saveOptinWhatsapp } = useProfile()
   const [profileModalOpen,    setProfileModalOpen]    = useState(false)
   const [profileModalBlock,   setProfileModalBlock]   = useState(false)
   const [profileModalMsg,     setProfileModalMsg]     = useState('')
@@ -159,6 +164,7 @@ export default function App() {
   return (
     <BrowserRouter basename={detectBasename()}>
       <div className="app">
+        <VerComoBanner sd={sd} />
         <header className="app-header">
           <div className="app-header__logo-section">
             <a href="https://rocomadrid.com" >
@@ -198,6 +204,7 @@ export default function App() {
                       className="app-header__logout-btn"
                       onClick={() => setLogoutOpen(true)}
                     >× Log out</button>
+                    {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
                   </div>
                 </div>
                 {sd.subscription && (
@@ -301,7 +308,7 @@ export default function App() {
                   <NavLink to="/eventos" className="app-nav__link">Eventos</NavLink>
                 </li>
               )}
-              {['gestion', 'socio'].includes(sd.userRole) && (
+              {canCalendar && (
                 <li className="app-nav__item">
                   <NavLink to="/calendario" className="app-nav__link">Calendario</NavLink>
                 </li>
@@ -378,9 +385,43 @@ export default function App() {
             saveProfile={saveProfile}
             checkNickname={checkNickname}
             uploadPhoto={uploadPhoto}
+            optinWhatsapp={optinWhatsapp}
+            saveOptinWhatsapp={saveOptinWhatsapp}
           />
         )}
       </div>
     </BrowserRouter>
+  )
+}
+
+const VER_COMO_LABEL = { gestion: 'Eva (gestión)', profesor: 'Profe' }
+
+// Selector "Ver como" (Ramiro, 1/11 18:30), solo para socio — al lado de Log out. Cambiar de
+// rol recarga la página: es la forma más simple de que TODA la app (decenas de sitios que leen
+// `window.blokesSiteData.userRole` directamente) refleje el rol simulado sin tener que convertir
+// cada uno de ellos a un estado de React.
+function VerComoSelector({ sd }) {
+  const actual = sd.userRole !== sd.userRoleReal ? sd.userRole : ''
+  const cambiar = e => {
+    const valor = e.target.value
+    if (valor) setVerComo(valor); else clearVerComo()
+    window.location.reload()
+  }
+  return (
+    <select className="app-header__ver-como" value={actual} onChange={cambiar} title="Ver como">
+      <option value="">Ver como: Socio</option>
+      <option value="gestion">Ver como: Eva (gestión)</option>
+      <option value="profesor">Ver como: Profe</option>
+    </select>
+  )
+}
+
+function VerComoBanner({ sd }) {
+  if (sd.userRoleReal !== 'socio' || sd.userRole === sd.userRoleReal) return null
+  const volver = () => { clearVerComo(); window.location.reload() }
+  return (
+    <div className="app-ver-como-banner">
+      👁 Viendo como {VER_COMO_LABEL[sd.userRole] || sd.userRole} — <button onClick={volver}>Volver a Socio</button>
+    </div>
   )
 }

@@ -26,6 +26,18 @@ DirectoryIndex index.php index.html
   ExpiresByType font/woff2               "access plus 1 year"
 </IfModule>
 
+# App instalable (PWA): el manifest con su tipo, y el service worker siempre fresco
+# (si se cachease un año como el resto de .js, los móviles no verían sus cambios)
+AddType application/manifest+json .webmanifest
+<FilesMatch "^(sw\.js|manifest\.webmanifest)$">
+  <IfModule mod_expires.c>
+    ExpiresActive Off
+  </IfModule>
+  <IfModule mod_headers.c>
+    Header set Cache-Control "no-cache"
+  </IfModule>
+</FilesMatch>
+
 # Security: block access to hidden files
 <FilesMatch "^\.">
   Order allow,deny

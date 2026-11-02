@@ -173,7 +173,6 @@ export function useWordPressPosts() {
             // Check if we should force mock data (for local testing)
             const forceMock =
                 import.meta.env.VITE_USE_MOCK === 'true'
-            const hasCredentials = !!ENV_AUTH
 
             // If forcing mock mode, use mock data
             if (forceMock) {
@@ -184,9 +183,12 @@ export function useWordPressPosts() {
                 return
             }
 
-            // Try to fetch from WordPress first if we have credentials
-            if (hasCredentials) {
-                try {
+            // Siempre se intenta de verdad: los blokes publicados son públicos en la REST API de
+            // WordPress, no hace falta `VITE_WORDPRESS_AUTH` para leerlos (solo para editar). Antes
+            // esto se saltaba entero si la build no tenía esa variable puesta (p. ej. un build local
+            // sin el .env completo) y mandaba a producción los 4 blokes de prueba sin ningún error
+            // visible — "los blokes no aparecen en Colección" sin que nadie se entere de por qué.
+            try {
                     // Build the WordPress REST API URL
                     const url = `${WORDPRESS_URL}/wp-json/wp/v2/blokes?` + new URLSearchParams({
                         per_page: 100,
@@ -331,13 +333,6 @@ export function useWordPressPosts() {
                     setLoading(false)
                     return
                 }
-            }
-
-            // No credentials - use mock
-            console.log('No credentials configured, using mock data')
-            setCards(MOCK_CARDS)
-            setDataSource('mock')
-            setLoading(false)
         }
 
         fetchData()
@@ -357,7 +352,6 @@ export function useWordPressPosts() {
                 // Re-trigger the effect by manually fetching
                 const forceMock =
                     import.meta.env.VITE_USE_MOCK === 'true'
-                const hasCredentials = !!ENV_AUTH
                 if (forceMock) {
                     setCards(MOCK_CARDS)
                     setDataSource('mock')
@@ -365,16 +359,15 @@ export function useWordPressPosts() {
                     return
                 }
 
-                if (hasCredentials) {
+                // Igual que en la carga inicial: se intenta siempre, con o sin credenciales
+                // (los blokes publicados son públicos).
+                {
+                    const authHeader = getAuthHeader()
                     fetch(`${WORDPRESS_URL}/wp-json/wp/v2/blokes?` + new URLSearchParams({
                             per_page: 100,
                             _embed: '',
                             acf_format: 'standard',
-                        }), {
-                            headers: {
-                                'Authorization': getAuthHeader()
-                            }
-                        })
+                        }), authHeader ? { headers: { 'Authorization': authHeader } } : {})
                         .then(res => res.json())
                         .then(posts => {
                             if (posts && posts.length > 0) {
@@ -439,10 +432,6 @@ export function useWordPressPosts() {
                             setError(err.message)
                             setLoading(false)
                         })
-                } else {
-                    setCards([])
-                    setDataSource('none')
-                    setLoading(false)
                 }
             }, 100)
         }, [])

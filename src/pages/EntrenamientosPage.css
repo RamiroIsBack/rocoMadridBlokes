@@ -85,6 +85,31 @@
   vertical-align: middle;
 }
 
+.entrena__missing-tag {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: hsl(calc(var(--missing-hue, 0)), 70%, 32%);
+  background: hsl(calc(var(--missing-hue, 0)), 90%, 95%);
+  border: 1px solid hsl(calc(var(--missing-hue, 0)), 80%, 75%);
+  border-radius: 3px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
+/* Le falta algún test: borde animado a la izquierda, de amarillo (casi completo) a rojo
+   (le falta mucho), según --missing-hue (0 = rojo, 50 = amarillo), calculado por fila. */
+@keyframes entrena-missing-pulse {
+  0%, 100% { box-shadow: inset 4px 0 0 0 hsl(var(--missing-hue, 0), 85%, 50%); }
+  50%      { box-shadow: inset 4px 0 0 0 hsl(var(--missing-hue, 0), 85%, 68%); }
+}
+.entrena__row--missing td:first-child {
+  animation: entrena-missing-pulse 1.8s ease-in-out infinite;
+}
+
 .entrena__modal-overlay {
   position: fixed;
   inset: 0;
@@ -452,7 +477,9 @@
   font-family: var(--font-serif);
   font-size: 1.1rem;
   font-weight: 700;
-  color: var(--zone-color, #2a2015);
+  /* El color de zona (azul/naranja/morado) se queda solo en el borde, decorativo — como texto
+     daba 2,46-3,47:1 sobre el beige (cowork, 1/11 18:30). */
+  color: var(--color-text-primary);
   margin: 0 0 12px;
   padding-bottom: 6px;
   border-bottom: 1.5px solid var(--zone-color, #c8bc9a);
@@ -508,6 +535,30 @@
   line-height: 1.45;
   color: var(--color-text-secondary);
 }
+
+/* ── Gestión de tests (antes Supervisión › Tests) ── */
+.entrena__tests-manager { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--color-border); }
+.entrena__tests-advanced { margin-top: 10px; padding: 12px; background: rgba(0,0,0,0.03); border: 1px dashed var(--color-border); }
+.entrena__hint { font-size: 0.8rem; color: var(--color-text-secondary); margin: 0 0 12px; }
+
+/* Las clases .sv-tests-* vienen de Supervisión, donde conviven fondo claro y fondo oscuro
+   (modales/CTRL Time Off) — aquí siempre es fondo claro, así que se corrigen aparte en vez de
+   tocar la regla compartida (Ramiro, 1/11 16:45: "nada de inputs negros sobre beige con texto
+   verde claro" — los inputs en sí ya llevan su propio fondo oscuro y están bien; lo que fallaba
+   eran los textos sueltos directamente sobre el beige). */
+.entrena__tests-manager .sv-tests-table th    { color: var(--color-text-secondary); }
+.entrena__tests-manager .sv-tests-none        { color: var(--color-text-secondary); }
+.entrena__tests-manager .sv-tests-clear       { color: var(--color-text-secondary); }
+.entrena__tests-manager .sv-tests-clear:hover { color: var(--state-bad); }
+.entrena__tests-manager .sv-tests-add         { color: var(--color-text-secondary); border-color: var(--color-border); }
+.entrena__tests-manager .sv-tests-add:hover   { color: var(--color-accent-hover); border-color: var(--color-accent-hover); }
+.entrena__tests-manager .sv-tests-cancel      { color: var(--color-text-secondary); border-color: var(--color-border); }
+.entrena__tests-manager .sv-tests-cancel:hover { color: var(--color-text-primary); border-color: var(--color-text-secondary); }
+.entrena__tests-manager .sv-tests-feedback    { color: var(--state-ok); }
+.entrena__tests-manager .sv-tests-mock-val    { color: var(--state-ok); }
+.entrena__tests-manager .sv-tests-danger      { color: var(--state-bad); border-color: var(--state-bad); }
+.entrena__tests-manager .sv-tests-confirm-msg { color: var(--state-bad); }
+.entrena__tests-manager .sv-tests-remove      { color: var(--state-bad); border-color: var(--state-bad); }
 
 /* ── Inline panel row (alumno mode) ── */
 .entrena__inline-panel td {

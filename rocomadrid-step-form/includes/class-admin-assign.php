@@ -616,11 +616,26 @@ class RocoMadrid_SF_Admin_Assign {
 
 		$subscription->set_address( $billing, 'billing' );
 
-		// Calcular fechas: inicio ahora, próximo pago según el período
+		// Calcular fechas: inicio ahora, próximo pago según el período — si el producto está
+		// sincronizado (todas las renovaciones el día 3, confirmado por Ramiro), el próximo pago
+		// lo calcula WooCommerce Subscriptions con su propia regla de sincronización, igual que
+		// hace el checkout normal (ver class-ajax.php, misma llamada). Si no se hace así, esta
+		// asignación manual queda con next_payment a "+1 mes desde hoy" sin más, desincronizada
+		// de todas las demás (cowork, 2/11 13:45: las suscripciones con created_via=admin_assign
+		// son justo las que no renuevan el día 3 — causa raíz confirmada en este fichero).
 		$start_date = gmdate( 'Y-m-d H:i:s' );
-		$next_payment = ( 'year' === $billing_period )
-			? gmdate( 'Y-m-d H:i:s', strtotime( '+1 year' ) )
-			: gmdate( 'Y-m-d H:i:s', strtotime( '+' . $billing_interval . ' month' ) );
+		$next_payment = null;
+		if ( class_exists( 'WC_Subscriptions_Synchroniser' ) ) {
+			$first_payment_ts = WC_Subscriptions_Synchroniser::calculate_first_payment_date( $sub_product, 'timestamp' );
+			if ( $first_payment_ts > 0 ) {
+				$next_payment = gmdate( 'Y-m-d H:i:s', $first_payment_ts );
+			}
+		}
+		if ( ! $next_payment ) {
+			$next_payment = ( 'year' === $billing_period )
+				? gmdate( 'Y-m-d H:i:s', strtotime( '+1 year' ) )
+				: gmdate( 'Y-m-d H:i:s', strtotime( '+' . $billing_interval . ' month' ) );
+		}
 
 		try {
 			$subscription->update_dates( array(

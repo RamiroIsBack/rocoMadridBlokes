@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import './PlaygroundPage.css'
 import { PROF_META, PROF_ORDER, DAYS, DAY_LABEL, SALA, BASE } from '../data/staffSchedule'
+import { useCostes } from '../hooks/useCostes'
 
 // ─── static data ─────────────────────────────────────────────────────────────
 
@@ -104,7 +105,7 @@ function TimeColCell() {
   )
 }
 
-function ProfCard({ name, selected, onSelect }) {
+function ProfCard({ name, coste, selected, onSelect }) {
   const m = PROF_META[name]
   return (
     <div
@@ -119,7 +120,7 @@ function ProfCard({ name, selected, onSelect }) {
       <div className="pg-prof-card__stat">
         <span className="pg-prof-card__lbl">Coste/mes</span>
         <span className="pg-prof-card__val">
-          {m.costoMes.toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
+          {(coste ?? m.costoMes).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}
         </span>
       </div>
       <div className="pg-prof-card__stat">
@@ -320,12 +321,13 @@ function ScenarioC() {
 export default function PlaygroundPage() {
   const sd = window.blokesSiteData || {}
   const [selectedProf, setSelectedProf] = useState('Alvaro')
+  const costes = useCostes()
 
   if (sd.userRole !== 'socio') {
     return <div className="pg-restricted"><p>Acceso restringido a socios.</p></div>
   }
 
-  const totalCost  = Object.values(PROF_META).reduce((s, m) => s + m.costoMes, 0)
+  const totalCost  = PROF_ORDER.reduce((s, p) => s + (costes.mes[p] ?? PROF_META[p].costoMes), 0)
   const totalClass = Object.values(PROF_META).reduce((s, m) => s + m.clasesSem, 0)
   const totalHClase = Object.values(PROF_META).reduce((s, m) => s + m.clasesSem * 1.5, 0)
   const avgHClase  = totalCost / (totalHClase * 4.33)
@@ -362,7 +364,7 @@ export default function PlaygroundPage() {
 
       <div className="pg-profs">
         {PROF_ORDER.map(n => (
-          <ProfCard key={n} name={n} selected={selectedProf === n} onSelect={setSelectedProf} />
+          <ProfCard key={n} name={n} coste={costes.mes[n]} selected={selectedProf === n} onSelect={setSelectedProf} />
         ))}
       </div>
 

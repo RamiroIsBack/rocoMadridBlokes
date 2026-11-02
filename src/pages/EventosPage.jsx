@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   useEventsAccess, useBookings, createBooking, importBookings, updateBooking, deleteBooking, saveEventSettings,
-  TYPES, STATUSES, ORIGINS, typeOf, statusOf, originOf, money, counts, emptyBooking,
+  getSsaBlock, setSsaBlock, createSsaTest, deleteSsaTest,
+  TYPES, STATUSES, ORIGINS, typeOf, statusOf, originOf, money, counts, depositDue, emptyBooking,
 } from '../hooks/useEvents'
 import { fmtEur } from '../utils/monthFormat'
 import './SuperAdminPage.css'
@@ -38,6 +39,7 @@ function BookingForm({ initial, settings, onSave, onDelete, onClose }) {
   const [error, setError] = useState('')
   const set = (k, v) => setF(x => ({ ...x, [k]: v }))
   const m   = money(f, settings)
+  const esSocio = window.blokesSiteData?.userRole === 'socio'
 
   async function submit(e) {
     e.preventDefault()
@@ -85,15 +87,16 @@ function BookingForm({ initial, settings, onSave, onDelete, onClose }) {
           </div>
         ))}
         {field('Resto pagado', <input type="checkbox" checked={f.rest_paid} onChange={e => set('rest_paid', e.target.checked)} />)}
-        {field('Pago a monitores', <input type="number" min="0" step="0.01" className="pr-input ev-input" value={f.monitors_pay ?? ''} onChange={e => set('monitors_pay', toNum(e.target.value))} />)}
-        {field('Materiales', <input type="number" min="0" step="0.01" className="pr-input ev-input" value={f.materials ?? ''} onChange={e => set('materials', toNum(e.target.value))} />)}
+        {esSocio && field('Pago a monitores', <input type="number" min="0" step="0.01" className="pr-input ev-input" value={f.monitors_pay ?? ''} onChange={e => set('monitors_pay', toNum(e.target.value))} />)}
+        {esSocio && field('Materiales', <input type="number" min="0" step="0.01" className="pr-input ev-input" value={f.materials ?? ''} onChange={e => set('materials', toNum(e.target.value))} />)}
         {field('Monitores', <input className="pr-input ev-input" placeholder="Quién lo da" value={f.monitors} onChange={e => set('monitors', e.target.value)} />)}
         {field('Notas', <textarea className="sa-pay-textarea" rows={2} maxLength={2000} value={f.notes} onChange={e => set('notes', e.target.value)} />, true)}
       </div>
 
       <p className="ev-form__sum">
         Total <strong>{fmtEur(m.total)}</strong> · señal {fmtEur(m.deposit)} · cobrado {fmtEur(m.paid)} ·
-        pendiente <strong className={m.pending > 0 ? 'ev-warn' : ''}>{fmtEur(m.pending)}</strong> · ganancia <strong>{fmtEur(m.profit)}</strong>
+        pendiente <strong className={m.pending > 0 ? 'ev-warn' : ''}>{fmtEur(m.pending)}</strong>
+        {esSocio && <> · ganancia <strong>{fmtEur(m.profit)}</strong></>}
       </p>
       {error && <p className="sa-error">{error}</p>}
       <div className="sa-pay-actions">
@@ -114,7 +117,7 @@ function WeekSummary({ bookings, settings, start, onShift, onOpen, onNew }) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i))
   const list = bookings.filter(b => b.date >= days[0] && b.date <= days[6] && counts(b))
   const kids = list.reduce((s, b) => s + (b.kids || 0), 0)
-  const pend = list.filter(b => !b.deposit_paid && b.status !== 'celebrada').length
+  const pend = list.filter(b => depositDue(b, settings)).length
 
   return (
     <div className="sa-section">
@@ -138,7 +141,7 @@ function WeekSummary({ bookings, settings, start, onShift, onOpen, onNew }) {
           return (
             <div key={d} className={`ev-week__day${d === today() ? ' ev-week__day--today' : ''}${weekend ? ' ev-week__day--weekend' : ''}`}>
               <div className="ev-week__date">{fmtDay(d)}</div>
-              {items.map(b => <BookingChip key={b.id} b={b} onClick={() => onOpen(b)} />)}
+              {items.map(b => <BookingChip key={b.id} b={b} settings={settings} onClick={() => onOpen(b)} />)}
               {free.map(s => <button key={s} className="ev-free" onClick={() => onNew(d, s)}>{s} libre</button>)}
             </div>
           )
@@ -148,14 +151,14 @@ function WeekSummary({ bookings, settings, start, onShift, onOpen, onNew }) {
   )
 }
 
-function BookingChip({ b, onClick }) {
+function BookingChip({ b, settings, onClick }) {
   const t = typeOf(b.type)
   return (
     <button className={`ev-chip${b.status === 'solicitud' ? ' ev-chip--tentative' : ''}`} style={{ '--type-color': t.color }} onClick={onClick}
       title={`${t.label} · ${statusOf(b.status).label}`}>
       <span className="ev-chip__time">{b.time || '—'}</span>
       <span className="ev-chip__name">{b.honoree || b.contact || t.label}</span>
-      {!b.deposit_paid && b.status !== 'celebrada' && <span className="ev-chip__warn" title="Señal sin pagar">€</span>}
+      {depositDue(b, settings) && <span className="ev-chip__warn" title={b.deposit_paid ? 'Señal a 0 €: revisa si de verdad está pagada' : 'Señal sin pagar'}>€</span>}
     </button>
   )
 }
@@ -185,7 +188,7 @@ function MonthCalendar({ bookings, settings, month, onMonth, onOpen, onNew }) {
           return (
             <div key={d} className={`ev-month__cell${monthOf(d) !== month ? ' ev-month__cell--out' : ''}${d === today() ? ' ev-month__cell--today' : ''}${weekend ? ' ev-month__cell--weekend' : ''}`}>
               <span className="ev-month__num">{parse(d).getDate()}</span>
-              {items.map(b => <BookingChip key={b.id} b={b} onClick={() => onOpen(b)} />)}
+              {items.map(b => <BookingChip key={b.id} b={b} settings={settings} onClick={() => onOpen(b)} />)}
               {free.map(s => <button key={s} className="ev-free" onClick={() => onNew(d, s)}>{s}</button>)}
             </div>
           )
@@ -216,7 +219,7 @@ function BookingList({ bookings, settings, onOpen, onChange }) {
   const rows = bookings.filter(b => {
     if (filter === 'proximas') return b.date >= t && b.status !== 'cancelada'
     if (filter === 'pasadas')  return b.date < t
-    if (filter === 'senal')    return counts(b) && !b.deposit_paid && b.status !== 'celebrada'
+    if (filter === 'senal')    return depositDue(b, settings)
     if (filter === 'cobro')    return counts(b) && money(b, settings).pending > 0.01
     return true
   }).filter(b => !q || `${b.contact} ${b.honoree} ${b.phone} ${b.email} ${b.notes}`.toLowerCase().includes(q.toLowerCase()))
@@ -264,9 +267,9 @@ function BookingList({ bookings, settings, onOpen, onChange }) {
                       <td className="sa-pay-num">{b.kids ?? '—'}</td>
                       <td className="sa-pay-num sa-pay-strong">{fmtEur(m.total)}</td>
                       <td>
-                        <Badge cls={b.deposit_paid ? 'ev-badge--ok' : 'ev-badge--warn'} title="Pulsa para cambiar"
+                        <Badge cls={b.deposit_paid && !depositDue(b, settings) ? 'ev-badge--ok' : 'ev-badge--warn'} title={b.deposit_paid && depositDue(b, settings) ? 'Señal a 0 €: revisa si de verdad está pagada. Pulsa para cambiar' : 'Pulsa para cambiar'}
                           onClick={() => onChange(b, { deposit_paid: !b.deposit_paid, deposit_date: !b.deposit_paid ? (b.deposit_date || today()) : b.deposit_date })}>
-                          {b.deposit_paid ? `Pagada · ${fmtEur(m.deposit)}` : `Sin pagar · ${fmtEur(m.deposit)}`}
+                          {b.deposit_paid ? `Pagada · ${fmtEur(m.deposit)}${depositDue(b, settings) ? ' ⚠' : ''}` : `Sin pagar · ${fmtEur(m.deposit)}`}
                         </Badge>
                       </td>
                       <td className={`sa-pay-num${m.pending > 0.01 ? ' ev-warn' : ''}`}>{fmtEur(m.pending)}</td>
@@ -345,7 +348,76 @@ function Money({ bookings, settings, onSettings }) {
         <p className="sa-pay-note">Ganancia = total − pago a monitores − materiales. No cuentan las reservas canceladas.</p>
       </div>
       <SettingsPanel settings={settings} onSaved={onSettings} />
+      {window.blokesSiteData?.userRole === 'socio' && <SsaBlockPanel slots={settings.slots ?? []} />}
     </>
+  )
+}
+
+// Bloquear en la web (SSA) los huecos de las reservas de Eventos. Con una prueba antes de activarlo.
+const WEB_BOOKING_URL = 'https://rocomadrid.com/otras-actividades/'
+
+function SsaBlockPanel({ slots }) {
+  const [state, setState] = useState(null)
+  const [date, setDate]   = useState('')
+  const [time, setTime]   = useState(slots[0] || '11:00')
+  const [busy, setBusy]   = useState(false)
+  const [msg, setMsg]     = useState('')
+
+  useEffect(() => { getSsaBlock().then(setState).catch(e => setMsg(`✗ ${e.message}`)) }, [])
+
+  async function run(fn, ok) {
+    setBusy(true); setMsg('')
+    try { setState(await fn()); if (ok) setMsg(ok) } catch (e) { setMsg(`✗ ${e.message}`) }
+    setBusy(false)
+  }
+  const toggle = () => {
+    const on = !state.enabled
+    if (on && !window.confirm('Se ocuparán en la web los huecos de todas las reservas de Eventos de hoy en adelante. ¿Activar?')) return
+    run(() => setSsaBlock(on), on ? '✓ Activado: los huecos de Eventos ya están ocupados en la web' : '✓ Desactivado')
+  }
+
+  if (!state) return msg ? <div className="sa-section"><p className="sa-error">{msg}</p></div> : null
+  return (
+    <div className="sa-section">
+      <div className="sa-section__header"><h2 className="sa-section-title">Bloquear huecos en la web</h2></div>
+      <p className="sa-pay-note">
+        Cada reserva de Eventos con hora ocupa su hueco en el formulario de reservas de la web, sin mandar emails.
+        Si se cambia de día u hora, el hueco se mueve; si se cancela o se borra, se libera.
+      </p>
+      <label className="ev-ssa-switch">
+        <input type="checkbox" checked={state.enabled} onChange={toggle} disabled={busy || !state.ready} />
+        {state.enabled ? 'Activado' : 'Desactivado'}
+      </label>
+
+      <h3 className="ev-ssa-sub">Prueba</h3>
+      {state.test ? (
+        <>
+          <p className="sa-pay-note">
+            Hay un bloqueo de prueba el <strong>{fmtDay(state.test.date)} a las {state.test.time}</strong>.
+            Mira en <a href={WEB_BOOKING_URL} target="_blank" rel="noreferrer">la web de reservas ↗</a> que ese hueco ya no sale
+            (recarga la página). Después quítalo y comprueba que vuelve.
+          </p>
+          <div className="sa-pay-actions">
+            <button className="sa-list-save__btn" onClick={() => run(deleteSsaTest, '✓ Bloqueo de prueba quitado')} disabled={busy}>Quitar bloqueo de prueba</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="sa-pay-note">
+            Elige un sábado o domingo libre, con más de 2 días de margen (la web no deja reservar antes), y comprueba
+            en <a href={WEB_BOOKING_URL} target="_blank" rel="noreferrer">la web de reservas ↗</a> que ese hueco sale libre.
+          </p>
+          <div className="sa-pay-actions">
+            <input type="date" className="pr-input ev-input" value={date} min={today()} onChange={e => setDate(e.target.value)} />
+            <select className="pr-select ev-input" value={time} onChange={e => setTime(e.target.value)}>
+              {(slots.length ? slots : ['11:00', '17:00']).map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <button className="sa-list-save__btn" onClick={() => run(() => createSsaTest(date, time), '✓ Bloqueo de prueba creado')} disabled={busy || !date}>Crear bloqueo de prueba</button>
+          </div>
+        </>
+      )}
+      {msg && <p className="sa-pay-feedback">{msg}</p>}
+    </div>
   )
 }
 
@@ -473,7 +545,8 @@ export default function EventosPage() {
     <div className="sa-page">
       <h1 className="sa-page__title">Eventos</h1>
       <div className="sa-main-tabs">
-        {TABS.map(t => (
+        {/* "Cobros y rentabilidad" es dinero agregado (costes, ganancia) — solo socio. */}
+        {TABS.filter(t => t.key !== 'cobros' || window.blokesSiteData?.userRole === 'socio').map(t => (
           <button key={t.key} className={`sa-main-tab${tab === t.key ? ' sa-main-tab--active' : ''}`} onClick={() => setTab(t.key)}>{t.label}</button>
         ))}
       </div>

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, Fragment } from 'react'
 import TrainingPanel from '../components/TrainingPanel'
 import { useAlumnoTraining } from '../hooks/useTraining'
 import { ZONES, TESTS as TEST_MAP } from '../components/BodyDiagram'
+import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import { normalizeName, consolidateAlumnos } from '../utils/alumnoUtils'
 import '../admin/AdminLogin.css'
 import './EntrenamientosPage.css'
@@ -14,18 +15,38 @@ const ORDEN_DIAS = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','
 
 const TESTS_LIST = Object.values(ZONES).flatMap(z => z.tests).filter(tid => TEST_MAP[tid]?.visible !== false)
 
+// Cuántos tests le faltan a un alumno (de siempre, no solo este mes) y el estilo de aviso
+// correspondiente: más le falta → más rojo; casi completo → más hacia amarillo.
+function testsFaltantes(alumno, completitud) {
+  if (!alumno?.user_id && !alumno?.placeholder_id) return 0 // sin cuenta vinculada: no se le puede medir todavía
+  const hechos = alumno?.is_placeholder
+    ? completitud.placeholders?.[alumno.placeholder_id]
+    : completitud.users?.[alumno.user_id]
+  if (!hechos) return TESTS_LIST.length
+  const set = new Set(hechos)
+  return TESTS_LIST.filter(tid => !set.has(Number(tid))).length
+}
+function missingRowStyle(faltantes) {
+  if (!faltantes) return null
+  const ratio = Math.min(1, faltantes / TESTS_LIST.length)
+  return { '--missing-hue': 50 - 50 * ratio, '--missing-count': faltantes }
+}
+
 function getAuthHeaders() {
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
   return nonce ? { 'X-WP-Nonce': nonce } : {}
 }
 
+// Para los profes, "viene el Lunes", "viene el Miércoles" y "viene Lunes y Miércoles" es la
+// misma franja — no hay que separarlos al buscar, solo en la ficha de cada alumno (que sigue
+// mostrando su día real). Mismo criterio que usa el backend para esto.
+const DIA_A_PAREJA = { Lunes: 'Lunes-Miércoles', Miércoles: 'Lunes-Miércoles', Martes: 'Martes-Jueves', Jueves: 'Martes-Jueves' }
+function diaAPareja(dia) { return DIA_A_PAREJA[dia] || dia }
+
 function diaMatches(claDia, filterDia) {
   if (!filterDia) return true
   if (!claDia) return false
-  if (claDia === filterDia) return true
-  // Single-day filter matches combined schedules containing that day
-  if (!filterDia.includes('-')) return claDia.split('-').includes(filterDia)
-  return false
+  return diaAPareja(claDia) === diaAPareja(filterDia)
 }
 
 function applyClaseFilters(clases, filters, exclude) {
@@ -41,6 +62,15 @@ function applyClaseFilters(clases, filters, exclude) {
 function distinct(clases, key) {
   const seen = new Set(), result = []
   clases.forEach(c => { if (c[key] && !seen.has(c[key])) { seen.add(c[key]); result.push(c[key]) } })
+  return result
+}
+// Opciones de "Día": una por franja (pareja), no una por cada combinación exacta de días.
+function distinctDiaParejas(clases) {
+  const seen = new Set(), result = []
+  clases.forEach(c => {
+    const p = c.dia && diaAPareja(c.dia)
+    if (p && !seen.has(p)) { seen.add(p); result.push(p) }
+  })
   return result
 }
 function sortDias(dias) {
@@ -66,7 +96,7 @@ function formatDate(dt) {
 }
 
 // ─── Per-student row in Test mode ───────────────────────────────────
-function TestModeRow({ alumno, testId, ambiguousActive }) {
+function TestModeRow({ alumno, testId, ambiguousActive, faltantes, onLogged }) {
   const { history, loading, logTraining, logTrainingConfirmed, updateTraining, reload } = useAlumnoTraining(alumno)
   const [value, setValue]   = useState('')
   const [note, setNote]     = useState('')
@@ -98,17 +128,18 @@ function TestModeRow({ alumno, testId, ambiguousActive }) {
       } else {
         if ((await logTrainingConfirmed(testId, val, unit, note)) === null) return
       }
-      setSaved(true); setTimeout(() => setSaved(false), 2000); reload()
+      setSaved(true); setTimeout(() => setSaved(false), 2000); reload(); onLogged?.()
     } catch (e) { setErr(e.message || 'Error') }
     finally { setSaving(false) }
   }
 
   return (
-    <tr className="entrena__test-row">
+    <tr className={`entrena__test-row${faltantes ? ' entrena__row--missing' : ''}`} style={missingRowStyle(faltantes)}>
       <td className="entrena__test-row__name">
         {alumno.cliente || alumno.nombre || '—'}
         {ambiguousActive && <span className="entrena__active-tag" title="Hay varias personas con este nombre — esta es la que tiene suscripción activa">activo ahora</span>}
         {alumno.is_placeholder && <span className="entrena__manual-tag" title="Alumno manual, sin cuenta vinculada">manual</span>}
+        {faltantes > 0 && <span className="entrena__missing-tag" title={`Le faltan ${faltantes} test${faltantes !== 1 ? 's' : ''} por hacer`}>faltan {faltantes}</span>}
       </td>
       <td className="entrena__test-row__meta">{alumno.dia} · {alumno.horario}</td>
       <td className="entrena__test-row__last">
@@ -151,7 +182,7 @@ function TestModeRow({ alumno, testId, ambiguousActive }) {
 }
 
 // ─── Definiciones de los tests ─────────────────────────────────────
-function DefinicionesList() {
+function DefinicionesList({ esSocio }) {
   return (
     <div className="entrena__defs">
       {Object.entries(ZONES).map(([zoneKey, zone]) => (
@@ -176,6 +207,158 @@ function DefinicionesList() {
           </div>
         </div>
       ))}
+      {esSocio && <TestsManager />}
+    </div>
+  )
+}
+
+// Gestión del catálogo de tests: antes vivía en Supervisión › Tests (pestaña aparte, con mal
+// contraste y sin relación visible con Entrenamientos). Única fuente en la BD (`trainingConfig`
+// ya sincroniza con el servidor y BodyDiagram reacciona al cambio); esto solo mueve la edición
+// aquí, añade la casilla «En uso» que faltaba, y esconde lo avanzado (Ramiro, 1/11 16:45).
+function TestsManager() {
+  const [config, setConfig] = useState(() => getConfig())
+  const [mockInputs, setMockInputs] = useState({})
+  const [feedback, setFeedback] = useState('')
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
+  function flash(msg) {
+    setFeedback(msg)
+    setTimeout(() => setFeedback(''), 2800)
+  }
+
+  function handleTestChange(index, field, value) {
+    setConfig(prev => ({ ...prev, tests: prev.tests.map((t, i) => i === index ? { ...t, [field]: value } : t) }))
+  }
+  function handleRemoveTest(index) {
+    setConfig(prev => ({ ...prev, tests: prev.tests.filter((_, i) => i !== index) }))
+  }
+  function handleAddTest() {
+    const newId = Date.now()
+    setConfig(prev => ({ ...prev, tests: [...prev.tests, { id: newId, name: '', unit: 'reps', zone: 'lower', desc: '', visible: true }] }))
+  }
+  async function handleSaveTests() {
+    saveTests(config.tests)
+    setConfig(getConfig())
+    flash('Guardando...')
+    const ok = await saveTestsToServer()
+    flash(ok ? '✓ Guardado en servidor' : '✓ Local (sin acceso al servidor)')
+  }
+  async function handleApplyMock(testId) {
+    const val = parseFloat(mockInputs[testId])
+    if (isNaN(val) || val <= 0) return
+    setMockValue(testId, val)
+    setMockInputs(prev => ({ ...prev, [testId]: '' }))
+    setConfig(getConfig())
+    flash('Guardando...')
+    const ok = await saveTestsToServer()
+    flash(ok ? '✓ Mock guardado en servidor' : '✓ Mock aplicado (solo local)')
+  }
+  function handleClearMock(testId) {
+    clearMockValue(testId)
+    setConfig(getConfig())
+    flash('✓ Mock eliminado')
+  }
+  async function handleClearAllDB() {
+    setClearing(true)
+    setConfirmClear(false)
+    try {
+      const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/training/all`, {
+        method: 'DELETE', credentials: 'include', headers: getAuthHeaders(),
+      })
+      const json = await res.json()
+      flash(res.ok ? '✓ BD vaciada — el mock es ahora la única fuente' : `✗ Error: ${json.message || res.status}`)
+    } catch (e) {
+      flash(`✗ Error de red: ${e.message}`)
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  return (
+    <div className="entrena__tests-manager">
+      <h2 className="entrena__defs-zone-title">Gestión de tests</h2>
+      <p className="entrena__hint">
+        Marca «En uso» los tests que deben salir en Entrenamientos (modo alumno y modo test), en el
+        registro de resultados y en las definiciones de arriba — es la única lista, no hay otra separada.
+        Desmarcar uno no borra sus resultados ya guardados; si se vuelve a marcar, su histórico reaparece.
+      </p>
+      <div className="sv-tests-scroll">
+        <table className="sv-tests-table">
+          <thead>
+            <tr><th>En uso</th><th>Nombre</th><th>Descripción</th><th>Unidad</th><th>Zona</th><th></th></tr>
+          </thead>
+          <tbody>
+            {config.tests.map((t, i) => (
+              <tr key={t.id}>
+                <td>
+                  <input type="checkbox" checked={t.visible !== false} onChange={e => handleTestChange(i, 'visible', e.target.checked)} title="En uso" />
+                </td>
+                <td><input className="sv-tests-input" value={t.name} onChange={e => handleTestChange(i, 'name', e.target.value)} /></td>
+                <td><textarea className="sv-tests-input sv-tests-input--desc" value={t.desc || ''} onChange={e => handleTestChange(i, 'desc', e.target.value)} placeholder="Cómo se mide este test" rows={2} /></td>
+                <td><input className="sv-tests-input sv-tests-input--unit" value={t.unit} onChange={e => handleTestChange(i, 'unit', e.target.value)} /></td>
+                <td>
+                  <select className="sv-tests-select" value={t.zone} onChange={e => handleTestChange(i, 'zone', e.target.value)}>
+                    <option value="lower">Inferior</option>
+                    <option value="upper">Superior</option>
+                    <option value="fingers">Dedos</option>
+                  </select>
+                </td>
+                <td><button className="sv-tests-remove" onClick={() => handleRemoveTest(i)} title="Borrar test">🗑</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="sv-tests-actions">
+        <button className="sv-tests-add" onClick={handleAddTest}>+ Añadir test</button>
+        <button className="sv-tests-save" onClick={handleSaveTests}>Guardar</button>
+        {feedback && <span className="sv-tests-feedback">{feedback}</span>}
+      </div>
+
+      <button className="entrena__mode-btn" onClick={() => setShowAdvanced(s => !s)} style={{ marginTop: 16 }}>
+        {showAdvanced ? '▾' : '▸'} Avanzado (solo socio)
+      </button>
+      {showAdvanced && (
+        <div className="entrena__tests-advanced">
+          <p className="entrena__hint">Datos de comunidad simulados por test, para probar gráficas sin esperar resultados reales.</p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead><tr><th>Test</th><th>Mock activo</th><th>Nuevo valor ref.</th><th></th></tr></thead>
+              <tbody>
+                {config.tests.map(t => (
+                  <tr key={t.id}>
+                    <td>{t.name}</td>
+                    <td className="sv-tests-mock-cell">
+                      {config.mockValues[t.id] != null ? (
+                        <><span className="sv-tests-mock-val">{config.mockValues[t.id]} {t.unit}</span>
+                          <button className="sv-tests-clear" onClick={() => handleClearMock(t.id)} title="Eliminar mock">×</button></>
+                      ) : <span className="sv-tests-none">—</span>}
+                    </td>
+                    <td>
+                      <input type="number" min="0" step="any" className="sv-tests-input sv-tests-input--num"
+                        value={mockInputs[t.id] || ''} onChange={e => setMockInputs(prev => ({ ...prev, [t.id]: e.target.value }))} placeholder="ej. 12" />
+                    </td>
+                    <td><button className="sv-tests-apply" disabled={!mockInputs[t.id]} onClick={() => handleApplyMock(t.id)}>Aplicar</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="sv-tests-actions">
+            {!confirmClear
+              ? <button className="sv-tests-danger" onClick={() => setConfirmClear(true)}>Vaciar BD tests</button>
+              : <>
+                  <span className="sv-tests-confirm-msg">¿Seguro? Borra todos los registros</span>
+                  <button className="sv-tests-danger sv-tests-danger--confirm" onClick={handleClearAllDB} disabled={clearing}>{clearing ? 'Borrando…' : 'Sí, borrar todo'}</button>
+                  <button className="sv-tests-cancel" onClick={() => setConfirmClear(false)}>Cancelar</button>
+                </>
+            }
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -183,6 +366,7 @@ function DefinicionesList() {
 // ─── Main page ───────────────────────────────────────────────────────
 export default function EntrenamientosPage() {
   const isAuthenticated = ['profesor', 'gestion', 'socio'].includes(window.blokesSiteData?.userRole)
+  const esSocio = window.blokesSiteData?.userRole === 'socio'
   const [viewMode, setViewMode]         = useState('alumno') // 'alumno' | 'test' | 'definiciones'
   const [filters, setFilters]           = useState(EMPTY_FILTERS)
   const [allClases, setAllClases]       = useState([])
@@ -197,6 +381,9 @@ export default function EntrenamientosPage() {
   const [manualError, setManualError]   = useState(null)
   const [manualDupes, setManualDupes]   = useState(null) // candidates the server returned for this name
   const [search, setSearch]             = useState('')
+  const [completitud, setCompletitud]   = useState({ users: {}, placeholders: {} })
+  const [completitudKey, setCompletitudKey] = useState(0)
+  const bumpCompletitud = useCallback(() => setCompletitudKey(k => k + 1), [])
 
   useEffect(() => {
     if (!isAuthenticated) return
@@ -205,6 +392,16 @@ export default function EntrenamientosPage() {
       .then(json => { if (json?.data?.clases) setAllClases(json.data.clases) })
       .catch(() => {})
   }, [isAuthenticated])
+
+  // Para marcar a quién le faltan tests sin pedir el historial completo alumno por alumno.
+  // Se vuelve a pedir si cambia la lista de alumnos o justo después de guardar un test.
+  useEffect(() => {
+    if (!isAuthenticated) return
+    fetch(`${CLUB_URL}/wp-json/progreso/v1/training/completitud`, { credentials: 'include', headers: getAuthHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(json => { if (json?.data) setCompletitud(json.data) })
+      .catch(() => {})
+  }, [isAuthenticated, alumnos, completitudKey])
 
   const fetchAlumnos = useCallback(async (currentFilters) => {
     setLoading(true); setError(null)
@@ -284,12 +481,12 @@ export default function EntrenamientosPage() {
     }
   }
 
-  const diaOptions     = sortDias(distinct(applyClaseFilters(allClases, filters, 'dia'), 'dia'))
+  const diaOptions     = sortDias(distinctDiaParejas(applyClaseFilters(allClases, filters, 'dia')))
   const turnoOptions   = distinct(applyClaseFilters(allClases, filters, 'turno'), 'turno').sort()
   const edadOptions    = distinct(applyClaseFilters(allClases, filters, 'edad'), 'edad').sort()
   const horarioOptions = distinct(applyClaseFilters(allClases, filters, 'horario'), 'horario').sort()
 
-  const manualDiaOptions     = sortDias(distinct(applyClaseFilters(allClases, manualForm, 'dia'), 'dia'))
+  const manualDiaOptions     = sortDias(distinctDiaParejas(applyClaseFilters(allClases, manualForm, 'dia')))
   const manualTurnoOptions   = distinct(applyClaseFilters(allClases, manualForm, 'turno'), 'turno').sort()
   const manualEdadOptions    = distinct(applyClaseFilters(allClases, manualForm, 'edad'), 'edad').sort()
   const manualHorarioOptions = distinct(applyClaseFilters(allClases, manualForm, 'horario'), 'horario').sort()
@@ -434,10 +631,10 @@ export default function EntrenamientosPage() {
         <button
           className={`entrena__mode-btn${viewMode === 'definiciones' ? ' entrena__mode-btn--active' : ''}`}
           onClick={() => setViewMode('definiciones')}
-        >Definiciones</button>
+        >{esSocio ? 'Definiciones y elección de tests' : 'Definiciones'}</button>
       </div>
 
-      {viewMode === 'definiciones' && <DefinicionesList />}
+      {viewMode === 'definiciones' && <DefinicionesList esSocio={esSocio} />}
 
       {viewMode !== 'definiciones' && (<>
 
@@ -555,7 +752,7 @@ export default function EntrenamientosPage() {
             <tbody>
               {visibleAlumnos
                 .filter(a => a.user_id || a.placeholder_id)
-                .map((a, i) => <TestModeRow key={a.placeholder_id ? `ph-${a.placeholder_id}` : (a.id ?? i)} alumno={a} testId={selectedTest} ambiguousActive={isAmbiguousActive(a)} />)
+                .map((a, i) => <TestModeRow key={a.placeholder_id ? `ph-${a.placeholder_id}` : (a.id ?? i)} alumno={a} testId={selectedTest} ambiguousActive={isAmbiguousActive(a)} faltantes={testsFaltantes(a, completitud)} onLogged={bumpCompletitud} />)
               }
             </tbody>
           </table>
@@ -580,16 +777,19 @@ export default function EntrenamientosPage() {
                 const isSelected = a.placeholder_id
                   ? selectedAlumno?.placeholder_id === a.placeholder_id
                   : (selectedAlumno?.id === a.id && !selectedAlumno?.placeholder_id)
+                const faltantes = testsFaltantes(a, completitud)
                 return (
                   <Fragment key={rowKey}>
                     <tr
-                      className={`entrena__row${isSelected ? ' entrena__row--active' : ''}`}
+                      className={`entrena__row${isSelected ? ' entrena__row--active' : ''}${faltantes ? ' entrena__row--missing' : ''}`}
+                      style={missingRowStyle(faltantes)}
                       onClick={() => setSelectedAlumno(isSelected ? null : a)}
                     >
                       <td>
                         {a.cliente || a.nombre || '—'}
                         {isAmbiguousActive(a) && <span className="entrena__active-tag" title="Hay varias personas con este nombre — esta es la que tiene suscripción activa">activo ahora</span>}
                         {a.is_placeholder && <span className="entrena__manual-tag" title="Alumno manual, sin cuenta vinculada">manual</span>}
+                        {faltantes > 0 && <span className="entrena__missing-tag" title={`Le faltan ${faltantes} test${faltantes !== 1 ? 's' : ''} por hacer`}>faltan {faltantes}</span>}
                       </td>
                       <td>{FRECUENCIA_LABEL[a.frecuencia] || a.producto || '—'}</td>
                       <td>{a.dia || '—'}</td>

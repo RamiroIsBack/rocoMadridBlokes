@@ -149,3 +149,9 @@
   .ev-month .ev-chip { font-size: 0.62rem; padding: 2px 3px; }
   .ev-month .ev-free { font-size: 0.58rem; padding: 1px 2px; }
 }
+
+
+/* Bloquear huecos en la web (SSA) */
+.ev-ssa-switch { display: inline-flex; align-items: center; gap: 8px; margin: 4px 0 8px; font-size: 0.85rem; font-weight: 600; color: #ddd; cursor: pointer; }
+.ev-ssa-switch input { width: 18px; height: 18px; accent-color: #34d399; }
+.ev-ssa-sub { margin: 16px 0 4px; font-size: 0.8rem; font-weight: 700; color: #f0ece0; }
