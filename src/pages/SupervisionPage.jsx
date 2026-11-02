@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
@@ -9,6 +9,7 @@ import {
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar,
+  syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
 import OvertimeTab from './OvertimeTab'
@@ -1481,6 +1482,150 @@ function sgCoincideBusqueda(a, termino, tel) {
   return false
 }
 
+const CAMBIO_TIPO_LABEL = {
+  pago_nuevo: 'Pago nuevo', nota: 'Nota cambiada', telefono: 'Teléfono cambiado',
+  alumno_nuevo: 'Alumno nuevo', fila_borrada: 'Fila borrada del Excel',
+}
+
+// Descripción de cada cambio según su tipo — "datos" viene en camelCase desde el servidor
+// (importe/metodo/fecha para pago_nuevo, notaAntes/notaDespues, telefonoAntes/telefonoDespues).
+function CambioDetalle({ c }) {
+  const d = c.datos || {}
+  switch (c.tipo) {
+    case 'pago_nuevo':
+      return <span>{fmtEur(d.importe)} ({d.metodo}){d.fecha ? ` el ${d.fecha}` : ''} — mes {c.mes}</span>
+    case 'nota':
+      return <span>«{d.notaAntes || '—'}» → «{d.notaDespues || '—'}»</span>
+    case 'telefono':
+      return <span>{d.telefonoAntes || '—'} → {d.telefonoDespues || '—'}</span>
+    case 'alumno_nuevo':
+      return <span>{d.nombre} {d.telefono ? `· ${d.telefono}` : ''}</span>
+    case 'fila_borrada':
+      return <span>Ya no está en el Excel — no se da de baja sola, solo aviso.</span>
+    default:
+      return <span className="sv-ot-muted">{JSON.stringify(d)}</span>
+  }
+}
+
+// Bandeja "Cambios hechos en el Excel" (NOTAS_PARA_CODE_sync_grupos.md, paso 2): lo que Eva
+// apunte en el Excel entra aquí para decidir Aplicar/Descartar, nunca se escribe solo —
+// excepto la primera sincronización de cada pestaña, que es la foto inicial (sin cambios).
+function SyncGruposCambiosPanel() {
+  const [cambios, setCambios] = useState(null)
+  const [ultima, setUltima] = useState(null)
+  const [estadoFiltro, setEstadoFiltro] = useState('pendiente')
+  const [sincronizando, setSincronizando] = useState(false)
+  const [busyId, setBusyId] = useState(null)
+  const [err, setErr] = useState(null)
+  const [resumenSync, setResumenSync] = useState(null)
+
+  async function cargar(estado = estadoFiltro) {
+    setErr(null)
+    try {
+      const r = await syncGruposCambiosGet(estado)
+      setCambios(r.cambios || [])
+      setUltima(r.ultimaSincronizacion)
+    } catch (e) { setErr(e.message) }
+  }
+  useEffect(() => { cargar() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function sincronizarAhora() {
+    setSincronizando(true); setErr(null)
+    try {
+      const r = await syncGruposSincronizar()
+      setResumenSync(r)
+      await cargar()
+    } catch (e) { setErr(e.message) } finally { setSincronizando(false) }
+  }
+  async function aplicar(id) {
+    setBusyId(id); setErr(null)
+    try { await syncGruposCambioAplicar(id); await cargar() }
+    catch (e) { setErr(e.message) } finally { setBusyId(null) }
+  }
+  async function descartar(id) {
+    setBusyId(id); setErr(null)
+    try { await syncGruposCambioDescartar(id); await cargar() }
+    catch (e) { setErr(e.message) } finally { setBusyId(null) }
+  }
+
+  return (
+    <div>
+      <p className="sv-note">
+        Lo que Eva apunte en la Hoja de Google «Grupos» entra aquí como propuesta de cambio — nunca se escribe
+        solo en la web (ni factura ni pedido) salvo que le den a «Aplicar». La primera sincronización de cada
+        pestaña es la foto inicial (sin cambios); a partir de ahí, solo diferencias.
+      </p>
+      <div className="sv-controls" style={{ marginBottom: 14 }}>
+        <div className="sv-controls-left">
+          <button className="sv-tests-save" onClick={sincronizarAhora} disabled={sincronizando}>
+            {sincronizando ? 'Sincronizando…' : 'Sincronizar ahora'}
+          </button>
+          <span className="sv-ot-muted">
+            {ultima ? `Última sincronización: ${new Date(ultima.replace(' ', 'T')).toLocaleString('es-ES')}` : 'Todavía no se ha sincronizado nunca.'}
+          </span>
+        </div>
+        <div className="sv-controls-right">
+          {['pendiente', 'aplicado', 'descartado', 'todos'].map(e => (
+            <button key={e} className={`sv-tab-mini ${estadoFiltro === e ? 'is-active' : ''}`} onClick={() => { setEstadoFiltro(e); cargar(e) }}>
+              {e === 'pendiente' ? 'Pendientes' : e === 'aplicado' ? 'Aplicados' : e === 'descartado' ? 'Descartados' : 'Todos'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {resumenSync && (
+        <p className="sv-ot-muted">
+          Sincronizado: {resumenSync.cambiosNuevos} cambio{resumenSync.cambiosNuevos === 1 ? '' : 's'} nuevo{resumenSync.cambiosNuevos === 1 ? '' : 's'}
+          {resumenSync.fotoInicial?.length ? ` · foto inicial de ${resumenSync.fotoInicial.length} pestaña(s)` : ''}.
+        </p>
+      )}
+      {err && <p className="sv-error">{err}</p>}
+
+      {cambios === null ? (
+        <p className="sv-loading">Cargando…</p>
+      ) : cambios.length === 0 ? (
+        <p className="sv-empty">Nada aquí ahora mismo.</p>
+      ) : (
+        <div className="sv-tests-scroll">
+          <table className="sv-tests-table">
+            <thead>
+              <tr><th>Pestaña</th><th>Alumno</th><th>Teléfono</th><th>Tipo</th><th>Detalle</th><th>Emparejado con</th><th></th></tr>
+            </thead>
+            <tbody>
+              {cambios.map(c => (
+                <tr key={c.id}>
+                  <td className="sv-ot-muted">{c.pestana}</td>
+                  <td>{c.nombre || <span className="sv-ot-muted">—</span>}</td>
+                  <td className="sv-ot-muted">{c.telefono || '—'}</td>
+                  <td>{CAMBIO_TIPO_LABEL[c.tipo] || c.tipo}</td>
+                  <td><CambioDetalle c={c} /></td>
+                  <td className="sv-ot-muted">{c.match_label || (c.tipo === 'pago_nuevo' ? 'sin emparejar' : '—')}</td>
+                  <td>
+                    {c.estado === 'pendiente' ? (
+                      <>
+                        <button
+                          className="sv-tests-save" disabled={busyId === c.id || (c.tipo === 'pago_nuevo' && !c.match_tipo)}
+                          title={c.tipo === 'pago_nuevo' && !c.match_tipo ? 'No hay nadie emparejado por teléfono — apúntalo a mano en Grupos.' : undefined}
+                          onClick={() => aplicar(c.id)}
+                        >
+                          Aplicar
+                        </button>{' '}
+                        <button className="sv-tests-select" disabled={busyId === c.id} onClick={() => descartar(c.id)}>Descartar</button>
+                      </>
+                    ) : (
+                      <span className="sv-ot-muted">{c.estado}{c.resuelto_por ? ` · ${c.resuelto_por}` : ''}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function GruposTab() {
   const { data, loading, error, refetch } = useGestionGrupos(4)
   const [grupoKey, setGrupoKey] = useState('')
@@ -1607,6 +1752,9 @@ function GruposTab() {
           </button>
           <button className={`sv-tab-mini ${vista === 'campanas' ? 'is-active' : ''}`} onClick={() => setVista('campanas')}>
             Campañas
+          </button>
+          <button className={`sv-tab-mini ${vista === 'excel' ? 'is-active' : ''}`} onClick={() => setVista('excel')}>
+            Cambios del Excel
           </button>
         </div>
         <div className="sv-controls-right">
@@ -1896,6 +2044,8 @@ function GruposTab() {
       )}
 
       {vista === 'campanas' && <CampanasSection />}
+
+      {vista === 'excel' && <SyncGruposCambiosPanel />}
 
       {vista === 'grupos' && (<>
       {grupo && <ProfesorLine dia={grupo.dia} horario={grupo.horario} />}

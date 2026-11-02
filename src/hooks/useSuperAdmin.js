@@ -114,6 +114,21 @@ export const clubDaysBorrar = id         => gestionCall('DELETE', `/gestion/club
 export const histPagosImportar = body => gestionPost('/gestion/hist-pagos/importar', body)
 export const histPagosResumen  = (desde = '', hasta = '') => gestionCall('GET', `/gestion/hist-pagos/resumen${desde || hasta ? `?desde=${desde}&hasta=${hasta}` : ''}`)
 
+// Pagos adelantados (NOTAS_PARA_CODE_grupos_como_excel.md, 1/11 18:55): transferencia/bizum/
+// tarjeta apuntados antes de que exista la renovación de WooCommerce.
+export const gestionAdelantadosGet    = ()  => gestionCall('GET', '/gestion/adelantados')
+export const gestionAdelantadoAnular  = id  => gestionPost(`/gestion/adelantados/${id}/anular`)
+
+// Sync Grupos ⇄ Excel, bandeja "Cambios hechos en el Excel" (NOTAS_PARA_CODE_sync_grupos.md,
+// paso 2) — Excel es un espejo que la web va comparando contra su última foto; lo que cambie se
+// queda aquí para que Eva decida Aplicar o Descartar, nunca se escribe solo.
+export const syncGruposConfigGet      = ()         => gestionCall('GET', '/gestion/sync-grupos/config')
+export const syncGruposConfigSet      = body        => gestionPost('/gestion/sync-grupos/config', body)
+export const syncGruposSincronizar    = ()         => gestionPost('/gestion/sync-grupos/sincronizar')
+export const syncGruposCambiosGet     = (estado = 'pendiente') => gestionCall('GET', `/gestion/sync-grupos/cambios?estado=${estado}`)
+export const syncGruposCambioAplicar  = id         => gestionPost(`/gestion/sync-grupos/cambios/${id}/aplicar`)
+export const syncGruposCambioDescartar = id        => gestionPost(`/gestion/sync-grupos/cambios/${id}/descartar`)
+
 // `from`: primer mes a incluir ('YYYY-MM', incluido) o '' para no limitar ("Todo").
 export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)
