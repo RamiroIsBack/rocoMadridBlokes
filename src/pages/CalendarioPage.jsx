@@ -357,12 +357,6 @@ export default function CalendarioPage() {
     return sel.length && sel.length < CALENDAR_CATEGORIES.length ? sel : null
   }, [prefs.cats])
 
-  // Categorías elegidas dentro de las de eventos; null = todas (también si lo guardado ya no vale)
-  const selCats = useMemo(() => {
-    const sel = (prefs.cats ?? []).filter(c => CALENDAR_CATEGORIES.includes(c))
-    return sel.length && sel.length < CALENDAR_CATEGORIES.length ? sel : null
-  }, [prefs.cats])
-
   const items = useMemo(() => {
     const evs = (data?.bookings ?? []).filter(b => b.status !== 'cancelada' && prefs.evTypes.includes(b.type))
     // Si ese día ya hay un cumpleaños en Eventos, el "Cumpleaños" de Notion es el mismo: no se repite
