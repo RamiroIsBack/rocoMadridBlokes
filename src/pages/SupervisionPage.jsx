@@ -967,8 +967,8 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
           <>
             <p className="sv-to-warn-txt">Simulación: no se ha escrito nada todavía.</p>
             <ul className="sv-grp-preview">
-              {Object.entries(preview).filter(([k]) => k !== 'aviso').map(([k, v]) => (
-                <li key={k}><span>{k}</span><span>{typeof v === 'boolean' ? (v ? 'sí' : 'no') : String(v ?? '—')}</span></li>
+              {Object.entries(preview).filter(([k, v]) => k !== 'aviso' && v !== null).map(([k, v]) => (
+                <li key={k}><span>{previewLabel(k)}</span><span>{previewValor(v)}</span></li>
               ))}
             </ul>
           </>
@@ -1261,6 +1261,26 @@ const MES_CORTO_GRP = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', '
 const mesLabelGrp = ym => { const [y, m] = ym.split('-'); return `${MES_CORTO_GRP[Number(m) - 1]} ${y.slice(2)}` }
 const PAGO_PENDIENTE = new Set(['pending', 'on-hold', 'failed'])
 
+// Etiquetas en castellano para las claves de la vista previa de simulación (Ramiro, 2/11 09:42:
+// "subId"/"proximoPago"/etc. en inglés no se lee para Eva). Lo que no está aquí se enseña con su
+// nombre tal cual (mejor eso que ocultarlo).
+const PREVIEW_LABEL = {
+  subId: 'Nº suscripción', estadoAntes: 'Estado ahora', pedidoExistente: 'Pedido ya creado',
+  proximoPago: 'Próximo pago', mesQueCubre: 'Mes que paga',
+  completaraPedidoExistente: 'Completa el pedido ya creado', seGuardaraComoAdelantado: 'Se guarda como pago adelantado (sin factura)',
+  adelantadoYaGuardado: 'Ya hay un adelantado guardado', pasaAActiva: 'Queda activa', mantienePausa: 'Sigue en pausa',
+  importe: 'Importe', metodo: 'Método', fecha: 'Fecha', parcial: 'Pago parcial',
+  reactivaLaSuscripcion: 'Reactiva la suscripción', pedidosACancelar: 'Pedidos sin pagar que se cancelan',
+  estadoDespues: 'Estado después', fechaFin: 'Fecha fin', fechaVuelta: 'Fecha de vuelta',
+}
+const previewLabel = k => PREVIEW_LABEL[k] || k
+const previewValor = v => {
+  if (v === null || v === undefined) return '—'
+  if (typeof v === 'boolean') return v ? 'sí' : 'no'
+  if (typeof v === 'object') return v.importe != null ? `${fmtEur(v.importe)} · ${v.fecha || ''} · ${v.por || ''}`.trim() : JSON.stringify(v)
+  return String(v)
+}
+
 // Marca de consentimiento de WhatsApp junto al nombre: gris = sin preguntar, verde = sí, rojo =
 // no/BAJA. Al pulsarla abre el mismo diálogo de "Consentimiento WhatsApp" (Ramiro, 31/10 17:17).
 function WaMark({ alumno, onClick }) {
@@ -1332,6 +1352,13 @@ function TablaAlumnos({ alumnos, meses, onWa, onMenu }) {
                     return (
                       <td key={m} className="sv-pago-cubierto" title={`Cubierto por el pago del ${p.fecha} (${fmtEur(p.importe)}, ${p.metodo})`}>
                         Pagado ({p.tipo || '…'})
+                      </td>
+                    )
+                  }
+                  if (p.adelantado) {
+                    return (
+                      <td key={m} className="sv-pago-cubierto" title={`Pagado por adelantado el ${p.fecha} (${p.metodo}). Se aplicará de verdad cuando WooCommerce genere esta renovación.`}>
+                        {fmtEur(p.importe)} (adelantado)
                       </td>
                     )
                   }
@@ -1526,7 +1553,7 @@ function GruposTab() {
       const pago = mesActual ? a.pagos[mesActual] : null
       // "cubierto" = mes ya pagado por un trimestral/anual de un mes anterior, no un cobro
       // nuevo de este mes: no se suma otra vez (si no, se contaría el mismo pago 2-3 veces).
-      if (pago && !pago.cubierto && !PAGO_PENDIENTE.has(pago.estadoPedido)) k.cobradoMes += pago.importe
+      if (pago && !pago.cubierto && !pago.adelantado && !PAGO_PENDIENTE.has(pago.estadoPedido)) k.cobradoMes += pago.importe
       if (a.pendiente && !a.exento && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes') {
         k.pendienteMes++
         k.pendienteImporte += a.pendiente.importe

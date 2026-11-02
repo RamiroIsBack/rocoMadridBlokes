@@ -840,6 +840,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_adelantados_listar',
         'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/adelantados/(?P<id>\d+)/anular', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_adelantado_anular',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/pausar', array(
         'methods'             => 'POST',
         'callback'            => 'superadmin_gestion_pausar',
@@ -3653,14 +3658,29 @@ function superadmin_gestion_grupos($request) {
             }
         }
         if ($pendiente && isset($cobros_manuales[$sub['id'] . '|' . $hoy_ym])) $pendiente = null;
-        // Ya hay un pago adelantado guardado para esta suscripción (ver Marcar cobrado): no es
-        // que nadie se haya ocupado, es que se aplicará solo en la renovación — se marca en vez
-        // de dejarlo como un pendiente mudo (cowork, 2/11 09:40).
-        if ($pendiente && isset($adelantados_por_sub[intval($sub['id'])])) {
-            $ad = $adelantados_por_sub[intval($sub['id'])];
-            $pendiente['adelantado'] = true;
-            $pendiente['adelantadoImporte'] = floatval($ad['importe']);
-            $pendiente['adelantadoMetodo']  = blokes_gestion_metodo_label($ad['metodo']);
+        // Ya hay un pago adelantado guardado para esta suscripción (ver Marcar cobrado): no hace
+        // falta cobrarle nada — nunca debe aparecer en "Cobrar este mes" por esto (cowork, 2/11
+        // 09:40/10:08: un alumno de prueba seguía contando en la bandeja con la fecha de un
+        // pedido viejo de OTRA suscripción duplicada suya, porque al no tener él ningún pendiente
+        // propio, la fusión de duplicados de más abajo tomaba el de esa otra). No se convierte en
+        // un $pendiente falso (eso lo volvería a meter en "Cobrar este mes", que es justo lo que
+        // no se quiere); solo se guarda aparte para que la fusión de duplicados no le cuelgue el
+        // de otra suscripción, y para pintar la columna del mes que cubre.
+        $tiene_adelantado = isset($adelantados_por_sub[intval($sub['id'])]) ? $adelantados_por_sub[intval($sub['id'])] : null;
+        if ($tiene_adelantado) {
+            if ($pendiente) {
+                $pendiente['adelantado'] = true;
+                $pendiente['adelantadoImporte'] = floatval($tiene_adelantado['importe']);
+                $pendiente['adelantadoMetodo']  = blokes_gestion_metodo_label($tiene_adelantado['metodo']);
+            }
+            // La columna del mes que cubre el adelantado: en vez de "—" (como si nadie hubiera
+            // pagado nada), se ve ya el importe marcado como adelantado (cowork, 2/11 09:42).
+            if (isset($meses_set[$tiene_adelantado['periodo']]) && empty($pagos[$tiene_adelantado['periodo']])) {
+                $pagos[$tiene_adelantado['periodo']] = array(
+                    'importe' => floatval($tiene_adelantado['importe']), 'metodo' => blokes_gestion_metodo_label($tiene_adelantado['metodo']),
+                    'fecha' => date('d/m/Y', strtotime($tiene_adelantado['fecha_banco'])), 'estadoPedido' => 'adelantado', 'adelantado' => true,
+                );
+            }
         }
 
         $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
@@ -3703,6 +3723,7 @@ function superadmin_gestion_grupos($request) {
             'exento'      => (bool) get_post_meta($sub_obj->get_id(), '_rm_exento', true),
             'pagos'       => $pagos,
             'pendiente'   => $pendiente,
+            'tieneAdelantado' => (bool) $tiene_adelantado,
             'notas'       => get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '',
             // Sin nombre de facturación ni en el perfil de WordPress: lo que se ve es el
             // nombre de usuario de la cuenta, no un nombre real.
@@ -3761,7 +3782,10 @@ function superadmin_gestion_grupos($request) {
                 foreach ($otra['pagos'] as $ym => $p) {
                     if ($p && empty($principal['pagos'][$ym])) $principal['pagos'][$ym] = $p;
                 }
-                if (!$principal['pendiente'] && $otra['pendiente']) $principal['pendiente'] = $otra['pendiente'];
+                // No colgarle el pendiente de una suscripción vieja/duplicada a quien ya tiene
+                // un pago adelantado guardado en la suya — si no, parece que le queda algo por
+                // cobrar cuando en realidad ya está resuelto (cowork, 2/11 09:40/10:08).
+                if (!$principal['pendiente'] && !$principal['tieneAdelantado'] && $otra['pendiente']) $principal['pendiente'] = $otra['pendiente'];
                 if ($otra['exento']) $principal['exento'] = true;
             }
             if ($otras) {
@@ -6432,6 +6456,16 @@ function superadmin_gestion_marcar_cobrado($request) {
     $next_payment_ts = $next_payment_mysql ? strtotime($next_payment_mysql) : null;
     $periodo_cubre = $next_payment_ts ? date('Y-m', $next_payment_ts) : date('Y-m');
 
+    // Ya hay un adelantado guardado para este mismo mes de esta suscripción: avisar en la
+    // simulación y no dejar duplicarlo al confirmar (cowork, 2/11 09:42, punto 3) — anúlalo
+    // primero con el nuevo POST /gestion/adelantados/{id}/anular si quieres cambiarlo.
+    blokes_ensure_adelantados_table();
+    global $wpdb;
+    $adelantado_existente = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM " . blokes_adelantados_table() . " WHERE sub_id = %d AND periodo = %s AND aplicado_at IS NULL ORDER BY id DESC LIMIT 1",
+        $sub_id, $periodo_cubre
+    ), ARRAY_A);
+
     // Modo simulación: ni crea ni completa ningún pedido, ni toca la suscripción — para poder
     // probar contra un caso real (secciones 6b/7) viendo qué pasaría, sin generar factura/AEAT
     // ni ningún otro efecto. Nada de lo de abajo se ejecuta.
@@ -6444,20 +6478,32 @@ function superadmin_gestion_marcar_cobrado($request) {
             'mesQueCubre'     => $periodo_cubre,
             'completaraPedidoExistente' => (bool) $order,
             'seGuardaraComoAdelantado'  => !$order,
+            'adelantadoYaGuardado'      => $adelantado_existente ? array(
+                'id' => intval($adelantado_existente['id']), 'importe' => floatval($adelantado_existente['importe']),
+                'fecha' => date_i18n('d/m/Y', strtotime($adelantado_existente['created_at'])), 'por' => $adelantado_existente['user_login'],
+            ) : null,
             'pasaAActiva'     => !($estaba_pausada && $mantener_pausa),
             'mantienePausa'   => $estaba_pausada && $mantener_pausa,
             'importe'         => $importe, 'metodo' => $metodo_label, 'fecha' => $fecha_txt, 'parcial' => $parcial,
-            'aviso'           => $order
-                ? 'Simulación: no se ha escrito nada en WooCommerce. De confirmarlo, SE EMITIRÁ FACTURA y se enviará a Hacienda (Verifactu).'
-                : 'Simulación: todavía no existe el pedido de renovación. De confirmarlo, se guardará como "pagado por adelantado" (sin factura) y se aplicará solo cuando WooCommerce genere esa renovación.',
+            'aviso'           => $adelantado_existente
+                ? sprintf('Ya hay un pago adelantado de %s € guardado el %s por %s para este mes — confirmar crearía otro. Anúlalo primero si quieres cambiarlo.',
+                    number_format(floatval($adelantado_existente['importe']), 2, ',', '.'), date_i18n('d/m/Y', strtotime($adelantado_existente['created_at'])), $adelantado_existente['user_login'])
+                : ($order
+                    ? 'Simulación: no se ha escrito nada en WooCommerce. De confirmarlo, SE EMITIRÁ FACTURA y se enviará a Hacienda (Verifactu).'
+                    : 'Simulación: todavía no existe el pedido de renovación. De confirmarlo, se guardará como "pagado por adelantado" (sin factura) y se aplicará solo cuando WooCommerce genere esa renovación.'),
         );
         blokes_gestion_log($sub_id, 'marcar_cobrado_simulado', $antes, null, $preview);
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $preview));
     }
 
     if (!$order) {
-        blokes_ensure_adelantados_table();
-        global $wpdb;
+        if ($adelantado_existente) {
+            return new WP_Error('adelantado_duplicado', sprintf(
+                'Ya hay un pago adelantado de %s € guardado el %s por %s para este mes. Anúlalo primero (POST /gestion/adelantados/%d/anular) si quieres cambiarlo.',
+                number_format(floatval($adelantado_existente['importe']), 2, ',', '.'), date_i18n('d/m/Y', strtotime($adelantado_existente['created_at'])),
+                $adelantado_existente['user_login'], intval($adelantado_existente['id'])
+            ), array('status' => 409));
+        }
         $user = wp_get_current_user();
         $wpdb->insert(blokes_adelantados_table(), array(
             'sub_id' => $sub_id, 'periodo' => $periodo_cubre, 'importe' => $importe, 'metodo' => $metodo,
@@ -6530,6 +6576,21 @@ function superadmin_gestion_adelantados_listar() {
         'pendientes' => $pendientes, 'aRevisar' => $a_revisar,
         'totalPendientes' => count($pendientes), 'totalARevisar' => count($a_revisar),
     )));
+}
+
+// Anula un adelantado guardado por error (importe/método equivocado, etc.) antes de que se
+// aplique — nunca tocó WooCommerce ni generó factura, así que anularlo es un borrado normal, sin
+// ningún efecto que deshacer. Una vez aplicado (aplicado_at ya puesto) no se puede anular aquí.
+function superadmin_gestion_adelantado_anular($request) {
+    global $wpdb;
+    blokes_ensure_adelantados_table();
+    $id = intval($request['id']);
+    $ad = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_adelantados_table() . " WHERE id = %d", $id), ARRAY_A);
+    if (!$ad) return new WP_Error('not_found', 'Adelantado no encontrado.', array('status' => 404));
+    if ($ad['aplicado_at']) return new WP_Error('ya_aplicado', 'Este adelantado ya se aplicó a un pedido real; no se puede anular.', array('status' => 409));
+    $wpdb->delete(blokes_adelantados_table(), array('id' => $id));
+    blokes_gestion_log(intval($ad['sub_id']), 'adelantado_anulado', $ad, null);
+    return rest_ensure_response(array('success' => true));
 }
 
 /**
