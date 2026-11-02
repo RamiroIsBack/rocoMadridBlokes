@@ -1205,8 +1205,13 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
           {preview ? (
             <>
               <button className="sv-tests-select" onClick={() => setPreview(null)} disabled={busy}>Volver</button>
-              <button className="sv-tests-danger sv-tests-danger--confirm" onClick={() => submit(true)} disabled={busy}>
-                {busy ? 'Guardando…' : 'Confirmar de verdad'}
+              <button
+                className="sv-tests-danger sv-tests-danger--confirm"
+                onClick={() => submit(true)}
+                disabled={busy || !!preview.adelantadoYaGuardado}
+                title={preview.adelantadoYaGuardado ? 'Ya hay un pago adelantado guardado para este mes — anúlalo primero si quieres cambiarlo.' : undefined}
+              >
+                {busy ? 'Guardando…' : (preview.adelantadoYaGuardado ? 'Ya hay un adelantado guardado' : 'Confirmar de verdad')}
               </button>
             </>
           ) : (
@@ -1668,7 +1673,10 @@ function GruposTab() {
                             Adelantado — se aplicará el {a.pendiente.fecha}
                           </span>
                         ) : (
-                          <span className="sv-to-bad">{fmtEur(a.pendiente.importe)} <span className="sv-ot-muted">(vence {a.pendiente.fecha})</span></span>
+                          <span className="sv-to-bad">
+                            {fmtEur(a.pendiente.importe)}{' '}
+                            <span className="sv-ot-muted">({a.pendiente.fechaEsVencimiento ? `vence ${a.pendiente.fecha}` : `pedido del ${a.pendiente.fecha}`})</span>
+                          </span>
                         )}
                       </td>
                       <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>

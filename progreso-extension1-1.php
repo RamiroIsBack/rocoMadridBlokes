@@ -3597,9 +3597,15 @@ function superadmin_gestion_grupos($request) {
             $o_status = $order->get_status();
             if (in_array($o_status, array('pending', 'failed', 'on-hold'), true)) {
                 if (!$pendiente || $fecha->getTimestamp() > $pendiente['ts']) {
+                    // Si la suscripción no tiene next_payment (p. ej. ella misma está en pausa,
+                    // o es una duplicada vieja sin renovación programada), no hay vencimiento
+                    // real que mostrar: se cae a la fecha del PEDIDO, pero marcada como tal, no
+                    // como si fuera una fecha de vencimiento (cowork, 2/11 11:25: con un alumno
+                    // sin next_payment seguía llamándose "vence" a la fecha de un pedido viejo).
                     $pendiente = array(
                         'importe' => floatval($order->get_total()),
                         'fecha'   => $vence_ts ? date('d/m/Y', $vence_ts) : $fecha->date('d/m/Y'),
+                        'fechaEsVencimiento' => (bool) $vence_ts,
                         'ts'      => $fecha->getTimestamp(),
                     );
                 }
