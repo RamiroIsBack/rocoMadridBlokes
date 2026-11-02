@@ -693,6 +693,7 @@ function WorkersAdmin({ workers, onChanged }) {
   const [blocksMin, setBlocksMin] = useState(1)
   const [blocksMax, setBlocksMax] = useState(2)
   const [isLead, setIsLead] = useState(false)
+  const [eventual, setEventual] = useState(false)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
 
@@ -702,8 +703,8 @@ function WorkersAdmin({ workers, onChanged }) {
     if (!name.trim()) { setError('Escribe un nombre'); return }
     setSaving(true); setError(null)
     try {
-      await api('POST', '/equipacion/workers', { name: name.trim(), workDays: days, blocksMin, blocksMax, isLead })
-      setName(''); setDays(['mon', 'tue', 'wed', 'thu', 'fri']); setBlocksMin(1); setBlocksMax(2); setIsLead(false)
+      await api('POST', '/equipacion/workers', { name: name.trim(), workDays: days, blocksMin, blocksMax, isLead, eventual })
+      setName(''); setDays(['mon', 'tue', 'wed', 'thu', 'fri']); setBlocksMin(1); setBlocksMax(2); setIsLead(false); setEventual(false)
       setShowAdd(false)
       onChanged()
     } catch (e) {
@@ -719,13 +720,23 @@ function WorkersAdmin({ workers, onChanged }) {
     onChanged()
   }
 
+  // "Eventual" (cowork, 2/11 14:00): viene solo a compes puntuales (p. ej. un fin de semana) —
+  // no debe entrar en el reparto normal de mantenimiento de cada semana.
+  const toggleEventual = async w => {
+    await api('PUT', `/equipacion/workers/${w.id}`, { eventual: !w.eventual })
+    onChanged()
+  }
+
   return (
     <div className="org__workers-admin">
       <ul className="org__worker-list">
         {workers.map(w => (
           <li key={w.id} className="org__worker-row">
-            <span className="org__worker-name">{w.name}{w.isLead ? ' · responsable' : ''}</span>
+            <span className="org__worker-name">{w.name}{w.isLead ? ' · responsable' : ''}{w.eventual ? ' · eventual' : ''}</span>
             <span className="org__worker-meta">{w.workDays.map(d => DAY_LABEL[d]).join('/')} · {w.blocksMin}-{w.blocksMax} bloques</span>
+            <button className="org__link-btn" onClick={() => toggleEventual(w)} title="Eventual: solo viene a compes puntuales, no entra en el reparto normal de mantenimiento">
+              {w.eventual ? 'Quitar eventual' : 'Marcar eventual'}
+            </button>
             <button className="org__remove-btn" onClick={() => remove(w)}>✕</button>
           </li>
         ))}
@@ -755,6 +766,12 @@ function WorkersAdmin({ workers, onChanged }) {
           </div>
           <div className="org__add-row">
             <label><input type="checkbox" checked={isLead} onChange={e => setIsLead(e.target.checked)} /> Es responsable (prepara las semanas)</label>
+          </div>
+          <div className="org__add-row">
+            <label>
+              <input type="checkbox" checked={eventual} onChange={e => setEventual(e.target.checked)} />
+              {' '}Eventual (solo viene a compes puntuales, no entra en el reparto normal de mantenimiento)
+            </label>
           </div>
           {error && <p className="org__error">{error}</p>}
           <div className="org__add-actions">

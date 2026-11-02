@@ -682,7 +682,8 @@ add_action('rest_api_init', function() {
         'methods' => 'POST', 'callback' => 'progreso_equip_week_add_assignment', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/assignments/(?P<id>\d+)', array(
-        'methods' => 'PUT', 'callback' => 'progreso_equip_update_assignment', 'permission_callback' => $equip_perm,
+        array('methods' => 'PUT',    'callback' => 'progreso_equip_update_assignment', 'permission_callback' => $equip_perm),
+        array('methods' => 'DELETE', 'callback' => 'progreso_equip_delete_assignment',  'permission_callback' => $equip_perm),
     ));
 
     register_rest_route('progreso/v1', '/equipacion/today', array(
@@ -9454,7 +9455,11 @@ function progreso_equip_ensure_tables() {
     // de Álvaro, Ramiro 1/11 17:20) — nunca se borra un tipo, solo se desactiva (histórico).
     // v8: weeks.auto (semana creada sola por el cron/al abrir Organización, paso 3 del encargo
     // del 28/10 — "si Álvaro no hace nada, la semana existe igual").
-    $version = '8';
+    // v9: workers.eventual (solo viene a compes puntuales, p. ej. el fin de semana de una — no
+    // debe entrar en el reparto normal de mantenimiento de cada semana; cowork, 2/11 14:00:
+    // generate-plan metía a todo el equipo activo, incluidos los de un solo finde, en semanas
+    // normales enteras).
+    $version = '9';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -9468,6 +9473,7 @@ function progreso_equip_ensure_tables() {
         blocks_max tinyint(3)          NOT NULL DEFAULT 2,
         is_lead    tinyint(1)          NOT NULL DEFAULT 0,
         active     tinyint(1)          NOT NULL DEFAULT 1,
+        eventual   tinyint(1)          NOT NULL DEFAULT 0,
         PRIMARY KEY (id)
     ) {$charset};");
 
@@ -9596,6 +9602,7 @@ function progreso_equip_ensure_tables() {
     progreso_equip_seed_if_empty();
     progreso_equip_seed_task_types_if_empty();
     progreso_equip_seed_comp_task_types_if_missing();
+    progreso_equip_marcar_eventuales_ramiro_1();
 
     // Periodicidades reales de Ramiro (1/11 17:20): se habían quedado todas a 1 (cowork
     // sospecha que un reseed del 29/10 las pisó). Una sola vez, no vuelve a tocarlas si alguien
@@ -9679,6 +9686,36 @@ function progreso_equip_seed_comp_task_types_if_missing() {
     }
 }
 
+// Migración de una sola vez (cowork, 2/11 12:55/14:00): Ramiro (id 5), Álvaro V. (id 6) y Javi
+// (id 7) se crearon para venir solo el fin de semana de esta compe — se marcan "eventual" para
+// que el reparto normal de mantenimiento ya no los cuente, y se quitan las asignaciones vacías
+// (sin tareas, sin bloques) que `generate-plan` ya les había puesto en semanas normales (2/11,
+// 9/11, 7/12…) antes de existir este campo.
+function progreso_equip_marcar_eventuales_ramiro_1() {
+    if (get_option('blokes_equip_eventuales_ramiro_1')) return;
+    global $wpdb;
+    $ids = array(5, 6, 7);
+    $workers_table = progreso_equip_table('workers');
+    $existe = $wpdb->get_col("SELECT id FROM {$workers_table} WHERE id IN (" . implode(',', $ids) . ")");
+    if ($existe) {
+        $wpdb->query("UPDATE {$workers_table} SET eventual = 1 WHERE id IN (" . implode(',', array_map('intval', $existe)) . ")");
+
+        $assignments_table = progreso_equip_table('assignments');
+        $tasks_table = progreso_equip_table('tasks');
+        $blocks_table = progreso_equip_table('blocks');
+        $vacias = $wpdb->get_results(
+            "SELECT id FROM {$assignments_table} WHERE worker_id IN (" . implode(',', array_map('intval', $existe)) . ")", ARRAY_A
+        );
+        foreach ($vacias as $a) {
+            $aid = intval($a['id']);
+            $tiene_tareas = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$tasks_table} WHERE assignment_id = %d", $aid));
+            $tiene_bloques = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$blocks_table} WHERE assignment_id = %d", $aid));
+            if (!$tiene_tareas && !$tiene_bloques) $wpdb->delete($assignments_table, array('id' => $aid), array('%d'));
+        }
+    }
+    update_option('blokes_equip_eventuales_ramiro_1', 1, false);
+}
+
 // Semilla inicial (trabajadores y catálogo de presas actuales) — solo si
 // las tablas están recién creadas y vacías, nunca sobrescribe datos reales.
 function progreso_equip_seed_if_empty() {
@@ -9726,7 +9763,7 @@ function progreso_equip_get_workers() {
             'id' => intval($r['id']), 'name' => $r['name'], 'email' => $r['email'],
             'workDays' => array_values(array_filter(explode(',', $r['work_days']))),
             'blocksMin' => intval($r['blocks_min']), 'blocksMax' => intval($r['blocks_max']),
-            'isLead' => (bool) $r['is_lead'], 'active' => (bool) $r['active'],
+            'isLead' => (bool) $r['is_lead'], 'active' => (bool) $r['active'], 'eventual' => (bool) $r['eventual'],
         );
     }, $rows)));
 }
@@ -9746,7 +9783,8 @@ function progreso_equip_create_worker($request) {
         'blocks_max' => intval($request->get_param('blocksMax')) ?: 2,
         'is_lead'    => $request->get_param('isLead') ? 1 : 0,
         'active'     => 1,
-    ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d'));
+        'eventual'   => $request->get_param('eventual') ? 1 : 0,
+    ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d', '%d'));
     return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
 }
 
@@ -9765,6 +9803,7 @@ function progreso_equip_update_worker($request) {
     if ($request->get_param('blocksMax') !== null) { $upd['blocks_max'] = intval($request->get_param('blocksMax')); $fmt[] = '%d'; }
     if ($request->get_param('isLead') !== null)    { $upd['is_lead']    = $request->get_param('isLead') ? 1 : 0;    $fmt[] = '%d'; }
     if ($request->get_param('active') !== null)    { $upd['active']     = $request->get_param('active') ? 1 : 0;    $fmt[] = '%d'; }
+    if ($request->get_param('eventual') !== null)  { $upd['eventual']   = $request->get_param('eventual') ? 1 : 0;  $fmt[] = '%d'; }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     $wpdb->update(progreso_equip_table('workers'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
@@ -10368,6 +10407,23 @@ function progreso_equip_week_add_assignment($request) {
     return rest_ensure_response(array('success' => true, 'assignmentId' => $wpdb->insert_id));
 }
 
+// DELETE /equipacion/assignments/{id} — solo si está vacía (sin tareas, sin bloques): para
+// deshacer un «+Persona» puesto por error, o limpiar las que el plan de una compe dejó sin usar
+// (cowork, 2/11 14:00). Si ya tiene algo, no se borra — ahí se trata como el resto del histórico.
+function progreso_equip_delete_assignment($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('assignments') . " WHERE id = %d", $id));
+    if (!$existe) return new WP_Error('not_found', 'Asignación no encontrada.', array('status' => 404));
+    $tiene_tareas = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('tasks') . " WHERE assignment_id = %d", $id));
+    $tiene_bloques = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('blocks') . " WHERE assignment_id = %d", $id));
+    if ($tiene_tareas || $tiene_bloques) {
+        return new WP_Error('no_vacia', 'Esta asignación tiene tareas o bloques — no se puede borrar así.', array('status' => 409));
+    }
+    $wpdb->delete(progreso_equip_table('assignments'), array('id' => $id), array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
 // Borrar semana: si no tiene nada hecho ni ningún bloque, se borra de
 // verdad (sirve para semanas creadas por error). Si tiene algo hecho, no
 // se pierde el histórico: se archiva (desaparece de la lista principal,
@@ -10554,18 +10610,17 @@ function progreso_equip_update_task($request) {
         $fmt[] = '%s';
     }
     if ($request->get_param('assignmentId') !== null) {
+        // Antes exigía que la asignación destino fuera de la MISMA semana que la tarea — pensado
+        // para el arrastre normal (siempre dentro de la semana que se ve en pantalla), pero
+        // bloqueaba mover a mano una tarea de compe a otra semana (p. ej. de la de
+        // desequipar/equipar al lunes de la propia compe). Si se manda explícitamente
+        // assignmentId, se confía en el que lo pide — solo se comprueba que esa asignación
+        // exista de verdad (cowork, 2/11 14:00).
         $new_assignment_id = intval($request->get_param('assignmentId'));
-        $current = $wpdb->get_row($wpdb->prepare(
-            "SELECT week_id FROM " . progreso_equip_table('assignments') . " a
-             JOIN " . progreso_equip_table('tasks') . " t ON t.assignment_id = a.id
-             WHERE t.id = %d", $id
-        ), ARRAY_A);
-        $target = $wpdb->get_row($wpdb->prepare(
-            "SELECT week_id FROM " . progreso_equip_table('assignments') . " WHERE id = %d", $new_assignment_id
-        ), ARRAY_A);
-        if (!$current || !$target || intval($current['week_id']) !== intval($target['week_id'])) {
-            return new WP_Error('invalid_data', 'Esa persona no está en la misma semana que esta tarea.', array('status' => 400));
-        }
+        $target = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM " . progreso_equip_table('assignments') . " WHERE id = %d", $new_assignment_id
+        ));
+        if (!$target) return new WP_Error('not_found', 'Esa asignación no existe.', array('status' => 404));
         $upd['assignment_id'] = $new_assignment_id;
         $fmt[] = '%d';
     }
@@ -10899,11 +10954,35 @@ function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warning
     }
     $week_id = $existing ? intval($existing['id']) : null;
 
+    // Si la semana ya existía pero no es de compe intensiva y nunca llegó a tener NINGUNA tarea
+    // de verdad (solo las de compe, que generate-plan ya borró justo antes de llamar aquí): se
+    // borra y se recrea entera con el reparto normal, en vez de quedarse con el responsable solo
+    // — así no hace falta repartir el mantenimiento de esa semana a mano (cowork, 2/11 14:00: la
+    // del 16/11 solo tenía 2 tareas de compe). Si en cambio ya tiene tareas reales (como la del
+    // 2/11 o la del 9/11, con las 13 del responsable), no se toca: solo se completa el equipo.
+    if ($week_id && !$solo_compe) {
+        $assignments_table = progreso_equip_table('assignments');
+        $tiene_tareas = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM " . progreso_equip_table('tasks') . " t JOIN {$assignments_table} a ON a.id = t.assignment_id WHERE a.week_id = %d",
+            $week_id
+        ));
+        $tiene_bloques = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM " . progreso_equip_table('blocks') . " b JOIN {$assignments_table} a ON a.id = b.assignment_id WHERE a.week_id = %d",
+            $week_id
+        ));
+        if (!$tiene_tareas && !$tiene_bloques) {
+            $wpdb->delete($assignments_table, array('week_id' => $week_id), array('%d'));
+            $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d'));
+            $week_id = null;
+        }
+    }
+
     if (!$week_id && !$solo_compe) {
         // Semana nueva "normal": se crea con el reparto de mantenimiento de siempre (todo el
-        // equipo activo), igual que si alguien la hubiera creado a mano — las tareas de compe se
-        // añaden encima, debajo en esta misma función.
-        $activos = $wpdb->get_results("SELECT id FROM " . progreso_equip_table('workers') . " WHERE active = 1", ARRAY_A);
+        // equipo activo y NO eventual — quien solo viene a compes puntuales no entra en el
+        // mantenimiento normal, cowork 2/11 14:00), igual que si alguien la hubiera creado a
+        // mano — las tareas de compe se añaden encima, debajo en esta misma función.
+        $activos = $wpdb->get_results("SELECT id FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND eventual = 0", ARRAY_A);
         if ($activos) {
             $req = new WP_REST_Request('POST', '/progreso/v1/equipacion/weeks');
             $req->set_param('startDate', $monday);
@@ -10927,10 +11006,11 @@ function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warning
         $week_id = $wpdb->insert_id;
         $warnings[] = "Semana del {$monday} creada para el plan de la competición.";
     } elseif (!$solo_compe) {
-        // Semana que ya existía (p. ej. creada antes solo con el responsable): se completa con
-        // quien falte del equipo activo. Solo la asignación — sin generar sus tareas de
-        // mantenimiento con retraso, que se reparten a mano como el resto (+Tarea o arrastrando).
-        $activos = $wpdb->get_results("SELECT id, name FROM " . progreso_equip_table('workers') . " WHERE active = 1", ARRAY_A);
+        // Semana que ya existía CON tareas reales (p. ej. la del 2/11 o la del 9/11, con las 13
+        // del responsable) — no se tocan sus tareas, solo se completa el equipo que falte. Solo
+        // la asignación — sin generar con retraso sus tareas de mantenimiento, que se reparten a
+        // mano como el resto (+Tarea o arrastrando).
+        $activos = $wpdb->get_results("SELECT id, name FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND eventual = 0", ARRAY_A);
         $ya_asignados = $wpdb->get_col($wpdb->prepare("SELECT worker_id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d", intval($week_id)));
         $anadidos = array();
         foreach ($activos as $w) {
