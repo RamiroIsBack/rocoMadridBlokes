@@ -941,6 +941,18 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/pestana', array(
         'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_pestana', 'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/sincronizar', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_sincronizar_ahora', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/cambios', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_cambios_listar', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/cambios/(?P<id>\d+)/aplicar', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_cambio_aplicar', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/cambios/(?P<id>\d+)/descartar', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_cambio_descartar', 'permission_callback' => $sa_perm,
+    ));
 
     // Calendario de días especiales del club (NOTAS_PARA_CODE_calendario.md): festivos, cierres
     // y horarios especiales, con una decisión por día. Ver y listar: cualquiera con acceso a
@@ -3502,6 +3514,21 @@ function superadmin_gestion_grupos($request) {
     $optin_por_tel = blokes_optin_por_telefono(); // marca (WA) junto al nombre
     $hoy_ym = date('Y-m');
 
+    // Pagos adelantados sin aplicar todavía (Ramiro, 1/11 18:55): si ya hay uno guardado para
+    // esta suscripción, "Cobrar este mes" no debe parecer que nadie se ha ocupado — se marca
+    // "adelantado, se aplicará el día de la renovación" en vez de un simple pendiente mudo
+    // (cowork, 2/11 09:40: dos alumnos de prueba con adelantado seguían saliendo como si nadie
+    // se hubiera ocupado).
+    blokes_ensure_adelantados_table();
+    global $wpdb;
+    $adelantados_por_sub = array();
+    foreach ($wpdb->get_results(
+        "SELECT * FROM " . blokes_adelantados_table() . " WHERE aplicado_at IS NULL AND revisar = 0 ORDER BY periodo ASC, id ASC", ARRAY_A
+    ) as $ad) {
+        $sid = intval($ad['sub_id']);
+        if (!isset($adelantados_por_sub[$sid])) $adelantados_por_sub[$sid] = $ad;
+    }
+
     foreach ($all as $sub) {
         if (empty($sub['id'])) continue;
         $status = $sub['status'] ?? '';
@@ -3549,6 +3576,13 @@ function superadmin_gestion_grupos($request) {
         // de periodos — si no hay pedido impagado, no está pendiente).
         $pagos = array_fill_keys($meses, null);
         $pendiente = null;
+        // Fecha de vencimiento real de la suscripción (próxima renovación) — antes se mostraba
+        // la fecha de creación del PEDIDO pendiente, que puede ser bastante anterior a cuándo
+        // vence de verdad y confundía (cowork, 2/11 09:40: salía "01/10" con el próximo pago ya
+        // el 02/11). Se guarda aparte y se usa siempre que exista, cayendo a la fecha del pedido
+        // solo si la suscripción no tiene next_payment (p. ej. ya cancelada).
+        $next_payment_mysql = method_exists($sub_obj, 'get_date') ? $sub_obj->get_date('next_payment') : '';
+        $vence_ts = $next_payment_mysql ? strtotime($next_payment_mysql) : null;
         $order_ids = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
         foreach ($order_ids as $oid) {
             $order = wc_get_order($oid);
@@ -3558,7 +3592,11 @@ function superadmin_gestion_grupos($request) {
             $o_status = $order->get_status();
             if (in_array($o_status, array('pending', 'failed', 'on-hold'), true)) {
                 if (!$pendiente || $fecha->getTimestamp() > $pendiente['ts']) {
-                    $pendiente = array('importe' => floatval($order->get_total()), 'fecha' => $fecha->date('d/m/Y'), 'ts' => $fecha->getTimestamp());
+                    $pendiente = array(
+                        'importe' => floatval($order->get_total()),
+                        'fecha'   => $vence_ts ? date('d/m/Y', $vence_ts) : $fecha->date('d/m/Y'),
+                        'ts'      => $fecha->getTimestamp(),
+                    );
                 }
             }
             $ym = $fecha->date('Y-m');
@@ -3615,6 +3653,15 @@ function superadmin_gestion_grupos($request) {
             }
         }
         if ($pendiente && isset($cobros_manuales[$sub['id'] . '|' . $hoy_ym])) $pendiente = null;
+        // Ya hay un pago adelantado guardado para esta suscripción (ver Marcar cobrado): no es
+        // que nadie se haya ocupado, es que se aplicará solo en la renovación — se marca en vez
+        // de dejarlo como un pendiente mudo (cowork, 2/11 09:40).
+        if ($pendiente && isset($adelantados_por_sub[intval($sub['id'])])) {
+            $ad = $adelantados_por_sub[intval($sub['id'])];
+            $pendiente['adelantado'] = true;
+            $pendiente['adelantadoImporte'] = floatval($ad['importe']);
+            $pendiente['adelantadoMetodo']  = blokes_gestion_metodo_label($ad['metodo']);
+        }
 
         $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
         $persona_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : ('n' . strtolower(trim($sub['cliente'] ?? ''))));
@@ -4821,6 +4868,307 @@ function superadmin_sync_grupos_pestana($request) {
     }
     $r['hojaUsada'] = $activa['cual'];
     return rest_ensure_response(array('success' => true, 'data' => $r));
+}
+
+// ─── Excel → Web: bandeja de cambios (paso 2 de NOTAS_PARA_CODE_sync_grupos.md) ───────────
+// Guarda una "instantánea" de cada fila del Excel (por pestaña) y, en cada sincronización,
+// compara contra esa instantánea para quedarse solo con lo que cambió desde la última vez. La
+// PRIMERA sincronización de cada pestaña es la "foto inicial": se guarda como base sin generar
+// ningún cambio (si no, meter 200-300 filas de golpe en la bandeja el primer día). A partir de
+// ahí, solo diferencias.
+function blokes_sync_grupos_snapshot_table() { global $wpdb; return $wpdb->prefix . 'blokes_sync_grupos_snapshot'; }
+function blokes_sync_grupos_cambios_table()  { global $wpdb; return $wpdb->prefix . 'blokes_sync_grupos_cambios'; }
+
+function blokes_sync_grupos_ensure_tables() {
+    global $wpdb;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+
+    $t1 = blokes_sync_grupos_snapshot_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $t1)) !== $t1) {
+        dbDelta("CREATE TABLE {$t1} (
+            id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            pestana     varchar(100)        NOT NULL,
+            clave       varchar(191)        NOT NULL,
+            nombre      varchar(190)        NOT NULL DEFAULT '',
+            telefono    varchar(30)         NOT NULL DEFAULT '',
+            notas       varchar(500)        NOT NULL DEFAULT '',
+            exento      tinyint(1)          NOT NULL DEFAULT 0,
+            pagos_json  longtext            NOT NULL,
+            updated_at  datetime            NOT NULL,
+            PRIMARY KEY (id),
+            UNIQUE KEY pestana_clave (pestana, clave),
+            KEY pestana (pestana)
+        ) {$charset};");
+    }
+
+    $t2 = blokes_sync_grupos_cambios_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $t2)) !== $t2) {
+        dbDelta("CREATE TABLE {$t2} (
+            id           bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+            pestana      varchar(100)        NOT NULL,
+            clave        varchar(191)        NOT NULL,
+            nombre       varchar(190)        NOT NULL DEFAULT '',
+            telefono     varchar(30)         NOT NULL DEFAULT '',
+            tipo         varchar(30)         NOT NULL,
+            mes          varchar(7)          NULL,
+            datos_json   longtext            NOT NULL,
+            match_tipo   varchar(20)         NULL,
+            match_id     bigint(20) UNSIGNED NULL,
+            match_label  varchar(190)        NOT NULL DEFAULT '',
+            estado       varchar(20)         NOT NULL DEFAULT 'pendiente',
+            creado_at    datetime            NOT NULL,
+            resuelto_at  datetime            NULL,
+            resuelto_por varchar(100)        NOT NULL DEFAULT '',
+            PRIMARY KEY (id),
+            KEY pestana (pestana),
+            KEY estado (estado)
+        ) {$charset};");
+    }
+}
+
+// Clave estable para emparejar la misma persona entre sincronizaciones: nombre normalizado +
+// teléfono normalizado. Si no hay teléfono, solo el nombre (puede chocar con un homónimo, pero
+// solo afecta a qué fila de la bandeja se actualiza en vez de duplicarse, nunca escribe nada).
+function blokes_sync_grupos_clave($nombre, $telefono) {
+    $n = remove_accents(mb_strtolower(trim((string) $nombre)));
+    $n = preg_replace('/\s+/', ' ', $n);
+    $t = blokes_externos_normaliza_telefono((string) $telefono);
+    return $n . '|' . $t;
+}
+
+// Encuentra con quién de la web emparejar un teléfono del Excel: primero una suscripción de
+// WooCommerce en vigor, si no, un externo. No se fía del nombre (demasiados homónimos/apodos),
+// solo del teléfono, que es lo que de verdad identifica a la persona en ambos sitios.
+function blokes_sync_grupos_emparejar($telefono, $subs_por_tel, $externos_por_tel) {
+    $tel = blokes_externos_normaliza_telefono((string) $telefono);
+    if ($tel === '') return null;
+    if (isset($subs_por_tel[$tel])) {
+        $s = $subs_por_tel[$tel];
+        return array('tipo' => 'sub', 'id' => intval($s['id']), 'label' => ($s['nombre'] ?? $s['alumno'] ?? ('Suscripción #' . $s['id'])));
+    }
+    if (isset($externos_por_tel[$tel])) {
+        $e = $externos_por_tel[$tel];
+        return array('tipo' => 'externo', 'id' => intval($e['id']), 'label' => $e['nombre'] ?? ('Externo #' . $e['id']));
+    }
+    return null;
+}
+
+// El método tal y como lo escribe Eva en el Excel ('ta'/'tr'/'ef'/'bizum'/'web'…) ya llega
+// traducido a transferencia/efectivo/bizum/web por blokes_sync_grupos_leer_pago(); aquí solo
+// falta encajarlo en los 5 métodos que acepta Marcar cobrado — "web" (pago con tarjeta en la
+// web, sin Redsys automático detrás) se trata como tarjeta a mano, igual que un TPV.
+function blokes_sync_grupos_metodo_a_cobrado($metodo) {
+    $map = array('web' => 'tarjeta', 'transferencia' => 'transferencia', 'efectivo' => 'efectivo', 'bizum' => 'bizum', 'ana' => 'transferencia');
+    return $map[$metodo] ?? 'transferencia';
+}
+
+// Crea o refresca un cambio pendiente para (pestana, clave, tipo, mes) — si ya hay uno
+// pendiente igual, se actualiza con el dato más fresco en vez de duplicarse en cada
+// sincronización mientras nadie lo resuelve.
+function blokes_sync_grupos_upsert_cambio($pestana, $clave, $nombre, $telefono, $tipo, $mes, $datos, $match) {
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $existente = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM {$tabla} WHERE pestana = %s AND clave = %s AND tipo = %s AND estado = 'pendiente' AND " . ($mes ? "mes = %s" : "mes IS NULL"),
+        ...array_filter(array($pestana, $clave, $tipo, $mes), function($v) { return $v !== null; })
+    ));
+    $campos = array(
+        'nombre' => $nombre, 'telefono' => $telefono, 'datos_json' => wp_json_encode($datos),
+        'match_tipo' => $match['tipo'] ?? null, 'match_id' => $match['id'] ?? null, 'match_label' => $match['label'] ?? '',
+    );
+    if ($existente) {
+        $wpdb->update($tabla, $campos, array('id' => intval($existente)));
+    } else {
+        $wpdb->insert($tabla, array_merge($campos, array(
+            'pestana' => $pestana, 'clave' => $clave, 'tipo' => $tipo, 'mes' => $mes, 'estado' => 'pendiente', 'creado_at' => current_time('mysql'),
+        )));
+    }
+}
+
+// El corazón del paso 2: lee TODAS las pestañas de la Hoja activa, las compara con la
+// instantánea guardada y deja en la bandeja solo lo que cambió. Lo usan tanto el cron (cada
+// hora) como el botón "Sincronizar ahora".
+function blokes_sync_grupos_sincronizar() {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $activa = blokes_sync_grupos_sheet_activa();
+    if (!$activa['id']) return new WP_Error('falta_config', 'No hay Hoja configurada.', array('status' => 400));
+
+    $meta = blokes_sync_grupos_get($activa['id'], '?fields=sheets.properties.title');
+    if (is_wp_error($meta)) return $meta;
+    $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
+    if (!$pestanas) return new WP_Error('sin_pestanas', 'La hoja no tiene pestañas.', array('status' => 502));
+
+    $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($activa['id'], $pestanas);
+    if (is_wp_error($valores_por_pestana)) return $valores_por_pestana;
+
+    $subs_por_tel     = blokes_campanas_subs_por_telefono();
+    $externos_por_tel = blokes_campanas_externos_por_telefono();
+
+    $resumen = array('hojaUsada' => $activa['cual'], 'pestanas' => array(), 'cambiosNuevos' => 0, 'fotoInicial' => array());
+    foreach ($pestanas as $tab) {
+        $r = blokes_sync_grupos_leer_pestana_filas($valores_por_pestana[$tab] ?? array());
+        if (!$r['filas'] && !$r['bloques']) continue; // pestaña sin formato de clase (Balance, Bonos de 10…)
+
+        $tabla_snap = blokes_sync_grupos_snapshot_table();
+        $es_foto_inicial = !$wpdb->get_var($wpdb->prepare("SELECT id FROM {$tabla_snap} WHERE pestana = %s LIMIT 1", $tab));
+        if ($es_foto_inicial) $resumen['fotoInicial'][] = $tab;
+
+        $claves_vistas = array();
+        $cambios_pestana = 0;
+        foreach ($r['filas'] as $fila) {
+            $clave = blokes_sync_grupos_clave($fila['nombre'], $fila['telefono']);
+            $claves_vistas[$clave] = true;
+            $anterior = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla_snap} WHERE pestana = %s AND clave = %s", $tab, $clave), ARRAY_A);
+            $pagos_anteriores = $anterior ? (json_decode($anterior['pagos_json'], true) ?: array()) : array();
+
+            if (!$es_foto_inicial) {
+                $match = blokes_sync_grupos_emparejar($fila['telefono'], $subs_por_tel, $externos_por_tel);
+                if (!$anterior) {
+                    blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'alumno_nuevo', null, array(
+                        'nombre' => $fila['nombre'], 'telefono' => $fila['telefono'],
+                    ), $match);
+                    $cambios_pestana++;
+                } else {
+                    if (trim($anterior['notas']) !== trim($fila['notas']) && $fila['notas'] !== '') {
+                        blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'nota', null, array(
+                            'notaAntes' => $anterior['notas'], 'notaDespues' => $fila['notas'],
+                        ), $match);
+                        $cambios_pestana++;
+                    }
+                    $tel_norm_antes = blokes_externos_normaliza_telefono($anterior['telefono']);
+                    $tel_norm_ahora = blokes_externos_normaliza_telefono($fila['telefono']);
+                    if ($tel_norm_antes !== $tel_norm_ahora && $tel_norm_ahora !== '') {
+                        blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'telefono', null, array(
+                            'telefonoAntes' => $anterior['telefono'], 'telefonoDespues' => $fila['telefono'],
+                        ), $match);
+                        $cambios_pestana++;
+                    }
+                }
+                foreach ($fila['pagos'] as $ym => $pago) {
+                    $antes = $pagos_anteriores[$ym] ?? null;
+                    $igual = $antes && floatval($antes['importe'] ?? 0) === floatval($pago['importe'] ?? 0) && ($antes['metodo'] ?? '') === ($pago['metodo'] ?? '');
+                    if (!$igual) {
+                        blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'pago_nuevo', $ym, array(
+                            'importe' => $pago['importe'], 'metodo' => $pago['metodo'], 'fecha' => $pago['fecha'] ?? null,
+                        ), $match);
+                        $cambios_pestana++;
+                    }
+                }
+            }
+
+            $wpdb->query($wpdb->prepare(
+                "INSERT INTO {$tabla_snap} (pestana, clave, nombre, telefono, notas, exento, pagos_json, updated_at) VALUES (%s,%s,%s,%s,%s,%d,%s,%s)
+                 ON DUPLICATE KEY UPDATE nombre=%s, telefono=%s, notas=%s, exento=%d, pagos_json=%s, updated_at=%s",
+                $tab, $clave, $fila['nombre'], $fila['telefono'], $fila['notas'], $fila['exento'] ? 1 : 0, wp_json_encode($fila['pagos']), current_time('mysql'),
+                $fila['nombre'], $fila['telefono'], $fila['notas'], $fila['exento'] ? 1 : 0, wp_json_encode($fila['pagos']), current_time('mysql')
+            ));
+        }
+
+        // Filas que estaban en la instantánea y ya no aparecen en el Excel: se avisa, nunca se
+        // da de baja sola (Ramiro, NOTAS_PARA_CODE_sync_grupos.md).
+        if (!$es_foto_inicial) {
+            $claves_antes = $wpdb->get_col($wpdb->prepare("SELECT clave FROM {$tabla_snap} WHERE pestana = %s", $tab));
+            foreach ($claves_antes as $clave_antes) {
+                if (isset($claves_vistas[$clave_antes])) continue;
+                $fila_antes = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla_snap} WHERE pestana = %s AND clave = %s", $tab, $clave_antes), ARRAY_A);
+                if (!$fila_antes) continue;
+                blokes_sync_grupos_upsert_cambio($tab, $clave_antes, $fila_antes['nombre'], $fila_antes['telefono'], 'fila_borrada', null, array(
+                    'nombre' => $fila_antes['nombre'],
+                ), null);
+                $cambios_pestana++;
+            }
+        }
+
+        $resumen['pestanas'][] = array('pestana' => $tab, 'filas' => count($r['filas']), 'cambiosNuevos' => $es_foto_inicial ? 0 : $cambios_pestana, 'fotoInicial' => $es_foto_inicial);
+        $resumen['cambiosNuevos'] += $es_foto_inicial ? 0 : $cambios_pestana;
+    }
+
+    update_option('blokes_sync_grupos_ultima_sincronizacion', current_time('mysql'), false);
+    return $resumen;
+}
+
+function superadmin_sync_grupos_sincronizar_ahora() {
+    $r = blokes_sync_grupos_sincronizar();
+    if (is_wp_error($r)) return new WP_Error($r->get_error_code(), $r->get_error_message(), array('status' => 502));
+    return rest_ensure_response(array('success' => true, 'data' => $r));
+}
+
+function superadmin_sync_grupos_cambios_listar($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $estado = sanitize_key((string) ($request->get_param('estado') ?: 'pendiente'));
+    $tabla = blokes_sync_grupos_cambios_table();
+    $rows = $estado === 'todos'
+        ? $wpdb->get_results("SELECT * FROM {$tabla} ORDER BY creado_at DESC LIMIT 500", ARRAY_A)
+        : $wpdb->get_results($wpdb->prepare("SELECT * FROM {$tabla} WHERE estado = %s ORDER BY creado_at DESC LIMIT 500", $estado), ARRAY_A);
+    foreach ($rows as &$r) { $r['datos'] = json_decode($r['datos_json'], true); unset($r['datos_json']); }
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'cambios' => $rows, 'ultimaSincronizacion' => get_option('blokes_sync_grupos_ultima_sincronizacion', null),
+    )));
+}
+
+// Aplicar: para "pago_nuevo" con una persona emparejada de verdad, reutiliza EXACTAMENTE el
+// mismo camino que "Marcar cobrado" a mano (con su protección de pagos adelantados incluida) o
+// el cobro de un externo — nunca lógica nueva para tocar dinero. El resto de tipos (nota,
+// teléfono, alumno nuevo, fila borrada) de momento solo se marca "aplicado" como aviso visto;
+// escribirlos solos en el perfil del alumno queda para una siguiente ronda (Ramiro: "se puede
+// valorar autoaplicar más adelante").
+function superadmin_sync_grupos_cambio_aplicar($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $id = intval($request['id']);
+    $tabla = blokes_sync_grupos_cambios_table();
+    $cambio = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla} WHERE id = %d", $id), ARRAY_A);
+    if (!$cambio) return new WP_Error('not_found', 'Cambio no encontrado.', array('status' => 404));
+    if ($cambio['estado'] !== 'pendiente') return new WP_Error('ya_resuelto', 'Este cambio ya estaba resuelto.', array('status' => 409));
+    $datos = json_decode($cambio['datos_json'], true) ?: array();
+
+    $resultado = null;
+    if ($cambio['tipo'] === 'pago_nuevo') {
+        if (!$cambio['match_tipo'] || !$cambio['match_id']) {
+            return new WP_Error('sin_match', 'No hay nadie emparejado por teléfono para este pago — apúntalo a mano en Grupos.', array('status' => 409));
+        }
+        $fecha = (string) ($datos['fecha'] ?? '');
+        $fecha = preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha) ? $fecha : current_time('Y-m-d');
+        if ($cambio['match_tipo'] === 'sub') {
+            $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
+            $req->set_param('sub_id', intval($cambio['match_id']));
+            $req->set_param('importe', floatval($datos['importe'] ?? 0));
+            $req->set_param('metodo', blokes_sync_grupos_metodo_a_cobrado($datos['metodo'] ?? ''));
+            $req->set_param('fecha', $fecha);
+            $req->set_param('nota', 'Detectado en el Excel de Eva (sincronización automática, pestaña ' . $cambio['pestana'] . ').');
+            $req->set_param('simular', false);
+            $resultado = superadmin_gestion_marcar_cobrado($req);
+        } else {
+            $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/externos/' . intval($cambio['match_id']) . '/pago');
+            $req->set_param('id', intval($cambio['match_id']));
+            $req->set_param('periodo', (string) $cambio['mes']);
+            $req->set_param('importe', floatval($datos['importe'] ?? 0));
+            $req->set_param('metodo', $datos['metodo'] ?? 'efectivo');
+            $req->set_param('fecha', $fecha);
+            $resultado = superadmin_gestion_externos_pago($req);
+        }
+        if (is_wp_error($resultado)) return new WP_Error($resultado->get_error_code(), $resultado->get_error_message(), array('status' => 409));
+    }
+
+    $u = wp_get_current_user();
+    $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => $u ? $u->user_login : ''), array('id' => $id));
+    return rest_ensure_response(array('success' => true, 'data' => $resultado ? $resultado->get_data() : null));
+}
+
+function superadmin_sync_grupos_cambio_descartar($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $id = intval($request['id']);
+    $tabla = blokes_sync_grupos_cambios_table();
+    $cambio = $wpdb->get_row($wpdb->prepare("SELECT id, estado FROM {$tabla} WHERE id = %d", $id), ARRAY_A);
+    if (!$cambio) return new WP_Error('not_found', 'Cambio no encontrado.', array('status' => 404));
+    if ($cambio['estado'] !== 'pendiente') return new WP_Error('ya_resuelto', 'Este cambio ya estaba resuelto.', array('status' => 409));
+    $u = wp_get_current_user();
+    $wpdb->update($tabla, array('estado' => 'descartado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => $u ? $u->user_login : ''), array('id' => $id));
+    return rest_ensure_response(array('success' => true));
 }
 
 // ============================================================
@@ -10742,6 +11090,18 @@ add_action('blokes_equip_autocrear_semanas', 'progreso_equip_autocrear_semanas')
 add_action('blokes_9to5_sync', function() {
     $c = nueve_config();
     if (!empty($c['api_key'])) nueve_sync(false);
+});
+
+// Sync Grupos ⇄ Excel, paso 2 (NOTAS_PARA_CODE_sync_grupos.md): revisa la Hoja activa (prueba o
+// real, según el interruptor) cada hora y deja en la bandeja lo que haya cambiado. "hourly" es
+// el intervalo más corto que trae WordPress de serie — cae dentro de lo pedido ("cada 1-2h").
+add_action('init', function() {
+    if (!wp_next_scheduled('blokes_sync_grupos_cron')) wp_schedule_event(time() + 900, 'hourly', 'blokes_sync_grupos_cron');
+});
+add_action('blokes_sync_grupos_cron', function() {
+    if (get_option('blokes_sync_grupos_sheet_prueba_id', '') || get_option('blokes_sync_grupos_sheet_real_id', '')) {
+        blokes_sync_grupos_sincronizar();
+    }
 });
 
 function nueve_config() {

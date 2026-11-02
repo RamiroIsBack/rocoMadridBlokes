@@ -1504,6 +1504,13 @@ function GruposTab() {
   const sinDatos        = useMemo(() => conGrupo.filter(a => !a.telefono || a.sinNombre).filter(coincide), [conGrupo, terminoBusq, telBusq])
   const pagaFuera        = useMemo(() => conGrupo.filter(a => a.esExterno).filter(coincide), [conGrupo, terminoBusq, telBusq])
 
+  // Cuántos coinciden en la vista actual — Ramiro, 2/11 09:40: no sabía "dónde darle a buscar"
+  // ni si el filtro seguía puesto al cambiar de pestaña; este número deja claro ambas cosas.
+  const resultadosBusqueda = (terminoBusq || telBusq) ? ({
+    grupos: conGrupo.filter(coincide).length, cobrar: porCobrar.length, pausados: pausados.length,
+    bajas: bajas.length, sindatos: sinDatos.length, externos: pagaFuera.length, duplicados: duplicados.length,
+  }[vista] ?? null) : null
+
   const kpis = useMemo(() => {
     const k = { personas: 0, enEspera: 0, dia1: 0, dia2: 0, dia3: 0, plazas: 0, cobradoMes: 0, pendienteMes: 0, pendienteImporte: 0 }
     alumnos.forEach(a => {
@@ -1571,13 +1578,18 @@ function GruposTab() {
           </button>
         </div>
         <div className="sv-controls-right">
-          <input
-            className="sv-tests-input sv-grp-buscar"
-            type="text"
-            placeholder="🔎 Buscar alumno (nombre o teléfono)"
-            value={busqueda}
-            onChange={e => setBusqueda(e.target.value)}
-          />
+          <span className="sv-grp-buscar-wrap">
+            <input
+              className="sv-tests-input sv-grp-buscar"
+              type="text"
+              placeholder="🔎 Buscar alumno (nombre o teléfono)"
+              value={busqueda}
+              onChange={e => setBusqueda(e.target.value)}
+            />
+            {busqueda && (
+              <button type="button" className="sv-grp-buscar-limpiar" title="Limpiar búsqueda" onClick={() => setBusqueda('')}>✕</button>
+            )}
+          </span>
           {vista === 'grupos' && (
             <select className="sv-tests-select" value={grupoKey} onChange={e => setGrupoKey(e.target.value)}>
               <option value="">Todos los grupos</option>
@@ -1594,6 +1606,12 @@ function GruposTab() {
           )}
         </div>
       </div>
+
+      {resultadosBusqueda !== null && (
+        <p className="sv-grp-buscar-resultado">
+          {resultadosBusqueda} resultado{resultadosBusqueda === 1 ? '' : 's'} para «{busqueda.trim()}» en esta pestaña — <button type="button" className="sv-grp-buscar-limpiar-texto" onClick={() => setBusqueda('')}>quitar filtro</button>
+        </p>
+      )}
 
       {buscador && <BuscarAlumnoModal onClose={() => setBuscador(false)} />}
 
@@ -1617,7 +1635,15 @@ function GruposTab() {
                       <td className="sv-ot-muted">{a.grupoLabel}</td>
                       <td className="sv-ot-muted">{a.telefono || '—'}</td>
                       <td><span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span></td>
-                      <td className="sv-to-bad">{fmtEur(a.pendiente.importe)} <span className="sv-ot-muted">({a.pendiente.fecha})</span></td>
+                      <td>
+                        {a.pendiente.adelantado ? (
+                          <span className="sv-ot-muted" title={`Pagó por adelantado: ${fmtEur(a.pendiente.adelantadoImporte)} (${a.pendiente.adelantadoMetodo}). Se aplicará solo cuando venza esta renovación.`}>
+                            Adelantado — se aplicará el {a.pendiente.fecha}
+                          </span>
+                        ) : (
+                          <span className="sv-to-bad">{fmtEur(a.pendiente.importe)} <span className="sv-ot-muted">(vence {a.pendiente.fecha})</span></span>
+                        )}
+                      </td>
                       <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
                     </tr>
                   )
@@ -1876,7 +1902,11 @@ function GruposTab() {
         </>
       ) : (
         grupos.map(g => {
-          const gAlumnos = conGrupoDatos(g)
+          // Antes esto ignoraba el buscador de arriba (usaba conGrupoDatos(g) sin filtrar) —
+          // Ramiro, 2/11 09:40: un nombre de prueba no filtraba nada en "Grupos". Con término de
+          // búsqueda, los grupos sin ninguna coincidencia se ocultan del todo, como pediste.
+          const gAlumnos = conGrupoDatos(g).filter(coincide)
+          if ((terminoBusq || telBusq) && gAlumnos.length === 0) return null
           return (
             <div key={`${g.dia}|${g.horario}|${g.edad}`} className="sv-grp-bloque">
               <h4 className="sv-grp-bloque__titulo">{g.label}</h4>
