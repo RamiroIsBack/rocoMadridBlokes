@@ -113,6 +113,9 @@ export const clubDaysBorrar = id         => gestionCall('DELETE', `/gestion/club
 // toca WooCommerce.
 export const histPagosImportar = body => gestionPost('/gestion/hist-pagos/importar', body)
 export const histPagosResumen  = (desde = '', hasta = '') => gestionCall('GET', `/gestion/hist-pagos/resumen${desde || hasta ? `?desde=${desde}&hasta=${hasta}` : ''}`)
+// Histórico real de "mañanas" (clases antes de las 15:00, sin infantiles ni sábados) para la
+// calculadora, en vez de los números a mano (NOTAS_PARA_CODE_hv_control_clientes.md, punto 2).
+export const histPagosResumenMananas = (desde = '', hasta = '') => gestionCall('GET', `/gestion/hist-pagos/resumen-mananas${desde || hasta ? `?desde=${desde}&hasta=${hasta}` : ''}`)
 
 // Pagos adelantados (NOTAS_PARA_CODE_grupos_como_excel.md, 1/11 18:55): transferencia/bizum/
 // tarjeta apuntados antes de que exista la renovación de WooCommerce.

@@ -7,7 +7,7 @@ import {
   CAMP_DEFAULT, CAMP_MESES, normalizeCamp, lunesDelMes,
 } from '../utils/coverage'
 import { equilibrioCamp, tablaCamp } from '../utils/campamento'
-import { useExpenses, clubDaysGet, clubDaysCrear, clubDaysEditar, clubDaysBorrar } from '../hooks/useSuperAdmin'
+import { useExpenses, clubDaysGet, clubDaysCrear, clubDaysEditar, clubDaysBorrar, histPagosResumenMananas } from '../hooks/useSuperAdmin'
 import { useCostes, FACTOR_COSTE } from '../hooks/useCostes'
 import { autoCategory } from '../utils/expensesParser'
 import { PL_DATA } from '../data/plHistorico'
@@ -16,6 +16,7 @@ import {
   evaluarPlan, defaultYear, todayISO, repartirVacaciones, BLOQUE_VERANO, MAX_BLOQUES, CIERRE_EXTRA,
   normalizeMananas, ingresosMananaDeClases, cuentasMananas, equilibrioManana,
   mesesCerradosManana, PERSONA_MES_ESTADOS, estadoPersonaMes, paroDesdePersonasMes, personasMesDesdeParo,
+  agruparHistoricoRealPorMes,
 } from '../utils/timeoffPlan'
 import { useTimeOffData, savePlan, saveReal, syncNueve, addScenario } from '../hooks/useTimeOff'
 import { useClases } from '../hooks/useClases'
@@ -742,6 +743,16 @@ function ConfigMananas({ state, update, clases }) {
   const mananas = normalizeMananas(state.mananas)
   const setMananas = patch => update({ mananas: { ...mananas, ...patch } })
   const cerrado = mananas.modo !== 'abiertas'
+
+  // Histórico real de mañanas del HV Control de Clientes (NOTAS_PARA_CODE_hv_control_clientes.md,
+  // punto 2) — solo socio, es dinero del club. Si no hay sesión de socio o la llamada falla, se
+  // sigue usando el respaldo de siempre (alumnos de HOY) sin romper nada.
+  const [historicoReal, setHistoricoReal] = useState(null)
+  useEffect(() => {
+    if (window.blokesSiteData?.userRole !== 'socio') return
+    histPagosResumenMananas().then(r => setHistoricoReal(agruparHistoricoRealPorMes(r.porMes))).catch(() => {})
+  }, [])
+
   return (
     <>
       <div className="sv-to-form">
@@ -791,38 +802,44 @@ function ConfigMananas({ state, update, clases }) {
           {mesesCerradosManana(mananas).length > 0 && (
             <div className="sv-to-form sv-to-wrap">
               <span className="sv-to-inline">
-                Alumnos/ingresos de mañana por mes, a mano con la fuente al lado (en blanco usa los alumnos de HOY —
-                en verano hay muchos menos, así que mejor rellenar julio/agosto con el histórico real):
+                Alumnos/ingresos de mañana por mes — en blanco usa el histórico real del HV Control de Clientes (ⓘ ahí
+                abajo, de dónde sale); rellena a mano solo si quieres forzar otro número:
               </span>
               {mesesCerradosManana(mananas).map(mes => {
                 const h = mananas.historico?.[mes] || {}
                 const setHist = patch => setMananas({ historico: { ...mananas.historico, [mes]: { ...h, ...patch } } })
+                const real = historicoReal?.[mes]
                 return (
                   <div key={mes} className="sv-to-inline">
                     <strong>{MESES_ANUALES[mes]}</strong>
-                    <input className="sv-tests-input sv-tests-input--num" type="number" min="0" placeholder="alumnos"
+                    <input className="sv-tests-input sv-tests-input--num" type="number" min="0" placeholder={real ? String(real.alumnos) : 'alumnos'}
                       value={h.alumnos ?? ''} onChange={e => setHist({ alumnos: e.target.value === '' ? null : num(e.target.value) })} />
-                    <input className="sv-tests-input sv-tests-input--num" type="number" min="0" placeholder="ingresos €/mes"
+                    <input className="sv-tests-input sv-tests-input--num" type="number" min="0" placeholder={real ? String(real.importe) : 'ingresos €/mes'}
                       value={h.ingresos ?? ''} onChange={e => setHist({ ingresos: e.target.value === '' ? null : num(e.target.value) })} />
-                    <input className="sv-tests-input" type="text" placeholder="fuente (ej. jul 25: 20 · jul 24: 22)"
+                    <input className="sv-tests-input" type="text" placeholder={real ? `HV: ${real.detalle}` : 'fuente (si fuerzas el número a mano)'}
                       value={h.fuente || ''} onChange={e => setHist({ fuente: e.target.value })} style={{ minWidth: 220 }} />
+                    {real && h.alumnos == null && h.ingresos == null && (
+                      <span className="sv-ot-muted" title="Histórico real del HV Control de Clientes, promedio de los años disponibles">
+                        ⓘ HV: {real.detalle}
+                      </span>
+                    )}
                   </div>
                 )
               })}
             </div>
           )}
-          <MananasCuentas mananas={mananas} clases={clases} />
+          <MananasCuentas mananas={mananas} clases={clases} historicoReal={historicoReal} />
         </>
       )}
     </>
   )
 }
 
-function MananasCuentas({ mananas, clases }) {
+function MananasCuentas({ mananas, clases, historicoReal }) {
   const ingresosManana = useMemo(() => ingresosMananaDeClases(clases, mananas.corteHora), [clases, mananas.corteHora])
-  const ctx = { ingresosManana }
-  const r = useMemo(() => cuentasMananas(mananas, ctx), [mananas, ingresosManana])
-  const eq = useMemo(() => equilibrioManana(mananas, ctx), [mananas, ingresosManana])
+  const ctx = { ingresosManana, historicoReal }
+  const r = useMemo(() => cuentasMananas(mananas, ctx), [mananas, ingresosManana, historicoReal])
+  const eq = useMemo(() => equilibrioManana(mananas, ctx), [mananas, ingresosManana, historicoReal])
   const cls = n => (n > 0 ? 'sv-to-good' : n < 0 ? 'sv-to-bad' : '')
   if (!r.cerrados.length) return null
   const lineas = [

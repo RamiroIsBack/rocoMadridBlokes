@@ -287,16 +287,45 @@ export function ingresosMananaDeClases(clases, corteHora = MANANAS_CORTE_DEFECTO
 }
 
 // Alumnos/ingresos de mañana de un mes cerrado concreto: el valor a mano en
-// `mananas.historico[mes]` (con su nota de fuente), o si no hay, los alumnos de HOY de
-// /progreso/v1/clases como aproximación — en verano hay muchos menos que en el resto del año,
-// así que ese valor de respaldo infla el ingreso perdido de julio/agosto si no se corrige a
-// mano (Ramiro/cowork, 1/11).
-function ingresosDelMesManana(mananas, mes, ingresosManana) {
+// `mananas.historico[mes]` (con su nota de fuente) manda si está puesto; si no, el histórico
+// REAL del HV Control de Clientes (clases de mañana de verdad, promediado por los años que haya
+// — NOTAS_PARA_CODE_hv_control_clientes.md, punto 2); y solo si tampoco hay eso, los alumnos de
+// HOY de /progreso/v1/clases como última aproximación — en verano hay muchos menos que en el
+// resto del año, así que ese valor de respaldo infla el ingreso perdido si no hay nada mejor
+// (Ramiro/cowork, 1/11).
+function ingresosDelMesManana(mananas, mes, ingresosManana, historicoReal) {
   const h = mananas.historico?.[mes]
   if (h && (h.alumnos != null || h.ingresos != null)) {
     return { alumnos: Number(h.alumnos) || 0, ingresos: Number(h.ingresos) || 0, fuente: h.fuente || '' }
   }
+  const real = historicoReal?.[mes]
+  if (real) {
+    return { alumnos: real.alumnos, ingresos: real.importe, fuente: `HV: ${real.detalle}` }
+  }
   return { alumnos: ingresosManana?.alumnos || 0, ingresos: ingresosManana?.ingresos || 0, fuente: '' }
+}
+
+// Agrupa el histórico real de mañanas por mes del año (1-12), promediando los años que haya
+// (p. ej. julio = media de jul-25 y jul-26) — el calendario de esta calculadora no distingue
+// año, así que una media representativa es mejor aproximación que un solo año suelto.
+export function agruparHistoricoRealPorMes(porMes) {
+  const porAnio = {}
+  Object.entries(porMes || {}).forEach(([ym, d]) => {
+    const [anio, mesStr] = ym.split('-')
+    const mes = Number(mesStr)
+    if (!porAnio[mes]) porAnio[mes] = []
+    porAnio[mes].push({ anio: Number(anio), alumnos: d.alumnos, importe: d.importe })
+  })
+  const out = {}
+  Object.entries(porAnio).forEach(([mes, anios]) => {
+    const n = anios.length
+    out[mes] = {
+      alumnos: Math.round(anios.reduce((s, a) => s + a.alumnos, 0) / n),
+      importe: Math.round(anios.reduce((s, a) => s + a.importe, 0) / n),
+      detalle: anios.map(a => `${a.anio}: ${a.alumnos}/${Math.round(a.importe)}€`).join(' · '),
+    }
+  })
+  return out
 }
 
 // Cuentas de cerrar por la mañana: ingreso que se pierde (neto del % que pasa a la tarde) y
@@ -305,12 +334,12 @@ function ingresosDelMesManana(mananas, mes, ingresosManana) {
 // unificación en la pestaña "Personas" (quién está en paro cada mes es una sola tabla, no dos),
 // ese ahorro sale entero de `ev.eco.personalMes` — contarlo también aquí lo duplicaría
 // (cowork, 1/11 07:50).
-export function cuentasMananas(mananas, { ingresosManana }) {
+export function cuentasMananas(mananas, { ingresosManana, historicoReal }) {
   const m = normalizeMananas(mananas)
   const cerrados = mesesCerradosManana(m)
 
   const porMes = cerrados.map(mes => {
-    const ing = ingresosDelMesManana(m, mes, ingresosManana)
+    const ing = ingresosDelMesManana(m, mes, ingresosManana, historicoReal)
     const perdidaBruta = ing.ingresos
     const perdidaNeta = perdidaBruta * (1 - (m.pctTarde || 0) / 100)
     const ahorroSala = m.gastoSala || 0
