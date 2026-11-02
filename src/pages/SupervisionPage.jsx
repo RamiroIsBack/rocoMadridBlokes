@@ -8,7 +8,7 @@ import {
   gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
-  histPagosImportar,
+  histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
@@ -2127,6 +2127,91 @@ function GruposTab() {
   )
 }
 
+// Histórico (NOTAS_PARA_CODE_hv_control_clientes.md, punto 5): permanencia media, bajas tras
+// verano, alumnos por profesor/clase/mes y uso de bonos — todo agregado del HV Control de
+// Clientes importado, nunca nombres ni teléfonos sueltos. Solo socio (dinero/datos del club).
+function TablaPorMes({ titulo, datos }) {
+  const meses = Array.from(new Set(Object.values(datos || {}).flatMap(d => Object.keys(d)))).sort()
+  const filas = Object.keys(datos || {}).sort()
+  if (!filas.length) return null
+  return (
+    <div className="sv-tests-scroll">
+      <h2 className="sv-section-title">{titulo}</h2>
+      <table className="sv-tests-table">
+        <thead><tr><th></th>{meses.map(m => <th key={m}>{m}</th>)}</tr></thead>
+        <tbody>
+          {filas.map(fila => (
+            <tr key={fila}>
+              <td>{fila}</td>
+              {meses.map(m => <td key={m} className={datos[fila][m] ? '' : 'sv-ot-muted'}>{datos[fila][m] || '—'}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function HistoricoTab() {
+  const [est, setEst] = useState(null)
+  const [err, setErr] = useState(null)
+  useEffect(() => { histPagosEstadisticas().then(setEst).catch(e => setErr(e.message)) }, [])
+
+  if (err) return <div className="sv-error">Error: {err}</div>
+  if (!est) return <div className="sv-loading">Cargando…</div>
+
+  const anios = Array.from(new Set([...Object.keys(est.bajasTrasVerano.activosVeranoPorAnio), ...Object.keys(est.bajasTrasVerano.porAnio)])).sort()
+
+  return (
+    <div className="sv-tab-panel">
+      <p className="sv-note">
+        Histórico importado del HV Control de Clientes (antes de pasarse a la web) — todo agregado, nunca nombres ni teléfonos.
+      </p>
+      <div className="sv-kpis">
+        <div className="sv-kpi">
+          <span className="sv-kpi__value">{est.permanenciaMeses.media} meses</span>
+          <span className="sv-kpi__label">Permanencia media ⓘ</span>
+        </div>
+        <div className="sv-kpi">
+          <span className="sv-kpi__value">{est.permanenciaMeses.mediana} meses</span>
+          <span className="sv-kpi__label">Mediana</span>
+        </div>
+        <div className="sv-kpi">
+          <span className="sv-kpi__value">{est.permanenciaMeses.alumnos}</span>
+          <span className="sv-kpi__label">Alumnos analizados ({est.permanenciaMeses.conMasDeUnPago} con más de un pago)</span>
+        </div>
+        <div className="sv-kpi">
+          <span className="sv-kpi__value">{est.usoBonos.total}</span>
+          <span className="sv-kpi__label">Bonos de 10 usados ({est.usoBonos.alumnosUnicos} alumnos)</span>
+        </div>
+      </div>
+
+      <h2 className="sv-section-title">Bajas tras verano (de quien pagó en jun/jul/ago de ese año, cuántos no volvieron a pagar sep-dic)</h2>
+      <table className="sv-tests-table">
+        <thead><tr><th>Año</th><th>Activos en verano</th><th>No volvieron</th><th>%</th></tr></thead>
+        <tbody>
+          {anios.map(a => {
+            const activos = est.bajasTrasVerano.activosVeranoPorAnio[a] || 0
+            const bajas = est.bajasTrasVerano.porAnio[a] || 0
+            const incompleto = est.bajasTrasVerano.aniosIncompletos.includes(a)
+            return (
+              <tr key={a}>
+                <td>{a}{incompleto && <span className="sv-ot-muted"> (datos incompletos todavía)</span>}</td>
+                <td>{activos}</td>
+                <td className={bajas > 0 ? 'sv-to-bad' : ''}>{bajas}</td>
+                <td>{activos ? Math.round((bajas / activos) * 100) : 0}%</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+
+      <TablaPorMes titulo="Alumnos por profesor y mes" datos={est.porProfesorMes} />
+      <TablaPorMes titulo="Alumnos por clase y mes" datos={est.porClaseMes} />
+    </div>
+  )
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SupervisionPage() {
   const role          = window.blokesSiteData?.userRole
@@ -2137,7 +2222,7 @@ export default function SupervisionPage() {
     { id: 'grupos',      label: 'Grupos'        },
     { id: 'horasextra',  label: 'Horas extra'    },
     // Lleva sueldos, nóminas y P&L: solo socios
-    ...(role === 'socio' ? [{ id: 'timeoff', label: 'CTRL Time Off' }] : []),
+    ...(role === 'socio' ? [{ id: 'timeoff', label: 'CTRL Time Off' }, { id: 'historico', label: 'Histórico' }] : []),
   ]
 
   const [tab, setTab] = useState('excelmuerte')
@@ -2169,6 +2254,7 @@ export default function SupervisionPage() {
       {tab === 'grupos'      && <GruposTab />}
       {tab === 'horasextra'  && <OvertimeTab />}
       {tab === 'timeoff'     && role === 'socio' && <TimeOffTab />}
+      {tab === 'historico'   && role === 'socio' && <HistoricoTab />}
     </div>
   )
 }

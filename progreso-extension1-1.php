@@ -986,6 +986,9 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/hist-pagos/resumen-mananas', array(
         'methods' => 'GET', 'callback' => 'superadmin_hist_pagos_resumen_mananas', 'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/hist-pagos/estadisticas', array(
+        'methods' => 'GET', 'callback' => 'superadmin_hist_pagos_estadisticas', 'permission_callback' => $socio_perm,
+    ));
 
     register_rest_route('superadmin/v1', '/expenses', array(
         array(
@@ -5743,6 +5746,116 @@ function superadmin_hist_pagos_resumen_mananas($request) {
     $out = array();
     foreach ($por_mes as $mes => $d) { $out[$mes] = array('alumnos' => count($d['alumnos']), 'importe' => round($d['importe'], 2)); }
     return rest_ensure_response(array('success' => true, 'data' => array('porMes' => $out, 'fuente' => 'HV')));
+}
+
+// GET /gestion/hist-pagos/estadisticas — punto 5 del encargo (NOTAS_PARA_CODE_hv_control_clientes.md):
+// permanencia media, bajas tras verano, alumnos por profesor/clase/mes, uso de bonos. Solo
+// agregados — nunca nombre ni teléfono sueltos (misma clave telefono||nombre que el resto de
+// resúmenes, solo para no duplicar a la misma persona en los recuentos).
+function superadmin_hist_pagos_estadisticas($request) {
+    global $wpdb;
+    blokes_ensure_hist_pagos_table();
+    $rows = $wpdb->get_results(
+        "SELECT fecha, importe, telefono, nombre, clase, profesor, duracion FROM " . blokes_hist_pagos_table() . " WHERE fecha IS NOT NULL ORDER BY fecha ASC",
+        ARRAY_A
+    );
+
+    $por_alumno = array(); // clave => array('meses' => array(ym => true), 'primera' => fecha, 'ultima' => fecha)
+    $por_profesor_mes = array();
+    $por_clase_mes = array();
+    $bonos_total = 0; $bonos_alumnos = array(); $bonos_por_mes = array();
+
+    foreach ($rows as $r) {
+        $clave = $r['telefono'] ?: $r['nombre'];
+        if ($clave === '') continue;
+        $ym = substr($r['fecha'], 0, 7);
+        if (!isset($por_alumno[$clave])) $por_alumno[$clave] = array('meses' => array(), 'primera' => $r['fecha'], 'ultima' => $r['fecha']);
+        $por_alumno[$clave]['meses'][$ym] = true;
+        if ($r['fecha'] < $por_alumno[$clave]['primera']) $por_alumno[$clave]['primera'] = $r['fecha'];
+        if ($r['fecha'] > $por_alumno[$clave]['ultima'])  $por_alumno[$clave]['ultima']  = $r['fecha'];
+
+        $profesor = trim((string) $r['profesor']);
+        if ($profesor !== '') {
+            if (!isset($por_profesor_mes[$profesor])) $por_profesor_mes[$profesor] = array();
+            if (!isset($por_profesor_mes[$profesor][$ym])) $por_profesor_mes[$profesor][$ym] = array();
+            $por_profesor_mes[$profesor][$ym][$clave] = true;
+        }
+        $clase = trim((string) $r['clase']);
+        if ($clase !== '') {
+            if (!isset($por_clase_mes[$clase])) $por_clase_mes[$clase] = array();
+            if (!isset($por_clase_mes[$clase][$ym])) $por_clase_mes[$clase][$ym] = array();
+            $por_clase_mes[$clase][$ym][$clave] = true;
+        }
+        if (trim((string) $r['duracion']) === 'Bono 10 asistencias') {
+            $bonos_total++;
+            $bonos_alumnos[$clave] = true;
+            if (!isset($bonos_por_mes[$ym])) $bonos_por_mes[$ym] = 0;
+            $bonos_por_mes[$ym]++;
+        }
+    }
+
+    // Permanencia: meses entre la primera y la última vez que pagó cada alumno (0 si solo pagó
+    // una vez — no es que "duró 0 meses", es que no hay más de un dato para medir su estancia).
+    $spans = array();
+    foreach ($por_alumno as $d) {
+        $dias = (strtotime($d['ultima']) - strtotime($d['primera'])) / 86400;
+        $spans[] = round($dias / 30.44, 1);
+    }
+    sort($spans);
+    $n = count($spans);
+    $media = $n ? round(array_sum($spans) / $n, 1) : 0;
+    $mediana = $n ? $spans[intdiv($n, 2)] : 0;
+    $con_mas_de_un_pago = count(array_filter($spans, function($s) { return $s > 0; }));
+
+    // Bajas tras verano: de quien pagó en junio/julio/agosto de un año, cuántos no volvieron a
+    // pagar en septiembre-diciembre de ese mismo año.
+    $bajas_tras_verano = array();
+    $activos_verano = array();
+    $max_fecha = $rows ? end($rows)['fecha'] : null;
+    foreach ($por_alumno as $clave => $d) {
+        $anios_verano = array();
+        foreach (array_keys($d['meses']) as $ym) {
+            $mes_num = intval(substr($ym, 5, 2));
+            if (in_array($mes_num, array(6, 7, 8), true)) $anios_verano[substr($ym, 0, 4)] = true;
+        }
+        foreach (array_keys($anios_verano) as $anio) {
+            if (!isset($activos_verano[$anio])) $activos_verano[$anio] = 0;
+            $activos_verano[$anio]++;
+            $volvio = false;
+            foreach (array_keys($d['meses']) as $ym) {
+                if (substr($ym, 0, 4) === $anio && intval(substr($ym, 5, 2)) >= 9) { $volvio = true; break; }
+            }
+            if (!$volvio) {
+                if (!isset($bajas_tras_verano[$anio])) $bajas_tras_verano[$anio] = 0;
+                $bajas_tras_verano[$anio]++;
+            }
+        }
+    }
+    // Un año cuyo verano es reciente (el histórico todavía no llega a diciembre de ese año) no
+    // ha tenido tiempo de que todos "vuelvan" todavía — contarlo igual que un año completo
+    // infla las bajas de mentira. Se marca "incompleto" en vez de ocultarlo sin más.
+    $anios_incompletos = array();
+    foreach (array_keys($activos_verano) as $anio) {
+        if (!$max_fecha || $max_fecha < "{$anio}-12-01") $anios_incompletos[$anio] = true;
+    }
+
+    $contar = function($por) {
+        $out = array();
+        foreach ($por as $clave => $meses) {
+            $out[$clave] = array();
+            foreach ($meses as $ym => $alumnos) $out[$clave][$ym] = count($alumnos);
+        }
+        return $out;
+    };
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'permanenciaMeses' => array('media' => $media, 'mediana' => $mediana, 'alumnos' => $n, 'conMasDeUnPago' => $con_mas_de_un_pago),
+        'bajasTrasVerano' => array('porAnio' => $bajas_tras_verano, 'activosVeranoPorAnio' => $activos_verano, 'aniosIncompletos' => array_keys($anios_incompletos)),
+        'usoBonos' => array('total' => $bonos_total, 'alumnosUnicos' => count($bonos_alumnos), 'porMes' => $bonos_por_mes),
+        'porProfesorMes' => $contar($por_profesor_mes),
+        'porClaseMes' => $contar($por_clase_mes),
+        'fuente' => 'HV',
+    )));
 }
 
 function blokes_contactos_table()      { global $wpdb; return $wpdb->prefix . 'blokes_contactos'; }
