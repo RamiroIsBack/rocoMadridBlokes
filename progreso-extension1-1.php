@@ -10953,29 +10953,12 @@ function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warning
         return array(null, null);
     }
     $week_id = $existing ? intval($existing['id']) : null;
-
-    // Si la semana ya existía pero no es de compe intensiva y nunca llegó a tener NINGUNA tarea
-    // de verdad (solo las de compe, que generate-plan ya borró justo antes de llamar aquí): se
-    // borra y se recrea entera con el reparto normal, en vez de quedarse con el responsable solo
-    // — así no hace falta repartir el mantenimiento de esa semana a mano (cowork, 2/11 14:00: la
-    // del 16/11 solo tenía 2 tareas de compe). Si en cambio ya tiene tareas reales (como la del
-    // 2/11 o la del 9/11, con las 13 del responsable), no se toca: solo se completa el equipo.
-    if ($week_id && !$solo_compe) {
-        $assignments_table = progreso_equip_table('assignments');
-        $tiene_tareas = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM " . progreso_equip_table('tasks') . " t JOIN {$assignments_table} a ON a.id = t.assignment_id WHERE a.week_id = %d",
-            $week_id
-        ));
-        $tiene_bloques = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM " . progreso_equip_table('blocks') . " b JOIN {$assignments_table} a ON a.id = b.assignment_id WHERE a.week_id = %d",
-            $week_id
-        ));
-        if (!$tiene_tareas && !$tiene_bloques) {
-            $wpdb->delete($assignments_table, array('week_id' => $week_id), array('%d'));
-            $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d'));
-            $week_id = null;
-        }
-    }
+    // (La versión anterior de este arreglo borraba y recreaba una semana ya existente sin
+    // tareas "reales" para que saliera con el reparto normal — pero eso podía chocar con las
+    // tareas de compe que ahora ya NUNCA se borran al regenerar el plan [ver
+    // progreso_equip_ensure_comp_task]: borrar la asignación del responsable las dejaría
+    // huérfanas. Por eso esto solo se intenta cuando la semana es NUEVA de verdad, más abajo; si
+    // ya existía, solo se completa el equipo que falte, igual que en 2/11 y 9/11.)
 
     if (!$week_id && !$solo_compe) {
         // Semana nueva "normal": se crea con el reparto de mantenimiento de siempre (todo el
@@ -11006,10 +10989,11 @@ function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warning
         $week_id = $wpdb->insert_id;
         $warnings[] = "Semana del {$monday} creada para el plan de la competición.";
     } elseif (!$solo_compe) {
-        // Semana que ya existía CON tareas reales (p. ej. la del 2/11 o la del 9/11, con las 13
-        // del responsable) — no se tocan sus tareas, solo se completa el equipo que falte. Solo
-        // la asignación — sin generar con retraso sus tareas de mantenimiento, que se reparten a
-        // mano como el resto (+Tarea o arrastrando).
+        // Semana que ya existía (p. ej. la del 2/11 o la del 9/11, con las 13 tareas normales
+        // del responsable; o una semana de compe anterior ya con sus tareas de compe puestas) —
+        // no se tocan sus tareas, solo se completa el equipo que falte. Solo la asignación — sin
+        // generar con retraso tareas de mantenimiento nuevas, que se reparten a mano como el
+        // resto (+Tarea o arrastrando).
         $activos = $wpdb->get_results("SELECT id, name FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND eventual = 0", ARRAY_A);
         $ya_asignados = $wpdb->get_col($wpdb->prepare("SELECT worker_id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d", intval($week_id)));
         $anadidos = array();
@@ -11047,6 +11031,22 @@ function progreso_equip_insert_comp_task($assignment_id, $task_type_id, $date, $
     ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d'));
 }
 
+// Crea la tarea de compe SOLO si no existe ya una de ese mismo tipo pensada para esa misma
+// fecha original — `original_date` no cambia nunca al mover una tarea (solo `task_date`
+// cambia), así que es la identidad estable que sobrevive a que cowork/Álvaro la hayan movido de
+// persona o de día, la hayan hecho o la hayan aplazado. Si ya existe, no se toca para nada (ni
+// se borra ni se recrea) — cowork, 2/11 19:45: regenerar el plan borraba el reparto a mano.
+function progreso_equip_ensure_comp_task($assignment_id, $task_type_id, $date, $competition_id, $params, &$existentes, &$creadas, &$conservadas) {
+    $clave = $task_type_id . '|' . $date;
+    if (isset($existentes[$clave])) {
+        unset($existentes[$clave]);
+        $conservadas++;
+        return;
+    }
+    progreso_equip_insert_comp_task($assignment_id, $task_type_id, $date, $competition_id, $params);
+    $creadas++;
+}
+
 // POST /equipacion/competitions/{id}/generate-plan — plan inverso automático (encargo
 // "Preparador de compes", Ramiro 1/11): diseño/material, limpieza/inscripciones, desequipar
 // (Cueva primero, resto desde el miércoles) y equipar la semana antes, los días de la propia
@@ -11064,7 +11064,17 @@ function progreso_equip_competition_generate_plan($request) {
     $lead = $wpdb->get_row("SELECT * FROM " . progreso_equip_table('workers') . " WHERE is_lead = 1 AND active = 1 ORDER BY id ASC LIMIT 1", ARRAY_A);
     if (!$lead) return new WP_Error('no_lead', 'No hay ningún responsable (is_lead) activo configurado en Equipación.', array('status' => 400));
 
-    $wpdb->delete(progreso_equip_table('tasks'), array('competition_id' => $id), array('%d'));
+    // Las tareas de compe que ya existan se dejan en paz (ver progreso_equip_ensure_comp_task) —
+    // ya no se borra todo a lo bruto antes de recrear. Solo al final se limpian las que ya no
+    // encajan con el plan actual Y nadie ha tocado todavía (sin hacer, sin mover, en su sitio).
+    $tasks_table = progreso_equip_table('tasks');
+    $assignments_table = progreso_equip_table('assignments');
+    $existentes_rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT t.*, a.worker_id FROM {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id WHERE t.competition_id = %d",
+        $id
+    ), ARRAY_A);
+    $existentes = array();
+    foreach ($existentes_rows as $t) { $existentes[$t['task_type_id'] . '|' . $t['original_date']] = $t; }
 
     $today = current_time('Y-m-d');
     $comp_date = $comp['comp_date'];
@@ -11118,6 +11128,7 @@ function progreso_equip_competition_generate_plan($request) {
 
     $warnings = array();
     $creadas = 0;
+    $conservadas = 0;
     $is_test = (bool) $comp['is_test'];
     foreach ($fases as $fase) {
         // Solo S0 (desequipar/equipar, con 'items') y los propios días de la compe (con
@@ -11131,7 +11142,9 @@ function progreso_equip_competition_generate_plan($request) {
             $d = $fase['rango'][0];
             while (strtotime($d) <= strtotime($fase['rango'][1])) {
                 if (!progreso_equip_dia_cerrado($d)) {
-                    foreach ($fase['tipos'] as $tipo) { progreso_equip_insert_comp_task($assignment_id, $tipo, $d, $id); $creadas++; }
+                    foreach ($fase['tipos'] as $tipo) {
+                        progreso_equip_ensure_comp_task($assignment_id, $tipo, $d, $id, array(), $existentes, $creadas, $conservadas);
+                    }
                 } else {
                     $warnings[] = "{$d} está marcado como cierre en el calendario del club: sin tareas de compe ese día.";
                 }
@@ -11148,8 +11161,7 @@ function progreso_equip_competition_generate_plan($request) {
                     $warnings[] = "{$item['date']} está marcado como cierre en el calendario del club: sin tareas de compe ese día.";
                     continue;
                 }
-                progreso_equip_insert_comp_task($assignment_id, $item['tipo'], $item['date'], $id, $item['params'] ?? array());
-                $creadas++;
+                progreso_equip_ensure_comp_task($assignment_id, $item['tipo'], $item['date'], $id, $item['params'] ?? array(), $existentes, $creadas, $conservadas);
             }
             continue;
         }
@@ -11162,10 +11174,28 @@ function progreso_equip_competition_generate_plan($request) {
         }
         if (empty($fechas)) { $fechas[] = $fase['monday']; $warnings[] = "Semana del {$fase['monday']}: todos sus días estaban cerrados, se usó el lunes igualmente."; }
         $n = count($fechas);
-        foreach ($fase['tipos'] as $i => $tipo) { progreso_equip_insert_comp_task($assignment_id, $tipo, $fechas[$i % $n], $id); $creadas++; }
+        foreach ($fase['tipos'] as $i => $tipo) {
+            progreso_equip_ensure_comp_task($assignment_id, $tipo, $fechas[$i % $n], $id, array(), $existentes, $creadas, $conservadas);
+        }
     }
 
-    return rest_ensure_response(array('success' => true, 'tasksCreated' => $creadas, 'warnings' => $warnings));
+    // Lo que quede en $existentes ya no encaja con el plan actual (p. ej. cambió la fecha de la
+    // compe). Si nadie lo tocó todavía, se borra (es ruido de una generación anterior); si ya se
+    // hizo, se movió o se aplazó, se deja y solo se avisa — igual que con las que sí encajan,
+    // nunca se borra trabajo real por regenerar el plan.
+    $borradas = 0;
+    foreach ($existentes as $t) {
+        $tocada = $t['done'] || $t['status'] !== 'pendiente' || $t['task_date'] !== $t['original_date']
+            || intval($t['worker_id']) !== intval($lead['id']) || $t['moved_to_task_id'];
+        if ($tocada) {
+            $warnings[] = "La tarea «{$t['task_type_id']}» del {$t['original_date']} ya no está en el plan actual, pero como ya se tocó (movida, hecha o aplazada) no se ha borrado — revísala a mano si ya no hace falta.";
+            continue;
+        }
+        $wpdb->delete(progreso_equip_table('tasks'), array('id' => intval($t['id'])), array('%d'));
+        $borradas++;
+    }
+
+    return rest_ensure_response(array('success' => true, 'tasksCreated' => $creadas, 'tasksKept' => $conservadas, 'tasksRemoved' => $borradas, 'warnings' => $warnings));
 }
 
 // GET /equipacion/competitions/{id}/plan — el plan generado, para "Mi parte" (cada persona
