@@ -5,6 +5,8 @@ import {
 } from 'recharts'
 import { parseExpensesCSV, CATEGORIES, CATEGORY_IVA, autoCategory, detectClubCaixaFormat } from '../utils/expensesParser'
 import { useExpenses, gestionExpenseSendersGet, gestionExpenseSenderSet } from '../hooks/useSuperAdmin'
+import { getExpenseRules, saveExpenseRules } from '../hooks/useBudget'
+import { conceptKey } from '../utils/expensesParser'
 import './ExpensesSection.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -127,6 +129,8 @@ function UploadPanel({ onSaved }) {
   const [saved,          setSaved]         = useState(false)
   const [error,          setError]         = useState(null)
   const [entityHint,     setEntityHint]    = useState(null)
+  const [learned,        setLearned]       = useState(null) // reglas aprendidas concepto → categoría
+  const [learnedCount,   setLearnedCount]  = useState(0)
 
   const uniqueMonths = useMemo(() => {
     const s = new Set(items.filter(i => i.month).map(i => i.month))
@@ -169,13 +173,19 @@ function UploadPanel({ onSaved }) {
     return filtered
   }, [items, previewMonth, previewAccount])
 
-  const handleFile = e => {
+  const handleFile = async e => {
     const file = e.target.files[0]
     if (!file) return
+    // Reglas aprendidas: se cargan una vez; si fallan se sigue solo con las reglas fijas
+    let rules = learned
+    if (!rules) {
+      rules = await getExpenseRules().catch(() => ({}))
+      setLearned(rules)
+    }
     const reader = new FileReader()
     reader.onload = ev => {
       try {
-        const { ingresos, costes } = parseExpensesCSV(ev.target.result)
+        const { ingresos, costes } = parseExpensesCSV(ev.target.result, rules)
         const all = [...ingresos, ...costes]
         if (all.length === 0) {
           setError('No se encontraron movimientos. Comprueba que es el extracto correcto del banco.')
@@ -198,6 +208,7 @@ function UploadPanel({ onSaved }) {
         setPreviewMonth('all')
         setPreviewAccount('all')
         setSaved(false)
+        setLearnedCount(0)
         setError(dupCount > 0 ? `Se eliminaron ${dupCount} movimiento${dupCount > 1 ? 's' : ''} duplicado${dupCount > 1 ? 's' : ''} (mismo día, concepto e importe).` : null)
         // auto-map known accounts, unknown → rocoteca
         const accounts = [...new Set(deduped.filter(i => i.cuenta).map(i => i.cuenta))]
@@ -255,6 +266,19 @@ function UploadPanel({ onSaved }) {
           body: JSON.stringify({ month: lote.month, entity: lote.entity, items: lote.items }),
         })
         if (!res.ok) throw new Error(`HTTP ${res.status} al guardar ${fmtMonth(lote.month)} (${lote.entity})`)
+      }
+      // Recordar las categorías cambiadas a mano para las próximas importaciones
+      const newRules = {}
+      items.forEach(i => {
+        if (i.excluded || !i.ruleCat || i.category === i.ruleCat) return
+        const key = conceptKey(i.concepto, i.section === 'ingresos')
+        if (key) newRules[key] = i.category
+      })
+      if (Object.keys(newRules).length) {
+        try {
+          setLearned(await saveExpenseRules(newRules))
+          setLearnedCount(Object.keys(newRules).length)
+        } catch { /* los movimientos ya están guardados; la regla se puede corregir luego */ }
       }
       setSaved(true)
       if (onSaved) onSaved()
@@ -325,6 +349,7 @@ function UploadPanel({ onSaved }) {
         )}
       </div>
 
+      {saved && learnedCount > 0 && <p className="exp-hint">ⓘ Se recordaron {learnedCount} {learnedCount === 1 ? 'categoría cambiada' : 'categorías cambiadas'} a mano para las próximas importaciones.</p>}
       {error && <p className={error.startsWith('Se eliminaron') ? 'exp-hint' : 'exp-error'}>{error.startsWith('Se eliminaron') ? `ⓘ ${error}` : `Error: ${error}`}</p>}
 
       {items.length > 0 && (
