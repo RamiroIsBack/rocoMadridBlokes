@@ -1121,6 +1121,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_campanas_marcar_accion',
         'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/campanas/(?P<id>\d+)/deshacer-enviados', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_campanas_deshacer_enviados',
+        'permission_callback' => $sa_perm,
+    ));
 });
 
 // ============================================================
@@ -6829,6 +6834,23 @@ function superadmin_campanas_marcar_accion($request) {
         }
     }
     return rest_ensure_response(array('success' => true));
+}
+
+// POST /campanas/{id}/deshacer-enviados — Ramiro, 3/11 12:10: en la campaña de antiguos alumnos
+// algunos contactos quedaron marcados "enviado" por pruebas, sin haberse mandado nada de verdad.
+// Quita el "enviado" de TODOS los de esta campaña de golpe (nunca toca respondio/baja/apuntado,
+// que son señales reales aparte) para que vuelvan a salir como pendientes.
+function superadmin_campanas_deshacer_enviados($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $campana_id = intval($request['id']);
+    $n = $wpdb->update(
+        blokes_campana_envios_table(),
+        array('enviado_at' => null, 'enviado_por' => '', 'updated_at' => current_time('mysql')),
+        array('campana_id' => $campana_id)
+    );
+    blokes_gestion_log(0, 'campana_deshacer_enviados', array(), array('campanaId' => $campana_id, 'filas' => $n));
+    return rest_ensure_response(array('success' => true, 'data' => array('filas' => intval($n))));
 }
 
 // GET /gestion/bajas-motivo — bajas de clases por mes y por motivo, para ver si una campaña de

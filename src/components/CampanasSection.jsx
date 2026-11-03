@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx'
 import {
   campanasContactosImportar, campanasContactosGet, campanasEnviosHoyGet,
   campanasListar, campanasCrear, campanasEditar, campanasDestinatarios, campanasMarcarAccion,
+  campanasDeshacerEnviados,
 } from '../hooks/useSuperAdmin'
 import './CampanasSection.css'
 
@@ -509,6 +510,17 @@ function CampanasPanel({ sugeridas }) {
     setRefresh(k => k + 1)
   }
 
+  // Ramiro, 3/11 12:10: alguna campaña se queda con contactos marcados "enviado" por pruebas,
+  // sin haberse mandado nada de verdad — esto los deja todos como pendientes otra vez.
+  const deshacerEnviados = async c => {
+    if (!window.confirm(`¿Quitar el "enviado" de los ${c.enviados} contacto(s) de «${c.nombre}»? Volverán a salir como pendientes. No se pierde quién respondió, se dio de baja o se apuntó.`)) return
+    try {
+      const res = await campanasDeshacerEnviados(c.id)
+      window.alert(`Hecho: ${res.filas} fila(s) actualizadas.`)
+    } catch (e) { window.alert(e.message) }
+    setRefresh(k => k + 1)
+  }
+
   const visibles = (campanas || []).filter(c => verArchivadas || c.activa)
 
   return (
@@ -545,6 +557,9 @@ function CampanasPanel({ sugeridas }) {
             <button className="cmp-btn cmp-btn--primary" onClick={() => setAbierta(c)}>Enviar / ver destinatarios</button>
             <button className="cmp-btn" onClick={() => setEditando(c)}>Editar</button>
             <button className="cmp-btn" onClick={() => archivar(c, !c.activa)}>{c.activa ? 'Archivar' : 'Reactivar'}</button>
+            {c.enviados > 0 && (
+              <button className="cmp-btn" onClick={() => deshacerEnviados(c)}>Deshacer enviados (eran pruebas)</button>
+            )}
           </div>
         </div>
       ))}
