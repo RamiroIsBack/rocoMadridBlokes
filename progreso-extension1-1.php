@@ -700,6 +700,12 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/weeks/historico', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_weeks_historico', 'permission_callback' => $equip_perm,
     ));
+    // Migración puntual del lío de los dos sitios (NOTAS_PARA_CODE_equipacion.md, 3/11 12:00) —
+    // solo socio, nunca el gate normal de equipación.
+    register_rest_route('progreso/v1', '/equipacion/migrar-principal-a-club', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_migrar_principal_a_club',
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+    ));
 
     register_rest_route('progreso/v1', '/equipacion/blocks', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_create_block', 'permission_callback' => $equip_perm,
@@ -9863,6 +9869,13 @@ function progreso_equip_autocrear_semanas() {
     progreso_equip_ensure_tables();
     $lead = $wpdb->get_row("SELECT * FROM " . progreso_equip_table('workers') . " WHERE is_lead = 1 AND active = 1 ORDER BY id ASC LIMIT 1", ARRAY_A);
     if (!$lead) return;
+    // Todo el equipo activo de mantenimiento, no solo el responsable (cowork,
+    // NOTAS_PARA_CODE_equipacion.md 3/11 12:00: las semanas 35 y 36 se habían creado solo con
+    // Álvaro — sin columnas de Ana/Edu/Sara no puede repartirles nada arrastrando). Los
+    // eventuales (solo vienen a compes puntuales) se quedan fuera, igual que en
+    // `progreso_equip_ensure_week_for_lead`.
+    $activos = $wpdb->get_results("SELECT id FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND eventual = 0 ORDER BY is_lead DESC, id ASC", ARRAY_A);
+    if (!$activos) $activos = array(array('id' => $lead['id']));
 
     $hoy = current_time('Y-m-d');
     // "Semana actual" en sábado/domingo no puede ser la que ya terminó (lunes-viernes ya
@@ -9884,7 +9897,7 @@ function progreso_equip_autocrear_semanas() {
         $req = new WP_REST_Request('POST', '/progreso/v1/equipacion/weeks');
         $req->set_param('startDate', $monday);
         $req->set_param('subzones', array());
-        $req->set_param('assignments', array(array('workerId' => intval($lead['id']))));
+        $req->set_param('assignments', array_map(function($w) { return array('workerId' => intval($w['id'])); }, $activos));
         $req->set_param('isAuto', true);
         $res = progreso_equip_create_week($req);
         if (is_wp_error($res)) continue;
@@ -9918,7 +9931,10 @@ function progreso_equip_ensure_tables() {
     // debe entrar en el reparto normal de mantenimiento de cada semana; cowork, 2/11 14:00:
     // generate-plan metía a todo el equipo activo, incluidos los de un solo finde, en semanas
     // normales enteras).
-    $version = '9';
+    // v10: nada de esquema — solo para disparar `progreso_equip_backfill_semanas_auto()` una vez
+    // (cowork, NOTAS_PARA_CODE_equipacion.md 3/11 12:00: las semanas automáticas solo llevaban al
+    // responsable, `progreso_equip_autocrear_semanas()` no pasaba el resto del equipo).
+    $version = '10';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -10062,6 +10078,7 @@ function progreso_equip_ensure_tables() {
     progreso_equip_seed_task_types_if_empty();
     progreso_equip_seed_comp_task_types_if_missing();
     progreso_equip_marcar_eventuales_ramiro_1();
+    progreso_equip_backfill_semanas_auto();
 
     // Periodicidades reales de Ramiro (1/11 17:20): se habían quedado todas a 1 (cowork
     // sospecha que un reseed del 29/10 las pisó). Una sola vez, no vuelve a tocarlas si alguien
@@ -10173,6 +10190,221 @@ function progreso_equip_marcar_eventuales_ramiro_1() {
         }
     }
     update_option('blokes_equip_eventuales_ramiro_1', 1, false);
+}
+
+// Migración de una sola vez (cowork, NOTAS_PARA_CODE_equipacion.md 3/11 12:00): hasta ahora
+// `progreso_equip_autocrear_semanas()` solo metía al responsable en las semanas automáticas —
+// sin columna para Ana/Edu/Sara, Álvaro no podía repartirles nada arrastrando. Ya está arreglado
+// para las semanas NUEVAS; esto completa el equipo en las que ya existían (p. ej. la 35 y la 36
+// del club), igual que el backfill de `progreso_equip_ensure_week_for_lead`.
+function progreso_equip_backfill_semanas_auto() {
+    if (get_option('blokes_equip_backfill_semanas_auto_1')) return;
+    global $wpdb;
+    $weeks_table = progreso_equip_table('weeks');
+    $assignments_table = progreso_equip_table('assignments');
+    $activos = $wpdb->get_results("SELECT id, name FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND eventual = 0", ARRAY_A);
+    $weeks = $wpdb->get_results("SELECT id FROM {$weeks_table} WHERE auto = 1", ARRAY_A);
+    foreach ($weeks as $w) {
+        $week_id = intval($w['id']);
+        $ya_asignados = $wpdb->get_col($wpdb->prepare("SELECT worker_id FROM {$assignments_table} WHERE week_id = %d", $week_id));
+        foreach ($activos as $worker) {
+            if (in_array(intval($worker['id']), array_map('intval', $ya_asignados), true)) continue;
+            $wpdb->insert($assignments_table, array(
+                'week_id' => $week_id, 'worker_id' => intval($worker['id']), 'subzones' => '', 'status' => 'pendiente',
+            ), array('%d', '%d', '%s', '%s'));
+        }
+    }
+    update_option('blokes_equip_backfill_semanas_auto_1', 1, false);
+}
+
+// POST /equipacion/migrar-principal-a-club — CAUSA ENCONTRADA por cowork (NOTAS_PARA_CODE_equipacion.md,
+// 3/11 12:00): la app llama siempre a /club/wp-json (blog_id 3), pero la compe id 2 (repartida a
+// mano: Ana, Edu, Sara, Ramiro, Álvaro V., Javi) y los trabajadores eventuales 5/6/7 se crearon
+// probando contra el sitio principal (blog_id 1), que en la multisite usa sus propias tablas —
+// por eso la app nunca los vio. Copia eso al club SIN BORRAR nada del principal (por si hay que
+// repetirlo) y SIN TOCAR las semanas 12/13 del principal (cowork: las 35/36 del club son las
+// buenas, se descartan). Por defecto solo informa de lo que haría (`confirmar` no mandado o
+// false) — para escribir de verdad hay que mandar `confirmar: true`, y solo se puede una vez
+// (lo marca `blokes_equip_migrado_principal_1`; si hay que repetirlo, hay que borrar esa opción
+// a mano primero).
+function progreso_equip_migrar_principal_a_club($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $confirmar = (bool) $request->get_param('confirmar');
+    if ($confirmar && get_option('blokes_equip_migrado_principal_1')) {
+        return new WP_Error('ya_migrado', 'Esto ya se migró antes. Si hace falta repetirlo, borra la opción blokes_equip_migrado_principal_1 primero.', array('status' => 409));
+    }
+
+    $main = function($name) use ($wpdb) { return $wpdb->get_blog_prefix(1) . 'blokes_equip_' . $name; };
+    $club = function($name) { return progreso_equip_table($name); };
+    $reporte = array(
+        'workers' => array(), 'competition' => null, 'weeks' => array(),
+        'assignments' => 0, 'tasks' => 0, 'taskTypes' => array(), 'compBlocks' => 0, 'avisos' => array(),
+    );
+
+    // 1. Trabajadores eventuales del principal que no existan ya en club (por nombre) — y mapeo
+    // por nombre de TODOS los trabajadores (también Álvaro/Ana/Edu/Sara, que ya existen en los
+    // dos sitios pero con IDs distintos) para poder remapear asignaciones y tareas más abajo.
+    $main_workers = $wpdb->get_results("SELECT * FROM " . $main('workers'), ARRAY_A);
+    $club_workers_by_name = array();
+    foreach ($wpdb->get_results("SELECT * FROM " . $club('workers'), ARRAY_A) as $w) {
+        $club_workers_by_name[mb_strtolower(trim($w['name']))] = $w;
+    }
+    $worker_map = array();
+    foreach ($main_workers as $w) {
+        $oid = intval($w['id']);
+        $key = mb_strtolower(trim($w['name']));
+        if (isset($club_workers_by_name[$key])) {
+            $worker_map[$oid] = intval($club_workers_by_name[$key]['id']);
+            if ($w['eventual']) $reporte['workers'][] = $w['name'] . ' (eventual, ya existía en club)';
+            continue;
+        }
+        if (!$w['eventual']) { $reporte['avisos'][] = 'Trabajador "' . $w['name'] . '" del principal no es eventual y no existe en club: no se crea solo (podría ser un duplicado con otro nombre).'; continue; }
+        $reporte['workers'][] = $w['name'] . ' (eventual, nuevo)';
+        if ($confirmar) {
+            $wpdb->insert($club('workers'), array(
+                'name' => $w['name'], 'email' => $w['email'], 'work_days' => $w['work_days'],
+                'blocks_min' => $w['blocks_min'], 'blocks_max' => $w['blocks_max'],
+                'is_lead' => $w['is_lead'], 'active' => $w['active'], 'eventual' => $w['eventual'],
+            ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d', '%d'));
+            $worker_map[$oid] = $wpdb->insert_id;
+        }
+    }
+
+    // 2. Competición #2 del principal.
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . $main('competitions') . " WHERE id = %d", 2), ARRAY_A);
+    $new_comp_id = null;
+    if ($comp) {
+        $existe_comp = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . $club('competitions') . " WHERE name = %s AND comp_date = %s", $comp['name'], $comp['comp_date']), ARRAY_A);
+        if ($existe_comp) {
+            $new_comp_id = intval($existe_comp['id']);
+            $reporte['competition'] = $comp['name'] . ' (ya existía en club, #' . $new_comp_id . ')';
+        } else {
+            $reporte['competition'] = $comp['name'] . ' (nueva)';
+            if ($confirmar) {
+                $wpdb->insert($club('competitions'), array(
+                    'name' => $comp['name'], 'comp_date' => $comp['comp_date'], 'comp_end_date' => $comp['comp_end_date'],
+                    'lead_weeks' => $comp['lead_weeks'], 'is_test' => $comp['is_test'], 'created_at' => $comp['created_at'],
+                ), array('%s', '%s', '%s', '%d', '%d', '%s'));
+                $new_comp_id = $wpdb->insert_id;
+            }
+        }
+    } else {
+        $reporte['avisos'][] = 'No se encontró la competición #2 en el sitio principal.';
+    }
+
+    // 3. Semanas 18, 15, 16 y 19 del principal (las de la compe intensiva con el reparto a
+    // mano) — nunca las 12/13 (maneimiento normal, ya superadas por la 35/36 del club).
+    $week_ids_principal = array(18, 15, 16, 19);
+    $week_map = array();
+    foreach ($week_ids_principal as $wid) {
+        $week = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . $main('weeks') . " WHERE id = %d", $wid), ARRAY_A);
+        if (!$week) { $reporte['avisos'][] = "Semana #{$wid} no encontrada en el principal."; continue; }
+        $existe_week = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . $club('weeks') . " WHERE start_date = %s", $week['start_date']), ARRAY_A);
+        if ($existe_week) {
+            $week_map[$wid] = intval($existe_week['id']);
+            $reporte['weeks'][] = $week['start_date'] . ' (ya existía en club, #' . $existe_week['id'] . ')';
+            continue;
+        }
+        $reporte['weeks'][] = $week['start_date'] . ' (nueva)';
+        if ($confirmar) {
+            $wpdb->insert($club('weeks'), array(
+                'start_date' => $week['start_date'], 'subzones' => $week['subzones'], 'notes' => $week['notes'],
+                'archived' => $week['archived'], 'is_test' => $week['is_test'], 'auto' => $week['auto'], 'created_at' => $week['created_at'],
+            ), array('%s', '%s', '%s', '%d', '%d', '%d', '%s'));
+            $week_map[$wid] = $wpdb->insert_id;
+        } else {
+            $week_map[$wid] = $wid; // placeholder solo para que el resto del informe pueda seguir en modo simulación
+        }
+    }
+
+    // 4. Asignaciones de esas semanas.
+    $assignment_map = array();
+    $week_ids_for_query = $week_ids_principal;
+    $ph = implode(',', array_fill(0, count($week_ids_for_query), '%d'));
+    $main_assignments = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . $main('assignments') . " WHERE week_id IN ($ph)", ...$week_ids_for_query
+    ), ARRAY_A);
+    foreach ($main_assignments as $a) {
+        $old_week_id = intval($a['week_id']);
+        $new_worker_id = $worker_map[intval($a['worker_id'])] ?? null;
+        if (!$new_worker_id) { $reporte['avisos'][] = 'Asignación #' . $a['id'] . ' (semana #' . $old_week_id . '): trabajador #' . $a['worker_id'] . ' sin mapear, no se migra.'; continue; }
+        $reporte['assignments']++;
+        if ($confirmar) {
+            $new_week_id = $week_map[$old_week_id] ?? null;
+            if (!$new_week_id) continue;
+            $wpdb->insert($club('assignments'), array(
+                'week_id' => $new_week_id, 'worker_id' => $new_worker_id, 'subzones' => $a['subzones'],
+                'blocks_min' => $a['blocks_min'], 'blocks_max' => $a['blocks_max'], 'work_days' => $a['work_days'], 'status' => $a['status'],
+            ), array('%d', '%d', '%s', '%d', '%d', '%s', '%s'));
+            $assignment_map[intval($a['id'])] = $wpdb->insert_id;
+        }
+    }
+
+    // 5. Tipos de tarea que usan esas tareas y que todavía no existen en club (se copian tal
+    // cual, mismo id-slug, para que el nombre no salga en blanco).
+    $main_tasks = $wpdb->get_results($wpdb->prepare(
+        "SELECT t.* FROM " . $main('tasks') . " t JOIN " . $main('assignments') . " a ON a.id = t.assignment_id WHERE a.week_id IN ($ph)", ...$week_ids_for_query
+    ), ARRAY_A);
+    $tipos_usados = array_values(array_unique(array_filter(array_map(function($t) { return $t['task_type_id']; }, $main_tasks), function($id) { return $id !== 'custom'; })));
+    if ($tipos_usados) {
+        $ph2 = implode(',', array_fill(0, count($tipos_usados), '%s'));
+        $existentes = $wpdb->get_col($wpdb->prepare("SELECT id FROM " . $club('task_types') . " WHERE id IN ($ph2)", ...$tipos_usados));
+        foreach ($tipos_usados as $tid) {
+            if (in_array($tid, $existentes, true)) continue;
+            $tipo = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . $main('task_types') . " WHERE id = %s", $tid), ARRAY_A);
+            if (!$tipo) continue;
+            $reporte['taskTypes'][] = $tipo['name'] . ' (' . $tid . ')';
+            if ($confirmar) {
+                $wpdb->insert($club('task_types'), $tipo);
+            }
+        }
+    }
+
+    // 6. Tareas (dos pasadas: primero se crean sin moved_to_task_id, luego se enlaza el que
+    // apunte a OTRA tarea de este mismo lote; si apuntaba fuera del lote — p. ej. a la semana
+    // 12/13 que no se migra — se deja sin enlazar, nunca roto).
+    $task_map = array();
+    $pendientes_moved_to = array();
+    foreach ($main_tasks as $t) {
+        $new_assignment_id = $assignment_map[intval($t['assignment_id'])] ?? null;
+        $reporte['tasks']++;
+        if (!$confirmar || !$new_assignment_id) continue;
+        $new_original_worker = $t['original_worker_id'] ? ($worker_map[intval($t['original_worker_id'])] ?? null) : null;
+        $new_competition_id = ($new_comp_id && intval($t['competition_id']) === 2) ? $new_comp_id : null;
+        $wpdb->insert($club('tasks'), array(
+            'assignment_id' => $new_assignment_id, 'task_type_id' => $t['task_type_id'], 'task_date' => $t['task_date'],
+            'params' => $t['params'], 'done' => $t['done'], 'done_at' => $t['done_at'], 'status' => $t['status'],
+            'original_date' => $t['original_date'], 'postponed_count' => $t['postponed_count'],
+            'original_worker_id' => $new_original_worker, 'competition_id' => $new_competition_id,
+        ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%d', '%d', '%d'));
+        $new_task_id = $wpdb->insert_id;
+        $task_map[intval($t['id'])] = $new_task_id;
+        if ($t['moved_to_task_id']) $pendientes_moved_to[$new_task_id] = intval($t['moved_to_task_id']);
+    }
+    foreach ($pendientes_moved_to as $new_task_id => $old_moved_to) {
+        $mapped = $task_map[$old_moved_to] ?? null;
+        if ($mapped) $wpdb->update($club('tasks'), array('moved_to_task_id' => $mapped), array('id' => $new_task_id), array('%d'), array('%d'));
+    }
+
+    // 7. Bloques de la ficha de la compe (mapa, equipador, foto…) de la competición #2.
+    if ($comp) {
+        $comp_blocks = $wpdb->get_results($wpdb->prepare("SELECT * FROM " . $main('comp_blocks') . " WHERE competition_id = %d", 2), ARRAY_A);
+        $reporte['compBlocks'] = count($comp_blocks);
+        if ($confirmar && $new_comp_id) {
+            foreach ($comp_blocks as $b) {
+                $wpdb->insert($club('comp_blocks'), array(
+                    'competition_id' => $new_comp_id, 'number' => $b['number'], 'x_pct' => $b['x_pct'], 'y_pct' => $b['y_pct'],
+                    'subzone' => $b['subzone'], 'grade_color' => $b['grade_color'], 'hold_set_ids' => $b['hold_set_ids'],
+                    'volumes' => $b['volumes'], 'equipador' => $b['equipador'], 'photo_url' => $b['photo_url'],
+                    'tested' => $b['tested'], 'status' => $b['status'],
+                ));
+            }
+        }
+    }
+
+    if ($confirmar) update_option('blokes_equip_migrado_principal_1', 1, false);
+    return rest_ensure_response(array('success' => true, 'confirmado' => $confirmar, 'data' => $reporte));
 }
 
 // Semilla inicial (trabajadores y catálogo de presas actuales) — solo si

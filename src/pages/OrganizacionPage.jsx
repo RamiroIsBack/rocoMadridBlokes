@@ -417,6 +417,8 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   // Las semanas de prueba no salen en la lista normal del equipo (cowork las necesita para
   // probar sin dejar residuos) — este botón las enseña aparte para poder gestionarlas.
   const [showTest, setShowTest] = useState(false)
+  // Migración puntual del lío de los dos sitios (NOTAS_PARA_CODE_equipacion.md, 3/11 12:00).
+  const [showMigrar, setShowMigrar] = useState(false)
 
   const reloadWeeks = useCallback(() => {
     api('GET', `/equipacion/weeks${showTest ? '?test=1' : ''}`).then(r => setWeeks(r.data || [])).catch(() => {})
@@ -578,9 +580,6 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
           ))}
         </div>
         <h3 className="org__section-title">Semana del {weekLabel(detail.startDate)} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
-        {/* Diagnóstico temporal (NOTAS_PARA_CODE_equipacion.md, 3/11 11:50): para saber si el
-            navegador recibió 4 asignaciones y es el pintado el que falla, o si ya llegaron menos. */}
-        <p className="org__hint">({detail.assignments.length} persona(s) en el reparto: {detail.assignments.map(a => a.workerName).join(', ') || '—'})</p>
         {detail.isAuto && <p className="org__hint org__hint--auto">Semana creada automáticamente: reparte las tareas arrastrándolas.</p>}
         <p className="org__hint">Arrastra una tarjeta a otra persona (o a otro día de esa persona) para reasignarla.</p>
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
@@ -677,7 +676,13 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
         <button className="org__link-btn" onClick={() => setShowTest(s => !s)}>
           {showTest ? 'Ver semanas normales' : 'Ver semanas de prueba'}
         </button>
+        {canManage && (
+          <button className="org__link-btn" onClick={() => setShowMigrar(s => !s)}>
+            {showMigrar ? 'Ocultar migración' : '⚠ Migrar datos del sitio principal'}
+          </button>
+        )}
       </div>
+      {showMigrar && <MigrarPrincipalPanel />}
       {showWorkers && <WorkersAdmin workers={workers} onChanged={onWorkersChanged} />}
       {showCreate && (
         <CreateWeekForm
@@ -728,6 +733,55 @@ function HistoricoView() {
           )}
         </div>
       ))}
+    </div>
+  )
+}
+
+// Migración puntual (NOTAS_PARA_CODE_equipacion.md, 3/11 12:00): trae del sitio principal
+// (blog_id 1) al club (donde vive la app) los trabajadores eventuales, la competición #2 y sus
+// semanas 18/15/16/19 con el reparto a mano, que se habían creado probando contra el sitio
+// equivocado. Primero enseña un informe (sin escribir nada); "Confirmar" lo ejecuta de verdad —
+// solo se puede una vez.
+function MigrarPrincipalPanel() {
+  const [informe, setInforme] = useState(null)
+  const [cargando, setCargando] = useState(false)
+  const [hecho, setHecho] = useState(false)
+
+  const revisar = async () => {
+    setCargando(true)
+    try { setInforme(await api('POST', '/equipacion/migrar-principal-a-club', { confirmar: false })) }
+    catch (e) { window.alert(e.message) }
+    setCargando(false)
+  }
+  const confirmar = async () => {
+    if (!window.confirm('¿Migrar de verdad? Solo se puede hacer una vez (si hace falta repetirlo luego hay que avisar a Code/cowork).')) return
+    setCargando(true)
+    try { setInforme(await api('POST', '/equipacion/migrar-principal-a-club', { confirmar: true })); setHecho(true) }
+    catch (e) { window.alert(e.message) }
+    setCargando(false)
+  }
+
+  return (
+    <div className="org__add-form">
+      <p className="org__hint">
+        Trae del sitio principal los trabajadores eventuales, la competición y las semanas 16/11, 23/11,
+        30/11 y 7/12 con el reparto a mano, que se crearon probando contra el sitio equivocado.
+      </p>
+      <button className="org__link-btn" onClick={revisar} disabled={cargando}>{cargando ? 'Cargando…' : 'Revisar qué haría (sin tocar nada)'}</button>
+      {informe && (
+        <div style={{ marginTop: 10, fontSize: '0.85rem' }}>
+          <p><strong>Trabajadores:</strong> {informe.data.workers.join(', ') || '—'}</p>
+          <p><strong>Competición:</strong> {informe.data.competition || '—'}</p>
+          <p><strong>Semanas:</strong> {informe.data.weeks.join(', ') || '—'}</p>
+          <p><strong>Asignaciones:</strong> {informe.data.assignments} · <strong>Tareas:</strong> {informe.data.tasks} · <strong>Tipos de tarea nuevos:</strong> {informe.data.taskTypes.join(', ') || '—'} · <strong>Bloques de compe:</strong> {informe.data.compBlocks}</p>
+          {informe.data.avisos.length > 0 && <p style={{ color: '#a33d33' }}><strong>Avisos:</strong> {informe.data.avisos.join(' · ')}</p>}
+          {informe.confirmado ? (
+            <p className="org__hint">✅ Migrado de verdad. Recarga la página y comprueba la semana del 16/11.</p>
+          ) : (
+            <button className="org__add-btn" onClick={confirmar} disabled={cargando || hecho}>Confirmar (escribir de verdad)</button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
