@@ -4339,7 +4339,8 @@ function superadmin_gestion_externos_pago($request) {
     $periodo = (string) ($body['periodo'] ?? '');
     if (!preg_match('/^\d{4}-\d{2}$/', $periodo)) return new WP_Error('bad_request', 'Periodo no válido (YYYY-MM).', array('status' => 400));
     $importe = floatval($body['importe'] ?? 0);
-    $metodo  = blokes_gestion_metodo_label(sanitize_text_field((string) ($body['metodo'] ?? '')));
+    $metodo_raw = sanitize_text_field((string) ($body['metodo'] ?? ''));
+    $metodo  = blokes_gestion_metodo_label($metodo_raw);
     $fecha   = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fecha'] ?? '')) ? $body['fecha'] : current_time('Y-m-d');
     // "Cubre hasta" (trimestral/anual): cuántos meses cubre este pago, empezando por $periodo.
     $cubre_meses = intval($body['cubreMeses'] ?? 1);
@@ -4350,6 +4351,11 @@ function superadmin_gestion_externos_pago($request) {
         $id, $periodo, $importe, $metodo, $fecha, $cubre_meses, $importe, $metodo, $fecha, $cubre_meses
     ));
     blokes_gestion_log($id, 'externo_pago', null, array('periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo, 'cubreMeses' => $cubre_meses));
+    // Web → Excel (NOTAS_PARA_CODE_sync_grupos.md): igual que con un cobro de suscripción.
+    $ext = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_externos_table() . " WHERE id = %d", $id), ARRAY_A);
+    if ($ext) {
+        blokes_sync_grupos_escribir_cobro($ext['dia'], $ext['horario'], $ext['telefono'], $ext['nombre'], $periodo, $importe, $metodo_raw, date_i18n('d/m/Y', strtotime($fecha)));
+    }
     return rest_ensure_response(array('success' => true));
 }
 
@@ -4520,6 +4526,133 @@ function blokes_sync_grupos_get($sheet_id, $path) {
     return $body;
 }
 
+// Llamada de escritura a la Sheets API v4 (values:batchUpdate) — el token ya tiene permiso de
+// escritura (scope "spreadsheets" completo, no "readonly"). USER_ENTERED para que Google
+// interprete números/fechas como si Eva los hubiera tecleado a mano, no como texto literal.
+function blokes_sync_grupos_escribir_valores($sheet_id, $data) {
+    $token = blokes_sync_grupos_access_token();
+    if (is_wp_error($token)) return $token;
+    $url = 'https://sheets.googleapis.com/v4/spreadsheets/' . rawurlencode($sheet_id) . '/values:batchUpdate';
+    $res = wp_remote_request($url, array(
+        'method' => 'POST', 'timeout' => 20,
+        'headers' => array('Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json'),
+        'body' => wp_json_encode(array('valueInputOption' => 'USER_ENTERED', 'data' => $data)),
+    ));
+    if (is_wp_error($res)) return $res;
+    $code = wp_remote_retrieve_response_code($res);
+    $body = json_decode(wp_remote_retrieve_body($res), true);
+    if ($code >= 300) {
+        return new WP_Error('sheets_api_error', 'Google Sheets API devolvió ' . $code . ': ' . ($body['error']['message'] ?? wp_remote_retrieve_body($res)));
+    }
+    return $body;
+}
+
+function blokes_sync_grupos_col_letra($idx0) {
+    $n = $idx0 + 1; $letra = '';
+    while ($n > 0) {
+        $rem = ($n - 1) % 26;
+        $letra = chr(65 + $rem) . $letra;
+        $n = intdiv($n - 1, 26);
+    }
+    return $letra;
+}
+
+// Encuentra el nombre REAL de la pestaña que corresponde a un grupo de la web (día+horario),
+// comparando normalizado (sin tildes/mayúsculas/separadores — los nombres de pestaña no son
+// idénticos al xlsx original: "V 9:00" en la web es "V 900" en la Hoja, espacios de más, etc.,
+// cowork 1/11). Si hay más de una coincidencia o ninguna, no se escribe nada — mejor no escribir
+// que escribir en la pestaña equivocada del documento de Eva.
+function blokes_sync_grupos_normalizar_nombre($s) {
+    $s = remove_accents((string) $s);
+    $s = mb_strtolower(trim($s));
+    $s = str_replace(array(':', '.', ','), '', $s);
+    $s = preg_replace('/\s+/', ' ', $s);
+    return trim($s);
+}
+function blokes_sync_grupos_pestana_de_grupo($pestanas_reales, $dia, $horario) {
+    $buscado = blokes_sync_grupos_normalizar_nombre($dia . ' ' . $horario);
+    if ($buscado === '') return null;
+    $candidatas = array();
+    foreach ($pestanas_reales as $p) {
+        $pn = blokes_sync_grupos_normalizar_nombre($p);
+        if ($pn === $buscado || strpos($pn, $buscado) === 0 || strpos($buscado, $pn) === 0) $candidatas[] = $p;
+    }
+    return count($candidatas) === 1 ? $candidatas[0] : null;
+}
+
+// Método tal y como lo escribe Eva en el Excel, a partir del método de WooCommerce — mapeo
+// razonable a falta de confirmar con ella el formato exacto que usa.
+function blokes_sync_grupos_metodo_a_excel($metodo) {
+    $map = array('transferencia' => 'TR', 'efectivo' => 'EF', 'tarjeta' => 'TA', 'bizum' => 'Bizum', 'wellhub' => 'Wellhub', 'web' => 'WEB');
+    return $map[$metodo] ?? ucfirst($metodo);
+}
+
+// Web → Excel, sección 1 de NOTAS_PARA_CODE_sync_grupos.md: escribe el cobro (importe, método,
+// fecha) en la celda del mes de la fila de esta persona en la Hoja activa (prueba o real, según
+// el interruptor). Nunca bloquea ni falla la acción principal que la llama (Marcar
+// cobrado/externo ya se ha hecho en WooCommerce antes de llegar aquí) — si no encuentra la
+// pestaña, la fila, o el bloque del mes todavía no existe en la Hoja (mes nuevo sin columnas
+// creadas, "cola con reintentos" pendiente de una próxima ronda), simplemente no escribe nada y
+// lo deja registrado en el log de gestión para revisar a mano.
+function blokes_sync_grupos_escribir_cobro($dia, $horario, $telefono, $nombre, $ym, $importe, $metodo, $fecha) {
+    try {
+        $activa = blokes_sync_grupos_sheet_activa();
+        if (!$activa['id']) return;
+        $meta = blokes_sync_grupos_get($activa['id'], '?fields=sheets.properties.title');
+        if (is_wp_error($meta)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'listar pestañas', 'error' => $meta->get_error_message())); return; }
+        $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
+        $pestana = blokes_sync_grupos_pestana_de_grupo($pestanas, $dia, $horario);
+        if (!$pestana) { blokes_gestion_log(0, 'sync_grupos_pestana_no_encontrada', null, array('dia' => $dia, 'horario' => $horario, 'hoja' => $activa['cual'])); return; }
+
+        $valores = blokes_sync_grupos_leer_valores($activa['id'], $pestana);
+        if (is_wp_error($valores)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'leer pestaña', 'pestana' => $pestana, 'error' => $valores->get_error_message())); return; }
+        $r = blokes_sync_grupos_leer_pestana_filas($valores);
+
+        $tel_norm = blokes_externos_normaliza_telefono((string) $telefono);
+        $fila_encontrada = null;
+        if ($tel_norm) {
+            foreach ($r['filas'] as $f) { if ($f['telefono'] === $tel_norm) { $fila_encontrada = $f; break; } }
+        }
+        if (!$fila_encontrada && $nombre) {
+            $nombre_norm = mb_strtolower(trim((string) $nombre));
+            foreach ($r['filas'] as $f) { if (mb_strtolower(trim($f['nombre'])) === $nombre_norm) { $fila_encontrada = $f; break; } }
+        }
+        if (!$fila_encontrada) { blokes_gestion_log(0, 'sync_grupos_fila_no_encontrada', null, array('pestana' => $pestana, 'telefono' => $tel_norm, 'nombre' => $nombre)); return; }
+
+        $bloque = null;
+        foreach ($r['bloquesLayout'] as $b) { if ($b['ym'] === $ym) { $bloque = $b; break; } }
+        if (!$bloque) { blokes_gestion_log(0, 'sync_grupos_mes_no_encontrado', null, array('pestana' => $pestana, 'mes' => $ym)); return; }
+
+        $fila_sheet = intval($fila_encontrada['_row']) + 1; // A1 es 1-based
+        $metodo_excel = blokes_sync_grupos_metodo_a_excel($metodo);
+        $prefijo = blokes_sync_grupos_a1_pestana($pestana) . '!';
+        $data = array();
+        if ($bloque['layout']['kind'] === 'cantidad') {
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['importe']) . $fila_sheet, 'values' => array(array($importe)));
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['metodo']) . $fila_sheet, 'values' => array(array($metodo_excel)));
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['fecha']) . $fila_sheet, 'values' => array(array($fecha)));
+        } else {
+            $col = ($metodo === 'efectivo') ? $bloque['layout']['efectivo'] : $bloque['layout']['transf'];
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($col) . $fila_sheet, 'values' => array(array($importe)));
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['fecha']) . $fila_sheet, 'values' => array(array($fecha)));
+        }
+        $res = blokes_sync_grupos_escribir_valores($activa['id'], $data);
+        if (is_wp_error($res)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'escribir', 'pestana' => $pestana, 'error' => $res->get_error_message())); return; }
+        blokes_gestion_log(0, 'sync_grupos_cobro_escrito', null, array('pestana' => $pestana, 'fila' => $fila_sheet, 'mes' => $ym, 'hoja' => $activa['cual']));
+    } catch (\Throwable $e) {
+        blokes_gestion_log(0, 'sync_grupos_escribir_excepcion', null, array('error' => $e->getMessage()));
+    }
+}
+
+// Localiza día/horario de una suscripción (para saber qué pestaña del Excel le toca) a partir
+// de blokes_get_all_subscription_data(), que ya los trae calculados de la variación del producto.
+function blokes_sync_grupos_dia_horario_de_sub($sub_id) {
+    foreach (blokes_get_all_subscription_data() as $s) {
+        if (intval($s['id'] ?? 0) === intval($sub_id)) return array('dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '');
+    }
+    return array('dia' => '', 'horario' => '');
+}
+
 function superadmin_sync_grupos_config_get() {
     return rest_ensure_response(array('success' => true, 'data' => array(
         'sheetPruebaId' => get_option('blokes_sync_grupos_sheet_prueba_id', ''),
@@ -4533,7 +4666,20 @@ function superadmin_sync_grupos_config_get() {
 // `test`/`resumen`/`pestana` ignoraban el interruptor y siempre leían la de PRUEBA (cowork,
 // 1/11 19:00: puse usarReal=true y siguieron leyendo la de prueba). También dice cuál usó,
 // para que la respuesta deje claro contra qué Hoja se ha leído.
+// Activa la Hoja real de una vez (Ramiro, 3/11): ya está probado el paso 2 (Excel→Web) contra
+// la copia y confirmado que la cuenta de servicio tiene acceso a la real — a partir de ahora se
+// lee y se escribe en la Hoja de verdad, no en la copia de prueba. Si quieres volver a la copia,
+// usa POST /gestion/sync-grupos/config con usarReal:false.
+function blokes_sync_grupos_activar_real_ramiro_1() {
+    if (get_option('blokes_sync_grupos_activado_real_ramiro_1')) return;
+    if (get_option('blokes_sync_grupos_sheet_real_id', '')) {
+        update_option('blokes_sync_grupos_usar_real', true, false);
+    }
+    update_option('blokes_sync_grupos_activado_real_ramiro_1', 1, false);
+}
+
 function blokes_sync_grupos_sheet_activa() {
+    blokes_sync_grupos_activar_real_ramiro_1();
     $usar_real = (bool) get_option('blokes_sync_grupos_usar_real', false);
     $id = $usar_real
         ? get_option('blokes_sync_grupos_sheet_real_id', '')
@@ -4803,7 +4949,14 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
             }
         }
 
-        $fila = array('nombre' => $nombre, 'telefono' => $tel, 'notas' => $notas, 'exento' => false, 'exentoMeses' => array(), 'pagos' => array());
+        // "_row" (0-based en $valores, fila de verdad = _row+1 en A1) y los layouts de columna
+        // (cols/bloques) se guardan también en la propia fila — hacen falta para escribir
+        // Web→Excel (NOTAS_PARA_CODE_sync_grupos.md, sección 1) sin tener que volver a detectar
+        // el layout de la pestaña cada vez que se escribe una celda.
+        $fila = array(
+            'nombre' => $nombre, 'telefono' => $tel, 'notas' => $notas, 'exento' => false, 'exentoMeses' => array(), 'pagos' => array(),
+            '_row' => $r,
+        );
         foreach ($bloques as $b) {
             list($pago, $exento) = blokes_sync_grupos_leer_pago($valores, $r, $b['layout']);
             if ($exento) { $fila['exento'] = true; $fila['exentoMeses'][] = $b['ym']; }
@@ -4813,7 +4966,10 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
         $r++;
     }
 
-    return array('filas' => $filas, 'bloques' => array_map(function($b) { return $b['ym']; }, $bloques));
+    return array(
+        'filas' => $filas, 'bloques' => array_map(function($b) { return $b['ym']; }, $bloques),
+        'bloquesLayout' => $bloques, 'cols' => $cols, 'totalRow' => $total_row,
+    );
 }
 
 // Resumen de TODAS las pestañas de la Hoja de PRUEBA: filas, con pago y exentos por pestaña,
@@ -6610,6 +6766,10 @@ function superadmin_gestion_marcar_cobrado($request) {
         $pedidos_cancelados = blokes_cancelar_pedidos_impagados($sub, false);
         $despues = array('periodo' => $periodo, 'importe' => $importe, 'metodo' => 'efectivo', 'reactivada' => $reactivaria, 'pedidosCancelados' => $pedidos_cancelados);
         blokes_gestion_log($sub_id, 'marcar_cobrado_efectivo', $antes, $despues, array('fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota));
+        // Web → Excel (NOTAS_PARA_CODE_sync_grupos.md): el cobro también se apunta en la Hoja de
+        // Eva, si se encuentra la pestaña/fila/mes de verdad — nunca bloquea esta respuesta.
+        $dh = blokes_sync_grupos_dia_horario_de_sub($sub_id);
+        blokes_sync_grupos_escribir_cobro($dh['dia'], $dh['horario'], $sub->get_billing_phone(), trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()), $periodo, $importe, 'efectivo', date('d/m/Y', $fecha_ts));
         return rest_ensure_response(array('success' => true, 'data' => $despues));
     }
 
@@ -6740,6 +6900,11 @@ function superadmin_gestion_marcar_cobrado($request) {
         'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota,
         'mantuvo_pausa' => $estaba_pausada && $mantener_pausa,
     ));
+    // Web → Excel (NOTAS_PARA_CODE_sync_grupos.md): el cobro también se apunta en la Hoja de
+    // Eva, si se encuentra la pestaña/fila/mes de verdad — nunca bloquea esta respuesta (el
+    // cobro y la factura ya están hechos en WooCommerce antes de llegar aquí).
+    $dh = blokes_sync_grupos_dia_horario_de_sub($sub_id);
+    blokes_sync_grupos_escribir_cobro($dh['dia'], $dh['horario'], $sub ? $sub->get_billing_phone() : '', $sub ? trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()) : '', $periodo_cubre, $importe, $metodo, $fecha_txt);
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
