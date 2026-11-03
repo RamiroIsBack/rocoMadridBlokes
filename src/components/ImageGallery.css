@@ -5,7 +5,7 @@
     width: 100%;
     overflow: hidden;
     border-radius: 7px 7px 0 0;
-    background-color: #fdfaf0;
+    background-color: var(--color-surface);
     padding: 6px 6px 0 6px; /* white photo-print border on 3 sides */
 }
 

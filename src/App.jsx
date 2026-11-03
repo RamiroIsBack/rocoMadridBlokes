@@ -25,9 +25,13 @@ import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import { useEventsAccess } from './hooks/useEvents'
 import { useCalendarAccess } from './hooks/useCalendar'
+import logotipo from './assets/brand/logotipo-4-tintas-iso-negro.png'
 import './App.css'
 
 const PRODUCT_NAMES = { 'Classes': 'Clases', 'Single Days': 'Días sueltos' }
+// Enlaces de la cabecera: clases (lleva a elegir 1 o 2 días) y curso de tecnificación
+const CLASES_URL        = 'https://rocomadrid.com/club/actividades-para-socios/'
+const TECNIFICACION_URL = 'https://rocomadrid.com/club/tecnificacion/'
 
 const SUBSALA_POSITIONS = {
   '1': { top: '5%',   left: '50%',  transform: 'translateX(-50%)' },
@@ -78,6 +82,7 @@ export default function App() {
   const [logoutOpen, setLogoutOpen] = useState(false)
   const [navFloating, setNavFloating] = useState(false)
   const [navVisible, setNavVisible] = useState(false)
+  const [navOpen, setNavOpen]       = useState(false)   // menú plegado en el móvil
   const lastScrollY = useRef(0)
   const sd = window.blokesSiteData || {}
   const canEvents = useEventsAccess()
@@ -167,14 +172,22 @@ export default function App() {
         <VerComoBanner sd={sd} />
         <header className="app-header">
           <div className="app-header__logo-section">
-            <a href="https://rocomadrid.com" >
+            <a href="https://rocomadrid.com" className="app-header__logo-link">
               <img
-                src="https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png"
-                alt="Rocoteca Madrid"
+                src={logotipo}
+                alt="RocoMadrid · Escuela de escalada"
                 className="app-header__logo"
               />
             </a>
-            <p className="app-header__subtitle">Boulder y entrenamiento · Roco Madrid</p>
+            <div className="app-header__claim">
+              <p className="app-header__claim-text">¿Hay blokes que se te resisten?</p>
+              <div className="app-header__links">
+                {sd.subscription?.status !== 'active' && (
+                  <a href={CLASES_URL} className="app-header__link app-header__link--cta">Apúntate a nuestras clases</a>
+                )}
+                <a href={TECNIFICACION_URL} className="app-header__link">Mejora tu técnica · Curso de tecnificación</a>
+              </div>
+            </div>
 
             {sd.isLoggedIn ? (
               <>
@@ -238,23 +251,6 @@ export default function App() {
                 Acceder
               </a>
             )}
-            <div className="app-header__links">
-              <div className="app-header__link-wrap">
-                {sd.subscription?.status === 'active' ? (
-                  <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta">
-                    Apúntate al curso de tecnificación
-                  </a>
-                ) : (
-                  <>
-                    <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
-                    <a href="https://rocomadrid.com/club" className="app-header__link app-header__link--cta">Apúntate a clases</a>
-                    <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta app-header__link--small">
-                      Tecnificación
-                    </a>
-                  </>
-                )}
-              </div>
-            </div>
           </div>
 
           <div className="app-header__salas-wrap">
@@ -282,10 +278,21 @@ export default function App() {
             })}
           </div>
 
-          <nav className={`app-nav${navFloating ? ' app-nav--floating' : ''}${navFloating && navVisible ? ' app-nav--visible' : ''}`}>
-            <ul className="app-nav__list">
+          <nav
+            className={`app-nav${navFloating ? ' app-nav--floating' : ''}${navFloating && navVisible ? ' app-nav--visible' : ''}`}
+            onClick={e => { if (e.target.closest('a')) setNavOpen(false) }}
+          >
+            {/* En el móvil el menú va plegado tras este botón; en pantallas grandes no se ve */}
+            <button
+              type="button" className="app-nav__toggle" aria-expanded={navOpen}
+              onClick={() => setNavOpen(o => !o)}
+            >
+              <span className="app-nav__toggle-icon" aria-hidden="true">{navOpen ? '✕' : '☰'}</span>
+              Menú
+            </button>
+            <ul className={`app-nav__list${navOpen ? ' app-nav__list--open' : ''}`}>
               <li className="app-nav__item">
-                <NavLink to="/" className="app-nav__link" end>Colección</NavLink>
+                <NavLink to="/" className="app-nav__link" end>Los blokes</NavLink>
               </li>
               <li className="app-nav__item">
                 <NavLink to="/progreso" className="app-nav__link">Progreso</NavLink>

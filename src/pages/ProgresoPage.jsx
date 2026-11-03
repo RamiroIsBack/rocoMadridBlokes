@@ -154,7 +154,7 @@ export default function ProgresoPage() {
 
   return (
     <div className="progreso">
-      <h1 className="progreso__title">Comunidad</h1>
+      <h1 className="progreso__title">Mi progreso</h1>
 
       <section className="progreso__section">
         <h2 className="progreso__section-title">Progreso de entrenamiento</h2>

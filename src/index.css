@@ -1,9 +1,10 @@
 /* ============================================
-   GOOGLE FONTS — matches rocomadrid.com brand
-   Playfair Display: display headings (retro serif)
-   Montserrat: headings | Inter: body text
+   GOOGLE FONTS — manual de identidad de RocoMadrid
+   Avenir Next (texto) y DIN Pro (titulares) son de pago: en la web se
+   usan Nunito Sans y Barlow Semi Condensed, que se les parecen mucho.
+   Caveat: letra manuscrita para el claim de la cabecera.
    ============================================ */
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Montserrat:wght@700;800&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&family=Barlow+Semi+Condensed:wght@600;700&family=Caveat:wght@600;700&display=swap');
 
 /* ============================================
    GLOBAL RESET & DESIGN TOKENS
@@ -18,15 +19,24 @@
 }
 
 :root {
-  /* Brand colors — rocomadrid.com palette, warmed up for retro feel */
-  --color-bg: #f4f0e4;            /* parchment warm */
-  --color-surface: #fdfaf3;       /* warm white */
-  --color-header: #1f1f1f;        /* charcoal — matches site header */
-  --color-text-primary: #2a2520;
-  --color-text-secondary: #5e5650;
-  --color-border: #cfc9b8;        /* warm beige border */
-  --color-accent: #d19d02;        /* golden yellow — primary CTA on rocomadrid.com */
-  --color-accent-hover: #846400;  /* darker gold on hover */
+  /* Colores del manual de identidad: mostaza y negro como principales, fondos
+     claros (blancos y grises) y los secundarios solo para detalles. */
+  --color-bg: #f5f4f0;            /* gris muy claro, cálido */
+  --color-surface: #ffffff;
+  --color-header: #ffffff;
+  --color-text-primary: #1d1d1b;  /* negro de la marca, suavizado para texto */
+  --color-text-secondary: #5c5b57;
+  --color-border: #dddbd3;
+  --color-accent: #d09c01;        /* MOSTAZA · Pantone 606 CP */
+  --color-accent-hover: #a87e00;
+  --color-accent-soft: #fbf3d9;   /* fondo mostaza muy claro (activos, avisos) */
+  --color-ink: #1d1d1b;           /* NEGRO de la marca */
+
+  /* Secundarios del manual (detalles, nunca dominantes) */
+  --brand-peacock: #006b92;
+  --brand-firefly: #072d3b;
+  --brand-green:   #d1cf00;
+  --brand-mora:    #4e2952;
 
   /* Estado — contraste ≥ 4,5:1 sobre --color-bg (#f4f0e4), para KPIs/pestañas/avisos de
      Supervisión, Campañas y CTRL Time Off (NOTAS_PARA_CODE_contraste.md, 1/11 08:10): los
@@ -57,9 +67,10 @@
   --spacing-xl: 40px;
 
   /* Typography */
-  --font-body: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-heading: 'Montserrat', 'Segoe UI', system-ui, sans-serif;
-  --font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  --font-body: 'Nunito Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Barlow Semi Condensed', 'Segoe UI', system-ui, sans-serif;
+  --font-serif: 'Barlow Semi Condensed', 'Segoe UI', system-ui, sans-serif;   /* antes Playfair (retro) */
+  --font-hand: 'Caveat', 'Segoe Print', cursive;
   --font-size-sm: 14px;
   --font-size-base: 16px;
   --font-size-lg: 20px;

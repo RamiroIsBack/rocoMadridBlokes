@@ -21,7 +21,7 @@ export default function ProgresoIndexPage() {
     <div className="progreso-idx">
       <nav className="progreso-idx__tabs">
         <NavLink to="/progreso/comunidad" className="progreso-idx__tab">
-          Comunidad
+          Mi progreso
         </NavLink>
 
         <NavLink
@@ -32,7 +32,7 @@ export default function ProgresoIndexPage() {
         </NavLink>
 
         <NavLink to="/progreso/yo" className="progreso-idx__tab">
-          Yo
+          Mis Blokes
         </NavLink>
       </nav>
 
