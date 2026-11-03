@@ -12531,6 +12531,23 @@ add_action('blokes_sync_grupos_cron', function() {
     }
 });
 
+// Precio de catálogo desactualizado en la variación 4673 (M-J Menores 17:30-18:30): mostraba
+// 86 € en wc-admin/Gestor de horarios, pero el formulario ya cobraba bien 57 € (vía Ajustes) —
+// solo confundía al mirar el catálogo, el cobro real nunca fue el erróneo (cowork, 3/11 21:00).
+// Migración de una sola vez, mismo patrón que el resto de arreglos de este fichero.
+add_action('init', function() {
+    if (get_option('blokes_fix_variacion_4673_precio')) return;
+    if (function_exists('wc_get_product')) {
+        $v = wc_get_product(4673);
+        if ($v) {
+            $v->set_regular_price('57');
+            $v->save();
+            update_post_meta(4673, '_subscription_price', '57');
+        }
+    }
+    update_option('blokes_fix_variacion_4673_precio', 1, false);
+});
+
 function nueve_config() {
     $c = get_option('blokes_9to5_config', array());
     return is_array($c) ? $c : array();
