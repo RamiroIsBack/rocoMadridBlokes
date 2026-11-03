@@ -1265,7 +1265,10 @@ function AccionMenu({ alumno, onPick, onClose }) {
   )
 }
 const MES_CORTO_GRP = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+const MES_LARGO_GRP = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 const mesLabelGrp = ym => { const [y, m] = ym.split('-'); return `${MES_CORTO_GRP[Number(m) - 1]} ${y.slice(2)}` }
+// Para mensajes de WhatsApp: mes completo en minúscula, sin año (NOTAS_PARA_CODE_pestanas_grupos.md).
+const mesLabelLargo = ym => MES_LARGO_GRP[Number(ym.split('-')[1]) - 1]
 const PAGO_PENDIENTE = new Set(['pending', 'on-hold', 'failed'])
 
 // Etiquetas en castellano para las claves de la vista previa de simulación (Ramiro, 2/11 09:42:
@@ -1751,10 +1754,6 @@ function GruposTab() {
   // 3/11 a partir de las renovaciones reales de esa noche): cada pestaña es una tarea concreta
   // de Eva, no solo un filtro de estado.
   const duplicados  = useMemo(() => conGrupo.filter(a => a.otrasSubs?.length > 0).filter(coincide), [conGrupo, terminoBusq, telBusq])
-  const pausados      = useMemo(
-    () => conGrupo.filter(a => a.estado === 'pausado').filter(coincide).sort((a, b) => (a.pausaHasta || '9999') < (b.pausaHasta || '9999') ? -1 : 1),
-    [conGrupo, terminoBusq, telBusq]
-  )
   const bajas          = useMemo(() => conGrupo.filter(a => a.estado === 'baja_fin_mes').filter(coincide), [conGrupo, terminoBusq, telBusq])
   const sinDatos        = useMemo(() => conGrupo.filter(a => !a.telefono || a.sinNombre), [conGrupo])
   const pagaFuera        = useMemo(() => conGrupo.filter(a => a.esExterno), [conGrupo])
@@ -1789,7 +1788,7 @@ function GruposTab() {
   // Cuántos coinciden en la vista actual — Ramiro, 2/11 09:40: no sabía "dónde darle a buscar"
   // ni si el filtro seguía puesto al cambiar de pestaña; este número deja claro ambas cosas.
   const resultadosBusqueda = (terminoBusq || telBusq) ? ({
-    grupos: conGrupo.filter(coincide).length, pausados: pausados.length, bajas: bajas.length,
+    grupos: conGrupo.filter(coincide).length, bajas: bajas.length,
     'pendientes-cobrar': pendientesCobrar.length, 'altas-manuales': altasManuales.length,
     'tarjeta-rechazada': tarjetaRechazada.length, 'mes-sin-venir': mesSinVenir.length, 'revisar-datos': revisarDatos.length,
   }[vista] ?? null) : null
@@ -1922,7 +1921,7 @@ function GruposTab() {
               </thead>
               <tbody>
                 {pendientesCobrar.map(a => {
-                  const mesLbl = mesLabelGrp(mesActual)
+                  const mesLbl = mesLabelLargo(mesActual)
                   const importe = a.pagos[mesAnterior]?.importe ?? a.importeCatalogo
                   const mensaje = `Hola ${sgNombreParaMensaje(a)}, te escribimos del Roco: nos falta el pago de ${mesLbl} (${fmtEur(importe)}). ¿Nos lo puedes enviar cuando puedas? ¡Gracias!`
                   return (
@@ -2009,10 +2008,7 @@ function GruposTab() {
 
       {vista === 'altas-manuales' && (
         <>
-          <p className="sv-note">
-            Suscripciones activas creadas desde el panel (no por el checkout de la web) — recuérdales que se
-            suscriban con su tarjeta en la web para que el cobro sea automático.
-          </p>
+          <p className="sv-note">Recuérdales que se suscriban por la web con su tarjeta para que el cobro sea automático.</p>
           <div className="sv-tests-scroll">
             <table className="sv-tests-table">
               <thead>
@@ -2039,7 +2035,7 @@ function GruposTab() {
 
       {vista === 'tarjeta-rechazada' && (
         <>
-          <p className="sv-note">La renovación de este mes la ha rechazado el banco — habla con ellos para que la revisen.</p>
+          <p className="sv-note">Habla con ellos para que revisen su tarjeta y el pago.</p>
           <div className="sv-tests-scroll">
             <table className="sv-tests-table">
               <thead>
@@ -2067,10 +2063,7 @@ function GruposTab() {
 
       {vista === 'mes-sin-venir' && (
         <>
-          <p className="sv-note">
-            No pagó el mes pasado ni este, pero sí algún mes de antes — no es sobre asistencia a clase, solo sobre si
-            paga. Mándales un WhatsApp para preguntar por qué no están viniendo.
-          </p>
+          <p className="sv-note">Mándales un WhatsApp para preguntar por qué no están viniendo y decirles que les echamos de menos.</p>
           <div className="sv-tests-scroll">
             <table className="sv-tests-table">
               <thead>
@@ -2128,61 +2121,9 @@ function GruposTab() {
         </>
       )}
 
-      {vista === 'pausados' && (
-        <>
-          <p className="sv-note">Por lesión, viaje… (no es impago). Ordenado por cuándo vuelven.</p>
-          <div className="sv-tests-scroll">
-            <table className="sv-tests-table">
-              <thead>
-                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Motivo</th><th>Vuelve el</th><th></th></tr>
-              </thead>
-              <tbody>
-                {pausados.map(a => (
-                  <tr key={`${a.subId}-${a.grupoLabel}`}>
-                    <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
-                    <td className="sv-ot-muted">{a.grupoLabel}</td>
-                    <td className="sv-ot-muted">{a.telefono || '—'}</td>
-                    <td>{a.pausaMotivo || <span className="sv-ot-muted">—</span>}</td>
-                    <td className={a.pausaHasta ? '' : 'sv-ot-muted'}>{a.pausaHasta || 'Sin fecha'}</td>
-                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {pausados.length === 0 && <p className="sv-empty">Nadie pausado ahora mismo.</p>}
-        </>
-      )}
-
-      {vista === 'pausados' && (
-        <>
-          <p className="sv-note">Por lesión, viaje… (no es impago). Ordenado por cuándo vuelven.</p>
-          <div className="sv-tests-scroll">
-            <table className="sv-tests-table">
-              <thead>
-                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Motivo</th><th>Vuelve el</th><th></th></tr>
-              </thead>
-              <tbody>
-                {pausados.map(a => (
-                  <tr key={`${a.subId}-${a.grupoLabel}`}>
-                    <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
-                    <td className="sv-ot-muted">{a.grupoLabel}</td>
-                    <td className="sv-ot-muted">{a.telefono || '—'}</td>
-                    <td>{a.pausaMotivo || <span className="sv-ot-muted">—</span>}</td>
-                    <td className={a.pausaHasta ? '' : 'sv-ot-muted'}>{a.pausaHasta || 'Sin fecha'}</td>
-                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {pausados.length === 0 && <p className="sv-empty">Nadie pausado ahora mismo.</p>}
-        </>
-      )}
-
       {vista === 'bajas' && (
         <>
-          <p className="sv-note">Siguen viniendo hasta que se les acabe lo ya pagado; luego se dan de baja solas.</p>
+          <p className="sv-note">Quien ha cancelado pero sigue yendo hasta fin de mes. Sirve para saber qué plazas quedan libres.</p>
           <div className="sv-tests-scroll">
             <table className="sv-tests-table">
               <thead>

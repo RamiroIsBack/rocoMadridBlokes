@@ -6912,9 +6912,18 @@ function superadmin_gestion_marcar_cobrado($request) {
 // "Mandar factura" (NOTAS_PARA_CODE_pestanas_grupos.md, pestaña 3): pedidos de renovación de
 // tarjeta ya cobrados de verdad por el banco (Redsys/la pasarela confirmó la transacción) pero
 // que WooCommerce dejó en "processing" en vez de "completed" — así nunca sale la factura
-// Verifactu ni el email al cliente. Solo cuenta un pedido como "cobro confirmado" si tiene
-// `transaction_id` (lo pone la propia pasarela al cobrar) — nunca por estar "processing" sin
-// más, que podría no ser un cobro real.
+// Verifactu ni el email al cliente. El plugin de Redsys no rellena `transaction_id` en las
+// renovaciones (cowork, prueba 3/11 06:00), así que un pedido cuenta como "cobro confirmado" si
+// tiene `date_paid` puesto Y además un código de autorización o el flag de Redsys hecho —
+// nunca por estar "processing" sin más, que podría no ser un cobro real.
+function blokes_gestion_pedido_cobro_confirmado($order) {
+    if (!$order->get_date_paid()) return false;
+    if ($order->get_transaction_id()) return true;
+    if ($order->get_meta('_authorisation_code_redsys')) return true;
+    if ($order->get_meta('_redsys_done')) return true;
+    return false;
+}
+
 function superadmin_gestion_facturas_pendientes($request) {
     if (!function_exists('wcs_get_subscription')) {
         return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
@@ -6928,24 +6937,22 @@ function superadmin_gestion_facturas_pendientes($request) {
         foreach ($order_ids as $oid) {
             $order = wc_get_order($oid);
             if (!$order || $order->get_status() !== 'processing') continue;
-            $txn = $order->get_transaction_id();
-            if (!$txn) continue;
+            if (!blokes_gestion_pedido_cobro_confirmado($order)) continue;
             $nombre_fact = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
             $out[] = array(
                 'orderId' => intval($oid), 'subId' => intval($sub['id']),
                 'alumno' => $nombre_fact !== '' ? $nombre_fact : ($sub['cliente'] ?? ''),
                 'importe' => floatval($order->get_total()), 'metodo' => $order->get_payment_method_title(),
                 'fecha' => ($order->get_date_paid() ?: $order->get_date_created())->date('d/m/Y'),
-                'transactionId' => $txn,
             );
         }
     }
     return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
-// Completa UN pedido ya confirmado por `facturas_pendientes` (misma comprobación: tiene que
-// seguir "processing" con transaction_id). "Mandar todas" en el frontend llama a esto uno por
-// uno y cuenta aciertos/errores — nunca una escritura en bloque de una sola vez.
+// Completa UN pedido ya confirmado por `facturas_pendientes` (misma comprobación de cobro real).
+// "Mandar todas" en el frontend llama a esto uno por uno y cuenta aciertos/errores — nunca una
+// escritura en bloque de una sola vez.
 function superadmin_gestion_facturas_pendientes_completar($request) {
     $order_id = intval($request['id']);
     $order = wc_get_order($order_id);
@@ -6953,7 +6960,7 @@ function superadmin_gestion_facturas_pendientes_completar($request) {
     if ($order->get_status() !== 'processing') {
         return new WP_Error('invalid_state', 'Este pedido ya no está en "processing" — probablemente ya se completó.', array('status' => 409));
     }
-    if (!$order->get_transaction_id()) {
+    if (!blokes_gestion_pedido_cobro_confirmado($order)) {
         return new WP_Error('sin_confirmar', 'Este pedido no tiene un cobro confirmado por la pasarela.', array('status' => 409));
     }
     blokes_gestion_sin_emails(function() use ($order) {
