@@ -92,26 +92,31 @@ export async function parseBudgetFile(file) {
   return lines
 }
 
-// Estado de una partida en un periodo.
-export function statusOf(budget, real, hasData) {
+// Estado de una partida frente a lo disponible (presupuesto + arrastre).
+// Lo que falta por gastar (o por cobrar) no es ahorro: pasa al mes siguiente.
+// Solo es ahorro al cierre del año (isFinal) o si se cobra más de lo previsto.
+export function statusOf(target, real, hasData, isFinal = false) {
   if (!hasData) return 'sin-datos'
-  const diff = real - budget
-  if (Math.abs(budget) < 0.01) {
+  if (Math.abs(target) < 0.01) {
     if (Math.abs(real) < 0.01) return null
     return real < 0 ? 'imprevisto' : 'ahorro'
   }
-  if (Math.abs(real) < 0.01) return 'sin-movimiento'
-  const tol = Math.max(Math.abs(budget) * TOLERANCE_PCT, TOLERANCE_MIN)
-  if (Math.abs(diff) <= tol) return 'cumplido'
-  return diff > 0 ? 'ahorro' : 'sobrecoste'
+  const remaining = target - real
+  const pending   = Math.sign(remaining) === Math.sign(target)
+  const tol = Math.max(Math.abs(target) * TOLERANCE_PCT, TOLERANCE_MIN)
+  if (Math.abs(real) < 0.01) return isFinal ? 'ahorro' : 'sin-movimiento'
+  if (Math.abs(remaining) <= tol) return 'cumplido'
+  if (pending) return isFinal ? 'ahorro' : 'arrastra'
+  return target < 0 ? 'sobrecoste' : 'ahorro'
 }
 
 export const STATUS_LABELS = {
   'cumplido':       { icon: '✅', label: 'Cumplido' },
   'ahorro':         { icon: '🟢', label: 'Ahorro' },
+  'arrastra':       { icon: '⏩', label: 'Sobra · pasa al mes siguiente' },
   'sobrecoste':     { icon: '🔴', label: 'Sobrecoste' },
   'imprevisto':     { icon: '⚠️', label: 'Imprevisto' },
-  'sin-movimiento': { icon: '⏳', label: 'Sin movimiento' },
+  'sin-movimiento': { icon: '⏳', label: 'Sin movimiento · pasa al mes siguiente' },
   'sin-datos':      { icon: '—',  label: 'Sin datos del banco' },
 }
 
@@ -139,7 +144,34 @@ export function buildComparison(budget, items, monthsLoaded, year) {
     c.items[m - 1].push(item)
   }
   const loaded = new Set(monthsLoaded.filter(m => m.startsWith(`${year}-`)).map(m => Number(m.slice(5)) - 1))
+  for (const c of Object.values(cats)) applyCarry(c, loaded)
   return { cats, loaded }
+}
+
+// Arrastre: lo presupuestado que no se gastó (o no se cobró) pasa al mes siguiente.
+//   carry[i]  = lo que llega arrastrado al mes i
+//   target[i] = presupuesto del mes + arrastre = lo disponible ese mes
+// Si se gasta menos de lo disponible, la diferencia pasa al mes siguiente. Si se gasta más,
+// el exceso es sobrecoste de ese mes y no se resta de los siguientes.
+// Un mes sin extracto del banco no consume ni suma: deja pasar el arrastre tal cual.
+function applyCarry(c, loaded) {
+  c.carry  = Array(12).fill(0)
+  c.target = Array(12).fill(0)
+  let carry = 0
+  for (let i = 0; i < 12; i++) {
+    c.carry[i]  = round2(carry)
+    c.target[i] = round2(c.budget[i] + carry)
+    if (!loaded.has(i)) continue
+    const remaining = c.target[i] - c.real[i]
+    // Solo pasa lo pendiente en el mismo sentido que lo previsto (pago pendiente o cobro pendiente)
+    carry = Math.abs(c.target[i]) > 0.005 && Math.sign(remaining) === Math.sign(c.target[i]) ? remaining : 0
+  }
+  // Lo que sale del último mes con extracto (para "pasa al mes siguiente")
+  c.carryOut = Array.from({ length: 12 }, (_, i) => {
+    if (!loaded.has(i)) return 0
+    const remaining = c.target[i] - c.real[i]
+    return Math.abs(c.target[i]) > 0.005 && Math.sign(remaining) === Math.sign(c.target[i]) ? round2(remaining) : 0
+  })
 }
 
 export const sum = arr => arr.reduce((s, v) => s + v, 0)
