@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { CATEGORIES } from '../utils/expensesParser'
 import { sum, round2 } from '../utils/budget'
+import { saveBudgetIncome } from '../hooks/useBudget'
 
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 const MODES = [['ppto', 'Presupuesto'], ['real', 'Real'], ['ambos', 'Ppto vs Real']]
@@ -54,17 +55,60 @@ function buildRows(budget, cats) {
   return rows
 }
 
-export default function BudgetMatrix({ budget, cats, loaded }) {
+// "1.234,56" / "1234.5" / "13,740 €" → número
+const parseNum = s => {
+  let t = String(s ?? '').replace(/[€\s]/g, '')
+  if (/,\d{1,2}$/.test(t)) t = t.replace(/\./g, '').replace(',', '.')
+  else t = t.replace(/,/g, '')
+  const n = Number(t)
+  return isFinite(n) ? n : 0
+}
+
+export default function BudgetMatrix({ budget, cats, loaded, year, incomeReal, onSaved }) {
   const [mode, setModeState] = useState(readMode)
   const setMode = m => {
     setModeState(m)
     try { localStorage.setItem(MODE_KEY, m) } catch { /* sin almacenamiento: no pasa nada */ }
   }
+  const [draft,  setDraft]  = useState(null)   // null = no se está editando; si no, 12 textos
+  const [saving, setSaving] = useState(false)
+  const [error,  setError]  = useState('')
 
   const rows = buildRows(budget, cats)
   const has = i => loaded.has(i)
   const totB = MONTHS.map((_, i) => sum(rows.map(r => r.budget[i])))
   const totR = MONTHS.map((_, i) => sum(rows.map(r => r.real[i])))
+
+  // Ingresos: esperado = lo guardado con el presupuesto; real = ventas cobradas en el banco ese mes
+  const incB = MONTHS.map((_, i) => Number(budget.income?.[i]) || 0)
+  const incR = MONTHS.map((_, i) => Number(incomeReal[`${year}-${String(i + 1).padStart(2, '0')}`]) || 0)
+  const hasIncome = incB.some(v => Math.abs(v) > 0.005)
+  const resB = MONTHS.map((_, i) => incB[i] + totB[i])
+  const resR = MONTHS.map((_, i) => incR[i] + totR[i])
+
+  const startEdit = () => { setError(''); setDraft(incB.map(v => (v ? String(Math.round(v * 100) / 100).replace('.', ',') : ''))) }
+  // Pegar una fila copiada del Excel (12 celdas separadas por tabulador) en cualquier casilla
+  const onPaste = (i, e) => {
+    const parts = e.clipboardData.getData('text').trim().split(/\t|;|\r?\n/)
+    if (parts.length < 2) return
+    e.preventDefault()
+    setDraft(d => d.map((v, j) => (j >= i && j - i < parts.length ? parts[j - i].trim() : v)))
+  }
+  async function saveIncome() {
+    setSaving(true)
+    setError('')
+    try {
+      const json = await saveBudgetIncome(budget, draft.map(parseNum))
+      // Un plugin antiguo en el servidor acepta la petición pero descarta los ingresos
+      if (!Array.isArray(json?.budget?.income)) throw new Error('el servidor todavía no guarda ingresos (falta actualizar el plugin)')
+      setDraft(null)
+      await onSaved()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
   // El total del real solo suma meses con extracto; el del presupuesto, el año entero
   const yearB = sum(totB)
   const yearR = sum(totR.filter((_, i) => has(i)))
@@ -117,6 +161,42 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
             </tr>
           </thead>
           <tbody>
+            <tr className="bud-mx-section"><td className="bud-mx-name" colSpan={14}>Ingresos</td></tr>
+            <tr className="bud-mx-income">
+              <td className="bud-mx-name">
+                Ingresos esperados
+                {!draft && (
+                  <button className="bud-mx-edit" onClick={startEdit} title="Editar los ingresos esperados de cada mes">
+                    ✎ {hasIncome ? 'Editar' : 'Añadir'}
+                  </button>
+                )}
+              </td>
+              {draft
+                ? draft.map((v, i) => (
+                  <td key={i} className="sa-pay-num">
+                    <input className="bud-mx-input" inputMode="decimal" value={v} aria-label={`Ingresos esperados ${MONTHS[i]}`}
+                           onChange={e => setDraft(d => d.map((x, j) => (j === i ? e.target.value : x)))}
+                           onPaste={e => onPaste(i, e)} />
+                  </td>
+                ))
+                : MONTHS.map((_, i) => cell(incB[i], incR[i], i))}
+              {draft
+                ? <td className="sa-pay-num sa-pay-strong">{fmt(sum(draft.map(parseNum)))}</td>
+                : totalCell(sum(incB), sum(incR.filter((_, i) => has(i))), sum(incB.filter((_, i) => has(i))))}
+            </tr>
+            {draft && (
+              <tr>
+                <td colSpan={14}>
+                  <div className="bud-mx-editbar">
+                  <button className="sa-pay-action bud-primary" onClick={saveIncome} disabled={saving}>{saving ? 'Guardando…' : 'Guardar ingresos'}</button>
+                  <button className="sa-pay-action" onClick={() => setDraft(null)} disabled={saving}>Cancelar</button>
+                  <span className="bud-small sa-pay-muted">Puedes copiar la fila de 12 meses del Excel y pegarla en la casilla de enero.</span>
+                  {error && <span className="sa-error bud-small">Error: {error}</span>}
+                  </div>
+                </td>
+              </tr>
+            )}
+            <tr className="bud-mx-section"><td className="bud-mx-name" colSpan={14}>Pagos</td></tr>
             {rows.map(r => {
               const rYear = sum(r.real.filter((_, i) => has(i)))
               const bYearLoaded = sum(r.budget.filter((_, i) => has(i)))
@@ -139,9 +219,16 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
               {MONTHS.map((_, i) => cell(totB[i], totR[i], i, true))}
               {totalCell(yearB, yearR, yearBLoaded)}
             </tr>
+            {hasIncome && (
+              <tr className="sa-pay-total bud-mx-result">
+                <td className="bud-mx-name">Resultado (ingresos − pagos)</td>
+                {MONTHS.map((_, i) => cell(resB[i], resR[i], i, true))}
+                {totalCell(sum(resB), sum(resR.filter((_, i) => has(i))), sum(resB.filter((_, i) => has(i))))}
+              </tr>
+            )}
             {mode === 'ambos' && (
               <tr className="bud-mx-diff">
-                <td className="bud-mx-name">Diferencia (real − ppto)</td>
+                <td className="bud-mx-name">Diferencia pagos (real − ppto)</td>
                 {MONTHS.map((_, i) => (
                   <td key={i} className={`sa-pay-num ${has(i) ? diffCls(totB[i], totR[i]) : 'sa-pay-muted'}`}>
                     {has(i) ? fmt(totR[i] - totB[i]) : '—'}
@@ -157,6 +244,7 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
       </div>
       <p className="sa-pay-note">
         Igual que el Excel: una fila por partida y una columna por mes, en euros sin decimales.
+        Ingresos reales = todo lo cobrado por ventas en el banco (cuotas, TPV, Bizum, Wellhub, transferencias), sin separar por clase.
         Los meses en gris aún no tienen extracto del banco. El total del real suma solo esos meses y se compara
         con el presupuesto de los mismos meses. ⇄ = varias partidas comparten categoría del banco y el real se reparte
         entre ellas según su presupuesto. Esta vista no aplica el arrastre; para eso está "Por mes".

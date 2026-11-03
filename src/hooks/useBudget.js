@@ -41,6 +41,10 @@ export function useBudget(year) {
 
 export const saveBudget = (year, lines, file) => request('/budget', 'POST', { year, lines, file })
 
+// Guarda los ingresos esperados (12 cifras) sin tocar las partidas de pagos
+export const saveBudgetIncome = (budget, income) =>
+  request('/budget', 'POST', { year: budget.year, lines: budget.lines, file: budget.file, income })
+
 // Reglas aprendidas "concepto → categoría"
 export const getExpenseRules  = () => request('/expense-rules').then(j => j.rules || {})
 export const saveExpenseRules = (rules) => request('/expense-rules', 'POST', { rules }).then(j => j.rules || {})
