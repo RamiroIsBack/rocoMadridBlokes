@@ -5,6 +5,7 @@ import {
   parseBudgetFile, buildComparison, statusOf, STATUS_LABELS, TOLERANCE_PCT, TOLERANCE_MIN, sum, round2, signedAmount,
 } from '../utils/budget'
 import { monthLabel, fmtEur } from '../utils/monthFormat'
+import BudgetMatrix from './BudgetMatrix'
 
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 const CATEGORY_OPTIONS = Object.entries(CATEGORIES).filter(([k]) => !SALES_CATEGORIES.includes(k))
@@ -228,7 +229,7 @@ function LearnedRules() {
 export default function BudgetSection() {
   const [year, setYear]         = useState(2027)
   const { data, loading, error, reload } = useBudget(year)
-  const [view, setView]         = useState('mes')
+  const [view, setView]         = useState('matriz')
   const [month, setMonth]       = useState(null)   // 0..11
   const [expanded, setExpanded] = useState(new Set())
   const [showImport, setShowImport] = useState(false)
@@ -372,12 +373,15 @@ export default function BudgetSection() {
             </div>
 
             <div className="sa-pl-tabs">
-              {[['mes', 'Por mes'], ['anual', 'Año completo'], ['imprevistos', `Imprevistos (${unbudgeted.length})`]].map(([k, l]) => (
+              {[['matriz', 'Matriz'], ['mes', 'Por mes'], ['anual', 'Año completo'], ['imprevistos', `Imprevistos (${unbudgeted.length})`]].map(([k, l]) => (
                 <button key={k} className={`sa-pl-tab${view === k ? ' sa-pl-tab--active' : ''}`} onClick={() => setView(k)}>{l}</button>
               ))}
             </div>
 
             {feedback && <p className={feedback.startsWith('Error') ? 'sa-error' : 'sa-pay-feedback'}>{feedback}</p>}
+
+            {/* ── Matriz: partidas × meses, como el Excel ── */}
+            {view === 'matriz' && <BudgetMatrix budget={budget} cats={cats} loaded={loaded} />}
 
             {/* ── Vista por mes ── */}
             {view === 'mes' && (
