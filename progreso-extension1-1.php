@@ -4040,9 +4040,16 @@ function superadmin_gestion_grupos($request) {
                     if ($p && empty($principal['pagos'][$ym])) $principal['pagos'][$ym] = $p;
                 }
                 // No colgarle el pendiente de una suscripción vieja/duplicada a quien ya tiene
-                // un pago adelantado guardado en la suya — si no, parece que le queda algo por
-                // cobrar cuando en realidad ya está resuelto (cowork, 2/11 09:40/10:08).
-                if (!$principal['pendiente'] && !$principal['tieneAdelantado'] && $otra['pendiente']) $principal['pendiente'] = $otra['pendiente'];
+                // un pago adelantado guardado en la suya, o a quien ya tiene un pedido
+                // completed/processing de ESTE mes en la suya (su pago real llegó por su propia
+                // suscripción, la duplicada vieja solo arrastra un pedido impagado antiguo) — si
+                // no, parece que le queda algo por cobrar cuando en realidad ya está resuelto
+                // (cowork, 2/11 09:40/10:08 para el adelantado; 3/11 20:05 para este otro caso:
+                // el pago llegaba por la principal, pero la fusión colgaba igual el pendiente
+                // viejo de la duplicada en espera).
+                $principal_cobrado_este_mes = !empty($principal['pagos'][$hoy_ym])
+                    && in_array($principal['pagos'][$hoy_ym]['estadoPedido'] ?? '', array('completed', 'processing'), true);
+                if (!$principal['pendiente'] && !$principal['tieneAdelantado'] && !$principal_cobrado_este_mes && $otra['pendiente']) $principal['pendiente'] = $otra['pendiente'];
                 if ($otra['exento']) $principal['exento'] = true;
             }
             if ($otras) {
