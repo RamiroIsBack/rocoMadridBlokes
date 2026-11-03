@@ -1232,3 +1232,38 @@ details[open] .sa-collapsible__arrow {
 .sa-pay-table--wide th, .sa-pay-table--wide td { padding-left: 7px; padding-right: 7px; }
 .sa-pay-person-pay__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; } .sa-pay-person-pay__head .sa-pay-person-pay__title { margin: 0; }
 .sa-pay-tags { margin-top: 3px; white-space: nowrap; } .sa-pay-tags .sa-pay-tag:first-child { margin-left: 15px; } .sa-pay-name { white-space: nowrap; }
+
+/* ── Presupuesto vs. bancos ── */
+.bud-import { border: 1px solid #2a2015; border-radius: 2px; padding: 14px; margin-bottom: 20px; background: #0c0a06; }
+.bud-primary { border-color: #34d399; color: #34d399; }
+.bud-small { font-size: 0.7rem; }
+.bud-select {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 0.75rem;
+  padding: 3px 6px;
+  font-family: inherit;
+  max-width: 220px;
+}
+.bud-select:focus { outline: none; border-color: #f5c842; }
+.bud-month-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.bud-row { cursor: pointer; }
+.bud-caret { display: inline-block; width: 14px; color: #888; }
+.bud-lines { font-size: 0.66rem; color: #888; margin: 2px 0 0 14px; }
+.bud-detail > td { background: #0c0a06; padding: 6px 10px 12px 24px !important; }
+.bud-items { font-size: 0.75rem; }
+.bud-pos { color: #34d399 !important; }
+.bud-neg { color: #f87171 !important; }
+.bud-year td, .bud-year th { padding: 5px 7px; }
+.bud-cell { font-size: 0.72rem; }
+.bud-status { font-size: 0.7rem; font-weight: 700; white-space: nowrap; }
+.bud-status--cumplido       { color: #34d399; }
+.bud-status--ahorro         { color: #34d399; }
+.bud-status--sobrecoste     { color: #f87171; }
+.bud-status--imprevisto     { color: #f97316; }
+.bud-status--sin-movimiento { color: #f5c842; }
+.bud-status--sin-datos      { color: #888; }
+.bud-rules { margin-top: 28px; border-top: 1px solid #2a2015; padding-top: 14px; }
+.bud-rules .sa-pay-table { margin-top: 8px; }

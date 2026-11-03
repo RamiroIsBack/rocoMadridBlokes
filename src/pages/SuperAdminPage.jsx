@@ -8,6 +8,7 @@ import ExpensesSection from '../components/ExpensesSection'
 import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
 import PayrollSection from '../components/PayrollSection'
 import PresupuestosSection from '../components/PresupuestosSection'
+import BudgetSection from '../components/BudgetSection'
 import ProjectsSection from '../components/ProjectsSection'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
 import { getCalendarAccess, saveCalendarAccess } from '../hooks/useCalendar'
@@ -1100,6 +1101,7 @@ export default function SuperAdminPage() {
     { key: 'gastos',   label: 'Gastos banco' },
     { key: 'pl',       label: 'P&L' },
     { key: 'nominas',  label: 'Nóminas' },
+    { key: 'presupuesto-anual', label: 'Presupuesto anual' },
     { key: 'acceso',   label: 'Acceso' },
     { key: 'presupuestos', label: 'Presupuestos' },
     { key: 'proyectos', label: 'Proyectos' },
@@ -1125,6 +1127,7 @@ export default function SuperAdminPage() {
       {saTab === 'gastos'   && <ExpensesSection />}
       {saTab === 'pl'       && <PLTab />}
       {saTab === 'nominas'  && <PayrollSection />}
+      {saTab === 'presupuesto-anual' && <BudgetSection />}
       {saTab === 'acceso'   && <ListasSection />}
       {saTab === 'presupuestos' && <PresupuestosSection />}
       {saTab === 'proyectos' && <ProjectsSection />}

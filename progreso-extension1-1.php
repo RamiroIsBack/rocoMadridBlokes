@@ -1043,6 +1043,28 @@ add_action('rest_api_init', function() {
         ),
     ));
 
+    // ── Presupuesto anual de pagos vs. bancos (solo socios) ──
+    // Reglas aprendidas "concepto del banco → categoría"
+    register_rest_route('superadmin/v1', '/expense-rules', array(
+        array('methods' => 'GET',  'callback' => 'superadmin_get_expense_rules',  'permission_callback' => $socio_perm),
+        array('methods' => 'POST', 'callback' => 'superadmin_save_expense_rules', 'permission_callback' => $socio_perm),
+    ));
+    // Cambiar la categoría de un movimiento ya guardado
+    register_rest_route('superadmin/v1', '/expense-item-category', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_set_expense_item_category',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/budget', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'superadmin_get_budget',
+            'permission_callback' => $socio_perm,
+            'args'                => array('year' => array('type' => 'integer', 'required' => true)),
+        ),
+        array('methods' => 'POST', 'callback' => 'superadmin_save_budget', 'permission_callback' => $socio_perm),
+    ));
+
     // ── Campañas de WhatsApp (fase a: envío manual wa.me) ──
     register_rest_route('superadmin/v1', '/gestion/bajas-motivo', array(
         'methods'             => 'GET',
@@ -1323,6 +1345,169 @@ function superadmin_save_expense_sender($request) {
 
     update_option(BLOKES_EXP_SENDERS_OPTION, wp_json_encode($map), false);
     return rest_ensure_response(array('success' => true, 'data' => $map));
+}
+
+// ============================================================
+//  superadmin/v1 — presupuesto anual de pagos vs. bancos
+// ============================================================
+
+// Fuera del prefijo blokes_exp_ para no mezclarse con los meses guardados.
+const BLOKES_BUDGET_RULES_OPTION = 'blokes_budget_exp_rules';
+
+function superadmin_clean_category($cat) {
+    $cat = sanitize_key($cat);
+    return $cat !== '' ? $cat : 'otros';
+}
+
+function superadmin_load_expense_rules() {
+    $rules = get_option(BLOKES_BUDGET_RULES_OPTION, array());
+    return is_array($rules) ? $rules : array();
+}
+
+function superadmin_get_expense_rules() {
+    return rest_ensure_response(array('rules' => superadmin_load_expense_rules()));
+}
+
+// Body: { rules: { "-N FELIX CASTRO MARTINO": "asesoria", "-OTRA": null } } — null borra la regla.
+function superadmin_save_expense_rules($request) {
+    $body  = $request->get_json_params();
+    $input = is_array($body['rules'] ?? null) ? $body['rules'] : array();
+    $rules = superadmin_load_expense_rules();
+
+    foreach ($input as $key => $cat) {
+        $key = sanitize_text_field($key);
+        if ($key === '' || strlen($key) > 200) continue;
+        if ($cat === null || $cat === '') { unset($rules[$key]); continue; }
+        $rules[$key] = superadmin_clean_category($cat);
+    }
+    update_option(BLOKES_BUDGET_RULES_OPTION, $rules, false);
+    return rest_ensure_response(array('rules' => $rules));
+}
+
+// Body: { month, entity, key, category, rule_key? }. `key` es blokes_exp_item_key() del
+// movimiento (no su posición, que cambia al fusionar subidas). Con rule_key también se aprende.
+function superadmin_set_expense_item_category($request) {
+    $body     = $request->get_json_params();
+    $month    = sanitize_text_field($body['month']  ?? '');
+    $entity   = sanitize_text_field($body['entity'] ?? '');
+    $item_key = (string) ($body['key'] ?? '');
+    $cat      = superadmin_clean_category($body['category'] ?? '');
+
+    if (!preg_match('/^\d{4}-\d{2}$/', $month) || $entity === '' || $item_key === '') {
+        return new WP_Error('invalid_params', 'Faltan datos del movimiento', array('status' => 400));
+    }
+    $option = blokes_exp_option_key($month, $entity);
+    $saved  = json_decode((string) get_option($option, ''), true);
+    if (!is_array($saved) || !is_array($saved['items'] ?? null)) {
+        return new WP_Error('not_found', 'Mes no encontrado', array('status' => 404));
+    }
+    $found = false;
+    foreach ($saved['items'] as $i => $item) {
+        if (blokes_exp_item_key($item) === $item_key) {
+            $saved['items'][$i]['category'] = $cat;
+            $found = true;
+            break;
+        }
+    }
+    if (!$found) return new WP_Error('not_found', 'Movimiento no encontrado', array('status' => 404));
+    update_option($option, wp_json_encode($saved), false);
+
+    $rule_key = sanitize_text_field($body['rule_key'] ?? '');
+    if ($rule_key !== '' && strlen($rule_key) <= 200) {
+        $rules = superadmin_load_expense_rules();
+        $rules[$rule_key] = $cat;
+        update_option(BLOKES_BUDGET_RULES_OPTION, $rules, false);
+    }
+    return rest_ensure_response(array('success' => true));
+}
+
+// Presupuesto: { year, lines: [{ name, category, note, months: [12 importes] }], file, saved }
+// Importes con signo: negativo = pago, positivo = cobro (p. ej. devolución de IVA).
+function superadmin_save_budget($request) {
+    $body = $request->get_json_params();
+    $year = intval($body['year'] ?? 0);
+    if ($year < 2020 || $year > 2100) {
+        return new WP_Error('invalid_year', 'Año inválido', array('status' => 400));
+    }
+    $lines = array();
+    foreach ((is_array($body['lines'] ?? null) ? $body['lines'] : array()) as $line) {
+        $name = sanitize_text_field($line['name'] ?? '');
+        if ($name === '') continue;
+        $months = array();
+        for ($i = 0; $i < 12; $i++) {
+            $months[] = round(floatval($line['months'][$i] ?? 0), 2);
+        }
+        $lines[] = array(
+            'name'     => $name,
+            'category' => superadmin_clean_category($line['category'] ?? ''),
+            'note'     => sanitize_text_field($line['note'] ?? ''),
+            'months'   => $months,
+        );
+    }
+    $budget = array(
+        'year'  => $year,
+        'lines' => $lines,
+        'file'  => sanitize_text_field($body['file'] ?? ''),
+        'saved' => (new DateTime())->format('c'),
+    );
+    update_option('blokes_budget_' . $year, wp_json_encode($budget), false);
+    return rest_ensure_response(array('budget' => $budget));
+}
+
+// Presupuesto del año + movimientos del banco de ese año (sin internos ni ventas), cada uno
+// con mes, entidad y clave para poder recategorizarlo.
+function superadmin_get_budget($request) {
+    $year   = intval($request->get_param('year'));
+    $budget = json_decode((string) get_option('blokes_budget_' . $year, ''), true);
+
+    global $wpdb;
+    $like = $wpdb->esc_like('blokes_exp_' . $year . '_') . '%';
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s", $like
+    ), ARRAY_A);
+
+    $sales  = array('tpv', 'bizum', 'wellhub', 'transferencia');
+    $items  = array();
+    $months = array();
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!is_array($saved) || empty($saved['month']) || substr($saved['month'], 0, 4) !== (string) $year) continue;
+        $entity = $saved['entity'] ?? 'rocoteca';
+        $months[$saved['month']] = true;
+
+        foreach (($saved['items'] ?? array()) as $item) {
+            $concepto_norm = function_exists('iconv')
+                ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
+                : strtolower($item['concepto'] ?? '');
+            $is_internal = !empty($item['excluded'])
+                || strpos($concepto_norm, 'rocodromo') !== false
+                || strpos($concepto_norm, 'transferencia entre cuentas') !== false;
+            if ($is_internal) continue;
+
+            $cat     = $item['category'] ?? 'otros';
+            $section = $item['section'] ?? 'costes';
+            if ($section === 'ingresos' && in_array($cat, $sales, true)) continue;
+
+            $items[] = array(
+                'month'    => $saved['month'],
+                'entity'   => $entity,
+                'key'      => blokes_exp_item_key($item),
+                'fecha'    => $item['fecha'] ?? '',
+                'concepto' => $item['concepto'] ?? '',
+                'importe'  => floatval($item['importe'] ?? 0),
+                'category' => $cat,
+                'section'  => $section,
+            );
+        }
+    }
+    $months = array_keys($months);
+    sort($months);
+
+    return rest_ensure_response(array(
+        'budget'        => is_array($budget) ? $budget : null,
+        'items'         => $items,
+        'months_loaded' => $months,
+    ));
 }
 
 // ============================================================
