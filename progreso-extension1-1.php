@@ -839,6 +839,16 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_marcar_cobrado',
         'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/facturas-pendientes', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_facturas_pendientes',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/facturas-pendientes/(?P<id>\d+)/completar', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_facturas_pendientes_completar',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/adelantados', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_gestion_adelantados_listar',
@@ -3735,6 +3745,11 @@ function superadmin_gestion_grupos($request) {
             'pausaMotivo' => $pausa_motivo ?: '',
             'pausaHasta'  => $pausa_hasta ?: '',
             'manual'      => method_exists($sub_obj, 'is_manual') ? $sub_obj->is_manual() : true,
+            // "Altas manuales" (NOTAS_PARA_CODE_pestanas_grupos.md): creada desde el panel
+            // (admin_assign), no por el checkout de la web — distinto de "manual" (que es el
+            // método de cobro, bacs/tarjeta a mano, y que un alumno normal también puede tener
+            // si eligió transferencia al suscribirse él mismo).
+            'altaManual'  => method_exists($sub_obj, 'get_created_via') ? ($sub_obj->get_created_via() === 'admin_assign') : false,
             'importeCatalogo' => floatval($sub_obj->get_total()),
             'exento'      => (bool) get_post_meta($sub_obj->get_id(), '_rm_exento', true),
             'pagos'       => $pagos,
@@ -6727,6 +6742,60 @@ function superadmin_gestion_marcar_cobrado($request) {
     ));
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// "Mandar factura" (NOTAS_PARA_CODE_pestanas_grupos.md, pestaña 3): pedidos de renovación de
+// tarjeta ya cobrados de verdad por el banco (Redsys/la pasarela confirmó la transacción) pero
+// que WooCommerce dejó en "processing" en vez de "completed" — así nunca sale la factura
+// Verifactu ni el email al cliente. Solo cuenta un pedido como "cobro confirmado" si tiene
+// `transaction_id` (lo pone la propia pasarela al cobrar) — nunca por estar "processing" sin
+// más, que podría no ser un cobro real.
+function superadmin_gestion_facturas_pendientes($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $out = array();
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (empty($sub['id'])) continue;
+        $sub_obj = wcs_get_subscription(intval($sub['id']));
+        if (!$sub_obj) continue;
+        $order_ids = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
+        foreach ($order_ids as $oid) {
+            $order = wc_get_order($oid);
+            if (!$order || $order->get_status() !== 'processing') continue;
+            $txn = $order->get_transaction_id();
+            if (!$txn) continue;
+            $nombre_fact = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+            $out[] = array(
+                'orderId' => intval($oid), 'subId' => intval($sub['id']),
+                'alumno' => $nombre_fact !== '' ? $nombre_fact : ($sub['cliente'] ?? ''),
+                'importe' => floatval($order->get_total()), 'metodo' => $order->get_payment_method_title(),
+                'fecha' => ($order->get_date_paid() ?: $order->get_date_created())->date('d/m/Y'),
+                'transactionId' => $txn,
+            );
+        }
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// Completa UN pedido ya confirmado por `facturas_pendientes` (misma comprobación: tiene que
+// seguir "processing" con transaction_id). "Mandar todas" en el frontend llama a esto uno por
+// uno y cuenta aciertos/errores — nunca una escritura en bloque de una sola vez.
+function superadmin_gestion_facturas_pendientes_completar($request) {
+    $order_id = intval($request['id']);
+    $order = wc_get_order($order_id);
+    if (!$order) return new WP_Error('not_found', 'Pedido no encontrado.', array('status' => 404));
+    if ($order->get_status() !== 'processing') {
+        return new WP_Error('invalid_state', 'Este pedido ya no está en "processing" — probablemente ya se completó.', array('status' => 409));
+    }
+    if (!$order->get_transaction_id()) {
+        return new WP_Error('sin_confirmar', 'Este pedido no tiene un cobro confirmado por la pasarela.', array('status' => 409));
+    }
+    blokes_gestion_sin_emails(function() use ($order) {
+        $order->update_status('completed', 'ExcelMuerte: factura enviada desde "Mandar factura" (pago de tarjeta ya confirmado).');
+    });
+    blokes_gestion_log(0, 'factura_pendiente_completada', array('status' => 'processing'), array('status' => 'completed', 'orderId' => $order_id));
+    return rest_ensure_response(array('success' => true));
 }
 
 // Lista de adelantados sin aplicar (pendientes de que WooCommerce genere la renovación) y los

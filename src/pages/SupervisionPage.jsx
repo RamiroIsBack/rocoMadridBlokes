@@ -10,6 +10,7 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar,
+  gestionFacturasPendientesGet, gestionFacturaCompletar,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
 import OvertimeTab from './OvertimeTab'
@@ -1482,6 +1483,49 @@ function sgCoincideBusqueda(a, termino, tel) {
   return false
 }
 
+// WhatsApp (NOTAS_PARA_CODE_pestanas_grupos.md, punto 3): abre WhatsApp Web con el mensaje ya
+// escrito, Eva revisa y le da a enviar — nunca se manda solo. Teléfono a E.164 básico (España
+// 34+9 por defecto; si ya trae más de 9 dígitos se asume que ya lleva su código de país —
+// aceptar internacionales de verdad queda para cuando se toque blokes_externos_normaliza_telefono()
+// de verdad, que es una función muy compartida).
+function sgTelefonoWhatsApp(tel) {
+  const digits = (tel || '').toString().replace(/[^\d]/g, '')
+  if (!digits) return null
+  if (digits.length === 9) return '34' + digits
+  if (digits.length > 9) return digits
+  return null
+}
+function sgEsMenor(a) { return !!(a.tutorNombre || a.tutorTelefono) }
+function sgTelefonoParaWhatsApp(a) { return sgEsMenor(a) && a.tutorTelefono ? a.tutorTelefono : a.telefono }
+function sgNombreParaMensaje(a) {
+  if (sgEsMenor(a) && a.tutorNombre) return a.tutorNombre.split(' ')[0]
+  return (a.alumno || '').split(' ')[0] || 'hola'
+}
+function WhatsAppBtn({ a, mensaje }) {
+  const tel = sgTelefonoParaWhatsApp(a)
+  const e164 = sgTelefonoWhatsApp(tel)
+  if (!e164) return <span className="sv-ot-muted" title="Sin teléfono: revisar datos">Sin teléfono</span>
+  return (
+    <button
+      className="sv-tests-select"
+      onClick={() => window.open(`https://wa.me/${e164}?text=${encodeURIComponent(mensaje)}`, '_blank')}
+    >💬 WhatsApp</button>
+  )
+}
+
+// Último mes (de los que se han cargado) con un pago contado de verdad — para "Un mes sin
+// venir", que necesita decir desde cuándo no viene sin más.
+function sgUltimoMesPagado(a, meses) {
+  for (let i = meses.length - 1; i >= 0; i--) {
+    const p = a.pagos[meses[i]]
+    if (p && (p.cubierto || p.adelantado || p.estadoPedido === 'completed' || p.estadoPedido === 'processing')) return meses[i]
+  }
+  return null
+}
+function sgPagoContado(p) {
+  return !!(p && (p.cubierto || p.adelantado || p.estadoPedido === 'completed' || p.estadoPedido === 'processing'))
+}
+
 const CAMBIO_TIPO_LABEL = {
   pago_nuevo: 'Pago nuevo', nota: 'Nota cambiada', telefono: 'Teléfono cambiado',
   alumno_nuevo: 'Alumno nuevo', fila_borrada: 'Fila borrada del Excel',
@@ -1637,6 +1681,35 @@ function GruposTab() {
   const [espera, setEspera] = useState(null) // lista de espera (8.5), cargada al entrar en esa vista
   const [esperaForm, setEsperaForm] = useState({ dia: '', horario: '', edad: 'Adultos', nombre: '', telefono: '', notas: '' })
   const [esperaBusy, setEsperaBusy] = useState(false)
+  const [facturas, setFacturas] = useState(null) // "Mandar factura" (NOTAS_PARA_CODE_pestanas_grupos.md)
+  const [facturasErr, setFacturasErr] = useState(null)
+  const [facturaBusyId, setFacturaBusyId] = useState(null)
+  const [mandandoTodas, setMandandoTodas] = useState(false)
+  const [confirmarTodas, setConfirmarTodas] = useState(false)
+  const [resultadoTodas, setResultadoTodas] = useState(null)
+
+  async function cargarFacturas() {
+    setFacturasErr(null)
+    try { setFacturas(await gestionFacturasPendientesGet()) } catch (e) { setFacturasErr(e.message) }
+  }
+  function abrirMandarFactura() { setVista('mandar-factura'); if (facturas === null) cargarFacturas() }
+  async function completarFactura(orderId) {
+    setFacturaBusyId(orderId)
+    try { await gestionFacturaCompletar(orderId); await cargarFacturas() }
+    catch (e) { alert(e.message) } finally { setFacturaBusyId(null) }
+  }
+  async function mandarTodas() {
+    setConfirmarTodas(false); setMandandoTodas(true); setResultadoTodas(null)
+    const lista = facturas || []
+    let enviadas = 0; const errores = []
+    for (const f of lista) {
+      try { await gestionFacturaCompletar(f.orderId); enviadas++ }
+      catch (e) { errores.push({ alumno: f.alumno, error: e.message }) }
+    }
+    setResultadoTodas({ enviadas, errores })
+    setMandandoTodas(false)
+    await cargarFacturas()
+  }
 
   async function cargarEspera() { try { setEspera(await gestionListaEsperaGet()) } catch (e) { setEspera([]) } }
   function abrirEspera() { setVista('espera'); if (espera === null) cargarEspera() }
@@ -1671,21 +1744,54 @@ function GruposTab() {
   // Bandejas 8.3: las mismas filas de siempre, filtradas y aplanadas de todos los grupos a la
   // vez, para que Eva no tenga que ir grupo por grupo buscando a quién le toca cada cosa.
   const conGrupo = useMemo(() => grupos.flatMap(conGrupoDatos), [grupos])
+  const mesAnterior = meses[meses.length - 2]
+  const noExentoActivo = a => !a.exento && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes'
+
+  // Rediseño de pestañas de Grupos (NOTAS_PARA_CODE_pestanas_grupos.md, decidido con Ramiro el
+  // 3/11 a partir de las renovaciones reales de esa noche): cada pestaña es una tarea concreta
+  // de Eva, no solo un filtro de estado.
   const duplicados  = useMemo(() => conGrupo.filter(a => a.otrasSubs?.length > 0).filter(coincide), [conGrupo, terminoBusq, telBusq])
-  const porCobrar    = useMemo(() => conGrupo.filter(a => a.pendiente && !a.exento && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes').filter(coincide), [conGrupo, terminoBusq, telBusq])
   const pausados      = useMemo(
     () => conGrupo.filter(a => a.estado === 'pausado').filter(coincide).sort((a, b) => (a.pausaHasta || '9999') < (b.pausaHasta || '9999') ? -1 : 1),
     [conGrupo, terminoBusq, telBusq]
   )
   const bajas          = useMemo(() => conGrupo.filter(a => a.estado === 'baja_fin_mes').filter(coincide), [conGrupo, terminoBusq, telBusq])
-  const sinDatos        = useMemo(() => conGrupo.filter(a => !a.telefono || a.sinNombre).filter(coincide), [conGrupo, terminoBusq, telBusq])
-  const pagaFuera        = useMemo(() => conGrupo.filter(a => a.esExterno).filter(coincide), [conGrupo, terminoBusq, telBusq])
+  const sinDatos        = useMemo(() => conGrupo.filter(a => !a.telefono || a.sinNombre), [conGrupo])
+  const pagaFuera        = useMemo(() => conGrupo.filter(a => a.esExterno), [conGrupo])
+  // 2. Pendientes de cobrar: pagó el mes pasado, este mes todavía no (sin pedido/adelantado/
+  // cubierto) — el conjunto, incluye a los externos y a quien también sale en otra pestaña.
+  const pendientesCobrar = useMemo(
+    () => conGrupo.filter(a => noExentoActivo(a) && sgPagoContado(a.pagos[mesAnterior]) && !sgPagoContado(a.pagos[mesActual])).filter(coincide),
+    [conGrupo, mesAnterior, mesActual, terminoBusq, telBusq]
+  )
+  // 4. Altas manuales: creadas desde el panel (admin_assign), activas.
+  const altasManuales = useMemo(() => conGrupo.filter(a => a.altaManual && a.enVigor).filter(coincide), [conGrupo, terminoBusq, telBusq])
+  // 5. Tarjeta rechazada: la renovación de este mes en failed.
+  const tarjetaRechazada = useMemo(() => conGrupo.filter(a => a.pagos[mesActual]?.estadoPedido === 'failed').filter(coincide), [conGrupo, mesActual, terminoBusq, telBusq])
+  // 6. Un mes sin venir: ni el mes pasado ni este, pero sí algún mes de antes (si no, es alta
+  // nueva, no "dejó de venir") — no es asistencia, solo si paga.
+  const mesSinVenir = useMemo(() => conGrupo.filter(a => {
+    if (!noExentoActivo(a)) return false
+    if (sgPagoContado(a.pagos[mesAnterior]) || sgPagoContado(a.pagos[mesActual])) return false
+    return meses.slice(0, -2).some(m => sgPagoContado(a.pagos[m]))
+  }).filter(coincide), [conGrupo, meses, mesAnterior, mesActual, terminoBusq, telBusq])
+  // 8. Revisar datos: lo que antes eran "Sin datos" + "Duplicados", juntas.
+  const revisarDatos = useMemo(() => {
+    const vistos = new Set()
+    return [...sinDatos, ...duplicados].filter(a => {
+      const k = a.subId ?? a.externoId
+      if (vistos.has(k)) return false
+      vistos.add(k)
+      return true
+    }).filter(coincide)
+  }, [sinDatos, duplicados, terminoBusq, telBusq])
 
   // Cuántos coinciden en la vista actual — Ramiro, 2/11 09:40: no sabía "dónde darle a buscar"
   // ni si el filtro seguía puesto al cambiar de pestaña; este número deja claro ambas cosas.
   const resultadosBusqueda = (terminoBusq || telBusq) ? ({
-    grupos: conGrupo.filter(coincide).length, cobrar: porCobrar.length, pausados: pausados.length,
-    bajas: bajas.length, sindatos: sinDatos.length, externos: pagaFuera.length, duplicados: duplicados.length,
+    grupos: conGrupo.filter(coincide).length, pausados: pausados.length, bajas: bajas.length,
+    'pendientes-cobrar': pendientesCobrar.length, 'altas-manuales': altasManuales.length,
+    'tarjeta-rechazada': tarjetaRechazada.length, 'mes-sin-venir': mesSinVenir.length, 'revisar-datos': revisarDatos.length,
   }[vista] ?? null) : null
 
   const kpis = useMemo(() => {
@@ -1729,29 +1835,31 @@ function GruposTab() {
       <div className="sv-controls">
         <div className="sv-controls-left">
           <button className={`sv-tab-mini ${vista === 'grupos' ? 'is-active' : ''}`} onClick={() => setVista('grupos')}>Grupos</button>
-          <button className={`sv-tab-mini ${vista === 'cobrar' ? 'is-active' : ''}`} onClick={() => setVista('cobrar')}>
-            Cobrar este mes {porCobrar.length ? <span className="sv-tab-mini__count">({porCobrar.length})</span> : ''}
+          <button className={`sv-tab-mini ${vista === 'pendientes-cobrar' ? 'is-active' : ''}`} onClick={() => setVista('pendientes-cobrar')}>
+            Pendientes de cobrar {pendientesCobrar.length ? <span className="sv-tab-mini__count">({pendientesCobrar.length})</span> : ''}
           </button>
-          <button className={`sv-tab-mini ${vista === 'pausados' ? 'is-active' : ''}`} onClick={() => setVista('pausados')}>
-            Pausados {pausados.length ? <span className="sv-tab-mini__count">({pausados.length})</span> : ''}
+          <button className={`sv-tab-mini ${vista === 'mandar-factura' ? 'is-active' : ''}`} onClick={abrirMandarFactura}>
+            Mandar factura {facturas?.length ? <span className="sv-tab-mini__count">({facturas.length})</span> : ''}
           </button>
-          <button className={`sv-tab-mini ${vista === 'bajas' ? 'is-active' : ''}`} onClick={() => setVista('bajas')}>
-            Bajas a fin de mes {bajas.length ? <span className="sv-tab-mini__count">({bajas.length})</span> : ''}
+          <button className={`sv-tab-mini ${vista === 'altas-manuales' ? 'is-active' : ''}`} onClick={() => setVista('altas-manuales')}>
+            Altas manuales {altasManuales.length ? <span className="sv-tab-mini__count">({altasManuales.length})</span> : ''}
           </button>
-          <button className={`sv-tab-mini ${vista === 'sindatos' ? 'is-active' : ''}`} onClick={() => setVista('sindatos')}>
-            Sin datos {sinDatos.length ? <span className="sv-tab-mini__count">({sinDatos.length})</span> : ''}
+          <button className={`sv-tab-mini ${vista === 'tarjeta-rechazada' ? 'is-active' : ''}`} onClick={() => setVista('tarjeta-rechazada')}>
+            Tarjeta rechazada {tarjetaRechazada.length ? <span className="sv-tab-mini__count">({tarjetaRechazada.length})</span> : ''}
           </button>
-          <button className={`sv-tab-mini ${vista === 'externos' ? 'is-active' : ''}`} onClick={() => setVista('externos')}>
-            Pagan fuera de la web {pagaFuera.length ? <span className="sv-tab-mini__count">({pagaFuera.length})</span> : ''}
+          <button className={`sv-tab-mini ${vista === 'mes-sin-venir' ? 'is-active' : ''}`} onClick={() => setVista('mes-sin-venir')}>
+            Un mes sin venir {mesSinVenir.length ? <span className="sv-tab-mini__count">({mesSinVenir.length})</span> : ''}
           </button>
-          <button className={`sv-tab-mini ${vista === 'duplicados' ? 'is-active' : ''}`} onClick={() => setVista('duplicados')}>
-            Duplicados {duplicados.length ? <span className="sv-tab-mini__count">({duplicados.length})</span> : ''}
+          {bajas.length > 0 && (
+            <button className={`sv-tab-mini ${vista === 'bajas' ? 'is-active' : ''}`} onClick={() => setVista('bajas')}>
+              Bajas a fin de mes <span className="sv-tab-mini__count">({bajas.length})</span>
+            </button>
+          )}
+          <button className={`sv-tab-mini ${vista === 'revisar-datos' ? 'is-active' : ''}`} onClick={() => setVista('revisar-datos')}>
+            Revisar datos {revisarDatos.length ? <span className="sv-tab-mini__count">({revisarDatos.length})</span> : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'espera' ? 'is-active' : ''}`} onClick={abrirEspera}>
             Lista de espera
-          </button>
-          <button className={`sv-tab-mini ${vista === 'campanas' ? 'is-active' : ''}`} onClick={() => setVista('campanas')}>
-            Campañas
           </button>
           <button className={`sv-tab-mini ${vista === 'excel' ? 'is-active' : ''}`} onClick={() => setVista('excel')}>
             Cambios del Excel
@@ -1784,6 +1892,12 @@ function GruposTab() {
           {vista === 'grupos' && (
             <button className="sv-tab-mini" onClick={() => setBuscador(true)}>+ Añadir alumno</button>
           )}
+          {vista === 'grupos' && (
+            <button
+              className="sv-tab-mini"
+              onClick={() => setAccion({ alumno: { esExterno: true, alumno: '', telefono: '', notas: '', exento: false, externoDia: '', externoHorario: '', externoEdad: 'Adultos' }, tipo: 'ext_editar' })}
+            >+ Alta externa</button>
+          )}
         </div>
       </div>
 
@@ -1795,38 +1909,29 @@ function GruposTab() {
 
       {buscador && <BuscarAlumnoModal onClose={() => setBuscador(false)} />}
 
-      {vista === 'cobrar' && (
+      {vista === 'pendientes-cobrar' && (
         <>
           <p className="sv-note">
-            Tienen de verdad un pedido sin pagar este mes (no solo «sin pedido»): no incluye a quien ya está pausado,
-            de baja o marcado exento/socio.
+            Pagó el mes pasado y este mes aún no (sin pedido, adelantado ni cubierto por trimestral/anual) — incluye
+            a quien paga fuera de la web. No incluye exentos, pausados ni bajas a fin de mes.
           </p>
           <div className="sv-tests-scroll">
             <table className="sv-tests-table">
               <thead>
-                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Estado</th><th>Pendiente</th><th></th></tr>
+                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Importe</th><th></th><th></th></tr>
               </thead>
               <tbody>
-                {porCobrar.map(a => {
-                  const est = ESTADO_LABEL[a.estado] || { txt: a.estado, cls: '' }
+                {pendientesCobrar.map(a => {
+                  const mesLbl = mesLabelGrp(mesActual)
+                  const importe = a.pagos[mesAnterior]?.importe ?? a.importeCatalogo
+                  const mensaje = `Hola ${sgNombreParaMensaje(a)}, te escribimos del Roco: nos falta el pago de ${mesLbl} (${fmtEur(importe)}). ¿Nos lo puedes enviar cuando puedas? ¡Gracias!`
                   return (
-                    <tr key={`${a.subId}-${a.grupoLabel}`}>
+                    <tr key={`${a.subId || a.externoId}-${a.grupoLabel}`}>
                       <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
                       <td className="sv-ot-muted">{a.grupoLabel}</td>
                       <td className="sv-ot-muted">{a.telefono || '—'}</td>
-                      <td><span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span></td>
-                      <td>
-                        {a.pendiente.adelantado ? (
-                          <span className="sv-ot-muted" title={`Pagó por adelantado: ${fmtEur(a.pendiente.adelantadoImporte)} (${a.pendiente.adelantadoMetodo}). Se aplicará solo cuando venza esta renovación.`}>
-                            Adelantado — se aplicará el {a.pendiente.fecha}
-                          </span>
-                        ) : (
-                          <span className="sv-to-bad">
-                            {fmtEur(a.pendiente.importe)}{' '}
-                            <span className="sv-ot-muted">({a.pendiente.fechaEsVencimiento ? `vence ${a.pendiente.fecha}` : `pedido del ${a.pendiente.fecha}`})</span>
-                          </span>
-                        )}
-                      </td>
+                      <td className="sv-to-bad">{fmtEur(importe)}</td>
+                      <td><WhatsAppBtn a={a} mensaje={mensaje} /></td>
                       <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
                     </tr>
                   )
@@ -1834,7 +1939,218 @@ function GruposTab() {
               </tbody>
             </table>
           </div>
-          {porCobrar.length === 0 && <p className="sv-empty">Nadie con un pago pendiente real este mes.</p>}
+          {pendientesCobrar.length === 0 && <p className="sv-empty">Nadie pendiente de cobrar este mes.</p>}
+        </>
+      )}
+
+      {vista === 'mandar-factura' && (
+        <>
+          <p className="sv-note">
+            Esto pone a completado el pedido del cliente en WooCommerce: factura a Verifactu y al cliente. Solo salen
+            los seguros: tarjeta ya cobrada de verdad por el banco (nunca pendiente, en espera o rechazada).
+          </p>
+          {facturasErr && <p className="sv-error">Error: {facturasErr}</p>}
+          {facturas === null ? (
+            <p className="sv-loading">Cargando…</p>
+          ) : (
+            <>
+              {facturas.length > 0 && (
+                <div style={{ marginBottom: 10 }}>
+                  <button className="sv-tests-danger sv-tests-danger--confirm" onClick={() => setConfirmarTodas(true)} disabled={mandandoTodas}>
+                    {mandandoTodas ? 'Mandando…' : `Mandar todas (${facturas.length})`}
+                  </button>
+                </div>
+              )}
+              {resultadoTodas && (
+                <p className={resultadoTodas.errores.length ? 'sv-to-warn-txt' : 'sv-to-good'}>
+                  {resultadoTodas.enviadas} enviada{resultadoTodas.enviadas === 1 ? '' : 's'}
+                  {resultadoTodas.errores.length > 0 && `, ${resultadoTodas.errores.length} con error: ${resultadoTodas.errores.map(e => `${e.alumno} (${e.error})`).join('; ')}`}
+                </p>
+              )}
+              <div className="sv-tests-scroll">
+                <table className="sv-tests-table">
+                  <thead>
+                    <tr><th>Alumno</th><th>Importe</th><th>Método</th><th>Fecha de cobro</th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {facturas.map(f => (
+                      <tr key={f.orderId}>
+                        <td>{f.alumno || <span className="sv-ot-muted">—</span>}</td>
+                        <td>{fmtEur(f.importe)}</td>
+                        <td className="sv-ot-muted">{f.metodo}</td>
+                        <td className="sv-ot-muted">{f.fecha}</td>
+                        <td>
+                          <button className="sv-tests-save" disabled={facturaBusyId === f.orderId || mandandoTodas} onClick={() => completarFactura(f.orderId)}>
+                            {facturaBusyId === f.orderId ? 'Mandando…' : 'Mandar factura'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {facturas.length === 0 && <p className="sv-empty">Nada pendiente de facturar ahora mismo.</p>}
+            </>
+          )}
+          {confirmarTodas && (
+            <div className="sv-grp-overlay" onClick={() => setConfirmarTodas(false)}>
+              <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
+                <h3>¿Mandar {facturas?.length} factura{facturas?.length === 1 ? '' : 's'}?</h3>
+                <p>Se completarán {facturas?.length} pedido{facturas?.length === 1 ? '' : 's'} en WooCommerce, se enviarán a Verifactu y cada cliente recibirá su factura por email.</p>
+                <div className="sv-grp-modal__actions">
+                  <button className="sv-tests-select" onClick={() => setConfirmarTodas(false)}>Cancelar</button>
+                  <button className="sv-tests-danger sv-tests-danger--confirm" onClick={mandarTodas}>Mandar {facturas?.length} factura{facturas?.length === 1 ? '' : 's'}</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {vista === 'altas-manuales' && (
+        <>
+          <p className="sv-note">
+            Suscripciones activas creadas desde el panel (no por el checkout de la web) — recuérdales que se
+            suscriban con su tarjeta en la web para que el cobro sea automático.
+          </p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th></th></tr>
+              </thead>
+              <tbody>
+                {altasManuales.map(a => {
+                  const mensaje = `Hola ${sgNombreParaMensaje(a)}, para que no tengas que preocuparte cada mes, ¿puedes suscribirte en rocomadrid.com con tu tarjeta? Así el pago se hace solo. ¡Gracias!`
+                  return (
+                    <tr key={`${a.subId}-${a.grupoLabel}`}>
+                      <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                      <td className="sv-ot-muted">{a.grupoLabel}</td>
+                      <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                      <td><WhatsAppBtn a={a} mensaje={mensaje} /></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          {altasManuales.length === 0 && <p className="sv-empty">Nadie con alta manual ahora mismo.</p>}
+        </>
+      )}
+
+      {vista === 'tarjeta-rechazada' && (
+        <>
+          <p className="sv-note">La renovación de este mes la ha rechazado el banco — habla con ellos para que la revisen.</p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Importe</th><th></th></tr>
+              </thead>
+              <tbody>
+                {tarjetaRechazada.map(a => {
+                  const mensaje = `Hola ${sgNombreParaMensaje(a)}, el banco ha rechazado el pago de este mes de tu tarjeta. ¿Puedes revisarla o actualizarla en rocomadrid.com? Si prefieres pagar de otra forma, dínoslo.`
+                  return (
+                    <tr key={`${a.subId}-${a.grupoLabel}`}>
+                      <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                      <td className="sv-ot-muted">{a.grupoLabel}</td>
+                      <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                      <td className="sv-to-bad">{fmtEur(a.pagos[mesActual]?.importe)}</td>
+                      <td><WhatsAppBtn a={a} mensaje={mensaje} /></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          {tarjetaRechazada.length === 0 && <p className="sv-empty">Ninguna tarjeta rechazada este mes.</p>}
+        </>
+      )}
+
+      {vista === 'mes-sin-venir' && (
+        <>
+          <p className="sv-note">
+            No pagó el mes pasado ni este, pero sí algún mes de antes — no es sobre asistencia a clase, solo sobre si
+            paga. Mándales un WhatsApp para preguntar por qué no están viniendo.
+          </p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Último mes pagado</th><th></th></tr>
+              </thead>
+              <tbody>
+                {mesSinVenir.map(a => {
+                  const ultimo = sgUltimoMesPagado(a, meses)
+                  const mensaje = `Hola ${sgNombreParaMensaje(a)}, ¡te echamos de menos en el Roco! ¿Ha pasado algo? Cuéntanos si podemos ayudarte en algo para que vuelvas.`
+                  return (
+                    <tr key={`${a.subId}-${a.grupoLabel}`}>
+                      <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                      <td className="sv-ot-muted">{a.grupoLabel}</td>
+                      <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                      <td className="sv-ot-muted">{ultimo ? mesLabelGrp(ultimo) : '—'}</td>
+                      <td><WhatsAppBtn a={a} mensaje={mensaje} /></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+          {mesSinVenir.length === 0 && <p className="sv-empty">Nadie en esta lista ahora mismo.</p>}
+        </>
+      )}
+
+      {vista === 'revisar-datos' && (
+        <>
+          <p className="sv-note">
+            Sin teléfono o sin nombre real (se ve el usuario de la cuenta), o con una suscripción vieja colgando de la
+            misma clase. «Fusionar» cancela solo la vieja; la activa no se toca.
+          </p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Qué falta o está repetido</th><th></th></tr>
+              </thead>
+              <tbody>
+                {revisarDatos.map(a => (
+                  <tr key={`${a.subId}-${a.grupoLabel}`}>
+                    <td>{a.alumno || <span className="sv-ot-muted">—</span>} <span className="sv-ot-muted">#{a.subId}</span></td>
+                    <td className="sv-ot-muted">{a.grupoLabel}</td>
+                    <td className="sv-ot-muted">
+                      {a.otrasSubs?.length > 0
+                        ? `Duplicado: también #${a.otrasSubs.map(s => s.subId).join(', #')}`
+                        : [!a.telefono && 'teléfono', a.sinNombre && 'nombre'].filter(Boolean).join(' y ')}
+                    </td>
+                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {revisarDatos.length === 0 && <p className="sv-empty">Nada que revisar ahora mismo.</p>}
+        </>
+      )}
+
+      {vista === 'pausados' && (
+        <>
+          <p className="sv-note">Por lesión, viaje… (no es impago). Ordenado por cuándo vuelven.</p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Motivo</th><th>Vuelve el</th><th></th></tr>
+              </thead>
+              <tbody>
+                {pausados.map(a => (
+                  <tr key={`${a.subId}-${a.grupoLabel}`}>
+                    <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                    <td className="sv-ot-muted">{a.grupoLabel}</td>
+                    <td className="sv-ot-muted">{a.telefono || '—'}</td>
+                    <td>{a.pausaMotivo || <span className="sv-ot-muted">—</span>}</td>
+                    <td className={a.pausaHasta ? '' : 'sv-ot-muted'}>{a.pausaHasta || 'Sin fecha'}</td>
+                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {pausados.length === 0 && <p className="sv-empty">Nadie pausado ahora mismo.</p>}
         </>
       )}
 
@@ -1886,99 +2202,6 @@ function GruposTab() {
             </table>
           </div>
           {bajas.length === 0 && <p className="sv-empty">Nadie de baja a fin de mes ahora.</p>}
-        </>
-      )}
-
-      {vista === 'sindatos' && (
-        <>
-          <p className="sv-note">
-            Altas hechas desde wp-admin sin teléfono y/o sin nombre de facturación: lo que se ve es el nombre de
-            usuario de la cuenta, no un nombre real. Se arreglará del todo con la migración del Excel.
-          </p>
-          <div className="sv-tests-scroll">
-            <table className="sv-tests-table">
-              <thead>
-                <tr><th>Alumno (como sale)</th><th>Grupo</th><th>Teléfono</th><th>Falta</th><th></th></tr>
-              </thead>
-              <tbody>
-                {sinDatos.map(a => (
-                  <tr key={`${a.subId}-${a.grupoLabel}`}>
-                    <td>{a.alumno || <span className="sv-ot-muted">—</span>} <span className="sv-ot-muted">#{a.subId}</span></td>
-                    <td className="sv-ot-muted">{a.grupoLabel}</td>
-                    <td className="sv-ot-muted">{a.telefono || '—'}</td>
-                    <td className="sv-ot-muted">
-                      {[!a.telefono && 'teléfono', a.sinNombre && 'nombre'].filter(Boolean).join(' y ')}
-                    </td>
-                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {sinDatos.length === 0 && <p className="sv-empty">Todos con teléfono y nombre real.</p>}
-        </>
-      )}
-
-      {vista === 'externos' && (
-        <>
-          <p className="sv-note">
-            Pagan fuera de la web (en mano, por transferencia directa…), sin suscripción de WooCommerce: lo que
-            lleve aquí no toca WooCommerce ni genera factura. De la migración del Excel, o añadidos a mano.
-          </p>
-          <button
-            className="sv-tests-select"
-            onClick={() => setAccion({ alumno: { esExterno: true, alumno: '', telefono: '', notas: '', exento: false, externoDia: '', externoHorario: '', externoEdad: 'Adultos' }, tipo: 'ext_editar' })}
-          >+ Alta externa</button>
-          <div className="sv-tests-scroll">
-            <table className="sv-tests-table">
-              <thead>
-                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Notas</th><th></th></tr>
-              </thead>
-              <tbody>
-                {pagaFuera.map(a => (
-                  <tr key={`ext-${a.externoId}`}>
-                    <td>{a.alumno || <span className="sv-ot-muted">—</span>}{a.exento && <span title="Exento/socio">*</span>}</td>
-                    <td className="sv-ot-muted">{a.grupoLabel}</td>
-                    <td className="sv-ot-muted">{a.telefono || '—'}</td>
-                    <td className="sv-ot-muted">{a.notas || '—'}</td>
-                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {pagaFuera.length === 0 && <p className="sv-empty">Nadie dado de alta como externo todavía.</p>}
-        </>
-      )}
-
-      {vista === 'duplicados' && (
-        <>
-          <p className="sv-note">
-            Alumnos con una suscripción vieja colgando de la misma clase (se volvieron a apuntar con un alta nueva).
-            «Fusionar» cancela solo la vieja; la activa no se toca.
-          </p>
-          <div className="sv-tests-scroll">
-            <table className="sv-tests-table">
-              <thead>
-                <tr><th>Alumno</th><th>Grupo</th><th>Estado (vigente)</th><th>Antiguas colgando</th><th></th></tr>
-              </thead>
-              <tbody>
-                {duplicados.map(a => {
-                  const est = ESTADO_LABEL[a.estado] || { txt: a.estado, cls: '' }
-                  return (
-                    <tr key={`${a.subId}-${a.grupoLabel}`}>
-                      <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
-                      <td className="sv-ot-muted">{a.grupoLabel}</td>
-                      <td><span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span> <span className="sv-ot-muted">#{a.subId}</span></td>
-                      <td className="sv-ot-muted">{a.otrasSubs.map(s => `#${s.subId} (${ESTADO_LABEL[s.estado]?.txt || s.estado})`).join(', ')}</td>
-                      <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-          {duplicados.length === 0 && <p className="sv-empty">Sin duplicados pendientes de fusionar.</p>}
         </>
       )}
 
@@ -2042,8 +2265,6 @@ function GruposTab() {
           )}
         </>
       )}
-
-      {vista === 'campanas' && <CampanasSection />}
 
       {vista === 'excel' && <SyncGruposCambiosPanel />}
 
@@ -2220,6 +2441,7 @@ export default function SupervisionPage() {
   const TABS = [
     { id: 'excelmuerte', label: 'ExcelMuerte'   },
     { id: 'grupos',      label: 'Grupos'        },
+    { id: 'campanas',    label: 'Campañas'      },
     { id: 'horasextra',  label: 'Horas extra'    },
     // Lleva sueldos, nóminas y P&L: solo socios
     ...(role === 'socio' ? [{ id: 'timeoff', label: 'CTRL Time Off' }, { id: 'historico', label: 'Histórico' }] : []),
@@ -2252,6 +2474,7 @@ export default function SupervisionPage() {
 
       {tab === 'excelmuerte' && <ClasesTab />}
       {tab === 'grupos'      && <GruposTab />}
+      {tab === 'campanas'    && <CampanasSection />}
       {tab === 'horasextra'  && <OvertimeTab />}
       {tab === 'timeoff'     && role === 'socio' && <TimeOffTab />}
       {tab === 'historico'   && role === 'socio' && <HistoricoTab />}

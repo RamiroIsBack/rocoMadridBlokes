@@ -80,6 +80,11 @@ export const gestionExternoBorrar    = id           => gestionCall('DELETE', `/g
 export const gestionExternoPago      = (id, body)   => gestionPost(`/gestion/externos/${id}/pago`, body)
 export const gestionExternosImportar = body         => gestionPost('/gestion/externos/importar', body)
 
+// "Mandar factura" (NOTAS_PARA_CODE_pestanas_grupos.md): pedidos de tarjeta ya cobrados de
+// verdad (transaction_id de la pasarela) que WooCommerce dejó en "processing" sin completar.
+export const gestionFacturasPendientesGet = () => gestionCall('GET', '/gestion/facturas-pendientes')
+export const gestionFacturaCompletar = orderId => gestionPost(`/gestion/facturas-pendientes/${orderId}/completar`)
+
 // Lista de espera por grupo (8.5: interesados que aún no son alumnos).
 export const gestionListaEsperaGet         = ()          => gestionCall('GET', '/gestion/lista-espera')
 export const gestionListaEsperaCrear       = body        => gestionPost('/gestion/lista-espera', body)
