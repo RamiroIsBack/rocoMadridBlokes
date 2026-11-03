@@ -1098,6 +1098,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_campanas_listar_contactos',
         'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/campanas/contactos/(?P<id>\d+)', array(
+        'methods'             => 'DELETE',
+        'callback'            => 'superadmin_campanas_borrar_contacto',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/campanas/envios-hoy', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_campanas_envios_hoy',
@@ -6376,11 +6381,23 @@ function blokes_ensure_campanas_tables() {
 
 // Última suscripción relevante de cada teléfono: gana la más "fuerte" (en vigor > de baja a
 // fin de mes > cancelada), para no clasificar mal a quien tiene varias suscripciones viejas.
+// `$s['telefono']` de blokes_get_all_subscription_data() es solo `get_billing_phone()` — vacío en
+// altas manuales con el teléfono metido en el email de relleno ("6xxxxxxxx@rocomadrid.com") en
+// vez de en el campo de verdad (NOTAS_PARA_CODE_whatsapp.md, 3/11 16:10: 7 alumnos actuales no se
+// detectaban como "ya en vigor" en una campaña de "antiguos", y les habría llegado ese mensaje).
+// Mismo fallback que ya usa Grupos: email de relleno → teléfono del perfil de WordPress.
 function blokes_campanas_subs_por_telefono() {
     $prioridad = array('active' => 3, 'on-hold' => 3, 'pending' => 3, 'pending-cancel' => 2, 'cancelled' => 1);
     $por_tel = array();
     foreach (blokes_get_all_subscription_data() as $s) {
         $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        if ($tel === '') {
+            $tel = blokes_externos_normaliza_telefono(blokes_telefono_de_email($s['email'] ?? ''));
+        }
+        if ($tel === '') {
+            $uid = intval(get_post_meta(intval($s['id'] ?? 0), '_customer_user', true));
+            if ($uid) $tel = blokes_externos_normaliza_telefono(get_user_meta($uid, 'billing_phone', true));
+        }
         if ($tel === '') continue;
         $p = $prioridad[$s['status'] ?? ''] ?? 0;
         if (!isset($por_tel[$tel]) || $p > $por_tel[$tel]['_prioridad']) {
@@ -6666,6 +6683,17 @@ function superadmin_campanas_listar_contactos($request) {
         $out[] = $fila;
     }
     return rest_ensure_response(array('success' => true, 'data' => array('contactos' => $out, 'resumen' => $resumen, 'resumenOptin' => $resumenOptin)));
+}
+
+// DELETE /campanas/contactos/{id} — quitar un contacto de verdad (p. ej. uno de prueba que se
+// coló en una importación real, NOTAS_PARA_CODE_whatsapp.md 3/11 16:10). Borra también sus
+// envíos de campañas para no dejar filas huérfanas.
+function superadmin_campanas_borrar_contacto($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $wpdb->delete(blokes_campana_envios_table(), array('contacto_id' => $id), array('%d'));
+    $wpdb->delete(blokes_contactos_table(), array('id' => $id), array('%d'));
+    return rest_ensure_response(array('success' => true));
 }
 
 // GET /campanas/envios-hoy — para el aviso de ritmo (WhatsApp bloquea números que mandan

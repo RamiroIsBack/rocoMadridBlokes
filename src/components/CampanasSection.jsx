@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import {
-  campanasContactosImportar, campanasContactosGet, campanasEnviosHoyGet,
+  campanasContactosImportar, campanasContactosGet, campanasContactoBorrar, campanasEnviosHoyGet,
   campanasListar, campanasCrear, campanasEditar, campanasDestinatarios, campanasMarcarAccion,
   campanasDeshacerEnviados,
 } from '../hooks/useSuperAdmin'
@@ -222,7 +222,7 @@ function ContactosPanel({ onPlantillasSugeridas }) {
         <div className="cmp-table-wrap">
           <table className="cmp-table">
             <thead>
-              <tr><th>Teléfono</th><th>Nombres</th><th>Tipo</th><th>Lista</th><th>Origen</th><th>WhatsApp</th></tr>
+              <tr><th>Teléfono</th><th>Nombres</th><th>Tipo</th><th>Lista</th><th>Origen</th><th>WhatsApp</th><th></th></tr>
             </thead>
             <tbody>
               {data.contactos.filter(c => soloOptin === 'all' || (c.optinWhatsapp || 'sin_preguntar') === soloOptin).map(c => (
@@ -233,6 +233,15 @@ function ContactosPanel({ onPlantillasSugeridas }) {
                   <td><span className={`cmp-badge cmp-badge--${c.lista || 'sin_clasificar'}`}>{LISTA_LABEL[c.lista || 'sin_clasificar']}</span></td>
                   <td className="cmp-muted">{c.origen}</td>
                   <td><WaMark value={c.optinWhatsapp} /></td>
+                  <td>
+                    <button
+                      className="cmp-btn"
+                      onClick={async () => {
+                        if (!window.confirm(`¿Borrar el contacto «${c.nombres.join(', ')}» (${c.telefono})? No se puede deshacer.`)) return
+                        try { await campanasContactoBorrar(c.id); setRefresh(k => k + 1) } catch (e) { window.alert(e.message) }
+                      }}
+                    >Borrar</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
