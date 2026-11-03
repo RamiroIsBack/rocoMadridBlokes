@@ -381,10 +381,7 @@ export default function BudgetSection() {
             {feedback && <p className={feedback.startsWith('Error') ? 'sa-error' : 'sa-pay-feedback'}>{feedback}</p>}
 
             {/* ── Matriz: partidas × meses, como el Excel ── */}
-            {view === 'matriz' && (
-              <BudgetMatrix budget={budget} cats={cats} loaded={loaded} year={year}
-                            incomeReal={data?.income_real || {}} onSaved={reload} />
-            )}
+            {view === 'matriz' && <BudgetMatrix budget={budget} cats={cats} loaded={loaded} />}
 
             {/* ── Vista por mes ── */}
             {view === 'mes' && (

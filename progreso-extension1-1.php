@@ -1434,21 +1434,11 @@ function superadmin_save_budget($request) {
             'months'   => $months,
         );
     }
-    // Ingresos esperados por mes (12 cifras). Si no vienen (p. ej. al volver a subir el Excel de
-    // pagos), se conservan los que ya había guardados.
-    $prev = json_decode((string) get_option('blokes_budget_' . $year, ''), true);
-    if (is_array($body['income'] ?? null)) {
-        $income = array();
-        for ($i = 0; $i < 12; $i++) $income[] = round(floatval($body['income'][$i] ?? 0), 2);
-    } else {
-        $income = (is_array($prev) && is_array($prev['income'] ?? null)) ? $prev['income'] : null;
-    }
     $budget = array(
-        'year'   => $year,
-        'lines'  => $lines,
-        'income' => $income,
-        'file'   => sanitize_text_field($body['file'] ?? ''),
-        'saved'  => (new DateTime())->format('c'),
+        'year'  => $year,
+        'lines' => $lines,
+        'file'  => sanitize_text_field($body['file'] ?? ''),
+        'saved' => (new DateTime())->format('c'),
     );
     update_option('blokes_budget_' . $year, wp_json_encode($budget), false);
     return rest_ensure_response(array('budget' => $budget));
@@ -1469,7 +1459,6 @@ function superadmin_get_budget($request) {
     $sales  = array('tpv', 'bizum', 'wellhub', 'transferencia');
     $items  = array();
     $months = array();
-    $income_real = array(); // 'YYYY-MM' => cobrado por ventas ese mes
     foreach ($rows as $row) {
         $saved = json_decode($row['option_value'], true);
         if (!is_array($saved) || empty($saved['month']) || substr($saved['month'], 0, 4) !== (string) $year) continue;
@@ -1487,11 +1476,7 @@ function superadmin_get_budget($request) {
 
             $cat     = $item['category'] ?? 'otros';
             $section = $item['section'] ?? 'costes';
-            // Ventas (cuotas, TPV, Bizum…): no van partida a partida, solo el total cobrado del mes
-            if ($section === 'ingresos' && in_array($cat, $sales, true)) {
-                $income_real[$saved['month']] = round(($income_real[$saved['month']] ?? 0) + abs(floatval($item['importe'] ?? 0)), 2);
-                continue;
-            }
+            if ($section === 'ingresos' && in_array($cat, $sales, true)) continue;
 
             $items[] = array(
                 'month'    => $saved['month'],
@@ -1512,7 +1497,6 @@ function superadmin_get_budget($request) {
         'budget'        => is_array($budget) ? $budget : null,
         'items'         => $items,
         'months_loaded' => $months,
-        'income_real'   => (object) $income_real,
     ));
 }
 

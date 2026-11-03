@@ -1283,11 +1283,6 @@ details[open] .sa-collapsible__arrow {
 .bud-mx-result td { border-top: 2px solid #f5c842; }
 .bud-mx-goal td { background: rgba(245, 200, 66, 0.05); color: #f5c842; }
 .bud-mx-goal .bud-mx-name { background: #17130a; font-weight: 700; }
-.bud-mx-edit { margin-left: 8px; background: none; border: 1px solid #2a2015; color: #f5c842; font-size: 0.64rem; padding: 1px 6px; border-radius: 2px; cursor: pointer; }
-.bud-mx-edit:hover { border-color: #f5c842; }
-.bud-mx-input { width: 64px; background: #0c0a06; border: 1px solid #2a2015; color: #eee; font-size: 0.72rem; padding: 3px 4px; text-align: right; border-radius: 2px; }
-.bud-mx-input:focus { outline: none; border-color: #f5c842; }
-.bud-mx-editbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; position: sticky; left: 7px; width: max-content; max-width: 90vw; }
 .bud-rules { margin-top: 28px; border-top: 1px solid #2a2015; padding-top: 14px; }
 .bud-rules .sa-pay-table { margin-top: 8px; }
 

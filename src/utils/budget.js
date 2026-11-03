@@ -174,5 +174,20 @@ function applyCarry(c, loaded) {
   })
 }
 
+// Objetivo de ingresos: lo que hay que cobrar cada mes para cubrir los pagos del año.
+// Julio y agosto ingresan menos (en 2026, el 42 % y el 28 % de un mes normal), así que el resto
+// de meses tiene que cubrir ese hueco. Se añade un margen por bajas o imprevistos.
+export const INCOME_TARGET = { julio: 0.42, agosto: 0.28, margen: 0.05 }
+export const seasonFactor = i => (i === 6 ? INCOME_TARGET.julio : i === 7 ? INCOME_TARGET.agosto : 1)
+
+// monthlyPayments: 12 cifras de pagos (negativas). Devuelve 12 cifras de ingresos objetivo (positivas).
+export function incomeTargets(monthlyPayments) {
+  const yearPayments = -monthlyPayments.reduce((s, v) => s + v, 0)
+  if (yearPayments <= 0) return Array(12).fill(0)
+  const months = Array.from({ length: 12 }, (_, i) => seasonFactor(i)).reduce((s, v) => s + v, 0)
+  const normal = (yearPayments / months) * (1 + INCOME_TARGET.margen)
+  return Array.from({ length: 12 }, (_, i) => Math.round(normal * seasonFactor(i)))
+}
+
 export const sum = arr => arr.reduce((s, v) => s + v, 0)
 export const round2 = v => Math.round(v * 100) / 100
