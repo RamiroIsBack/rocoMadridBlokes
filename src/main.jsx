@@ -4,6 +4,9 @@ import './index.css'
 import App from './App'
 import { applyVerComo, installVerComoFetch } from './utils/verComo'
 
+// eslint-disable-next-line no-undef
+console.log('Blokes build', __BUILD_TIME__)
+
 if (window.blokesSiteData) {
   const r = window.blokesSiteData.userRole
   if (r === 'superadmin') window.blokesSiteData.userRole = 'socio'
