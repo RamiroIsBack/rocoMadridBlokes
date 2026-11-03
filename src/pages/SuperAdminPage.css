@@ -1267,3 +1267,6 @@ details[open] .sa-collapsible__arrow {
 .bud-status--sin-datos      { color: #888; }
 .bud-rules { margin-top: 28px; border-top: 1px solid #2a2015; padding-top: 14px; }
 .bud-rules .sa-pay-table { margin-top: 8px; }
+
+/* ── Subpestañas de cada apartado (Tesorería, Gestión) ── */
+.sa-sub-tabs { margin: -14px 0 22px; }
