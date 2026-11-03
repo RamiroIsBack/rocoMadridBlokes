@@ -6552,7 +6552,20 @@ function blokes_campanas_subs_por_telefono() {
     $prioridad = array('active' => 3, 'on-hold' => 3, 'pending' => 3, 'pending-cancel' => 2, 'cancelled' => 1);
     $por_tel = array();
     foreach (blokes_get_all_subscription_data() as $s) {
-        $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        // El array de blokes_get_all_subscription_data() trae 'telefono' de
+        // RocoMadrid_SF_Stats (plugin de terceros), que lo deja vacío para la mayoría de altas
+        // aunque la propia suscripción SÍ tenga billing_phone (cowork, 3/11 18:50: de 388 solo 1
+        // "directo"). El resto del código (Grupos, blokes_gestion_grupos) ya resuelve esto
+        // llamando a wcs_get_subscription()->get_billing_phone() en vez de fiarse de ese campo
+        // cacheado — mismo camino aquí, con el mismo orden de respaldo que allí.
+        $tel = '';
+        if (function_exists('wcs_get_subscription')) {
+            $sub_obj = wcs_get_subscription(intval($s['id'] ?? 0));
+            if ($sub_obj) $tel = blokes_externos_normaliza_telefono($sub_obj->get_billing_phone());
+        }
+        if ($tel === '') {
+            $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        }
         if ($tel === '') {
             $tel = blokes_externos_normaliza_telefono(blokes_telefono_de_email($s['email'] ?? ''));
         }
@@ -6977,19 +6990,6 @@ function superadmin_campanas_destinatarios($request) {
         'totalSubs' => count(blokes_get_all_subscription_data()),
         'subsPorTel' => count($subs_por_tel),
     );
-    // Diagnóstico ampliado (cowork, 3/11 17:25: de 388 solo 9 acaban con teléfono) — en qué paso
-    // exacto de blokes_campanas_subs_por_telefono() se pierde cada uno, sin tocar esa función.
-    $diag = array('directo' => 0, 'porEmail' => 0, 'porUserMeta' => 0, 'sinNada' => 0, 'sinEmailNiNada' => 0);
-    foreach (blokes_get_all_subscription_data() as $s) {
-        if (blokes_externos_normaliza_telefono($s['telefono'] ?? '') !== '') { $diag['directo']++; continue; }
-        $correo = $s['email'] ?? '';
-        if (blokes_externos_normaliza_telefono(blokes_telefono_de_email($correo)) !== '') { $diag['porEmail']++; continue; }
-        $uid = intval(get_post_meta(intval($s['id'] ?? 0), '_customer_user', true));
-        if ($uid && blokes_externos_normaliza_telefono(get_user_meta($uid, 'billing_phone', true)) !== '') { $diag['porUserMeta']++; continue; }
-        if ($correo === '' || $correo === 'N/A') $diag['sinEmailNiNada']++;
-        $diag['sinNada']++;
-    }
-    $debug['diagTelefono'] = $diag;
     $envios_por_contacto = array();
     foreach ($wpdb->get_results($wpdb->prepare(
         "SELECT * FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d", $id
