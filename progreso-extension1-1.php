@@ -982,6 +982,18 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/reintentar-cobro', array(
         'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_reintentar_cobro', 'permission_callback' => $sa_perm,
     ));
+    // WP-Cron no corre de fiar con poco tráfico (pseudo-cron: solo se dispara si entra una
+    // visita después de la hora programada) — Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05:
+    // "esto tiene que pasar automático". Ruta pública protegida por secreto (como el webhook de
+    // 9to5) para que un cron de verdad del hosting la llame cada 10-15 min.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/cron-tick', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_cron_tick', 'permission_callback' => '__return_true',
+    ));
+    // Para que cowork/Ramiro recuperen la URL exacta (con el secreto) y la peguen en el panel
+    // de SiteGround — con sesión, nunca a ciegas por curl sin credenciales.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/cron-url', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_cron_url', 'permission_callback' => $sa_perm,
+    ));
 
     // Calendario de días especiales del club (NOTAS_PARA_CODE_calendario.md): festivos, cierres
     // y horarios especiales, con una decisión por día. Ver y listar: cualquiera con acceso a
@@ -4911,6 +4923,7 @@ function superadmin_sync_grupos_config_get() {
         'sheetRealId'   => get_option('blokes_sync_grupos_sheet_real_id', ''),
         'usarReal'      => (bool) get_option('blokes_sync_grupos_usar_real', false),
         'credencialesConfiguradas' => (bool) blokes_sync_grupos_credenciales(),
+        'ultimaSincronizacion' => get_option('blokes_sync_grupos_ultima_sincronizacion', null),
     )));
 }
 
@@ -5442,11 +5455,74 @@ function blokes_sync_grupos_upsert_cambio($pestana, $clave, $nombre, $telefono, 
     );
     if ($existente) {
         $wpdb->update($tabla, $campos, array('id' => intval($existente)));
-    } else {
-        $wpdb->insert($tabla, array_merge($campos, array(
-            'pestana' => $pestana, 'clave' => $clave, 'tipo' => $tipo, 'mes' => $mes, 'estado' => 'pendiente', 'creado_at' => current_time('mysql'),
-        )));
+        return intval($existente);
     }
+    $wpdb->insert($tabla, array_merge($campos, array(
+        'pestana' => $pestana, 'clave' => $clave, 'tipo' => $tipo, 'mes' => $mes, 'estado' => 'pendiente', 'creado_at' => current_time('mysql'),
+    )));
+    return $wpdb->insert_id;
+}
+
+// Auto-aplica un cambio recién creado si es de un tipo seguro (pago_nuevo/nota) Y está
+// emparejado sin ambigüedad — todo lo demás (sin match, teléfono, alumno nuevo, fila borrada)
+// se queda pendiente en la bandeja para que alguien decida (Ramiro, 3/11 17:05: "esto tiene que
+// pasar automático" para lo claro, nunca para lo dudoso). Si el efecto falla por cualquier
+// motivo, se deja pendiente igual — nunca se pierde el aviso.
+function blokes_sync_grupos_autoaplicar_si_seguro($cambio_id, $tipo, $match) {
+    if (!in_array($tipo, array('pago_nuevo', 'nota'), true) || empty($match['tipo']) || empty($match['id'])) return;
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $cambio = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla} WHERE id = %d", $cambio_id), ARRAY_A);
+    if (!$cambio || $cambio['estado'] !== 'pendiente') return;
+    $datos = json_decode($cambio['datos_json'], true) ?: array();
+    $resultado = blokes_sync_grupos_aplicar_efecto($cambio, $datos);
+    if (is_wp_error($resultado)) return;
+    $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => 'auto (sincronización)'), array('id' => $cambio_id));
+}
+
+// Dado el nombre real de una pestaña ("M-J 17.30"), busca entre los grupos que YA existen de
+// verdad (por suscripción) cuál combinación día/horario/edad produce esa misma pestaña —
+// blokes_sync_grupos_pestana_de_grupo() pero al revés, nunca un formato de horario inventado.
+// Si hay más de una combinación que encaje, o ninguna (Pilates/Yoga/Kids con nombres sueltos,
+// p. ej.), no se puede fiar: mejor la bandeja que crear un grupo fantasma con el horario mal.
+function blokes_sync_grupos_grupo_de_pestana($pestana_real, $pestanas_reales) {
+    $vistos = array();
+    $candidatos = array();
+    foreach (blokes_get_all_subscription_data() as $s) {
+        $dia = blokes_dia_a_pareja($s['dia'] ?? '');
+        $horario = $s['horario'] ?? '';
+        $edad = $s['edad'] ?? 'Adultos';
+        if ($dia === '' || $horario === '') continue;
+        $clave = $dia . '|' . $horario . '|' . $edad;
+        if (isset($vistos[$clave])) continue;
+        $vistos[$clave] = true;
+        if (blokes_sync_grupos_pestana_de_grupo($pestanas_reales, $dia, $horario) === $pestana_real) {
+            $candidatos[$clave] = array('dia' => $dia, 'horario' => $horario, 'edad' => $edad);
+        }
+    }
+    return count($candidatos) === 1 ? reset($candidatos) : null;
+}
+
+// "alumno_nuevo" sin match (nadie con ese teléfono en WooCommerce ni en externos): si la
+// pestaña se puede traducir sin ambigüedad a día/horario/edad reales, se crea de alta externa
+// — igual que si Eva lo hubiera añadido a mano desde "+ Alta externa", sin teléfono si no lo
+// trae el Excel (sale en "Revisar datos" hasta que alguien lo rellene). Si no se puede traducir
+// la pestaña con seguridad, se queda en la bandeja para decidir a mano.
+function blokes_sync_grupos_autocrear_alumno_nuevo($cambio_id, $tab, $pestanas_reales, $nombre, $telefono) {
+    global $wpdb;
+    $grupo = blokes_sync_grupos_grupo_de_pestana($tab, $pestanas_reales);
+    if (!$grupo) return;
+    $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/externos');
+    $req->set_param('nombre', $nombre);
+    $req->set_param('telefono', $telefono);
+    $req->set_param('dia', $grupo['dia']);
+    $req->set_param('horario', $grupo['horario']);
+    $req->set_param('edad', $grupo['edad']);
+    $req->set_param('notas', 'Detectado en el Excel de Eva (sincronización automática, pestaña ' . $tab . ').');
+    $resultado = superadmin_gestion_externos_crear($req);
+    if (is_wp_error($resultado)) return;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => 'auto (sincronización)'), array('id' => $cambio_id));
 }
 
 // El corazón del paso 2: lee TODAS las pestañas de la Hoja activa, las compara con la
@@ -5489,15 +5565,17 @@ function blokes_sync_grupos_sincronizar() {
             if (!$es_foto_inicial) {
                 $match = blokes_sync_grupos_emparejar($fila['telefono'], $subs_por_tel, $externos_por_tel);
                 if (!$anterior) {
-                    blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'alumno_nuevo', null, array(
+                    $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'alumno_nuevo', null, array(
                         'nombre' => $fila['nombre'], 'telefono' => $fila['telefono'],
                     ), $match);
+                    if (!$match) blokes_sync_grupos_autocrear_alumno_nuevo($cid, $tab, $pestanas, $fila['nombre'], $fila['telefono']);
                     $cambios_pestana++;
                 } else {
                     if (trim($anterior['notas']) !== trim($fila['notas']) && $fila['notas'] !== '') {
-                        blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'nota', null, array(
+                        $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'nota', null, array(
                             'notaAntes' => $anterior['notas'], 'notaDespues' => $fila['notas'],
                         ), $match);
+                        blokes_sync_grupos_autoaplicar_si_seguro($cid, 'nota', $match);
                         $cambios_pestana++;
                     }
                     $tel_norm_antes = blokes_externos_normaliza_telefono($anterior['telefono']);
@@ -5513,9 +5591,10 @@ function blokes_sync_grupos_sincronizar() {
                     $antes = $pagos_anteriores[$ym] ?? null;
                     $igual = $antes && floatval($antes['importe'] ?? 0) === floatval($pago['importe'] ?? 0) && ($antes['metodo'] ?? '') === ($pago['metodo'] ?? '');
                     if (!$igual) {
-                        blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'pago_nuevo', $ym, array(
+                        $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'pago_nuevo', $ym, array(
                             'importe' => $pago['importe'], 'metodo' => $pago['metodo'], 'fecha' => $pago['fecha'] ?? null,
                         ), $match);
+                        blokes_sync_grupos_autoaplicar_si_seguro($cid, 'pago_nuevo', $match);
                         $cambios_pestana++;
                     }
                 }
@@ -5552,6 +5631,37 @@ function blokes_sync_grupos_sincronizar() {
     return $resumen;
 }
 
+// Secreto de un solo uso para /cron-tick — se genera y se guarda la primera vez que se pide
+// (nunca hardcodeado, nunca en el código del repo público). Mismo patrón que el webhook de 9to5.
+function blokes_sync_grupos_cron_secreto() {
+    $s = get_option('blokes_sync_grupos_cron_secreto', '');
+    if ($s === '') {
+        $s = wp_generate_password(32, false);
+        update_option('blokes_sync_grupos_cron_secreto', $s, false);
+    }
+    return $s;
+}
+// GET /gestion/sync-grupos/cron-tick?secret=... — para un cron real del hosting (SiteGround:
+// panel → Herramientas de desarrollo → Cron Jobs, URL cada 10-15 min). Ruta pública (sin sesión
+// de WordPress) pero inútil sin el secreto exacto, y no hace nada si no hay Hoja configurada.
+function superadmin_sync_grupos_cron_tick($request) {
+    $secret = (string) $request->get_param('secret');
+    if (!hash_equals(blokes_sync_grupos_cron_secreto(), $secret)) {
+        return new WP_Error('secreto_invalido', 'Secreto no válido.', array('status' => 403));
+    }
+    if (!get_option('blokes_sync_grupos_sheet_prueba_id', '') && !get_option('blokes_sync_grupos_sheet_real_id', '')) {
+        return rest_ensure_response(array('success' => true, 'data' => array('omitido' => true)));
+    }
+    $r = blokes_sync_grupos_sincronizar();
+    if (is_wp_error($r)) return new WP_Error($r->get_error_code(), $r->get_error_message(), array('status' => 502));
+    return rest_ensure_response(array('success' => true, 'data' => $r));
+}
+
+function superadmin_sync_grupos_cron_url($request) {
+    $url = rest_url('superadmin/v1/gestion/sync-grupos/cron-tick') . '?secret=' . blokes_sync_grupos_cron_secreto();
+    return rest_ensure_response(array('success' => true, 'data' => array('url' => $url)));
+}
+
 function superadmin_sync_grupos_sincronizar_ahora() {
     $r = blokes_sync_grupos_sincronizar();
     if (is_wp_error($r)) return new WP_Error($r->get_error_code(), $r->get_error_message(), array('status' => 502));
@@ -5572,23 +5682,14 @@ function superadmin_sync_grupos_cambios_listar($request) {
     )));
 }
 
-// Aplicar: para "pago_nuevo" con una persona emparejada de verdad, reutiliza EXACTAMENTE el
-// mismo camino que "Marcar cobrado" a mano (con su protección de pagos adelantados incluida) o
-// el cobro de un externo — nunca lógica nueva para tocar dinero. El resto de tipos (nota,
-// teléfono, alumno nuevo, fila borrada) de momento solo se marca "aplicado" como aviso visto;
-// escribirlos solos en el perfil del alumno queda para una siguiente ronda (Ramiro: "se puede
-// valorar autoaplicar más adelante").
-function superadmin_sync_grupos_cambio_aplicar($request) {
-    blokes_sync_grupos_ensure_tables();
-    global $wpdb;
-    $id = intval($request['id']);
-    $tabla = blokes_sync_grupos_cambios_table();
-    $cambio = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla} WHERE id = %d", $id), ARRAY_A);
-    if (!$cambio) return new WP_Error('not_found', 'Cambio no encontrado.', array('status' => 404));
-    if ($cambio['estado'] !== 'pendiente') return new WP_Error('ya_resuelto', 'Este cambio ya estaba resuelto.', array('status' => 409));
-    $datos = json_decode($cambio['datos_json'], true) ?: array();
-
-    $resultado = null;
+// Efecto real de un cambio: "pago_nuevo" reutiliza EXACTAMENTE el mismo camino que "Marcar
+// cobrado" a mano (con su protección de pagos adelantados incluida) o el cobro de un externo —
+// nunca lógica nueva para tocar dinero. "nota" copia el texto al perfil (post meta de la
+// suscripción, o el campo notas del externo). El resto de tipos (teléfono, alumno nuevo, fila
+// borrada) sigue sin tener efecto propio — ambiguos a propósito, se quedan en la bandeja para
+// que alguien decida a mano (Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05: solo lo
+// claramente seguro se aplica solo; lo dudoso sigue pasando por la bandeja).
+function blokes_sync_grupos_aplicar_efecto($cambio, $datos) {
     if ($cambio['tipo'] === 'pago_nuevo') {
         if (!$cambio['match_tipo'] || !$cambio['match_id']) {
             return new WP_Error('sin_match', 'No hay nadie emparejado por teléfono para este pago — apúntalo a mano en Grupos.', array('status' => 409));
@@ -5603,18 +5704,49 @@ function superadmin_sync_grupos_cambio_aplicar($request) {
             $req->set_param('fecha', $fecha);
             $req->set_param('nota', 'Detectado en el Excel de Eva (sincronización automática, pestaña ' . $cambio['pestana'] . ').');
             $req->set_param('simular', false);
-            $resultado = superadmin_gestion_marcar_cobrado($req);
-        } else {
-            $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/externos/' . intval($cambio['match_id']) . '/pago');
-            $req->set_param('id', intval($cambio['match_id']));
-            $req->set_param('periodo', (string) $cambio['mes']);
-            $req->set_param('importe', floatval($datos['importe'] ?? 0));
-            $req->set_param('metodo', $datos['metodo'] ?? 'efectivo');
-            $req->set_param('fecha', $fecha);
-            $resultado = superadmin_gestion_externos_pago($req);
+            return superadmin_gestion_marcar_cobrado($req);
         }
-        if (is_wp_error($resultado)) return new WP_Error($resultado->get_error_code(), $resultado->get_error_message(), array('status' => 409));
+        $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/externos/' . intval($cambio['match_id']) . '/pago');
+        $req->set_param('id', intval($cambio['match_id']));
+        $req->set_param('periodo', (string) $cambio['mes']);
+        $req->set_param('importe', floatval($datos['importe'] ?? 0));
+        $req->set_param('metodo', $datos['metodo'] ?? 'efectivo');
+        $req->set_param('fecha', $fecha);
+        return superadmin_gestion_externos_pago($req);
     }
+    if ($cambio['tipo'] === 'nota') {
+        if (!$cambio['match_tipo'] || !$cambio['match_id']) {
+            return new WP_Error('sin_match', 'No hay nadie emparejado por teléfono para esta nota — apúntala a mano en Grupos.', array('status' => 409));
+        }
+        $nota = (string) ($datos['notaDespues'] ?? '');
+        if ($cambio['match_tipo'] === 'sub') {
+            $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/nota');
+            $req->set_param('sub_id', intval($cambio['match_id']));
+            $req->set_param('nota', $nota);
+            return superadmin_gestion_nota($req);
+        }
+        global $wpdb;
+        $wpdb->update(blokes_externos_table(), array(
+            'notas' => mb_substr(sanitize_text_field($nota), 0, 500), 'updated_at' => current_time('mysql'),
+        ), array('id' => intval($cambio['match_id'])));
+        blokes_gestion_log(intval($cambio['match_id']), 'externo_actualizar', null, array('notas' => $nota), 'Nota detectada en el Excel de Eva (sincronización).');
+        return rest_ensure_response(array('success' => true));
+    }
+    return null; // resto de tipos: sin efecto todavía, solo queda visto en la bandeja
+}
+
+function superadmin_sync_grupos_cambio_aplicar($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $id = intval($request['id']);
+    $tabla = blokes_sync_grupos_cambios_table();
+    $cambio = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla} WHERE id = %d", $id), ARRAY_A);
+    if (!$cambio) return new WP_Error('not_found', 'Cambio no encontrado.', array('status' => 404));
+    if ($cambio['estado'] !== 'pendiente') return new WP_Error('ya_resuelto', 'Este cambio ya estaba resuelto.', array('status' => 409));
+    $datos = json_decode($cambio['datos_json'], true) ?: array();
+
+    $resultado = blokes_sync_grupos_aplicar_efecto($cambio, $datos);
+    if (is_wp_error($resultado)) return new WP_Error($resultado->get_error_code(), $resultado->get_error_message(), array('status' => 409));
 
     $u = wp_get_current_user();
     $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => $u ? $u->user_login : ''), array('id' => $id));
@@ -6806,6 +6938,15 @@ function superadmin_campanas_destinatarios($request) {
 
     $subs_por_tel     = blokes_campanas_subs_por_telefono();
     $externos_por_tel = blokes_campanas_externos_por_telefono();
+    // Diagnóstico temporal (NOTAS_PARA_CODE_whatsapp.md, 3/11 17:00: yaEnVigor sale false en los
+    // 521 aunque el teléfono coincide con billing_phone) — para saber si el problema es que
+    // blokes_get_all_subscription_data() devuelve pocas/cero filas en este contexto (sitio
+    // equivocado, caché...) antes de seguir adivinando.
+    $debug = array(
+        'blogId' => get_current_blog_id(),
+        'totalSubs' => count(blokes_get_all_subscription_data()),
+        'subsPorTel' => count($subs_por_tel),
+    );
     $envios_por_contacto = array();
     foreach ($wpdb->get_results($wpdb->prepare(
         "SELECT * FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d", $id
@@ -6856,6 +6997,7 @@ function superadmin_campanas_destinatarios($request) {
             'remitente' => $campana['remitente'],
         ),
         'destinatarios' => $out,
+        '_debug' => $debug,
     )));
 }
 
