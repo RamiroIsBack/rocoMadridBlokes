@@ -47,6 +47,13 @@ function dayLabel(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   return `${DOW_LABEL[new Date(y, m - 1, d).getDay()]} ${d}/${m}`
 }
+const DOW_LABEL_LARGO = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
+const MES_LABEL_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+// "Semana del ISO" en humano (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30: Ramiro pidió "lunes 2 de noviembre" en vez de "2026-11-02").
+function weekLabel(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return `${DOW_LABEL_LARGO[new Date(y, m - 1, d).getDay()]} ${d} de ${MES_LABEL_LARGO[m - 1]}`
+}
 // Una tarea suelta con texto libre (sin tipo de catálogo) se guarda como taskTypeId "custom"
 // con el texto en params.texto (creador de tareas de Álvaro, Ramiro 1/11 17:20).
 function taskLabel(t, taskTypeById) {
@@ -141,14 +148,28 @@ function HoyView({ config, workers, workerId, onChooseWorker, canManage }) {
   useEffect(() => { reload() }, [reload])
 
   if (!workerId || !worker) {
+    // Los eventuales (solo vienen para compes puntuales) se enseñan aparte para que no se
+    // confundan con el equipo de mantenimiento normal (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30).
+    const habituales = workers.filter(w => !w.eventual)
+    const eventuales = workers.filter(w => w.eventual)
     return (
       <div className="org__whoami">
         <p className="org__hint">¿Quién eres?</p>
         <div className="org__whoami-list">
-          {workers.map(w => (
+          {habituales.map(w => (
             <button key={w.id} className="org__whoami-btn" onClick={() => onChooseWorker(w.id)}>{w.name}</button>
           ))}
         </div>
+        {eventuales.length > 0 && (
+          <>
+            <p className="org__hint">Solo compe</p>
+            <div className="org__whoami-list">
+              {eventuales.map(w => (
+                <button key={w.id} className="org__whoami-btn" onClick={() => onChooseWorker(w.id)}>{w.name}</button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     )
   }
@@ -402,7 +423,17 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   }, [showTest])
   useEffect(() => { reloadWeeks() }, [reloadWeeks])
 
-  const openWeek = id => api('GET', `/equipacion/weeks/${id}`).then(r => setDetail(r.data)).catch(() => {})
+  // Si se pide abrir otra semana (o recargar la misma) antes de que responda la petición
+  // anterior, esa respuesta vieja no debe pisar a la nueva al llegar tarde — guardamos solo la
+  // del último `openWeek` pedido (cowork, 3/11 11:30: sospecha de que el tablero se quedaba con
+  // datos de otra semana).
+  const openWeekSeq = useRef(0)
+  const openWeek = id => {
+    const seq = ++openWeekSeq.current
+    return api('GET', `/equipacion/weeks/${id}`)
+      .then(r => { if (seq === openWeekSeq.current) setDetail(r.data) })
+      .catch(() => {})
+  }
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const workerById = useMemo(() => Object.fromEntries(workers.map(w => [w.id, w])), [workers])
 
@@ -434,6 +465,17 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
     try { await api('POST', `/equipacion/tasks/${taskId}/postpone`) } catch {}
     await openWeek(detail.id)
     setPostponing(null)
+  }
+
+  // Quitar una tarea de verdad (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30) — distinto de
+  // "→ Semana siguiente", que la mueve. Solo responsable/socios ven el botón (canManage).
+  const [deletingTask, setDeletingTask] = useState(null)
+  const deleteTask = async taskId => {
+    if (!window.confirm('¿Quitar esta tarea? No se puede deshacer.')) return
+    setDeletingTask(taskId)
+    try { await api('DELETE', `/equipacion/tasks/${taskId}`) } catch {}
+    await openWeek(detail.id)
+    setDeletingTask(null)
   }
 
   const [editingDaysFor, setEditingDaysFor] = useState(null)
@@ -535,7 +577,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
             <button className="org__link-btn" onClick={() => setAddingPerson(true)}>+ Persona</button>
           ))}
         </div>
-        <h3 className="org__section-title">Semana del {detail.startDate} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
+        <h3 className="org__section-title">Semana del {weekLabel(detail.startDate)} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
         {detail.isAuto && <p className="org__hint org__hint--auto">Semana creada automáticamente: reparte las tareas arrastrándolas.</p>}
         <p className="org__hint">Arrastra una tarjeta a otra persona (o a otro día de esa persona) para reasignarla.</p>
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
@@ -596,6 +638,9 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
                           onPointerDown={onTileDown(t.id, t.date, a.id)}
                           onToggleDone={toggleTaskDone}
                           onPostpone={postponeTask}
+                          canManage={canManage}
+                          onDelete={deleteTask}
+                          deleting={deletingTask === t.id}
                         />
                       ))}
                     </div>
@@ -642,7 +687,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
       <ul className="org__week-list">
         {weeks.map(w => (
           <li key={w.id} className="org__week-row" onClick={() => openWeek(w.id)}>
-            <span>Semana del {w.startDate}{w.isAuto ? ' · automática' : ''}</span>
+            <span>Semana del {weekLabel(w.startDate)}{w.isAuto ? ' · automática' : ''}</span>
             <span className="org__week-subzones">{w.subzones.map(s => `#${s}`).join(', ')}</span>
           </li>
         ))}
@@ -668,7 +713,7 @@ function HistoricoView() {
       {rows.map(w => (
         <div key={w.id} className="org__historico-row">
           <p className="org__historico-title">
-            Semana del {w.startDate}{w.archived ? ' · archivada' : ''}
+            Semana del {weekLabel(w.startDate)}{w.archived ? ' · archivada' : ''}
           </p>
           <p className="org__historico-meta">
             {w.hechas} hecha(s) · {w.retrasadas} retrasada(s) · {w.pendientes} sin hacer todavía
@@ -941,7 +986,7 @@ function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, onDone, o
 // no se cancelan, solo se mueven a la semana siguiente ("→ Semana
 // siguiente"), y quedan marcadas "retrasada" para que no se pierda el
 // histórico de lo que se fue quedando atrás.
-function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone }) {
+function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canManage, onDelete, deleting }) {
   const params = Object.entries(task.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
   const movedAway = task.status === 'retrasada' && task.movedToTaskId
   const isRetrasada = task.status === 'retrasada'
@@ -973,6 +1018,16 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
           onClick={() => onPostpone(task.id)}
           disabled={postponing}
         >{postponing ? '...' : '→ Semana siguiente'}</button>
+      )}
+      {canManage && (
+        <button
+          type="button"
+          className="org__tile-delete"
+          onPointerDown={e => e.stopPropagation()}
+          onClick={() => onDelete(task.id)}
+          disabled={deleting}
+          title="Quitar esta tarea"
+        >{deleting ? '...' : '✕ Quitar'}</button>
       )}
     </div>
   )
@@ -1008,10 +1063,13 @@ function NormasView({ config, canManage, onConfigChanged }) {
     setEditing(null); setEditForm(null)
     onConfigChanged(); reloadAll()
   }
+  const [showInactive, setShowInactive] = useState(false)
   const toggleActive = async t => {
     try {
-      if (t.active) await api('DELETE', `/equipacion/task-types/${t.id}`)
-      else await api('PUT', `/equipacion/task-types/${t.id}`, { active: true })
+      if (t.active) {
+        // Si nunca se usó, el backend la borra de verdad en vez de solo desactivarla.
+        await api('DELETE', `/equipacion/task-types/${t.id}`)
+      } else await api('PUT', `/equipacion/task-types/${t.id}`, { active: true })
     } catch (e) { window.alert(e.message) }
     onConfigChanged(); reloadAll()
   }
@@ -1025,19 +1083,19 @@ function NormasView({ config, canManage, onConfigChanged }) {
           la haya hecho antes. {canManage ? 'Puedes crear tareas nuevas, editarlas o desactivarlas (nunca se borran, para no perder el histórico).' : 'Solo el responsable o un socio pueden crear o editar tareas del catálogo.'}
         </p>
         <ul className="org__task-list">
-          {types.map(t => (
-            <li key={t.id} className={`org__task${t.active === false ? ' org__task--inactive' : ''}`}>
+          {types.filter(t => t.active !== false).map(t => (
+            <li key={t.id} className="org__task">
               {editing === t.id ? (
                 <TaskTypeEditForm form={editForm} setForm={setEditForm} config={config} onSave={() => save(t.id)} onCancel={() => { setEditing(null); setEditForm(null) }} />
               ) : (
                 <>
-                  <span className="org__task-name">{t.name}{t.active === false ? ' (desactivada)' : ''}</span>
+                  <span className="org__task-name">{t.name}</span>
                   {t.description && <span className="org__task-params">{t.description}</span>}
                   <span className="org__task-params">cada {t.periodicityWeeks ?? 1} semana(s){t.preferredDay ? ` · ${DAY_LABEL[t.preferredDay] || t.preferredDay}` : ''}{t.subzone ? ` · subzona #${t.subzone}` : ''}{t.durationMin ? ` · ${t.durationMin} min` : ''}{t.leadOnly ? ' · siempre al responsable' : ''}</span>
                   {canManage && (
                     <span className="org__periodicity-edit">
                       <button className="org__link-btn" onClick={() => startEdit(t)}>Editar</button>
-                      <button className="org__link-btn" onClick={() => toggleActive(t)}>{t.active === false ? 'Reactivar' : 'Desactivar'}</button>
+                      <button className="org__link-btn" onClick={() => toggleActive(t)}>Desactivar</button>
                     </span>
                   )}
                 </>
@@ -1045,6 +1103,25 @@ function NormasView({ config, canManage, onConfigChanged }) {
             </li>
           ))}
         </ul>
+        {canManage && types.some(t => t.active === false) && (
+          <>
+            <button className="org__link-btn" onClick={() => setShowInactive(s => !s)}>
+              {showInactive ? 'Ocultar desactivadas' : `Ver desactivadas (${types.filter(t => t.active === false).length})`}
+            </button>
+            {showInactive && (
+              <ul className="org__task-list">
+                {types.filter(t => t.active === false).map(t => (
+                  <li key={t.id} className="org__task org__task--inactive">
+                    <span className="org__task-name">{t.name} (desactivada)</span>
+                    <span className="org__periodicity-edit">
+                      <button className="org__link-btn" onClick={() => toggleActive(t)}>Reactivar</button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
         {canManage && !showCreate && <button className="org__add-btn" onClick={() => setShowCreate(true)}>+ Nueva tarea</button>}
         {canManage && showCreate && (
           <CreateTaskTypeForm config={config} onDone={() => { setShowCreate(false); onConfigChanged(); reloadAll() }} onCancel={() => setShowCreate(false)} />
@@ -1297,7 +1374,7 @@ function CompePlanView({ compId, taskTypeById, workers }) {
       </div>
       {Object.keys(byWeek).sort().map(weekStart => (
         <div key={weekStart} className="org__historico-row">
-          <p className="org__historico-title">Semana del {weekStart}</p>
+          <p className="org__historico-title">Semana del {weekLabel(weekStart)}</p>
           <ul className="org__task-list">
             {byWeek[weekStart].map(t => (
               <li key={t.id} className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}`}>

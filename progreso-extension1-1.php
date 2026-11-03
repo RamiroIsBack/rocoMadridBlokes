@@ -691,7 +691,8 @@ add_action('rest_api_init', function() {
     ));
 
     register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)', array(
-        'methods' => 'PUT', 'callback' => 'progreso_equip_update_task', 'permission_callback' => $equip_perm,
+        array('methods' => 'PUT',    'callback' => 'progreso_equip_update_task', 'permission_callback' => $equip_perm),
+        array('methods' => 'DELETE', 'callback' => 'progreso_equip_delete_task',  'permission_callback' => $equip_perm),
     ));
     register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)/postpone', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_postpone_task', 'permission_callback' => $equip_perm,
@@ -9744,14 +9745,24 @@ function progreso_equip_update_task_type($request) {
     return rest_ensure_response(array('success' => true));
 }
 
-// DELETE /equipacion/task-types/{id} — "borrar" desde la interfaz es desactivar, nunca se
-// borra el tipo de verdad (el histórico de tareas ya hechas con ese tipo se quedaría sin
-// nombre). Reactivable después con PUT { active: true }.
+// DELETE /equipacion/task-types/{id} — si ya se usó alguna vez (hay tareas con este
+// taskTypeId), "borrar" desde la interfaz es desactivar, nunca se borra el tipo de verdad (el
+// histórico de tareas ya hechas con ese tipo se quedaría sin nombre); reactivable después con
+// PUT { active: true }. Si NUNCA se usó, se borra de verdad — para quitar del todo una prueba
+// o un tipo creado por error (cowork, NOTAS_PARA_CODE_equipacion.md 3/11 11:30: la "PRUEBA
+// Cowork (borrar)" se quedaba desactivada para siempre en la lista).
 function progreso_equip_deactivate_task_type($request) {
     global $wpdb;
     $id = sanitize_text_field((string) $request['id']);
-    $wpdb->update(progreso_equip_table('task_types'), array('active' => 0), array('id' => $id), array('%d'), array('%s'));
-    return rest_ensure_response(array('success' => true));
+    $usado = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM " . progreso_equip_table('tasks') . " WHERE task_type_id = %s", $id
+    ));
+    if (intval($usado) > 0) {
+        $wpdb->update(progreso_equip_table('task_types'), array('active' => 0), array('id' => $id), array('%d'), array('%s'));
+        return rest_ensure_response(array('success' => true, 'deactivated' => true));
+    }
+    $wpdb->delete(progreso_equip_table('task_types'), array('id' => $id), array('%s'));
+    return rest_ensure_response(array('success' => true, 'deleted' => true));
 }
 
 // POST /equipacion/tasks — tarea suelta para un día y persona concretos, sin esperar al
@@ -11052,6 +11063,22 @@ function progreso_equip_update_task($request) {
     }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     $wpdb->update(progreso_equip_table('tasks'), $upd, array('id' => $id), $fmt, array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+// Quitar una tarea concreta de la semana (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30: Ramiro
+// quiere poder quitarlas, no solo moverlas a la semana siguiente). Borrado de verdad, no un
+// estado "cancelada" — el frontend solo enseña el botón al responsable o a un socio. Si otra
+// tarea ya movida apuntaba a esta como destino, se desenlaza para no dejar un movedToTaskId
+// roto.
+function progreso_equip_delete_task($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $tasks_table = progreso_equip_table('tasks');
+    $task = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$tasks_table} WHERE id = %d", $id));
+    if (!$task) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
+    $wpdb->update($tasks_table, array('moved_to_task_id' => null), array('moved_to_task_id' => $id), array('%s'), array('%d'));
+    $wpdb->delete($tasks_table, array('id' => $id), array('%d'));
     return rest_ensure_response(array('success' => true));
 }
 
