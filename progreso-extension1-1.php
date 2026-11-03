@@ -3858,6 +3858,15 @@ function superadmin_gestion_grupos($request) {
                 'estadoPedido' => $o_status,
             );
         }
+        // Un pedido viejo sin pagar (de un mes anterior, ya cancelado o simplemente colgando)
+        // no debe seguir marcando "pendiente" si el mes EN CURSO ya tiene un pedido de verdad
+        // completed/processing — antes se quedaba el pendiente más reciente encontrado aunque
+        // hubiera un pago posterior que lo dejara obsoleto (cowork, 3/11 18:40: dos alumnos que
+        // ya habían pagado noviembre seguían saliendo en "Pendientes de cobrar" con una fecha de
+        // vencimiento vieja, de un pedido de octubre).
+        if ($pendiente && !empty($pagos[$hoy_ym]) && in_array($pagos[$hoy_ym]['estadoPedido'] ?? '', array('completed', 'processing'), true)) {
+            $pendiente = null;
+        }
         if ($pendiente) unset($pendiente['ts']);
 
         // Trimestrales y anuales (Ramiro, 31/10 17:11): un pago cubre varios meses de golpe, así
