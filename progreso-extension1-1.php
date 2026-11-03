@@ -979,6 +979,9 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/cambios/(?P<id>\d+)/descartar', array(
         'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_cambio_descartar', 'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/reintentar-cobro', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_reintentar_cobro', 'permission_callback' => $sa_perm,
+    ));
 
     // Calendario de días especiales del club (NOTAS_PARA_CODE_calendario.md): festivos, cierres
     // y horarios especiales, con una decisión por día. Ver y listar: cualquiera con acceso a
@@ -4766,15 +4769,30 @@ function blokes_sync_grupos_normalizar_nombre($s) {
     $s = preg_replace('/\s+/', ' ', $s);
     return trim($s);
 }
+// Pestañas reales de Eva van abreviadas ("L-X 19.00", "M-J 20.30"), no con el nombre completo
+// del día que usa Grupos ("Lunes-Miércoles") — cowork, 3/11 12:29 (prueba real: llegaba
+// "Miércoles" suelto, ni siquiera la pareja completa, y tampoco habría bastado por la abreviatura).
+function blokes_sync_grupos_dia_abrev($dia) {
+    $map = array('Lunes-Miércoles' => 'L-X', 'Martes-Jueves' => 'M-J', 'Viernes' => 'V', 'Sábado' => 'S');
+    return $map[$dia] ?? $dia;
+}
 function blokes_sync_grupos_pestana_de_grupo($pestanas_reales, $dia, $horario) {
-    $buscado = blokes_sync_grupos_normalizar_nombre($dia . ' ' . $horario);
-    if ($buscado === '') return null;
-    $candidatas = array();
-    foreach ($pestanas_reales as $p) {
-        $pn = blokes_sync_grupos_normalizar_nombre($p);
-        if ($pn === $buscado || strpos($pn, $buscado) === 0 || strpos($buscado, $pn) === 0) $candidatas[] = $p;
+    // Varias formas de nombrar el mismo grupo: completa ("Lunes-Miércoles 19:00-20:30") y
+    // abreviada como en el Excel ("L-X 19.00") — la primera que dé una única coincidencia gana;
+    // nunca se mezclan candidatas de las dos formas a la vez (evita un falso "ambiguo" si una
+    // forma encaja con una pestaña y la otra con otra distinta por casualidad).
+    $formas = array_unique(array_filter(array($dia . ' ' . $horario, blokes_sync_grupos_dia_abrev($dia) . ' ' . $horario)));
+    foreach ($formas as $forma) {
+        $buscado = blokes_sync_grupos_normalizar_nombre($forma);
+        if ($buscado === '') continue;
+        $candidatas = array();
+        foreach ($pestanas_reales as $p) {
+            $pn = blokes_sync_grupos_normalizar_nombre($p);
+            if ($pn === $buscado || strpos($pn, $buscado) === 0 || strpos($buscado, $pn) === 0) $candidatas[] = $p;
+        }
+        if (count($candidatas) === 1) return $candidatas[0];
     }
-    return count($candidatas) === 1 ? $candidatas[0] : null;
+    return null;
 }
 
 // Método tal y como lo escribe Eva en el Excel, a partir del método de WooCommerce — mapeo
@@ -4845,9 +4863,41 @@ function blokes_sync_grupos_escribir_cobro($dia, $horario, $telefono, $nombre, $
 // de blokes_get_all_subscription_data(), que ya los trae calculados de la variación del producto.
 function blokes_sync_grupos_dia_horario_de_sub($sub_id) {
     foreach (blokes_get_all_subscription_data() as $s) {
-        if (intval($s['id'] ?? 0) === intval($sub_id)) return array('dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '');
+        // El día de la suscripción es un día suelto ("Miércoles"), pero el grupo (y la pestaña
+        // de Eva) es la pareja completa ("Lunes-Miércoles") — mismo criterio que Grupos (cowork,
+        // 3/11 12:29: le llegaba el día suelto y la escritura nunca encontraba su pestaña).
+        if (intval($s['id'] ?? 0) === intval($sub_id)) return array('dia' => blokes_dia_a_pareja($s['dia'] ?? ''), 'horario' => $s['horario'] ?? '');
     }
     return array('dia' => '', 'horario' => '');
+}
+
+// POST /gestion/sync-grupos/reintentar-cobro — reescribir a mano UN cobro concreto en el Excel
+// (NOTAS_PARA_CODE_sync_grupos.md, 3/11 12:29): para pagos que fallaron al escribir antes del
+// arreglo de la pestaña, o que nunca pasaron por este camino (ya estaban completados en
+// WooCommerce antes de que existiera esta escritura automática). Nunca toca WooCommerce — solo
+// repite blokes_sync_grupos_escribir_cobro con teléfono/nombre de la suscripción.
+function superadmin_sync_grupos_reintentar_cobro($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id  = intval($request->get_param('subId'));
+    $ym      = sanitize_text_field((string) $request->get_param('ym'));
+    $importe = floatval($request->get_param('importe'));
+    $metodo  = sanitize_text_field((string) $request->get_param('metodo'));
+    $fecha   = sanitize_text_field((string) $request->get_param('fecha'));
+    if (!$sub_id || !preg_match('/^\d{4}-\d{2}$/', $ym) || $importe <= 0 || !$metodo || !$fecha) {
+        return new WP_Error('invalid_data', 'Faltan datos o están mal formados (subId, ym AAAA-MM, importe, metodo, fecha dd/mm/aaaa).', array('status' => 400));
+    }
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    $dh = blokes_sync_grupos_dia_horario_de_sub($sub_id);
+    blokes_sync_grupos_escribir_cobro(
+        $dh['dia'], $dh['horario'], $sub->get_billing_phone(),
+        trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()),
+        $ym, $importe, $metodo, $fecha
+    );
+    blokes_gestion_log(0, 'sync_grupos_reintentar_cobro', null, array('subId' => $sub_id, 'ym' => $ym, 'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha));
+    return rest_ensure_response(array('success' => true));
 }
 
 function superadmin_sync_grupos_config_get() {

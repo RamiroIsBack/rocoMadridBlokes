@@ -141,6 +141,9 @@ export const syncGruposSincronizar    = ()         => gestionPost('/gestion/sync
 export const syncGruposCambiosGet     = (estado = 'pendiente') => gestionCall('GET', `/gestion/sync-grupos/cambios?estado=${estado}`)
 export const syncGruposCambioAplicar  = id         => gestionPost(`/gestion/sync-grupos/cambios/${id}/aplicar`)
 export const syncGruposCambioDescartar = id        => gestionPost(`/gestion/sync-grupos/cambios/${id}/descartar`)
+// Reintentar a mano la escritura Web→Excel de un cobro concreto (3/11 12:29: para pagos que
+// fallaron antes del arreglo de la pestaña, o que nunca pasaron por este camino).
+export const syncGruposReintentarCobro = body       => gestionPost('/gestion/sync-grupos/reintentar-cobro', body)
 
 // `from`: primer mes a incluir ('YYYY-MM', incluido) o '' para no limitar ("Todo").
 export function useExpenses(from, entity = 'all', excludeInternal = true) {

@@ -9,7 +9,7 @@ import {
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
-  syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar,
+  syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
   gestionFacturasPendientesGet, gestionFacturaCompletar,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
@@ -1672,6 +1672,61 @@ function SyncGruposCambiosPanel() {
             </tbody>
           </table>
         </div>
+      )}
+
+      <hr style={{ margin: '18px 0' }} />
+      <ReintentarCobroExcel />
+    </div>
+  )
+}
+
+// Reescribir a mano un cobro concreto Web→Excel (NOTAS_PARA_CODE_sync_grupos.md, 3/11 12:29):
+// para pagos que fallaron antes del arreglo de la pestaña (día suelto en vez de pareja) o que
+// nunca pasaron por este camino (completado por un adelantado antes de que existiera Web→Excel).
+// No toca WooCommerce — solo repite la escritura en la Hoja.
+function ReintentarCobroExcel() {
+  const [form, setForm] = useState({ subId: '', ym: '', importe: '', metodo: 'transferencia', fecha: '' })
+  const [busy, setBusy] = useState(false)
+  const [resultado, setResultado] = useState(null)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const enviar = async () => {
+    setBusy(true); setResultado(null)
+    try {
+      await syncGruposReintentarCobro({
+        subId: Number(form.subId), ym: form.ym, importe: Number(form.importe), metodo: form.metodo, fecha: form.fecha,
+      })
+      setResultado({ ok: true })
+    } catch (e) { setResultado({ ok: false, error: e.message }) }
+    setBusy(false)
+  }
+
+  return (
+    <div>
+      <p className="sv-note">
+        Reintentar a mano la escritura en el Excel de un cobro concreto (no toca WooCommerce, ya tiene que estar
+        cobrado ahí). Teléfono y nombre se sacan de la suscripción.
+      </p>
+      <div className="org__add-row"><label>ID suscripción</label><input type="number" value={form.subId} onChange={e => set('subId', e.target.value)} style={{ width: 90 }} /></div>
+      <div className="org__add-row"><label>Mes (AAAA-MM)</label><input type="text" placeholder="2026-11" value={form.ym} onChange={e => set('ym', e.target.value)} style={{ width: 90 }} /></div>
+      <div className="org__add-row"><label>Importe €</label><input type="number" step="0.01" value={form.importe} onChange={e => set('importe', e.target.value)} style={{ width: 90 }} /></div>
+      <div className="org__add-row">
+        <label>Método</label>
+        <select value={form.metodo} onChange={e => set('metodo', e.target.value)}>
+          <option value="transferencia">Transferencia</option>
+          <option value="efectivo">Efectivo</option>
+          <option value="tarjeta">Tarjeta</option>
+          <option value="bizum">Bizum</option>
+        </select>
+      </div>
+      <div className="org__add-row"><label>Fecha (dd/mm/aaaa)</label><input type="text" placeholder="29/10/2026" value={form.fecha} onChange={e => set('fecha', e.target.value)} style={{ width: 110 }} /></div>
+      <button className="sv-tests-save" onClick={enviar} disabled={busy || !form.subId || !form.ym || !form.importe || !form.fecha}>
+        {busy ? 'Enviando…' : 'Reintentar escritura'}
+      </button>
+      {resultado && (
+        resultado.ok
+          ? <p className="sv-ot-muted">Hecho — revisa el log de gestión o la Hoja para confirmar que esta vez encontró la pestaña y la fila.</p>
+          : <p className="sv-error">Error: {resultado.error}</p>
       )}
     </div>
   )
