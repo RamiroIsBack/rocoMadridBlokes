@@ -226,6 +226,28 @@ export default function BudgetMatrix({ budget, cats, loaded, year, incomeReal, o
                 {totalCell(sum(resB), sum(resR.filter((_, i) => has(i))), sum(resB.filter((_, i) => has(i))))}
               </tr>
             )}
+            {hasIncome && resB.some(v => v < -0.5) && (
+              <tr className="bud-mx-goal">
+                <td className="bud-mx-name" title="En los meses en que lo esperado no cubre los pagos: lo mínimo que habría que cobrar para no perder dinero ese mes">
+                  🎯 Objetivo para cubrir el mes
+                </td>
+                {MONTHS.map((_, i) => {
+                  if (resB[i] >= -0.5) return <td key={i} className="sa-pay-num sa-pay-muted">—</td>
+                  const goal = -totB[i]
+                  const reached = has(i) && incR[i] >= goal - 0.5
+                  return (
+                    <td key={i} className="sa-pay-num bud-mx-both"
+                        title={has(i) ? `Cobrado ${fmt(incR[i])} · ${reached ? 'objetivo cumplido' : `faltan ${fmt(goal - incR[i])}`}` : `Esperado ${fmt(incB[i])} · faltan ${fmt(goal - incB[i])}`}>
+                      <span className="bud-mx-r">{fmt(goal)}</span>
+                      <span className={`bud-mx-b ${has(i) ? (reached ? 'bud-pos' : 'bud-neg') : ''}`}>
+                        {has(i) ? (reached ? '✓ cumplido' : `faltan ${fmt(goal - incR[i])}`) : `+${fmt(goal - incB[i])} sobre lo esperado`}
+                      </span>
+                    </td>
+                  )
+                })}
+                <td className="sa-pay-num sa-pay-muted">—</td>
+              </tr>
+            )}
             {mode === 'ambos' && (
               <tr className="bud-mx-diff">
                 <td className="bud-mx-name">Diferencia pagos (real − ppto)</td>
@@ -245,6 +267,7 @@ export default function BudgetMatrix({ budget, cats, loaded, year, incomeReal, o
       <p className="sa-pay-note">
         Igual que el Excel: una fila por partida y una columna por mes, en euros sin decimales.
         Ingresos reales = todo lo cobrado por ventas en el banco (cuotas, TPV, Bizum, Wellhub, transferencias), sin separar por clase.
+        🎯 En los meses en que lo esperado no llega a los pagos, el objetivo es lo mínimo a cobrar para no perder dinero ese mes.
         Los meses en gris aún no tienen extracto del banco. El total del real suma solo esos meses y se compara
         con el presupuesto de los mismos meses. ⇄ = varias partidas comparten categoría del banco y el real se reparte
         entre ellas según su presupuesto. Esta vista no aplica el arrastre; para eso está "Por mes".
