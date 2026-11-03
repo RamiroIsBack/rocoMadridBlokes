@@ -10268,6 +10268,13 @@ function progreso_equip_migrar_principal_a_club($request) {
                 'is_lead' => $w['is_lead'], 'active' => $w['active'], 'eventual' => $w['eventual'],
             ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d', '%d'));
             $worker_map[$oid] = $wpdb->insert_id;
+        } else {
+            // En el informe (sin escribir) todavía no hay un id real del club: un id negativo de
+            // relleno basta para que el resto del informe pueda contar bien las asignaciones y
+            // tareas de este trabajador en vez de salir como "sin mapear" (cowork, 3/11 12:35: el
+            // aviso hacía parecer que se iba a perder el reparto del fin de semana de montaje,
+            // cuando al confirmar de verdad sí se crea el trabajador antes de mapear).
+            $worker_map[$oid] = -$oid;
         }
     }
 
