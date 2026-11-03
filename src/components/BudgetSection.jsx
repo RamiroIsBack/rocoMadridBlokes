@@ -16,9 +16,10 @@ function fmtDiff(v) {
   return `${v > 0 ? '+' : '−'}${fmtEur(Math.abs(v))}`
 }
 
-// Pago presupuestado que aún no aparece en el banco: no es un ahorro, solo está pendiente
-const isPending = (b, r) => b < -0.005 && Math.abs(r) < 0.005
-const diffClass = (b, r) => isPending(b, r) ? 'sa-pay-muted' : r - b > 0.005 ? 'bud-pos' : r - b < -0.005 ? 'bud-neg' : ''
+// Color de la diferencia según el estado: lo que pasa al mes siguiente va en gris (no es ahorro todavía)
+const STATUS_CLASS = { ahorro: 'bud-pos', sobrecoste: 'bud-neg', imprevisto: 'bud-neg', arrastra: 'sa-pay-muted', 'sin-movimiento': 'sa-pay-muted' }
+const diffClass = (target, real, isFinal) => STATUS_CLASS[statusOf(target, real, true, isFinal)] || ''
+const fmtShort = d => Math.abs(d) < 0.5 ? '0' : `${d > 0 ? '+' : '−'}${Math.round(Math.abs(d)).toLocaleString('es-ES', { useGrouping: 'always' })}`
 
 function Status({ status }) {
   if (!status) return null
@@ -270,21 +271,29 @@ export default function BudgetSection() {
   })
 
   // ── Filas del mes seleccionado ──
+  // b = presupuesto del mes, k = arrastrado de meses anteriores, t = disponible (b + k), r = real, out = pasa al siguiente
   const m = month ?? 0
   const monthRows = Object.entries(cats)
-    .map(([cat, c]) => ({ cat, ...c, b: c.budget[m], r: round2(c.real[m]), list: c.items[m] }))
-    .filter(row => Math.abs(row.b) > 0.005 || Math.abs(row.r) > 0.005)
-    .sort((a, b) => a.b - b.b || a.r - b.r)
+    .map(([cat, c]) => ({ cat, ...c, b: c.budget[m], k: c.carry[m], t: c.target[m], r: round2(c.real[m]), out: c.carryOut[m], list: c.items[m] }))
+    .filter(row => Math.abs(row.b) > 0.005 || Math.abs(row.k) > 0.005 || Math.abs(row.r) > 0.005)
+    .sort((a, b) => a.t - b.t || a.r - b.r)
   const hasMonth = loaded.has(m)
   const mBudget  = sum(monthRows.map(r => r.b))
+  const mCarry   = sum(monthRows.map(r => r.k))
+  const mTarget  = sum(monthRows.map(r => r.t))
   const mReal    = sum(monthRows.map(r => r.r))
+  const mOut     = sum(monthRows.map(r => r.out))
+  // Sobrecostes: lo gastado de más sobre lo disponible, más los gastos sin presupuesto
+  const mOver    = sum(monthRows.map(r => (r.t <= 0.005 && r.r < r.t ? r.r - r.t : 0)))
+  const nextLabel = m < 11 ? MONTHS[m + 1] : 'cierre'
 
   // ── Acumulado: solo meses con extracto del banco ──
-  const loadedIdx = [...loaded]
-  const ytdBudget = sum(Object.values(cats).map(c => sum(loadedIdx.map(i => c.budget[i]))))
-  const ytdReal   = sum(Object.values(cats).map(c => sum(loadedIdx.map(i => c.real[i]))))
-  const mPending   = sum(monthRows.filter(r => isPending(r.b, r.r)).map(r => -r.b))
-  const ytdPending = sum(Object.values(cats).map(c => sum(loadedIdx.map(i => isPending(c.budget[i], c.real[i]) ? -c.budget[i] : 0))))
+  const loadedIdx  = [...loaded]
+  const lastLoaded = loadedIdx.length ? Math.max(...loadedIdx) : null
+  const isFinal    = lastLoaded === 11
+  const ytdBudget  = sum(Object.values(cats).map(c => sum(loadedIdx.map(i => c.budget[i]))))
+  const ytdReal    = sum(Object.values(cats).map(c => sum(loadedIdx.map(i => c.real[i]))))
+  const ytdPending = lastLoaded == null ? 0 : sum(Object.values(cats).map(c => c.carryOut[lastLoaded]))
   const yearBudget = sum(Object.values(cats).map(c => sum(c.budget)))
 
   // ── Imprevistos: movimientos en categorías sin presupuesto en todo el año, u "Otros" ──
@@ -292,8 +301,6 @@ export default function BudgetSection() {
     .filter(([cat, c]) => cat === 'otros' || c.budget.every(v => Math.abs(v) < 0.005))
     .flatMap(([, c]) => c.items.flat())
     .sort((a, b) => a.month.localeCompare(b.month) || signedAmount(a) - signedAmount(b))
-
-  const lastLoaded = loadedIdx.length ? Math.max(...loadedIdx) : null
 
   return (
     <div className="sa-section">
@@ -338,25 +345,28 @@ export default function BudgetSection() {
             {/* ── Resumen ── */}
             <div className="sa-kpis">
               <div className="sa-kpi" style={{ '--kpi-color': '#a78bfa' }}>
-                <span className="sa-kpi__value">{fmtEur(mBudget)}</span>
-                <span className="sa-kpi__label">Presupuesto · {MONTHS[m]}</span>
+                <span className="sa-kpi__value">{fmtEur(mTarget)}</span>
+                <span className="sa-kpi__label">
+                  Disponible · {MONTHS[m]}
+                  {Math.abs(mCarry) > 0.005 && <> · {fmtEur(mBudget)} + {fmtEur(mCarry)} arrastrado</>}
+                </span>
               </div>
               <div className="sa-kpi" style={{ '--kpi-color': '#60a5fa' }}>
                 <span className="sa-kpi__value">{hasMonth ? fmtEur(mReal) : '—'}</span>
                 <span className="sa-kpi__label">Real banco · {MONTHS[m]}</span>
               </div>
-              <div className="sa-kpi" style={{ '--kpi-color': !hasMonth ? '#555' : mReal - mBudget >= 0 ? '#34d399' : '#f87171' }}>
-                <span className="sa-kpi__value">{hasMonth ? fmtDiff(mReal - mBudget) : '—'}</span>
+              <div className="sa-kpi" style={{ '--kpi-color': !hasMonth ? '#555' : mOver < -0.005 ? '#f87171' : '#34d399' }}>
+                <span className="sa-kpi__value">{hasMonth ? fmtDiff(mOver) : '—'}</span>
                 <span className="sa-kpi__label">
-                  {!hasMonth ? 'Diferencia del mes' : mReal - mBudget >= 0 ? 'Ahorro del mes' : 'Sobrecoste del mes'}
-                  {hasMonth && mPending > 0.005 && <> · incluye {fmtEur(mPending)} sin movimiento</>}
+                  Sobrecostes del mes
+                  {hasMonth && Math.abs(mOut) > 0.005 && <> · pasan {fmtEur(mOut)} a {nextLabel}</>}
                 </span>
               </div>
               <div className="sa-kpi" style={{ '--kpi-color': !loadedIdx.length ? '#555' : ytdReal - ytdBudget >= 0 ? '#34d399' : '#f87171' }}>
                 <span className="sa-kpi__value">{loadedIdx.length ? fmtDiff(ytdReal - ytdBudget) : '—'}</span>
                 <span className="sa-kpi__label">
-                  Acumulado del año {loadedIdx.length ? `(${loadedIdx.length} ${loadedIdx.length === 1 ? 'mes' : 'meses'})` : ''}
-                  {ytdPending > 0.005 && <> · incluye {fmtEur(ytdPending)} sin movimiento</>}
+                  Diferencia acumulada{loadedIdx.length ? ` (${loadedIdx.length} ${loadedIdx.length === 1 ? 'mes' : 'meses'})` : ''}
+                  {!isFinal && Math.abs(ytdPending) > 0.005 && <> · {fmtEur(ytdPending)} aún pendiente (arrastrado)</>}
                 </span>
               </div>
             </div>
@@ -384,14 +394,16 @@ export default function BudgetSection() {
                       <tr>
                         <th>Partida</th>
                         <th className="sa-pay-num">Presupuesto</th>
+                        <th className="sa-pay-num" title="Lo que no se gastó en meses anteriores">Arrastrado</th>
+                        <th className="sa-pay-num">Disponible</th>
                         <th className="sa-pay-num">Real banco</th>
                         <th className="sa-pay-num">Diferencia</th>
                         <th>Estado</th>
+                        <th className="sa-pay-num">Pasa a {nextLabel}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {monthRows.map(row => {
-                        const diff = row.r - row.b
                         const open = expanded.has(row.cat)
                         return [
                           <tr key={row.cat} className="bud-row" onClick={() => toggle(row.cat)}>
@@ -402,15 +414,18 @@ export default function BudgetSection() {
                               {row.lines.length > 0 && <div className="bud-lines">{row.lines.join(' · ')}</div>}
                             </td>
                             <td className="sa-pay-num">{fmtEur(row.b)}</td>
+                            <td className="sa-pay-num sa-pay-muted">{Math.abs(row.k) > 0.005 ? fmtEur(row.k) : '—'}</td>
+                            <td className="sa-pay-num sa-pay-strong">{fmtEur(row.t)}</td>
                             <td className="sa-pay-num">{hasMonth ? fmtEur(row.r) : '—'}</td>
-                            <td className={`sa-pay-num ${!hasMonth ? '' : diffClass(row.b, row.r)}`}>
-                              {hasMonth ? fmtDiff(diff) : '—'}
+                            <td className={`sa-pay-num ${!hasMonth ? '' : diffClass(row.t, row.r)}`}>
+                              {hasMonth ? fmtDiff(row.r - row.t) : '—'}
                             </td>
-                            <td><Status status={statusOf(row.b, row.r, hasMonth)} /></td>
+                            <td><Status status={statusOf(row.t, row.r, hasMonth)} /></td>
+                            <td className="sa-pay-num sa-pay-muted">{hasMonth && Math.abs(row.out) > 0.005 ? fmtEur(row.out) : '—'}</td>
                           </tr>,
                           open && (
                             <tr key={`${row.cat}-items`} className="bud-detail">
-                              <td colSpan={5}>
+                              <td colSpan={8}>
                                 <ItemsTable items={row.list} onRecategorize={recategorize} busyKey={busyKey} />
                               </td>
                             </tr>
@@ -422,19 +437,21 @@ export default function BudgetSection() {
                       <tr className="sa-pay-total">
                         <td>Total del mes</td>
                         <td className="sa-pay-num">{fmtEur(mBudget)}</td>
+                        <td className="sa-pay-num">{Math.abs(mCarry) > 0.005 ? fmtEur(mCarry) : '—'}</td>
+                        <td className="sa-pay-num">{fmtEur(mTarget)}</td>
                         <td className="sa-pay-num">{hasMonth ? fmtEur(mReal) : '—'}</td>
-                        <td className={`sa-pay-num ${!hasMonth ? '' : mReal - mBudget >= 0 ? 'bud-pos' : 'bud-neg'}`}>
-                          {hasMonth ? fmtDiff(mReal - mBudget) : '—'}
-                        </td>
+                        <td className="sa-pay-num">{hasMonth ? fmtDiff(mReal - mTarget) : '—'}</td>
                         <td></td>
+                        <td className="sa-pay-num">{hasMonth && Math.abs(mOut) > 0.005 ? fmtEur(mOut) : '—'}</td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
                 <p className="sa-pay-note">
-                  Pulsa una partida para ver los movimientos del banco que la forman y corregir su categoría.
+                  Lo que no se gasta en un mes pasa al siguiente ("Arrastrado") y se suma a su presupuesto ("Disponible").
+                  Si se gasta más de lo disponible, el exceso es sobrecoste y no se resta de los meses siguientes.
                   "Cumplido" admite un margen de ±{Math.round(TOLERANCE_PCT * 100)} % (mínimo {TOLERANCE_MIN} €).
-                  "Sin movimiento" = estaba presupuestado y no aparece en el banco (puede llegar el mes siguiente).
+                  Pulsa una partida para ver sus movimientos del banco y corregir su categoría.
                 </p>
               </>
             )}
@@ -451,8 +468,9 @@ export default function BudgetSection() {
                         <th className="sa-pay-num">Presup. a la fecha</th>
                         <th className="sa-pay-num">Real a la fecha</th>
                         <th className="sa-pay-num">Diferencia</th>
+                        <th className="sa-pay-num" title="Lo no gastado que sigue pasando al mes siguiente">Pendiente</th>
                         <th>Estado</th>
-                        {MONTHS.map((mm, i) => <th key={mm} className="sa-pay-num" title="Diferencia del mes">{mm}</th>)}
+                        {MONTHS.map(mm => <th key={mm} className="sa-pay-num" title="Real − disponible del mes">{mm}</th>)}
                       </tr>
                     </thead>
                     <tbody>
@@ -461,11 +479,12 @@ export default function BudgetSection() {
                           cat, c,
                           by: sum(loadedIdx.map(i => c.budget[i])),
                           ry: round2(sum(loadedIdx.map(i => c.real[i]))),
+                          pend: lastLoaded == null ? 0 : c.carryOut[lastLoaded],
                           total: sum(c.budget),
                         }))
                         .filter(r => Math.abs(r.total) > 0.005 || Math.abs(r.ry) > 0.005)
                         .sort((a, b) => a.total - b.total || a.ry - b.ry)
-                        .map(({ cat, c, by, ry, total }) => (
+                        .map(({ cat, c, by, ry, pend, total }) => (
                           <tr key={cat}>
                             <td>
                               <span className="sa-pay-strong">{catLabel(cat)}</span>
@@ -474,17 +493,18 @@ export default function BudgetSection() {
                             <td className="sa-pay-num">{fmtEur(total)}</td>
                             <td className="sa-pay-num">{loadedIdx.length ? fmtEur(by) : '—'}</td>
                             <td className="sa-pay-num">{loadedIdx.length ? fmtEur(ry) : '—'}</td>
-                            <td className={`sa-pay-num ${!loadedIdx.length ? '' : diffClass(by, ry)}`}>
+                            <td className={`sa-pay-num ${!loadedIdx.length ? '' : diffClass(by, ry, isFinal)}`}>
                               {loadedIdx.length ? fmtDiff(ry - by) : '—'}
                             </td>
-                            <td><Status status={statusOf(by, ry, loadedIdx.length > 0)} /></td>
+                            <td className="sa-pay-num sa-pay-muted">{!isFinal && Math.abs(pend) > 0.005 ? fmtEur(pend) : '—'}</td>
+                            <td><Status status={statusOf(by, ry, loadedIdx.length > 0, isFinal)} /></td>
                             {MONTHS.map((mm, i) => {
                               if (!loaded.has(i)) return <td key={mm} className="sa-pay-num sa-pay-muted">—</td>
-                              const d = c.real[i] - c.budget[i]
+                              const d = c.real[i] - c.target[i]
                               return (
-                                <td key={mm} className={`sa-pay-num bud-cell ${diffClass(c.budget[i], c.real[i]) || 'sa-pay-muted'}`}
-                                    title={`Presupuesto ${fmtEur(c.budget[i])} · Real ${fmtEur(c.real[i])}${isPending(c.budget[i], c.real[i]) ? ' · sin movimiento' : ''}`}>
-                                  {Math.abs(d) < 0.5 ? '0' : `${d > 0 ? '+' : '−'}${Math.round(Math.abs(d)).toLocaleString('es-ES', { useGrouping: 'always' })}`}
+                                <td key={mm} className={`sa-pay-num bud-cell ${diffClass(c.target[i], c.real[i], i === 11) || 'sa-pay-muted'}`}
+                                    title={`Presupuesto ${fmtEur(c.budget[i])} · Arrastrado ${fmtEur(c.carry[i])} · Real ${fmtEur(c.real[i])}`}>
+                                  {fmtShort(d)}
                                 </td>
                               )
                             })}
@@ -497,26 +517,22 @@ export default function BudgetSection() {
                         <td className="sa-pay-num">{fmtEur(yearBudget)}</td>
                         <td className="sa-pay-num">{loadedIdx.length ? fmtEur(ytdBudget) : '—'}</td>
                         <td className="sa-pay-num">{loadedIdx.length ? fmtEur(ytdReal) : '—'}</td>
-                        <td className={`sa-pay-num ${!loadedIdx.length ? '' : ytdReal - ytdBudget >= 0 ? 'bud-pos' : 'bud-neg'}`}>
-                          {loadedIdx.length ? fmtDiff(ytdReal - ytdBudget) : '—'}
-                        </td>
+                        <td className="sa-pay-num">{loadedIdx.length ? fmtDiff(ytdReal - ytdBudget) : '—'}</td>
+                        <td className="sa-pay-num">{!isFinal && Math.abs(ytdPending) > 0.005 ? fmtEur(ytdPending) : '—'}</td>
                         <td></td>
                         {MONTHS.map((mm, i) => {
                           if (!loaded.has(i)) return <td key={mm} className="sa-pay-num sa-pay-muted">—</td>
-                          const d = sum(Object.values(cats).map(c => c.real[i] - c.budget[i]))
-                          return (
-                            <td key={mm} className={`sa-pay-num bud-cell ${d >= 0 ? 'bud-pos' : 'bud-neg'}`}>
-                              {`${d >= 0 ? '+' : '−'}${Math.round(Math.abs(d)).toLocaleString('es-ES', { useGrouping: 'always' })}`}
-                            </td>
-                          )
+                          const d = sum(Object.values(cats).map(c => c.real[i] - c.target[i]))
+                          return <td key={mm} className="sa-pay-num bud-cell">{fmtShort(d)}</td>
                         })}
                       </tr>
                     </tfoot>
                   </table>
                 </div>
                 <p className="sa-pay-note">
-                  "A la fecha" suma solo los meses con extracto del banco cargado. Las columnas de meses muestran la
-                  diferencia en euros (verde = ahorro, rojo = sobrecoste). Pasa el ratón por una cifra para ver el detalle.
+                  "A la fecha" suma solo los meses con extracto del banco. "Pendiente" es lo no gastado que sigue
+                  pasando al mes siguiente; solo cuenta como ahorro al cerrar diciembre. En las columnas de meses,
+                  rojo = sobrecoste y gris = sobra y pasa al mes siguiente. Pasa el ratón por una cifra para ver el detalle.
                 </p>
               </>
             )}
