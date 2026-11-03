@@ -5529,7 +5529,24 @@ function blokes_sync_grupos_autoaplicar_si_seguro($cambio_id, $tipo, $match) {
 // blokes_sync_grupos_pestana_de_grupo() pero al revés, nunca un formato de horario inventado.
 // Si hay más de una combinación que encaje, o ninguna (Pilates/Yoga/Kids con nombres sueltos,
 // p. ej.), no se puede fiar: mejor la bandeja que crear un grupo fantasma con el horario mal.
+// Pestañas que el matcher automático no puede desambiguar por sí solo (coinciden con MÁS de un
+// grupo real por la hora de inicio) pero que Ramiro/Eva ya han confirmado a mano con una persona
+// real de por medio — nunca se adivina en código, solo se documenta aquí la respuesta ya dada.
+// Se consulta ANTES del emparejamiento automático; si la pestaña no está aquí, sigue intentándolo
+// solo como siempre.
+function blokes_sync_grupos_alias_pestana($pestana_real) {
+    $alias = array(
+        // Ramiro/Eva, 3/11 20:05 (NOTAS_PARA_CODE_sync_grupos.md): "M-J 17.30" son los adultos
+        // (17:30-19:00, 86 €), no los niños (17:30-18:30) — ambos arrancan a la misma hora y el
+        // matcher por franja de inicio no puede distinguirlos sin esta confirmación.
+        'M-J 17.30' => array('dia' => 'Martes-Jueves', 'horario' => '17:30-19:00', 'edad' => 'Adultos'),
+    );
+    return $alias[$pestana_real] ?? null;
+}
+
 function blokes_sync_grupos_grupo_de_pestana($pestana_real, $pestanas_reales) {
+    $alias = blokes_sync_grupos_alias_pestana($pestana_real);
+    if ($alias) return $alias;
     $vistos = array();
     $candidatos = array();
     foreach (blokes_get_all_subscription_data() as $s) {
