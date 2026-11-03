@@ -1511,7 +1511,11 @@ function WhatsAppBtn({ a, mensaje }) {
   return (
     <button
       className="sv-tests-select"
-      onClick={() => window.open(`https://wa.me/${e164}?text=${encodeURIComponent(mensaje)}`, '_blank')}
+      // web.whatsapp.com/send en vez de wa.me: wa.me redirige por api.whatsapp.com, que ofrece
+      // abrir la app de escritorio en vez de la pestaña de WhatsApp Web que Eva ya tiene abierta,
+      // y de camino rompía los emojis del mensaje (NOTAS_PARA_CODE_pestanas_grupos.md, 3/11
+      // 10:45). Nombre de ventana fijo para reutilizar siempre la misma pestaña.
+      onClick={() => window.open(`https://web.whatsapp.com/send?phone=${e164}&text=${encodeURIComponent(mensaje)}`, 'blokes_whatsapp')}
     >💬 WhatsApp</button>
   )
 }

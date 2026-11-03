@@ -389,8 +389,11 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
   }
 
   const abrirWhatsapp = (d) => {
-    const url = `https://wa.me/34${d.telefono}?text=${encodeURIComponent(d.mensaje)}`
-    window.open(url, '_blank')
+    // web.whatsapp.com/send, no wa.me: wa.me pasa por api.whatsapp.com, que abre la app de
+    // escritorio en vez de la pestaña de WhatsApp Web ya abierta y rompía los emojis del mensaje
+    // (NOTAS_PARA_CODE_pestanas_grupos.md, 3/11 10:45). Ventana con nombre fijo para reutilizarla.
+    const url = `https://web.whatsapp.com/send?phone=34${d.telefono}&text=${encodeURIComponent(d.mensaje)}`
+    window.open(url, 'blokes_whatsapp')
     accion(d.contactoId, 'enviado')
   }
 
@@ -556,7 +559,7 @@ export default function CampanasSection() {
   return (
     <div className="cmp-section">
       <p className="sv-note">
-        Campañas de WhatsApp (envío manual, enlaces wa.me — sin API de Meta por ahora). Las listas (Actuales,
+        Campañas de WhatsApp (envío manual, enlaces de WhatsApp Web — sin API de Meta por ahora). Las listas (Actuales,
         Nuevos, Antiguos) se calculan solas a partir de las suscripciones y externos de Grupos; «Bajas de
         mensajes» solo se marca a mano y nunca se recalcula.
       </p>
