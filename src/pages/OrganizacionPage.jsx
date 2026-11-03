@@ -578,6 +578,9 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
           ))}
         </div>
         <h3 className="org__section-title">Semana del {weekLabel(detail.startDate)} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
+        {/* Diagnóstico temporal (NOTAS_PARA_CODE_equipacion.md, 3/11 11:50): para saber si el
+            navegador recibió 4 asignaciones y es el pintado el que falla, o si ya llegaron menos. */}
+        <p className="org__hint">({detail.assignments.length} persona(s) en el reparto: {detail.assignments.map(a => a.workerName).join(', ') || '—'})</p>
         {detail.isAuto && <p className="org__hint org__hint--auto">Semana creada automáticamente: reparte las tareas arrastrándolas.</p>}
         <p className="org__hint">Arrastra una tarjeta a otra persona (o a otro día de esa persona) para reasignarla.</p>
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>

@@ -1699,7 +1699,10 @@ function GruposTab() {
     setFacturasErr(null)
     try { setFacturas(await gestionFacturasPendientesGet()) } catch (e) { setFacturasErr(e.message) }
   }
-  function abrirMandarFactura() { setVista('mandar-factura'); if (facturas === null) cargarFacturas() }
+  // Cargada ya al entrar en Grupos (no solo al pulsar la pestaña) para que el número entre
+  // paréntesis salga desde el principio, igual que en el resto de pestañas (cowork, 3/11 11:50).
+  useEffect(() => { cargarFacturas() }, [])
+  function abrirMandarFactura() { setVista('mandar-factura') }
   async function completarFactura(orderId) {
     setFacturaBusyId(orderId)
     try { await gestionFacturaCompletar(orderId); await cargarFacturas() }
