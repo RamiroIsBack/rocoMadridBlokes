@@ -5439,6 +5439,34 @@ function blokes_sync_grupos_metodo_a_cobrado($metodo) {
     return $map[$metodo] ?? 'transferencia';
 }
 
+// Reintenta el auto-aplicar sobre cambios "pendiente" que YA existían de antes (incluso de
+// antes de tener esta lógica, o que no encajaron la primera vez porque entonces no había
+// match): se vuelve a probar en CADA sincronización con los datos más frescos, no solo al
+// crearse (cowork, 3/11 18:xx: un alta nueva se quedó pendiente para siempre porque se creó
+// antes del auto-aplicar y nadie volvía a mirarla). Mismo criterio "seguro" que al crearse —
+// nunca inventa un match ni un grupo nuevo, solo reintenta con lo que ya hay.
+function blokes_sync_grupos_reintentar_pendientes($pestanas, $subs_por_tel, $externos_por_tel) {
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo IN (%s, %s, %s)",
+        'alumno_nuevo', 'pago_nuevo', 'nota'
+    ), ARRAY_A);
+    foreach ($pendientes as $cambio) {
+        $match = blokes_sync_grupos_emparejar($cambio['telefono'], $subs_por_tel, $externos_por_tel);
+        if ($match) {
+            $wpdb->update($tabla, array(
+                'match_tipo' => $match['tipo'], 'match_id' => $match['id'], 'match_label' => $match['label'],
+            ), array('id' => intval($cambio['id'])));
+        }
+        if ($cambio['tipo'] === 'alumno_nuevo') {
+            if (!$match) blokes_sync_grupos_autocrear_alumno_nuevo(intval($cambio['id']), $cambio['pestana'], $pestanas, $cambio['nombre'], $cambio['telefono']);
+        } else {
+            blokes_sync_grupos_autoaplicar_si_seguro(intval($cambio['id']), $cambio['tipo'], $match);
+        }
+    }
+}
+
 // Crea o refresca un cambio pendiente para (pestana, clave, tipo, mes) — si ya hay uno
 // pendiente igual, se actualiza con el dato más fresco en vez de duplicarse en cada
 // sincronización mientras nadie lo resuelve.
@@ -5626,6 +5654,8 @@ function blokes_sync_grupos_sincronizar() {
         $resumen['pestanas'][] = array('pestana' => $tab, 'filas' => count($r['filas']), 'cambiosNuevos' => $es_foto_inicial ? 0 : $cambios_pestana, 'fotoInicial' => $es_foto_inicial);
         $resumen['cambiosNuevos'] += $es_foto_inicial ? 0 : $cambios_pestana;
     }
+
+    blokes_sync_grupos_reintentar_pendientes($pestanas, $subs_por_tel, $externos_por_tel);
 
     update_option('blokes_sync_grupos_ultima_sincronizacion', current_time('mysql'), false);
     return $resumen;
@@ -6947,6 +6977,19 @@ function superadmin_campanas_destinatarios($request) {
         'totalSubs' => count(blokes_get_all_subscription_data()),
         'subsPorTel' => count($subs_por_tel),
     );
+    // Diagnóstico ampliado (cowork, 3/11 17:25: de 388 solo 9 acaban con teléfono) — en qué paso
+    // exacto de blokes_campanas_subs_por_telefono() se pierde cada uno, sin tocar esa función.
+    $diag = array('directo' => 0, 'porEmail' => 0, 'porUserMeta' => 0, 'sinNada' => 0, 'sinEmailNiNada' => 0);
+    foreach (blokes_get_all_subscription_data() as $s) {
+        if (blokes_externos_normaliza_telefono($s['telefono'] ?? '') !== '') { $diag['directo']++; continue; }
+        $correo = $s['email'] ?? '';
+        if (blokes_externos_normaliza_telefono(blokes_telefono_de_email($correo)) !== '') { $diag['porEmail']++; continue; }
+        $uid = intval(get_post_meta(intval($s['id'] ?? 0), '_customer_user', true));
+        if ($uid && blokes_externos_normaliza_telefono(get_user_meta($uid, 'billing_phone', true)) !== '') { $diag['porUserMeta']++; continue; }
+        if ($correo === '' || $correo === 'N/A') $diag['sinEmailNiNada']++;
+        $diag['sinNada']++;
+    }
+    $debug['diagTelefono'] = $diag;
     $envios_por_contacto = array();
     foreach ($wpdb->get_results($wpdb->prepare(
         "SELECT * FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d", $id
