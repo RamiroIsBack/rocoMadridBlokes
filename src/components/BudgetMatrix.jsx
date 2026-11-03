@@ -125,6 +125,13 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
             </tr>
           </thead>
           <tbody>
+            {/* ── Ingresos: objetivo informativo, calculado con los pagos del año ── */}
+            <tr className="bud-mx-section"><td colSpan={14}><span className="bud-mx-sec">Ingresos</span></td></tr>
+            <tr className="bud-mx-income">
+              <td className="bud-mx-name" title="Lo que hay que cobrar cada mes para cubrir los pagos del año">Ingresos objetivo</td>
+              {goalIn.map((v, i) => <td key={i} className="sa-pay-num sa-pay-strong">{fmt(v)}</td>)}
+              <td className="sa-pay-num sa-pay-strong">{fmt(sum(goalIn))}</td>
+            </tr>
             <tr className="bud-mx-section"><td colSpan={14}><span className="bud-mx-sec">Pagos</span></td></tr>
             {rows.map(r => {
               const rYear = sum(r.real.filter((_, i) => has(i)))
@@ -162,13 +169,8 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
               </tr>
             )}
 
-            {/* ── Objetivo de ingresos (informativo) ── */}
-            <tr className="bud-mx-section"><td colSpan={14}><span className="bud-mx-sec">Objetivo de ingresos</span></td></tr>
-            <tr className="bud-mx-income">
-              <td className="bud-mx-name" title="Lo que hay que cobrar cada mes para cubrir los pagos del año">Ingresos objetivo</td>
-              {goalIn.map((v, i) => <td key={i} className="sa-pay-num sa-pay-strong">{fmt(v)}</td>)}
-              <td className="sa-pay-num sa-pay-strong">{fmt(sum(goalIn))}</td>
-            </tr>
+            {/* ── Resultado frente al objetivo de ingresos ── */}
+            <tr className="bud-mx-section"><td colSpan={14}><span className="bud-mx-sec">Resultado</span></td></tr>
             <tr className="bud-mx-result">
               <td className="bud-mx-name">Resultado previsto (objetivo − pagos)</td>
               {result.map((v, i) => <td key={i} className={`sa-pay-num ${signCls(v)}`}>{fmt(v)}</td>)}
