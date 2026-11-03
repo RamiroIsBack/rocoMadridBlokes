@@ -125,7 +125,7 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
             </tr>
           </thead>
           <tbody>
-            <tr className="bud-mx-section"><td className="bud-mx-name" colSpan={14}>Pagos</td></tr>
+            <tr className="bud-mx-section"><td colSpan={14}><span className="bud-mx-sec">Pagos</span></td></tr>
             {rows.map(r => {
               const rYear = sum(r.real.filter((_, i) => has(i)))
               const bYearLoaded = sum(r.budget.filter((_, i) => has(i)))
@@ -163,7 +163,7 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
             )}
 
             {/* ── Objetivo de ingresos (informativo) ── */}
-            <tr className="bud-mx-section"><td className="bud-mx-name" colSpan={14}>Objetivo de ingresos</td></tr>
+            <tr className="bud-mx-section"><td colSpan={14}><span className="bud-mx-sec">Objetivo de ingresos</span></td></tr>
             <tr className="bud-mx-income">
               <td className="bud-mx-name" title="Lo que hay que cobrar cada mes para cubrir los pagos del año">Ingresos objetivo</td>
               {goalIn.map((v, i) => <td key={i} className="sa-pay-num sa-pay-strong">{fmt(v)}</td>)}
@@ -187,9 +187,9 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
                 {MONTHS.map((_, i) => {
                   if (!shortMonths.includes(i)) return <td key={i} className="sa-pay-num sa-pay-muted">—</td>
                   return (
-                    <td key={i} className="sa-pay-num bud-mx-both">
+                    <td key={i} className="sa-pay-num bud-mx-both" title={`Para no perder dinero en ${MONTHS[i]} hay que cobrar ${fmt(-totB[i])}: ${fmt(-totB[i] - goalIn[i])} más que el objetivo`}>
                       <span className="bud-mx-r">{fmt(-totB[i])}</span>
-                      <span className="bud-mx-b">+{fmt(-totB[i] - goalIn[i])} sobre el objetivo</span>
+                      <span className="bud-mx-b">faltan {fmt(-totB[i] - goalIn[i])}</span>
                     </td>
                   )
                 })}

@@ -1277,7 +1277,8 @@ details[open] .sa-collapsible__arrow {
 .bud-mx-extra td { font-style: italic; }
 .bud-mx-shared { margin-left: 5px; color: #888; cursor: help; }
 .bud-mx-diff td { border-top: 1px solid #2a2015; font-weight: 700; }
-.bud-mx-section td { font-size: 0.66rem !important; text-transform: uppercase; letter-spacing: 0.08em; color: #f5c842; padding-top: 12px !important; }
+.bud-mx-section td { font-size: 0.66rem !important; text-transform: uppercase; letter-spacing: 0.08em; color: #f5c842; padding-top: 12px !important; font-weight: 700; }
+.bud-mx-sec { position: sticky; left: 7px; }
 .bud-mx-income td { background: rgba(52, 211, 153, 0.04); }
 .bud-mx-income .bud-mx-name { background: #111209; }
 .bud-mx-result td { border-top: 2px solid #f5c842; }
