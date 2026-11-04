@@ -1446,7 +1446,11 @@ function CreateCompForm({ onDone, onCancel }) {
       <div className="org__add-row"><label>Nombre</label><input type="text" value={name} onChange={e => setName(e.target.value)} /></div>
       <div className="org__add-row"><label>Empieza</label><input type="date" value={compDate} onChange={e => setCompDate(e.target.value)} /></div>
       <div className="org__add-row"><label>Termina</label><input type="date" value={compEndDate} min={compDate} onChange={e => setCompEndDate(e.target.value)} /></div>
-      <div className="org__add-row"><label>Semanas de antelación para las tareas</label><input type="number" min="1" max="12" value={leadWeeks} onChange={e => setLeadWeeks(Number(e.target.value))} /></div>
+      <div className="org__add-row">
+        <label>Semanas de antelación para las tareas</label>
+        <input type="number" min="3" max="12" value={leadWeeks} onChange={e => setLeadWeeks(Math.max(3, Number(e.target.value)))} />
+        <span className="org__hint">Mínimo 3 — por debajo no queda sitio para la semana de diseño antes de la de limpieza/equipar.</span>
+      </div>
       <label className="org__add-row org__add-row--check">
         <input type="checkbox" checked={isTest} onChange={e => setIsTest(e.target.checked)} />
         <span>Competición de prueba (no sale en la lista normal; se puede borrar del todo)</span>

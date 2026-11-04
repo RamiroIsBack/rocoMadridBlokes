@@ -11918,7 +11918,9 @@ function progreso_equip_create_competition($request) {
     $comp_end_date_in = sanitize_text_field((string) $request->get_param('compEndDate'));
     $comp_end_date = ($comp_end_date_in && strtotime($comp_end_date_in) >= strtotime($comp_date))
         ? date('Y-m-d', strtotime($comp_end_date_in)) : $comp_date;
-    $lead_weeks = intval($request->get_param('leadWeeks')) ?: 3;
+    // Mínimo 3: por debajo no hay sitio para una semana de diseño distinta de la de limpieza sin
+    // mover las de prep/equipar, que son fijas (cowork, 4/11 08:30 — ver generate-plan).
+    $lead_weeks = max(3, intval($request->get_param('leadWeeks')) ?: 3);
     $is_test = $request->get_param('isTest') ? 1 : 0;
 
     $wpdb->insert(progreso_equip_table('competitions'), array(
@@ -11973,7 +11975,7 @@ function progreso_equip_update_competition($request) {
     if ($request->get_param('name') !== null)      { $upd['name']      = sanitize_text_field($request->get_param('name'));             $fmt[] = '%s'; }
     if ($request->get_param('compDate') !== null)  { $upd['comp_date'] = date('Y-m-d', strtotime($request->get_param('compDate')));     $fmt[] = '%s'; }
     if ($request->get_param('compEndDate') !== null) { $upd['comp_end_date'] = date('Y-m-d', strtotime($request->get_param('compEndDate'))); $fmt[] = '%s'; }
-    if ($request->get_param('leadWeeks') !== null)  { $upd['lead_weeks'] = intval($request->get_param('leadWeeks'));                     $fmt[] = '%d'; }
+    if ($request->get_param('leadWeeks') !== null)  { $upd['lead_weeks'] = max(3, intval($request->get_param('leadWeeks')));             $fmt[] = '%d'; }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     $wpdb->update(progreso_equip_table('competitions'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
@@ -11981,9 +11983,12 @@ function progreso_equip_update_competition($request) {
 
 // Borra también las tareas que hubiera generado el plan de esta compe (si lo hubo), para no
 // dejar huérfanas tareas "Compe: ..." sin ninguna competición a la que pertenezcan. Si la compe
-// es de PRUEBA, además borra las semanas de prueba que el plan creó y que se quedan completamente
-// vacías al quitar sus tareas de compe — nunca una semana REAL, ni una de prueba que tuviera algo
-// más (cowork, 4/11 07:20: tuvo que borrar 6 semanas a mano).
+// es de PRUEBA, además borra ENTERAS las semanas de prueba que tocó su plan, tengan lo que
+// tengan (también el reparto normal de mantenimiento que añade `progreso_equip_ensure_week_for_lead`
+// al crear la semana) — es todo dato de prueba desechable, igual que el resto. Nunca una semana
+// REAL (cowork, 4/11 07:20 y reprueba 08:30: primero dejaba huérfanas las semanas con tareas de
+// mantenimiento normal además de las de compe; "borra todas sus semanas de prueba, tengan lo que
+// tengan").
 function progreso_equip_delete_competition($request) {
     global $wpdb;
     $id = intval($request['id']);
@@ -12002,14 +12007,14 @@ function progreso_equip_delete_competition($request) {
     foreach ($semanas_afectadas as $week_id) {
         $week_id = intval($week_id);
         $semana = $wpdb->get_row($wpdb->prepare("SELECT is_test FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $week_id), ARRAY_A);
-        if (!$semana || !$semana['is_test']) continue;
+        if (!$semana || !$semana['is_test']) continue; // nunca una semana real
         $assignment_ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM {$assignments_table} WHERE week_id = %d", $week_id));
-        if (!$assignment_ids) { $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d')); continue; }
-        $ph = implode(',', array_fill(0, count($assignment_ids), '%d'));
-        $quedan_tareas = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$tasks_table} WHERE assignment_id IN ($ph)", ...$assignment_ids));
-        $quedan_bloques = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('blocks') . " WHERE assignment_id IN ($ph)", ...$assignment_ids));
-        if ($quedan_tareas > 0 || $quedan_bloques > 0) continue; // tenía algo más: no se toca
-        $wpdb->query($wpdb->prepare("DELETE FROM {$assignments_table} WHERE week_id = %d", $week_id));
+        if ($assignment_ids) {
+            $ph = implode(',', array_fill(0, count($assignment_ids), '%d'));
+            $wpdb->query($wpdb->prepare("DELETE FROM {$tasks_table} WHERE assignment_id IN ($ph)", ...$assignment_ids));
+            $wpdb->query($wpdb->prepare("DELETE FROM " . progreso_equip_table('blocks') . " WHERE assignment_id IN ($ph)", ...$assignment_ids));
+            $wpdb->query($wpdb->prepare("DELETE FROM {$assignments_table} WHERE week_id = %d", $week_id));
+        }
         $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d'));
     }
     return rest_ensure_response(array('success' => true));
@@ -12236,19 +12241,19 @@ function progreso_equip_competition_generate_plan($request) {
     $s1_monday = date('Y-m-d', strtotime($s0_monday) - 7 * 86400);
     $s2_monday = date('Y-m-d', strtotime($s0_monday) - 14 * 86400);
     // La semana de diseño/revisar material arranca "leadWeeks" semanas antes de la compe (el
-    // campo "Semanas de antelación" del formulario de creación) — antes era siempre 3 semanas
-    // antes de s0 fijo, sin usar ese campo para nada (cowork, 4/11 07:20: con leadWeeks=2 las
-    // tareas empezaban igualmente 4 semanas antes). Con leadWeeks <= 2 no hay sitio para una
-    // semana de diseño separada de la de limpieza/inscripciones (s2): se juntan en una sola, en
-    // vez de pisar fechas o crear una semana de diseño DESPUÉS de la de limpieza.
-    $lead_weeks = max(1, intval($comp['lead_weeks']) ?: 3);
+    // campo "Semanas de antelación" del formulario de creación) — antes era siempre fija, sin
+    // usar ese campo para nada (cowork, 4/11 07:20). Mínimo 3: por debajo no queda sitio para
+    // una semana de diseño distinta de la de limpieza (s2, que siempre es comp-3 semanas) sin
+    // mover también las semanas de prep/equipar, que son fijas — mismo mínimo que ahora exige
+    // el formulario (cowork, 4/11 08:30: con leadWeeks 1 y 2 seguía dando comp-3 semanas igual,
+    // mi primer intento de arreglo solo movía la fecha interna sin bajar el mínimo real).
+    $lead_weeks = max(3, intval($comp['lead_weeks']) ?: 3);
     $s3_monday = date('Y-m-d', strtotime($comp_monday) - $lead_weeks * 7 * 86400);
     $after_monday = date('Y-m-d', strtotime($comp_monday) + 7 * 86400);
-    // Si la semana de diseño ya ha pasado (no queda runway desde hoy), o no hay semanas de
-    // antelación de sobra para una fase separada, se junta con la de limpieza/inscripciones en
-    // vez de crear tareas ya vencidas o una fase antes de tiempo — confirmado con cowork (1/11
+    // Si la semana de diseño ya ha pasado (no queda runway desde hoy), o coincide con la de
+    // limpieza/inscripciones (leadWeeks = 3 exactas), se juntan en una sola — confirmado con cowork (1/11
     // 17:20) como regla general.
-    $diseno_monday = ($lead_weeks <= 2 || strtotime($s3_monday) < strtotime($today) || strtotime($s3_monday) >= strtotime($s2_monday)) ? $s2_monday : $s3_monday;
+    $diseno_monday = (strtotime($s3_monday) < strtotime($today) || strtotime($s3_monday) >= strtotime($s2_monday)) ? $s2_monday : $s3_monday;
 
     $fases = array();
     if ($diseno_monday === $s2_monday) {
