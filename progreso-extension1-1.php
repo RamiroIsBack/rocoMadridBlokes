@@ -11840,12 +11840,23 @@ function progreso_equip_get_competitions($request = null) {
     return rest_ensure_response(array('success' => true, 'data' => array_map('progreso_equip_competition_fila', $rows)));
 }
 
+// Resumen rápido (días que faltan, tareas y bloques) para que la lista de competiciones diga
+// algo de un vistazo en vez de una fila de texto plano (Ramiro, 4/11 05:48: "no pude ver la compe
+// que creamos" — ni tarjeta pulsable ni estado, parecía que no había nada).
 function progreso_equip_competition_fila($r) {
+    global $wpdb;
+    $id = intval($r['id']);
+    $tasks_total  = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('tasks') . " WHERE competition_id = %d", $id)));
+    $tasks_hechas = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('tasks') . " WHERE competition_id = %d AND done = 1", $id)));
+    $blocks_total = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d", $id)));
+    $blocks_colocados = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d AND x_pct IS NOT NULL", $id)));
     return array(
-        'id' => intval($r['id']), 'name' => $r['name'], 'compDate' => $r['comp_date'],
+        'id' => $id, 'name' => $r['name'], 'compDate' => $r['comp_date'],
         'compEndDate' => $r['comp_end_date'] ?: $r['comp_date'],
         'leadWeeks' => intval($r['lead_weeks']), 'isTest' => (bool) $r['is_test'],
         'tasksStartDate' => date('Y-m-d', strtotime($r['comp_date']) - intval($r['lead_weeks']) * 7 * 86400),
+        'tasksTotal' => $tasks_total, 'tasksHechas' => $tasks_hechas,
+        'blocksTotal' => $blocks_total, 'blocksColocados' => $blocks_colocados,
     );
 }
 

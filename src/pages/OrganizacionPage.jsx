@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react'
 import mapaEquipacion from '../assets/mapa-equipacion.jpg'
 import './OrganizacionPage.css'
 
@@ -60,6 +60,51 @@ function taskLabel(t, taskTypeById) {
   if (t.taskTypeId === 'custom') return t.params?.texto || 'Tarea'
   return taskTypeById[t.taskTypeId]?.name || t.taskTypeId
 }
+const MES_LABEL_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+// "lun 30 nov" o, con fecha de fin distinta, "lun 30 nov – vie 4 dic" — en vez de ISO
+// (Ramiro, 4/11 05:48, encargo "refina compe": las fechas en 2026-11-30 no se entienden de un vistazo).
+function dateRangeLabel(startStr, endStr) {
+  const corta = dateStr => {
+    const [y, m, d] = dateStr.split('-').map(Number)
+    return `${DOW_LABEL[new Date(y, m - 1, d).getDay()].toLowerCase()} ${d} ${MES_LABEL_CORTO[m - 1]}`
+  }
+  if (!endStr || endStr === startStr) return corta(startStr)
+  return `${corta(startStr)} – ${corta(endStr)}`
+}
+function daysUntil(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const target = new Date(y, m - 1, d)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.round((target - today) / 86400000)
+}
+
+// Aviso visible de "algo falló" (Ramiro, 4/11 05:48: casi todas las llamadas se tragaban el error
+// con `.catch(() => {})` y no pasaba nada en pantalla — parecía que la acción "no estaba").
+// Un contexto en vez de pasar la función por props por media docena de niveles de componentes.
+const ToastCtx = createContext(() => {})
+function useToast() {
+  return useContext(ToastCtx)
+}
+function ToastProvider({ children }) {
+  const [toast, setToast] = useState(null)
+  const timerRef = useRef(null)
+  const showToast = useCallback(msg => {
+    setToast(msg)
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => setToast(null), 5000)
+  }, [])
+  return (
+    <ToastCtx.Provider value={showToast}>
+      {children}
+      {toast && (
+        <div className="org__toast" role="alert" onClick={() => setToast(null)}>
+          {toast} <span className="org__toast-close">✕</span>
+        </div>
+      )}
+    </ToastCtx.Provider>
+  )
+}
 
 export default function OrganizacionPage() {
   const [config, setConfig] = useState(null)
@@ -102,24 +147,61 @@ export default function OrganizacionPage() {
   if (loading) return <div className="org"><p className="org__hint">Cargando...</p></div>
 
   return (
-    <div className="org">
-      <div className="org__switch">
-        <button className={`org__switch-btn${view === 'hoy' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('hoy')}>Hoy</button>
-        <button className={`org__switch-btn${view === 'semana' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('semana')}>Semana</button>
-        <button className={`org__switch-btn${view === 'normas' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('normas')}>Normas</button>
-        <button className={`org__switch-btn${view === 'compe' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('compe')}>Compe</button>
-      </div>
+    <ToastProvider>
+      <div className="org">
+        <div className="org__switch">
+          <button className={`org__switch-btn${view === 'hoy' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('hoy')}>Hoy</button>
+          <button className={`org__switch-btn${view === 'semana' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('semana')}>Semana</button>
+          <button className={`org__switch-btn${view === 'normas' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('normas')}>Normas</button>
+          <button className={`org__switch-btn${view === 'compe' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('compe')}>Compe</button>
+        </div>
 
-      {view === 'hoy' && (
-        <HoyView
-          config={config} workers={workers}
-          workerId={workerId} onChooseWorker={chooseWorker} canManage={canManage}
-        />
-      )}
-      {view === 'semana' && <SemanaView config={config} workers={workers} canManage={canManage} onWorkersChanged={reloadWorkers} />}
-      {view === 'normas' && <NormasView config={config} canManage={canManage} onConfigChanged={reloadConfig} />}
-      {view === 'compe' && <CompeView config={config} workers={workers} />}
-    </div>
+        {view === 'hoy' && <CompeResumenHoy workerId={workerId} onGoToCompe={() => setView('compe')} />}
+        {view === 'hoy' && (
+          <HoyView
+            config={config} workers={workers}
+            workerId={workerId} onChooseWorker={chooseWorker} canManage={canManage}
+          />
+        )}
+        {view === 'semana' && <SemanaView config={config} workers={workers} canManage={canManage} onWorkersChanged={reloadWorkers} />}
+        {view === 'normas' && <NormasView config={config} canManage={canManage} onConfigChanged={reloadConfig} />}
+        {view === 'compe' && <CompeView config={config} workers={workers} />}
+      </div>
+    </ToastProvider>
+  )
+}
+
+// Tarjeta-resumen arriba de Hoy cuando hay una compe en curso (dentro de sus semanas de
+// antelación), para que se note que existe sin tener que ir a la pestaña Compe a buscarla
+// (Ramiro, 4/11 05:48: "no pude ver la compe que creamos" — abría siempre en Hoy y ahí no se veía
+// nada de ella).
+function CompeResumenHoy({ workerId, onGoToCompe }) {
+  const [comp, setComp] = useState(null)
+  const [miPendientes, setMiPendientes] = useState(null)
+  useEffect(() => {
+    api('GET', '/equipacion/competitions').then(r => {
+      const hoy = todayStr()
+      const enCurso = (r.data || []).find(c => hoy >= c.tasksStartDate && hoy <= c.compEndDate)
+      setComp(enCurso || null)
+      if (enCurso && workerId) {
+        api('GET', `/equipacion/competitions/${enCurso.id}/plan`).then(p => {
+          const mias = (p.data?.tasks || []).filter(t => String(t.workerId) === String(workerId))
+          setMiPendientes(mias.filter(t => !t.done).length)
+        }).catch(() => {})
+      }
+    }).catch(() => {})
+  }, [workerId])
+  if (!comp) return null
+  const faltan = daysUntil(comp.compDate)
+  const estadoFechas = faltan > 0 ? `Faltan ${faltan} día${faltan === 1 ? '' : 's'}` : faltan === 0 ? 'Es hoy' : 'En curso'
+  return (
+    <button className="org__compe-resumen" onClick={onGoToCompe}>
+      <span className="org__compe-resumen-nombre">🏆 {comp.name}</span>
+      <span className="org__compe-resumen-datos">
+        {estadoFechas}{miPendientes !== null ? ` · tu parte: ${miPendientes} pendiente${miPendientes === 1 ? '' : 's'}` : ''}
+      </span>
+      <span className="org__compe-resumen-flecha">→</span>
+    </button>
   )
 }
 
@@ -133,6 +215,7 @@ function HoyView({ config, workers, workerId, onChooseWorker, canManage }) {
 
   const worker = workers.find(w => w.id === workerId)
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
+  const showToast = useToast()
 
   useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
 
@@ -176,7 +259,7 @@ function HoyView({ config, workers, workerId, onChooseWorker, canManage }) {
 
   const toggleTask = async (taskId, done) => {
     setData(d => ({ ...d, tasks: d.tasks.map(t => t.id === taskId ? { ...t, done } : t) }))
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { reload() }
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { showToast('No se ha podido guardar — deshecho.'); reload() }
   }
 
   return (
@@ -271,7 +354,11 @@ function HoyView({ config, workers, workerId, onChooseWorker, canManage }) {
 function MiParteCompes({ workerId, config }) {
   const [competitions, setCompetitions] = useState([])
   const [plans, setPlans] = useState({})
+  // Por defecto solo se ve lo pendiente y lo próximo, agrupado por semana — antes era una lista
+  // plana de todo (hechas y pendientes mezcladas), 23 líneas casi iguales (Ramiro, 4/11 05:48).
+  const [verTodo, setVerTodo] = useState({})
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
+  const showToast = useToast()
 
   useEffect(() => {
     api('GET', '/equipacion/competitions').then(r => setCompetitions(r.data || [])).catch(() => {})
@@ -283,10 +370,13 @@ function MiParteCompes({ workerId, config }) {
   }, [competitions])
 
   const toggleDone = async (taskId, done, compId) => {
+    const antes = plans[compId]
     setPlans(p => ({ ...p, [compId]: { ...p[compId], tasks: p[compId].tasks.map(t => t.id === taskId ? { ...t, done } : t) } }))
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch {}
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) }
+    catch { showToast('No se ha podido guardar — deshecho.'); setPlans(p => ({ ...p, [compId]: antes })) }
   }
 
+  const today = todayStr()
   const sections = competitions
     .map(c => ({ comp: c, mine: (plans[c.id]?.tasks || []).filter(t => String(t.workerId) === String(workerId)) }))
     .filter(s => s.mine.length > 0)
@@ -295,22 +385,46 @@ function MiParteCompes({ workerId, config }) {
   return (
     <section className="org__section">
       <h3 className="org__section-title">Mi parte de la compe</h3>
-      {sections.map(({ comp, mine }) => (
-        <div key={comp.id}>
-          {sections.length > 1 && <p className="org__hint">{comp.name}</p>}
-          <ul className="org__task-list">
-            {mine.map(t => (
-              <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}`}>
-                <label>
-                  <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked, comp.id)} />
-                  <span className="org__task-name">{taskTypeById[t.taskTypeId]?.name || t.taskTypeId}</span>
-                  <span className="org__task-params">{dayLabel(t.date)}</span>
-                </label>
-              </li>
+      {sections.map(({ comp, mine }) => {
+        const todas = !!verTodo[comp.id]
+        const visibles = todas ? mine : mine.filter(t => !t.done)
+        const porSemana = {}
+        visibles.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(t => {
+          const wk = t.weekStart || t.date
+          ;(porSemana[wk] = porSemana[wk] || []).push(t)
+        })
+        return (
+          <div key={comp.id}>
+            {sections.length > 1 && <p className="org__hint">{comp.name}</p>}
+            {Object.keys(porSemana).sort().map(wk => (
+              <div key={wk}>
+                <p className="org__mi-parte-semana">Semana del {weekLabel(wk)}</p>
+                <ul className="org__task-list">
+                  {porSemana[wk].map(t => {
+                    const retrasada = !t.done && t.date < today
+                    return (
+                      <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}${retrasada ? ' org__task--retrasada' : ''}`}>
+                        <label>
+                          <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked, comp.id)} />
+                          <span className="org__task-name">{taskTypeById[t.taskTypeId]?.name || t.taskTypeId}</span>
+                          <span className="org__task-params">{dayLabel(t.date)}</span>
+                          {retrasada && <span className="org__tile-badge">RETRASADA</span>}
+                        </label>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
             ))}
-          </ul>
-        </div>
-      ))}
+            {visibles.length === 0 && <p className="org__hint">Todo hecho ✓</p>}
+            {mine.some(t => t.done) && (
+              <button className="org__link-btn" onClick={() => setVerTodo(v => ({ ...v, [comp.id]: !todas }))}>
+                {todas ? 'Ver solo lo pendiente' : 'Ver todo'}
+              </button>
+            )}
+          </div>
+        )
+      })}
     </section>
   )
 }
@@ -417,12 +531,11 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   // Las semanas de prueba no salen en la lista normal del equipo (cowork las necesita para
   // probar sin dejar residuos) — este botón las enseña aparte para poder gestionarlas.
   const [showTest, setShowTest] = useState(false)
-  // Migración puntual del lío de los dos sitios (NOTAS_PARA_CODE_equipacion.md, 3/11 12:00).
-  const [showMigrar, setShowMigrar] = useState(false)
+  const showToast = useToast()
 
   const reloadWeeks = useCallback(() => {
-    api('GET', `/equipacion/weeks${showTest ? '?test=1' : ''}`).then(r => setWeeks(r.data || [])).catch(() => {})
-  }, [showTest])
+    api('GET', `/equipacion/weeks${showTest ? '?test=1' : ''}`).then(r => setWeeks(r.data || [])).catch(() => showToast('No se ha podido cargar la lista de semanas.'))
+  }, [showTest, showToast])
   useEffect(() => { reloadWeeks() }, [reloadWeeks])
 
   // Si se pide abrir otra semana (o recargar la misma) antes de que responda la petición
@@ -434,7 +547,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
     const seq = ++openWeekSeq.current
     return api('GET', `/equipacion/weeks/${id}`)
       .then(r => { if (seq === openWeekSeq.current) setDetail(r.data) })
-      .catch(() => {})
+      .catch(() => showToast('No se ha podido abrir la semana.'))
   }
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const workerById = useMemo(() => Object.fromEntries(workers.map(w => [w.id, w])), [workers])
@@ -444,7 +557,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   const [moving, setMoving] = useState(false)
   const reassignTask = async (taskId, assignmentId, date) => {
     setMoving(true)
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { assignmentId, date }) } catch {}
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { assignmentId, date }) } catch { showToast('No se ha podido mover la tarea.') }
     await openWeek(detail.id)
     setMoving(false)
   }
@@ -456,7 +569,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
         tasks: a.tasks.map(t => t.id === taskId ? { ...t, done, doneAt: done ? new Date().toISOString() : null } : t),
       })),
     }))
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { openWeek(detail.id) }
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { showToast('No se ha podido guardar — deshecho.'); openWeek(detail.id) }
   }
 
   // Las tareas no se cancelan: solo se mueven a la semana siguiente, y
@@ -464,7 +577,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   const [postponing, setPostponing] = useState(null)
   const postponeTask = async taskId => {
     setPostponing(taskId)
-    try { await api('POST', `/equipacion/tasks/${taskId}/postpone`) } catch {}
+    try { await api('POST', `/equipacion/tasks/${taskId}/postpone`) } catch { showToast('No se ha podido posponer la tarea.') }
     await openWeek(detail.id)
     setPostponing(null)
   }
@@ -475,7 +588,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   const deleteTask = async taskId => {
     if (!window.confirm('¿Quitar esta tarea? No se puede deshacer.')) return
     setDeletingTask(taskId)
-    try { await api('DELETE', `/equipacion/tasks/${taskId}`) } catch {}
+    try { await api('DELETE', `/equipacion/tasks/${taskId}`) } catch { showToast('No se ha podido quitar la tarea.') }
     await openWeek(detail.id)
     setDeletingTask(null)
   }
@@ -563,7 +676,6 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
       <div>
         <div className="org__semana-actions">
           <button className="org__link-btn" onClick={() => setDetail(null)}>← Volver a semanas</button>
-          <button className="org__link-btn" onClick={deleteWeek}>Borrar semana</button>
           {canManage && (addingPerson ? (
             <select
               autoFocus value="" disabled={addPersonBusy}
@@ -659,6 +771,11 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
             {taskTypeById[detail.assignments.flatMap(a => a.tasks).find(t => t.id === dragTaskId)?.taskTypeId]?.name}
           </div>
         )}
+        {canManage && (
+          <div className="org__danger-zone">
+            <button className="org__link-btn org__link-btn--danger" onClick={deleteWeek}>Borrar semana</button>
+          </div>
+        )}
       </div>
     )
   }
@@ -676,13 +793,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
         <button className="org__link-btn" onClick={() => setShowTest(s => !s)}>
           {showTest ? 'Ver semanas normales' : 'Ver semanas de prueba'}
         </button>
-        {canManage && (
-          <button className="org__link-btn" onClick={() => setShowMigrar(s => !s)}>
-            {showMigrar ? 'Ocultar migración' : '⚠ Migrar datos del sitio principal'}
-          </button>
-        )}
       </div>
-      {showMigrar && <MigrarPrincipalPanel />}
       {showWorkers && <WorkersAdmin workers={workers} onChanged={onWorkersChanged} />}
       {showCreate && (
         <CreateWeekForm
@@ -733,55 +844,6 @@ function HistoricoView() {
           )}
         </div>
       ))}
-    </div>
-  )
-}
-
-// Migración puntual (NOTAS_PARA_CODE_equipacion.md, 3/11 12:00): trae del sitio principal
-// (blog_id 1) al club (donde vive la app) los trabajadores eventuales, la competición #2 y sus
-// semanas 18/15/16/19 con el reparto a mano, que se habían creado probando contra el sitio
-// equivocado. Primero enseña un informe (sin escribir nada); "Confirmar" lo ejecuta de verdad —
-// solo se puede una vez.
-function MigrarPrincipalPanel() {
-  const [informe, setInforme] = useState(null)
-  const [cargando, setCargando] = useState(false)
-  const [hecho, setHecho] = useState(false)
-
-  const revisar = async () => {
-    setCargando(true)
-    try { setInforme(await api('POST', '/equipacion/migrar-principal-a-club', { confirmar: false })) }
-    catch (e) { window.alert(e.message) }
-    setCargando(false)
-  }
-  const confirmar = async () => {
-    if (!window.confirm('¿Migrar de verdad? Solo se puede hacer una vez (si hace falta repetirlo luego hay que avisar a Code/cowork).')) return
-    setCargando(true)
-    try { setInforme(await api('POST', '/equipacion/migrar-principal-a-club', { confirmar: true })); setHecho(true) }
-    catch (e) { window.alert(e.message) }
-    setCargando(false)
-  }
-
-  return (
-    <div className="org__add-form">
-      <p className="org__hint">
-        Trae del sitio principal los trabajadores eventuales, la competición y las semanas 16/11, 23/11,
-        30/11 y 7/12 con el reparto a mano, que se crearon probando contra el sitio equivocado.
-      </p>
-      <button className="org__link-btn" onClick={revisar} disabled={cargando}>{cargando ? 'Cargando…' : 'Revisar qué haría (sin tocar nada)'}</button>
-      {informe && (
-        <div style={{ marginTop: 10, fontSize: '0.85rem' }}>
-          <p><strong>Trabajadores:</strong> {informe.data.workers.join(', ') || '—'}</p>
-          <p><strong>Competición:</strong> {informe.data.competition || '—'}</p>
-          <p><strong>Semanas:</strong> {informe.data.weeks.join(', ') || '—'}</p>
-          <p><strong>Asignaciones:</strong> {informe.data.assignments} · <strong>Tareas:</strong> {informe.data.tasks} · <strong>Tipos de tarea nuevos:</strong> {informe.data.taskTypes.join(', ') || '—'} · <strong>Bloques de compe:</strong> {informe.data.compBlocks}</p>
-          {informe.data.avisos.length > 0 && <p style={{ color: '#a33d33' }}><strong>Avisos:</strong> {informe.data.avisos.join(' · ')}</p>}
-          {informe.confirmado ? (
-            <p className="org__hint">✅ Migrado de verdad. Recarga la página y comprueba la semana del 16/11.</p>
-          ) : (
-            <button className="org__add-btn" onClick={confirmar} disabled={cargando || hecho}>Confirmar (escribir de verdad)</button>
-          )}
-        </div>
-      )}
     </div>
   )
 }
@@ -1300,13 +1362,14 @@ function CompeView({ config, workers }) {
   const [current, setCurrent] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
+  const showToast = useToast()
 
   const reload = useCallback(() => {
-    return api('GET', '/equipacion/competitions').then(r => setCompetitions(r.data || [])).catch(() => {})
-  }, [])
+    return api('GET', '/equipacion/competitions').then(r => setCompetitions(r.data || [])).catch(() => showToast('No se ha podido cargar la lista de competiciones.'))
+  }, [showToast])
   useEffect(() => { reload().finally(() => setLoading(false)) }, [reload])
 
-  const openComp = id => api('GET', `/equipacion/competitions/${id}`).then(r => setCurrent(r.data)).catch(() => {})
+  const openComp = id => api('GET', `/equipacion/competitions/${id}`).then(r => setCurrent(r.data)).catch(() => showToast('No se ha podido abrir la competición.'))
 
   if (current) {
     return (
@@ -1329,13 +1392,23 @@ function CompeView({ config, workers }) {
           onCancel={() => setShowCreate(false)}
         />
       )}
-      <ul className="org__week-list">
-        {competitions.map(c => (
-          <li key={c.id} className="org__week-row" onClick={() => openComp(c.id)}>
-            <span>{c.name} — {c.compDate}{c.compEndDate !== c.compDate ? ` al ${c.compEndDate}` : ''}{c.isTest ? ' (prueba)' : ''}</span>
-            <span className="org__week-subzones">tareas desde {c.tasksStartDate}</span>
-          </li>
-        ))}
+      <ul className="org__compe-list">
+        {competitions.map(c => {
+          const faltan = daysUntil(c.compDate)
+          const faltanTxt = faltan > 0 ? `Faltan ${faltan} día${faltan === 1 ? '' : 's'}` : faltan === 0 ? 'Es hoy' : (daysUntil(c.compEndDate) >= 0 ? 'En curso' : 'Terminada')
+          return (
+            <li key={c.id} className="org__compe-card" onClick={() => openComp(c.id)}>
+              <div className="org__compe-card-main">
+                <span className="org__compe-card-nombre">{c.name}{c.isTest ? ' (prueba)' : ''}</span>
+                <span className="org__compe-card-fechas">{dateRangeLabel(c.compDate, c.compEndDate)}</span>
+                <span className="org__compe-card-estado">
+                  {faltanTxt} · {c.tasksHechas}/{c.tasksTotal} tareas · {c.blocksColocados}/{c.blocksTotal} bloques colocados
+                </span>
+              </div>
+              <span className="org__compe-card-flecha">Abrir →</span>
+            </li>
+          )
+        })}
         {competitions.length === 0 && <p className="org__hint">Sin competiciones todavía.</p>}
       </ul>
     </div>
