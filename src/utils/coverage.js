@@ -168,6 +168,20 @@ export function setFestivos(dates) {
   festivos = new Set(dates && dates.length ? dates : FESTIVOS_BASE)
 }
 
+// Cierres sueltos que SÍ gastan vacaciones (Ramiro, 4/11 06:27: 24 y 31 de diciembre cierran pero
+// cuentan como vacaciones para quien trabajaría ese día) — a diferencia de un festivo normal, NO
+// entran en `festivos` (siguen siendo laborables: una solicitud de vacaciones aprobada que los
+// cubra sí resta del saldo, igual que cualquier otro día). Solo afectan a `simulatePlan` (abajo):
+// ese día no se simula cobertura, igual que un mes cerrado — nadie debería "faltar" un día en el
+// que la sala ni abre. La parte de "resta vacaciones a quien trabajaría" se hace aparte, con
+// solicitudes aprobadas de verdad (TimeOffTab.jsx), no tocando `isClosed()` en general: esa
+// función también la usa `vacacionesPersona` para el bloque de verano, y mezclar los dos cierres
+// ahí habría liado la cuenta de las vacaciones de agosto.
+let cierreVacaciones = new Set()
+export function setCierreVacaciones(dates) {
+  cierreVacaciones = new Set(dates || [])
+}
+
 const JS_DAY = [null, 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', null]
 
 export function isoDate(d) {
@@ -353,7 +367,7 @@ export function simulatePlan(dates, { periods, paro = {}, cierre = 'abierto', ca
   const years = [...new Set(dates.map(d => Number(d.slice(0, 4))))]
   const campSet = new Set(years.flatMap(y => [...campDates(camp, y)]))
   return dates.map(date => {
-    if (isClosed(date, cierre)) {
+    if (isClosed(date, cierre) || cierreVacaciones.has(date)) {
       return {
         date, day: weekdayOf(date), closed: true, camp: campSet.has(date), out: [], total: 0,
         lost: [], covered: [], suspended: [], comodin: 0, sinAbrir: false, sinCerrar: false,

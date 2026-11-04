@@ -5990,6 +5990,44 @@ function blokes_ensure_club_days_table() {
         ));
         update_option('blokes_club_days_evento_ace', 1, false);
     }
+
+    // Decisión de Ramiro (4/11 06:27): 24 y 31 de diciembre 2026 (jueves) cierran de verdad este
+    // año — pero a diferencia del resto de festivos, SÍ gastan vacaciones de quien trabajaría ese
+    // día (Eva: "nunca se ha abierto" esos días; Ramiro: "quiero que sí les cuente como
+    // vacaciones"). Pasa esos dos días de `abre` (la regla general de "víspera = abre" que no
+    // aplica aquí) a `cierra_vacaciones`, y genera la solicitud de vacaciones aprobada para cada
+    // persona que trabaja los jueves — Alvaro, Sigurd, Sara y Eva; Lucía y Ana no tienen horario
+    // ese día (src/data/staffSchedule.js) — como "cierre colectivo", sin que cada uno tenga que
+    // pedirlo. Migración de una sola vez; de ahora en adelante el botón "Cierra (vacaciones)" de
+    // CTRL Time Off hace esto mismo para cualquier cierre nuevo parecido.
+    if (!get_option('blokes_club_days_cierre_vacaciones_dic_2026')) {
+        $ahora = current_time('mysql');
+        foreach (array('2026-12-24', '2026-12-31') as $fecha) {
+            $wpdb->update(blokes_club_days_table(), array(
+                'decision' => 'cierra_vacaciones', 'decidido_por' => 'ramiro', 'fecha_decision' => $ahora, 'updated_at' => $ahora,
+            ), array('fecha' => $fecha));
+        }
+        $trabajan_jueves = array('Alvaro', 'Sigurd', 'Sara', 'Eva');
+        $requests = get_option('blokes_timeoff_requests', array());
+        if (!is_array($requests)) $requests = array();
+        foreach (array('2026-12-24', '2026-12-31') as $fecha) {
+            foreach ($trabajan_jueves as $persona) {
+                $ya = false;
+                foreach ($requests as $r) {
+                    if (mb_strtolower($r['person'] ?? '') === mb_strtolower($persona) && ($r['from'] ?? '') === $fecha && ($r['to'] ?? '') === $fecha) { $ya = true; break; }
+                }
+                if ($ya) continue;
+                $requests[] = array(
+                    'id' => wp_generate_uuid4(), 'person' => $persona, 'from' => $fecha, 'to' => $fecha,
+                    'status' => 'aprobada', 'canal' => 'otro',
+                    'nota' => 'Cierre Nochebuena/Nochevieja — vacaciones para todos',
+                    'created_at' => $ahora, 'by' => 'ramiro (migración)',
+                );
+            }
+        }
+        update_option('blokes_timeoff_requests', $requests, false);
+        update_option('blokes_club_days_cierre_vacaciones_dic_2026', 1, false);
+    }
 }
 
 // GET /gestion/club-days?desde&hasta — lista ordenada por fecha, opcionalmente filtrada.
@@ -6015,14 +6053,16 @@ function blokes_club_day_fila($r) {
     );
 }
 
-// Fechas (YYYY-MM-DD → true) marcadas "cierra" en el calendario del club dentro de [desde,
-// hasta] (inclusive) — las usa Organización (Equipación) para no repartir tareas esos días,
-// igual que ya pasa con el fin de semana (NOTAS_PARA_CODE_calendario.md, 1/11).
+// Fechas (YYYY-MM-DD → true) marcadas "cierra" o "cierra_vacaciones" en el calendario del club
+// dentro de [desde, hasta] (inclusive) — las usa Organización (Equipación) para no repartir
+// tareas esos días, igual que ya pasa con el fin de semana (NOTAS_PARA_CODE_calendario.md, 1/11).
+// La sala está cerrada en los dos casos; que además cuente como vacaciones (cierra_vacaciones) no
+// cambia que no haya nadie para equipar.
 function blokes_club_days_cerrados($desde, $hasta) {
     global $wpdb;
     blokes_ensure_club_days_table();
     $fechas = $wpdb->get_col($wpdb->prepare(
-        "SELECT fecha FROM " . blokes_club_days_table() . " WHERE decision = 'cierra' AND fecha BETWEEN %s AND %s",
+        "SELECT fecha FROM " . blokes_club_days_table() . " WHERE decision IN ('cierra', 'cierra_vacaciones') AND fecha BETWEEN %s AND %s",
         $desde, $hasta
     ));
     return array_flip($fechas);
@@ -6063,7 +6103,11 @@ function superadmin_club_days_editar($request) {
     blokes_ensure_club_days_table();
     global $wpdb;
     $tipos = array('festivo_nacional', 'festivo_madrid', 'festivo_local', 'cierre', 'horario_especial', 'evento');
-    $decisiones = array('pendiente', 'abre', 'abre_horario_especial', 'cierra');
+    // "cierra_vacaciones" (Ramiro, 4/11 06:27): cierra, pero a diferencia de "cierra" SÍ gasta
+    // vacaciones de quien trabajaría ese día — para cierres como Nochebuena/Nochevieja que no son
+    // festivo oficial. El reparto real (quién tiene vacaciones ese día) lo decide el frontend
+    // (TimeOffTab.jsx) generando solicitudes aprobadas, no esta tabla.
+    $decisiones = array('pendiente', 'abre', 'abre_horario_especial', 'cierra', 'cierra_vacaciones');
     $id = intval($request['id']);
     $antes = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_club_days_table() . " WHERE id = %d", $id), ARRAY_A);
     if (!$antes) return new WP_Error('not_found', 'Día no encontrado.', array('status' => 404));
@@ -6073,7 +6117,7 @@ function superadmin_club_days_editar($request) {
     if (isset($body['decision'])) {
         $decision = sanitize_key($body['decision']);
         if (!in_array($decision, $decisiones, true)) {
-            return new WP_Error('bad_request', 'decision debe ser pendiente, abre, abre_horario_especial o cierra.', array('status' => 400));
+            return new WP_Error('bad_request', 'decision debe ser pendiente, abre, abre_horario_especial, cierra o cierra_vacaciones.', array('status' => 400));
         }
         $campos['decision'] = $decision;
         $u = wp_get_current_user();

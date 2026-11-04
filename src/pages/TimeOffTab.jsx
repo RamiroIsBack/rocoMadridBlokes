@@ -1,9 +1,10 @@
 import { Component, useState, useMemo, useEffect, useRef } from 'react'
-import { PROF_META, PROF_ORDER, DAYS, DAY_LABEL } from '../data/staffSchedule'
+import { PROF_META, PROF_ORDER, DAYS, DAY_LABEL, BASE } from '../data/staffSchedule'
 import {
   KEY_HOLDERS_DEFAULT, VERANO_APERTURA, COMODIN_VERANO, veranoSlots, pairConflict, simulatePlan,
   laborablesBetween, laborablesFrom, isSummer, weekdayOf, fmtShort,
   diasDevengados, PARO_VERANO, combinacionesParo, CIERRE_VERANO, isClosed, disponible, setFestivos,
+  setCierreVacaciones,
   CAMP_DEFAULT, CAMP_MESES, normalizeCamp, lunesDelMes,
 } from '../utils/coverage'
 import { equilibrioCamp, tablaCamp } from '../utils/campamento'
@@ -18,7 +19,7 @@ import {
   mesesCerradosManana, PERSONA_MES_ESTADOS, estadoPersonaMes, paroDesdePersonasMes, personasMesDesdeParo,
   agruparHistoricoRealPorMes,
 } from '../utils/timeoffPlan'
-import { useTimeOffData, savePlan, saveReal, syncNueve, addScenario } from '../hooks/useTimeOff'
+import { useTimeOffData, savePlan, saveReal, syncNueve, addScenario, addRequests } from '../hooks/useTimeOff'
 import { useClases } from '../hooks/useClases'
 import TimeOffRequests, { matchPerson } from './TimeOffRequests'
 import TimeOffIntegration, { personaDeEmpleado } from './TimeOffIntegration'
@@ -1637,19 +1638,27 @@ class FalloSeguro extends Component {
 
 // ─── Fiestas y cierres (NOTAS_PARA_CODE_calendario.md) ──────────────────────
 // Calendario único de días especiales del club: festivos, cierres sueltos, horarios especiales
-// y eventos, cada uno con una decisión (pendiente/abre/abre_horario_especial/cierra). Un día
-// marcado "cierra" aquí entra en `festivos` (ver `festivosKey` más abajo) y por tanto no gasta
-// vacaciones ni cuenta como "sin cubrir" en la cobertura, igual que un festivo nacional — eso
-// ya funciona de verdad. "Abre con horario especial" solo se registra: la cobertura día a día
-// todavía no sabe usar un horario distinto al habitual (pendiente, es un cambio más profundo).
+// y eventos, cada uno con una decisión (pendiente/abre/abre_horario_especial/cierra/
+// cierra_vacaciones). Un día marcado "cierra" aquí entra en `festivos` (ver `festivosKey` más
+// abajo) y por tanto no gasta vacaciones ni cuenta como "sin cubrir" en la cobertura, igual que
+// un festivo nacional — eso ya funciona de verdad. "Cierra (vacaciones)" (Ramiro, 4/11 06:27) es
+// distinto: tampoco cuenta como "sin cubrir", pero SÍ gasta vacaciones de quien trabajaría ese
+// día — para cierres como Nochebuena/Nochevieja que no son festivo oficial. Al marcarlo así se
+// genera sola una solicitud de vacaciones aprobada para cada persona con horario ese día de la
+// semana (ver BASE en staffSchedule.js), como un "cierre colectivo" sin que cada uno tenga que
+// pedirlo. "Abre con horario especial" solo se registra: la cobertura día a día todavía no sabe
+// usar un horario distinto al habitual (pendiente, es un cambio más profundo).
 const CLUB_DAY_TIPO_LABEL = {
   festivo_nacional: 'Festivo nacional', festivo_madrid: 'Festivo Madrid', festivo_local: 'Festivo local',
   cierre: 'Cierre', horario_especial: 'Horario especial', evento: 'Evento',
 }
-const CLUB_DAY_DECISION_LABEL = { pendiente: 'Pendiente', abre: 'Abre', abre_horario_especial: 'Abre (horario especial)', cierra: 'Cierra' }
+const CLUB_DAY_DECISION_LABEL = {
+  pendiente: 'Pendiente', abre: 'Abre', abre_horario_especial: 'Abre (horario especial)',
+  cierra: 'Cierra', cierra_vacaciones: 'Cierra (vacaciones)',
+}
 const CLUB_DAY_FORM_INICIAL = { fecha: '', tipo: 'evento', nombre: '', horario: '' }
 
-function FiestasCierres({ clubDays, onReload }) {
+function FiestasCierres({ clubDays, onReload, onGenerarVacaciones }) {
   const [form, setForm] = useState(CLUB_DAY_FORM_INICIAL)
   const [busy, setBusy] = useState(false)
 
@@ -1657,7 +1666,14 @@ function FiestasCierres({ clubDays, onReload }) {
     if (decision === 'cierra' && !window.confirm(
       `¿Marcar ${dia.fecha} (${dia.nombre || CLUB_DAY_TIPO_LABEL[dia.tipo]}) como CIERRE? Ese día no gastará vacaciones de nadie y no contará como "sin cubrir" en la cobertura.`
     )) return
-    try { await clubDaysEditar(dia.id, { decision }); onReload() } catch (e) { alert(e.message) }
+    if (decision === 'cierra_vacaciones' && !window.confirm(
+      `¿Marcar ${dia.fecha} (${dia.nombre || CLUB_DAY_TIPO_LABEL[dia.tipo]}) como CIERRE CON VACACIONES? La sala no abre, no contará como "sin cubrir", y se generará una solicitud de vacaciones APROBADA para cada persona que trabajaría ese día de la semana.`
+    )) return
+    try {
+      await clubDaysEditar(dia.id, { decision })
+      if (decision === 'cierra_vacaciones') await onGenerarVacaciones?.(dia)
+      onReload()
+    } catch (e) { alert(e.message) }
   }
   const crear = async e => {
     e.preventDefault()
@@ -1679,7 +1695,9 @@ function FiestasCierres({ clubDays, onReload }) {
       <h3 className="sv-section-title">Fiestas y cierres</h3>
       <p className="sv-note">
         Un día marcado <strong>Cierra</strong> no gasta vacaciones de nadie y no cuenta como "sin cubrir" en la cobertura —
-        se trata igual que un festivo. <strong>Abre con horario especial</strong> queda registrado aquí, pero de momento la
+        se trata igual que un festivo. <strong>Cierra (vacaciones)</strong> tampoco cuenta como "sin cubrir", pero SÍ gasta
+        vacaciones de quien trabajaría ese día: genera sola una solicitud aprobada para cada persona con horario ese día de
+        la semana. <strong>Abre con horario especial</strong> queda registrado aquí, pero de momento la
         cobertura día a día no usa ese horario distinto todavía. Solo el rol socio puede decidir.
       </p>
       {pendientes.length > 0 && (
@@ -1720,7 +1738,7 @@ function FiestasCierres({ clubDays, onReload }) {
                   <td>{DAY_LABEL[weekdayOf(d.fecha)]?.slice(0, 3) || ''} {fmtShort(d.fecha)}</td>
                   <td className="sv-ot-muted">{CLUB_DAY_TIPO_LABEL[d.tipo] || d.tipo}</td>
                   <td>{d.nombre || '—'}</td>
-                  <td className={d.decision === 'pendiente' ? 'sv-to-warn-txt' : d.decision === 'cierra' ? 'sv-to-bad' : ''}>
+                  <td className={d.decision === 'pendiente' ? 'sv-to-warn-txt' : (d.decision === 'cierra' || d.decision === 'cierra_vacaciones') ? 'sv-to-bad' : ''}>
                     {CLUB_DAY_DECISION_LABEL[d.decision] || d.decision}
                   </td>
                   <td className="sv-ot-muted">{d.horario || '—'}</td>
@@ -1729,6 +1747,7 @@ function FiestasCierres({ clubDays, onReload }) {
                     <button className="sv-tests-select" onClick={() => decidir(d, 'abre')}>Abre</button>
                     <button className="sv-tests-select" onClick={() => decidir(d, 'abre_horario_especial')}>Horario especial</button>
                     <button className="sv-tests-select" onClick={() => decidir(d, 'cierra')}>Cierra</button>
+                    <button className="sv-tests-select" onClick={() => decidir(d, 'cierra_vacaciones')}>Cierra (vacaciones)</button>
                     {d.origen === 'manual' && <button className="sv-tests-remove" onClick={() => borrar(d)}>Eliminar</button>}
                   </td>
                 </tr>
@@ -1800,11 +1819,33 @@ export default function TimeOffTab() {
     return list.join()
   }, [nueve?.holidays, clubDays])
 
+  // "Cierra (vacaciones)" (Ramiro, 4/11 06:27): a diferencia de "cierra", NO entra en festivos —
+  // sigue siendo laborable, así que la solicitud de vacaciones aprobada que se genera al marcarlo
+  // (ver generarVacacionesCierre) sí resta del saldo. Solo avisa a la simulación de cobertura de
+  // que ese día no hace falta cubrirlo (la sala no abre).
+  const cierreVacacionesKey = useMemo(() => {
+    const list = clubDays.filter(d => d.decision === 'cierra_vacaciones').map(d => d.fecha)
+    setCierreVacaciones(list)
+    return list.join()
+  }, [clubDays])
+
+  // Genera la solicitud de vacaciones APROBADA para cada persona que tiene horario ese día de la
+  // semana (BASE en staffSchedule.js) — el "cierre colectivo" que pidió Ramiro, sin que cada uno
+  // tenga que pedirlo a mano. Nunca duplica (addRequests ya ignora persona+fechas repetidas).
+  const generarVacacionesCierre = async dia => {
+    const diaSemana = weekdayOf(dia.fecha)
+    const trabajan = diaSemana ? PROF_ORDER.filter(p => (BASE[p]?.[diaSemana] || []).length > 0) : []
+    if (trabajan.length === 0) return
+    const nota = `Cierre ${dia.nombre || fmtShort(dia.fecha)} — vacaciones para todos`
+    const res = await addRequests(trabajan.map(person => ({ person, from: dia.fecha, to: dia.fecha, status: 'aprobada', canal: 'otro', nota })))
+    setRequests(res.requests)
+  }
+
   // Lo real del año que se ve (y del siguiente, para el resumen); el simulador, sin solicitudes
   const realAnio = useMemo(() => ({ ...real, year: anio }), [real, anio])
-  const evReal = useMemo(() => evaluarPlan(realAnio, costes.mes, requests), [realAnio, costes.mes, requests, festivosKey])
-  const evRealSig = useMemo(() => evaluarPlan({ ...real, year: anio + 1 }, costes.mes, requests), [real, anio, costes.mes, requests, festivosKey])
-  const evSim  = useMemo(() => evaluarPlan(sim, costes.mes, []), [sim, costes.mes, festivosKey])
+  const evReal = useMemo(() => evaluarPlan(realAnio, costes.mes, requests), [realAnio, costes.mes, requests, festivosKey, cierreVacacionesKey])
+  const evRealSig = useMemo(() => evaluarPlan({ ...real, year: anio + 1 }, costes.mes, requests), [real, anio, costes.mes, requests, festivosKey, cierreVacacionesKey])
+  const evSim  = useMemo(() => evaluarPlan(sim, costes.mes, []), [sim, costes.mes, festivosKey, cierreVacacionesKey])
   const sugerido = useMemo(() => sugeridoHistorico(hist.months), [hist.months])
 
   // Saldo de vacaciones de 9to5 por persona del equipo, para un año
@@ -1902,7 +1943,7 @@ export default function TimeOffTab() {
         </div></FalloSeguro>
       ) : (
         <FalloSeguro que="fiestas y cierres">
-          <FiestasCierres clubDays={clubDays} onReload={cargarClubDays} />
+          <FiestasCierres clubDays={clubDays} onReload={cargarClubDays} onGenerarVacaciones={generarVacacionesCierre} />
         </FalloSeguro>
       )}
     </div>
