@@ -3847,7 +3847,14 @@ function superadmin_gestion_grupos($request) {
                     );
                 }
             }
-            $ym = $fecha->date('Y-m');
+            // A qué mes pertenece este pago: por cuándo WooCommerce generó la renovación
+            // (date_created), no por cuándo se marcó pagada — un adelantado (ver
+            // blokes_aplicar_adelantado_si_hay) deja la suscripción con la fecha REAL del banco,
+            // que puede caer en el mes anterior al que de verdad cubre, y el pago se colaba en el
+            // cubo equivocado (cowork, 3/11-4/11: pedido 7546, date_created 02/11 pero date_paid
+            // 29/10 — confirmado con el date_created real antes de aplicar esto).
+            $fecha_mes = $order->get_date_created() ?: $fecha;
+            $ym = $fecha_mes->date('Y-m');
             if (!isset($meses_set[$ym])) continue;
             $metodo = $order->get_payment_method_title();
             if (!$metodo && in_array($o_status, array('completed', 'processing'), true)) $metodo = 'Manual';
@@ -4526,7 +4533,15 @@ function blokes_externos_limpia($body, $defaults = array()) {
 function superadmin_gestion_externos_crear($request) {
     blokes_ensure_externos_tables();
     global $wpdb;
+    // get_json_params() solo ve un BODY json real (lo que manda el frontend) — una llamada
+    // interna construida con WP_REST_Request + set_param() (como el alta automática de Sync
+    // Grupos) no lo rellena y siempre llegaba vacía aquí, así que "Falta el nombre" saltaba
+    // SIEMPRE y la autocreación fallaba en silencio (cowork, 4/11 04:30: un alta nueva nunca se
+    // creaba sola a pesar del alias de pestaña ya resuelto). Con get_params() como respaldo
+    // seguimos leyendo el JSON real del frontend cuando lo hay, y el resto de parámetros
+    // (incluidos los puestos con set_param()) cuando no.
     $body = $request->get_json_params();
+    if (!$body) $body = $request->get_params();
     $f = blokes_externos_limpia($body);
     if ($f['nombre'] === '') return new WP_Error('bad_request', 'Falta el nombre.', array('status' => 400));
     if (!$f['dia'] && !$f['horario']) return new WP_Error('bad_request', 'Falta el grupo (día/horario).', array('status' => 400));
@@ -4568,7 +4583,12 @@ function superadmin_gestion_externos_pago($request) {
     blokes_ensure_externos_tables();
     global $wpdb;
     $id = intval($request['id']);
+    // Mismo bug que en superadmin_gestion_externos_crear: get_json_params() se queda vacío para
+    // una llamada interna construida con set_param() (el auto-aplicar de Sync Grupos a un
+    // externo) — con get_params() de respaldo seguimos leyendo el JSON real del frontend cuando
+    // lo hay (4/11, mismo hallazgo que el de la autocreación de alumno nuevo).
     $body = $request->get_json_params();
+    if (!$body) $body = $request->get_params();
     $periodo = (string) ($body['periodo'] ?? '');
     if (!preg_match('/^\d{4}-\d{2}$/', $periodo)) return new WP_Error('bad_request', 'Periodo no válido (YYYY-MM).', array('status' => 400));
     $importe = floatval($body['importe'] ?? 0);
@@ -5477,10 +5497,23 @@ function blokes_sync_grupos_reintentar_pendientes($pestanas, $subs_por_tel, $ext
         }
         if ($cambio['tipo'] === 'alumno_nuevo') {
             if (!$match) blokes_sync_grupos_autocrear_alumno_nuevo(intval($cambio['id']), $cambio['pestana'], $pestanas, $cambio['nombre'], $cambio['telefono']);
+            else blokes_sync_grupos_resolver_alumno_nuevo_ya_existe(intval($cambio['id']), $match);
         } else {
             blokes_sync_grupos_autoaplicar_si_seguro(intval($cambio['id']), $cambio['tipo'], $match);
         }
     }
+}
+
+// "alumno_nuevo" CON match: esta fila del Excel es de alguien que ya existe en la web
+// (identificado por teléfono) — no hay nada que crear, solo se marca vista para que no se quede
+// pendiente para siempre sin necesidad (cowork, 4/11 04:30: un alta con match a una suscripción
+// real nunca se resolvía porque solo el caso "sin match" tenía una acción definida).
+function blokes_sync_grupos_resolver_alumno_nuevo_ya_existe($cambio_id, $match) {
+    if (empty($match['tipo']) || empty($match['id'])) return;
+    global $wpdb;
+    $wpdb->update(blokes_sync_grupos_cambios_table(), array(
+        'estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => 'auto (ya existe en la web)',
+    ), array('id' => intval($cambio_id), 'estado' => 'pendiente'));
 }
 
 // Crea o refresca un cambio pendiente para (pestana, clave, tipo, mes) — si ya hay uno
@@ -5630,6 +5663,7 @@ function blokes_sync_grupos_sincronizar() {
                         'nombre' => $fila['nombre'], 'telefono' => $fila['telefono'],
                     ), $match);
                     if (!$match) blokes_sync_grupos_autocrear_alumno_nuevo($cid, $tab, $pestanas, $fila['nombre'], $fila['telefono']);
+                    else blokes_sync_grupos_resolver_alumno_nuevo_ya_existe($cid, $match);
                     $cambios_pestana++;
                 } else {
                     if (trim($anterior['notas']) !== trim($fila['notas']) && $fila['notas'] !== '') {
@@ -5745,6 +5779,23 @@ function superadmin_sync_grupos_cambios_listar($request) {
     )));
 }
 
+// ¿Esta suscripción ya tiene un pedido completed/processing de ese mes? Mismo criterio de "a qué
+// mes pertenece" que usa Grupos (date_created, no date_paid — un adelantado deja la fecha real
+// del banco, que puede caer en el mes anterior al que de verdad cubre).
+function blokes_sync_grupos_sub_ya_cobrado_mes($sub_id, $ym) {
+    if (!function_exists('wcs_get_subscription') || $ym === '') return false;
+    $sub = wcs_get_subscription(intval($sub_id));
+    if (!$sub) return false;
+    $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
+    foreach ($order_ids as $oid) {
+        $order = wc_get_order($oid);
+        if (!$order || !in_array($order->get_status(), array('completed', 'processing'), true)) continue;
+        $fecha = $order->get_date_created() ?: $order->get_date_paid();
+        if ($fecha && $fecha->date('Y-m') === $ym) return true;
+    }
+    return false;
+}
+
 // Efecto real de un cambio: "pago_nuevo" reutiliza EXACTAMENTE el mismo camino que "Marcar
 // cobrado" a mano (con su protección de pagos adelantados incluida) o el cobro de un externo —
 // nunca lógica nueva para tocar dinero. "nota" copia el texto al perfil (post meta de la
@@ -5760,6 +5811,15 @@ function blokes_sync_grupos_aplicar_efecto($cambio, $datos) {
         $fecha = (string) ($datos['fecha'] ?? '');
         $fecha = preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha) ? $fecha : current_time('Y-m-d');
         if ($cambio['match_tipo'] === 'sub') {
+            // Si la web ya tiene un pedido completed/processing de ESE mes (p. ej. cobro
+            // automático por Redsys que ya pasó solo, o un pago ya marcado por otro camino), el
+            // pago del Excel no añade nada nuevo — intentar "Marcar cobrado" encima fallaría
+            // además con "cobro automático" si la suscripción cobra sola, dejando el cambio
+            // pendiente para siempre sin motivo real (cowork, 4/11 04:30: un pago ya cobrado en
+            // la web se quedaba pendiente en Sync Grupos indefinidamente).
+            if (blokes_sync_grupos_sub_ya_cobrado_mes(intval($cambio['match_id']), (string) $cambio['mes'])) {
+                return rest_ensure_response(array('success' => true, 'yaCobrado' => true));
+            }
             $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
             $req->set_param('sub_id', intval($cambio['match_id']));
             $req->set_param('importe', floatval($datos['importe'] ?? 0));
@@ -12546,6 +12606,21 @@ add_action('init', function() {
         }
     }
     update_option('blokes_fix_variacion_4673_precio', 1, false);
+});
+
+// Variación duplicada 6706 "Children" (L-X Menores): confirmado por cowork que tiene 0
+// suscripciones (la 6707 "Menores" sí tiene 2) — se pasa a privada, nunca se borra, igual que el
+// resto de variaciones sin uso que ya se limpiaron a mano (cowork, 4/11 04:30).
+add_action('init', function() {
+    if (get_option('blokes_fix_variacion_6706_privada')) return;
+    if (function_exists('wc_get_product')) {
+        $v = wc_get_product(6706);
+        if ($v) {
+            $v->set_status('private');
+            $v->save();
+        }
+    }
+    update_option('blokes_fix_variacion_6706_privada', 1, false);
 });
 
 function nueve_config() {
