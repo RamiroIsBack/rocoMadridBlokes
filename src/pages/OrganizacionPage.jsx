@@ -180,8 +180,10 @@ function CompeResumenHoy({ workerId, onGoToCompe }) {
   const [miPendientes, setMiPendientes] = useState(null)
   useEffect(() => {
     api('GET', '/equipacion/competitions').then(r => {
+      // Desde que se crea la compe, no solo desde que empiezan sus tareas (cowork, 4/11 07:20:
+      // Ramiro no la veía porque la tarjeta no salía hasta tasksStartDate).
       const hoy = todayStr()
-      const enCurso = (r.data || []).find(c => hoy >= c.tasksStartDate && hoy <= c.compEndDate)
+      const enCurso = (r.data || []).find(c => hoy <= c.compEndDate)
       setComp(enCurso || null)
       if (enCurso && workerId) {
         api('GET', `/equipacion/competitions/${enCurso.id}/plan`).then(p => {
@@ -276,7 +278,7 @@ function HoyView({ config, workers, workerId, onChooseWorker, canManage }) {
           <section className="org__section">
             <h3 className="org__section-title">Tareas de hoy</h3>
             {data.tasks.length === 0 ? (
-              <p className="org__hint">Sin tareas para hoy (puede que no sea día de trabajo, o que no haya semana planificada).</p>
+              <p className="org__hint">Sin tareas para hoy — puede que no sea tu día de trabajo, que no haya semana planificada, o que el responsable todavía no haya repartido las de esta semana (muchas se le asignan primero a él para que las arrastre a quien toque).</p>
             ) : (
               <ul className="org__task-list">
                 {data.tasks.map(t => {
@@ -768,7 +770,10 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
         </div>
         {dragTaskId != null && dragPos && (
           <div className="org__drag-ghost" style={{ left: dragPos.x, top: dragPos.y }}>
-            {taskTypeById[detail.assignments.flatMap(a => a.tasks).find(t => t.id === dragTaskId)?.taskTypeId]?.name}
+            {(() => {
+              const t = detail.assignments.flatMap(a => a.tasks).find(t => t.id === dragTaskId)
+              return t ? taskLabel(t, taskTypeById) : ''
+            })()}
           </div>
         )}
         {canManage && (
@@ -1461,6 +1466,7 @@ function CompePlanView({ compId, taskTypeById, workers }) {
   const [plan, setPlan] = useState(null)
   const [filterWorker, setFilterWorker] = useState('')
   const [generating, setGenerating] = useState(false)
+  const showToast = useToast()
 
   const reload = useCallback(() => {
     api('GET', `/equipacion/competitions/${compId}/plan`).then(r => setPlan(r.data)).catch(() => setPlan(null))
@@ -1479,7 +1485,9 @@ function CompePlanView({ compId, taskTypeById, workers }) {
 
   const toggleDone = async (taskId, done) => {
     setPlan(p => ({ ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, done } : t) }))
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch {} finally { reload() }
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) }
+    catch { showToast('No se ha podido guardar — deshecho.') }
+    finally { reload() }
   }
 
   const tasks = (plan?.tasks || []).filter(t => !filterWorker || String(t.workerId) === filterWorker)
@@ -1528,6 +1536,7 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
   const wrapRef = useRef(null)
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const [blocks, setBlocks] = useState(comp.blocks)
+  const showToast = useToast()
   const [selectedToPlace, setSelectedToPlace] = useState(null)
   const [editingBlockId, setEditingBlockId] = useState(null)
   const [holdsets, setHoldsets] = useState([])
@@ -1572,7 +1581,7 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
     if (id == null) return
     if (!moved) { setEditingBlockId(id); return }
     const b = blocks.find(x => x.id === id)
-    if (b) { try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: b.xPct, yPct: b.yPct }) } catch {} }
+    if (b) { try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: b.xPct, yPct: b.yPct }) } catch { showToast('No se ha podido guardar la posición.') } }
   }
   const onWrapClick = async e => {
     if (dragIdRef.current != null || !selectedToPlace) return
@@ -1580,7 +1589,8 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
     const id = selectedToPlace
     setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: x, yPct: y } : b))
     setSelectedToPlace(null)
-    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: x, yPct: y }) } catch {}
+    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: x, yPct: y }) }
+    catch { showToast('No se ha podido colocar el bloque.'); setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: null, yPct: null } : b)) }
   }
   // Arrastrar un número de la bandeja hasta el mapa (además de tocar y
   // tocar): mismo mecanismo de pointer que las burbujas ya colocadas, con un
@@ -1610,12 +1620,15 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
     const { x, y } = posFromClient(e.clientX, e.clientY)
     setSelectedToPlace(null)
     setBlocks(cur => cur.map(b => b.id === st.id ? { ...b, xPct: x, yPct: y } : b))
-    try { await api('PUT', `/equipacion/comp-blocks/${st.id}`, { xPct: x, yPct: y }) } catch {}
+    try { await api('PUT', `/equipacion/comp-blocks/${st.id}`, { xPct: x, yPct: y }) }
+    catch { showToast('No se ha podido colocar el bloque.'); setBlocks(cur => cur.map(b => b.id === st.id ? { ...b, xPct: null, yPct: null } : b)) }
   }
 
   const unplace = async id => {
+    const antes = blocks.find(b => b.id === id)
     setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: null, yPct: null } : b))
-    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { unplace: true }) } catch {}
+    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { unplace: true }) }
+    catch { showToast('No se ha podido quitar el bloque.'); if (antes) setBlocks(cur => cur.map(b => b.id === id ? antes : b)) }
   }
 
   const unplaced = blocks.filter(b => b.xPct == null)
@@ -1623,8 +1636,8 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
 
   const removeComp = async () => {
     if (!window.confirm(`¿Borrar la competición "${comp.name}"? No se puede deshacer.`)) return
-    try { await api('DELETE', `/equipacion/competitions/${comp.id}`) } catch {}
-    onBack()
+    try { await api('DELETE', `/equipacion/competitions/${comp.id}`); onBack() }
+    catch { showToast('No se ha podido borrar la competición.') }
   }
 
   return (

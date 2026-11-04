@@ -11239,13 +11239,15 @@ function progreso_equip_create_week($request) {
         // semana en curso que todavía no han llegado a su fecha): una
         // semana nueva puede crearse mientras la anterior aún no termina.
         $today = current_time('Y-m-d');
+        // Nunca mezclar prueba con real (cowork, 4/11 07:20): una tarea atrasada de una semana de
+        // PRUEBA no debe colarse en la primera semana REAL que se cree después, ni al revés.
         $pending = $wpdb->get_results($wpdb->prepare(
             "SELECT t.*, a.worker_id FROM {$tasks_table} t
              JOIN {$assignments_table} a ON a.id = t.assignment_id
              JOIN " . progreso_equip_table('weeks') . " wk ON wk.id = a.week_id
              WHERE t.task_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL
-               AND wk.start_date < %s AND wk.id != %d",
-            $today, $start_date, $week_id
+               AND wk.start_date < %s AND wk.id != %d AND wk.is_test = %d",
+            $today, $start_date, $week_id, $is_test
         ), ARRAY_A);
         $pending_by_type = array();
         foreach ($pending as $old) { $pending_by_type[$old['task_type_id']][] = $old; }
@@ -11978,13 +11980,38 @@ function progreso_equip_update_competition($request) {
 }
 
 // Borra también las tareas que hubiera generado el plan de esta compe (si lo hubo), para no
-// dejar huérfanas tareas "Compe: ..." sin ninguna competición a la que pertenezcan.
+// dejar huérfanas tareas "Compe: ..." sin ninguna competición a la que pertenezcan. Si la compe
+// es de PRUEBA, además borra las semanas de prueba que el plan creó y que se quedan completamente
+// vacías al quitar sus tareas de compe — nunca una semana REAL, ni una de prueba que tuviera algo
+// más (cowork, 4/11 07:20: tuvo que borrar 6 semanas a mano).
 function progreso_equip_delete_competition($request) {
     global $wpdb;
     $id = intval($request['id']);
-    $wpdb->delete(progreso_equip_table('tasks'), array('competition_id' => $id), array('%d'));
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT is_test FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $id), ARRAY_A);
+    $tasks_table = progreso_equip_table('tasks');
+    $assignments_table = progreso_equip_table('assignments');
+    $semanas_afectadas = $comp && $comp['is_test'] ? $wpdb->get_col($wpdb->prepare(
+        "SELECT DISTINCT a.week_id FROM {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id WHERE t.competition_id = %d",
+        $id
+    )) : array();
+
+    $wpdb->delete($tasks_table, array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('comp_blocks'), array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('competitions'), array('id' => $id), array('%d'));
+
+    foreach ($semanas_afectadas as $week_id) {
+        $week_id = intval($week_id);
+        $semana = $wpdb->get_row($wpdb->prepare("SELECT is_test FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $week_id), ARRAY_A);
+        if (!$semana || !$semana['is_test']) continue;
+        $assignment_ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM {$assignments_table} WHERE week_id = %d", $week_id));
+        if (!$assignment_ids) { $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d')); continue; }
+        $ph = implode(',', array_fill(0, count($assignment_ids), '%d'));
+        $quedan_tareas = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$tasks_table} WHERE assignment_id IN ($ph)", ...$assignment_ids));
+        $quedan_bloques = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('blocks') . " WHERE assignment_id IN ($ph)", ...$assignment_ids));
+        if ($quedan_tareas > 0 || $quedan_bloques > 0) continue; // tenía algo más: no se toca
+        $wpdb->query($wpdb->prepare("DELETE FROM {$assignments_table} WHERE week_id = %d", $week_id));
+        $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d'));
+    }
     return rest_ensure_response(array('success' => true));
 }
 
@@ -12208,13 +12235,20 @@ function progreso_equip_competition_generate_plan($request) {
     $s0_monday = date('Y-m-d', strtotime($comp_monday) - 7 * 86400);
     $s1_monday = date('Y-m-d', strtotime($s0_monday) - 7 * 86400);
     $s2_monday = date('Y-m-d', strtotime($s0_monday) - 14 * 86400);
-    $s3_monday = date('Y-m-d', strtotime($s0_monday) - 21 * 86400);
+    // La semana de diseño/revisar material arranca "leadWeeks" semanas antes de la compe (el
+    // campo "Semanas de antelación" del formulario de creación) — antes era siempre 3 semanas
+    // antes de s0 fijo, sin usar ese campo para nada (cowork, 4/11 07:20: con leadWeeks=2 las
+    // tareas empezaban igualmente 4 semanas antes). Con leadWeeks <= 2 no hay sitio para una
+    // semana de diseño separada de la de limpieza/inscripciones (s2): se juntan en una sola, en
+    // vez de pisar fechas o crear una semana de diseño DESPUÉS de la de limpieza.
+    $lead_weeks = max(1, intval($comp['lead_weeks']) ?: 3);
+    $s3_monday = date('Y-m-d', strtotime($comp_monday) - $lead_weeks * 7 * 86400);
     $after_monday = date('Y-m-d', strtotime($comp_monday) + 7 * 86400);
-    // Si la semana de diseño ya ha pasado (no queda runway desde hoy), se junta con la de
-    // limpieza/inscripciones en vez de crear tareas ya vencidas desde el primer día — confirmado
-    // con cowork (1/11 17:20) como regla general, aunque para esta compe en concreto sí hay
-    // margen y las 4 semanas de antes quedan separadas, una por semana.
-    $diseno_monday = (strtotime($s3_monday) < strtotime($today)) ? $s2_monday : $s3_monday;
+    // Si la semana de diseño ya ha pasado (no queda runway desde hoy), o no hay semanas de
+    // antelación de sobra para una fase separada, se junta con la de limpieza/inscripciones en
+    // vez de crear tareas ya vencidas o una fase antes de tiempo — confirmado con cowork (1/11
+    // 17:20) como regla general.
+    $diseno_monday = ($lead_weeks <= 2 || strtotime($s3_monday) < strtotime($today) || strtotime($s3_monday) >= strtotime($s2_monday)) ? $s2_monday : $s3_monday;
 
     $fases = array();
     if ($diseno_monday === $s2_monday) {
