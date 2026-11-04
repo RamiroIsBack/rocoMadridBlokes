@@ -3,6 +3,7 @@
 // Diferencia = real − presupuesto  →  positiva = a favor (ahorro), negativa = en contra (sobrecoste).
 
 import { readFirstSheet } from './xlsxReader'
+import { autoCategory, SALES_CATEGORIES } from './expensesParser'
 
 // Margen para considerar una partida "cumplida": 5 % del presupuesto, mínimo 5 €.
 export const TOLERANCE_PCT = 0.05
@@ -187,6 +188,21 @@ export function incomeTargets(monthlyPayments) {
   const months = Array.from({ length: 12 }, (_, i) => seasonFactor(i)).reduce((s, v) => s + v, 0)
   const normal = (yearPayments / months) * (1 + INCOME_TARGET.margen)
   return Array.from({ length: 12 }, (_, i) => Math.round(normal * seasonFactor(i)))
+}
+
+// Ingresos reales: cobros por ventas (TPV, Bizum, Wellhub, transferencias) de cada mes, sacados de los
+// extractos del banco (respuesta de /expenses). Las devoluciones de comisiones o de Hacienda no cuentan:
+// ya restan en su partida de pagos.
+export function salesByMonth(expMonths, year) {
+  const out = Array(12).fill(0)
+  for (const m of expMonths || []) {
+    const [y, mm] = String(m.month || '').split('-').map(Number)
+    if (y !== year || !mm) continue
+    for (const it of m.ingresos_items || []) {
+      if (SALES_CATEGORIES.includes(autoCategory(it.concepto, true))) out[mm - 1] += Math.abs(Number(it.importe) || 0)
+    }
+  }
+  return out.map(v => Math.round(v * 100) / 100)
 }
 
 export const sum = arr => arr.reduce((s, v) => s + v, 0)

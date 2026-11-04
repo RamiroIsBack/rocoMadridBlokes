@@ -56,7 +56,7 @@ function buildRows(budget, cats) {
   return rows
 }
 
-export default function BudgetMatrix({ budget, cats, loaded }) {
+export default function BudgetMatrix({ budget, cats, loaded, income }) {
   const [mode, setModeState] = useState(readMode)
   const setMode = m => {
     setModeState(m)
@@ -77,6 +77,29 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
   const result = MONTHS.map((_, i) => goalIn[i] + totB[i])
   const accum  = result.reduce((acc, v, i) => [...acc, (acc[i - 1] || 0) + v], [])
   const shortMonths = result.map((v, i) => (v < -0.5 ? i : null)).filter(i => i !== null)
+
+  // Real del banco: cobros por ventas frente a pagos, solo en meses con extracto
+  const inR     = income || Array(12).fill(0)
+  const resR    = MONTHS.map((_, i) => inR[i] + totR[i])
+  const accumR  = resR.reduce((acc, v, i) => [...acc, (acc[i - 1] || 0) + (has(i) ? v : 0)], [])
+  const goalLoaded = sum(goalIn.filter((_, i) => has(i)))
+  const resLoaded  = sum(result.filter((_, i) => has(i)))
+  const inYearR    = sum(inR.filter((_, i) => has(i)))
+  const resYearR   = sum(resR.filter((_, i) => has(i)))
+  const incomeLabel = mode === 'ppto' ? 'Ingresos objetivo' : mode === 'real' ? 'Ingresos reales (banco)' : 'Ingresos objetivo / real'
+  const resultLabel = mode === 'ppto' ? 'Resultado previsto (objetivo − pagos)'
+    : mode === 'real' ? 'Resultado real (ingresos − pagos)' : 'Resultado previsto / real'
+  // Acumulado: en ppto el del objetivo; en real el del banco; comparado, los dos
+  const accumCell = i => {
+    if (mode === 'ppto') return <td key={i} className={`sa-pay-num ${signCls(accum[i])}`}>{fmt(accum[i])}</td>
+    if (mode === 'real') return <td key={i} className={`sa-pay-num ${has(i) ? signCls(accumR[i]) : ''}`}>{has(i) ? fmt(accumR[i]) : '—'}</td>
+    return (
+      <td key={i} className="sa-pay-num bud-mx-both">
+        <span className={`bud-mx-b ${signCls(accum[i])}`}>{fmt(accum[i])}</span>
+        <span className={`bud-mx-r ${has(i) ? signCls(accumR[i]) : ''}`}>{has(i) ? fmt(accumR[i]) : '—'}</span>
+      </td>
+    )
+  }
 
   const cell = (b, r, i, strong) => {
     const cls = strong ? 'sa-pay-strong' : ''
@@ -111,7 +134,7 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
         </div>
         {mode === 'ambos' && (
           <span className="bud-small sa-pay-muted">
-            Pagos: arriba presupuesto · abajo real del banco (<span className="bud-neg">rojo</span> = peor de lo previsto, <span className="bud-pos">verde</span> = mejor)
+            Arriba presupuesto u objetivo · abajo real del banco (<span className="bud-neg">rojo</span> = peor de lo previsto, <span className="bud-pos">verde</span> = mejor)
           </span>
         )}
       </div>
@@ -125,12 +148,14 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
             </tr>
           </thead>
           <tbody>
-            {/* ── Ingresos: objetivo informativo, calculado con los pagos del año ── */}
+            {/* ── Ingresos: objetivo informativo (calculado con los pagos del año) y cobros reales del banco ── */}
             <tr className="bud-mx-section"><td colSpan={14}><span className="bud-mx-sec">Ingresos</span></td></tr>
             <tr className="bud-mx-income">
-              <td className="bud-mx-name" title="Lo que hay que cobrar cada mes para cubrir los pagos del año">Ingresos objetivo</td>
-              {goalIn.map((v, i) => <td key={i} className="sa-pay-num sa-pay-strong">{fmt(v)}</td>)}
-              <td className="sa-pay-num sa-pay-strong">{fmt(sum(goalIn))}</td>
+              <td className="bud-mx-name" title="Objetivo: lo que hay que cobrar cada mes para cubrir los pagos del año. Real: cobros por ventas del banco (TPV, Bizum, Wellhub y transferencias)">
+                {incomeLabel}
+              </td>
+              {MONTHS.map((_, i) => cell(goalIn[i], inR[i], i, true))}
+              {totalCell(sum(goalIn), inYearR, goalLoaded)}
             </tr>
             <tr className="bud-mx-section"><td colSpan={14}><span className="bud-mx-sec">Pagos</span></td></tr>
             {rows.map(r => {
@@ -172,16 +197,16 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
             {/* ── Resultado frente al objetivo de ingresos ── */}
             <tr className="bud-mx-section"><td colSpan={14}><span className="bud-mx-sec">Resultado</span></td></tr>
             <tr className="bud-mx-result">
-              <td className="bud-mx-name">Resultado previsto (objetivo − pagos)</td>
-              {result.map((v, i) => <td key={i} className={`sa-pay-num ${signCls(v)}`}>{fmt(v)}</td>)}
-              <td className={`sa-pay-num sa-pay-strong ${signCls(sum(result))}`}>{fmt(sum(result))}</td>
+              <td className="bud-mx-name">{resultLabel}</td>
+              {MONTHS.map((_, i) => cell(result[i], resR[i], i))}
+              {totalCell(sum(result), resYearR, resLoaded)}
             </tr>
             <tr>
               <td className="bud-mx-name sa-pay-muted">Acumulado del año</td>
-              {accum.map((v, i) => <td key={i} className={`sa-pay-num ${signCls(v)}`}>{fmt(v)}</td>)}
+              {MONTHS.map((_, i) => accumCell(i))}
               <td className="sa-pay-num sa-pay-muted">—</td>
             </tr>
-            {shortMonths.length > 0 && (
+            {shortMonths.length > 0 && mode !== 'real' && (
               <tr className="bud-mx-goal">
                 <td className="bud-mx-name" title="En los meses en que el objetivo no llega a los pagos: lo mínimo que habría que cobrar para no perder dinero ese mes">
                   🎯 Objetivo para cubrir el mes
@@ -213,6 +238,11 @@ export default function BudgetMatrix({ budget, cats, loaded }) {
         el {pct(INCOME_TARGET.agosto)} de un mes normal), así que el resto de meses cubre ese hueco; incluye un margen del
         {' '}{pct(INCOME_TARGET.margen)}. 🎯 En los meses que quedan en negativo, el objetivo para cubrir el mes es lo mínimo
         a cobrar para no perder dinero ese mes.
+      </p>
+      <p className="sa-pay-note">
+        <strong>Ingresos reales</strong>: cobros por ventas de los extractos del banco (TPV, Bizum, Wellhub y
+        transferencias) de las dos cuentas. No cuentan las devoluciones de comisiones ni de Hacienda, que ya restan en
+        su partida. El resultado real es ingresos reales − pagos reales, solo en los meses con extracto.
       </p>
     </>
   )

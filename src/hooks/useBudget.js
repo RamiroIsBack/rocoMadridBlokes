@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { salesByMonth } from '../utils/budget'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 const BASE     = `${CLUB_URL}/wp-json/superadmin/v1`
@@ -20,7 +21,7 @@ async function request(path, method = 'GET', body) {
   return json
 }
 
-// { budget, items, months_loaded } de un año
+// { budget, items, months_loaded, income } de un año. income = 12 cifras de cobros por ventas del banco.
 export function useBudget(year) {
   const [data,    setData]    = useState(null)
   const [loading, setLoading] = useState(true)
@@ -29,8 +30,12 @@ export function useBudget(year) {
   const reload = useCallback(() => {
     setLoading(true)
     setError(null)
-    return request(`/budget?year=${year}`)
-      .then(json => setData(json))
+    return Promise.all([
+      request(`/budget?year=${year}`),
+      // Si falla, el presupuesto se ve igual, solo sin ingresos reales
+      request(`/expenses?from=${year}-01&entity=all`).catch(() => null),
+    ])
+      .then(([json, exp]) => setData({ ...json, income: exp ? salesByMonth(exp.data, year) : null }))
       .catch(e   => setError(e.message))
       .finally(() => setLoading(false))
   }, [year])
