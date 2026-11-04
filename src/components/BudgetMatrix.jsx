@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { CATEGORIES } from '../utils/expensesParser'
+import { getBudget } from '../hooks/useBudget'
 import { sum, round2, incomeTargets, INCOME_TARGET } from '../utils/budget'
 
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -56,8 +57,12 @@ function buildRows(budget, cats) {
   return rows
 }
 
-export default function BudgetMatrix({ budget, cats, loaded, income }) {
+const monthTotals = b => MONTHS.map((_, i) => sum(b.lines.map(l => Number(l.months[i]) || 0)))
+
+export default function BudgetMatrix({ year, budget, cats, loaded, income }) {
   const [mode, setModeState] = useState(readMode)
+  // Pagos por mes del presupuesto del año siguiente: base del objetivo si este año no está completo
+  const [refPayments, setRefPayments] = useState(null)
   const setMode = m => {
     setModeState(m)
     try { localStorage.setItem(MODE_KEY, m) } catch { /* sin almacenamiento: no pasa nada */ }
@@ -72,11 +77,24 @@ export default function BudgetMatrix({ budget, cats, loaded, income }) {
   const yearR = sum(totR.filter((_, i) => has(i)))
   const yearBLoaded = sum(totB.filter((_, i) => has(i)))
 
-  // Objetivo de ingresos (informativo): se calcula con los pagos del presupuesto, no se guarda
-  const goalIn = incomeTargets(totB)
-  const result = MONTHS.map((_, i) => goalIn[i] + totB[i])
+  // Objetivo de ingresos (informativo): se calcula con los pagos del presupuesto, no se guarda.
+  // Solo hay objetivo en los meses con presupuesto. Si el año no tiene los 12 meses (p. ej. 2026, que
+  // solo va de octubre a diciembre), el objetivo de esos meses es el del presupuesto del año siguiente.
+  const covered = totB.map(v => Math.abs(v) > 0.5)
+  const partial = covered.some(c => !c)
+  useEffect(() => {
+    if (!partial) { setRefPayments(null); return }
+    let alive = true
+    getBudget(year + 1)
+      .then(b => { if (alive) setRefPayments(b ? monthTotals(b) : null) })
+      .catch(() => { if (alive) setRefPayments(null) })
+    return () => { alive = false }
+  }, [year, partial])
+  const goalFromNext = partial && !!refPayments
+  const goalIn = incomeTargets(goalFromNext ? refPayments : totB).map((v, i) => (covered[i] ? v : 0))
+  const result = MONTHS.map((_, i) => (covered[i] ? goalIn[i] + totB[i] : 0))
   const accum  = result.reduce((acc, v, i) => [...acc, (acc[i - 1] || 0) + v], [])
-  const shortMonths = result.map((v, i) => (v < -0.5 ? i : null)).filter(i => i !== null)
+  const shortMonths = result.map((v, i) => (covered[i] && v < -0.5 ? i : null)).filter(i => i !== null)
 
   // Real del banco: cobros por ventas frente a pagos, solo en meses con extracto
   const inR     = income || Array(12).fill(0)
@@ -244,6 +262,12 @@ export default function BudgetMatrix({ budget, cats, loaded, income }) {
         transferencias) de las dos cuentas. No cuentan las devoluciones de comisiones ni de Hacienda, que ya restan en
         su partida. El resultado real es ingresos reales − pagos reales, solo en los meses con extracto.
       </p>
+      {partial && (
+        <p className="sa-pay-note">
+          El presupuesto de {year} no cubre todo el año: solo hay objetivo en los meses con presupuesto
+          {goalFromNext ? `, y es el mismo que en ${year + 1}` : ''}. En el resto se ven solo los ingresos reales.
+        </p>
+      )}
     </>
   )
 }

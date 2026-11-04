@@ -44,7 +44,10 @@ export function useBudget(year) {
   return { data, loading, error, reload }
 }
 
-export const saveBudget = (year, lines, file) => request('/budget', 'POST', { year, lines, file })
+// Solo el presupuesto guardado de un año (sin movimientos), o null si no hay
+export const getBudget = (year) => request(`/budget?year=${year}`).then(j => j.budget || null)
+
+export const saveBudget =(year, lines, file) => request('/budget', 'POST', { year, lines, file })
 
 // Reglas aprendidas "concepto → categoría"
 export const getExpenseRules  = () => request('/expense-rules').then(j => j.rules || {})
