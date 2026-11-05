@@ -190,7 +190,9 @@ export default function OrganizacionPage() {
 // nada de ella).
 function CompeResumenHoy({ workerId, onGoToCompe }) {
   const [comp, setComp] = useState(null)
-  const [miPendientes, setMiPendientes] = useState(null)
+  // Si hay "quién soy" elegido, cuenta solo lo suyo ("tu parte"); si no (Hoy ya no obliga a
+  // elegir, Ramiro 5/11), cuenta lo de todo el equipo — nunca se queda sin número.
+  const [pendientes, setPendientes] = useState(null)
   useEffect(() => {
     api('GET', '/equipacion/competitions').then(r => {
       // Desde que se crea la compe, no solo desde que empiezan sus tareas (cowork, 4/11 07:20:
@@ -198,10 +200,10 @@ function CompeResumenHoy({ workerId, onGoToCompe }) {
       const hoy = todayStr()
       const enCurso = (r.data || []).find(c => hoy <= c.compEndDate)
       setComp(enCurso || null)
-      if (enCurso && workerId) {
+      if (enCurso) {
         api('GET', `/equipacion/competitions/${enCurso.id}/plan`).then(p => {
-          const mias = (p.data?.tasks || []).filter(t => String(t.workerId) === String(workerId))
-          setMiPendientes(mias.filter(t => !t.done).length)
+          const tareas = workerId ? (p.data?.tasks || []).filter(t => String(t.workerId) === String(workerId)) : (p.data?.tasks || [])
+          setPendientes(tareas.filter(t => !t.done).length)
         }).catch(() => {})
       }
     }).catch(() => {})
@@ -209,11 +211,12 @@ function CompeResumenHoy({ workerId, onGoToCompe }) {
   if (!comp) return null
   const faltan = daysUntil(comp.compDate)
   const estadoFechas = faltan > 0 ? `Faltan ${faltan} día${faltan === 1 ? '' : 's'}` : faltan === 0 ? 'Es hoy' : 'En curso'
+  const etiquetaPendientes = workerId ? 'tu parte' : 'equipo'
   return (
     <button className="org__compe-resumen" onClick={onGoToCompe}>
       <span className="org__compe-resumen-nombre">🏆 {comp.name}</span>
       <span className="org__compe-resumen-datos">
-        {estadoFechas}{miPendientes !== null ? ` · tu parte: ${miPendientes} pendiente${miPendientes === 1 ? '' : 's'}` : ''}
+        {estadoFechas}{pendientes !== null ? ` · ${etiquetaPendientes}: ${pendientes} pendiente${pendientes === 1 ? '' : 's'}` : ''}
       </span>
       <span className="org__compe-resumen-flecha">→</span>
     </button>
@@ -221,172 +224,155 @@ function CompeResumenHoy({ workerId, onGoToCompe }) {
 }
 
 // ─── Hoy ──────────────────────────────────────────────────────────────
+// Antes había que elegir primero "¿quién eres?" para ver nada; ahora el tablero del día se ve
+// siempre, con una columna por persona, igual que la vista semanal — Ramiro, 5/11: "no des a
+// elegir entre los equipadores, que salgan todos como en la vista semanal". "¿Quién soy?" sigue
+// disponible, pero solo para firmar lo que añadas/edites (igual que ya hacía Semana), nunca para
+// filtrar lo que se ve.
 function HoyView({ config, workers, workerId, onChooseWorker, canEdit }) {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [showAddBlock, setShowAddBlock] = useState(false)
-  const [showAddTask, setShowAddTask] = useState(false)
-  const [editingTask, setEditingTask] = useState(null)
+  const [detail, setDetail] = useState(null)
+  const [loading, setLoading] = useState(true)
   const [holdsets, setHoldsets] = useState([])
+  const [addingTaskFor, setAddingTaskFor] = useState(null)
+  const [addingBlockFor, setAddingBlockFor] = useState(null)
+  const [editingTask, setEditingTask] = useState(null)
+  const [postponing, setPostponing] = useState(null)
+  const [deletingTask, setDeletingTask] = useState(null)
 
   const worker = workers.find(w => w.id === workerId)
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const showToast = useToast()
+  const today = todayStr()
 
   useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
 
   const reload = useCallback(() => {
-    if (!workerId) return
     setLoading(true)
-    api('GET', `/equipacion/today?workerId=${workerId}&date=${todayStr()}`)
-      .then(res => setData(res.data))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [workerId])
+    api('GET', '/equipacion/weeks').then(r => {
+      const wk = (r.data || []).find(w => today >= w.startDate && today < addDays(w.startDate, 7))
+      if (!wk) { setDetail(null); return null }
+      return api('GET', `/equipacion/weeks/${wk.id}`).then(r2 => setDetail(r2.data))
+    }).catch(() => showToast('No se ha podido cargar el día de hoy.')).finally(() => setLoading(false))
+  }, [today, showToast])
 
   useEffect(() => { reload() }, [reload])
 
-  if (!workerId || !worker) {
-    // Los eventuales (solo vienen para compes puntuales) se enseñan aparte para que no se
-    // confundan con el equipo de mantenimiento normal (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30).
-    const habituales = workers.filter(w => !w.eventual)
-    const eventuales = workers.filter(w => w.eventual)
-    return (
-      <div className="org__whoami">
-        <p className="org__hint">¿Quién eres?</p>
-        <div className="org__whoami-list">
-          {habituales.map(w => (
-            <button key={w.id} className="org__whoami-btn" onClick={() => onChooseWorker(w.id)}>{w.name}</button>
-          ))}
-        </div>
-        {eventuales.length > 0 && (
-          <>
-            <p className="org__hint">Solo compe</p>
-            <div className="org__whoami-list">
-              {eventuales.map(w => (
-                <button key={w.id} className="org__whoami-btn" onClick={() => onChooseWorker(w.id)}>{w.name}</button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    )
-  }
-
   const toggleTask = async (taskId, done) => {
-    setData(d => ({ ...d, tasks: d.tasks.map(t => t.id === taskId ? { ...t, done } : t) }))
+    setDetail(d => ({ ...d, assignments: d.assignments.map(a => ({ ...a, tasks: a.tasks.map(t => t.id === taskId ? { ...t, done } : t) })) }))
     try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { showToast('No se ha podido guardar — deshecho.'); reload() }
+  }
+  const postponeTask = async taskId => {
+    setPostponing(taskId)
+    try { await api('POST', `/equipacion/tasks/${taskId}/postpone`) } catch { showToast('No se ha podido posponer la tarea.') }
+    await reload()
+    setPostponing(null)
+  }
+  const deleteTask = async taskId => {
+    if (!window.confirm('¿Quitar esta tarea? No se puede deshacer.')) return
+    setDeletingTask(taskId)
+    try { await api('DELETE', `/equipacion/tasks/${taskId}`) } catch { showToast('No se ha podido quitar la tarea.') }
+    await reload()
+    setDeletingTask(null)
   }
 
   return (
     <div>
       <div className="org__who-row">
-        <span className="org__who-name">{worker.name}{worker.isLead ? ' · responsable' : ''}</span>
-        <button className="org__link-btn" onClick={() => onChooseWorker(null)}>No soy yo</button>
+        {worker ? (
+          <>
+            <span className="org__who-name">{worker.name}{worker.isLead ? ' · responsable' : ''}</span>
+            <button className="org__link-btn" onClick={() => onChooseWorker(null)}>No soy yo</button>
+          </>
+        ) : (
+          <>
+            <span className="org__hint">¿Quién eres? (solo para firmar lo que añadas o cambies)</span>
+            <select value="" onChange={e => { if (e.target.value) onChooseWorker(Number(e.target.value)) }}>
+              <option value="">— elige —</option>
+              {workers.map(w => <option key={w.id} value={w.id}>{w.name}{w.eventual ? ' (solo compe)' : ''}</option>)}
+            </select>
+          </>
+        )}
       </div>
 
       {loading && <p className="org__hint">Cargando...</p>}
 
-      {!loading && data && (
+      {!loading && !detail && (
+        <p className="org__hint">No hay semana planificada para hoy: pide a Álvaro que la cree.</p>
+      )}
+
+      {!loading && detail && (
         <>
-          <section className="org__section">
-            <h3 className="org__section-title">Tareas de hoy</h3>
-            {data.tasks.length === 0 ? (
-              <p className="org__hint">Sin tareas para hoy — puede que no sea tu día de trabajo, que no haya semana planificada, o que el responsable todavía no haya repartido las de esta semana (muchas se le asignan primero a él para que las arrastre a quien toque).</p>
-            ) : (
-              <ul className="org__task-list">
-                {data.tasks.map(t => {
-                  const params = Object.entries(t.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
-                  const isRetrasada = t.status === 'retrasada'
-                  const movedAway = isRetrasada && t.movedToTaskId
-                  if (movedAway) {
-                    return (
-                      <li key={t.id} className="org__task org__task--moved">
-                        <span className="org__task-name">{taskLabel(t, taskTypeById)}</span>
-                        {params && <span className="org__task-params">{params}</span>}
-                        <span className="org__tile-badge">→ pasada a la semana del {dayLabel(t.movedToDate)}</span>
-                      </li>
-                    )
-                  }
-                  const rastro = rastroTarea(t)
-                  return (
-                    <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}${isRetrasada ? ' org__task--retrasada' : ''}`}>
-                      <label>
-                        <input type="checkbox" checked={t.done} onChange={e => toggleTask(t.id, e.target.checked)} />
-                        <span className="org__task-name">{taskLabel(t, taskTypeById)}</span>
-                        {params && <span className="org__task-params">{params}</span>}
-                        {isRetrasada && <span className="org__tile-badge">RETRASADA{t.postponedCount > 1 ? ` ×${t.postponedCount}` : ''}</span>}
-                        {rastro && <span className="org__task-rastro">{rastro}</span>}
-                      </label>
-                      {canEdit && editingTask !== t.id && (
-                        <button className="org__link-btn" onClick={() => setEditingTask(t.id)}>Editar</button>
-                      )}
-                      {editingTask === t.id && (
-                        <TaskEditForm
-                          task={{ ...t, date: data.date }} byWorkerId={workerId}
-                          onDone={() => { setEditingTask(null); reload() }}
-                          onCancel={() => setEditingTask(null)}
-                        />
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-            {canEdit && data.assignmentId && !showAddTask && (
-              <button className="org__link-btn" onClick={() => setShowAddTask(true)}>+ Tarea</button>
-            )}
-            {showAddTask && (
-              <LooseTaskForm
-                config={config} assignmentId={data.assignmentId} defaultDate={todayStr()} byWorkerId={workerId}
-                onDone={() => { setShowAddTask(false); reload() }}
-                onCancel={() => setShowAddTask(false)}
-              />
-            )}
-          </section>
+          <h3 className="org__section-title">Hoy — {dayLabel(today)}</h3>
+          <div className="org__board">
+            {detail.assignments.map(a => {
+              const tasksHoy = a.tasks.filter(t => t.date === today)
+              return (
+                <div key={a.id} className="org__board-col">
+                  <p className="org__board-col-title">{a.workerName}{a.isLead ? ' · responsable' : ''}</p>
+                  {tasksHoy.length === 0 ? (
+                    <p className="org__hint">Sin tareas hoy.</p>
+                  ) : (
+                    tasksHoy.map(t => editingTask === t.id ? (
+                      <TaskEditForm
+                        key={t.id} task={t} byWorkerId={workerId}
+                        assignments={detail.assignments} assignmentId={a.id}
+                        onDone={() => { setEditingTask(null); reload() }}
+                        onCancel={() => setEditingTask(null)}
+                      />
+                    ) : (
+                      <TaskTile
+                        key={t.id} task={t} typeName={taskLabel(t, taskTypeById)}
+                        isMissed={false} dragging={false} postponing={postponing === t.id}
+                        onPointerDown={() => {}} onToggleDone={toggleTask} onPostpone={postponeTask}
+                        canEdit={canEdit} onEdit={() => setEditingTask(t.id)} onDelete={deleteTask} deleting={deletingTask === t.id}
+                      />
+                    ))
+                  )}
+                  {canEdit && (
+                    addingTaskFor === a.id ? (
+                      <LooseTaskForm
+                        config={config} assignmentId={a.id} defaultDate={today} byWorkerId={workerId}
+                        onDone={() => { setAddingTaskFor(null); reload() }}
+                        onCancel={() => setAddingTaskFor(null)}
+                      />
+                    ) : <button className="org__link-btn" onClick={() => setAddingTaskFor(a.id)}>+ Tarea</button>
+                  )}
+                  <p className="org__board-col-meta">{a.blocks.length} bloque{a.blocks.length === 1 ? '' : 's'} puesto{a.blocks.length === 1 ? '' : 's'} esta semana</p>
+                  {a.blocks.length > 0 && (
+                    <ul className="org__block-list">
+                      {a.blocks.map(b => <BlockRow key={b.id} block={b} holdsets={holdsets} onChanged={reload} />)}
+                    </ul>
+                  )}
+                  {addingBlockFor === a.id ? (
+                    <AddBlockForm
+                      config={config} holdsets={holdsets} assignmentId={a.id}
+                      onDone={() => { setAddingBlockFor(null); reload() }}
+                      onCancel={() => setAddingBlockFor(null)}
+                    />
+                  ) : <button className="org__add-btn" onClick={() => setAddingBlockFor(a.id)}>+ Añadir bloque</button>}
+                </div>
+              )
+            })}
+          </div>
 
-          <MiParteCompes workerId={workerId} config={config} />
-
-          <section className="org__section">
-            <h3 className="org__section-title">Bloques puestos</h3>
-            {data.blocks.length === 0 ? (
-              <p className="org__hint">Ninguno todavía.</p>
-            ) : (
-              <ul className="org__block-list">
-                {data.blocks.map(b => (
-                  <BlockRow key={b.id} block={b} holdsets={holdsets} onChanged={reload} />
-                ))}
-              </ul>
-            )}
-            {!data.assignmentId && <p className="org__hint">No hay semana planificada: pide a Álvaro que la cree.</p>}
-            {data.assignmentId && !showAddBlock && (
-              <button className="org__add-btn" onClick={() => setShowAddBlock(true)}>+ Añadir bloque</button>
-            )}
-            {showAddBlock && (
-              <AddBlockForm
-                config={config} holdsets={holdsets} assignmentId={data.assignmentId}
-                onDone={() => { setShowAddBlock(false); reload() }}
-                onCancel={() => setShowAddBlock(false)}
-              />
-            )}
-          </section>
+          <MiParteCompesHoy config={config} />
         </>
       )}
     </div>
   )
 }
 
-// "Mi parte" dentro de Hoy (Ramiro, 1/11 17:20): las tareas del plan de cualquier competición
-// que le toquen a esta persona, igual que las tareas normales del día pero sin filtrar por
-// fecha — una compe tiene semanas de antelación y conviene verlas todas, no solo las de hoy.
-function MiParteCompes({ workerId, config }) {
+// Tareas de compe de HOY, agrupadas por persona (Ramiro, 5/11: Hoy ya no filtra por "quién
+// soy" — esta sección tampoco debe hacerlo, se ve el reparto de todos igual que en el tablero
+// de arriba). Antes era "Mi parte" (solo de la persona elegida, sin filtrar por fecha); ahora
+// muestra a todo el equipo, solo lo de hoy — el resto de días de la compe se ve en la pestaña
+// Compe → Plan.
+function MiParteCompesHoy({ config }) {
   const [competitions, setCompetitions] = useState([])
   const [plans, setPlans] = useState({})
-  // Por defecto solo se ve lo pendiente y lo próximo, agrupado por semana — antes era una lista
-  // plana de todo (hechas y pendientes mezcladas), 23 líneas casi iguales (Ramiro, 4/11 05:48).
-  const [verTodo, setVerTodo] = useState({})
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const showToast = useToast()
+  const today = todayStr()
 
   useEffect(() => {
     api('GET', '/equipacion/competitions').then(r => setCompetitions(r.data || [])).catch(() => {})
@@ -404,52 +390,35 @@ function MiParteCompes({ workerId, config }) {
     catch { showToast('No se ha podido guardar — deshecho.'); setPlans(p => ({ ...p, [compId]: antes })) }
   }
 
-  const today = todayStr()
   const sections = competitions
-    .map(c => ({ comp: c, mine: (plans[c.id]?.tasks || []).filter(t => String(t.workerId) === String(workerId)) }))
-    .filter(s => s.mine.length > 0)
+    .map(c => ({ comp: c, hoy: (plans[c.id]?.tasks || []).filter(t => t.date === today) }))
+    .filter(s => s.hoy.length > 0)
   if (sections.length === 0) return null
 
   return (
     <section className="org__section">
-      <h3 className="org__section-title">Mi parte de la compe</h3>
-      {sections.map(({ comp, mine }) => {
-        const todas = !!verTodo[comp.id]
-        const visibles = todas ? mine : mine.filter(t => !t.done)
-        const porSemana = {}
-        visibles.slice().sort((a, b) => a.date.localeCompare(b.date)).forEach(t => {
-          const wk = t.weekStart || t.date
-          ;(porSemana[wk] = porSemana[wk] || []).push(t)
-        })
+      <h3 className="org__section-title">Compe de hoy</h3>
+      {sections.map(({ comp, hoy }) => {
+        const porPersona = {}
+        hoy.forEach(t => { (porPersona[t.workerName] = porPersona[t.workerName] || []).push(t) })
         return (
           <div key={comp.id}>
             {sections.length > 1 && <p className="org__hint">{comp.name}</p>}
-            {Object.keys(porSemana).sort().map(wk => (
-              <div key={wk}>
-                <p className="org__mi-parte-semana">Semana del {weekLabel(wk)}</p>
+            {Object.keys(porPersona).sort().map(nombre => (
+              <div key={nombre}>
+                <p className="org__mi-parte-semana">{nombre}</p>
                 <ul className="org__task-list">
-                  {porSemana[wk].map(t => {
-                    const retrasada = !t.done && t.date < today
-                    return (
-                      <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}${retrasada ? ' org__task--retrasada' : ''}`}>
-                        <label>
-                          <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked, comp.id)} />
-                          <span className="org__task-name">{taskTypeById[t.taskTypeId]?.name || t.taskTypeId}</span>
-                          <span className="org__task-params">{dayLabel(t.date)}</span>
-                          {retrasada && <span className="org__tile-badge">RETRASADA</span>}
-                        </label>
-                      </li>
-                    )
-                  })}
+                  {porPersona[nombre].map(t => (
+                    <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}`}>
+                      <label>
+                        <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked, comp.id)} />
+                        <span className="org__task-name">{taskTypeById[t.taskTypeId]?.name || t.taskTypeId}</span>
+                      </label>
+                    </li>
+                  ))}
                 </ul>
               </div>
             ))}
-            {visibles.length === 0 && <p className="org__hint">Todo hecho ✓</p>}
-            {mine.some(t => t.done) && (
-              <button className="org__link-btn" onClick={() => setVerTodo(v => ({ ...v, [comp.id]: !todas }))}>
-                {todas ? 'Ver solo lo pendiente' : 'Ver todo'}
-              </button>
-            )}
           </div>
         )
       })}
