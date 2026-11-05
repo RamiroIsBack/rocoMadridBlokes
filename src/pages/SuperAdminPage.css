@@ -1282,6 +1282,11 @@ details[open] .sa-collapsible__arrow {
 .bud-mx-income td { background: rgba(52, 211, 153, 0.04); }
 .bud-mx-income .bud-mx-name { background: #111209; }
 .bud-mx-result td { border-top: 2px solid #f5c842; }
+/* Grupo de gasto: cabecera con el subtotal del grupo; sus partidas van sangradas debajo */
+.bud-mx-group td, .bud-group-row td { border-top: 1px solid rgba(245, 200, 66, 0.35); font-weight: 700; background: rgba(245, 200, 66, 0.04); }
+.bud-mx-group .bud-mx-name { background: #17130b; color: #f5c842; }
+.bud-group-row td:first-child { color: #f5c842; }
+.bud-mx-indent .bud-mx-name, .bud-indent > td:first-child { padding-left: 20px !important; }
 .bud-mx-goal td { background: rgba(245, 200, 66, 0.05); color: #f5c842; }
 .bud-mx-goal .bud-mx-name { background: #17130a; font-weight: 700; }
 .bud-rules { margin-top: 28px; border-top: 1px solid #2a2015; padding-top: 14px; }

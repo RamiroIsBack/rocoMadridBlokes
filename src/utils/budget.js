@@ -46,6 +46,25 @@ const LINE_RULES = [
   [/\bgas\b/,                     'gas'],
 ]
 
+// Grupos de gasto (decididos por Álvaro y Ramiro). Lo que no esté en la lista va a Opcionales.
+export const EXPENSE_GROUPS = [
+  ['administrativos', 'Administrativos'],
+  ['nominas',         'Nóminas'],
+  ['local',           'Gastos Local'],
+  ['impuestos',       'Impuestos'],
+  ['opcionales',      'Opcionales'],
+]
+const GROUP_OF = {
+  asesoria: 'administrativos', comisiones_banco: 'administrativos', seguro_rc: 'administrativos',
+  web: 'administrativos', dominio: 'administrativos', telecomunicaciones: 'administrativos',
+  seguridad_laboral: 'administrativos',
+  nominas: 'nominas', ss: 'nominas', socios: 'nominas',
+  alquiler: 'local', comunidad: 'local', electricidad: 'local', gas: 'local', agua: 'local',
+  tasa_residuos: 'local', gatos: 'local', eurofer: 'local',
+  iva_303: 'impuestos', mod_115: 'impuestos', mod_111: 'impuestos', hacienda: 'impuestos',
+}
+export const groupOf = cat => GROUP_OF[cat] || 'opcionales'
+
 export function guessCategory(name) {
   const n = norm(name)
   for (const [re, cat] of LINE_RULES) if (re.test(n)) return cat

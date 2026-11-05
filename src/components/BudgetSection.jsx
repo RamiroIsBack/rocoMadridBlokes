@@ -3,6 +3,7 @@ import { useBudget, saveBudget, getExpenseRules, saveExpenseRules, setItemCatego
 import { CATEGORIES, SALES_CATEGORIES, conceptKey } from '../utils/expensesParser'
 import {
   parseBudgetFile, buildComparison, statusOf, STATUS_LABELS, TOLERANCE_PCT, TOLERANCE_MIN, sum, round2, signedAmount,
+  EXPENSE_GROUPS, groupOf,
 } from '../utils/budget'
 import { monthLabel, fmtEur } from '../utils/monthFormat'
 import BudgetMatrix from './BudgetMatrix'
@@ -288,6 +289,37 @@ export default function BudgetSection() {
   const mOver    = sum(monthRows.map(r => (r.t <= 0.005 && r.r < r.t ? r.r - r.t : 0)))
   const nextLabel = m < 11 ? MONTHS[m + 1] : 'cierre'
 
+  // Una categoría del mes; al pulsarla se despliegan sus movimientos del banco
+  const renderMonthRow = row => {
+    const open = expanded.has(row.cat)
+    return [
+      <tr key={row.cat} className="bud-row bud-indent" onClick={() => toggle(row.cat)}>
+        <td>
+          <span className="bud-caret">{open ? '▾' : '▸'}</span>
+          <span className="sa-pay-strong">{catLabel(row.cat)}</span>
+          {row.list.length > 0 && <span className="sa-pay-tag">{row.list.length} mov.</span>}
+          {row.lines.length > 0 && <div className="bud-lines">{row.lines.join(' · ')}</div>}
+        </td>
+        <td className="sa-pay-num">{fmtEur(row.b)}</td>
+        <td className="sa-pay-num sa-pay-muted">{Math.abs(row.k) > 0.005 ? fmtEur(row.k) : '—'}</td>
+        <td className="sa-pay-num sa-pay-strong">{fmtEur(row.t)}</td>
+        <td className="sa-pay-num">{hasMonth ? fmtEur(row.r) : '—'}</td>
+        <td className={`sa-pay-num ${!hasMonth ? '' : diffClass(row.t, row.r)}`}>
+          {hasMonth ? fmtDiff(row.r - row.t) : '—'}
+        </td>
+        <td><Status status={statusOf(row.t, row.r, hasMonth)} /></td>
+        <td className="sa-pay-num sa-pay-muted">{hasMonth && Math.abs(row.out) > 0.005 ? fmtEur(row.out) : '—'}</td>
+      </tr>,
+      open && (
+        <tr key={`${row.cat}-items`} className="bud-detail">
+          <td colSpan={8}>
+            <ItemsTable items={row.list} onRecategorize={recategorize} busyKey={busyKey} />
+          </td>
+        </tr>
+      ),
+    ]
+  }
+
   // ── Acumulado: solo meses con extracto del banco ──
   const loadedIdx  = [...loaded]
   const lastLoaded = loadedIdx.length ? Math.max(...loadedIdx) : null
@@ -407,33 +439,23 @@ export default function BudgetSection() {
                       </tr>
                     </thead>
                     <tbody>
-                      {monthRows.map(row => {
-                        const open = expanded.has(row.cat)
+                      {EXPENSE_GROUPS.map(([g, gLabel]) => {
+                        const gRows = monthRows.filter(row => groupOf(row.cat) === g)
+                        if (!gRows.length) return null
+                        const s = key => sum(gRows.map(row => row[key]))
+                        const [gB, gK, gT, gR, gOut] = ['b', 'k', 't', 'r', 'out'].map(s)
                         return [
-                          <tr key={row.cat} className="bud-row" onClick={() => toggle(row.cat)}>
-                            <td>
-                              <span className="bud-caret">{open ? '▾' : '▸'}</span>
-                              <span className="sa-pay-strong">{catLabel(row.cat)}</span>
-                              {row.list.length > 0 && <span className="sa-pay-tag">{row.list.length} mov.</span>}
-                              {row.lines.length > 0 && <div className="bud-lines">{row.lines.join(' · ')}</div>}
-                            </td>
-                            <td className="sa-pay-num">{fmtEur(row.b)}</td>
-                            <td className="sa-pay-num sa-pay-muted">{Math.abs(row.k) > 0.005 ? fmtEur(row.k) : '—'}</td>
-                            <td className="sa-pay-num sa-pay-strong">{fmtEur(row.t)}</td>
-                            <td className="sa-pay-num">{hasMonth ? fmtEur(row.r) : '—'}</td>
-                            <td className={`sa-pay-num ${!hasMonth ? '' : diffClass(row.t, row.r)}`}>
-                              {hasMonth ? fmtDiff(row.r - row.t) : '—'}
-                            </td>
-                            <td><Status status={statusOf(row.t, row.r, hasMonth)} /></td>
-                            <td className="sa-pay-num sa-pay-muted">{hasMonth && Math.abs(row.out) > 0.005 ? fmtEur(row.out) : '—'}</td>
+                          <tr key={`g-${g}`} className="bud-group-row">
+                            <td>{gLabel}</td>
+                            <td className="sa-pay-num">{fmtEur(gB)}</td>
+                            <td className="sa-pay-num sa-pay-muted">{Math.abs(gK) > 0.005 ? fmtEur(gK) : '—'}</td>
+                            <td className="sa-pay-num">{fmtEur(gT)}</td>
+                            <td className="sa-pay-num">{hasMonth ? fmtEur(gR) : '—'}</td>
+                            <td className={`sa-pay-num ${!hasMonth ? '' : diffClass(gT, gR)}`}>{hasMonth ? fmtDiff(gR - gT) : '—'}</td>
+                            <td></td>
+                            <td className="sa-pay-num sa-pay-muted">{hasMonth && Math.abs(gOut) > 0.005 ? fmtEur(gOut) : '—'}</td>
                           </tr>,
-                          open && (
-                            <tr key={`${row.cat}-items`} className="bud-detail">
-                              <td colSpan={8}>
-                                <ItemsTable items={row.list} onRecategorize={recategorize} busyKey={busyKey} />
-                              </td>
-                            </tr>
-                          ),
+                          ...gRows.map(renderMonthRow),
                         ]
                       })}
                     </tbody>

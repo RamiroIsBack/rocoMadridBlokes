@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { CATEGORIES } from '../utils/expensesParser'
 import { getBudget } from '../hooks/useBudget'
-import { sum, round2, incomeTargets, INCOME_TARGET } from '../utils/budget'
+import { sum, round2, incomeTargets, INCOME_TARGET, EXPENSE_GROUPS, groupOf } from '../utils/budget'
 
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
 const MODES = [['ppto', 'Presupuesto'], ['real', 'Real'], ['ambos', 'Ppto vs Real']]
@@ -44,7 +44,7 @@ function buildRows(budget, cats) {
       return round2(c.real[i] * share)
     })
     return {
-      key: line.name, name: line.name, note: line.note,
+      key: line.name, name: line.name, note: line.note, cat: line.category,
       shared: siblings.length > 1 ? siblings.length : 0,
       budget: line.months.map(v => Number(v) || 0), real,
     }
@@ -52,7 +52,7 @@ function buildRows(budget, cats) {
   // Movimientos del banco en categorías que no tienen ninguna partida en el presupuesto
   for (const [cat, c] of Object.entries(cats)) {
     if (byCat[cat] || c.real.every(v => Math.abs(v) < 0.005)) continue
-    rows.push({ key: `x-${cat}`, name: CATEGORIES[cat] || cat, extra: true, budget: Array(12).fill(0), real: c.real.map(round2) })
+    rows.push({ key: `x-${cat}`, name: CATEGORIES[cat] || cat, cat, extra: true, budget: Array(12).fill(0), real: c.real.map(round2) })
   }
   return rows
 }
@@ -142,6 +142,19 @@ export default function BudgetMatrix({ year, budget, cats, loaded, income }) {
       )
   )
 
+  // Una partida del Excel (o categoría del banco sin partida), sangrada bajo su grupo
+  const lineRow = r => (
+    <tr key={r.key} className={`bud-mx-indent${r.extra ? ' bud-mx-extra' : ''}`}>
+      <td className="bud-mx-name" title={r.note || ''}>
+        {r.name}
+        {r.extra && <span className="sa-pay-tag">sin presupuesto</span>}
+        {r.shared > 0 && mode !== 'ppto' && <span className="bud-mx-shared" title="El real del banco se reparte entre las partidas de la misma categoría según su presupuesto">⇄</span>}
+      </td>
+      {MONTHS.map((_, i) => cell(r.budget[i], r.real[i], i))}
+      {totalCell(sum(r.budget), sum(r.real.filter((_, i) => has(i))), sum(r.budget.filter((_, i) => has(i))))}
+    </tr>
+  )
+
   return (
     <>
       <div className="bud-mx-bar">
@@ -176,20 +189,19 @@ export default function BudgetMatrix({ year, budget, cats, loaded, income }) {
               {totalCell(sum(goalIn), inYearR, goalLoaded)}
             </tr>
             <tr className="bud-mx-section"><td colSpan={14}><span className="bud-mx-sec">Pagos</span></td></tr>
-            {rows.map(r => {
-              const rYear = sum(r.real.filter((_, i) => has(i)))
-              const bYearLoaded = sum(r.budget.filter((_, i) => has(i)))
-              return (
-                <tr key={r.key} className={r.extra ? 'bud-mx-extra' : ''}>
-                  <td className="bud-mx-name" title={r.note || ''}>
-                    {r.name}
-                    {r.extra && <span className="sa-pay-tag">sin presupuesto</span>}
-                    {r.shared > 0 && mode !== 'ppto' && <span className="bud-mx-shared" title="El real del banco se reparte entre las partidas de la misma categoría según su presupuesto">⇄</span>}
-                  </td>
-                  {MONTHS.map((_, i) => cell(r.budget[i], r.real[i], i))}
-                  {totalCell(sum(r.budget), rYear, bYearLoaded)}
-                </tr>
-              )
+            {EXPENSE_GROUPS.map(([g, gLabel]) => {
+              const gRows = rows.filter(r => groupOf(r.cat) === g)
+              if (!gRows.length) return null
+              const gB = MONTHS.map((_, i) => sum(gRows.map(r => r.budget[i])))
+              const gR = MONTHS.map((_, i) => sum(gRows.map(r => r.real[i])))
+              return [
+                <tr key={`g-${g}`} className="bud-mx-group">
+                  <td className="bud-mx-name">{gLabel}</td>
+                  {MONTHS.map((_, i) => cell(gB[i], gR[i], i, true))}
+                  {totalCell(sum(gB), sum(gR.filter((_, i) => has(i))), sum(gB.filter((_, i) => has(i))))}
+                </tr>,
+                ...gRows.map(lineRow),
+              ]
             })}
           </tbody>
           <tfoot>
