@@ -178,7 +178,7 @@ export default function OrganizacionPage() {
           />
         )}
         {view === 'semana' && <SemanaView config={config} workers={workers} workerId={workerId} canEdit={canEdit} canManage={canManage} onWorkersChanged={reloadWorkers} />}
-        {view === 'normas' && <NormasView config={config} canManage={canEdit} onConfigChanged={reloadConfig} />}
+        {view === 'normas' && <NormasView config={config} workers={workers} canManage={canEdit} onConfigChanged={reloadConfig} />}
         {view === 'compe' && <CompeView config={config} workers={workers} canManage={canManage} />}
       </div>
     </ToastProvider>
@@ -1231,7 +1231,7 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
 }
 
 // ─── Normas ───────────────────────────────────────────────────────────
-function NormasView({ config, canManage, onConfigChanged }) {
+function NormasView({ config, workers, canManage, onConfigChanged }) {
   const [allTypes, setAllTypes] = useState(null) // incluye inactivas, solo si canManage
   const [editing, setEditing] = useState(null) // id del tipo que se está editando entero
   const [editForm, setEditForm] = useState(null)
@@ -1250,7 +1250,7 @@ function NormasView({ config, canManage, onConfigChanged }) {
     setEditForm({
       name: t.name, description: t.description || '', periodicityWeeks: t.periodicityWeeks ?? 1,
       preferredDay: t.preferredDay || '', subzone: t.subzone ?? '', durationMin: t.durationMin ?? '',
-      leadOnly: !!t.leadOnly,
+      leadOnly: !!t.leadOnly, preferredWorkers: t.preferredWorkers || [],
     })
   }
   const save = async id => {
@@ -1276,19 +1276,24 @@ function NormasView({ config, canManage, onConfigChanged }) {
       <section className="org__section">
         <h3 className="org__section-title">Catálogo de tareas</h3>
         <p className="org__hint">
-          El sistema propone solo las tareas activas que tocan según su periodicidad, y elige a quien más
-          la haya hecho antes. {canManage ? 'Puedes crear tareas nuevas, editarlas o desactivarlas (nunca se borran, para no perder el histórico).' : 'Solo un profe, gestión o un socio pueden crear o editar tareas del catálogo.'}
+          El sistema propone solo las tareas activas que tocan según su periodicidad. Si una tarea tiene
+          "personas preferidas" puestas, se reparte entre ellas (la que menos lleve esta semana); si no,
+          a quien más la haya hecho antes en esta app, o turno rotatorio sin historial.{' '}
+          {canManage ? 'Puedes crear tareas nuevas, editarlas o desactivarlas (nunca se borran, para no perder el histórico).' : 'Solo un profe, gestión o un socio pueden crear o editar tareas del catálogo.'}
         </p>
         <ul className="org__task-list">
           {types.filter(t => t.active !== false).map(t => (
             <li key={t.id} className="org__task">
               {editing === t.id ? (
-                <TaskTypeEditForm form={editForm} setForm={setEditForm} config={config} onSave={() => save(t.id)} onCancel={() => { setEditing(null); setEditForm(null) }} />
+                <TaskTypeEditForm form={editForm} setForm={setEditForm} config={config} workers={workers} onSave={() => save(t.id)} onCancel={() => { setEditing(null); setEditForm(null) }} />
               ) : (
                 <>
                   <span className="org__task-name">{t.name}</span>
                   {t.description && <span className="org__task-params">{t.description}</span>}
                   <span className="org__task-params">cada {t.periodicityWeeks ?? 1} semana(s){t.preferredDay ? ` · ${DAY_LABEL[t.preferredDay] || t.preferredDay}` : ''}{t.subzone ? ` · subzona #${t.subzone}` : ''}{t.durationMin ? ` · ${t.durationMin} min` : ''}{t.leadOnly ? ' · siempre al responsable' : ''}</span>
+                  {t.preferredWorkers?.length > 0 && (
+                    <span className="org__task-params">preferido: {t.preferredWorkers.map(id => workers.find(w => w.id === id)?.name || `#${id}`).join(', ')}</span>
+                  )}
                   {canManage && (
                     <span className="org__periodicity-edit">
                       <button className="org__link-btn" onClick={() => startEdit(t)}>Editar</button>
@@ -1351,8 +1356,10 @@ function NormasView({ config, canManage, onConfigChanged }) {
   )
 }
 
-function TaskTypeEditForm({ form, setForm, config, onSave, onCancel }) {
+function TaskTypeEditForm({ form, setForm, config, workers, onSave, onCancel }) {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const toggleWorker = id => set('preferredWorkers', (form.preferredWorkers || []).includes(id)
+    ? form.preferredWorkers.filter(x => x !== id) : [...(form.preferredWorkers || []), id])
   return (
     <div className="org__add-form">
       <div className="org__add-row"><label>Nombre</label><input type="text" value={form.name} onChange={e => set('name', e.target.value)} /></div>
@@ -1373,6 +1380,20 @@ function TaskTypeEditForm({ form, setForm, config, onSave, onCancel }) {
         </select>
       </div>
       <div className="org__add-row"><label>Duración estimada (min)</label><input type="number" min="0" value={form.durationMin} onChange={e => set('durationMin', e.target.value)} /></div>
+      {workers?.length > 0 && (
+        <div className="org__add-row org__add-row--holdsets">
+          <label>Personas preferidas (vacío = reparto automático de siempre)</label>
+          <div className="org__holdset-chips">
+            {workers.filter(w => !w.eventual).map(w => (
+              <button
+                key={w.id} type="button"
+                className={`org__holdset-chip${(form.preferredWorkers || []).includes(w.id) ? ' org__holdset-chip--on' : ''}`}
+                onClick={() => toggleWorker(w.id)}
+              >{w.name}</button>
+            ))}
+          </div>
+        </div>
+      )}
       <label className="org__add-row org__add-row--check">
         <input type="checkbox" checked={form.leadOnly} onChange={e => set('leadOnly', e.target.checked)} />
         <span>Siempre al responsable (él la reparte)</span>

@@ -10108,6 +10108,10 @@ function progreso_equip_task_type_fila($r) {
         'durationMin' => $r['duration_min'] !== null ? intval($r['duration_min']) : null,
         'recurring' => (bool) $r['recurring'],
         'active' => (bool) ($r['active'] ?? 1),
+        // Pauta de quién suele hacer esta tarea, en orden de preferencia (ids de trabajador) —
+        // editable desde Normas (Ramiro, 5/11 21:08: "guarda la pauta como datos editables, no
+        // fija en código"). Vacío = sigue como hasta ahora (por historial propio de la app).
+        'preferredWorkers' => array_values(array_filter(array_map('intval', explode(',', $r['preferred_workers'] ?? '')))),
     );
 }
 
@@ -10165,6 +10169,11 @@ function progreso_equip_update_task_type($request) {
         $upd['duration_min'] = ($dm === '' ? null : intval($dm)); $fmt[] = '%d';
     }
     if ($request->get_param('leadOnly') !== null) { $upd['lead_only'] = $request->get_param('leadOnly') ? 1 : 0; $fmt[] = '%d'; }
+    if ($request->get_param('preferredWorkers') !== null) {
+        $pw = $request->get_param('preferredWorkers');
+        $upd['preferred_workers'] = is_array($pw) ? implode(',', array_filter(array_map('intval', $pw))) : '';
+        $fmt[] = '%s';
+    }
     // Nunca se borra un tipo (rompería el histórico de tareas que ya lo usaron): "borrar" desde
     // la interfaz manda `active: false`, que lo saca del reparto automático sin perder nada.
     if ($request->get_param('active') !== null) { $upd['active'] = $request->get_param('active') ? 1 : 0; $fmt[] = '%d'; }
@@ -10351,7 +10360,9 @@ function progreso_equip_ensure_tables() {
     // responsable, `progreso_equip_autocrear_semanas()` no pasaba el resto del equipo).
     // v11: tasks.created_by/created_at/updated_by/updated_at (Ramiro, 5/11 06:54: cualquier profe
     // o Eva puede crear y modificar tareas, y Álvaro tiene que ver quién cambió qué).
-    $version = '11';
+    // v12: task_types.preferred_workers (Ramiro, 5/11 21:08: pauta de quién suele hacer cada
+    // tarea, sacada del histórico de Notion — editable desde Normas, no fija en código).
+    $version = '12';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -10491,6 +10502,7 @@ function progreso_equip_ensure_tables() {
         recurring         tinyint(1)   NOT NULL DEFAULT 1,
         active            tinyint(1)   NOT NULL DEFAULT 1,
         sort_order        tinyint(3)   NOT NULL DEFAULT 0,
+        preferred_workers varchar(100) NOT NULL DEFAULT '',
         PRIMARY KEY (id)
     ) {$charset};");
 
@@ -11325,20 +11337,23 @@ function progreso_equip_create_week($request) {
     }
 
     // 4. ¿Quién recibe cada tarea que toca?
-    //    - Periódicas (periodicity_weeks > 1) y las "lead_only": siempre al
-    //      responsable, que luego la reparte él mismo. Si no está esta
-    //      semana, al primero de la lista (con aviso).
-    //    - Semanales normales: a quien más veces la haya hecho entre los de
-    //      esta semana; sin historial, turno rotatorio.
+    //    - "lead_only": siempre al responsable (se marca a mano para lo que de verdad solo
+    //      puede decidir él, p. ej. "Organizar próximas semanas"). Si no está esta semana, al
+    //      primero de la lista (con aviso).
+    //    - El resto (ya no depende de la periodicidad — Ramiro, 5/11 21:08: "ya no todo al
+    //      responsable"): si el tipo tiene gente preferida (pauta editable desde Normas,
+    //      sacada del histórico real de quién suele hacer cada tarea), se reparte entre los
+    //      preferidos que están esta semana — el que menos tareas lleve hasta ahora, para no
+    //      cargarlo todo en el primero de la lista. Sin pauta puesta: a quien más veces la haya
+    //      hecho en el histórico de la propia app; sin historial, turno rotatorio — igual que
+    //      antes.
     $warnings = array();
     if ($rolled_count > 0 && $rollover_target) {
         $warnings[] = "{$rolled_count} tarea(s) retrasada(s) asignada(s) a {$rollover_target['worker']['name']} para repartir.";
     }
     $rr_cursor = 0;
     foreach ($due_types as $type) {
-        $goes_to_lead = $type['lead_only'] || intval($type['periodicityWeeks']) > 1;
-
-        if ($goes_to_lead) {
+        if ($type['lead_only']) {
             $chosen = $lead_worker_id ?: ($eligible_worker_ids[0] ?? null);
             if ($chosen === null) continue;
             if (!$lead_worker_id) {
@@ -11350,6 +11365,16 @@ function progreso_equip_create_week($request) {
 
         $candidates = $eligible_worker_ids;
         if (empty($candidates)) continue;
+
+        $preferidos_aqui = array_values(array_intersect($type['preferredWorkers'], $candidates));
+        if (!empty($preferidos_aqui)) {
+            usort($preferidos_aqui, function($a, $b) use ($crew) {
+                return count($crew[$a]['queue']) <=> count($crew[$b]['queue']);
+            });
+            $chosen = $preferidos_aqui[0];
+            $crew[$chosen]['queue'][] = $type;
+            continue;
+        }
 
         $ph = implode(',', array_fill(0, count($candidates), '%d'));
         $history = $wpdb->get_results($wpdb->prepare(
