@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
@@ -1880,7 +1880,11 @@ function GruposTab() {
   }, [alumnos, mesActual])
 
   if (loading) return <div className="sv-loading">Cargando grupos…</div>
-  if (error)   return <div className="sv-error">Error: {error}</div>
+  if (error)   return (
+    <div className="sv-error">
+      Error: {error} <button className="sv-filter-btn" onClick={refetch}>Reintentar</button>
+    </div>
+  )
 
   return (
     <div className="sv-tab-panel">
@@ -2379,9 +2383,17 @@ function TablaPorMes({ titulo, datos }) {
 function HistoricoTab() {
   const [est, setEst] = useState(null)
   const [err, setErr] = useState(null)
-  useEffect(() => { histPagosEstadisticas().then(setEst).catch(e => setErr(e.message)) }, [])
+  const cargar = useCallback(() => {
+    setErr(null)
+    histPagosEstadisticas().then(setEst).catch(e => setErr(e.message))
+  }, [])
+  useEffect(cargar, [cargar])
 
-  if (err) return <div className="sv-error">Error: {err}</div>
+  if (err) return (
+    <div className="sv-error">
+      Error: {err} <button className="sv-filter-btn" onClick={cargar}>Reintentar</button>
+    </div>
+  )
   if (!est) return <div className="sv-loading">Cargando…</div>
 
   const anios = Array.from(new Set([...Object.keys(est.bajasTrasVerano.activosVeranoPorAnio), ...Object.keys(est.bajasTrasVerano.porAnio)])).sort()

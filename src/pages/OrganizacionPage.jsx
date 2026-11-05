@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react'
 import mapaEquipacion from '../assets/mapa-equipacion.jpg'
+import { fetchWithNonceRetry } from '../utils/wpNonce'
 import './OrganizacionPage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -16,11 +17,11 @@ function getAuthHeaders() {
   return nonce ? { 'X-WP-Nonce': nonce } : {}
 }
 async function api(method, path, body) {
-  const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1${path}`, {
+  const res = await fetchWithNonceRetry(() => fetch(`${CLUB_URL}/wp-json/progreso/v1${path}`, {
     method, credentials: 'include',
     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
-  })
+  }))
   const json = await res.json().catch(() => null)
   if (!res.ok) throw new Error(json?.message || `Error ${res.status}`)
   return json
@@ -232,6 +233,7 @@ function CompeResumenHoy({ workerId, onGoToCompe }) {
 function HoyView({ config, workers, workerId, onChooseWorker, canEdit }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(null)
   const [holdsets, setHoldsets] = useState([])
   const [addingTaskFor, setAddingTaskFor] = useState(null)
   const [addingBlockFor, setAddingBlockFor] = useState(null)
@@ -248,11 +250,12 @@ function HoyView({ config, workers, workerId, onChooseWorker, canEdit }) {
 
   const reload = useCallback(() => {
     setLoading(true)
+    setLoadError(null)
     api('GET', '/equipacion/weeks').then(r => {
       const wk = (r.data || []).find(w => today >= w.startDate && today < addDays(w.startDate, 7))
       if (!wk) { setDetail(null); return null }
       return api('GET', `/equipacion/weeks/${wk.id}`).then(r2 => setDetail(r2.data))
-    }).catch(() => showToast('No se ha podido cargar el día de hoy.')).finally(() => setLoading(false))
+    }).catch(e => { setLoadError(e.message); showToast('No se ha podido cargar el día de hoy.') }).finally(() => setLoading(false))
   }, [today, showToast])
 
   useEffect(() => { reload() }, [reload])
@@ -296,7 +299,13 @@ function HoyView({ config, workers, workerId, onChooseWorker, canEdit }) {
 
       {loading && <p className="org__hint">Cargando...</p>}
 
-      {!loading && !detail && (
+      {!loading && loadError && (
+        <p className="org__hint">
+          No se ha podido cargar el día de hoy ({loadError}). <button className="org__link-btn" onClick={reload}>Reintentar</button>
+        </p>
+      )}
+
+      {!loading && !loadError && !detail && (
         <p className="org__hint">No hay semana planificada para hoy: pide a Álvaro que la cree.</p>
       )}
 

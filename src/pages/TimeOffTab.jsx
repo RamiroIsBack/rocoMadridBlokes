@@ -1908,6 +1908,10 @@ export default function TimeOffTab() {
 
       {cargando ? (
         <p className="sv-loading">Cargando vacaciones, solicitudes y conexión con 9to5…</p>
+      ) : remote.error && !remote.data ? (
+        <div className="sv-error">
+          Error: {remote.error} <button className="sv-filter-btn" onClick={remote.reload}>Reintentar</button>
+        </div>
       ) : vista === 'real' ? (
         <>
           <div className="sv-to-form sv-to-topbar">

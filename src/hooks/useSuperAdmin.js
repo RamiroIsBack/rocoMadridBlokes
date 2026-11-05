@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { fetchWithNonceRetry } from '../utils/wpNonce'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 
@@ -8,14 +9,15 @@ function useEndpoint(path, params = {}) {
   const [error, setError]     = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
 
-  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
   const query = new URLSearchParams(params).toString()
   const url   = `${CLUB_URL}/wp-json/superadmin/v1${path}${query ? '?' + query : ''}`
 
   useEffect(() => {
     setLoading(true)
     setError(null)
-    fetch(url, { headers: { 'X-WP-Nonce': nonce } })
+    // El nonce se lee de nuevo en cada intento (no al montar el hook), para que un reintento
+    // tras refrescarlo (sesión abierta muchas horas — Ramiro, 5/11) use el nuevo de verdad.
+    fetchWithNonceRetry(() => fetch(url, { headers: { 'X-WP-Nonce': window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || '' } }))
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
@@ -48,12 +50,11 @@ export function useGestionGrupos(months = 4) {
 }
 
 async function gestionCall(method, path, body) {
-  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
-  const res = await fetch(`${CLUB_URL}/wp-json/superadmin/v1${path}`, {
+  const res = await fetchWithNonceRetry(() => fetch(`${CLUB_URL}/wp-json/superadmin/v1${path}`, {
     method,
-    headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
+    headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || '' },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  })
+  }))
   const json = await res.json().catch(() => null)
   if (!res.ok) throw new Error(json?.message || `HTTP ${res.status}`)
   return json?.data ?? json
@@ -153,13 +154,12 @@ export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
 
-  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
   const url = `${CLUB_URL}/wp-json/superadmin/v1/expenses?from=${from || ''}&entity=${entity}&exclude_internal=${excludeInternal ? 1 : 0}`
 
   useEffect(() => {
     setLoading(true)
     setError(null)
-    fetch(url, { headers: { 'X-WP-Nonce': nonce } })
+    fetchWithNonceRetry(() => fetch(url, { headers: { 'X-WP-Nonce': window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || '' } }))
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
       .then(json => { setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setLoading(false) })
       .catch(e  => { setError(e.message); setLoading(false) })
