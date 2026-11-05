@@ -10193,6 +10193,20 @@ function progreso_equip_deactivate_task_type($request) {
     return rest_ensure_response(array('success' => true, 'deleted' => true));
 }
 
+// Quién hace el cambio, para el rastro de la tarea: la persona elegida en «¿Quién eres?»
+// (`byWorkerId`) si viene; si no, el nombre de la cuenta de WordPress (Eva entra con la suya y no
+// es del equipo de equipación).
+function progreso_equip_actor($request) {
+    global $wpdb;
+    $by = intval($request->get_param('byWorkerId'));
+    if ($by) {
+        $name = $wpdb->get_var($wpdb->prepare("SELECT name FROM " . progreso_equip_table('workers') . " WHERE id = %d", $by));
+        if ($name) return $name;
+    }
+    $user = wp_get_current_user();
+    return ($user && $user->ID) ? ($user->display_name ?: $user->user_login) : '';
+}
+
 // POST /equipacion/tasks — tarea suelta para un día y persona concretos, sin esperar al
 // reparto automático (p. ej. arreglar una presa, comprar tornillos) — creador de tareas de
 // Álvaro (Ramiro, 1/11 17:20). `taskTypeId` de un tipo del catálogo, o `customText` libre (se
@@ -10226,7 +10240,8 @@ function progreso_equip_create_loose_task($request) {
     $wpdb->insert(progreso_equip_table('tasks'), array(
         'assignment_id' => $assignment_id, 'task_type_id' => $task_type_id, 'task_date' => $date,
         'params' => wp_json_encode($params), 'done' => 0, 'status' => 'pendiente', 'original_date' => $date,
-    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s'));
+        'created_by' => progreso_equip_actor($request), 'created_at' => current_time('mysql'),
+    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s'));
     return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
 }
 
@@ -10334,7 +10349,9 @@ function progreso_equip_ensure_tables() {
     // v10: nada de esquema — solo para disparar `progreso_equip_backfill_semanas_auto()` una vez
     // (cowork, NOTAS_PARA_CODE_equipacion.md 3/11 12:00: las semanas automáticas solo llevaban al
     // responsable, `progreso_equip_autocrear_semanas()` no pasaba el resto del equipo).
-    $version = '10';
+    // v11: tasks.created_by/created_at/updated_by/updated_at (Ramiro, 5/11 06:54: cualquier profe
+    // o Eva puede crear y modificar tareas, y Álvaro tiene que ver quién cambió qué).
+    $version = '11';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -10399,6 +10416,10 @@ function progreso_equip_ensure_tables() {
         moved_to_task_id  bigint(20) UNSIGNED NULL,
         original_worker_id bigint(20) UNSIGNED NULL,
         competition_id    bigint(20) UNSIGNED NULL,
+        created_by        varchar(100)        NULL,
+        created_at        datetime            NULL,
+        updated_by        varchar(100)        NULL,
+        updated_at        datetime            NULL,
         PRIMARY KEY (id),
         KEY assignment_id (assignment_id),
         KEY task_date (task_date)
@@ -11414,6 +11435,8 @@ function progreso_equip_get_week_detail($request) {
                 'postponedCount' => intval($t['postponed_count']),
                 'movedToTaskId' => $moved_to_task_id,
                 'movedToDate' => $moved_to_task_id && isset($moved_to_dates[$moved_to_task_id]) ? $moved_to_dates[$moved_to_task_id]->task_date : null,
+                'createdBy' => $t['created_by'] ?? null, 'createdAt' => $t['created_at'] ?? null,
+                'updatedBy' => $t['updated_by'] ?? null, 'updatedAt' => $t['updated_at'] ?? null,
             );
         }
         $blocks = $wpdb->get_results($wpdb->prepare(
@@ -11669,6 +11692,8 @@ function progreso_equip_get_today($request) {
                 'postponedCount' => intval($t['postponed_count']),
                 'movedToTaskId' => $moved_to_task_id,
                 'movedToDate' => $moved_to_task_id && isset($moved_to_dates[$moved_to_task_id]) ? $moved_to_dates[$moved_to_task_id] : null,
+                'createdBy' => $t['created_by'] ?? null, 'createdAt' => $t['created_at'] ?? null,
+                'updatedBy' => $t['updated_by'] ?? null, 'updatedAt' => $t['updated_at'] ?? null,
             );
         }, $tasks),
         'blocks' => array_map(function($b) {
@@ -11688,6 +11713,7 @@ function progreso_equip_get_today($request) {
 // progreso_equip_create_week la próxima vez.
 function progreso_equip_update_task($request) {
     global $wpdb;
+    progreso_equip_ensure_tables();
     $id = intval($request['id']);
     $upd = array(); $fmt = array();
     if ($request->get_param('done') !== null) {
@@ -11724,7 +11750,29 @@ function progreso_equip_update_task($request) {
         $upd['assignment_id'] = $new_assignment_id;
         $fmt[] = '%d';
     }
+    // Editar el texto (tareas de texto libre) o las notas (Ramiro, 5/11 06:54: hasta ahora solo
+    // se podía mover o quitar una tarea, no corregirla).
+    if ($request->get_param('customText') !== null || $request->get_param('notas') !== null) {
+        $row = $wpdb->get_row($wpdb->prepare("SELECT task_type_id, params FROM " . progreso_equip_table('tasks') . " WHERE id = %d", $id), ARRAY_A);
+        if (!$row) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
+        $params = json_decode($row['params'], true) ?: array();
+        if ($request->get_param('customText') !== null && $row['task_type_id'] === 'custom') {
+            $texto = sanitize_text_field(trim((string) $request->get_param('customText')));
+            if ($texto === '') return new WP_Error('invalid_data', 'El texto de la tarea no puede quedar vacío.', array('status' => 400));
+            $params['texto'] = $texto;
+        }
+        if ($request->get_param('notas') !== null) {
+            $notas = sanitize_text_field(trim((string) $request->get_param('notas')));
+            if ($notas === '') unset($params['notas']); else $params['notas'] = $notas;
+        }
+        $upd['params'] = wp_json_encode($params ?: new stdClass()); $fmt[] = '%s';
+    }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    // Marcar hecha no cuenta como modificación; cambiar persona, día, texto o notas, sí.
+    if (array_diff(array_keys($upd), array('done', 'done_at', 'status'))) {
+        $upd['updated_by'] = progreso_equip_actor($request); $fmt[] = '%s';
+        $upd['updated_at'] = current_time('mysql');           $fmt[] = '%s';
+    }
     $wpdb->update(progreso_equip_table('tasks'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
 }

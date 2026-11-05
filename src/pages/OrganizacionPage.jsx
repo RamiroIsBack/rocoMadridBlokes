@@ -71,6 +71,17 @@ function dateRangeLabel(startStr, endStr) {
   if (!endStr || endStr === startStr) return corta(startStr)
   return `${corta(startStr)} – ${corta(endStr)}`
 }
+// Rastro pequeño en la tarjeta: «añadida por Eva · 5 nov» o, si alguien la cambió después,
+// «cambiada por Ana · 6 nov» (Ramiro, 5/11 06:54: que Álvaro vea qué ha tocado otro).
+function rastroTarea(t) {
+  const fecha = dt => {
+    const [, m, d] = dt.slice(0, 10).split('-').map(Number)
+    return `${d} ${MES_LABEL_CORTO[m - 1]}`
+  }
+  if (t.updatedBy && t.updatedAt) return `cambiada por ${t.updatedBy} · ${fecha(t.updatedAt)}`
+  if (t.createdBy && t.createdAt) return `añadida por ${t.createdBy} · ${fecha(t.createdAt)}`
+  return null
+}
 function daysUntil(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   const target = new Date(y, m - 1, d)
@@ -136,13 +147,15 @@ export default function OrganizacionPage() {
     setWorkerId(id)
     try { localStorage.setItem(WHOAMI_KEY, String(id)) } catch {}
   }
-  // Quién puede crear/editar el catálogo de tareas y añadir tareas sueltas: el responsable
-  // (Álvaro) o un socio — el resto solo ve y marca hecho (Ramiro, 1/11 17:20). La identidad de
-  // "quién soy" en Organización es de toda la vida solo un selector local (no hay cuenta por
-  // persona), así que esto es un permiso de interfaz, no una comprobación de seguridad real —
-  // igual que el resto de "quién soy" aquí.
+  // Crear, editar, quitar y mover tareas, añadir personas a una semana y tocar el catálogo:
+  // cualquier profe, Eva (gestión) o un socio (Ramiro, 5/11 06:54) — los mismos roles que deja
+  // el backend. Lo destructivo grande (borrar semana o competición) sigue solo para el
+  // responsable (Álvaro) o un socio. La identidad de "quién soy" en Organización es solo un
+  // selector local, así que canManage es un permiso de interfaz, no de seguridad.
   const currentWorker = workers.find(w => w.id === workerId)
-  const canManage = !!currentWorker?.isLead || window.blokesSiteData?.userRole === 'socio'
+  const userRole = window.blokesSiteData?.userRole
+  const canEdit = ['profesor', 'gestion', 'socio'].includes(userRole)
+  const canManage = !!currentWorker?.isLead || userRole === 'socio'
 
   if (loading) return <div className="org"><p className="org__hint">Cargando...</p></div>
 
@@ -160,12 +173,12 @@ export default function OrganizacionPage() {
         {view === 'hoy' && (
           <HoyView
             config={config} workers={workers}
-            workerId={workerId} onChooseWorker={chooseWorker} canManage={canManage}
+            workerId={workerId} onChooseWorker={chooseWorker} canEdit={canEdit}
           />
         )}
-        {view === 'semana' && <SemanaView config={config} workers={workers} canManage={canManage} onWorkersChanged={reloadWorkers} />}
-        {view === 'normas' && <NormasView config={config} canManage={canManage} onConfigChanged={reloadConfig} />}
-        {view === 'compe' && <CompeView config={config} workers={workers} />}
+        {view === 'semana' && <SemanaView config={config} workers={workers} workerId={workerId} canEdit={canEdit} canManage={canManage} onWorkersChanged={reloadWorkers} />}
+        {view === 'normas' && <NormasView config={config} canManage={canEdit} onConfigChanged={reloadConfig} />}
+        {view === 'compe' && <CompeView config={config} workers={workers} canManage={canManage} />}
       </div>
     </ToastProvider>
   )
@@ -208,11 +221,12 @@ function CompeResumenHoy({ workerId, onGoToCompe }) {
 }
 
 // ─── Hoy ──────────────────────────────────────────────────────────────
-function HoyView({ config, workers, workerId, onChooseWorker, canManage }) {
+function HoyView({ config, workers, workerId, onChooseWorker, canEdit }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [showAddBlock, setShowAddBlock] = useState(false)
   const [showAddTask, setShowAddTask] = useState(false)
+  const [editingTask, setEditingTask] = useState(null)
   const [holdsets, setHoldsets] = useState([])
 
   const worker = workers.find(w => w.id === workerId)
@@ -294,6 +308,7 @@ function HoyView({ config, workers, workerId, onChooseWorker, canManage }) {
                       </li>
                     )
                   }
+                  const rastro = rastroTarea(t)
                   return (
                     <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}${isRetrasada ? ' org__task--retrasada' : ''}`}>
                       <label>
@@ -301,18 +316,29 @@ function HoyView({ config, workers, workerId, onChooseWorker, canManage }) {
                         <span className="org__task-name">{taskLabel(t, taskTypeById)}</span>
                         {params && <span className="org__task-params">{params}</span>}
                         {isRetrasada && <span className="org__tile-badge">RETRASADA{t.postponedCount > 1 ? ` ×${t.postponedCount}` : ''}</span>}
+                        {rastro && <span className="org__task-rastro">{rastro}</span>}
                       </label>
+                      {canEdit && editingTask !== t.id && (
+                        <button className="org__link-btn" onClick={() => setEditingTask(t.id)}>Editar</button>
+                      )}
+                      {editingTask === t.id && (
+                        <TaskEditForm
+                          task={{ ...t, date: data.date }} byWorkerId={workerId}
+                          onDone={() => { setEditingTask(null); reload() }}
+                          onCancel={() => setEditingTask(null)}
+                        />
+                      )}
                     </li>
                   )
                 })}
               </ul>
             )}
-            {canManage && data.assignmentId && !showAddTask && (
+            {canEdit && data.assignmentId && !showAddTask && (
               <button className="org__link-btn" onClick={() => setShowAddTask(true)}>+ Tarea</button>
             )}
             {showAddTask && (
               <LooseTaskForm
-                config={config} assignmentId={data.assignmentId} defaultDate={todayStr()}
+                config={config} assignmentId={data.assignmentId} defaultDate={todayStr()} byWorkerId={workerId}
                 onDone={() => { setShowAddTask(false); reload() }}
                 onCancel={() => setShowAddTask(false)}
               />
@@ -524,7 +550,7 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
 }
 
 // ─── Semana ───────────────────────────────────────────────────────────
-function SemanaView({ config, workers, canManage, onWorkersChanged }) {
+function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersChanged }) {
   const [weeks, setWeeks] = useState([])
   const [detail, setDetail] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -559,7 +585,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   const [moving, setMoving] = useState(false)
   const reassignTask = async (taskId, assignmentId, date) => {
     setMoving(true)
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { assignmentId, date }) } catch { showToast('No se ha podido mover la tarea.') }
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { assignmentId, date, byWorkerId: workerId }) } catch { showToast('No se ha podido mover la tarea.') }
     await openWeek(detail.id)
     setMoving(false)
   }
@@ -585,7 +611,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   }
 
   // Quitar una tarea de verdad (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30) — distinto de
-  // "→ Semana siguiente", que la mueve. Solo responsable/socios ven el botón (canManage).
+  // "→ Semana siguiente", que la mueve. Lo ve cualquiera que pueda editar (canEdit).
   const [deletingTask, setDeletingTask] = useState(null)
   const deleteTask = async taskId => {
     if (!window.confirm('¿Quitar esta tarea? No se puede deshacer.')) return
@@ -597,6 +623,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
 
   const [editingDaysFor, setEditingDaysFor] = useState(null)
   const [addingTaskFor, setAddingTaskFor] = useState(null)
+  const [editingTask, setEditingTask] = useState(null)
   // Añadir a alguien a una semana que ya existe (Álvaro/cowork, 2/11 12:55: el plan de una compe
   // la crea solo con el responsable). Solo la asignación, sin tareas de mantenimiento — sus
   // tareas de esta semana se añaden sueltas (+Tarea) o arrastrando, como siempre.
@@ -678,7 +705,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
       <div>
         <div className="org__semana-actions">
           <button className="org__link-btn" onClick={() => setDetail(null)}>← Volver a semanas</button>
-          {canManage && (addingPerson ? (
+          {canEdit && (addingPerson ? (
             <select
               autoFocus value="" disabled={addPersonBusy}
               onChange={e => { if (e.target.value) addPerson(e.target.value) }}
@@ -713,7 +740,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
                 <p className="org__board-col-meta">
                   subzonas {a.subzones.map(s => `#${s}`).join(', ')} · bloques {a.blocksMin}-{a.blocksMax}
                   {a.workDays?.length > 0 && <> · días cambiados esta semana</>}
-                  {' '}<button className="org__link-btn" onClick={() => setEditingDaysFor(cur => cur === a.id ? null : a.id)}>editar días</button>
+                  {canEdit && <>{' '}<button className="org__link-btn" onClick={() => setEditingDaysFor(cur => cur === a.id ? null : a.id)}>editar días</button></>}
                 </p>
                 {editingDaysFor === a.id && (
                   <div className="org__holdset-chips">
@@ -727,12 +754,12 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
                     <button className="org__link-btn" onClick={() => saveAssignmentDays(a.id, [])}>usar lo de siempre</button>
                   </div>
                 )}
-                {canManage && (
+                {canEdit && (
                   <button className="org__link-btn" onClick={() => setAddingTaskFor(cur => cur === a.id ? null : a.id)}>+ Tarea</button>
                 )}
                 {addingTaskFor === a.id && (
                   <LooseTaskForm
-                    config={config} weekStart={detail.startDate}
+                    config={config} weekStart={detail.startDate} byWorkerId={workerId}
                     onDone={() => { setAddingTaskFor(null); openWeek(detail.id) }}
                     onCancel={() => setAddingTaskFor(null)}
                     assignmentId={a.id}
@@ -743,7 +770,14 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
                   return (
                     <div key={date} className="org__board-day" data-date={date}>
                       <p className="org__board-day-label">{dayLabel(date)}</p>
-                      {tasksOnDate.map(t => (
+                      {tasksOnDate.map(t => editingTask === t.id ? (
+                        <TaskEditForm
+                          key={t.id} task={t} byWorkerId={workerId}
+                          assignments={detail.assignments} assignmentId={a.id}
+                          onDone={() => { setEditingTask(null); openWeek(detail.id) }}
+                          onCancel={() => setEditingTask(null)}
+                        />
+                      ) : (
                         <TaskTile
                           key={t.id}
                           task={t}
@@ -754,7 +788,8 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
                           onPointerDown={onTileDown(t.id, t.date, a.id)}
                           onToggleDone={toggleTaskDone}
                           onPostpone={postponeTask}
-                          canManage={canManage}
+                          canEdit={canEdit}
+                          onEdit={() => setEditingTask(t.id)}
                           onDelete={deleteTask}
                           deleting={deletingTask === t.id}
                         />
@@ -1064,7 +1099,7 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
 
 // Tarea suelta para un día concreto, del catálogo o con texto libre (creador de tareas de
 // Álvaro, Ramiro 1/11 17:20) — se usa igual en el tablero de Semana y en Hoy.
-function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, onDone, onCancel }) {
+function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, byWorkerId, onDone, onCancel }) {
   const [taskTypeId, setTaskTypeId] = useState('')
   const [customText, setCustomText] = useState('')
   const [date, setDate] = useState(defaultDate || weekStart || todayStr())
@@ -1076,7 +1111,7 @@ function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, onDone, o
     if (!taskTypeId && !customText.trim()) { setError('Elige un tipo del catálogo o escribe un texto.'); return }
     setSaving(true); setError(null)
     try {
-      await api('POST', '/equipacion/tasks', { assignmentId, date, taskTypeId, customText: customText.trim(), notas })
+      await api('POST', '/equipacion/tasks', { assignmentId, date, taskTypeId, customText: customText.trim(), notas, byWorkerId })
       onDone()
     } catch (e) { setError(e.message) } finally { setSaving(false) }
   }
@@ -1105,16 +1140,67 @@ function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, onDone, o
   )
 }
 
+// Editar una tarea que ya existe (Ramiro, 5/11 06:54): texto (si es de texto libre), notas, día
+// y, desde el tablero de Semana, persona. Solo manda lo que ha cambiado.
+function TaskEditForm({ task, byWorkerId, assignments, assignmentId, onDone, onCancel }) {
+  const esLibre = task.taskTypeId === 'custom'
+  const [texto, setTexto] = useState(task.params?.texto || '')
+  const [notas, setNotas] = useState(task.params?.notas || '')
+  const [date, setDate] = useState(task.date)
+  const [persona, setPersona] = useState(assignmentId)
+  const [error, setError] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    const body = { byWorkerId }
+    if (esLibre && texto.trim() !== (task.params?.texto || '')) {
+      if (!texto.trim()) { setError('El texto no puede quedar vacío.'); return }
+      body.customText = texto.trim()
+    }
+    if (notas.trim() !== (task.params?.notas || '')) body.notas = notas.trim()
+    if (date !== task.date) body.date = date
+    if (assignments && persona !== assignmentId) body.assignmentId = persona
+    if (Object.keys(body).length === 1) { onCancel(); return }
+    setSaving(true); setError(null)
+    try {
+      await api('PUT', `/equipacion/tasks/${task.id}`, body)
+      onDone()
+    } catch (e) { setError(e.message); setSaving(false) }
+  }
+
+  return (
+    <div className="org__add-form">
+      {esLibre && <div className="org__add-row"><label>Texto</label><input type="text" value={texto} onChange={e => setTexto(e.target.value)} /></div>}
+      <div className="org__add-row"><label>Notas</label><input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="opcional" /></div>
+      <div className="org__add-row"><label>Día</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
+      {assignments && (
+        <div className="org__add-row">
+          <label>Persona</label>
+          <select value={persona} onChange={e => setPersona(Number(e.target.value))}>
+            {assignments.map(a => <option key={a.id} value={a.id}>{a.workerName}</option>)}
+          </select>
+        </div>
+      )}
+      {error && <p className="org__error">{error}</p>}
+      <div className="org__add-actions">
+        <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
+        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
+      </div>
+    </div>
+  )
+}
+
 // Tile visual de una tarea: checklist incorporado (checkbox) + info de la
 // tarea (subzona, objetivo...) + arrastrable a otra persona/día. Las tareas
 // no se cancelan, solo se mueven a la semana siguiente ("→ Semana
 // siguiente"), y quedan marcadas "retrasada" para que no se pierda el
 // histórico de lo que se fue quedando atrás.
-function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canManage, onDelete, deleting }) {
+function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canEdit, onEdit, onDelete, deleting }) {
   const params = Object.entries(task.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
   const movedAway = task.status === 'retrasada' && task.movedToTaskId
   const isRetrasada = task.status === 'retrasada'
   const canPostpone = !task.done && !movedAway
+  const rastro = rastroTarea(task)
 
   let badge = null
   if (movedAway) badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
@@ -1133,6 +1219,7 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
         <span className="org__tile-name">{typeName}</span>
         {params && <span className="org__tile-params">{params}</span>}
         {badge && <span className="org__tile-badge">{badge}</span>}
+        {rastro && <span className="org__task-rastro">{rastro}</span>}
       </div>
       {canPostpone && (
         <button
@@ -1143,7 +1230,15 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
           disabled={postponing}
         >{postponing ? '...' : '→ Semana siguiente'}</button>
       )}
-      {canManage && (
+      {canEdit && !movedAway && (
+        <button
+          type="button"
+          className="org__tile-edit"
+          onPointerDown={e => e.stopPropagation()}
+          onClick={onEdit}
+        >✎ Editar</button>
+      )}
+      {canEdit && (
         <button
           type="button"
           className="org__tile-delete"
@@ -1204,7 +1299,7 @@ function NormasView({ config, canManage, onConfigChanged }) {
         <h3 className="org__section-title">Catálogo de tareas</h3>
         <p className="org__hint">
           El sistema propone solo las tareas activas que tocan según su periodicidad, y elige a quien más
-          la haya hecho antes. {canManage ? 'Puedes crear tareas nuevas, editarlas o desactivarlas (nunca se borran, para no perder el histórico).' : 'Solo el responsable o un socio pueden crear o editar tareas del catálogo.'}
+          la haya hecho antes. {canManage ? 'Puedes crear tareas nuevas, editarlas o desactivarlas (nunca se borran, para no perder el histórico).' : 'Solo un profe, gestión o un socio pueden crear o editar tareas del catálogo.'}
         </p>
         <ul className="org__task-list">
           {types.filter(t => t.active !== false).map(t => (
@@ -1362,7 +1457,7 @@ function CreateTaskTypeForm({ config, onDone, onCancel }) {
 // Organización de una competición: fecha, semanas de antelación para las
 // tareas de equipación, y dónde va cada uno de los 16 bloques en el mapa.
 // Más reglas (categorías, puntuación...) se añaden sobre la marcha.
-function CompeView({ config, workers }) {
+function CompeView({ config, workers, canManage }) {
   const [competitions, setCompetitions] = useState([])
   const [current, setCurrent] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -1379,7 +1474,7 @@ function CompeView({ config, workers }) {
   if (current) {
     return (
       <CompeMapEditor
-        comp={current} config={config} workers={workers}
+        comp={current} config={config} workers={workers} canManage={canManage}
         onBack={() => { setCurrent(null); reload() }}
         onRefresh={() => openComp(current.id)}
       />
@@ -1536,7 +1631,7 @@ function CompePlanView({ compId, taskTypeById, workers }) {
 // Arrastra una burbuja ya colocada para moverla, o toca un número sin
 // colocar y luego el sitio del mapa — pensado para funcionar igual con
 // ratón que con el dedo en la tablet.
-function CompeMapEditor({ comp, config, workers, onBack }) {
+function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
   const wrapRef = useRef(null)
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const [blocks, setBlocks] = useState(comp.blocks)
@@ -1648,7 +1743,7 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
     <div>
       <div className="org__semana-actions">
         <button className="org__link-btn" onClick={onBack}>← Volver a competiciones</button>
-        <button className="org__link-btn" onClick={removeComp}>Borrar competición</button>
+        {canManage && <button className="org__link-btn" onClick={removeComp}>Borrar competición</button>}
       </div>
       <h3 className="org__section-title">{comp.name} — {comp.compDate}{comp.compEndDate && comp.compEndDate !== comp.compDate ? ` al ${comp.compEndDate}` : ''}</h3>
       <p className="org__hint">Las tareas de equipación para esta compe empiezan el {comp.tasksStartDate}.</p>

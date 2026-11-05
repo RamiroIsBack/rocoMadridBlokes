@@ -452,6 +452,17 @@
   cursor: pointer;
 }
 .org__tile-delete:disabled { opacity: 0.6; cursor: default; }
+.org__tile-edit {
+  flex: 0 0 100%;
+  background: none;
+  border: 1px dashed #c8bc9a;
+  color: #5a4a2a;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.org__task-rastro { font-size: 0.66rem; color: var(--color-text-secondary); font-style: italic; }
 .org__task--retrasada { border-color: #c8961e; background: #fdf0d8; }
 .org__task--moved { opacity: 0.6; }
 .org__task--moved .org__task-name { text-decoration: line-through; }
