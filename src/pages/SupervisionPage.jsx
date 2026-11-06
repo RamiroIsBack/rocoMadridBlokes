@@ -867,6 +867,11 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
   const [motivo, setMotivo]   = useState('')
   const [fechaVuelta, setFechaVuelta] = useState('')
   const [nota, setNota]       = useState(alumno.notas || '')
+  // Excepción de precio en Marcar cobrado (NOTAS_PARA_CODE_pestanas_grupos.md, Ramiro 06/11
+  // 16:00): cuando el importe no coincide con el total, hay que elegir una de las dos antes de
+  // poder confirmar de verdad.
+  const [ajustarPrecio, setAjustarPrecio] = useState('')
+  const [motivoExcepcionPrecio, setMotivoExcepcionPrecio] = useState('')
   const [mantenerPausa, setMantenerPausa] = useState(true)
   const [modoBaja, setModoBaja] = useState('fin_mes')
   const [motivoBajaCategoria, setMotivoBajaCategoria] = useState('')
@@ -916,7 +921,12 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
       let res
       if (tipo === 'marcar_cobrado') {
         if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
-        res = await gestionMarcarCobrado({ sub_id: alumno.subId, importe: Number(importe), metodo, fecha, parcial, nota, mantener_pausa: mantenerPausa, simular: sim })
+        if (!sim && preview?.importeDistinto && !ajustarPrecio) throw new Error('Elige si el precio distinto es solo este mes o también desde ahora.')
+        if (!sim && preview?.importeDistinto && !motivoExcepcionPrecio.trim()) throw new Error('Pon el motivo de la excepción de precio.')
+        res = await gestionMarcarCobrado({
+          sub_id: alumno.subId, importe: Number(importe), metodo, fecha, parcial, nota, mantener_pausa: mantenerPausa, simular: sim,
+          ...(preview?.importeDistinto ? { ajustarPrecio, motivoExcepcion: motivoExcepcionPrecio } : {}),
+        })
       } else if (tipo === 'pausar') {
         if (!motivo.trim()) throw new Error('Pon un motivo.')
         res = await gestionPausar({ sub_id: alumno.subId, motivo, fecha_vuelta: fechaVuelta, simular: sim })
@@ -972,10 +982,35 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
           <>
             <p className="sv-to-warn-txt">Simulación: no se ha escrito nada todavía.</p>
             <ul className="sv-grp-preview">
-              {Object.entries(preview).filter(([k, v]) => k !== 'aviso' && v !== null).map(([k, v]) => (
-                <li key={k}><span>{previewLabel(k)}</span><span>{previewValor(v)}</span></li>
-              ))}
+              {Object.entries(preview)
+                .filter(([k, v]) => !['aviso', 'importeDistinto', 'totalActual', 'ajustarPrecio', 'opciones'].includes(k) && v !== null)
+                .map(([k, v]) => (
+                  <li key={k}><span>{previewLabel(k)}</span><span>{previewValor(v)}</span></li>
+                ))}
             </ul>
+            {tipo === 'marcar_cobrado' && preview.importeDistinto && (
+              <div className="sv-grp-field sv-to-warn-txt">
+                <p>
+                  El importe ({fmtEur(preview.importe)}) no coincide con el total actual ({fmtEur(preview.totalActual)}).
+                  Elige una opción antes de confirmar:
+                </p>
+                <label className="sv-grp-field sv-grp-field--check">
+                  <input type="radio" name="ajustarPrecio" checked={ajustarPrecio === 'solo_este_mes'}
+                    disabled={!preview.opciones?.solo_este_mes?.disponible}
+                    onChange={() => setAjustarPrecio('solo_este_mes')} />
+                  Cobrar este importe solo este mes (factura por {fmtEur(preview.importe)})
+                  {!preview.opciones?.solo_este_mes?.disponible ? ' — todavía no existe el pedido de este mes' : ''}
+                </label>
+                <label className="sv-grp-field sv-grp-field--check">
+                  <input type="radio" name="ajustarPrecio" checked={ajustarPrecio === 'desde_ahora'}
+                    onChange={() => setAjustarPrecio('desde_ahora')} />
+                  Y usar este precio a partir de ahora (cambia también las próximas renovaciones)
+                </label>
+                <label className="sv-grp-field">Motivo de la excepción
+                  <input className="sv-tests-input" type="text" value={motivoExcepcionPrecio} onChange={e => setMotivoExcepcionPrecio(e.target.value)} placeholder="Hermanos, cambio de grupo, acuerdo…" />
+                </label>
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -1213,8 +1248,10 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
               <button
                 className="sv-tests-danger sv-tests-danger--confirm"
                 onClick={() => submit(true)}
-                disabled={busy || !!preview.adelantadoYaGuardado}
-                title={preview.adelantadoYaGuardado ? 'Ya hay un pago adelantado guardado para este mes — anúlalo primero si quieres cambiarlo.' : undefined}
+                disabled={busy || !!preview.adelantadoYaGuardado || (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim()))}
+                title={preview.adelantadoYaGuardado
+                  ? 'Ya hay un pago adelantado guardado para este mes — anúlalo primero si quieres cambiarlo.'
+                  : (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim()) ? 'Elige una opción y pon el motivo de la excepción de precio.' : undefined)}
               >
                 {busy ? 'Guardando…' : (preview.adelantadoYaGuardado ? 'Ya hay un adelantado guardado' : 'Confirmar de verdad')}
               </button>
@@ -1346,6 +1383,9 @@ function TablaAlumnos({ alumnos, meses, onWa, onMenu }) {
                     : <span className="sv-wa sv-wa--sin" title="No se puede pedir el consentimiento de WhatsApp sin teléfono guardado">(sin tlf)</span>}
                   {a.sinNombre && <span className="sv-to-warn-txt" title="No es un nombre real: es el usuario de la cuenta (sin dirección de facturación). Pulsa ⋯ → «Editar nombre/teléfono» para arreglarlo."> ⚠ no es nombre real</span>}
                   {a.exento && <span title="Exento/socio: no se le pide cobro">*</span>}
+                  {a.precioEspecial && (
+                    <span className="sv-to-warn-txt" title={`Precio especial: ${fmtEur(a.precioEspecial.importe)} · ${a.precioEspecial.motivo} · ${a.precioEspecial.por} · ${a.precioEspecial.desde}`}> 💶 precio especial</span>
+                  )}
                   {a.otrasSubs?.length > 0 && (
                     <span title={`${a.otrasSubs.length} suscripción(es) antigua(s) colgando en este grupo (duplicado)`}> ⚠</span>
                   )}

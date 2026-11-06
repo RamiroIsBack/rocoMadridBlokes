@@ -4091,6 +4091,15 @@ function superadmin_gestion_grupos($request) {
             'sinNombre'   => $nombre_fact === '',
             'tutorNombre'   => get_post_meta($sub_obj->get_id(), '_rm_tutor_nombre', true) ?: '',
             'tutorTelefono' => get_post_meta($sub_obj->get_id(), '_rm_tutor_telefono', true) ?: '',
+            // Precio especial (NOTAS_PARA_CODE_pestanas_grupos.md, Ramiro 06/11 16:00): puesto
+            // desde "Marcar cobrado" con la opción "y desde ahora" — para que Eva lo vea de un
+            // vistazo en la ficha.
+            'precioEspecial' => get_post_meta($sub_obj->get_id(), '_rm_precio_especial', true) !== '' ? array(
+                'importe' => floatval(get_post_meta($sub_obj->get_id(), '_rm_precio_especial', true)),
+                'motivo'  => get_post_meta($sub_obj->get_id(), '_rm_precio_especial_motivo', true) ?: '',
+                'desde'   => get_post_meta($sub_obj->get_id(), '_rm_precio_especial_desde', true) ?: '',
+                'por'     => get_post_meta($sub_obj->get_id(), '_rm_precio_especial_por', true) ?: '',
+            ) : null,
         );
 
         if (!isset($grupos[$gkey]['personas'][$persona_key])) $grupos[$gkey]['personas'][$persona_key] = array();
@@ -4237,6 +4246,23 @@ function blokes_gestion_metodo_label($metodo) {
         'tarjeta' => 'Tarjeta (TPV roco)', 'wellhub' => 'Wellhub', 'bizum' => 'Bizum',
     );
     return $map[$metodo] ?? ucfirst($metodo);
+}
+
+// Cambia el precio de la ÚNICA línea de producto de un pedido o de una suscripción (ambos son
+// WC_Abstract_Order) y recalcula impuestos/totales — mismo patrón que ya usa
+// superadmin_gestion_cambiar_grupo() para la suscripción. Solo cuando hay exactamente 1 línea:
+// con más de una no se adivina cuál ajustar (NOTAS_PARA_CODE_pestanas_grupos.md, Ramiro 06/11
+// 16:00 — "excepción de precio" en Marcar cobrado).
+function blokes_gestion_ajustar_precio_linea($pedido_o_sub, $importe_nuevo) {
+    $items = $pedido_o_sub->get_items();
+    if (count($items) !== 1) return false;
+    $item = reset($items);
+    $item->set_subtotal($importe_nuevo);
+    $item->set_total($importe_nuevo);
+    $item->save();
+    $pedido_o_sub->calculate_taxes();
+    $pedido_o_sub->calculate_totals(false);
+    return true;
 }
 
 function blokes_cobros_manuales_table() {
@@ -7655,12 +7681,24 @@ function superadmin_gestion_marcar_cobrado($request) {
     $mantener_pausa = $mantener_pausa === null ? true : (bool) $mantener_pausa;
     $simular  = (bool) $request->get_param('simular');
     $es_efectivo = $metodo === 'efectivo';
+    // Excepción de precio (NOTAS_PARA_CODE_pestanas_grupos.md, Ramiro 06/11 16:00): cuando el
+    // importe escrito no es el total del pedido/catálogo. 'solo_este_mes' ajusta solo este
+    // cobro; 'desde_ahora' además cambia el precio recurrente de la suscripción. Si no se manda
+    // (p. ej. llamadas automáticas como Sync Grupos), el comportamiento es EXACTAMENTE el de
+    // antes: el importe distinto queda solo como nota, sin tocar el pedido ni la suscripción —
+    // así no se cambia nada para quien ya llama a este endpoint sin pasar por el diálogo nuevo.
+    $ajustar_precio = sanitize_key((string) $request->get_param('ajustarPrecio'));
+    if (!in_array($ajustar_precio, array('', 'solo_este_mes', 'desde_ahora'), true)) $ajustar_precio = '';
+    $motivo_excepcion = sanitize_text_field((string) $request->get_param('motivoExcepcion'));
 
     if (!$sub_id || $importe <= 0 || !$metodo) {
         return new WP_Error('bad_request', 'Faltan sub_id, importe o metodo.', array('status' => 400));
     }
     if (!in_array($metodo, array('transferencia', 'tarjeta', 'efectivo', 'wellhub', 'bizum'), true)) {
         return new WP_Error('bad_request', 'Método no reconocido. Usa transferencia, tarjeta, efectivo, bizum o wellhub.', array('status' => 400));
+    }
+    if ($ajustar_precio !== '' && $motivo_excepcion === '') {
+        return new WP_Error('falta_motivo', 'El motivo de la excepción de precio es obligatorio.', array('status' => 400));
     }
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
@@ -7751,6 +7789,12 @@ function superadmin_gestion_marcar_cobrado($request) {
         $sub_id, $periodo_cubre
     ), ARRAY_A);
 
+    // ¿El importe escrito es distinto del total del pedido/suscripción? (excepción de precio —
+    // Ramiro 06/11 16:00). No aplica a "efectivo" (ahí nunca hay pedido ni factura) ni a
+    // "parcial" (eso ya es su propio camino: pedido a medias, sin factura completa).
+    $total_referencia = $order ? floatval($order->get_total()) : floatval($sub->get_total());
+    $importe_distinto = !$es_efectivo && !$parcial && abs($importe - $total_referencia) > 0.009;
+
     // Modo simulación: ni crea ni completa ningún pedido, ni toca la suscripción — para poder
     // probar contra un caso real (secciones 6b/7) viendo qué pasaría, sin generar factura/AEAT
     // ni ningún otro efecto. Nada de lo de abajo se ejecuta.
@@ -7770,15 +7814,57 @@ function superadmin_gestion_marcar_cobrado($request) {
             'pasaAActiva'     => !($estaba_pausada && $mantener_pausa),
             'mantienePausa'   => $estaba_pausada && $mantener_pausa,
             'importe'         => $importe, 'metodo' => $metodo_label, 'fecha' => $fecha_txt, 'parcial' => $parcial,
+            // Excepción de precio: lo que vería el diálogo para ofrecer las 2 opciones de
+            // Ramiro. totalPedidoAntes/Despues y totalFacturaDespues dejan claro qué cambia en
+            // cada una antes de confirmar.
+            'importeDistinto'      => $importe_distinto,
+            'totalActual'          => $total_referencia,
+            'ajustarPrecio'        => $ajustar_precio ?: null,
+            'opciones' => !$importe_distinto ? null : array(
+                'solo_este_mes' => array(
+                    'disponible' => (bool) $order,
+                    'totalPedidoAntes' => $total_referencia, 'totalPedidoDespues' => $importe, 'totalFactura' => $importe,
+                    'aviso' => $order ? null : 'Todavía no existe el pedido de esta renovación — no se puede ajustar solo este mes hasta que exista (usa "y desde ahora" o espera a que se genere).',
+                ),
+                'desde_ahora' => array(
+                    'disponible' => true,
+                    'totalPedidoAntes' => $total_referencia, 'totalPedidoDespues' => $importe, 'totalFactura' => $importe,
+                    'cambiaRenovaciones' => true, 'precioRecurrenteDespues' => $importe,
+                ),
+            ),
             'aviso'           => $adelantado_existente
                 ? sprintf('Ya hay un pago adelantado de %s € guardado el %s por %s para este mes — confirmar crearía otro. Anúlalo primero si quieres cambiarlo.',
                     number_format(floatval($adelantado_existente['importe']), 2, ',', '.'), date_i18n('d/m/Y', strtotime($adelantado_existente['created_at'])), $adelantado_existente['user_login'])
-                : ($order
-                    ? 'Simulación: no se ha escrito nada en WooCommerce. De confirmarlo, SE EMITIRÁ FACTURA y se enviará a Hacienda (Verifactu).'
-                    : 'Simulación: todavía no existe el pedido de renovación. De confirmarlo, se guardará como "pagado por adelantado" (sin factura) y se aplicará solo cuando WooCommerce genere esa renovación.'),
+                : ($importe_distinto
+                    ? sprintf('El importe (%s €) no coincide con el total actual (%s €) — elige si es solo este mes o también desde ahora antes de confirmar.',
+                        number_format($importe, 2, ',', '.'), number_format($total_referencia, 2, ',', '.'))
+                    : ($order
+                        ? 'Simulación: no se ha escrito nada en WooCommerce. De confirmarlo, SE EMITIRÁ FACTURA y se enviará a Hacienda (Verifactu).'
+                        : 'Simulación: todavía no existe el pedido de renovación. De confirmarlo, se guardará como "pagado por adelantado" (sin factura) y se aplicará solo cuando WooCommerce genere esa renovación.')),
         );
         blokes_gestion_log($sub_id, 'marcar_cobrado_simulado', $antes, null, $preview);
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $preview));
+    }
+
+    if ($importe_distinto && $ajustar_precio === 'solo_este_mes' && !$order) {
+        return new WP_Error('sin_pedido', 'Todavía no existe el pedido de esta renovación — no se puede ajustar el precio solo este mes hasta que exista. Usa "y desde ahora" o espera a que se genere.', array('status' => 409));
+    }
+
+    // "desde_ahora" cambia el precio recurrente de la suscripción YA (antes de completar el
+    // pedido si existe, o aunque todavía no exista — así, si se guarda como adelantado, la
+    // próxima renovación que genere WooCommerce nacerá ya con el precio nuevo y el adelantado
+    // coincidirá solo con comprobarlo, sin tocar blokes_aplicar_adelantado_si_hay).
+    if ($importe_distinto && $ajustar_precio === 'desde_ahora') {
+        $ok_sub = blokes_gestion_ajustar_precio_linea($sub, $importe);
+        if (!$ok_sub) {
+            return new WP_Error('varias_lineas', 'Esta suscripción tiene más de una línea de producto — no se puede ajustar el precio recurrente a ciegas. Dímelo y lo reviso a mano.', array('status' => 409));
+        }
+        $user = wp_get_current_user();
+        update_post_meta($sub_id, '_rm_precio_especial', $importe);
+        update_post_meta($sub_id, '_rm_precio_especial_motivo', $motivo_excepcion);
+        update_post_meta($sub_id, '_rm_precio_especial_desde', $fecha_txt);
+        update_post_meta($sub_id, '_rm_precio_especial_por', $user ? $user->user_login : '');
+        blokes_gestion_log($sub_id, 'precio_especial', array('total' => $total_referencia), array('total' => $importe, 'motivo' => $motivo_excepcion));
     }
 
     if (!$order) {
@@ -7803,9 +7889,28 @@ function superadmin_gestion_marcar_cobrado($request) {
         ))));
     }
 
-    blokes_gestion_sin_emails(function() use ($order, $metodo_label, $importe, $fecha_ts, $fecha_txt, $parcial, $nota) {
+    // Excepción de precio sobre el pedido ya existente — "solo este mes" (y también
+    // "desde ahora", que además de cambiar la suscripción arriba, este cobro concreto se
+    // factura por lo cobrado): ajusta la línea del pedido ANTES de completarlo, para que la
+    // factura/Verifactu salga por el importe real.
+    if ($importe_distinto && in_array($ajustar_precio, array('solo_este_mes', 'desde_ahora'), true)) {
+        $ok_pedido = blokes_gestion_ajustar_precio_linea($order, $importe);
+        if (!$ok_pedido) {
+            return new WP_Error('varias_lineas', 'Este pedido tiene más de una línea de producto — no se puede ajustar el precio a ciegas. Dímelo y lo reviso a mano.', array('status' => 409));
+        }
+    }
+
+    blokes_gestion_sin_emails(function() use ($order, $metodo_label, $importe, $fecha_ts, $fecha_txt, $parcial, $nota, $importe_distinto, $ajustar_precio, $motivo_excepcion, $total_referencia) {
         $order->set_payment_method_title($metodo_label);
         $nota_txt = sprintf('ExcelMuerte: cobrado %s € (%s) el %s.', number_format($importe, 2, ',', '.'), $metodo_label, $fecha_txt);
+        if ($importe_distinto && $ajustar_precio) {
+            $nota_txt .= sprintf(
+                ' PRECIO ESPECIAL (antes %s €, %s) — %s.',
+                number_format($total_referencia, 2, ',', '.'),
+                $ajustar_precio === 'desde_ahora' ? 'también desde ahora' : 'solo este mes',
+                $motivo_excepcion
+            );
+        }
         if ($parcial) $nota_txt .= ' PAGO PARCIAL' . ($nota ? ' — ' . $nota : '') . '.';
         elseif ($nota) $nota_txt .= ' ' . $nota;
         $order->add_order_note($nota_txt);
@@ -7842,6 +7947,7 @@ function superadmin_gestion_marcar_cobrado($request) {
     blokes_gestion_log($sub_id, 'marcar_cobrado', $antes, $despues, array(
         'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota,
         'mantuvo_pausa' => $estaba_pausada && $mantener_pausa,
+        'precioEspecial' => ($importe_distinto && $ajustar_precio) ? array('totalAntes' => $total_referencia, 'modo' => $ajustar_precio, 'motivo' => $motivo_excepcion) : null,
     ));
     // Web → Excel (NOTAS_PARA_CODE_sync_grupos.md): el cobro también se apunta en la Hoja de
     // Eva, si se encuentra la pestaña/fila/mes de verdad — nunca bloquea esta respuesta (el
