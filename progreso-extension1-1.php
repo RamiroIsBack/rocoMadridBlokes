@@ -5621,14 +5621,49 @@ function blokes_sync_grupos_clave($nombre, $telefono) {
 }
 
 // Encuentra con quién de la web emparejar un teléfono del Excel: primero una suscripción de
-// WooCommerce en vigor, si no, un externo. No se fía del nombre (demasiados homónimos/apodos),
-// solo del teléfono, que es lo que de verdad identifica a la persona en ambos sitios.
-function blokes_sync_grupos_emparejar($telefono, $subs_por_tel, $externos_por_tel) {
+// WooCommerce en vigor, si no, un externo. No se fía del nombre para el emparejamiento en sí
+// (demasiados homónimos/apodos), solo del teléfono — PERO cuando ese teléfono tiene más de una
+// suscripción (familia/hermanos con el mismo número, cowork 06/11 15:55: el pago de un hermano
+// se aplicaba a la suscripción del otro), el teléfono solo no basta para decidir CUÁL de ellas
+// es. En ese caso sí se mira el nombre, solo para desambiguar entre los candidatos que YA
+// comparten teléfono — nunca para encontrar un match nuevo. Si no hay una coincidencia clara de
+// nombre (o coincide con más de uno, p. ej. dos hermanos con nombres parecidos o una
+// suscripción duplicada de la misma persona), no se adivina: se queda sin match, a la bandeja.
+function blokes_sync_grupos_emparejar($telefono, $nombre_fila, $subs_por_tel, $externos_por_tel) {
     $tel = blokes_externos_normaliza_telefono((string) $telefono);
     if ($tel === '') return null;
-    if (isset($subs_por_tel[$tel])) {
-        $s = $subs_por_tel[$tel];
-        return array('tipo' => 'sub', 'id' => intval($s['id']), 'label' => ($s['nombre'] ?? $s['alumno'] ?? ('Suscripción #' . $s['id'])));
+    $candidatos = $subs_por_tel[$tel] ?? array();
+    if (count($candidatos) > 1) {
+        // Antes de mirar el nombre, quedarse solo con los de mayor prioridad (en vigor > de baja
+        // a fin de mes > cancelada) — si alguien tiene una suscripción activa y otra vieja
+        // cancelada con el mismo teléfono, sigue ganando la activa sin hacer falta el nombre,
+        // igual que antes. El nombre solo desempata cuando de verdad hay varias EN EL MISMO nivel
+        // (dos hermanos, dos altas activas de la misma persona).
+        $max_p = max(array_column($candidatos, '_prioridad'));
+        $candidatos = array_values(array_filter($candidatos, function($s) use ($max_p) { return $s['_prioridad'] === $max_p; }));
+    }
+    if (count($candidatos) === 1) {
+        $s = $candidatos[0];
+        return array('tipo' => 'sub', 'id' => intval($s['id']), 'label' => ($s['_nombre_fact'] ?: ('Suscripción #' . $s['id'])));
+    }
+    if (count($candidatos) > 1) {
+        // Desambiguar por el primer nombre (de pila) ya normalizado — los apellidos no sirven
+        // aquí porque los hermanos casi siempre los comparten.
+        $buscado = explode(' ', blokes_externos_normaliza_nombre((string) $nombre_fila));
+        $buscado_primer = $buscado[0] ?? '';
+        $coincide = array();
+        foreach ($candidatos as $s) {
+            $cand = explode(' ', blokes_externos_normaliza_nombre((string) ($s['_nombre_fact'] ?? '')));
+            $cand_primer = $cand[0] ?? '';
+            if ($buscado_primer !== '' && $cand_primer !== '' && $buscado_primer === $cand_primer) {
+                $coincide[] = $s;
+            }
+        }
+        if (count($coincide) === 1) {
+            $s = $coincide[0];
+            return array('tipo' => 'sub', 'id' => intval($s['id']), 'label' => ($s['_nombre_fact'] ?: ('Suscripción #' . $s['id'])));
+        }
+        return null;
     }
     if (isset($externos_por_tel[$tel])) {
         $e = $externos_por_tel[$tel];
@@ -5660,7 +5695,7 @@ function blokes_sync_grupos_reintentar_pendientes($pestanas, $subs_por_tel, $ext
         'alumno_nuevo', 'pago_nuevo', 'nota'
     ), ARRAY_A);
     foreach ($pendientes as $cambio) {
-        $match = blokes_sync_grupos_emparejar($cambio['telefono'], $subs_por_tel, $externos_por_tel);
+        $match = blokes_sync_grupos_emparejar($cambio['telefono'], $cambio['nombre'], $subs_por_tel, $externos_por_tel);
         if ($match) {
             $wpdb->update($tabla, array(
                 'match_tipo' => $match['tipo'], 'match_id' => $match['id'], 'match_label' => $match['label'],
@@ -5807,7 +5842,7 @@ function blokes_sync_grupos_sincronizar() {
     $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($activa['id'], $pestanas);
     if (is_wp_error($valores_por_pestana)) return $valores_por_pestana;
 
-    $subs_por_tel     = blokes_campanas_subs_por_telefono();
+    $subs_por_tel     = blokes_sync_grupos_subs_por_telefono();
     $externos_por_tel = blokes_campanas_externos_por_telefono();
 
     $resumen = array('hojaUsada' => $activa['cual'], 'pestanas' => array(), 'cambiosNuevos' => 0, 'fotoInicial' => array());
@@ -5828,7 +5863,7 @@ function blokes_sync_grupos_sincronizar() {
             $pagos_anteriores = $anterior ? (json_decode($anterior['pagos_json'], true) ?: array()) : array();
 
             if (!$es_foto_inicial) {
-                $match = blokes_sync_grupos_emparejar($fila['telefono'], $subs_por_tel, $externos_por_tel);
+                $match = blokes_sync_grupos_emparejar($fila['telefono'], $fila['nombre'], $subs_por_tel, $externos_por_tel);
                 if (!$anterior) {
                     $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'alumno_nuevo', null, array(
                         'nombre' => $fila['nombre'], 'telefono' => $fila['telefono'],
@@ -6984,6 +7019,32 @@ function blokes_campanas_subs_por_telefono() {
             $s['_prioridad'] = $p;
             $por_tel[$tel] = $s;
         }
+    }
+    return $por_tel;
+}
+
+// Igual que blokes_campanas_subs_por_telefono() (mismo criterio de teléfono/prioridad) pero
+// guarda TODOS los candidatos de cada teléfono, no solo "el mejor" — Sync Grupos necesita verlos
+// todos para poder desambiguar por nombre cuando una familia comparte número
+// (blokes_sync_grupos_emparejar(), cowork 06/11 15:55). También guarda el nombre de facturación
+// real de cada suscripción (más de fiar que el nombre de la cuenta — mismo criterio que Grupos).
+function blokes_sync_grupos_subs_por_telefono() {
+    $prioridad = array('active' => 3, 'on-hold' => 3, 'pending' => 3, 'pending-cancel' => 2, 'cancelled' => 1);
+    $por_tel = array();
+    foreach (blokes_get_all_subscription_data() as $s) {
+        $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription(intval($s['id'] ?? 0)) : null;
+        $tel = $sub_obj ? blokes_externos_normaliza_telefono($sub_obj->get_billing_phone()) : '';
+        if ($tel === '') $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        if ($tel === '') $tel = blokes_externos_normaliza_telefono(blokes_telefono_de_email($s['email'] ?? ''));
+        if ($tel === '') {
+            $uid = intval(get_post_meta(intval($s['id'] ?? 0), '_customer_user', true));
+            if ($uid) $tel = blokes_externos_normaliza_telefono(get_user_meta($uid, 'billing_phone', true));
+        }
+        if ($tel === '') continue;
+        $nombre_fact = $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : '';
+        $s['_nombre_fact'] = $nombre_fact !== '' ? $nombre_fact : ($s['cliente'] ?? '');
+        $s['_prioridad'] = $prioridad[$s['status'] ?? ''] ?? 0;
+        $por_tel[$tel][] = $s;
     }
     return $por_tel;
 }
