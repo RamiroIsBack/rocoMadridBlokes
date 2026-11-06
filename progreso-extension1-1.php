@@ -1008,6 +1008,14 @@ add_action('rest_api_init', function() {
         array('methods' => 'DELETE', 'callback' => 'superadmin_club_days_borrar', 'permission_callback' => $socio_perm),
     ));
 
+    // Abonos anual/trimestral de escalada libre, derivados de los mensuales (5114/5115) sin
+    // tocarlos — Ramiro, NOTAS_PARA_CODE_abono_anual.md 06/11. Crea productos nuevos (duplicando
+    // el mensual correspondiente), nunca convierte ni toca los suscriptores actuales. Solo socio:
+    // crea productos/precios reales.
+    register_rest_route('superadmin/v1', '/gestion/abonos/crear-periodicidad', array(
+        'methods' => 'POST', 'callback' => 'superadmin_abonos_crear_periodicidad', 'permission_callback' => $socio_perm,
+    ));
+
     // Histórico de pagos importado (HV Control de Clientes, NOTAS_PARA_CODE_hv_control_clientes.md)
     // — solo socio, es dinero agregado/datos de clientes antiguos.
     register_rest_route('superadmin/v1', '/gestion/hist-pagos/importar', array(
@@ -6238,6 +6246,88 @@ function superadmin_club_days_borrar($request) {
     $wpdb->delete(blokes_club_days_table(), array('id' => $id));
     blokes_gestion_log(0, 'club_day_borrar', $fila, null, 'Borrado del calendario del club');
     return rest_ensure_response(array('success' => true));
+}
+
+/**
+ * Crea UN producto de abono nuevo duplicando $source_id (el mensual correspondiente, 5114/5115)
+ * — copia título, imagen, categorías, descripción, impuestos, stock, etc. tal cual, y solo
+ * cambia nombre/precio/periodicidad. El mensual de origen no se toca para nada, así que sus
+ * suscriptores actuales siguen intactos (NOTAS_PARA_CODE_abono_anual.md, Ramiro 06/11).
+ * Idempotente: si ya existe un producto con ese título exacto, devuelve su id sin crear otro.
+ *
+ * @param int    $source_id Id del producto mensual del que se parte (5114 o 5115).
+ * @param string $titulo    Título del abono nuevo.
+ * @param float  $precio    Precio del periodo completo (p.ej. 749 para el anual).
+ * @param string $period    'month' o 'year' (periodo de WooCommerce Subscriptions).
+ * @param int    $interval  Cada cuántos $period se renueva (3 para trimestral, 1 para anual).
+ * @return int|WP_Error Id del producto (nuevo o ya existente) o error.
+ */
+function blokes_crear_producto_abono_periodicidad($source_id, $titulo, $precio, $period, $interval) {
+    if (!function_exists('wc_get_product')) {
+        return new WP_Error('no_woocommerce', 'WooCommerce no está activo.', array('status' => 500));
+    }
+    $existente = get_page_by_title($titulo, OBJECT, 'product');
+    if ($existente) {
+        return (int) $existente->ID;
+    }
+    $source = wc_get_product($source_id);
+    if (!$source) {
+        return new WP_Error('origen_no_encontrado', 'No existe el producto de origen ' . $source_id . '.', array('status' => 404));
+    }
+    $data = $source->get_data();
+    unset($data['id'], $data['sku'], $data['slug'], $data['date_created'], $data['date_modified'], $data['name'], $data['meta_data']);
+
+    $nuevo = new WC_Product_Subscription();
+    $nuevo->set_props($data);
+    $nuevo->set_name($titulo);
+    $nuevo->set_regular_price((string) $precio);
+    $nuevo->set_sale_price('');
+    $nuevo->set_status('publish');
+    $nuevo->set_subscription_period($period);
+    $nuevo->set_subscription_period_interval((string) $interval);
+    $nuevo->set_subscription_price((string) $precio);
+    $nuevo->save();
+
+    $nuevo_id = $nuevo->get_id();
+    update_post_meta($nuevo_id, '_blokes_abono_generado_desde', $source_id);
+    $nuevo = wc_get_product($nuevo_id);
+    $sku_base = 'abono-' . sanitize_title($titulo);
+    $sku = $sku_base;
+    $i = 2;
+    while (wc_get_product_id_by_sku($sku) && wc_get_product_id_by_sku($sku) !== $nuevo_id) {
+        $sku = $sku_base . '-' . $i;
+        $i++;
+    }
+    $nuevo->set_sku($sku);
+    $nuevo->save();
+
+    blokes_gestion_log(0, 'abono_periodicidad_crear', null, array(
+        'id' => $nuevo_id, 'titulo' => $titulo, 'precio' => $precio, 'period' => $period, 'interval' => $interval, 'desde' => $source_id,
+    ), 'Alta de abono ' . $titulo . ' (duplicado de ' . $source_id . ')');
+
+    return $nuevo_id;
+}
+
+// POST /gestion/abonos/crear-periodicidad — crea los 4 abonos pedidos por Ramiro (anual y
+// trimestral, todo el día y mañana), duplicando 5115 y 5114 respectivamente. Se puede llamar
+// varias veces sin riesgo: los que ya existen (por título) no se vuelven a crear.
+function superadmin_abonos_crear_periodicidad($request) {
+    $pedidos = array(
+        array('source' => 5115, 'titulo' => 'Abono anual todo el día',      'precio' => 749, 'period' => 'year',  'interval' => 1),
+        array('source' => 5114, 'titulo' => 'Abono anual mañana',          'precio' => 629, 'period' => 'year',  'interval' => 1),
+        array('source' => 5115, 'titulo' => 'Abono trimestral todo el día', 'precio' => 195, 'period' => 'month', 'interval' => 3),
+        array('source' => 5114, 'titulo' => 'Abono trimestral mañana',     'precio' => 165, 'period' => 'month', 'interval' => 3),
+    );
+    $resultado = array();
+    foreach ($pedidos as $p) {
+        $id = blokes_crear_producto_abono_periodicidad($p['source'], $p['titulo'], $p['precio'], $p['period'], $p['interval']);
+        if (is_wp_error($id)) {
+            $resultado[] = array('titulo' => $p['titulo'], 'error' => $id->get_error_message());
+        } else {
+            $resultado[] = array('titulo' => $p['titulo'], 'id' => $id, 'url_editar' => admin_url('post.php?post=' . $id . '&action=edit'));
+        }
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $resultado));
 }
 
 /**
