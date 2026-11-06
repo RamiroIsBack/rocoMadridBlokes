@@ -7473,15 +7473,6 @@ function superadmin_campanas_destinatarios($request) {
 
     $subs_por_tel     = blokes_campanas_subs_por_telefono();
     $externos_por_tel = blokes_campanas_externos_por_telefono();
-    // Diagnóstico temporal (NOTAS_PARA_CODE_whatsapp.md, 3/11 17:00: yaEnVigor sale false en los
-    // 521 aunque el teléfono coincide con billing_phone) — para saber si el problema es que
-    // blokes_get_all_subscription_data() devuelve pocas/cero filas en este contexto (sitio
-    // equivocado, caché...) antes de seguir adivinando.
-    $debug = array(
-        'blogId' => get_current_blog_id(),
-        'totalSubs' => count(blokes_get_all_subscription_data()),
-        'subsPorTel' => count($subs_por_tel),
-    );
     $envios_por_contacto = array();
     foreach ($wpdb->get_results($wpdb->prepare(
         "SELECT * FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d", $id
@@ -7532,7 +7523,6 @@ function superadmin_campanas_destinatarios($request) {
             'remitente' => $campana['remitente'],
         ),
         'destinatarios' => $out,
-        '_debug' => $debug,
     )));
 }
 
