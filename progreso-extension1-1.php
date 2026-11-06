@@ -2202,6 +2202,67 @@ function blokes_get_pending_cancel_alumnos() {
 }
 
 /**
+ * Abonos de escalada libre (sin clases): mensuales (5114/5115, ya existían) + los nuevos
+ * anual/trimestral creados el 06/11 (NOTAS_PARA_CODE_abono_anual.md) — 7753-7756. No los conoce
+ * RocoMadrid_SF_Stats (son productos simples de WooCommerce, no del step form), así que se leen
+ * aquí aparte y se les da 'producto' => 'Abono' para que Grupos/Supervisión los distinga de una
+ * clase — nunca "no como clase" (no tienen día de la semana: es acceso libre).
+ */
+function blokes_get_abono_subscripciones() {
+    if (!function_exists('wcs_get_subscriptions')) return array();
+
+    // id => [franja mostrada, turno]. Si se crean más abonos (otro precio/periodo), añadir aquí.
+    $abono_ids = array(
+        5115 => array('franja' => 'Todo el día', 'turno' => 'Afternoon'),
+        5114 => array('franja' => 'Mañana',      'turno' => 'Morning'),
+        7753 => array('franja' => 'Todo el día', 'turno' => 'Afternoon'),
+        7754 => array('franja' => 'Mañana',      'turno' => 'Morning'),
+        7755 => array('franja' => 'Todo el día', 'turno' => 'Afternoon'),
+        7756 => array('franja' => 'Mañana',      'turno' => 'Morning'),
+    );
+
+    $subscriptions = wcs_get_subscriptions(array(
+        'subscriptions_per_page' => -1,
+        'subscription_status'    => array('active', 'pending', 'on-hold', 'cancelled', 'pending-cancel'),
+    ));
+
+    $data = array();
+    foreach ($subscriptions as $subscription) {
+        $producto_id = 0;
+        foreach ($subscription->get_items() as $item) {
+            $pid = intval($item->get_product_id());
+            if (isset($abono_ids[$pid])) { $producto_id = $pid; break; }
+        }
+        if (!$producto_id) continue;
+
+        $raw_status = $subscription->get_status();
+        $customer   = $subscription->get_user();
+        $start_date = $subscription->get_date('date_created');
+
+        $data[] = array(
+            'id'           => $subscription->get_id(),
+            'status'       => ($raw_status === 'pending-cancel') ? 'active' : $raw_status,
+            'status_raw'   => $raw_status,
+            'cliente'      => $customer ? $customer->display_name : 'N/A',
+            'email'        => $customer ? $customer->user_email : 'N/A',
+            'telefono'     => $subscription->get_billing_phone(),
+            'producto'     => 'Abono',
+            'producto_id'  => $producto_id,
+            'dia'          => '',
+            'horario'      => $abono_ids[$producto_id]['franja'],
+            'edad'         => 'Adultos',
+            'turno'        => $abono_ids[$producto_id]['turno'],
+            'plan'         => 'monthly',
+            'total'        => floatval($subscription->get_total()),
+            'period'       => $subscription->get_billing_period(),
+            'interval'     => $subscription->get_billing_interval(),
+            'fecha_inicio' => $start_date ? date_i18n('d/m/Y', strtotime($start_date)) : 'N/A',
+        );
+    }
+    return $data;
+}
+
+/**
  * Wrapper sobre RocoMadrid_SF_Stats::get_all_subscription_data() (plugin de
  * terceros) que además incluye las suscripciones pending-cancel, leídas
  * directamente de WooCommerce. Usar esta función en vez de llamar al plugin
@@ -2209,7 +2270,7 @@ function blokes_get_pending_cancel_alumnos() {
  */
 function blokes_get_all_subscription_data() {
     $base = class_exists('RocoMadrid_SF_Stats') ? RocoMadrid_SF_Stats::get_all_subscription_data() : array();
-    return array_merge($base, blokes_get_pending_cancel_alumnos());
+    return array_merge($base, blokes_get_pending_cancel_alumnos(), blokes_get_abono_subscripciones());
 }
 
 function progreso_get_alumnos($request) {
@@ -3812,6 +3873,7 @@ function superadmin_gestion_grupos($request) {
         $dia = $sub['dia'] ?? ''; $horario = $sub['horario'] ?? ''; $edad = $sub['edad'] ?? 'Adultos';
         $producto = $sub['producto'] ?? '';
         $es_pilates_yoga = in_array($producto, array('Pilates', 'Yoga'), true);
+        $es_abono = ($producto === 'Abono');
         if (!$dia && !$horario && !$es_pilates_yoga) continue;
 
         $sub_obj = wcs_get_subscription(intval($sub['id']));
@@ -3820,8 +3882,10 @@ function superadmin_gestion_grupos($request) {
         // Agrupar por franja como en el Excel de Eva (M-J 20:30 junta a los de 2 días y a los
         // sueltos de solo martes o solo jueves), no por cada combinación exacta de día. El
         // horario se normaliza aparte para agrupar (espacios/guiones distintos de las altas
-        // hechas desde admin no deben partir el mismo grupo en dos).
-        $pareja         = $es_pilates_yoga ? $producto : blokes_dia_a_pareja($dia);
+        // hechas desde admin no deben partir el mismo grupo en dos). Abono (escalada libre, sin
+        // día fijo) se agrupa por su franja ("Todo el día"/"Mañana"), no por día — igual que
+        // Pilates/Yoga, pero sin perder esa franja en el label (ver abajo).
+        $pareja         = ($es_pilates_yoga || $es_abono) ? $producto : blokes_dia_a_pareja($dia);
         $horario_agrupa = blokes_horario_agrupable($horario);
         $gkey   = $pareja . '|' . $horario_agrupa . '|' . $edad;
         if (!isset($grupos[$gkey])) {
