@@ -2360,6 +2360,31 @@ function progreso_get_clases($request) {
         }
     }
 
+    // Adolescentes no es un término pa_edad real en el catálogo (hoy se monta sobre la variación
+    // de Adultos del mismo día/horario, con el precio ajustado por un addon en el alta normal —
+    // ver NOTAS_PARA_CODE_sync_grupos.md, Ramiro 06/11). Para que "Cambiar de grupo" pueda
+    // ofrecer y mover a un grupo de Adolescentes, añadimos aquí una fila sintética por cada fila
+    // real de Adultos, con el precio real de Adolescentes (misma fórmula que usa el alta).
+    if (class_exists('RocoMadrid_SF_Pricing')) {
+        $filas_adultos = array_filter($clases, function($c) { return $c['edad'] === 'Adultos'; });
+        foreach ($filas_adultos as $fila) {
+            $frequency = ($fila['tipo'] === 'classes') ? '2_days' : '1_day';
+            $planes_adol = RocoMadrid_SF_Pricing::calculate_plan_prices(array(
+                'pa_dias' => $fila['dia'], 'pa_horario' => $fila['horario'], 'pa_edad' => 'Adolescentes', 'frequency' => $frequency,
+            ));
+            $precio_adol = floatval($planes_adol['monthly']['price'] ?? 0);
+            if ($precio_adol <= 0) continue;
+            $key_adol = $fila['dia'] . '|' . $fila['horario'] . '|Adolescentes';
+            $clases[] = array(
+                'id' => 'adol-' . $fila['id'], 'tipo' => $fila['tipo'], 'dia' => $fila['dia'], 'horario' => $fila['horario'],
+                'turno' => $fila['turno'], 'edad' => 'Adolescentes', 'precio' => $precio_adol,
+                'stock' => $fila['stock'], 'stock_status' => $fila['stock_status'], 'sku' => $fila['sku'] . '-ADOL',
+                'status' => $fila['status'], 'alumnos' => isset($sub_counts[$key_adol]) ? $sub_counts[$key_adol] : 0,
+            );
+        }
+        if (!empty($filas_adultos) && !in_array('Adolescentes', $edades)) $edades[] = 'Adolescentes';
+    }
+
     usort($dias_single,  $sort_by_day);
     usort($dias_classes, $sort_by_day);
     sort($horarios);
@@ -8077,13 +8102,21 @@ function superadmin_gestion_cambiar_grupo($request) {
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
 
     $product_classes_id = RocoMadrid_Step_Form::product_tarifas_id();
+    $product_single_id  = RocoMadrid_Step_Form::product_dias_sueltos_id();
     $item = null;
     foreach ($sub->get_items() as $it) {
-        if (intval($it->get_product_id()) === intval($product_classes_id)) { $item = $it; break; }
+        $pid = intval($it->get_product_id());
+        if ($pid === intval($product_classes_id) || $pid === intval($product_single_id)) { $item = $it; break; }
     }
     if (!$item) {
-        return new WP_Error('no_aplica', 'Esta suscripción no es de un grupo semanal (Classes) — esta acción no aplica a Pilates, Yoga o Días sueltos.', array('status' => 400));
+        return new WP_Error('no_aplica', 'Esta suscripción no es de un grupo semanal ni de un día suelto (Classes/Días sueltos) — esta acción no aplica a Pilates ni Yoga.', array('status' => 400));
     }
+
+    // ¿Es de 1 día (Días sueltos) o de 2 días (Classes)? La clave de _step_form_selections y la
+    // taxonomía de la variación cambian según cuál sea (mismo criterio que usa
+    // RocoMadrid_SF_Stats::get_all_subscription_data() para leer el día actual de cada tipo).
+    $es_dias_sueltos_actual = (intval($item->get_product_id()) === intval($product_single_id));
+    $clave_dia_actual = $es_dias_sueltos_actual ? 'pa_dia-suelto' : 'pa_dias';
 
     // Día/horario/edad actuales: para el "antes" y como valor por defecto de la edad si no se
     // pide cambiarla también. Mismo orden de prioridad que en blokes_get_pending_cancel_alumnos:
@@ -8091,16 +8124,16 @@ function superadmin_gestion_cambiar_grupo($request) {
     $selecciones_actuales = $item->get_meta('_step_form_selections', true);
     $dia_actual = $horario_actual = $edad_actual = '';
     if (!empty($selecciones_actuales) && is_array($selecciones_actuales)) {
-        $dia_actual     = $selecciones_actuales['pa_dias']    ?? '';
-        $horario_actual = $selecciones_actuales['pa_horario'] ?? '';
-        $edad_actual    = $selecciones_actuales['pa_edad']    ?? '';
+        $dia_actual     = $selecciones_actuales[$clave_dia_actual] ?? '';
+        $horario_actual = $selecciones_actuales['pa_horario']      ?? '';
+        $edad_actual    = $selecciones_actuales['pa_edad']         ?? '';
     }
     if (empty($dia_actual) || empty($horario_actual) || empty($edad_actual)) {
         $variacion_actual = wc_get_product($item->get_variation_id());
         if ($variacion_actual) {
             foreach ($variacion_actual->get_variation_attributes() as $key => $value) {
                 $key_lower = strtolower($key);
-                if (empty($dia_actual) && strpos($key_lower, 'dias') !== false) $dia_actual = $value;
+                if (empty($dia_actual) && (strpos($key_lower, 'dia-suelto') !== false || strpos($key_lower, 'dias') !== false)) $dia_actual = $value;
                 if (empty($horario_actual) && strpos($key_lower, 'horario') !== false) $horario_actual = $value;
                 if (empty($edad_actual) && strpos($key_lower, 'edad') !== false) $edad_actual = $value;
             }
@@ -8111,25 +8144,38 @@ function superadmin_gestion_cambiar_grupo($request) {
     $edad_actual    = blokes_normalizar_edad($edad_actual);
     $edad_nuevo     = ($edad_param !== null && $edad_param !== '') ? blokes_normalizar_edad(sanitize_text_field((string) $edad_param)) : $edad_actual;
 
+    // 2 días/semana (bloques "Lunes-Miércoles"/"Martes-Jueves") van al producto Classes; un solo
+    // día va al producto de Días sueltos — mismo criterio que ya usa progreso_get_clases() para
+    // separar "tipo". Adolescentes NO es un término pa_edad real en ningún catálogo: hoy se
+    // monta sobre la variación de Adultos del mismo día/horario (precio ajustado por addon en el
+    // alta normal) — aquí hacemos lo mismo: buscamos la variación de Adultos y guardamos
+    // "Adolescentes" solo en el precio y en _step_form_selections. $edad_nuevo ya pasó por
+    // blokes_normalizar_edad(), así que comparamos contra esa misma forma normalizada
+    // ("Adolescentes (12-18 años)"), no contra la palabra suelta.
+    $frecuencia = (strpos($dia_nuevo, '-') !== false) ? '2_days' : '1_day';
+    $target_product_id = ($frecuencia === '2_days') ? $product_classes_id : $product_single_id;
+    $target_taxonomy    = ($frecuencia === '2_days') ? 'pa_dias' : 'pa_dia-suelto';
+    $edad_buscar = ($edad_nuevo === blokes_normalizar_edad('Adolescentes')) ? 'Adultos' : $edad_nuevo;
+
     // Buscar en el catálogo la variación que corresponde a la combinación nueva — igual que hace
     // progreso_get_clases() para listarlas, para no inventar una combinación que no existe.
-    $producto = wc_get_product($product_classes_id);
-    if (!$producto) return new WP_Error('not_found', 'No se encuentra el producto de clases (Tarifas) en WooCommerce.', array('status' => 404));
+    $producto = wc_get_product($target_product_id);
+    if (!$producto) return new WP_Error('not_found', 'No se encuentra el producto de clases/días sueltos en WooCommerce.', array('status' => 404));
     $variacion_nueva = null;
     foreach ($producto->get_children() as $vid) {
         $variacion = wc_get_product($vid);
         if (!$variacion) continue;
         $attrs = $variacion->get_attributes();
-        $dia_slug     = $attrs['pa_dias']    ?? '';
+        $dia_slug     = $attrs[$target_taxonomy] ?? '';
         $horario_slug = $attrs['pa_horario'] ?? '';
-        $edad_slug    = $attrs['pa_edad']    ?? '';
-        $dia_term     = $dia_slug     ? get_term_by('slug', $dia_slug,     'pa_dias')    : null;
+        $edad_slug    = $attrs['pa_edad'] ?? '';
+        $dia_term     = $dia_slug     ? get_term_by('slug', $dia_slug,     $target_taxonomy) : null;
         $horario_term = $horario_slug ? get_term_by('slug', $horario_slug, 'pa_horario') : null;
         $edad_term    = $edad_slug    ? get_term_by('slug', $edad_slug,    'pa_edad')    : null;
         $dia_v     = blokes_normalizar_dia($dia_term ? $dia_term->name : ucfirst($dia_slug));
         $horario_v = blokes_normalizar_horario($horario_term ? $horario_term->name : $horario_slug);
         $edad_v    = blokes_normalizar_edad($edad_term ? $edad_term->name : ($edad_slug ? ucfirst($edad_slug) : 'Adultos'));
-        if ($dia_v === $dia_nuevo && $horario_v === $horario_nuevo && $edad_v === $edad_nuevo) {
+        if ($dia_v === $dia_nuevo && $horario_v === $horario_nuevo && $edad_v === $edad_buscar) {
             $variacion_nueva = $variacion;
             break;
         }
@@ -8139,8 +8185,9 @@ function superadmin_gestion_cambiar_grupo($request) {
     }
 
     // Precio nuevo según la tabla de tarifas vigente (misma lógica que el formulario de alta),
-    // respetando el plan de pago actual (mensual/trimestral/anual).
-    $frecuencia = (strpos($dia_nuevo, '-') !== false) ? '2_days' : '1_day';
+    // respetando el plan de pago actual (mensual/trimestral/anual). Usa $edad_nuevo (no
+    // $edad_buscar): el precio de Adolescentes es distinto al de la variación de Adultos que se
+    // reutiliza como variación real.
     $planes = RocoMadrid_SF_Pricing::calculate_plan_prices(array(
         'pa_dias' => $dia_nuevo, 'pa_horario' => $horario_nuevo, 'pa_edad' => $edad_nuevo, 'frequency' => $frecuencia,
     ));
@@ -8160,11 +8207,17 @@ function superadmin_gestion_cambiar_grupo($request) {
         )));
     }
 
-    blokes_gestion_sin_emails(function() use ($item, $sub, $variacion_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo, $precio_nuevo, $selecciones_actuales) {
+    blokes_gestion_sin_emails(function() use ($item, $sub, $variacion_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo, $precio_nuevo, $selecciones_actuales, $frecuencia, $clave_dia_actual) {
+        // Si cambia de 1 a 2 días (o al revés) la variación nueva es de OTRO producto padre
+        // (Días sueltos ↔ Classes) — hay que actualizar también product_id, no solo
+        // variation_id, para que no quede una variación "huérfana" de otro padre en el pedido.
+        $item->set_product_id($variacion_nueva->get_parent_id());
         $item->set_variation_id($variacion_nueva->get_id());
         $item->set_name($variacion_nueva->get_name());
         $nuevas_selecciones = is_array($selecciones_actuales) ? $selecciones_actuales : array();
-        $nuevas_selecciones['pa_dias']    = $dia_nuevo;
+        $clave_dia_nueva = ($frecuencia === '2_days') ? 'pa_dias' : 'pa_dia-suelto';
+        if ($clave_dia_nueva !== $clave_dia_actual) unset($nuevas_selecciones[$clave_dia_actual]);
+        $nuevas_selecciones[$clave_dia_nueva] = $dia_nuevo;
         $nuevas_selecciones['pa_horario'] = $horario_nuevo;
         $nuevas_selecciones['pa_edad']    = $edad_nuevo;
         $item->add_meta_data('_step_form_selections', $nuevas_selecciones, true);

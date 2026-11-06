@@ -904,7 +904,10 @@ function AccionModal({ alumno, tipo, targetId, onClose, onDone }) {
     optin_whatsapp: 'Consentimiento WhatsApp', editar_alumno: 'Editar nombre/teléfono',
   }
   const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'dar_de_baja', 'fusionar', 'cambiar_grupo'].includes(tipo)
-  const clasesSemanales = (catalogoClases || []).filter(c => c.tipo === 'classes')
+  // Incluye también "single" (días sueltos, 1 día/semana) — antes solo se ofrecían los grupos de
+  // 2 días, así que mover a alguien a un grupo de 1 día (p.ej. Martes o Jueves suelto) no era
+  // posible desde aquí. El día ya distingue el tipo (bloques de 2 días llevan guion: "Martes-Jueves").
+  const clasesSemanales = (catalogoClases || []).filter(c => c.tipo === 'classes' || c.tipo === 'single')
 
   async function submit(forzarReal = false) {
     setBusy(true); setErr(null)
