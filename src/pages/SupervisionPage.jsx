@@ -1536,6 +1536,7 @@ function sgPagoContado(p) {
 const CAMBIO_TIPO_LABEL = {
   pago_nuevo: 'Pago nuevo', nota: 'Nota cambiada', telefono: 'Teléfono cambiado',
   alumno_nuevo: 'Alumno nuevo', fila_borrada: 'Fila borrada del Excel',
+  web_sin_fila: 'Cobro web sin fila en el Excel',
 }
 
 // Descripción de cada cambio según su tipo — "datos" viene en camelCase desde el servidor
@@ -1553,6 +1554,8 @@ function CambioDetalle({ c }) {
       return <span>{d.nombre} {d.telefono ? `· ${d.telefono}` : ''}</span>
     case 'fila_borrada':
       return <span>Ya no está en el Excel — no se da de baja sola, solo aviso.</span>
+    case 'web_sin_fila':
+      return <span>Se cobró en la web ({fmtEur(d.importe)}, {d.metodo}) pero no se encontró su fila en el Excel — añádela y pulsa Aplicar para escribirlo solo.</span>
     default:
       return <span className="sv-ot-muted">{JSON.stringify(d)}</span>
   }
@@ -2013,6 +2016,7 @@ function GruposTab() {
           <p className="sv-note">
             Esto pone a completado el pedido del cliente en WooCommerce: factura a Verifactu y al cliente. Solo salen
             los seguros: tarjeta ya cobrada de verdad por el banco (nunca pendiente, en espera o rechazada).
+            Al mandar la factura también se apunta el pago en el Excel de Eva, sola, sin que haga falta nada más.
           </p>
           {facturasErr && <p className="sv-error">Error: {facturasErr}</p>}
           {facturas === null ? (

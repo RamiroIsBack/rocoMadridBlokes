@@ -4859,21 +4859,26 @@ function blokes_sync_grupos_metodo_a_excel($metodo) {
 // fecha) en la celda del mes de la fila de esta persona en la Hoja activa (prueba o real, según
 // el interruptor). Nunca bloquea ni falla la acción principal que la llama (Marcar
 // cobrado/externo ya se ha hecho en WooCommerce antes de llegar aquí) — si no encuentra la
-// pestaña, la fila, o el bloque del mes todavía no existe en la Hoja (mes nuevo sin columnas
-// creadas, "cola con reintentos" pendiente de una próxima ronda), simplemente no escribe nada y
-// lo deja registrado en el log de gestión para revisar a mano.
-function blokes_sync_grupos_escribir_cobro($dia, $horario, $telefono, $nombre, $ym, $importe, $metodo, $fecha) {
+// pestaña o el bloque del mes todavía no existe en la Hoja (mes nuevo sin columnas creadas),
+// simplemente no escribe nada y lo deja registrado en el log de gestión para revisar a mano. Si
+// no encuentra la FILA (persona nueva que todavía no está en el Excel de Eva), en vez de
+// perderlo deja un pendiente «Web→Excel sin fila» en Cambios del Excel (Ramiro, 6/11 16:04).
+// Nunca reescribe un mes que ya tiene algo apuntado (`$ym` con pago ya puesto): sin duplicados,
+// aunque esta función se llame más de una vez para el mismo cobro — $subId (opcional) solo sirve
+// para poder reintentar luego desde el pendiente, no cambia nada de la lógica de escritura.
+// Devuelve true si ya quedó escrito (o ya estaba, nada que hacer), false si se quedó pendiente.
+function blokes_sync_grupos_escribir_cobro($dia, $horario, $telefono, $nombre, $ym, $importe, $metodo, $fecha, $sub_id = null) {
     try {
         $activa = blokes_sync_grupos_sheet_activa();
-        if (!$activa['id']) return;
+        if (!$activa['id']) return false;
         $meta = blokes_sync_grupos_get($activa['id'], '?fields=sheets.properties.title');
-        if (is_wp_error($meta)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'listar pestañas', 'error' => $meta->get_error_message())); return; }
+        if (is_wp_error($meta)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'listar pestañas', 'error' => $meta->get_error_message())); return false; }
         $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
         $pestana = blokes_sync_grupos_pestana_de_grupo($pestanas, $dia, $horario);
-        if (!$pestana) { blokes_gestion_log(0, 'sync_grupos_pestana_no_encontrada', null, array('dia' => $dia, 'horario' => $horario, 'hoja' => $activa['cual'])); return; }
+        if (!$pestana) { blokes_gestion_log(0, 'sync_grupos_pestana_no_encontrada', null, array('dia' => $dia, 'horario' => $horario, 'hoja' => $activa['cual'])); return false; }
 
         $valores = blokes_sync_grupos_leer_valores($activa['id'], $pestana);
-        if (is_wp_error($valores)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'leer pestaña', 'pestana' => $pestana, 'error' => $valores->get_error_message())); return; }
+        if (is_wp_error($valores)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'leer pestaña', 'pestana' => $pestana, 'error' => $valores->get_error_message())); return false; }
         $r = blokes_sync_grupos_leer_pestana_filas($valores);
 
         $tel_norm = blokes_externos_normaliza_telefono((string) $telefono);
@@ -4885,11 +4890,22 @@ function blokes_sync_grupos_escribir_cobro($dia, $horario, $telefono, $nombre, $
             $nombre_norm = mb_strtolower(trim((string) $nombre));
             foreach ($r['filas'] as $f) { if (mb_strtolower(trim($f['nombre'])) === $nombre_norm) { $fila_encontrada = $f; break; } }
         }
-        if (!$fila_encontrada) { blokes_gestion_log(0, 'sync_grupos_fila_no_encontrada', null, array('pestana' => $pestana, 'telefono' => $tel_norm, 'nombre' => $nombre)); return; }
+        if (!$fila_encontrada) {
+            blokes_gestion_log(0, 'sync_grupos_fila_no_encontrada', null, array('pestana' => $pestana, 'telefono' => $tel_norm, 'nombre' => $nombre));
+            blokes_sync_grupos_pendiente_sin_fila($pestana, $nombre, $telefono, $ym, $importe, $metodo, $fecha, $dia, $horario, $sub_id);
+            return false;
+        }
+
+        // Sin duplicados: si ese mes ya tiene algo apuntado, no se reescribe (Ramiro, 6/11
+        // 16:04) — tanto si ya lo puso esta misma función antes como si lo apuntó Eva a mano.
+        if (!empty($fila_encontrada['pagos'][$ym])) {
+            blokes_gestion_log(0, 'sync_grupos_cobro_ya_apuntado', null, array('pestana' => $pestana, 'mes' => $ym, 'nombre' => $nombre));
+            return true;
+        }
 
         $bloque = null;
         foreach ($r['bloquesLayout'] as $b) { if ($b['ym'] === $ym) { $bloque = $b; break; } }
-        if (!$bloque) { blokes_gestion_log(0, 'sync_grupos_mes_no_encontrado', null, array('pestana' => $pestana, 'mes' => $ym)); return; }
+        if (!$bloque) { blokes_gestion_log(0, 'sync_grupos_mes_no_encontrado', null, array('pestana' => $pestana, 'mes' => $ym)); return false; }
 
         $fila_sheet = intval($fila_encontrada['_row']) + 1; // A1 es 1-based
         $metodo_excel = blokes_sync_grupos_metodo_a_excel($metodo);
@@ -4905,12 +4921,70 @@ function blokes_sync_grupos_escribir_cobro($dia, $horario, $telefono, $nombre, $
             $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['fecha']) . $fila_sheet, 'values' => array(array($fecha)));
         }
         $res = blokes_sync_grupos_escribir_valores($activa['id'], $data);
-        if (is_wp_error($res)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'escribir', 'pestana' => $pestana, 'error' => $res->get_error_message())); return; }
+        if (is_wp_error($res)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'escribir', 'pestana' => $pestana, 'error' => $res->get_error_message())); return false; }
         blokes_gestion_log(0, 'sync_grupos_cobro_escrito', null, array('pestana' => $pestana, 'fila' => $fila_sheet, 'mes' => $ym, 'hoja' => $activa['cual']));
+        return true;
     } catch (\Throwable $e) {
         blokes_gestion_log(0, 'sync_grupos_escribir_excepcion', null, array('error' => $e->getMessage()));
+        return false;
     }
 }
+
+// Pendiente «Web→Excel sin fila» (Ramiro, 6/11 16:04, punto 3): se cobró de verdad en la web
+// pero esta persona todavía no tiene fila en el Excel de Eva — en vez de perder el dato, se deja
+// en Cambios del Excel con todo lo necesario para que, en cuanto Eva añada la fila, "Aplicar"
+// reintente la misma escritura sin que nadie tenga que volver a teclear nada.
+function blokes_sync_grupos_pendiente_sin_fila($pestana, $nombre, $telefono, $ym, $importe, $metodo, $fecha, $dia, $horario, $sub_id) {
+    blokes_sync_grupos_ensure_tables();
+    $clave = blokes_sync_grupos_clave($nombre, $telefono);
+    blokes_sync_grupos_upsert_cambio($pestana, $clave, $nombre, $telefono, 'web_sin_fila', $ym, array(
+        'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha, 'dia' => $dia, 'horario' => $horario, 'subId' => $sub_id,
+    ), null);
+}
+
+// Punto 2 de NOTAS_PARA_CODE_pestanas_grupos.md (Ramiro, 6/11 16:04 — "hazlo ya lo de mejor
+// aún"): TODO cobro de la web va solo al Excel, sin que nadie pulse nada — no solo "Marcar
+// cobrado". A qué mes pertenece, mismo criterio que Grupos (date_created, no date_paid, por los
+// adelantados). El propio blokes_sync_grupos_escribir_cobro ya evita duplicados (no reescribe un
+// mes que ya tiene algo apuntado), así que no pasa nada si este gancho se dispara más de una vez
+// para el mismo pedido.
+function blokes_sync_grupos_auto_escribir_cobro($sub, $order) {
+    if (!$sub || !$order) return;
+    $dh = blokes_sync_grupos_dia_horario_de_sub($sub->get_id());
+    if (!$dh['dia'] || !$dh['horario']) return; // no es una clase/pilates/yoga del club: nada que apuntar
+    $fecha_mes = $order->get_date_created() ?: $order->get_date_paid();
+    if (!$fecha_mes) return;
+    $importe = floatval($order->get_total());
+    if ($importe <= 0) return;
+    $fecha_pago = $order->get_date_paid() ?: $fecha_mes;
+    blokes_sync_grupos_escribir_cobro(
+        $dh['dia'], $dh['horario'], $sub->get_billing_phone(),
+        trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()),
+        $fecha_mes->date('Y-m'), $importe, 'tarjeta', $fecha_pago->date('d/m/Y'), $sub->get_id()
+    );
+}
+// Renovación que se cobra sola con tarjeta (Redsys) — WCS dispara esto al confirmar el pago de
+// una renovación, con el pedido de esa renovación como segundo argumento.
+add_action('woocommerce_subscription_renewal_payment_complete', function($subscription, $last_order = null) {
+    if (!$last_order) {
+        // Respaldo si el hook no trae el pedido (versión antigua de WCS): el de renovación más
+        // reciente, mismo patrón que ya usa el resto de este fichero (get_related_orders).
+        $ids = $subscription->get_related_orders('ids', 'renewal');
+        $last_order = $ids ? wc_get_order(max($ids)) : null;
+    }
+    blokes_sync_grupos_auto_escribir_cobro($subscription, $last_order);
+}, 20, 2);
+// Alta nueva (el pedido inicial que crea la suscripción) cobrada con tarjeta — las renovaciones
+// ya las cubre el gancho de arriba; este solo mira pedidos "parent" para no procesar el mismo
+// pedido dos veces.
+add_action('woocommerce_payment_complete', function($order_id) {
+    if (!function_exists('wcs_get_subscriptions_for_order')) return;
+    $order = wc_get_order($order_id);
+    if (!$order) return;
+    foreach (wcs_get_subscriptions_for_order($order, array('order_type' => 'parent')) as $sub) {
+        blokes_sync_grupos_auto_escribir_cobro($sub, $order);
+    }
+}, 20);
 
 // Localiza día/horario de una suscripción (para saber qué pestaña del Excel le toca) a partir
 // de blokes_get_all_subscription_data(), que ya los trae calculados de la variación del producto.
@@ -5853,6 +5927,21 @@ function blokes_sync_grupos_aplicar_efecto($cambio, $datos) {
             'notas' => mb_substr(sanitize_text_field($nota), 0, 500), 'updated_at' => current_time('mysql'),
         ), array('id' => intval($cambio['match_id'])));
         blokes_gestion_log(intval($cambio['match_id']), 'externo_actualizar', null, array('notas' => $nota), 'Nota detectada en el Excel de Eva (sincronización).');
+        return rest_ensure_response(array('success' => true));
+    }
+    if ($cambio['tipo'] === 'web_sin_fila') {
+        // Reintenta exactamente la misma escritura que falló por no encontrar la fila — en
+        // cuanto Eva añada a la persona al Excel, "Aplicar" la escribe sola sin volver a teclear
+        // nada (Ramiro, 6/11 16:04). Si todavía no está, se queda pendiente (nunca se marca
+        // resuelto sin haber escrito el dato de verdad).
+        $escrito = blokes_sync_grupos_escribir_cobro(
+            $datos['dia'] ?? '', $datos['horario'] ?? '', $cambio['telefono'], $cambio['nombre'],
+            (string) $cambio['mes'], floatval($datos['importe'] ?? 0), (string) ($datos['metodo'] ?? ''),
+            (string) ($datos['fecha'] ?? ''), $datos['subId'] ?? null
+        );
+        if (!$escrito) {
+            return new WP_Error('sin_fila', 'Todavía no se encuentra esta fila en el Excel — añade a la persona y vuelve a pulsar Aplicar.', array('status' => 409));
+        }
         return rest_ensure_response(array('success' => true));
     }
     return null; // resto de tipos: sin efecto todavía, solo queda visto en la bandeja
@@ -7581,6 +7670,15 @@ function superadmin_gestion_facturas_pendientes_completar($request) {
         $order->update_status('completed', 'ExcelMuerte: factura enviada desde "Mandar factura" (pago de tarjeta ya confirmado).');
     });
     blokes_gestion_log(0, 'factura_pendiente_completada', array('status' => 'processing'), array('status' => 'completed', 'orderId' => $order_id));
+    // Web → Excel (Ramiro, 6/11 16:04, punto 1): completar desde "Mandar factura" no dispara
+    // `woocommerce_payment_complete` de nuevo (el cobro ya se confirmó antes, esto solo cambia
+    // "processing" a "completed") — se escribe aparte, explícito, para no depender de un hook
+    // que aquí no llega a saltar.
+    if (function_exists('wcs_get_subscriptions_for_order')) {
+        foreach (wcs_get_subscriptions_for_order($order, array('order_type' => 'any')) as $sub) {
+            blokes_sync_grupos_auto_escribir_cobro($sub, $order);
+        }
+    }
     return rest_ensure_response(array('success' => true));
 }
 
