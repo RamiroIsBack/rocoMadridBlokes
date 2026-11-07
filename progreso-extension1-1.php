@@ -13042,6 +13042,7 @@ function progreso_equip_delete_competition($request) {
     // completados, con factura). Comprobado con cowork: nunca se llegó a borrar ninguno porque lo
     // pilló antes, pero el riesgo era real. Ahora: dentro de switch_to_blog(1), y solo se borra
     // si el post es de verdad un 'blokes' (nunca a ciegas por id).
+    $diagnostico_blokes = array();
     if ($comp && $comp['is_test']) {
         $bloke_ids = $wpdb->get_col($wpdb->prepare(
             "SELECT bloke_post_id FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d AND bloke_post_id IS NOT NULL", $id
@@ -13049,12 +13050,27 @@ function progreso_equip_delete_competition($request) {
         if ($bloke_ids) {
             $es_multisite = is_multisite();
             if ($es_multisite) switch_to_blog(1);
+            // Cowork, 07/11 11:45: tras el primer arreglo los blokes de prueba NO se borraron
+            // (seguían en borrador) — en vez de fiarse de get_post_type()/get_post() (que pueden
+            // devolver algo cacheado de antes del switch_to_blog), se comprueba aquí con SQL
+            // directo contra {$wpdb->posts} — esa tabla sí respeta el prefijo del blog actual
+            // siempre, sin caché de objetos de por medio — y se devuelve en la respuesta qué vio
+            // y qué hizo con cada uno, para poder ver exactamente dónde falla si vuelve a pasar.
             foreach ($bloke_ids as $bloke_id) {
                 $bloke_id = intval($bloke_id);
-                if ($bloke_id && get_post_type($bloke_id) === 'blokes') {
+                if (!$bloke_id) continue;
+                clean_post_cache($bloke_id);
+                $tipo_real = $wpdb->get_var($wpdb->prepare("SELECT post_type FROM {$wpdb->posts} WHERE ID = %d", $bloke_id));
+                $fila_diag = array('blokePostId' => $bloke_id, 'blogActual' => get_current_blog_id(), 'postType' => $tipo_real);
+                if ($tipo_real === 'blokes') {
                     blokes_quitar_completions_de_bloke($bloke_id);
-                    wp_delete_post($bloke_id, true);
+                    $ok = wp_delete_post($bloke_id, true);
+                    $fila_diag['borrado'] = (bool) $ok;
+                } else {
+                    $fila_diag['borrado'] = false;
+                    $fila_diag['motivo'] = $tipo_real ? 'post_type no es blokes' : 'no existe ese post en este blog';
                 }
+                $diagnostico_blokes[] = $fila_diag;
             }
             if ($es_multisite) restore_current_blog();
         }
@@ -13078,7 +13094,7 @@ function progreso_equip_delete_competition($request) {
         }
         $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d'));
     }
-    return rest_ensure_response(array('success' => true));
+    return rest_ensure_response(array('success' => true, 'diagnosticoBlokes' => $diagnostico_blokes));
 }
 
 function progreso_equip_update_comp_block($request) {
@@ -13270,12 +13286,15 @@ function progreso_equip_set_modo_compe($request) {
                 $post_por_bloque[intval($b['id'])] = $post_id;
             }
             if ($b['grade_color']) update_field('bloke_color', $b['grade_color'], $post_id);
-            // Subzona de la compe → "subsala" del bloke (mismo número, cowork 07/11 11:00). La
-            // "sala" en sí (entrada/sala_grande/...) no se toca — no sabemos a qué sala física
-            // corresponde esta compe sin que alguien lo confirme, y el valor por defecto
-            // ('entrada', puesto por blokes_toggle_completion si no hay nada) es mejor que
-            // adivinar una sala equivocada.
-            if ($b['subzone'] !== null) update_field('bloke_subsala', (string) intval($b['subzone']), $post_id);
+            // Subzona de la compe → "subsala" del bloke (mismo número) y "sala" real, según la
+            // tabla que dio cowork (07/11 11:45, sacada de los blokes que ya existen):
+            // subzona 1-2 = entrada, 3-7 = sala_grande, 8 = cueva.
+            if ($b['subzone'] !== null) {
+                $subzona = intval($b['subzone']);
+                update_field('bloke_subsala', (string) $subzona, $post_id);
+                $sala = ($subzona === 8) ? 'cueva' : (($subzona >= 3) ? 'sala_grande' : 'entrada');
+                update_field('bloke_sala', $sala, $post_id);
+            }
             update_post_meta($post_id, '_comp_competition_id', $id);
             update_post_meta($post_id, '_comp_block_id', intval($b['id']));
             update_post_meta($post_id, '_comp_block_number', intval($b['number']));
