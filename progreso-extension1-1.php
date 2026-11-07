@@ -929,6 +929,13 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_buscar_alumno',
         'permission_callback' => $sa_perm,
     ));
+    // Crear cliente nuevo en WooCommerce desde "Añadir alumno" cuando no existe (Ramiro, 07/11
+    // 08:06) — Eva (gestión) y socios, igual que el resto de Grupos.
+    register_rest_route('superadmin/v1', '/gestion/alta-cliente', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_alta_cliente',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/externos', array(
         array('methods' => 'GET',  'callback' => 'superadmin_gestion_externos_get',   'permission_callback' => $sa_perm),
         array('methods' => 'POST', 'callback' => 'superadmin_gestion_externos_crear', 'permission_callback' => $sa_perm),
@@ -8320,6 +8327,56 @@ function superadmin_gestion_exento($request) {
 }
 
 /**
+ * Busca en el catálogo de clases (Classes/Días sueltos) la variación que corresponde a un
+ * día/horario/edad concretos — misma lógica que ya usaba superadmin_gestion_cambiar_grupo(),
+ * extraída aquí para reutilizarla también al crear un alumno nuevo
+ * (superadmin_gestion_alta_cliente()). $dia/$horario/$edad deben venir ya normalizados
+ * (blokes_normalizar_dia/horario/edad). Devuelve null si no existe esa combinación, o un array
+ * con la variación encontrada y los datos derivados (frecuencia, producto, edad real buscada —
+ * Adolescentes se busca como Adultos, ver comentario abajo).
+ */
+function blokes_buscar_variacion_clase($dia, $horario, $edad) {
+    if (!class_exists('RocoMadrid_Step_Form')) return null;
+    $product_classes_id = RocoMadrid_Step_Form::product_tarifas_id();
+    $product_single_id  = RocoMadrid_Step_Form::product_dias_sueltos_id();
+
+    // 2 días/semana (bloques "Lunes-Miércoles"/"Martes-Jueves") van al producto Classes; un solo
+    // día va al producto de Días sueltos. Adolescentes NO es un término pa_edad real en ningún
+    // catálogo: hoy se monta sobre la variación de Adultos del mismo día/horario (precio
+    // ajustado por addon en el alta normal) — aquí hacemos lo mismo: buscamos la variación de
+    // Adultos; el precio real de Adolescentes se calcula aparte con RocoMadrid_SF_Pricing.
+    $frecuencia = (strpos($dia, '-') !== false) ? '2_days' : '1_day';
+    $target_product_id = ($frecuencia === '2_days') ? $product_classes_id : $product_single_id;
+    $target_taxonomy    = ($frecuencia === '2_days') ? 'pa_dias' : 'pa_dia-suelto';
+    $edad_buscar = ($edad === blokes_normalizar_edad('Adolescentes')) ? 'Adultos' : $edad;
+
+    $producto = wc_get_product($target_product_id);
+    if (!$producto) return null;
+    foreach ($producto->get_children() as $vid) {
+        $variacion = wc_get_product($vid);
+        if (!$variacion) continue;
+        $attrs = $variacion->get_attributes();
+        $dia_slug     = $attrs[$target_taxonomy] ?? '';
+        $horario_slug = $attrs['pa_horario'] ?? '';
+        $edad_slug    = $attrs['pa_edad'] ?? '';
+        $dia_term     = $dia_slug     ? get_term_by('slug', $dia_slug,     $target_taxonomy) : null;
+        $horario_term = $horario_slug ? get_term_by('slug', $horario_slug, 'pa_horario') : null;
+        $edad_term    = $edad_slug    ? get_term_by('slug', $edad_slug,    'pa_edad')    : null;
+        $dia_v     = blokes_normalizar_dia($dia_term ? $dia_term->name : ucfirst($dia_slug));
+        $horario_v = blokes_normalizar_horario($horario_term ? $horario_term->name : $horario_slug);
+        $edad_v    = blokes_normalizar_edad($edad_term ? $edad_term->name : ($edad_slug ? ucfirst($edad_slug) : 'Adultos'));
+        if ($dia_v === $dia && $horario_v === $horario && $edad_v === $edad_buscar) {
+            return array(
+                'variacion' => $variacion, 'frecuencia' => $frecuencia,
+                'targetProductId' => $target_product_id, 'targetTaxonomy' => $target_taxonomy,
+                'claveDia' => $target_taxonomy,
+            );
+        }
+    }
+    return null;
+}
+
+/**
  * Cambiar de grupo/horario, o de 1 a 2 días (y al revés) (8.2.5). Solo para suscripciones de
  * clase semanal (producto "Classes"/Tarifas) — no aplica a Pilates, Yoga ni Días sueltos. Busca
  * en el catálogo de WooCommerce la variación que corresponde a la combinación nueva (la misma
@@ -8388,45 +8445,15 @@ function superadmin_gestion_cambiar_grupo($request) {
     $edad_actual    = blokes_normalizar_edad($edad_actual);
     $edad_nuevo     = ($edad_param !== null && $edad_param !== '') ? blokes_normalizar_edad(sanitize_text_field((string) $edad_param)) : $edad_actual;
 
-    // 2 días/semana (bloques "Lunes-Miércoles"/"Martes-Jueves") van al producto Classes; un solo
-    // día va al producto de Días sueltos — mismo criterio que ya usa progreso_get_clases() para
-    // separar "tipo". Adolescentes NO es un término pa_edad real en ningún catálogo: hoy se
-    // monta sobre la variación de Adultos del mismo día/horario (precio ajustado por addon en el
-    // alta normal) — aquí hacemos lo mismo: buscamos la variación de Adultos y guardamos
-    // "Adolescentes" solo en el precio y en _step_form_selections. $edad_nuevo ya pasó por
-    // blokes_normalizar_edad(), así que comparamos contra esa misma forma normalizada
-    // ("Adolescentes (12-18 años)"), no contra la palabra suelta.
-    $frecuencia = (strpos($dia_nuevo, '-') !== false) ? '2_days' : '1_day';
-    $target_product_id = ($frecuencia === '2_days') ? $product_classes_id : $product_single_id;
-    $target_taxonomy    = ($frecuencia === '2_days') ? 'pa_dias' : 'pa_dia-suelto';
-    $edad_buscar = ($edad_nuevo === blokes_normalizar_edad('Adolescentes')) ? 'Adultos' : $edad_nuevo;
-
-    // Buscar en el catálogo la variación que corresponde a la combinación nueva — igual que hace
-    // progreso_get_clases() para listarlas, para no inventar una combinación que no existe.
-    $producto = wc_get_product($target_product_id);
-    if (!$producto) return new WP_Error('not_found', 'No se encuentra el producto de clases/días sueltos en WooCommerce.', array('status' => 404));
-    $variacion_nueva = null;
-    foreach ($producto->get_children() as $vid) {
-        $variacion = wc_get_product($vid);
-        if (!$variacion) continue;
-        $attrs = $variacion->get_attributes();
-        $dia_slug     = $attrs[$target_taxonomy] ?? '';
-        $horario_slug = $attrs['pa_horario'] ?? '';
-        $edad_slug    = $attrs['pa_edad'] ?? '';
-        $dia_term     = $dia_slug     ? get_term_by('slug', $dia_slug,     $target_taxonomy) : null;
-        $horario_term = $horario_slug ? get_term_by('slug', $horario_slug, 'pa_horario') : null;
-        $edad_term    = $edad_slug    ? get_term_by('slug', $edad_slug,    'pa_edad')    : null;
-        $dia_v     = blokes_normalizar_dia($dia_term ? $dia_term->name : ucfirst($dia_slug));
-        $horario_v = blokes_normalizar_horario($horario_term ? $horario_term->name : $horario_slug);
-        $edad_v    = blokes_normalizar_edad($edad_term ? $edad_term->name : ($edad_slug ? ucfirst($edad_slug) : 'Adultos'));
-        if ($dia_v === $dia_nuevo && $horario_v === $horario_nuevo && $edad_v === $edad_buscar) {
-            $variacion_nueva = $variacion;
-            break;
-        }
-    }
-    if (!$variacion_nueva) {
+    // Busca en el catálogo (Classes/Días sueltos) la variación que corresponde a la combinación
+    // nueva — Adolescentes se busca como la variación de Adultos del mismo día/horario (no es
+    // un término pa_edad real, ver blokes_buscar_variacion_clase()).
+    $encontrado = blokes_buscar_variacion_clase($dia_nuevo, $horario_nuevo, $edad_nuevo);
+    if (!$encontrado) {
         return new WP_Error('no_existe', 'No existe esa combinación de día, horario y edad en el catálogo de clases.', array('status' => 404));
     }
+    $variacion_nueva = $encontrado['variacion'];
+    $frecuencia      = $encontrado['frecuencia'];
 
     // Precio nuevo según la tabla de tarifas vigente (misma lógica que el formulario de alta),
     // respetando el plan de pago actual (mensual/trimestral/anual). Usa $edad_nuevo (no
@@ -8695,6 +8722,273 @@ function superadmin_gestion_buscar_alumno($request) {
     $personas = array_map(function($p) { unset($p['score']); return $p; }, array_values($personas));
 
     return rest_ensure_response(array('success' => true, 'data' => $personas));
+}
+
+/**
+ * Crear cliente nuevo en WooCommerce desde "Añadir alumno" cuando no existe (Ramiro, 07/11
+ * 08:06, NOTAS_PARA_CODE_pestanas_grupos.md) — hasta ahora solo se podía dar de alta "externo"
+ * (fuera de la web) o asignar a un cliente YA existente (y eso exigía manage_woocommerce, solo
+ * wp-admin). Crea el usuario de WordPress (o reutiliza uno existente), la suscripción con la
+ * variación/producto correcto y la misma meta visible que pone el step-form al comprar, y deja
+ * el primer pago en uno de dos caminos: completado de verdad (como "Marcar cobrado", con su
+ * misma excepción de precio) o un enlace de pago con tarjeta pendiente de que el cliente pague.
+ */
+function superadmin_gestion_alta_cliente($request) {
+    if (!function_exists('wcs_create_subscription') || !class_exists('RocoMadrid_Step_Form') || !class_exists('RocoMadrid_SF_Pricing')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions o RocoMadrid Step Form no disponibles.', array('status' => 503));
+    }
+    $nombre        = sanitize_text_field((string) $request->get_param('nombre'));
+    $apellidos     = sanitize_text_field((string) $request->get_param('apellidos'));
+    $email         = sanitize_email((string) $request->get_param('email'));
+    $telefono_in   = sanitize_text_field((string) $request->get_param('telefono'));
+    $telefono      = blokes_externos_normaliza_telefono($telefono_in) ?: $telefono_in;
+    $tipo          = sanitize_key((string) $request->get_param('tipo')); // 'clase' | 'abono'
+    $dia_in        = sanitize_text_field((string) $request->get_param('dia'));
+    $horario_in    = sanitize_text_field((string) $request->get_param('horario'));
+    $edad_in       = sanitize_text_field((string) $request->get_param('edad'));
+    $plan          = sanitize_key((string) $request->get_param('plan')); // monthly|quarterly|annual (solo 'clase')
+    $producto_abono_id = intval($request->get_param('productoAbonoId'));
+    $fecha_inicio  = sanitize_text_field((string) $request->get_param('fechaInicio'));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha_inicio)) $fecha_inicio = current_time('Y-m-d');
+    $primer_pago   = sanitize_key((string) $request->get_param('primerPago')); // 'ya_pagado' | 'enlace_pago'
+    $metodo        = sanitize_key((string) $request->get_param('metodo'));
+    $importe_pago  = floatval($request->get_param('importe'));
+    $fecha_pago    = sanitize_text_field((string) $request->get_param('fechaPago'));
+    $ajustar_precio = sanitize_key((string) $request->get_param('ajustarPrecio'));
+    if (!in_array($ajustar_precio, array('', 'solo_este_mes', 'desde_ahora'), true)) $ajustar_precio = '';
+    $motivo_excepcion = sanitize_text_field((string) $request->get_param('motivoExcepcion'));
+    $enviar_acceso   = (bool) $request->get_param('enviarAcceso');
+    $usar_cliente_id = intval($request->get_param('usarClienteId'));
+    $confirmar_nuevo = (bool) $request->get_param('confirmarNuevo');
+    $simular         = (bool) $request->get_param('simular');
+
+    if (!$nombre || (!$email && !$telefono)) {
+        return new WP_Error('bad_request', 'Falta el nombre y al menos email o teléfono.', array('status' => 400));
+    }
+    if (!in_array($tipo, array('clase', 'abono'), true)) {
+        return new WP_Error('bad_request', 'tipo debe ser "clase" o "abono".', array('status' => 400));
+    }
+    if ($primer_pago === 'ya_pagado' && (!$metodo || $importe_pago <= 0)) {
+        return new WP_Error('bad_request', 'Falta el método o el importe del primer pago.', array('status' => 400));
+    }
+    if ($primer_pago === 'ya_pagado' && !in_array($metodo, array('transferencia', 'tarjeta', 'efectivo', 'wellhub', 'bizum'), true)) {
+        return new WP_Error('bad_request', 'Método no reconocido. Usa transferencia, tarjeta, efectivo, bizum o wellhub.', array('status' => 400));
+    }
+    if (!in_array($primer_pago, array('ya_pagado', 'enlace_pago'), true)) {
+        return new WP_Error('bad_request', 'primerPago debe ser "ya_pagado" o "enlace_pago".', array('status' => 400));
+    }
+    if ($ajustar_precio !== '' && $motivo_excepcion === '') {
+        return new WP_Error('falta_motivo', 'El motivo de la excepción de precio es obligatorio.', array('status' => 400));
+    }
+
+    // --- Variación/producto y precio de catálogo ---
+    $dia_norm = $horario_norm = $edad_norm = '';
+    $producto_item = null; $frecuencia = null; $billing_period = 'month'; $billing_interval = 1;
+    if ($tipo === 'clase') {
+        $dia_norm     = blokes_normalizar_dia($dia_in);
+        $horario_norm = blokes_normalizar_horario($horario_in);
+        $edad_norm    = blokes_normalizar_edad($edad_in);
+        if (!$dia_norm || !$horario_norm) return new WP_Error('bad_request', 'Faltan dia/horario.', array('status' => 400));
+        if (!in_array($plan, array('monthly', 'quarterly', 'annual'), true)) {
+            return new WP_Error('bad_request', 'plan debe ser monthly, quarterly o annual.', array('status' => 400));
+        }
+        $encontrado = blokes_buscar_variacion_clase($dia_norm, $horario_norm, $edad_norm);
+        if (!$encontrado) return new WP_Error('no_existe', 'No existe esa combinación de día, horario y edad en el catálogo.', array('status' => 404));
+        $producto_item = $encontrado['variacion'];
+        $frecuencia     = $encontrado['frecuencia'];
+        $billing_period   = ($plan === 'annual') ? 'year' : 'month';
+        $billing_interval = ($plan === 'quarterly') ? 3 : 1;
+        $planes = RocoMadrid_SF_Pricing::calculate_plan_prices(array(
+            'pa_dias' => $dia_norm, 'pa_horario' => $horario_norm, 'pa_edad' => $edad_norm, 'frequency' => $frecuencia,
+        ));
+        $plan_key = ($plan === 'annual') ? 'annual' : (($plan === 'quarterly') ? 'quarterly' : 'monthly');
+        $precio_catalogo = floatval($planes[$plan_key]['price'] ?? $planes['monthly']['price']);
+    } else {
+        $abono_ids = array(5114, 5115, 7753, 7754, 7755, 7756);
+        if (!in_array($producto_abono_id, $abono_ids, true)) {
+            return new WP_Error('bad_request', 'productoAbonoId debe ser uno de los abonos existentes (5114, 5115, 7753-7756).', array('status' => 400));
+        }
+        $producto_item = wc_get_product($producto_abono_id);
+        if (!$producto_item) return new WP_Error('not_found', 'Abono no encontrado en WooCommerce.', array('status' => 404));
+        $precio_catalogo = floatval($producto_item->get_regular_price());
+        $billing_period   = get_post_meta($producto_abono_id, '_subscription_period', true) ?: 'month';
+        $billing_interval = max(1, intval(get_post_meta($producto_abono_id, '_subscription_period_interval', true) ?: 1));
+    }
+    $importe_final = ($primer_pago === 'ya_pagado' && $importe_pago > 0) ? $importe_pago : $precio_catalogo;
+
+    // --- Posible duplicado: mismo email (de verdad, WordPress no permite repetirlo) o
+    // teléfono/nombre parecido ya visto en Grupos/externos/usuarios (reutiliza el mismo
+    // buscador de "Añadir alumno" — nunca una lógica de coincidencia nueva). ---
+    $uid_por_email = $email ? email_exists($email) : false;
+    $duplicado = null;
+    $q_dup = $telefono ?: $email;
+    if (!$uid_por_email && $q_dup && mb_strlen($q_dup) >= 2) {
+        $req_busqueda = new WP_REST_Request('GET', '/superadmin/v1/gestion/buscar-alumno');
+        $req_busqueda->set_param('q', $q_dup);
+        $res_busqueda = superadmin_gestion_buscar_alumno($req_busqueda);
+        if (!is_wp_error($res_busqueda)) {
+            $personas_encontradas = $res_busqueda->get_data()['data'] ?? array();
+            if (!empty($personas_encontradas)) $duplicado = $personas_encontradas[0];
+        }
+    }
+    // El email exacto manda siempre (no se puede crear un usuario de WordPress duplicado) —
+    // nunca hace falta confirmarlo, es la MISMA cuenta por definición.
+    if ($uid_por_email && !$usar_cliente_id) $usar_cliente_id = intval($uid_por_email);
+    $hay_duplicado_sin_resolver = $duplicado && !$usar_cliente_id && !$confirmar_nuevo;
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'nombre' => trim($nombre . ' ' . $apellidos), 'email' => $email, 'telefono' => $telefono,
+            'tipo' => $tipo, 'dia' => $dia_norm ?: null, 'horario' => $horario_norm ?: null, 'edad' => $edad_norm ?: null,
+            'producto' => $producto_item ? $producto_item->get_name() : null,
+            'precioCatalogo' => $precio_catalogo, 'importeFinal' => $importe_final,
+            'billingPeriod' => $billing_period, 'billingInterval' => $billing_interval, 'fechaInicio' => $fecha_inicio,
+            'primerPago' => $primer_pago, 'usaClienteExistente' => $usar_cliente_id ?: null,
+            'posibleDuplicado' => $hay_duplicado_sin_resolver ? $duplicado : null,
+            'aviso' => $hay_duplicado_sin_resolver
+                ? 'Ya hay alguien con ese teléfono/nombre parecido — elige "usar este cliente" o confirma que es una persona distinta antes de crear de verdad.'
+                : ($uid_por_email ? 'Ya existe un usuario de WordPress con ese email — se usará esa cuenta (no se crea una nueva).'
+                    : 'Simulación: no se ha creado nada todavía.'),
+        )));
+    }
+
+    if ($hay_duplicado_sin_resolver) {
+        return new WP_Error('posible_duplicado', 'Ya hay alguien con ese teléfono/nombre parecido — usa ese cliente (usarClienteId) o confirma que es una persona distinta (confirmarNuevo).', array('status' => 409));
+    }
+
+    // --- Cliente: reutilizar o crear ---
+    $resultado_crear_usuario = function() use ($usar_cliente_id, $email, $nombre, $apellidos) {
+        if ($usar_cliente_id) {
+            $u = get_user_by('id', $usar_cliente_id);
+            return $u ? $u->ID : new WP_Error('cliente_no_encontrado', 'El cliente indicado no existe.', array('status' => 404));
+        }
+        if (!$email) return new WP_Error('falta_email', 'Para crear un cliente nuevo hace falta un email.', array('status' => 400));
+        $uid = wc_create_new_customer($email, '', '', array('first_name' => $nombre, 'last_name' => $apellidos));
+        return $uid;
+    };
+    $customer_id = $enviar_acceso ? $resultado_crear_usuario() : blokes_gestion_sin_emails($resultado_crear_usuario);
+    if (is_wp_error($customer_id)) return $customer_id;
+
+    update_user_meta($customer_id, 'billing_first_name', $nombre);
+    update_user_meta($customer_id, 'billing_last_name', $apellidos);
+    if ($telefono) update_user_meta($customer_id, 'billing_phone', $telefono);
+    if ($email) update_user_meta($customer_id, 'billing_email', $email);
+
+    $billing = array(
+        'first_name' => $nombre, 'last_name' => $apellidos, 'email' => $email ?: get_userdata($customer_id)->user_email,
+        'phone' => $telefono, 'country' => 'ES',
+    );
+
+    $crear_todo = function() use (
+        $customer_id, $billing, $producto_item, $tipo, $dia_norm, $horario_norm, $edad_norm,
+        $billing_period, $billing_interval, $precio_catalogo, $importe_final, $fecha_inicio,
+        $primer_pago, $metodo, $fecha_pago, $ajustar_precio, $motivo_excepcion
+    ) {
+        $gateways = WC()->payment_gateways()->payment_gateways();
+        $bacs_title = isset($gateways['bacs']) ? $gateways['bacs']->get_title() : 'Transferencia bancaria';
+
+        $order = wc_create_order(array('customer_id' => $customer_id, 'created_via' => 'admin_assign'));
+        if (is_wp_error($order)) return $order;
+        if ($primer_pago === 'ya_pagado') { $order->set_payment_method('bacs'); $order->set_payment_method_title($bacs_title); }
+        $item_pedido_id = $order->add_product($producto_item, 1, array('subtotal' => $precio_catalogo, 'total' => $precio_catalogo));
+        if ($tipo === 'clase') {
+            $clave_dia = (strpos($dia_norm, '-') !== false) ? 'pa_dias' : 'pa_dia-suelto';
+            $selecciones = array($clave_dia => $dia_norm, 'pa_horario' => $horario_norm, 'pa_edad' => $edad_norm);
+            $item_pedido = $order->get_item($item_pedido_id);
+            $item_pedido->add_meta_data('_step_form_selections', $selecciones, true);
+            blokes_gestion_actualizar_meta_visible_grupo($item_pedido, $clave_dia, $clave_dia, $dia_norm, $horario_norm, $edad_norm);
+            $item_pedido->save();
+        }
+        $order->set_address($billing, 'billing');
+        $order->add_order_note('ExcelMuerte: alta de cliente nueva creada desde Grupos.');
+        $order->set_status('pending');
+        $order->calculate_totals();
+        $order->save();
+
+        $subscription = wcs_create_subscription(array(
+            'order_id' => $order->get_id(), 'status' => 'pending',
+            'billing_period' => $billing_period, 'billing_interval' => $billing_interval,
+            'customer_id' => $customer_id, 'created_via' => 'admin_assign',
+        ));
+        if (is_wp_error($subscription)) { $order->delete(true); return $subscription; }
+        if ($primer_pago === 'ya_pagado') { $subscription->set_payment_method('bacs'); $subscription->set_payment_method_title($bacs_title); }
+        $item_sub = $subscription->add_product($producto_item, 1, array('subtotal' => $precio_catalogo, 'total' => $precio_catalogo));
+        if ($tipo === 'clase') {
+            $clave_dia = strpos($dia_norm, '-') !== false ? 'pa_dias' : 'pa_dia-suelto';
+            $selecciones = array($clave_dia => $dia_norm, 'pa_horario' => $horario_norm, 'pa_edad' => $edad_norm);
+            $subscription->get_item($item_sub)->add_meta_data('_step_form_selections', $selecciones, true);
+            blokes_gestion_actualizar_meta_visible_grupo($subscription->get_item($item_sub), $clave_dia, $clave_dia, $dia_norm, $horario_norm, $edad_norm);
+            $subscription->get_item($item_sub)->save();
+        }
+        $subscription->set_address($billing, 'billing');
+
+        $start_date = $fecha_inicio . ' 00:00:00';
+        $next_payment = null;
+        if (class_exists('WC_Subscriptions_Synchroniser')) {
+            $first_payment_ts = WC_Subscriptions_Synchroniser::calculate_first_payment_date($producto_item, 'timestamp');
+            if ($first_payment_ts > 0) $next_payment = gmdate('Y-m-d H:i:s', $first_payment_ts);
+        }
+        if (!$next_payment) {
+            $next_payment = ($billing_period === 'year')
+                ? gmdate('Y-m-d H:i:s', strtotime('+1 year'))
+                : gmdate('Y-m-d H:i:s', strtotime('+' . $billing_interval . ' month'));
+        }
+        try { $subscription->update_dates(array('start' => $start_date, 'next_payment' => $next_payment)); } catch (Exception $e) {}
+        $subscription->calculate_totals();
+        $subscription->save();
+
+        $importe_distinto = abs($importe_final - $precio_catalogo) > 0.009;
+        $pago_url = null;
+        if ($primer_pago === 'enlace_pago') {
+            $pago_url = $order->get_checkout_payment_url();
+        } else {
+            if ($importe_distinto && in_array($ajustar_precio, array('solo_este_mes', 'desde_ahora'), true)) {
+                blokes_gestion_ajustar_precio_linea($order, $importe_final);
+                if ($ajustar_precio === 'desde_ahora') {
+                    blokes_gestion_ajustar_precio_linea($subscription, $importe_final);
+                    update_post_meta($subscription->get_id(), '_rm_precio_especial', $importe_final);
+                    update_post_meta($subscription->get_id(), '_rm_precio_especial_motivo', $motivo_excepcion);
+                    update_post_meta($subscription->get_id(), '_rm_precio_especial_desde', date_i18n('d/m/Y'));
+                    $u = wp_get_current_user();
+                    update_post_meta($subscription->get_id(), '_rm_precio_especial_por', $u ? $u->user_login : '');
+                }
+            }
+            $metodo_label = blokes_gestion_metodo_label($metodo);
+            $order->set_payment_method_title($metodo_label);
+            $fecha_pago_ts = $fecha_pago ? strtotime($fecha_pago . ' 12:00:00') : time();
+            $order->add_order_note(sprintf('ExcelMuerte: cobrado %s € (%s) el %s — primer pago del alta.', number_format($importe_final, 2, ',', '.'), $metodo_label, date_i18n('d/m/Y', $fecha_pago_ts)));
+            $order->save();
+            update_post_meta($order->get_id(), '_rm_importe_cobrado', $importe_final);
+            update_post_meta($order->get_id(), '_rm_metodo_cobro', $metodo);
+            $order->payment_complete();
+            $order->update_status('completed', 'ExcelMuerte: pedido completado (alta con primer pago ya hecho).');
+            $order->set_date_paid($fecha_pago_ts);
+            $order->save();
+        }
+
+        return array('order' => $order, 'subscription' => $subscription, 'pagoUrl' => $pago_url);
+    };
+
+    $r = blokes_gestion_sin_emails($crear_todo);
+    if (is_wp_error($r)) return $r;
+
+    if ($primer_pago === 'ya_pagado') {
+        $dh = ($tipo === 'clase') ? array('dia' => $dia_norm, 'horario' => $horario_norm) : blokes_sync_grupos_dia_horario_de_sub($r['subscription']->get_id());
+        blokes_sync_grupos_escribir_cobro(
+            $dh['dia'], $dh['horario'], $telefono, trim($nombre . ' ' . $apellidos),
+            date('Y-m', strtotime($fecha_pago ?: $fecha_inicio)), $importe_final, $metodo,
+            date_i18n('d/m/Y', $fecha_pago ? strtotime($fecha_pago) : time()), $r['subscription']->get_id()
+        );
+    }
+
+    $despues = array(
+        'subId' => $r['subscription']->get_id(), 'orderId' => $r['order']->get_id(), 'customerId' => $customer_id,
+        'tipo' => $tipo, 'dia' => $dia_norm ?: null, 'horario' => $horario_norm ?: null, 'edad' => $edad_norm ?: null,
+        'precio' => $importe_final, 'primerPago' => $primer_pago, 'pagoUrl' => $r['pagoUrl'],
+    );
+    blokes_gestion_log($r['subscription']->get_id(), 'alta_cliente', null, $despues);
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
 function superadmin_classes($request) {

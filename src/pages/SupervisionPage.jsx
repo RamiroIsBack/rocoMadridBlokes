@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno,
+  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
@@ -1446,6 +1446,7 @@ function BuscarAlumnoModal({ onClose }) {
   const [resultados, setResultados] = useState(null)
   const [buscando, setBuscando]     = useState(false)
   const [err, setErr]       = useState(null)
+  const [crear, setCrear]   = useState(false) // "Crear cliente en la web" (Ramiro, 07/11 08:06)
 
   async function buscar() {
     if (q.trim().length < 2) { setErr('Escribe al menos 2 caracteres.'); return }
@@ -1460,14 +1461,16 @@ function BuscarAlumnoModal({ onClose }) {
     }
   }
 
+  if (crear) return <CrearClienteForm onClose={onClose} onVolver={() => setCrear(false)} qInicial={q} />
+
   return (
     <div className="sv-grp-overlay" onClick={onClose}>
       <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
         <h3>Añadir alumno — buscar primero</h3>
         <p className="sv-note">
           Busca por nombre, teléfono o email en suscripciones (de cualquier estado, también antiguos alumnos),
-          externos y usuarios de WordPress. De momento solo enseña dónde está cada uno — "Transferir aquí",
-          "Añadir a este grupo" y "Crear alumno nuevo" llegan en la siguiente ronda.
+          externos y usuarios de WordPress. "Transferir aquí" y "Añadir a este grupo" llegan en la siguiente
+          ronda — si no aparece, puedes crear el cliente nuevo en la web directamente.
         </p>
         <label className="sv-grp-field">Nombre, teléfono o email
           <input
@@ -1480,6 +1483,7 @@ function BuscarAlumnoModal({ onClose }) {
         {err && <p className="sv-to-warn-txt">{err}</p>}
         <div className="sv-grp-modal__actions">
           <button className="sv-tests-select" onClick={onClose}>Cerrar</button>
+          <button className="sv-tests-select" onClick={() => setCrear(true)}>+ Crear cliente en la web</button>
           <button className="sv-tests-save" disabled={buscando} onClick={buscar}>{buscando ? 'Buscando…' : 'Buscar'}</button>
         </div>
 
@@ -1509,6 +1513,218 @@ function BuscarAlumnoModal({ onClose }) {
             </ul>
           )
         )}
+      </div>
+    </div>
+  )
+}
+
+// Abonos existentes (NOTAS_PARA_CODE_abono_anual.md) — productos simples, no variaciones de
+// catálogo, así que se listan a mano aquí (igual que ya hace blokes_get_abono_subscripciones()
+// en el backend).
+const ABONOS_OPCIONES = [
+  { id: 5115, label: 'Bono mensual todo el día — 69 €/mes' },
+  { id: 5114, label: 'Bono mensual mañana — 58 €/mes' },
+  { id: 7753, label: 'Abono anual todo el día — 749 €/año' },
+  { id: 7754, label: 'Abono anual mañana — 629 €/año' },
+  { id: 7755, label: 'Abono trimestral todo el día — 195 € / 3 meses' },
+  { id: 7756, label: 'Abono trimestral mañana — 165 € / 3 meses' },
+]
+
+// "Crear cliente en la web" (Ramiro, 07/11 08:06): hasta ahora "Añadir alumno" solo buscaba o
+// daba de alta un externo (fuera de la web) — esto crea de verdad el cliente de WooCommerce + su
+// suscripción, con Simular primero como el resto de acciones de Grupos.
+function CrearClienteForm({ onClose, onVolver, qInicial }) {
+  const [nombre, setNombre]       = useState('')
+  const [apellidos, setApellidos] = useState('')
+  const [email, setEmail]         = useState(qInicial?.includes('@') ? qInicial : '')
+  const [telefono, setTelefono]   = useState(qInicial && !qInicial.includes('@') ? qInicial : '')
+  const [tipo, setTipo]           = useState('clase') // 'clase' | 'abono'
+  const [grupoNuevo, setGrupoNuevo] = useState('') // "dia|horario|edad"
+  const [plan, setPlan]           = useState('monthly')
+  const [abonoId, setAbonoId]     = useState(ABONOS_OPCIONES[0].id)
+  const [fechaInicio, setFechaInicio] = useState(hoyISO())
+  const [primerPago, setPrimerPago]   = useState('ya_pagado')
+  const [metodo, setMetodo]       = useState('transferencia')
+  const [importe, setImporte]     = useState('')
+  const [fechaPago, setFechaPago] = useState(hoyISO())
+  const [ajustarPrecio, setAjustarPrecio] = useState('')
+  const [motivoExcepcion, setMotivoExcepcion] = useState('')
+  const [enviarAcceso, setEnviarAcceso] = useState(false)
+  const [usarClienteId, setUsarClienteId] = useState(null)
+  const [confirmarNuevo, setConfirmarNuevo] = useState(false)
+  const [preview, setPreview]     = useState(null)
+  const [busy, setBusy]           = useState(false)
+  const [err, setErr]             = useState(null)
+
+  const { clases: catalogoClases } = useClases(tipo === 'clase')
+  const clasesSemanales = (catalogoClases || []).filter(c => c.tipo === 'classes' || c.tipo === 'single')
+  const [dia, horario, edad] = grupoNuevo.split('|')
+
+  async function submit(forzarReal) {
+    setBusy(true); setErr(null)
+    try {
+      if (!nombre.trim()) throw new Error('Pon el nombre.')
+      if (!email.trim() && !telefono.trim()) throw new Error('Pon email o teléfono (al menos uno).')
+      if (tipo === 'clase' && !grupoNuevo) throw new Error('Elige el grupo.')
+      if (primerPago === 'ya_pagado' && (!importe || Number(importe) <= 0)) throw new Error('Pon el importe del primer pago.')
+      const body = {
+        nombre: nombre.trim(), apellidos: apellidos.trim(), email: email.trim(), telefono: telefono.trim(),
+        tipo, fechaInicio, primerPago, enviarAcceso, simular: !forzarReal,
+        ...(usarClienteId ? { usarClienteId } : {}),
+        ...(confirmarNuevo ? { confirmarNuevo: true } : {}),
+        ...(tipo === 'clase' ? { dia, horario, edad, plan } : { productoAbonoId: abonoId }),
+        ...(primerPago === 'ya_pagado' ? { metodo, importe: Number(importe), fechaPago } : {}),
+        ...(preview?.precioCatalogo != null && Number(importe) !== preview.precioCatalogo && ajustarPrecio ? { ajustarPrecio, motivoExcepcion } : {}),
+      }
+      const res = await gestionAltaCliente(body)
+      if (!forzarReal) setPreview(res)
+      else { onClose(); alert(res?.pagoUrl ? `Cliente creado. Enlace de pago: ${res.pagoUrl}` : 'Cliente creado.') }
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const importeDistinto = preview && preview.precioCatalogo != null && Math.abs(Number(importe || preview.precioCatalogo) - preview.precioCatalogo) > 0.009
+
+  return (
+    <div className="sv-grp-overlay" onClick={onClose}>
+      <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
+        <h3>Crear cliente en la web</h3>
+
+        {preview ? (
+          <>
+            <p className="sv-to-warn-txt">Simulación: no se ha creado nada todavía.</p>
+            <ul className="sv-grp-preview">
+              <li><span>Cliente</span><span>{preview.nombre} · {preview.email || preview.telefono}</span></li>
+              <li><span>Grupo/producto</span><span>{preview.producto || '—'} {preview.dia ? `· ${preview.dia} · ${preview.horario} · ${preview.edad}` : ''}</span></li>
+              <li><span>Precio catálogo</span><span>{fmtEur(preview.precioCatalogo)}</span></li>
+              <li><span>Primer pago</span><span>{preview.primerPago === 'ya_pagado' ? `${fmtEur(preview.importeFinal)} ya cobrado` : 'Enlace de pago con tarjeta'}</span></li>
+              {preview.aviso && <li><span>Aviso</span><span>{preview.aviso}</span></li>}
+            </ul>
+            {preview.posibleDuplicado && (
+              <div className="sv-grp-field sv-to-warn-txt">
+                <p>Ya hay alguien parecido: <strong>{preview.posibleDuplicado.nombre}</strong> ({preview.posibleDuplicado.telefono || preview.posibleDuplicado.email}).</p>
+                <button className="sv-tests-select" type="button" onClick={() => setUsarClienteId(preview.posibleDuplicado.uid)}>
+                  Usar este cliente {usarClienteId === preview.posibleDuplicado.uid ? '✓' : ''}
+                </button>
+                <button className="sv-tests-select" type="button" onClick={() => setConfirmarNuevo(true)}>
+                  Es una persona distinta, crear de todas formas {confirmarNuevo ? '✓' : ''}
+                </button>
+              </div>
+            )}
+            {importeDistinto && (
+              <div className="sv-grp-field sv-to-warn-txt">
+                <p>El importe ({fmtEur(Number(importe))}) no coincide con el catálogo ({fmtEur(preview.precioCatalogo)}). Elige una opción:</p>
+                <label className="sv-grp-field sv-grp-field--check">
+                  <input type="radio" name="ajustarPrecioAlta" checked={ajustarPrecio === 'solo_este_mes'} onChange={() => setAjustarPrecio('solo_este_mes')} />
+                  Cobrar este importe solo este mes
+                </label>
+                <label className="sv-grp-field sv-grp-field--check">
+                  <input type="radio" name="ajustarPrecioAlta" checked={ajustarPrecio === 'desde_ahora'} onChange={() => setAjustarPrecio('desde_ahora')} />
+                  Y usar este precio a partir de ahora
+                </label>
+                <label className="sv-grp-field">Motivo
+                  <input className="sv-tests-input" type="text" value={motivoExcepcion} onChange={e => setMotivoExcepcion(e.target.value)} placeholder="Hermanos, acuerdo…" />
+                </label>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <label className="sv-grp-field">Nombre
+              <input className="sv-tests-input" type="text" value={nombre} onChange={e => setNombre(e.target.value)} autoFocus />
+            </label>
+            <label className="sv-grp-field">Apellidos
+              <input className="sv-tests-input" type="text" value={apellidos} onChange={e => setApellidos(e.target.value)} />
+            </label>
+            <label className="sv-grp-field">Email
+              <input className="sv-tests-input" type="email" value={email} onChange={e => setEmail(e.target.value)} />
+            </label>
+            <label className="sv-grp-field">Teléfono
+              <input className="sv-tests-input" type="text" value={telefono} onChange={e => setTelefono(e.target.value)} />
+            </label>
+            <label className="sv-grp-field">Tipo
+              <select className="sv-tests-select" value={tipo} onChange={e => setTipo(e.target.value)}>
+                <option value="clase">Clase semanal</option>
+                <option value="abono">Abono (escalada libre)</option>
+              </select>
+            </label>
+            {tipo === 'clase' ? (
+              <>
+                <label className="sv-grp-field">Grupo
+                  <select className="sv-tests-select" value={grupoNuevo} onChange={e => setGrupoNuevo(e.target.value)}>
+                    <option value="">— Elige día · horario · edad —</option>
+                    {clasesSemanales.map(c => (
+                      <option key={`${c.dia}|${c.horario}|${c.edad}`} value={`${c.dia}|${c.horario}|${c.edad}`}>
+                        {c.dia} · {c.horario} · {c.edad} ({c.precio} €)
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="sv-grp-field">Plan de pago
+                  <select className="sv-tests-select" value={plan} onChange={e => setPlan(e.target.value)}>
+                    <option value="monthly">Mensual</option>
+                    <option value="quarterly">Trimestral</option>
+                    <option value="annual">Anual</option>
+                  </select>
+                </label>
+              </>
+            ) : (
+              <label className="sv-grp-field">Abono
+                <select className="sv-tests-select" value={abonoId} onChange={e => setAbonoId(Number(e.target.value))}>
+                  {ABONOS_OPCIONES.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+                </select>
+              </label>
+            )}
+            <label className="sv-grp-field">Fecha de inicio
+              <input className="sv-tests-input" type="date" value={fechaInicio} onChange={e => setFechaInicio(e.target.value)} />
+            </label>
+            <label className="sv-grp-field">Primer pago
+              <select className="sv-tests-select" value={primerPago} onChange={e => setPrimerPago(e.target.value)}>
+                <option value="ya_pagado">Ya ha pagado</option>
+                <option value="enlace_pago">Mandarle enlace de pago con tarjeta</option>
+              </select>
+            </label>
+            {primerPago === 'ya_pagado' && (
+              <>
+                <label className="sv-grp-field">Método
+                  <select className="sv-tests-select" value={metodo} onChange={e => setMetodo(e.target.value)}>
+                    {METODO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
+                  </select>
+                </label>
+                <label className="sv-grp-field">Importe (€)
+                  <input className="sv-tests-input" type="number" step="0.01" min="0" value={importe} onChange={e => setImporte(e.target.value)} />
+                </label>
+                <label className="sv-grp-field">Fecha del pago
+                  <input className="sv-tests-input" type="date" value={fechaPago} onChange={e => setFechaPago(e.target.value)} />
+                </label>
+              </>
+            )}
+            <label className="sv-grp-field sv-grp-field--check">
+              <input type="checkbox" checked={enviarAcceso} onChange={e => setEnviarAcceso(e.target.checked)} />
+              Enviarle email para que ponga su contraseña
+            </label>
+          </>
+        )}
+
+        {err && <p className="sv-error">{err}</p>}
+
+        <div className="sv-grp-modal__actions">
+          <button className="sv-tests-select" onClick={onClose} disabled={busy}>Cancelar</button>
+          <button className="sv-tests-select" onClick={preview ? () => setPreview(null) : onVolver} disabled={busy}>Volver</button>
+          {preview ? (
+            <button
+              className="sv-tests-danger sv-tests-danger--confirm" disabled={busy}
+              onClick={() => submit(true)}
+            >
+              {busy ? 'Creando…' : 'Confirmar de verdad'}
+            </button>
+          ) : (
+            <button className="sv-tests-save" disabled={busy} onClick={() => submit(false)}>{busy ? 'Simulando…' : 'Simular'}</button>
+          )}
+        </div>
       </div>
     </div>
   )

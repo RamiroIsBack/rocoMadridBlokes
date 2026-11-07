@@ -72,6 +72,8 @@ export const gestionCambiarGrupo  = body => gestionPost('/gestion/cambiar-grupo'
 export const gestionOptinWhatsapp = body => gestionPost('/gestion/optin-whatsapp', body)
 export const gestionEditarAlumno  = body => gestionPost('/gestion/editar-alumno', body)
 export const gestionBuscarAlumno  = q    => gestionCall('GET', `/gestion/buscar-alumno?q=${encodeURIComponent(q)}`)
+// Crear cliente nuevo en WooCommerce desde "Añadir alumno" (Ramiro, 07/11 08:06).
+export const gestionAltaCliente   = body => gestionPost('/gestion/alta-cliente', body)
 
 // 8.4: alumnos que pagan fuera de la web (sin suscripción de WooCommerce).
 export const gestionExternosGet      = ()           => gestionCall('GET', '/gestion/externos')
