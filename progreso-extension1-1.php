@@ -772,6 +772,10 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/compe/validar', array(
         'methods' => 'POST', 'callback' => 'progreso_compe_validar', 'permission_callback' => 'is_user_logged_in',
     ));
+    // Pantalla de la tele: público, sin login (Ramiro, punto 5).
+    register_rest_route('progreso/v1', '/compe/clasificacion', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_clasificacion', 'permission_callback' => '__return_true',
+    ));
 
     register_rest_route('progreso/v1', '/training/me', array(
         'methods'             => 'GET',
@@ -13434,6 +13438,67 @@ function progreso_compe_validar($request) {
         'validado_por' => $yo, 'validado_at' => current_time('mysql'), 'updated_at' => current_time('mysql'),
     ), array('id' => $resultado_id), array('%s', '%d', '%s', '%s'), array('%d'));
     return rest_ensure_response(array('success' => true));
+}
+
+// GET /progreso/v1/compe/clasificacion?competitionId=X — público (pantalla de la tele,
+// NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 07/11): clasificación provisional de ESTA compe
+// (nº de tops validados, ordenado por tops y luego por quién llegó antes a esa cifra) y los
+// últimos tops validados. Punto 7 de Ramiro: "solo nombre y nickname entre paréntesis, nunca
+// apellidos" — se construye aquí, nunca se manda el apellido al frontend. Categorías y puntos de
+// verdad (y la liga de temporada de las 3 compes) quedan para cuando Ramiro confirme el formato
+// — de momento una sola categoría "General".
+function progreso_compe_clasificacion($request) {
+    global $wpdb;
+    $competition_id = intval($request->get_param('competitionId'));
+    if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
+
+    $filas = $wpdb->get_results($wpdb->prepare(
+        "SELECT r.*, b.number AS numero, b.grade_color AS color FROM " . progreso_equip_table('comp_resultados') . " r
+         JOIN " . progreso_equip_table('comp_blocks') . " b ON b.id = r.comp_block_id
+         WHERE r.competition_id = %d AND r.estado = 'validado' AND r.top = 1 AND r.participante_tipo = 'user'
+         ORDER BY r.validado_at ASC", $competition_id
+    ), ARRAY_A);
+
+    $por_participante = array();
+    foreach ($filas as $f) {
+        $uid = intval($f['participante_id']);
+        if (!isset($por_participante[$uid])) $por_participante[$uid] = array('tops' => 0, 'primerTop' => $f['created_at']);
+        $por_participante[$uid]['tops']++;
+    }
+
+    $es_multisite = is_multisite();
+    if ($es_multisite) switch_to_blog(1);
+    $clasificacion = array();
+    foreach ($por_participante as $uid => $info) {
+        $u = get_userdata($uid);
+        $nombre = $u ? ($u->first_name ?: explode(' ', trim($u->display_name))[0]) : 'Alguien';
+        $nick = $u ? blokes_get_user_nickname($uid) : '';
+        $clasificacion[] = array(
+            'nombreMostrar' => $nick ? "{$nombre} ({$nick})" : $nombre,
+            'categoria' => 'General', 'tops' => $info['tops'], 'primerTop' => $info['primerTop'],
+        );
+    }
+    usort($clasificacion, function($a, $b) {
+        return $b['tops'] !== $a['tops'] ? $b['tops'] <=> $a['tops'] : strcmp($a['primerTop'], $b['primerTop']);
+    });
+
+    $ultimos = array_slice(array_reverse($filas), 0, 10);
+    $ultimos_validados = array();
+    foreach ($ultimos as $f) {
+        $u = get_userdata(intval($f['participante_id']));
+        $nombre = $u ? ($u->first_name ?: explode(' ', trim($u->display_name))[0]) : 'Alguien';
+        $nick = $u ? blokes_get_user_nickname(intval($f['participante_id'])) : '';
+        $ultimos_validados[] = array(
+            'nombreMostrar' => $nick ? "{$nombre} ({$nick})" : $nombre,
+            'numero' => intval($f['numero']), 'color' => $f['color'], 'hace' => human_time_diff(strtotime($f['validado_at']), current_time('timestamp')),
+        );
+    }
+    if ($es_multisite) restore_current_blog();
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'categorias' => array(array('nombre' => 'General', 'clasificacion' => $clasificacion)),
+        'ultimosValidados' => $ultimos_validados,
+    )));
 }
 
 function progreso_equip_monday_of($date) {

@@ -19,6 +19,7 @@ import LeaguesPage from './pages/LeaguesPage'
 import EventosPage from './pages/EventosPage'
 import CalendarioPage from './pages/CalendarioPage'
 import CompePage from './pages/CompePage'
+import CompeDirectoPage from './pages/CompeDirectoPage'
 import { setVerComo, clearVerComo } from './utils/verComo'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
@@ -41,7 +42,7 @@ const SUBSALA_POSITIONS = {
   '8': { top: '44.5%', right: '18%', transform: 'translateX(50%)' },
 }
 
-const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground', '/eventos', '/calendario']
+const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground', '/eventos', '/calendario', '/compe']
 
 function detectBasename() {
   const injected = window.blokesSiteData?.appBasename
@@ -360,6 +361,7 @@ export default function App() {
             <Route path="/playground" element={<PlaygroundPage />} />
             <Route path="/ligas" element={<LeaguesPage />} />
             <Route path="/compe" element={<CompePage />} />
+            <Route path="/compe/directo" element={<CompeDirectoPage />} />
             <Route path="/eventos" element={<EventosPage />} />
             <Route path="/calendario" element={<CalendarioPage />} />
           </Routes>
