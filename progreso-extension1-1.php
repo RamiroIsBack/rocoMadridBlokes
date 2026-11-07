@@ -4255,7 +4255,12 @@ function blokes_gestion_actualizar_meta_visible_grupo($item, $edad_nuevo) {
     $selecciones = $item->get_meta('_step_form_selections', true);
     if (is_string($selecciones)) $selecciones = json_decode($selecciones, true); // asignador viejo de wp-admin
     if (is_array($selecciones) && $selecciones && class_exists('RocoMadrid_SF_Ajax')) {
-        $item->update_meta_data('_step_form_display', RocoMadrid_SF_Ajax::format_selections_for_display($selecciones));
+        // format_selections_for_display() etiqueta "Age" tanto age_addon/age_addon_2days (del
+        // alta original) como pa_edad (el que de verdad mantenemos al día aquí) — si quedan los
+        // dos, "Age: ..." sale dos veces (cowork, 07/11 10:05). pa_edad manda.
+        $para_mostrar = $selecciones;
+        unset($para_mostrar['age_addon'], $para_mostrar['age_addon_2days']);
+        $item->update_meta_data('_step_form_display', RocoMadrid_SF_Ajax::format_selections_for_display($para_mostrar));
     }
 }
 
