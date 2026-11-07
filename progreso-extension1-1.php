@@ -4247,12 +4247,13 @@ function superadmin_gestion_grupos($request) {
 // la línea salía con el horario viejo Y el nuevo (cowork, 07/11): aquí se borran esas claves
 // sueltas y los `pa_*` se copian de la variación que YA tiene el item — así que hay que llamarla
 // después de set_variation_id(). También rehace `_step_form_display` desde `_step_form_selections`.
-function blokes_gestion_actualizar_meta_visible_grupo($item, $edad_nuevo) {
+function blokes_gestion_actualizar_meta_visible_grupo($item, $edad_nuevo, $billing_period = null, $billing_interval = null) {
     $taxonomias = array('pa_dias', 'pa_dia-suelto', 'pa_horario', 'pa_edad');
     foreach ($taxonomias as $tax) {
         $label = wc_attribute_label($tax);
         if ($label !== $tax) $item->delete_meta_data($label);
     }
+    $edad_variacion = '';
     $variacion = wc_get_product($item->get_variation_id());
     if ($variacion) {
         $attrs = $variacion->get_attributes();
@@ -4260,8 +4261,35 @@ function blokes_gestion_actualizar_meta_visible_grupo($item, $edad_nuevo) {
             if (!array_key_exists($tax, $attrs)) $item->delete_meta_data($tax);           // p. ej. pa_dias al pasar a 1 día
             elseif ((string) $attrs[$tax] !== '') $item->update_meta_data($tax, $attrs[$tax]); // '' = «cualquiera»: se deja lo que hubiera
         }
+        if (!empty($attrs['pa_edad'])) {
+            $edad_term = get_term_by('slug', $attrs['pa_edad'], 'pa_edad');
+            $edad_variacion = blokes_normalizar_edad($edad_term ? $edad_term->name : $attrs['pa_edad']);
+        }
     }
-    $item->update_meta_data(__('Student age', 'neve-child'), $edad_nuevo);
+    // "Edad del alumno" (meta técnica aparte de pa_edad) solo hace falta cuando la edad real no
+    // coincide con la que ya enseña la propia variación (Adolescentes se compra sobre la
+    // variación de Adultos, ver blokes_buscar_variacion_clase()) — si coinciden (caso normal), una
+    // compra real desde la web solo enseña "Edad" una vez; no la dupliques (cowork, 07/11 10:10).
+    $etiqueta_edad = __('Student age', 'neve-child');
+    if ($edad_nuevo && $edad_nuevo !== $edad_variacion) {
+        $item->update_meta_data($etiqueta_edad, $edad_nuevo);
+    } else {
+        $item->delete_meta_data($etiqueta_edad);
+    }
+
+    // "Plan de pago": el step-form real la pone al pasar por el carrito (class-cart.php), pero el
+    // alta y "Cambiar de grupo" crean la línea directamente en WooCommerce sin carrito, así que
+    // no salía (cowork, 07/11 10:10) — mismas etiquetas que usa el step-form real.
+    if ($billing_period !== null) {
+        $interval_norm = max(1, intval($billing_interval ?: 1));
+        $plan_key = ($billing_period === 'year') ? 'annual' : (($interval_norm >= 3) ? 'quarterly' : 'monthly');
+        $plan_labels = array(
+            'monthly'   => __('Monthly', 'neve-child'),
+            'quarterly' => __('Quarterly', 'neve-child'),
+            'annual'    => __('Annual', 'neve-child'),
+        );
+        $item->update_meta_data(__('Payment plan', 'neve-child'), $plan_labels[$plan_key]);
+    }
 
     $selecciones = $item->get_meta('_step_form_selections', true);
     if (is_string($selecciones)) $selecciones = json_decode($selecciones, true); // asignador viejo de wp-admin
@@ -8448,7 +8476,10 @@ function blokes_buscar_variacion_clase($dia, $horario, $edad) {
  * (RocoMadrid_SF_Pricing, la misma que usa el formulario de alta), respetando el plan de pago
  * actual (mensual/trimestral/anual) — cambiar de grupo no cambia cada cuánto se cobra, solo
  * cuánto. No crea pedido ni toca renovaciones ya pagadas: el histórico queda intacto, el precio
- * nuevo se nota desde la próxima renovación.
+ * nuevo se nota desde la próxima renovación. Excepción: si el pedido padre (el "enlace de pago"
+ * inicial) sigue sin pagar (pending/on-hold), su línea y total se actualizan igual que los de la
+ * sub, para que el enlace ya pendiente cobre el grupo/precio nuevos (cowork, 07/11 10:10) — un
+ * pedido ya pagado nunca se toca.
  */
 function superadmin_gestion_cambiar_grupo($request) {
     if (!function_exists('wcs_get_subscription') || !class_exists('RocoMadrid_Step_Form') || !class_exists('RocoMadrid_SF_Pricing')) {
@@ -8475,6 +8506,24 @@ function superadmin_gestion_cambiar_grupo($request) {
     }
     if (!$item) {
         return new WP_Error('no_aplica', 'Esta suscripción no es de un grupo semanal ni de un día suelto (Classes/Días sueltos) — esta acción no aplica a Pilates ni Yoga.', array('status' => 400));
+    }
+
+    // Si el pedido padre (el "enlace de pago" inicial) sigue sin pagar, su línea se actualiza
+    // igual que la de la sub — si no, el enlace seguiría cobrando el grupo y el precio viejos
+    // aunque la sub ya esté bien (cowork, 07/11 10:10). Nunca se toca un pedido ya pagado
+    // (facturado/histórico): eso sigue intacto, como dice el comentario de arriba.
+    $item_padre = null;
+    $orden_padre = null;
+    $parent_id = $sub->get_parent_id();
+    if ($parent_id) {
+        $orden_padre_candidata = wc_get_order($parent_id);
+        if ($orden_padre_candidata && in_array($orden_padre_candidata->get_status(), array('pending', 'on-hold'), true)) {
+            foreach ($orden_padre_candidata->get_items() as $it) {
+                $pid = intval($it->get_product_id());
+                if ($pid === intval($product_classes_id) || $pid === intval($product_single_id)) { $item_padre = $it; break; }
+            }
+            if ($item_padre) $orden_padre = $orden_padre_candidata;
+        }
     }
 
     // ¿Es de 1 día (Días sueltos) o de 2 días (Classes)? La clave de _step_form_selections y la
@@ -8538,11 +8587,12 @@ function superadmin_gestion_cambiar_grupo($request) {
     if ($simular) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'subId' => $sub_id, 'antes' => $antes, 'despues' => $despues,
+            'actualizaPedidoPendiente' => $item_padre ? $orden_padre->get_id() : null,
             'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
         )));
     }
 
-    blokes_gestion_sin_emails(function() use ($item, $sub, $variacion_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo, $precio_nuevo, $selecciones_actuales, $frecuencia, $clave_dia_actual) {
+    blokes_gestion_sin_emails(function() use ($item, $sub, $item_padre, $orden_padre, $variacion_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo, $precio_nuevo, $selecciones_actuales, $frecuencia, $clave_dia_actual, $periodo, $interval) {
         // Si cambia de 1 a 2 días (o al revés) la variación nueva es de OTRO producto padre
         // (Días sueltos ↔ Classes) — hay que actualizar también product_id, no solo
         // variation_id, para que no quede una variación "huérfana" de otro padre en el pedido.
@@ -8557,7 +8607,7 @@ function superadmin_gestion_cambiar_grupo($request) {
         $nuevas_selecciones['pa_edad']    = $edad_nuevo;
         if (isset($nuevas_selecciones['frequency'])) $nuevas_selecciones['frequency'] = $frecuencia;
         $item->add_meta_data('_step_form_selections', $nuevas_selecciones, true);
-        blokes_gestion_actualizar_meta_visible_grupo($item, $edad_nuevo);
+        blokes_gestion_actualizar_meta_visible_grupo($item, $edad_nuevo, $periodo, $interval);
         $item->set_subtotal($precio_nuevo);
         $item->set_total($precio_nuevo);
         $item->save();
@@ -8567,11 +8617,34 @@ function superadmin_gestion_cambiar_grupo($request) {
             $dia_nuevo, $horario_nuevo, $edad_nuevo, number_format($precio_nuevo, 2, ',', '.')
         ));
         $sub->save();
+
+        // El pedido padre ("enlace de pago" inicial) solo se toca si sigue sin pagar — si no, el
+        // enlace cobraría el grupo y el precio viejos aunque la sub ya esté bien (cowork, 07/11
+        // 10:10). Un pedido ya pagado/facturado nunca se tocaría aquí.
+        if ($item_padre && $orden_padre) {
+            $item_padre->set_product_id($variacion_nueva->get_parent_id());
+            $item_padre->set_variation_id($variacion_nueva->get_id());
+            $item_padre->set_name($variacion_nueva->get_name());
+            $item_padre->add_meta_data('_step_form_selections', $nuevas_selecciones, true);
+            blokes_gestion_actualizar_meta_visible_grupo($item_padre, $edad_nuevo, $periodo, $interval);
+            $item_padre->set_subtotal($precio_nuevo);
+            $item_padre->set_total($precio_nuevo);
+            $item_padre->save();
+            $orden_padre->calculate_totals();
+            $orden_padre->add_order_note(sprintf(
+                'ExcelMuerte: cambio de grupo a %s · %s (%s), %s € — pedido actualizado al no estar pagado aún.',
+                $dia_nuevo, $horario_nuevo, $edad_nuevo, number_format($precio_nuevo, 2, ',', '.')
+            ));
+            $orden_padre->save();
+        }
     });
 
     blokes_gestion_log($sub_id, 'cambiar_grupo', $antes, $despues);
 
-    return rest_ensure_response(array('success' => true, 'data' => array('subId' => $sub_id, 'antes' => $antes, 'despues' => $despues)));
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'subId' => $sub_id, 'antes' => $antes, 'despues' => $despues,
+        'pedidoPendienteActualizado' => $item_padre ? $orden_padre->get_id() : null,
+    )));
 }
 
 // Corrige la meta visible (Día/Horario/Edad del alumno) de toda suscripción que pasó por
@@ -8620,13 +8693,15 @@ function superadmin_cambiar_grupo_arreglar_meta_visible($request) {
             $item_orden = $orden ? $item_de_clase($orden) : null;
             if ($item_orden) $items[] = $item_orden;
         }
-        blokes_gestion_sin_emails(function() use ($items, $despues, $edad) {
+        $periodo_sub  = $sub->get_billing_period();
+        $interval_sub = max(1, intval($sub->get_billing_interval()));
+        blokes_gestion_sin_emails(function() use ($items, $despues, $edad, $periodo_sub, $interval_sub) {
             foreach ($items as $it) {
                 if (!$it->get_meta('_step_form_selections', true)) {
                     $clave_dia = (strpos($despues['dia'], '-') !== false) ? 'pa_dias' : 'pa_dia-suelto';
                     $it->add_meta_data('_step_form_selections', array($clave_dia => $despues['dia'], 'pa_horario' => $despues['horario'], 'pa_edad' => $edad), true);
                 }
-                blokes_gestion_actualizar_meta_visible_grupo($it, $edad);
+                blokes_gestion_actualizar_meta_visible_grupo($it, $edad, $periodo_sub, $interval_sub);
                 $it->save();
             }
         });
@@ -8982,7 +9057,7 @@ function superadmin_gestion_alta_cliente($request) {
             $selecciones = array($clave_dia => $dia_norm, 'pa_horario' => $horario_norm, 'pa_edad' => $edad_norm);
             $item_pedido = $order->get_item($item_pedido_id);
             $item_pedido->add_meta_data('_step_form_selections', $selecciones, true);
-            blokes_gestion_actualizar_meta_visible_grupo($item_pedido, $edad_norm);
+            blokes_gestion_actualizar_meta_visible_grupo($item_pedido, $edad_norm, $billing_period, $billing_interval);
             $item_pedido->save();
         }
         $order->set_address($billing, 'billing');
@@ -9006,7 +9081,7 @@ function superadmin_gestion_alta_cliente($request) {
             // en uno y guardar otro la perdía.
             $item_sub_obj = $subscription->get_item($item_sub);
             $item_sub_obj->add_meta_data('_step_form_selections', $selecciones, true);
-            blokes_gestion_actualizar_meta_visible_grupo($item_sub_obj, $edad_norm);
+            blokes_gestion_actualizar_meta_visible_grupo($item_sub_obj, $edad_norm, $billing_period, $billing_interval);
             $item_sub_obj->save();
         }
         $subscription->set_address($billing, 'billing');
