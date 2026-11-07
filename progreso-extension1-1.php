@@ -776,6 +776,13 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/compe/clasificacion', array(
         'methods' => 'GET', 'callback' => 'progreso_compe_clasificacion', 'permission_callback' => '__return_true',
     ));
+    // Recepción (Ramiro, punto 6): "¿quién eres?" + participante rápido sin cuenta.
+    register_rest_route('progreso/v1', '/compe/buscar-participante', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_buscar_participante', 'permission_callback' => 'is_user_logged_in',
+    ));
+    register_rest_route('progreso/v1', '/compe/participante-rapido', array(
+        'methods' => 'POST', 'callback' => 'progreso_compe_crear_participante_rapido', 'permission_callback' => 'is_user_logged_in',
+    ));
 
     register_rest_route('progreso/v1', '/training/me', array(
         'methods'             => 'GET',
@@ -13381,11 +13388,17 @@ function progreso_compe_apuntar_resultado($request) {
     $zona     = $request->get_param('zona') ? 1 : 0;
     $intentos = max(0, intval($request->get_param('intentos')));
     $target_user_id = intval($request->get_param('targetUserId'));
+    // Participante rápido (Ramiro, 07/11 08:48: pase de día sin cuenta) — siempre lo crea
+    // recepción, nunca se autoapunta a sí mismo, así que siempre queda validado como el resto de
+    // "apuntado por otra persona".
+    $target_rapido_id = intval($request->get_param('targetParticipanteRapidoId'));
     if (!$comp_block_id) return new WP_Error('bad_request', 'Falta compBlockId.', array('status' => 400));
-    if ($target_user_id && !blokes_can_supervise()) {
+    if (($target_user_id || $target_rapido_id) && !blokes_can_supervise()) {
         return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
     }
-    $participante_id = $target_user_id ?: get_current_user_id();
+    $participante_tipo = $target_rapido_id ? 'rapido' : 'user';
+    $participante_id = $target_rapido_id ?: ($target_user_id ?: get_current_user_id());
+    $es_recepcion = (bool) ($target_user_id || $target_rapido_id);
 
     $block = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $comp_block_id), ARRAY_A);
     if (!$block) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
@@ -13393,16 +13406,24 @@ function progreso_compe_apuntar_resultado($request) {
     if (!$comp || !$comp['modo_activo']) {
         return new WP_Error('modo_inactivo', 'El modo compe no está activo para este bloque.', array('status' => 409));
     }
+    if ($target_rapido_id) {
+        $existe_rapido = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE id = %d AND competition_id = %d",
+            $target_rapido_id, $block['competition_id']
+        ));
+        if (!$existe_rapido) return new WP_Error('not_found', 'Participante rápido no encontrado en esta compe.', array('status' => 404));
+    }
 
     $ahora = current_time('mysql');
     $existente = $wpdb->get_row($wpdb->prepare(
-        "SELECT id FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND comp_block_id = %d AND participante_tipo = 'user' AND participante_id = %d",
-        $block['competition_id'], $comp_block_id, $participante_id
+        "SELECT id FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND comp_block_id = %d AND participante_tipo = %s AND participante_id = %d",
+        $block['competition_id'], $comp_block_id, $participante_tipo, $participante_id
     ), ARRAY_A);
     // Recepción (Eva/profe/socio apuntando por otra persona, cowork 07/11 11:00): lo ha visto
     // quien lo apunta, así que queda validado directamente — no tiene sentido pedirle a otra
-    // persona que lo confirme otra vez.
-    $datos = $target_user_id ? array(
+    // persona que lo confirme otra vez. Un participante rápido SIEMPRE llega así (nunca se
+    // autoapunta, no tiene cuenta).
+    $datos = $es_recepcion ? array(
         'top' => $top, 'zona' => $zona ?: $top, 'intentos' => $intentos, 'apuntado_por' => get_current_user_id(),
         'estado' => 'validado', 'validado_por' => get_current_user_id(), 'validado_at' => $ahora, 'updated_at' => $ahora,
     ) : array(
@@ -13414,10 +13435,66 @@ function progreso_compe_apuntar_resultado($request) {
     } else {
         $wpdb->insert(progreso_equip_table('comp_resultados'), array_merge($datos, array(
             'competition_id' => $block['competition_id'], 'comp_block_id' => $comp_block_id,
-            'participante_tipo' => 'user', 'participante_id' => $participante_id, 'created_at' => $ahora,
+            'participante_tipo' => $participante_tipo, 'participante_id' => $participante_id, 'created_at' => $ahora,
         )));
     }
     return rest_ensure_response(array('success' => true, 'data' => array('estado' => $datos['estado'])));
+}
+
+// GET /progreso/v1/compe/buscar-participante?q=X&competitionId=Y — "¿quién eres?" de recepción
+// (Ramiro, 07/11 08:46/08:48): busca entre usuarios reales de WordPress (nombre/nickname, en el
+// sitio Principal) y entre los participantes rápidos YA creados en esta compe (para no crear
+// uno nuevo cada vez que vuelve la misma persona sin cuenta). Solo quien puede supervisar
+// (profe/gestión/socio/tablet).
+function progreso_compe_buscar_participante($request) {
+    if (!blokes_can_supervise()) return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
+    $q = trim((string) $request->get_param('q'));
+    $competition_id = intval($request->get_param('competitionId'));
+    if (mb_strlen($q) < 2) return new WP_Error('bad_request', 'Escribe al menos 2 caracteres.', array('status' => 400));
+
+    global $wpdb;
+    $resultado = array();
+
+    $es_multisite = is_multisite();
+    if ($es_multisite) switch_to_blog(1);
+    $usuarios = get_users(array(
+        'number' => 20, 'search' => '*' . $q . '*', 'search_columns' => array('display_name', 'user_nicename'),
+    ));
+    foreach ($usuarios as $u) {
+        $nick = blokes_get_user_nickname($u->ID);
+        $resultado[] = array('tipo' => 'user', 'id' => $u->ID, 'nombreMostrar' => $nick ? "{$u->display_name} ({$nick})" : $u->display_name);
+    }
+    if ($es_multisite) restore_current_blog();
+
+    if ($competition_id) {
+        $rapidos = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, nombre FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE competition_id = %d AND nombre LIKE %s LIMIT 20",
+            $competition_id, '%' . $wpdb->esc_like($q) . '%'
+        ), ARRAY_A);
+        foreach ($rapidos as $r) {
+            $resultado[] = array('tipo' => 'rapido', 'id' => intval($r['id']), 'nombreMostrar' => $r['nombre'] . ' (sin cuenta)');
+        }
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $resultado));
+}
+
+// POST /progreso/v1/compe/participante-rapido — crea un participante sin cuenta (pase de día,
+// Ramiro 07/11 08:48). Solo recepción (can_supervise).
+function progreso_compe_crear_participante_rapido($request) {
+    if (!blokes_can_supervise()) return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
+    global $wpdb;
+    $competition_id = intval($request->get_param('competitionId'));
+    $nombre = sanitize_text_field((string) $request->get_param('nombre'));
+    $telefono = sanitize_text_field((string) $request->get_param('telefono'));
+    $email = sanitize_email((string) $request->get_param('email'));
+    if (!$competition_id || !$nombre) return new WP_Error('bad_request', 'Falta competitionId o nombre.', array('status' => 400));
+    $u = wp_get_current_user();
+    $wpdb->insert(progreso_equip_table('comp_participantes_rapidos'), array(
+        'competition_id' => $competition_id, 'nombre' => $nombre, 'telefono' => $telefono, 'email' => $email,
+        'categoria' => 'General', 'created_by' => $u ? $u->user_login : '', 'created_at' => current_time('mysql'),
+    ));
+    $id = $wpdb->insert_id;
+    return rest_ensure_response(array('success' => true, 'data' => array('id' => $id, 'nombreMostrar' => $nombre . ' (sin cuenta)')));
 }
 
 // GET /progreso/v1/compe/mis-resultados?competitionId=X — lo que YA ha apuntado el usuario (o
@@ -13435,13 +13512,15 @@ function progreso_compe_mis_resultados($request) {
     global $wpdb;
     $competition_id = intval($request->get_param('competitionId'));
     $subject_user_id = intval($request->get_param('subjectUserId'));
-    if ($subject_user_id && !blokes_can_supervise()) return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
-    $user_id = $subject_user_id ?: get_current_user_id();
+    $subject_rapido_id = intval($request->get_param('subjectParticipanteRapidoId'));
+    if (($subject_user_id || $subject_rapido_id) && !blokes_can_supervise()) return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
+    $participante_tipo = $subject_rapido_id ? 'rapido' : 'user';
+    $participante_id = $subject_rapido_id ?: ($subject_user_id ?: get_current_user_id());
     if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
     $filas = $wpdb->get_results($wpdb->prepare(
         "SELECT comp_block_id, top, zona, intentos, estado, created_at FROM " . progreso_equip_table('comp_resultados') . "
-         WHERE competition_id = %d AND participante_tipo = 'user' AND participante_id = %d",
-        $competition_id, $user_id
+         WHERE competition_id = %d AND participante_tipo = %s AND participante_id = %d",
+        $competition_id, $participante_tipo, $participante_id
     ), ARRAY_A);
     $data = array();
     $ventana_inicio = null;
@@ -13545,26 +13624,52 @@ function progreso_compe_clasificacion($request) {
     $filas = $wpdb->get_results($wpdb->prepare(
         "SELECT r.*, b.number AS numero, b.grade_color AS color FROM " . progreso_equip_table('comp_resultados') . " r
          JOIN " . progreso_equip_table('comp_blocks') . " b ON b.id = r.comp_block_id
-         WHERE r.competition_id = %d AND r.estado = 'validado' AND r.top = 1 AND r.participante_tipo = 'user'
+         WHERE r.competition_id = %d AND r.estado = 'validado' AND r.top = 1
          ORDER BY r.validado_at ASC", $competition_id
     ), ARRAY_A);
 
+    // Participantes rápidos (sin cuenta): su nombre ya está guardado tal cual, no hace falta
+    // mirar usuarios de WordPress — una sola consulta para todos los que aparezcan.
+    $nombres_rapidos = array();
+    $rapido_ids = array();
+    foreach ($filas as $f) {
+        if ($f['participante_tipo'] === 'rapido') $rapido_ids[intval($f['participante_id'])] = true;
+    }
+    $rapido_ids = array_keys($rapido_ids);
+    if ($rapido_ids) {
+        $ph = implode(',', array_fill(0, count($rapido_ids), '%d'));
+        $filas_rapidos = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, nombre FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE id IN ($ph)", ...$rapido_ids
+        ), ARRAY_A);
+        foreach ($filas_rapidos as $fr) $nombres_rapidos[intval($fr['id'])] = $fr['nombre'];
+    }
+
     $por_participante = array();
     foreach ($filas as $f) {
-        $uid = intval($f['participante_id']);
-        if (!isset($por_participante[$uid])) $por_participante[$uid] = array('tops' => 0, 'primerTop' => $f['created_at']);
-        $por_participante[$uid]['tops']++;
+        $clave = $f['participante_tipo'] . ':' . intval($f['participante_id']);
+        if (!isset($por_participante[$clave])) {
+            $por_participante[$clave] = array(
+                'tipo' => $f['participante_tipo'], 'id' => intval($f['participante_id']),
+                'tops' => 0, 'primerTop' => $f['created_at'],
+            );
+        }
+        $por_participante[$clave]['tops']++;
     }
 
     $es_multisite = is_multisite();
     if ($es_multisite) switch_to_blog(1);
+    $nombre_de = function($tipo, $id) use ($nombres_rapidos) {
+        if ($tipo === 'rapido') return ($nombres_rapidos[$id] ?? 'Alguien') . ' (sin cuenta)';
+        $u = get_userdata($id);
+        if (!$u) return 'Alguien';
+        $nombre = $u->first_name ?: explode(' ', trim($u->display_name))[0];
+        $nick = blokes_get_user_nickname($id);
+        return $nick ? "{$nombre} ({$nick})" : $nombre;
+    };
     $clasificacion = array();
-    foreach ($por_participante as $uid => $info) {
-        $u = get_userdata($uid);
-        $nombre = $u ? ($u->first_name ?: explode(' ', trim($u->display_name))[0]) : 'Alguien';
-        $nick = $u ? blokes_get_user_nickname($uid) : '';
+    foreach ($por_participante as $info) {
         $clasificacion[] = array(
-            'nombreMostrar' => $nick ? "{$nombre} ({$nick})" : $nombre,
+            'nombreMostrar' => $nombre_de($info['tipo'], $info['id']),
             'categoria' => 'General', 'tops' => $info['tops'], 'primerTop' => $info['primerTop'],
         );
     }
@@ -13575,11 +13680,8 @@ function progreso_compe_clasificacion($request) {
     $ultimos = array_slice(array_reverse($filas), 0, 10);
     $ultimos_validados = array();
     foreach ($ultimos as $f) {
-        $u = get_userdata(intval($f['participante_id']));
-        $nombre = $u ? ($u->first_name ?: explode(' ', trim($u->display_name))[0]) : 'Alguien';
-        $nick = $u ? blokes_get_user_nickname(intval($f['participante_id'])) : '';
         $ultimos_validados[] = array(
-            'nombreMostrar' => $nick ? "{$nombre} ({$nick})" : $nombre,
+            'nombreMostrar' => $nombre_de($f['participante_tipo'], intval($f['participante_id'])),
             'numero' => intval($f['numero']), 'color' => $f['color'], 'hace' => human_time_diff(strtotime($f['validado_at']), current_time('timestamp')),
         );
     }

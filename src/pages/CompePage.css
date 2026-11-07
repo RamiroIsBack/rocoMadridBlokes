@@ -63,3 +63,15 @@
   cursor: pointer; padding: 0;
 }
 .compe-pendiente__texto { font-size: 0.9rem; margin: 0 0 4px; }
+
+.compe-grp-field { display: block; margin-bottom: 10px; font-size: 0.85rem; color: #374151; }
+.compe-recepcion-input {
+  display: block; width: 100%; margin-top: 4px; padding: 8px 10px;
+  border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem;
+}
+.compe-recepcion-lista { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.compe-recepcion-resultado {
+  display: block; width: 100%; text-align: left; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid #e5e7eb; background: #f9fafb; font-size: 0.95rem; cursor: pointer;
+}
+.compe-recepcion-resultado:hover { background: #f3f4f6; }

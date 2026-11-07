@@ -24,12 +24,16 @@ const COLOR_HEX = {
   negro: '#1f2937', blanco: '#e5e7eb', naranja: '#f97316', morado: '#8b5cf6', rosa: '#ec4899',
 }
 
+const PUEDE_RECEPCION = ['profesor', 'gestion', 'socio', 'tablet']
+
 // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md). Parte 1: apuntar top/zona/intentos.
-// Parte 2 (Ramiro, 07/11 09:11): validación de buena fe (cualquier compañero o profe que lo haya
-// visto, sin cola de jueces fija) y la ventana de 1h30 desde el primer top. Pendiente: pantalla
-// de la tele, modo tablet/recepción/participante rápido, resultados finales y liga de temporada.
+// Parte 2: validación de buena fe y ventana de 1h30. Parte 4 (Ramiro, 07/11 08:46/08:48):
+// recepción apuntando por otra persona (profe/Eva/socio) + participante rápido sin cuenta.
+// Pendiente: modo tablet con PIN de autoservicio (Ramiro no ha concretado cómo se verifica el
+// PIN — preguntado, no adivinado), resultados finales y liga de temporada.
 export default function CompePage() {
   const sd = window.blokesSiteData || {}
+  const puedeRecepcion = PUEDE_RECEPCION.includes(sd.userRole)
   const [estado, setEstado] = useState(null)
   const [misResultados, setMisResultados] = useState({})
   const [ventana, setVentana] = useState(null)
@@ -126,9 +130,12 @@ export default function CompePage() {
         <button className={`compe-tab${tab === 'validar' ? ' compe-tab--activo' : ''}`} onClick={() => setTab('validar')}>
           Validar{pendientes.length > 0 ? ` (${pendientes.length})` : ''}
         </button>
+        {puedeRecepcion && (
+          <button className={`compe-tab${tab === 'recepcion' ? ' compe-tab--activo' : ''}`} onClick={() => setTab('recepcion')}>Recepción</button>
+        )}
       </div>
 
-      {tab === 'apuntar' ? (
+      {tab === 'apuntar' && (
         <div className="compe-page__grid">
           {estado.bloques.map(b => (
             <BloqueFila
@@ -140,12 +147,160 @@ export default function CompePage() {
             />
           ))}
         </div>
-      ) : (
+      )}
+      {tab === 'validar' && (
         <div className="compe-page__grid">
           {pendientes.length === 0 && <p className="compe-page__muted">Nada pendiente de validar ahora mismo.</p>}
           {pendientes.map(p => (
             <PendienteFila key={p.resultadoId} p={p} guardando={guardando === p.resultadoId} onValidar={accion => validar(p.resultadoId, accion)} />
           ))}
+        </div>
+      )}
+      {tab === 'recepcion' && puedeRecepcion && (
+        <RecepcionTab bloques={estado.bloques} competitionId={estado.competitionId} />
+      )}
+    </div>
+  )
+}
+
+// Recepción (Ramiro, 07/11 08:46: "Eva o cualquier profe con la app en modo tablet/ordenador en
+// recepción puede apuntar los bloques por otra persona") — busca a quien lo ha hecho (cuenta
+// real o un participante rápido ya creado), o lo crea sin cuenta si viene con pase de día, y
+// apunta por él/ella. Queda validado directamente (lo ha visto quien lo apunta).
+function RecepcionTab({ bloques, competitionId }) {
+  const [q, setQ] = useState('')
+  const [resultados, setResultados] = useState(null)
+  const [buscando, setBuscando] = useState(false)
+  const [seleccionado, setSeleccionado] = useState(null) // { tipo, id, nombreMostrar }
+  const [misResultados, setMisResultados] = useState({})
+  const [guardando, setGuardando] = useState(null)
+  const [err, setErr] = useState(null)
+  const [crearNombre, setCrearNombre] = useState('')
+  const [crearTelefono, setCrearTelefono] = useState('')
+  const [crearEmail, setCrearEmail] = useState('')
+  const [creando, setCreando] = useState(false)
+  const [mostrarCrear, setMostrarCrear] = useState(false)
+
+  async function buscar() {
+    if (q.trim().length < 2) { setErr('Escribe al menos 2 caracteres.'); return }
+    setBuscando(true); setErr(null)
+    try {
+      const r = await api('GET', `/compe/buscar-participante?q=${encodeURIComponent(q.trim())}&competitionId=${competitionId}`)
+      setResultados(r.data || [])
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setBuscando(false)
+    }
+  }
+
+  async function elegir(p) {
+    setSeleccionado(p)
+    setErr(null)
+    try {
+      const param = p.tipo === 'rapido' ? `subjectParticipanteRapidoId=${p.id}` : `subjectUserId=${p.id}`
+      const r = await api('GET', `/compe/mis-resultados?competitionId=${competitionId}&${param}`)
+      setMisResultados(r.data || {})
+    } catch (e) {
+      setErr(e.message)
+    }
+  }
+
+  async function crearRapido() {
+    if (!crearNombre.trim()) { setErr('Pon el nombre.'); return }
+    setCreando(true); setErr(null)
+    try {
+      const r = await api('POST', '/compe/participante-rapido', {
+        competitionId, nombre: crearNombre.trim(), telefono: crearTelefono.trim(), email: crearEmail.trim(),
+      })
+      await elegir({ tipo: 'rapido', id: r.data.id, nombreMostrar: r.data.nombreMostrar })
+      setMostrarCrear(false); setCrearNombre(''); setCrearTelefono(''); setCrearEmail('')
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setCreando(false)
+    }
+  }
+
+  async function guardarPara(compBlockId, cambios) {
+    setGuardando(compBlockId)
+    try {
+      const target = seleccionado.tipo === 'rapido' ? { targetParticipanteRapidoId: seleccionado.id } : { targetUserId: seleccionado.id }
+      await api('POST', '/compe/resultado', { compBlockId, ...cambios, ...target })
+      setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios, estado: 'validado' } }))
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setGuardando(null)
+    }
+  }
+
+  if (seleccionado) {
+    return (
+      <div>
+        <p className="compe-page__muted">
+          Apuntando por <strong>{seleccionado.nombreMostrar}</strong> — quedará validado directamente.{' '}
+          <button type="button" className="compe-intentos-link" onClick={() => { setSeleccionado(null); setMisResultados({}) }}>Elegir otra persona</button>
+        </p>
+        {err && <p className="compe-page__error">{err}</p>}
+        <div className="compe-page__grid">
+          {bloques.map(b => (
+            <BloqueFila
+              key={b.compBlockId}
+              bloque={b}
+              resultado={misResultados[b.compBlockId]}
+              guardando={guardando === b.compBlockId}
+              onGuardar={cambios => guardarPara(b.compBlockId, cambios)}
+            />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <label className="compe-grp-field">
+        <input
+          className="compe-recepcion-input" type="text" value={q} autoFocus
+          onChange={e => setQ(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') buscar() }}
+          placeholder="Nombre de quien lo ha hecho…"
+        />
+      </label>
+      <button className="compe-bloque__guardar" disabled={buscando} onClick={buscar}>{buscando ? 'Buscando…' : 'Buscar'}</button>
+      {err && <p className="compe-page__error">{err}</p>}
+
+      {resultados !== null && (
+        resultados.length === 0 ? (
+          <p className="compe-page__muted">Nadie coincide con «{q}».</p>
+        ) : (
+          <ul className="compe-recepcion-lista">
+            {resultados.map((p, i) => (
+              <li key={i}>
+                <button type="button" className="compe-recepcion-resultado" onClick={() => elegir(p)}>{p.nombreMostrar}</button>
+              </li>
+            ))}
+          </ul>
+        )
+      )}
+
+      {!mostrarCrear ? (
+        <button type="button" className="compe-intentos-link" onClick={() => { setMostrarCrear(true); setCrearNombre(q) }}>
+          No está en la lista — pase de día sin cuenta
+        </button>
+      ) : (
+        <div className="compe-page__grid" style={{ marginTop: 12 }}>
+          <label className="compe-grp-field">Nombre
+            <input className="compe-recepcion-input" type="text" value={crearNombre} onChange={e => setCrearNombre(e.target.value)} />
+          </label>
+          <label className="compe-grp-field">Teléfono (opcional)
+            <input className="compe-recepcion-input" type="text" value={crearTelefono} onChange={e => setCrearTelefono(e.target.value)} />
+          </label>
+          <label className="compe-grp-field">Email (opcional)
+            <input className="compe-recepcion-input" type="email" value={crearEmail} onChange={e => setCrearEmail(e.target.value)} />
+          </label>
+          <button className="compe-bloque__guardar" disabled={creando} onClick={crearRapido}>{creando ? 'Creando…' : 'Crear y apuntar'}</button>
         </div>
       )}
     </div>
