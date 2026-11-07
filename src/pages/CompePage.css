@@ -39,14 +39,12 @@
 .compe-bloque__pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .compe-estado { font-size: 0.8rem; color: #6b7280; }
 .compe-estado--validado { color: #16a34a; font-weight: 600; }
-.compe-estado--rechazado { color: #ef4444; font-weight: 600; }
 
 .compe-bloque__guardar {
   padding: 6px 14px; border-radius: 8px; border: none; background: #111827; color: #fff;
   font-weight: 600; font-size: 0.85rem; cursor: pointer;
 }
 .compe-bloque__guardar:disabled { opacity: 0.6; cursor: default; }
-.compe-bloque__guardar--rechazar { background: #6b7280; }
 
 .compe-ventana { font-size: 0.85rem; color: #374151; background: #eef2ff; border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }
 .compe-ventana--cerrada { background: #fef3c7; color: #92400e; }
@@ -62,8 +60,6 @@
   background: none; border: none; color: #6b7280; font-size: 0.8rem; text-decoration: underline;
   cursor: pointer; padding: 0;
 }
-.compe-pendiente__texto { font-size: 0.9rem; margin: 0 0 4px; }
-
 .compe-grp-field { display: block; margin-bottom: 10px; font-size: 0.85rem; color: #374151; }
 .compe-recepcion-input {
   display: block; width: 100%; margin-top: 4px; padding: 8px 10px;

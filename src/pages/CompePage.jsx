@@ -27,21 +27,21 @@ const COLOR_HEX = {
 const PUEDE_RECEPCION = ['profesor', 'gestion', 'socio', 'tablet']
 
 // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md). Parte 1: apuntar top/zona/intentos.
-// Parte 2: validación de buena fe y ventana de 1h30. Parte 4 (Ramiro, 07/11 08:46/08:48):
-// recepción apuntando por otra persona (profe/Eva/socio) + participante rápido sin cuenta.
-// Pendiente: modo tablet con PIN de autoservicio (Ramiro no ha concretado cómo se verifica el
-// PIN — preguntado, no adivinado), resultados finales y liga de temporada.
+// Parte 4 (Ramiro, 07/11 08:46/08:48): recepción apuntando por otra persona (profe/Eva/socio) +
+// participante rápido sin cuenta. Sin validación en la app (Ramiro, 07/11 más tarde): todo lo
+// apuntado cuenta al momento, lo valida la palabra de los compañeros, no la app — en la tablet
+// (rol "tablet", incluido en PUEDE_RECEPCION) cada uno busca su propio nombre en "Recepción" y
+// apunta, sin PIN.
 export default function CompePage() {
   const sd = window.blokesSiteData || {}
   const puedeRecepcion = PUEDE_RECEPCION.includes(sd.userRole)
   const [estado, setEstado] = useState(null)
   const [misResultados, setMisResultados] = useState({})
   const [ventana, setVentana] = useState(null)
-  const [pendientes, setPendientes] = useState([])
   const [tab, setTab] = useState('apuntar')
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
-  const [guardando, setGuardando] = useState(null) // compBlockId o resultadoId en curso
+  const [guardando, setGuardando] = useState(null) // compBlockId en curso
 
   const cargar = useCallback(() => {
     setLoading(true)
@@ -49,12 +49,8 @@ export default function CompePage() {
       .then(r => {
         setEstado(r.data)
         if (r.data?.activo && sd.isLoggedIn) {
-          return Promise.all([
-            api('GET', `/compe/mis-resultados?competitionId=${r.data.competitionId}`)
-              .then(rr => { setMisResultados(rr.data || {}); setVentana(rr.ventana || null) }),
-            api('GET', `/compe/pendientes-validar?competitionId=${r.data.competitionId}`)
-              .then(rr => setPendientes(rr.data || [])),
-          ])
+          return api('GET', `/compe/mis-resultados?competitionId=${r.data.competitionId}`)
+            .then(rr => { setMisResultados(rr.data || {}); setVentana(rr.ventana || null) })
         }
       })
       .catch(e => setErr(e.message))
@@ -67,19 +63,7 @@ export default function CompePage() {
     setGuardando(compBlockId)
     try {
       await api('POST', '/compe/resultado', { compBlockId, ...cambios })
-      setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios, estado: 'pendiente' } }))
-    } catch (e) {
-      setErr(e.message)
-    } finally {
-      setGuardando(null)
-    }
-  }
-
-  async function validar(resultadoId, accion) {
-    setGuardando(resultadoId)
-    try {
-      await api('POST', '/compe/validar', { resultadoId, accion })
-      setPendientes(prev => prev.filter(p => p.resultadoId !== resultadoId))
+      setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios, estado: 'validado' } }))
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -114,7 +98,7 @@ export default function CompePage() {
     <div className="compe-page">
       <h1>{estado.nombre}</h1>
       <p className="compe-page__muted">
-        Para que cuente, un compañero o profe que te haya visto tiene que validártelo.
+        Norma de honor: lo que apuntes cuenta al momento — que un compañero o profe te haya visto hacerlo.
       </p>
       {ventana && (
         <p className={`compe-ventana${ventana.cerrada ? ' compe-ventana--cerrada' : ''}`}>
@@ -125,15 +109,12 @@ export default function CompePage() {
       )}
       {err && <p className="compe-page__error">{err}</p>}
 
-      <div className="compe-tabs">
-        <button className={`compe-tab${tab === 'apuntar' ? ' compe-tab--activo' : ''}`} onClick={() => setTab('apuntar')}>Apuntar</button>
-        <button className={`compe-tab${tab === 'validar' ? ' compe-tab--activo' : ''}`} onClick={() => setTab('validar')}>
-          Validar{pendientes.length > 0 ? ` (${pendientes.length})` : ''}
-        </button>
-        {puedeRecepcion && (
+      {puedeRecepcion && (
+        <div className="compe-tabs">
+          <button className={`compe-tab${tab === 'apuntar' ? ' compe-tab--activo' : ''}`} onClick={() => setTab('apuntar')}>Apuntar</button>
           <button className={`compe-tab${tab === 'recepcion' ? ' compe-tab--activo' : ''}`} onClick={() => setTab('recepcion')}>Recepción</button>
-        )}
-      </div>
+        </div>
+      )}
 
       {tab === 'apuntar' && (
         <div className="compe-page__grid">
@@ -148,14 +129,6 @@ export default function CompePage() {
           ))}
         </div>
       )}
-      {tab === 'validar' && (
-        <div className="compe-page__grid">
-          {pendientes.length === 0 && <p className="compe-page__muted">Nada pendiente de validar ahora mismo.</p>}
-          {pendientes.map(p => (
-            <PendienteFila key={p.resultadoId} p={p} guardando={guardando === p.resultadoId} onValidar={accion => validar(p.resultadoId, accion)} />
-          ))}
-        </div>
-      )}
       {tab === 'recepcion' && puedeRecepcion && (
         <RecepcionTab bloques={estado.bloques} competitionId={estado.competitionId} />
       )}
@@ -166,7 +139,9 @@ export default function CompePage() {
 // Recepción (Ramiro, 07/11 08:46: "Eva o cualquier profe con la app en modo tablet/ordenador en
 // recepción puede apuntar los bloques por otra persona") — busca a quien lo ha hecho (cuenta
 // real o un participante rápido ya creado), o lo crea sin cuenta si viene con pase de día, y
-// apunta por él/ella. Queda validado directamente (lo ha visto quien lo apunta).
+// apunta por él/ella. En la tablet del Roco (rol "tablet") es también donde cada participante
+// busca su propio nombre y se apunta a sí mismo, sin PIN (Ramiro, 07/11: sin validación en la
+// app, cuenta al momento).
 function RecepcionTab({ bloques, competitionId }) {
   const [q, setQ] = useState('')
   const [resultados, setResultados] = useState(null)
@@ -227,7 +202,7 @@ function RecepcionTab({ bloques, competitionId }) {
     try {
       const target = seleccionado.tipo === 'rapido' ? { targetParticipanteRapidoId: seleccionado.id } : { targetUserId: seleccionado.id }
       await api('POST', '/compe/resultado', { compBlockId, ...cambios, ...target })
-      setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios, estado: 'validado' } }))
+      setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios } }))
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -239,7 +214,7 @@ function RecepcionTab({ bloques, competitionId }) {
     return (
       <div>
         <p className="compe-page__muted">
-          Apuntando por <strong>{seleccionado.nombreMostrar}</strong> — quedará validado directamente.{' '}
+          Apuntando por <strong>{seleccionado.nombreMostrar}</strong>.{' '}
           <button type="button" className="compe-intentos-link" onClick={() => { setSeleccionado(null); setMisResultados({}) }}>Elegir otra persona</button>
         </p>
         {err && <p className="compe-page__error">{err}</p>}
@@ -318,9 +293,7 @@ function BloqueFila({ bloque, resultado, guardando, onGuardar }) {
   }, [resultado?.top, resultado?.zona, resultado?.intentos])
 
   const color = COLOR_HEX[(bloque.color || '').toLowerCase()] || '#9ca3af'
-  const estadoLabel = resultado?.estado === 'validado' ? 'Validado ✓'
-    : resultado?.estado === 'rechazado' ? 'Rechazado'
-    : (resultado ? 'Pendiente de validar' : '')
+  const estadoLabel = resultado ? 'Apuntado ✓' : ''
 
   return (
     <div className="compe-bloque">
@@ -354,25 +327,6 @@ function BloqueFila({ bloque, resultado, guardando, onGuardar }) {
           >
             {guardando ? 'Guardando…' : 'Guardar'}
           </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function PendienteFila({ p, guardando, onValidar }) {
-  const color = COLOR_HEX[(p.color || '').toLowerCase()] || '#9ca3af'
-  return (
-    <div className="compe-bloque">
-      <div className="compe-bloque__numero" style={{ background: color }}>{p.numero}</div>
-      <div className="compe-bloque__cuerpo">
-        <p className="compe-pendiente__texto">
-          <strong>{p.participante || 'Alguien'}</strong> dice {p.top ? 'Top' : 'Zona'}
-          {p.intentos ? ` · ${p.intentos} intentos` : ''} · hace {p.hace}
-        </p>
-        <div className="compe-bloque__pie">
-          <button className="compe-bloque__guardar compe-bloque__guardar--rechazar" disabled={guardando} onClick={() => onValidar('rechazar')}>No lo vi así</button>
-          <button className="compe-bloque__guardar" disabled={guardando} onClick={() => onValidar('validar')}>{guardando ? '…' : 'Confirmo, lo vi'}</button>
         </div>
       </div>
     </div>

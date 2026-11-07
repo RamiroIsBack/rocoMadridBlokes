@@ -48,8 +48,9 @@ function ColeccionModoCompe({ estado }) {
         padding: '10px 12px', borderRadius: 10, marginBottom: 16,
       }}>
         🧗 <strong>Modo compe activo — {estado.nombre}</strong><br />
-        Para que cuente, un compañero o profe que te haya visto tiene que validártelo en{' '}
-        <a href="/blokes/compe" style={{ color: '#fbbf24', fontWeight: 600 }}>Compe</a>.
+        Norma de honor: apunta tus tops en{' '}
+        <a href="/blokes/compe" style={{ color: '#fbbf24', fontWeight: 600 }}>Compe</a>, que un
+        compañero o profe te haya visto hacerlos.
       </div>
       <div className="cards-grid">
         {(estado.bloques || []).map(b => (

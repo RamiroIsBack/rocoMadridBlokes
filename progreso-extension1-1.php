@@ -764,14 +764,6 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/compe/mis-resultados', array(
         'methods' => 'GET', 'callback' => 'progreso_compe_mis_resultados', 'permission_callback' => 'is_user_logged_in',
     ));
-    // Validación de buena fe (Ramiro, 07/11 09:11): cualquier compañero o profe con cuenta que
-    // lo haya visto, sin cola de jueces fija.
-    register_rest_route('progreso/v1', '/compe/pendientes-validar', array(
-        'methods' => 'GET', 'callback' => 'progreso_compe_pendientes_validar', 'permission_callback' => 'is_user_logged_in',
-    ));
-    register_rest_route('progreso/v1', '/compe/validar', array(
-        'methods' => 'POST', 'callback' => 'progreso_compe_validar', 'permission_callback' => 'is_user_logged_in',
-    ));
     // Pantalla de la tele: público, sin login (Ramiro, punto 5).
     register_rest_route('progreso/v1', '/compe/clasificacion', array(
         'methods' => 'GET', 'callback' => 'progreso_compe_clasificacion', 'permission_callback' => '__return_true',
@@ -13464,8 +13456,7 @@ function progreso_compe_apuntar_resultado($request) {
     $intentos = max(0, intval($request->get_param('intentos')));
     $target_user_id = intval($request->get_param('targetUserId'));
     // Participante rápido (Ramiro, 07/11 08:48: pase de día sin cuenta) — siempre lo crea
-    // recepción, nunca se autoapunta a sí mismo, así que siempre queda validado como el resto de
-    // "apuntado por otra persona".
+    // recepción.
     $target_rapido_id = intval($request->get_param('targetParticipanteRapidoId'));
     if (!$comp_block_id) return new WP_Error('bad_request', 'Falta compBlockId.', array('status' => 400));
     if (($target_user_id || $target_rapido_id) && !blokes_can_supervise()) {
@@ -13473,7 +13464,6 @@ function progreso_compe_apuntar_resultado($request) {
     }
     $participante_tipo = $target_rapido_id ? 'rapido' : 'user';
     $participante_id = $target_rapido_id ?: ($target_user_id ?: get_current_user_id());
-    $es_recepcion = (bool) ($target_user_id || $target_rapido_id);
 
     $block = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $comp_block_id), ARRAY_A);
     if (!$block) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
@@ -13494,16 +13484,11 @@ function progreso_compe_apuntar_resultado($request) {
         "SELECT id FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND comp_block_id = %d AND participante_tipo = %s AND participante_id = %d",
         $block['competition_id'], $comp_block_id, $participante_tipo, $participante_id
     ), ARRAY_A);
-    // Recepción (Eva/profe/socio apuntando por otra persona, cowork 07/11 11:00): lo ha visto
-    // quien lo apunta, así que queda validado directamente — no tiene sentido pedirle a otra
-    // persona que lo confirme otra vez. Un participante rápido SIEMPRE llega así (nunca se
-    // autoapunta, no tiene cuenta).
-    $datos = $es_recepcion ? array(
+    // Sin validación en la app (Ramiro, 07/11): todo lo apuntado cuenta al momento, venga del
+    // móvil, de la tablet o de recepción — lo validan los compañeros de palabra, fuera de la app.
+    $datos = array(
         'top' => $top, 'zona' => $zona ?: $top, 'intentos' => $intentos, 'apuntado_por' => get_current_user_id(),
         'estado' => 'validado', 'validado_por' => get_current_user_id(), 'validado_at' => $ahora, 'updated_at' => $ahora,
-    ) : array(
-        'top' => $top, 'zona' => $zona ?: $top, 'intentos' => $intentos, 'apuntado_por' => get_current_user_id(),
-        'estado' => 'pendiente', 'validado_por' => null, 'validado_at' => null, 'updated_at' => $ahora,
     );
     if ($existente) {
         $wpdb->update(progreso_equip_table('comp_resultados'), $datos, array('id' => intval($existente['id'])), null, array('%d'));
@@ -13619,69 +13604,6 @@ function progreso_compe_mis_resultados($request) {
         );
     }
     return rest_ensure_response(array('success' => true, 'data' => $data, 'ventana' => $ventana));
-}
-
-// GET /progreso/v1/compe/pendientes-validar?competitionId=X — resultados de OTRAS personas
-// pendientes de validar (nunca los propios: Ramiro 07/11 09:11, "otra persona con cuenta
-// confirma el top" — nadie se valida a sí mismo). Validación de buena fe: no hay cola de jueces
-// fija, cualquiera que lo haya visto puede confirmarlo.
-function progreso_compe_pendientes_validar($request) {
-    if (!is_user_logged_in()) return new WP_Error('forbidden', 'Hace falta sesión.', array('status' => 401));
-    global $wpdb;
-    $competition_id = intval($request->get_param('competitionId'));
-    if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
-    $yo = get_current_user_id();
-    $filas = $wpdb->get_results($wpdb->prepare(
-        "SELECT r.id, r.comp_block_id, r.participante_tipo, r.participante_id, r.top, r.zona, r.intentos, r.created_at,
-                b.number AS numero, b.grade_color AS color
-         FROM " . progreso_equip_table('comp_resultados') . " r
-         JOIN " . progreso_equip_table('comp_blocks') . " b ON b.id = r.comp_block_id
-         WHERE r.competition_id = %d AND r.estado = 'pendiente'
-         ORDER BY r.created_at ASC", $competition_id
-    ), ARRAY_A);
-    $es_multisite = is_multisite();
-    if ($es_multisite) switch_to_blog(1);
-    $data = array();
-    foreach ($filas as $f) {
-        if ($f['participante_tipo'] === 'user' && intval($f['participante_id']) === $yo) continue; // nunca el propio
-        $nombre = '';
-        if ($f['participante_tipo'] === 'user') {
-            $u = get_userdata(intval($f['participante_id']));
-            $nombre = $u ? ($u->first_name ?: $u->display_name) : ('#' . $f['participante_id']);
-        }
-        $data[] = array(
-            'resultadoId' => intval($f['id']), 'numero' => intval($f['numero']), 'color' => $f['color'],
-            'participante' => $nombre, 'top' => (bool) $f['top'], 'zona' => (bool) $f['zona'],
-            'intentos' => intval($f['intentos']), 'hace' => human_time_diff(strtotime($f['created_at']), current_time('timestamp')),
-        );
-    }
-    if ($es_multisite) restore_current_blog();
-    return rest_ensure_response(array('success' => true, 'data' => $data));
-}
-
-// POST /progreso/v1/compe/validar — body {resultadoId, accion: 'validar'|'rechazar'}.
-function progreso_compe_validar($request) {
-    if (!is_user_logged_in()) return new WP_Error('forbidden', 'Hace falta sesión.', array('status' => 401));
-    global $wpdb;
-    $resultado_id = intval($request->get_param('resultadoId'));
-    $accion = sanitize_key((string) $request->get_param('accion'));
-    if (!in_array($accion, array('validar', 'rechazar'), true)) {
-        return new WP_Error('bad_request', 'accion debe ser validar o rechazar.', array('status' => 400));
-    }
-    $fila = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_resultados') . " WHERE id = %d", $resultado_id), ARRAY_A);
-    if (!$fila) return new WP_Error('not_found', 'Resultado no encontrado.', array('status' => 404));
-    $yo = get_current_user_id();
-    if ($fila['participante_tipo'] === 'user' && intval($fila['participante_id']) === $yo) {
-        return new WP_Error('forbidden', 'No puedes validar tu propio resultado.', array('status' => 403));
-    }
-    if ($fila['estado'] !== 'pendiente') {
-        return new WP_Error('ya_resuelto', 'Este resultado ya estaba resuelto.', array('status' => 409));
-    }
-    $wpdb->update(progreso_equip_table('comp_resultados'), array(
-        'estado' => $accion === 'validar' ? 'validado' : 'rechazado',
-        'validado_por' => $yo, 'validado_at' => current_time('mysql'), 'updated_at' => current_time('mysql'),
-    ), array('id' => $resultado_id), array('%s', '%d', '%s', '%s'), array('%d'));
-    return rest_ensure_response(array('success' => true));
 }
 
 // GET /progreso/v1/compe/clasificacion?competitionId=X — público (pantalla de la tele,
