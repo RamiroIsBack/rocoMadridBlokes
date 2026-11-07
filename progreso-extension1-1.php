@@ -13036,11 +13036,28 @@ function progreso_equip_delete_competition($request) {
     // borrable entera): si es de prueba, borra también los blokes reales que se hubieran creado
     // para sus bloques — nunca para una compe REAL, ahí el bloke ya es contenido de verdad de la
     // app y se deja huérfano (sin competition_id) en vez de borrarlo.
+    // 🚨 CRÍTICO (cowork, 07/11 11:00): esta petición llega por el Club (blog 3) — sin
+    // switch_to_blog(1), wp_delete_post() borraba el post con ESE MISMO id pero EN EL CLUB, que
+    // no tiene nada que ver con el bloke real: ahí esos ids eran 16 PEDIDOS REALES (la mayoría
+    // completados, con factura). Comprobado con cowork: nunca se llegó a borrar ninguno porque lo
+    // pilló antes, pero el riesgo era real. Ahora: dentro de switch_to_blog(1), y solo se borra
+    // si el post es de verdad un 'blokes' (nunca a ciegas por id).
     if ($comp && $comp['is_test']) {
         $bloke_ids = $wpdb->get_col($wpdb->prepare(
             "SELECT bloke_post_id FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d AND bloke_post_id IS NOT NULL", $id
         ));
-        foreach ($bloke_ids as $bloke_id) wp_delete_post(intval($bloke_id), true);
+        if ($bloke_ids) {
+            $es_multisite = is_multisite();
+            if ($es_multisite) switch_to_blog(1);
+            foreach ($bloke_ids as $bloke_id) {
+                $bloke_id = intval($bloke_id);
+                if ($bloke_id && get_post_type($bloke_id) === 'blokes') {
+                    blokes_quitar_completions_de_bloke($bloke_id);
+                    wp_delete_post($bloke_id, true);
+                }
+            }
+            if ($es_multisite) restore_current_blog();
+        }
     }
     $wpdb->delete(progreso_equip_table('comp_resultados'), array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('comp_participantes_rapidos'), array('competition_id' => $id), array('%d'));
@@ -13124,6 +13141,42 @@ function progreso_equip_upload_comp_block_photo($request) {
 //  intentos, una sola categoría "General" por defecto — cuando Ramiro decida el formato de
 //  verdad, cambia solo blokes_compe_config(), no la forma de guardar los datos.
 // ============================================================
+
+// Al borrar una compe de PRUEBA (y con ella sus blokes), quita cualquier rastro de ese bloke en
+// completions de usuarios/placeholders — si no, la zona personal/ligas se quedan con tops de un
+// bloke que ya no existe. Llamar siempre ya dentro de switch_to_blog(1) (el caller es quien
+// decide el contexto). OJO — límite a propósito: esto NO deshace puntos de liga ni ascensos/
+// descensos de categoría que ese top de prueba pudiera haber disparado (blokes_register_top_
+// for_leagues hace swaps con otros miembros reales de la liga, y deshacerlo a ciegas podría
+// tocar la clasificación de alguien real) — si una compe de prueba llegó a afectar a eso, hay
+// que revisarlo a mano, no lo intenta este helper.
+function blokes_quitar_completions_de_bloke($post_id) {
+    global $wpdb;
+    $post_id = intval($post_id);
+    if (!$post_id) return;
+    $like = '%' . $wpdb->esc_like('i:' . $post_id . ';') . '%';
+    $user_ids = $wpdb->get_col($wpdb->prepare(
+        "SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = '_blokes_completed' AND meta_value LIKE %s", $like
+    ));
+    foreach ($user_ids as $uid) {
+        $uid = intval($uid);
+        $completed = get_user_meta($uid, '_blokes_completed', true);
+        if (is_array($completed)) {
+            update_user_meta($uid, '_blokes_completed', array_values(array_diff(array_map('intval', $completed), array($post_id))));
+        }
+        $log = get_user_meta($uid, '_blokes_completion_log', true);
+        if (is_array($log)) {
+            update_user_meta($uid, '_blokes_completion_log', array_values(array_filter($log, function($e) use ($post_id) {
+                return intval($e['postId'] ?? 0) !== $post_id;
+            })));
+        }
+        $fa = get_user_meta($uid, '_blokes_first_ascents', true);
+        if (is_array($fa)) {
+            update_user_meta($uid, '_blokes_first_ascents', array_values(array_diff(array_map('intval', $fa), array($post_id))));
+        }
+    }
+    $wpdb->delete(blokes_placeholder_completions_table(), array('post_id' => $post_id), array('%d'));
+}
 
 // Igual que blokes_toggle_completion() pero SIN alternar (marca hecho si no lo estaba ya, nunca
 // lo quita) — para cuando se apaga "modo compe" y los tops ya validados tienen que empezar a
@@ -13210,12 +13263,19 @@ function progreso_equip_set_modo_compe($request) {
             if ($es_nuevo) {
                 $post_id = wp_insert_post(array(
                     'post_type' => 'blokes', 'post_title' => 'Bloque ' . intval($b['number']),
-                    'post_status' => 'draft', 'post_content' => '',
+                    'post_status' => 'draft',
+                    'post_content' => 'Compe RocoMadrid · bloque ' . intval($b['number']),
                 ));
                 if (is_wp_error($post_id)) continue;
                 $post_por_bloque[intval($b['id'])] = $post_id;
             }
             if ($b['grade_color']) update_field('bloke_color', $b['grade_color'], $post_id);
+            // Subzona de la compe → "subsala" del bloke (mismo número, cowork 07/11 11:00). La
+            // "sala" en sí (entrada/sala_grande/...) no se toca — no sabemos a qué sala física
+            // corresponde esta compe sin que alguien lo confirme, y el valor por defecto
+            // ('entrada', puesto por blokes_toggle_completion si no hay nada) es mejor que
+            // adivinar una sala equivocada.
+            if ($b['subzone'] !== null) update_field('bloke_subsala', (string) intval($b['subzone']), $post_id);
             update_post_meta($post_id, '_comp_competition_id', $id);
             update_post_meta($post_id, '_comp_block_id', intval($b['id']));
             update_post_meta($post_id, '_comp_block_number', intval($b['number']));
@@ -13320,7 +13380,13 @@ function progreso_compe_apuntar_resultado($request) {
         "SELECT id FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND comp_block_id = %d AND participante_tipo = 'user' AND participante_id = %d",
         $block['competition_id'], $comp_block_id, $participante_id
     ), ARRAY_A);
-    $datos = array(
+    // Recepción (Eva/profe/socio apuntando por otra persona, cowork 07/11 11:00): lo ha visto
+    // quien lo apunta, así que queda validado directamente — no tiene sentido pedirle a otra
+    // persona que lo confirme otra vez.
+    $datos = $target_user_id ? array(
+        'top' => $top, 'zona' => $zona ?: $top, 'intentos' => $intentos, 'apuntado_por' => get_current_user_id(),
+        'estado' => 'validado', 'validado_por' => get_current_user_id(), 'validado_at' => $ahora, 'updated_at' => $ahora,
+    ) : array(
         'top' => $top, 'zona' => $zona ?: $top, 'intentos' => $intentos, 'apuntado_por' => get_current_user_id(),
         'estado' => 'pendiente', 'validado_por' => null, 'validado_at' => null, 'updated_at' => $ahora,
     );
@@ -13332,7 +13398,7 @@ function progreso_compe_apuntar_resultado($request) {
             'participante_tipo' => 'user', 'participante_id' => $participante_id, 'created_at' => $ahora,
         )));
     }
-    return rest_ensure_response(array('success' => true, 'data' => array('estado' => 'pendiente')));
+    return rest_ensure_response(array('success' => true, 'data' => array('estado' => $datos['estado'])));
 }
 
 // GET /progreso/v1/compe/mis-resultados?competitionId=X — lo que YA ha apuntado el usuario (o
@@ -13368,10 +13434,15 @@ function progreso_compe_mis_resultados($request) {
     }
     $ventana = null;
     if ($ventana_inicio) {
+        // $ventana_inicio viene de current_time('mysql') (hora LOCAL de Madrid) — hay que
+        // compararlo con current_time('timestamp') (el mismo desplazamiento), nunca con time()
+        // a secas (UTC real): si no, sale desplazado por el offset horario de Madrid — cowork,
+        // 07/11 11:00, "sale 149 min en vez de 90".
+        $ahora_ts = current_time('timestamp');
         $fin_ts = strtotime($ventana_inicio) + PROGRESO_COMPE_VENTANA_MINUTOS * 60;
         $ventana = array(
-            'inicio' => $ventana_inicio, 'minutosRestantes' => max(0, (int) round(($fin_ts - time()) / 60)),
-            'cerrada' => time() >= $fin_ts,
+            'inicio' => $ventana_inicio, 'minutosRestantes' => max(0, (int) round(($fin_ts - $ahora_ts) / 60)),
+            'cerrada' => $ahora_ts >= $fin_ts,
         );
     }
     return rest_ensure_response(array('success' => true, 'data' => $data, 'ventana' => $ventana));

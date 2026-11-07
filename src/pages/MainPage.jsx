@@ -19,30 +19,60 @@ const COLECCION_SLIDES = [
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 
-// Leyenda cuando el modo compe está activo (Ramiro, 07/11 09:11: validación de buena fe, sin
-// jueces fijos). Propia e independiente de la carga de blokes/completions — si esto falla no
-// debe afectar a Colección, solo no se enseña el aviso.
-function CompeLegendBanner() {
-  const [activo, setActivo] = useState(false)
+const COMPE_COLOR_HEX = {
+  verde: '#22c55e', azul: '#3b82f6', amarillo: '#eab308', rojo: '#ef4444',
+  negro: '#1f2937', blanco: '#e5e7eb', naranja: '#f97316', morado: '#8b5cf6', rosa: '#ec4899',
+}
+
+// Modo compe (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 07/11 08:46: "Colección solo con los 16
+// bloques de la compe, sin foto") — propia e independiente de la carga normal de blokes/
+// completions: si esto falla, Colección sigue funcionando como siempre, solo no sale el aviso.
+function useCompeEstado() {
+  const [estado, setEstado] = useState(null)
   useEffect(() => {
     fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/estado`)
       .then(r => r.ok ? r.json() : null)
-      .then(j => setActivo(!!j?.data?.activo))
+      .then(j => setEstado(j?.data || null))
       .catch(() => {})
   }, [])
-  if (!activo) return null
+  return estado
+}
+
+// Colección en modo compe: SOLO los 16 bloques, número y color, nunca la foto (se enseña al
+// apagar el modo) — para que nadie sepa cómo son antes de probarlos.
+function ColeccionModoCompe({ estado }) {
   return (
-    <div style={{
-      background: '#111827', color: '#fff', textAlign: 'center', fontSize: '0.85rem',
-      padding: '8px 12px', position: 'relative', zIndex: 5,
-    }}>
-      🧗 Modo compe activo — para que cuente, un compañero o profe que te haya visto tiene que validártelo en{' '}
-      <a href="/blokes/compe" style={{ color: '#fbbf24', fontWeight: 600 }}>Compe</a>.
-    </div>
+    <main className="app-main">
+      <div style={{
+        background: '#111827', color: '#fff', textAlign: 'center', fontSize: '0.9rem',
+        padding: '10px 12px', borderRadius: 10, marginBottom: 16,
+      }}>
+        🧗 <strong>Modo compe activo — {estado.nombre}</strong><br />
+        Para que cuente, un compañero o profe que te haya visto tiene que validártelo en{' '}
+        <a href="/blokes/compe" style={{ color: '#fbbf24', fontWeight: 600 }}>Compe</a>.
+      </div>
+      <div className="cards-grid">
+        {(estado.bloques || []).map(b => (
+          <a
+            key={b.compBlockId}
+            href="/blokes/compe"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              aspectRatio: '1', borderRadius: 16, textDecoration: 'none',
+              background: COMPE_COLOR_HEX[(b.color || '').toLowerCase()] || '#9ca3af',
+              color: '#fff', fontSize: '2.2rem', fontWeight: 800,
+            }}
+          >
+            {b.numero}
+          </a>
+        ))}
+      </div>
+    </main>
   )
 }
 
 function MainPage() {
+  const compeEstado = useCompeEstado()
   const { cards, loading, error } = useWordPressPosts()
   const { isLoggedIn, loginUrl, completedByMe, countOverrides, toggleCompletion, myRatings, ratingCountOverrides, rateBloke, firstAscentIds } = useCompletions()
   const [activeSala, setActiveSala] = useState('TODOS')
@@ -112,9 +142,16 @@ function MainPage() {
       })
   }, [cards, activeSala, activeColor, sortMode])
 
+  if (compeEstado?.activo) {
+    return (
+      <div className="app">
+        <ColeccionModoCompe estado={compeEstado} />
+      </div>
+    )
+  }
+
   return (
     <div className="app">
-      <CompeLegendBanner />
       {showTutorial && !loading && filteredCards.length > 0 && (
         <OnboardingTutorial
           storageKey={COLECCION_TUTORIAL_KEY}
