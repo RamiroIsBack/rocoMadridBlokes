@@ -13140,6 +13140,23 @@ function progreso_equip_delete_competition($request) {
                     blokes_quitar_completions_de_bloke($bloke_id);
                     $ok = wp_delete_post($bloke_id, true);
                     $fila_diag['borrado'] = (bool) $ok;
+                    // Cowork, 07/11 16:30: wp_delete_post() fallaba justo cuando ese MISMO id
+                    // existía como pedido/suscripción en el Club (otro blog) — algo en su cadena
+                    // de hooks (WooCommerce/Subscriptions) sigue mirando ahí aunque estemos ya en
+                    // switch_to_blog(1), y cancela el borrado por verlo "ocupado". Como aquí ya
+                    // hemos comprobado por SQL directo que el post de ESTE blog es de verdad un
+                    // 'blokes' (nunca un pedido), si wp_delete_post() no lo consigue se borra la
+                    // fila a mano (posts/postmeta/term_relationships, todo con el prefijo del blog
+                    // 1 en el que ya estamos) — sin pasar por esos hooks.
+                    if (!$ok) {
+                        $wpdb->delete($wpdb->postmeta, array('post_id' => $bloke_id), array('%d'));
+                        $wpdb->delete($wpdb->term_relationships, array('object_id' => $bloke_id), array('%d'));
+                        $wpdb->delete($wpdb->posts, array('ID' => $bloke_id), array('%d'));
+                        clean_post_cache($bloke_id);
+                        $sigue = $wpdb->get_var($wpdb->prepare("SELECT ID FROM {$wpdb->posts} WHERE ID = %d", $bloke_id));
+                        $fila_diag['borradoSql'] = ($sigue === null);
+                        $fila_diag['borrado'] = ($sigue === null);
+                    }
                 } else {
                     $fila_diag['borrado'] = false;
                     $fila_diag['motivo'] = $tipo_real ? 'post_type no es blokes' : 'no existe ese post en este blog';
@@ -13359,6 +13376,11 @@ function progreso_equip_set_modo_compe($request) {
                 if (is_wp_error($post_id)) continue;
                 $post_por_bloque[intval($b['id'])] = $post_id;
             }
+            // Los campos ACF de descripción/categoría no son post_content — sin tocarlos,
+            // ACF enseña su valor por defecto ("nuevo bloke de RocoMadrid" / TÉCNICA), que no
+            // pinta nada en un bloke de compe (cowork, 07/11 16:30).
+            update_field('bloke_description', 'Compe RocoMadrid · bloque ' . intval($b['number']), $post_id);
+            update_field('bloke_category', array(), $post_id);
             if ($b['grade_color']) update_field('bloke_color', $b['grade_color'], $post_id);
             // Subzona de la compe → "subsala" del bloke (mismo número) y "sala" real, según la
             // tabla que dio cowork (07/11 11:45, sacada de los blokes que ya existen):
@@ -13382,11 +13404,15 @@ function progreso_equip_set_modo_compe($request) {
             $wpdb->update(progreso_equip_table('comp_blocks'), array('bloke_post_id' => $post_id), array('id' => $comp_block_id), array('%d'), array('%d'));
         }
     } else {
-        // Resultados ya validados de ANTES de tocar ningún bloke (mismo contexto en que llegó la
-        // petición, las tablas de resultados son de equipación) — se aplican después, ya en
-        // blog 1, junto con el resto de lo que toca un bloke/usuario/liga.
+        // Resultados de ANTES de tocar ningún bloke (mismo contexto en que llegó la petición, las
+        // tablas de resultados son de equipación) — se aplican después, ya en blog 1, junto con
+        // el resto de lo que toca un bloke/usuario/liga. Sin validación en la app (Ramiro, 07/11
+        // 16:36): todo lo apuntado (estado siempre 'validado' desde ese cambio) cuenta al apagar,
+        // no solo "lo validado" de antes. Solo participantes con cuenta ('user') — un rápido no
+        // tiene usuario al que ponerle la completion; sus tops quedan en comp_resultados hasta
+        // que, si crea cuenta, se le asocien (pendiente, ver notas).
         $resultados = $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND estado = 'validado' AND top = 1 AND participante_tipo = 'user'", $id
+            "SELECT * FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND top = 1 AND participante_tipo = 'user'", $id
         ), ARRAY_A);
         $bloque_a_post = array();
         foreach ($blocks as $b) { $bloque_a_post[intval($b['id'])] = intval($b['bloke_post_id']); }
@@ -13656,7 +13682,17 @@ function progreso_compe_clasificacion($request) {
     $es_multisite = is_multisite();
     if ($es_multisite) switch_to_blog(1);
     $nombre_de = function($tipo, $id) use ($nombres_rapidos) {
-        if ($tipo === 'rapido') return ($nombres_rapidos[$id] ?? 'Alguien') . ' (sin cuenta)';
+        if ($tipo === 'rapido') {
+            // Público (tele/clasificación): nunca apellidos (Ramiro, punto 7) — un rápido se
+            // escribe entero en Recepción (nombre y apellidos sueltos, sin un campo separado),
+            // así que aquí solo se enseña la primera palabra + la inicial de la siguiente si hay
+            // (cowork, 07/11 16:30: "Rápido P."). En Recepción (interno) sí sale completo.
+            $partes = array_filter(explode(' ', trim($nombres_rapidos[$id] ?? 'Alguien')));
+            $partes = array_values($partes);
+            $nombre_corto = $partes[0] ?? 'Alguien';
+            if (isset($partes[1]) && $partes[1] !== '') $nombre_corto .= ' ' . mb_substr($partes[1], 0, 1) . '.';
+            return $nombre_corto . ' (sin cuenta)';
+        }
         $u = get_userdata($id);
         if (!$u) return 'Alguien';
         $nombre = $u->first_name ?: explode(' ', trim($u->display_name))[0];
