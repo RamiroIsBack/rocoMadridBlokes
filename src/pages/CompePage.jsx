@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import './CompePage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -156,6 +156,20 @@ function RecepcionTab({ bloques, competitionId }) {
   const [creando, setCreando] = useState(false)
   const [mostrarCrear, setMostrarCrear] = useState(false)
 
+  function volverABuscar() {
+    setSeleccionado(null); setMisResultados({}); setQ(''); setResultados(null)
+  }
+
+  // Tablet de autoservicio (Ramiro, 07/11 16:35/16:36): esta misma pestaña la usa tanto
+  // recepción (apunta por varios bloques de la misma persona) como cada participante en la
+  // tablet compartida — para que el siguiente no apunte sin querer en la cuenta del anterior,
+  // vuelve sola a la búsqueda a los 60 s sin tocar nada mientras hay alguien elegido.
+  useEffect(() => {
+    if (!seleccionado) return
+    const id = setTimeout(volverABuscar, 60000)
+    return () => clearTimeout(id)
+  }, [seleccionado, misResultados])
+
   async function buscar() {
     if (q.trim().length < 2) { setErr('Escribe al menos 2 caracteres.'); return }
     setBuscando(true); setErr(null)
@@ -203,6 +217,9 @@ function RecepcionTab({ bloques, competitionId }) {
       const target = seleccionado.tipo === 'rapido' ? { targetParticipanteRapidoId: seleccionado.id } : { targetUserId: seleccionado.id }
       await api('POST', '/compe/resultado', { compBlockId, ...cambios, ...target })
       setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios } }))
+      // Tras guardar, vuelve sola a la búsqueda (Ramiro, 07/11 16:35) — con un momento para que
+      // se vea «Apuntado ✓» antes de que desaparezca la pantalla de esta persona.
+      setTimeout(volverABuscar, 1200)
     } catch (e) {
       setErr(e.message)
     } finally {
