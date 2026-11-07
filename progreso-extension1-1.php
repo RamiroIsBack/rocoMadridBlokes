@@ -745,6 +745,26 @@ add_action('rest_api_init', function() {
         'methods' => 'GET', 'callback' => 'progreso_equip_get_competition_plan', 'permission_callback' => $equip_perm,
     ));
 
+    // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 7/11). Encender/apagar el
+    // modo compe es solo de un socio; estado es público (lo lee el móvil sin login para saber si
+    // hay compe activa, y más adelante la pantalla de la tele); apuntar/leer resultado necesita
+    // sesión normal.
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/modo-compe', array(
+        // Inline (no $socio_perm compartido en este cierre): progreso_equip_set_modo_compe()
+        // ya comprueba blokes_es_socio() otra vez por dentro, esto es solo para que el error
+        // salga como 403 normal de WP REST en vez de dentro de la respuesta.
+        'methods' => 'POST', 'callback' => 'progreso_equip_set_modo_compe', 'permission_callback' => function() { return blokes_es_socio(); },
+    ));
+    register_rest_route('progreso/v1', '/compe/estado', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_estado', 'permission_callback' => '__return_true',
+    ));
+    register_rest_route('progreso/v1', '/compe/resultado', array(
+        'methods' => 'POST', 'callback' => 'progreso_compe_apuntar_resultado', 'permission_callback' => 'is_user_logged_in',
+    ));
+    register_rest_route('progreso/v1', '/compe/mis-resultados', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_mis_resultados', 'permission_callback' => 'is_user_logged_in',
+    ));
+
     register_rest_route('progreso/v1', '/training/me', array(
         'methods'             => 'GET',
         'callback'            => 'progreso_get_training_me',
@@ -11227,7 +11247,13 @@ function progreso_equip_ensure_tables() {
     // o Eva puede crear y modificar tareas, y Álvaro tiene que ver quién cambió qué).
     // v12: task_types.preferred_workers (Ramiro, 5/11 21:08: pauta de quién suele hacer cada
     // tarea, sacada del histórico de Notion — editable desde Normas, no fija en código).
-    $version = '12';
+    // v13: competitions.modo_activo (interruptor manual de "modo compe", solo lo enciende/apaga
+    // un socio) y comp_blocks.bloke_post_id (enlace al bloke real de la app una vez creado) —
+    // encargo "la compe en Blokes" (Ramiro, 7/11 08:39/08:46/08:48/08:51,
+    // NOTAS_PARA_CODE_compe_en_blokes.md). Nuevas tablas comp_resultados (top/zona/intentos de
+    // cada participante por bloque, pendiente de validar) y comp_participantes_rapidos (gente
+    // sin cuenta de Blokes dada de alta desde recepción).
+    $version = '13';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -11322,6 +11348,7 @@ function progreso_equip_ensure_tables() {
         comp_end_date date                NULL,
         lead_weeks    tinyint(3)          NOT NULL DEFAULT 3,
         is_test       tinyint(1)          NOT NULL DEFAULT 0,
+        modo_activo   tinyint(1)          NOT NULL DEFAULT 0,
         created_at    datetime            NOT NULL,
         PRIMARY KEY (id)
     ) {$charset};");
@@ -11344,6 +11371,51 @@ function progreso_equip_ensure_tables() {
         photo_url      varchar(255)        NOT NULL DEFAULT '',
         tested         tinyint(1)          NOT NULL DEFAULT 0,
         status         varchar(20)         NOT NULL DEFAULT 'planeado',
+        bloke_post_id  bigint(20) UNSIGNED NULL,
+        PRIMARY KEY (id),
+        KEY competition_id (competition_id)
+    ) {$charset};");
+
+    // Resultado de UN participante en UN bloque de compe — top/zona/intentos, pendiente de
+    // validar por un juez/profe hasta que alguien lo confirme. participante_tipo distingue un
+    // usuario real de Blokes de un "participante rápido" sin cuenta (mismo patrón que
+    // wp_blokes_placeholder_completions ya usa para alumnos sin cuenta).
+    dbDelta("CREATE TABLE " . progreso_equip_table('comp_resultados') . " (
+        id                bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        competition_id    bigint(20) UNSIGNED NOT NULL,
+        comp_block_id     bigint(20) UNSIGNED NOT NULL,
+        participante_tipo varchar(12)         NOT NULL DEFAULT 'user',
+        participante_id   bigint(20) UNSIGNED NOT NULL,
+        top               tinyint(1)          NOT NULL DEFAULT 0,
+        zona              tinyint(1)          NOT NULL DEFAULT 0,
+        intentos          smallint(5)         NOT NULL DEFAULT 0,
+        apuntado_por      bigint(20) UNSIGNED NULL,
+        estado            varchar(20)         NOT NULL DEFAULT 'pendiente',
+        validado_por      bigint(20) UNSIGNED NULL,
+        validado_at       datetime            NULL,
+        created_at        datetime            NOT NULL,
+        updated_at        datetime            NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY resultado_unico (competition_id, comp_block_id, participante_tipo, participante_id),
+        KEY competition_id (competition_id),
+        KEY estado (estado)
+    ) {$charset};");
+
+    // Gente sin cuenta de Blokes dada de alta desde recepción (pase de día, no socio) —
+    // linked_user_id/linked_at: si más tarde se crea una cuenta con el mismo email/teléfono, se
+    // enlazan sus resultados (mismo patrón que wp_blokes_placeholder_alumnos).
+    dbDelta("CREATE TABLE " . progreso_equip_table('comp_participantes_rapidos') . " (
+        id             bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        competition_id bigint(20) UNSIGNED NOT NULL,
+        nombre         varchar(190)        NOT NULL,
+        telefono       varchar(30)         NOT NULL DEFAULT '',
+        email          varchar(190)        NOT NULL DEFAULT '',
+        categoria      varchar(60)         NOT NULL DEFAULT 'General',
+        pin            varchar(4)          NOT NULL DEFAULT '',
+        linked_user_id bigint(20) UNSIGNED NULL,
+        linked_at      datetime            NULL,
+        created_by     varchar(100)        NOT NULL DEFAULT '',
+        created_at     datetime            NOT NULL,
         PRIMARY KEY (id),
         KEY competition_id (competition_id)
     ) {$charset};");
@@ -12938,6 +13010,18 @@ function progreso_equip_delete_competition($request) {
         $id
     )) : array();
 
+    // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md, punto 8: compe de prueba
+    // borrable entera): si es de prueba, borra también los blokes reales que se hubieran creado
+    // para sus bloques — nunca para una compe REAL, ahí el bloke ya es contenido de verdad de la
+    // app y se deja huérfano (sin competition_id) en vez de borrarlo.
+    if ($comp && $comp['is_test']) {
+        $bloke_ids = $wpdb->get_col($wpdb->prepare(
+            "SELECT bloke_post_id FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d AND bloke_post_id IS NOT NULL", $id
+        ));
+        foreach ($bloke_ids as $bloke_id) wp_delete_post(intval($bloke_id), true);
+    }
+    $wpdb->delete(progreso_equip_table('comp_resultados'), array('competition_id' => $id), array('%d'));
+    $wpdb->delete(progreso_equip_table('comp_participantes_rapidos'), array('competition_id' => $id), array('%d'));
     $wpdb->delete($tasks_table, array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('comp_blocks'), array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('competitions'), array('id' => $id), array('%d'));
@@ -13009,6 +13093,249 @@ function progreso_equip_upload_comp_block_photo($request) {
 
     $wpdb->update(progreso_equip_table('comp_blocks'), array('photo_url' => $url), array('id' => $id), array('%s'), array('%d'));
     return rest_ensure_response(array('success' => true, 'photoUrl' => $url));
+}
+
+// ============================================================
+//  "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 7/11 08:39 en adelante).
+//  Puntuación/categorías quedan deliberadamente SIN fijar en código (punto final, 08:51): de
+//  momento se guarda top/zona/intentos de cada uno y se ordena por nº de tops y luego menos
+//  intentos, una sola categoría "General" por defecto — cuando Ramiro decida el formato de
+//  verdad, cambia solo blokes_compe_config(), no la forma de guardar los datos.
+// ============================================================
+
+// Igual que blokes_toggle_completion() pero SIN alternar (marca hecho si no lo estaba ya, nunca
+// lo quita) — para cuando se apaga "modo compe" y los tops ya validados tienen que empezar a
+// contar en la zona personal y en las ligas como cualquier bloke normal, sin que nadie tenga que
+// volver a tocarlos uno a uno.
+function blokes_marcar_completado_si_no_estaba($user_id, $post_id) {
+    $saved = get_user_meta($user_id, '_blokes_completed', true);
+    $completed_ids = is_array($saved) ? array_map('intval', $saved) : array();
+    if (in_array(intval($post_id), $completed_ids, true)) return; // ya contaba, no duplicar
+    $completed_ids[] = intval($post_id);
+    $log = get_user_meta($user_id, '_blokes_completion_log', true);
+    if (!is_array($log)) $log = array();
+    $color = sanitize_text_field(get_field('bloke_color', $post_id) ?: 'green');
+    $sala  = sanitize_text_field(get_field('bloke_sala', $post_id) ?: 'entrada');
+    $log[] = array('postId' => intval($post_id), 'color' => $color, 'sala' => $sala, 'timestamp' => current_time('c'));
+    update_user_meta($user_id, '_blokes_completed', $completed_ids);
+    update_user_meta($user_id, '_blokes_completion_log', $log);
+    $count = (int) get_post_meta($post_id, '_bloke_completion_count', true) + 1;
+    update_post_meta($post_id, '_bloke_completion_count', $count);
+    if ($count === 1) {
+        $u = get_userdata($user_id);
+        $display_name = $u ? $u->display_name : '';
+        $first_name = explode(' ', trim($display_name))[0];
+        update_post_meta($post_id, '_bloke_first_ascent', array(
+            'user_id' => $user_id, 'name' => $first_name ?: $display_name, 'timestamp' => current_time('c'),
+        ));
+        $my_fa = get_user_meta($user_id, '_blokes_first_ascents', true);
+        if (!is_array($my_fa)) $my_fa = array();
+        $my_fa[] = intval($post_id);
+        update_user_meta($user_id, '_blokes_first_ascents', $my_fa);
+    }
+    blokes_register_top_for_leagues($user_id, intval($post_id));
+}
+
+// POST /equipacion/competitions/{id}/modo-compe — body {activo: bool}. Solo un socio (Ramiro,
+// 07/11 08:46: "lo enciende/apaga un socio"). Al ENCENDER: crea (si no existía ya) un bloke real
+// por cada uno de los 16 comp_blocks, oculto (post_status 'draft') hasta que alguien lo publique
+// — "Colección solo con los 16, sin foto" se resuelve en el frontend (punto aparte), aquí solo se
+// prepara el bloke sin ninguna foto puesta todavía (se guarda aparte, pendiente). Al APAGAR: los
+// 16 blokes pasan a 'publish' de verdad (ya son blokes normales de la colección, con su foto de
+// verdad si la había) y cualquier resultado YA VALIDADO de esta compe se traspasa a completions
+// normales (zona personal + ligas) — lo que siga "pendiente" o "rechazado" no cuenta, igual que
+// antes de apagar el modo.
+function progreso_equip_set_modo_compe($request) {
+    if (!blokes_es_socio()) return new WP_Error('forbidden', 'Solo un socio puede encender o apagar el modo compe.', array('status' => 403));
+    global $wpdb;
+    $id = intval($request['id']);
+    $activo = (bool) $request->get_param('activo');
+    $simular = (bool) $request->get_param('simular');
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $id), ARRAY_A);
+    if (!$comp) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+    if ((bool) $comp['modo_activo'] === $activo) {
+        return rest_ensure_response(array('success' => true, 'data' => array('modoActivo' => $activo, 'aviso' => 'Ya estaba así.')));
+    }
+    $blocks = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $id
+    ), ARRAY_A);
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'modoActivoDespues' => $activo, 'bloques' => count($blocks),
+            'aviso' => $activo
+                ? 'Se crearán (o reutilizarán) ' . count($blocks) . ' blokes ocultos, uno por bloque de la compe.'
+                : 'Los blokes de la compe pasarán a publicados (colección normal) y los resultados ya validados contarán en ligas/zona personal.',
+        )));
+    }
+
+    // Esta petición llega por el subsitio Club (donde viven las tablas de equipación), pero los
+    // blokes de verdad (post_type 'blokes'), sus completions y las ligas viven en el subsitio
+    // Principal (blog 1) — multisite real, tablas con prefijo distinto. Todo lo que toca un
+    // bloke/usuario/liga tiene que hacerse dentro de switch_to_blog(1); todo lo que toca las
+    // tablas de progreso_equip_table() tiene que hacerse FUERA (en el contexto en que llegó la
+    // petición), nunca mezclado, o se escribe en el prefijo equivocado sin que salte ningún error.
+    $es_multisite = is_multisite();
+    $bloques_tocados = array();
+    if ($activo) {
+        // Fase 1 (blog 1): crear/actualizar cada bloke real. Solo se recogen aquí los datos del
+        // bloke — nada de progreso_equip_table() dentro de este switch.
+        if ($es_multisite) switch_to_blog(1);
+        $post_por_bloque = array(); // comp_block_id => post_id (solo los NUEVOS, para guardar luego)
+        foreach ($blocks as $b) {
+            $post_id = intval($b['bloke_post_id']);
+            $es_nuevo = !$post_id || !get_post($post_id);
+            if ($es_nuevo) {
+                $post_id = wp_insert_post(array(
+                    'post_type' => 'blokes', 'post_title' => 'Bloque ' . intval($b['number']),
+                    'post_status' => 'draft', 'post_content' => '',
+                ));
+                if (is_wp_error($post_id)) continue;
+                $post_por_bloque[intval($b['id'])] = $post_id;
+            }
+            if ($b['grade_color']) update_field('bloke_color', $b['grade_color'], $post_id);
+            update_post_meta($post_id, '_comp_competition_id', $id);
+            update_post_meta($post_id, '_comp_block_id', intval($b['id']));
+            update_post_meta($post_id, '_comp_block_number', intval($b['number']));
+            if ($b['photo_url']) update_post_meta($post_id, '_comp_photo_pendiente', $b['photo_url']);
+            $bloques_tocados[] = $post_id;
+        }
+        if ($es_multisite) restore_current_blog();
+        // Fase 2 (de vuelta al contexto de la petición): guardar el id del bloke nuevo en
+        // comp_blocks — nunca dentro del switch_to_blog de arriba.
+        foreach ($post_por_bloque as $comp_block_id => $post_id) {
+            $wpdb->update(progreso_equip_table('comp_blocks'), array('bloke_post_id' => $post_id), array('id' => $comp_block_id), array('%d'), array('%d'));
+        }
+    } else {
+        // Resultados ya validados de ANTES de tocar ningún bloke (mismo contexto en que llegó la
+        // petición, las tablas de resultados son de equipación) — se aplican después, ya en
+        // blog 1, junto con el resto de lo que toca un bloke/usuario/liga.
+        $resultados = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND estado = 'validado' AND top = 1 AND participante_tipo = 'user'", $id
+        ), ARRAY_A);
+        $bloque_a_post = array();
+        foreach ($blocks as $b) { $bloque_a_post[intval($b['id'])] = intval($b['bloke_post_id']); }
+
+        if ($es_multisite) switch_to_blog(1);
+        foreach ($blocks as $b) {
+            $post_id = intval($b['bloke_post_id']);
+            if (!$post_id) continue;
+            $post = get_post($post_id);
+            if ($post && $post->post_status !== 'publish') {
+                wp_update_post(array('ID' => $post_id, 'post_status' => 'publish'));
+            }
+            $photo_pendiente = get_post_meta($post_id, '_comp_photo_pendiente', true);
+            if ($photo_pendiente) {
+                $attachment_id = attachment_url_to_postid($photo_pendiente);
+                if ($attachment_id) set_post_thumbnail($post_id, $attachment_id);
+                delete_post_meta($post_id, '_comp_photo_pendiente');
+            }
+            $bloques_tocados[] = $post_id;
+        }
+        // Resultados ya validados → completions normales (zona personal + ligas). Nunca los
+        // pendientes/rechazados: igual que antes de apagar el modo, esos no cuentan para nada.
+        foreach ($resultados as $r) {
+            $post_id = $bloque_a_post[intval($r['comp_block_id'])] ?? 0;
+            if ($post_id) blokes_marcar_completado_si_no_estaba(intval($r['participante_id']), $post_id);
+        }
+        if ($es_multisite) restore_current_blog();
+    }
+
+    $wpdb->update(progreso_equip_table('competitions'), array('modo_activo' => $activo ? 1 : 0), array('id' => $id), array('%d'), array('%d'));
+    return rest_ensure_response(array('success' => true, 'data' => array('modoActivo' => $activo, 'bloques' => $bloques_tocados)));
+}
+
+// GET /progreso/v1/compe/estado — público (sin login), lo usa tanto el móvil para saber si
+// mostrar "apuntar resultados" como (más adelante) la pantalla de la tele. Nunca enseña la foto
+// de los bloques (eso solo se revela al apagar el modo compe) ni ningún dato de quién ha hecho
+// qué — eso va aparte, con sesión, en el endpoint de apuntar/leer resultados.
+function progreso_compe_estado($request) {
+    global $wpdb;
+    $comp = $wpdb->get_row(
+        "SELECT * FROM " . progreso_equip_table('competitions') . " WHERE modo_activo = 1 ORDER BY id DESC LIMIT 1", ARRAY_A
+    );
+    if (!$comp) return rest_ensure_response(array('success' => true, 'data' => array('activo' => false)));
+    $blocks = $wpdb->get_results($wpdb->prepare(
+        "SELECT id, number, grade_color, bloke_post_id FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $comp['id']
+    ), ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'activo' => true, 'competitionId' => intval($comp['id']), 'nombre' => $comp['name'],
+        'bloques' => array_map(function($b) {
+            return array('compBlockId' => intval($b['id']), 'blokePostId' => intval($b['bloke_post_id']), 'numero' => intval($b['number']), 'color' => $b['grade_color']);
+        }, $blocks),
+    )));
+}
+
+// POST /progreso/v1/compe/resultado — apunta/corrige el top/zona/intentos de UN bloque. Con
+// sesión normal, siempre el propio usuario. targetUserId (como en blokes_toggle_completion) es
+// para recepción apuntando por otra persona (Ramiro, 07/11 08:46) — exige
+// blokes_can_supervise(), igual que el resto de "actuar en nombre de alguien". Cualquier cambio
+// vuelve a dejarlo en "pendiente" — editar algo ya validado necesita que el juez lo vuelva a
+// mirar, nunca se queda validado con datos distintos de los que vio.
+function progreso_compe_apuntar_resultado($request) {
+    if (!is_user_logged_in()) return new WP_Error('forbidden', 'Hace falta sesión.', array('status' => 401));
+    global $wpdb;
+    $comp_block_id = intval($request->get_param('compBlockId'));
+    $top      = $request->get_param('top') ? 1 : 0;
+    $zona     = $request->get_param('zona') ? 1 : 0;
+    $intentos = max(0, intval($request->get_param('intentos')));
+    $target_user_id = intval($request->get_param('targetUserId'));
+    if (!$comp_block_id) return new WP_Error('bad_request', 'Falta compBlockId.', array('status' => 400));
+    if ($target_user_id && !blokes_can_supervise()) {
+        return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
+    }
+    $participante_id = $target_user_id ?: get_current_user_id();
+
+    $block = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $comp_block_id), ARRAY_A);
+    if (!$block) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT modo_activo FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $block['competition_id']), ARRAY_A);
+    if (!$comp || !$comp['modo_activo']) {
+        return new WP_Error('modo_inactivo', 'El modo compe no está activo para este bloque.', array('status' => 409));
+    }
+
+    $ahora = current_time('mysql');
+    $existente = $wpdb->get_row($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND comp_block_id = %d AND participante_tipo = 'user' AND participante_id = %d",
+        $block['competition_id'], $comp_block_id, $participante_id
+    ), ARRAY_A);
+    $datos = array(
+        'top' => $top, 'zona' => $zona ?: $top, 'intentos' => $intentos, 'apuntado_por' => get_current_user_id(),
+        'estado' => 'pendiente', 'validado_por' => null, 'validado_at' => null, 'updated_at' => $ahora,
+    );
+    if ($existente) {
+        $wpdb->update(progreso_equip_table('comp_resultados'), $datos, array('id' => intval($existente['id'])), null, array('%d'));
+    } else {
+        $wpdb->insert(progreso_equip_table('comp_resultados'), array_merge($datos, array(
+            'competition_id' => $block['competition_id'], 'comp_block_id' => $comp_block_id,
+            'participante_tipo' => 'user', 'participante_id' => $participante_id, 'created_at' => $ahora,
+        )));
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array('estado' => 'pendiente')));
+}
+
+// GET /progreso/v1/compe/mis-resultados?competitionId=X — lo que YA ha apuntado el usuario (o
+// subjectUserId, misma regla de supervisión) en esta compe, para que el móvil pinte cada bloque
+// con lo que ya tiene puesto en vez de partir siempre de cero.
+function progreso_compe_mis_resultados($request) {
+    if (!is_user_logged_in()) return new WP_Error('forbidden', 'Hace falta sesión.', array('status' => 401));
+    global $wpdb;
+    $competition_id = intval($request->get_param('competitionId'));
+    $subject_user_id = intval($request->get_param('subjectUserId'));
+    if ($subject_user_id && !blokes_can_supervise()) return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
+    $user_id = $subject_user_id ?: get_current_user_id();
+    if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
+    $filas = $wpdb->get_results($wpdb->prepare(
+        "SELECT comp_block_id, top, zona, intentos, estado FROM " . progreso_equip_table('comp_resultados') . "
+         WHERE competition_id = %d AND participante_tipo = 'user' AND participante_id = %d",
+        $competition_id, $user_id
+    ), ARRAY_A);
+    $data = array();
+    foreach ($filas as $f) {
+        $data[intval($f['comp_block_id'])] = array(
+            'top' => (bool) $f['top'], 'zona' => (bool) $f['zona'], 'intentos' => intval($f['intentos']), 'estado' => $f['estado'],
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $data));
 }
 
 function progreso_equip_monday_of($date) {

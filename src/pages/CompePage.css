@@ -1,0 +1,48 @@
+.compe-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 16px 80px;
+}
+.compe-page--loading { padding: 40px 16px; text-align: center; color: #6b7280; }
+.compe-page h1 { font-size: 1.4rem; margin-bottom: 4px; }
+.compe-page__muted { color: #6b7280; font-size: 0.9rem; margin-bottom: 16px; }
+.compe-page__error { color: #ef4444; font-size: 0.9rem; margin-bottom: 12px; }
+.compe-page__login {
+  display: inline-block; margin-top: 8px; padding: 10px 18px; border-radius: 8px;
+  background: #111827; color: #fff; text-decoration: none; font-weight: 600;
+}
+
+.compe-page__grid { display: flex; flex-direction: column; gap: 10px; }
+
+.compe-bloque {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px;
+}
+.compe-bloque__numero {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: 1.05rem;
+}
+.compe-bloque__cuerpo { flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; }
+.compe-bloque__toggles { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+.compe-toggle {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px;
+  border-radius: 999px; border: 1px solid #d1d5db; font-size: 0.9rem; cursor: pointer; user-select: none;
+}
+.compe-toggle--on { background: #16a34a; color: #fff; border-color: #16a34a; }
+.compe-toggle input { margin: 0; }
+
+.compe-intentos { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: #374151; }
+.compe-intentos input { width: 52px; padding: 4px 6px; border: 1px solid #d1d5db; border-radius: 6px; }
+
+.compe-bloque__pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.compe-estado { font-size: 0.8rem; color: #6b7280; }
+.compe-estado--validado { color: #16a34a; font-weight: 600; }
+.compe-estado--rechazado { color: #ef4444; font-weight: 600; }
+
+.compe-bloque__guardar {
+  padding: 6px 14px; border-radius: 8px; border: none; background: #111827; color: #fff;
+  font-weight: 600; font-size: 0.85rem; cursor: pointer;
+}
+.compe-bloque__guardar:disabled { opacity: 0.6; cursor: default; }

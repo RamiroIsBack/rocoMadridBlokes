@@ -18,6 +18,7 @@ import TimeOffPage from './pages/TimeOffPage'
 import LeaguesPage from './pages/LeaguesPage'
 import EventosPage from './pages/EventosPage'
 import CalendarioPage from './pages/CalendarioPage'
+import CompePage from './pages/CompePage'
 import { setVerComo, clearVerComo } from './utils/verComo'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
@@ -293,6 +294,9 @@ export default function App() {
               <li className="app-nav__item">
                 <NavLink to="/ligas" className="app-nav__link">Ligas</NavLink>
               </li>
+              <li className="app-nav__item">
+                <NavLink to="/compe" className="app-nav__link">Compe</NavLink>
+              </li>
               {['profesor', 'gestion', 'socio'].includes(sd.userRole) && (
                 <>
                   <li className="app-nav__item">
@@ -355,6 +359,7 @@ export default function App() {
             <Route path="/supervision" element={<SupervisionPage />} />
             <Route path="/playground" element={<PlaygroundPage />} />
             <Route path="/ligas" element={<LeaguesPage />} />
+            <Route path="/compe" element={<CompePage />} />
             <Route path="/eventos" element={<EventosPage />} />
             <Route path="/calendario" element={<CalendarioPage />} />
           </Routes>
