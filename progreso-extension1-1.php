@@ -4201,14 +4201,34 @@ function superadmin_gestion_grupos($request) {
 // de `_step_form_selections` (meta técnica interna). Cowork, 07/11 08:15: superadmin_gestion_
 // cambiar_grupo() solo cambiaba la variación y `_step_form_selections`, así que la línea seguía
 // ENSEÑANDO el horario viejo (y esa es la meta que se copia a cada renovación, así que también
-// salía mal en la factura). $clave_dia_vieja/$clave_dia_nueva son 'pa_dias' o 'pa_dia-suelto'.
-function blokes_gestion_actualizar_meta_visible_grupo($item, $clave_dia_vieja, $clave_dia_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo) {
-    $label_dia_vieja = wc_attribute_label($clave_dia_vieja);
-    $label_dia_nueva = wc_attribute_label($clave_dia_nueva);
-    if ($label_dia_nueva !== $label_dia_vieja) $item->delete_meta_data($label_dia_vieja);
-    $item->update_meta_data($label_dia_nueva, $dia_nuevo);
-    $item->update_meta_data(wc_attribute_label('pa_horario'), $horario_nuevo);
+// salía mal en la factura).
+// WooCommerce guarda los atributos de la variación con el SLUG del atributo como clave y el
+// slug del término como valor (`pa_horario` = `1930-2100`) y él mismo pone la etiqueta «Horario»
+// al enseñarlos. La versión de 2baec8d escribía con la etiqueta como clave («Día», «Horario») y
+// la línea salía con el horario viejo Y el nuevo (cowork, 07/11): aquí se borran esas claves
+// sueltas y los `pa_*` se copian de la variación que YA tiene el item — así que hay que llamarla
+// después de set_variation_id(). También rehace `_step_form_display` desde `_step_form_selections`.
+function blokes_gestion_actualizar_meta_visible_grupo($item, $edad_nuevo) {
+    $taxonomias = array('pa_dias', 'pa_dia-suelto', 'pa_horario', 'pa_edad');
+    foreach ($taxonomias as $tax) {
+        $label = wc_attribute_label($tax);
+        if ($label !== $tax) $item->delete_meta_data($label);
+    }
+    $variacion = wc_get_product($item->get_variation_id());
+    if ($variacion) {
+        $attrs = $variacion->get_attributes();
+        foreach ($taxonomias as $tax) {
+            if (!array_key_exists($tax, $attrs)) $item->delete_meta_data($tax);           // p. ej. pa_dias al pasar a 1 día
+            elseif ((string) $attrs[$tax] !== '') $item->update_meta_data($tax, $attrs[$tax]); // '' = «cualquiera»: se deja lo que hubiera
+        }
+    }
     $item->update_meta_data(__('Student age', 'neve-child'), $edad_nuevo);
+
+    $selecciones = $item->get_meta('_step_form_selections', true);
+    if (is_string($selecciones)) $selecciones = json_decode($selecciones, true); // asignador viejo de wp-admin
+    if (is_array($selecciones) && $selecciones && class_exists('RocoMadrid_SF_Ajax')) {
+        $item->update_meta_data('_step_form_display', RocoMadrid_SF_Ajax::format_selections_for_display($selecciones));
+    }
 }
 
 function blokes_gestion_log_table() {
@@ -8491,8 +8511,9 @@ function superadmin_gestion_cambiar_grupo($request) {
         $nuevas_selecciones[$clave_dia_nueva] = $dia_nuevo;
         $nuevas_selecciones['pa_horario'] = $horario_nuevo;
         $nuevas_selecciones['pa_edad']    = $edad_nuevo;
+        if (isset($nuevas_selecciones['frequency'])) $nuevas_selecciones['frequency'] = $frecuencia;
         $item->add_meta_data('_step_form_selections', $nuevas_selecciones, true);
-        blokes_gestion_actualizar_meta_visible_grupo($item, $clave_dia_actual, $clave_dia_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo);
+        blokes_gestion_actualizar_meta_visible_grupo($item, $edad_nuevo);
         $item->set_subtotal($precio_nuevo);
         $item->set_total($precio_nuevo);
         $item->save();
@@ -8509,47 +8530,63 @@ function superadmin_gestion_cambiar_grupo($request) {
     return rest_ensure_response(array('success' => true, 'data' => array('subId' => $sub_id, 'antes' => $antes, 'despues' => $despues)));
 }
 
-// Corrige la meta visible (Día/Horario/Edad del alumno) de toda suscripción que ya pasó por
-// "Cambiar de grupo" ANTES de este arreglo (cowork, 07/11 08:15) — usa el "después" ya guardado
-// en blokes_gestion_log para cada una (el último cambio de cada sub, si hubo más de uno). No
-// toca precio, variación ni _step_form_selections (ya estaban bien); solo la meta visible que
-// se enseña en la línea del pedido y se copia a cada renovación/factura.
+// Corrige la meta visible (Día/Horario/Edad del alumno) de toda suscripción que pasó por
+// "Cambiar de grupo" o "Crear cliente en la web" (cowork, 07/11) — usa el "después" ya guardado
+// en blokes_gestion_log (el último de cada sub). Borra las metas sueltas «Día»/«Horario» que
+// dejó la primera versión de esta migración, deja los `pa_*` con el slug de la variación y rehace
+// `_step_form_display`. No toca precio ni variación. En las altas de "Crear cliente" también
+// arregla la línea del pedido inicial y pone `_step_form_selections` en la suscripción si falta
+// (no se guardaba, ver superadmin_gestion_crear_cliente). Idempotente.
 function superadmin_cambiar_grupo_arreglar_meta_visible($request) {
     if (!function_exists('wcs_get_subscription') || !class_exists('RocoMadrid_Step_Form')) {
         return new WP_Error('class_not_found', 'WooCommerce Subscriptions o RocoMadrid Step Form no disponibles.', array('status' => 503));
     }
     global $wpdb;
     $tabla = blokes_gestion_log_table();
-    $filas = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$tabla} WHERE accion = %s ORDER BY id ASC", 'cambiar_grupo'), ARRAY_A);
+    $filas = $wpdb->get_results("SELECT * FROM {$tabla} WHERE accion IN ('cambiar_grupo', 'alta_cliente') ORDER BY id ASC", ARRAY_A);
     $ultimo_por_sub = array();
     foreach ($filas as $fila) { $ultimo_por_sub[intval($fila['sub_id'])] = $fila; } // el más reciente pisa al anterior
 
-    $product_classes_id = RocoMadrid_Step_Form::product_tarifas_id();
-    $product_single_id  = RocoMadrid_Step_Form::product_dias_sueltos_id();
+    $product_classes_id = intval(RocoMadrid_Step_Form::product_tarifas_id());
+    $product_single_id  = intval(RocoMadrid_Step_Form::product_dias_sueltos_id());
+    $item_de_clase = function($objeto) use ($product_classes_id, $product_single_id) {
+        foreach ($objeto->get_items() as $it) {
+            $pid = intval($it->get_product_id());
+            if ($pid === $product_classes_id || $pid === $product_single_id) return $it;
+        }
+        return null;
+    };
     $resultado = array();
     foreach ($ultimo_por_sub as $sub_id => $fila) {
         $despues = json_decode($fila['despues'], true);
         if (!is_array($despues) || empty($despues['dia']) || empty($despues['horario'])) {
-            $resultado[] = array('subId' => $sub_id, 'error' => 'log sin dia/horario'); continue;
+            // Altas de abono (sin día/horario): no tienen meta de grupo que arreglar
+            if ($fila['accion'] !== 'alta_cliente') $resultado[] = array('subId' => $sub_id, 'error' => 'log sin dia/horario');
+            continue;
         }
         $sub = wcs_get_subscription($sub_id);
         if (!$sub) { $resultado[] = array('subId' => $sub_id, 'error' => 'suscripción no encontrada'); continue; }
-        $item = null;
-        foreach ($sub->get_items() as $it) {
-            $pid = intval($it->get_product_id());
-            if ($pid === intval($product_classes_id) || $pid === intval($product_single_id)) { $item = $it; break; }
-        }
+        $item = $item_de_clase($sub);
         if (!$item) { $resultado[] = array('subId' => $sub_id, 'error' => 'sin línea de clases/días sueltos'); continue; }
 
-        $es_dias_sueltos = (intval($item->get_product_id()) === intval($product_single_id));
-        $clave_dia  = $es_dias_sueltos ? 'pa_dia-suelto' : 'pa_dias';
-        $otra_clave = $es_dias_sueltos ? 'pa_dias' : 'pa_dia-suelto';
-        $edad = $despues['edad'] ?? 'Adultos';
-        blokes_gestion_sin_emails(function() use ($item, $clave_dia, $otra_clave, $despues, $edad) {
-            blokes_gestion_actualizar_meta_visible_grupo($item, $otra_clave, $clave_dia, $despues['dia'], $despues['horario'], $edad);
-            $item->save();
+        $edad  = $despues['edad'] ?? 'Adultos';
+        $items = array($item);
+        if ($fila['accion'] === 'alta_cliente') {
+            $orden = !empty($despues['orderId']) ? wc_get_order(intval($despues['orderId'])) : null;
+            $item_orden = $orden ? $item_de_clase($orden) : null;
+            if ($item_orden) $items[] = $item_orden;
+        }
+        blokes_gestion_sin_emails(function() use ($items, $despues, $edad) {
+            foreach ($items as $it) {
+                if (!$it->get_meta('_step_form_selections', true)) {
+                    $clave_dia = (strpos($despues['dia'], '-') !== false) ? 'pa_dias' : 'pa_dia-suelto';
+                    $it->add_meta_data('_step_form_selections', array($clave_dia => $despues['dia'], 'pa_horario' => $despues['horario'], 'pa_edad' => $edad), true);
+                }
+                blokes_gestion_actualizar_meta_visible_grupo($it, $edad);
+                $it->save();
+            }
         });
-        $resultado[] = array('subId' => $sub_id, 'dia' => $despues['dia'], 'horario' => $despues['horario'], 'edad' => $edad);
+        $resultado[] = array('subId' => $sub_id, 'accion' => $fila['accion'], 'dia' => $despues['dia'], 'horario' => $despues['horario'], 'edad' => $edad);
     }
     return rest_ensure_response(array('success' => true, 'data' => $resultado));
 }
@@ -8896,7 +8933,7 @@ function superadmin_gestion_alta_cliente($request) {
             $selecciones = array($clave_dia => $dia_norm, 'pa_horario' => $horario_norm, 'pa_edad' => $edad_norm);
             $item_pedido = $order->get_item($item_pedido_id);
             $item_pedido->add_meta_data('_step_form_selections', $selecciones, true);
-            blokes_gestion_actualizar_meta_visible_grupo($item_pedido, $clave_dia, $clave_dia, $dia_norm, $horario_norm, $edad_norm);
+            blokes_gestion_actualizar_meta_visible_grupo($item_pedido, $edad_norm);
             $item_pedido->save();
         }
         $order->set_address($billing, 'billing');
@@ -8916,9 +8953,12 @@ function superadmin_gestion_alta_cliente($request) {
         if ($tipo === 'clase') {
             $clave_dia = strpos($dia_norm, '-') !== false ? 'pa_dias' : 'pa_dia-suelto';
             $selecciones = array($clave_dia => $dia_norm, 'pa_horario' => $horario_norm, 'pa_edad' => $edad_norm);
-            $subscription->get_item($item_sub)->add_meta_data('_step_form_selections', $selecciones, true);
-            blokes_gestion_actualizar_meta_visible_grupo($subscription->get_item($item_sub), $clave_dia, $clave_dia, $dia_norm, $horario_norm, $edad_norm);
-            $subscription->get_item($item_sub)->save();
+            // Un solo objeto: get_item() recarga de la BD en cada llamada, así que añadir la meta
+            // en uno y guardar otro la perdía.
+            $item_sub_obj = $subscription->get_item($item_sub);
+            $item_sub_obj->add_meta_data('_step_form_selections', $selecciones, true);
+            blokes_gestion_actualizar_meta_visible_grupo($item_sub_obj, $edad_norm);
+            $item_sub_obj->save();
         }
         $subscription->set_address($billing, 'billing');
 
