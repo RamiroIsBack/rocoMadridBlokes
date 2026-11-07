@@ -906,6 +906,14 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_cambiar_grupo',
         'permission_callback' => $sa_perm,
     ));
+    // Migración de una vez (cowork, 07/11 08:15): corrige la meta visible de día/horario/edad en
+    // las suscripciones que ya se cambiaron de grupo antes de este arreglo. Idempotente — se
+    // puede llamar más de una vez sin riesgo, solo vuelve a poner el mismo valor correcto.
+    register_rest_route('superadmin/v1', '/gestion/cambiar-grupo/arreglar-meta-visible', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_cambiar_grupo_arreglar_meta_visible',
+        'permission_callback' => $sa_perm,
+    ));
     // Nombre real y teléfono del alumno, editables desde Grupos sin tocar wp-admin (31/10,
     // NOTAS_PARA_CODE_grupos_como_excel.md) — para cuando la suscripción se dio de alta sin
     // dirección de facturación y solo se ve el usuario de la cuenta de WordPress, no un nombre real.
@@ -4180,6 +4188,21 @@ function superadmin_gestion_grupos($request) {
 }
 
 // ─── Sección 8.2: acciones de ExcelMuerte sobre WooCommerce (quedan registradas) ──────────
+
+// Actualiza las metas VISIBLES de un item de pedido/suscripción (las que WooCommerce rellena
+// solas al comprar desde el step-form: "Días"/"Día", "Horario" y "Edad del alumno") — distintas
+// de `_step_form_selections` (meta técnica interna). Cowork, 07/11 08:15: superadmin_gestion_
+// cambiar_grupo() solo cambiaba la variación y `_step_form_selections`, así que la línea seguía
+// ENSEÑANDO el horario viejo (y esa es la meta que se copia a cada renovación, así que también
+// salía mal en la factura). $clave_dia_vieja/$clave_dia_nueva son 'pa_dias' o 'pa_dia-suelto'.
+function blokes_gestion_actualizar_meta_visible_grupo($item, $clave_dia_vieja, $clave_dia_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo) {
+    $label_dia_vieja = wc_attribute_label($clave_dia_vieja);
+    $label_dia_nueva = wc_attribute_label($clave_dia_nueva);
+    if ($label_dia_nueva !== $label_dia_vieja) $item->delete_meta_data($label_dia_vieja);
+    $item->update_meta_data($label_dia_nueva, $dia_nuevo);
+    $item->update_meta_data(wc_attribute_label('pa_horario'), $horario_nuevo);
+    $item->update_meta_data(__('Student age', 'neve-child'), $edad_nuevo);
+}
 
 function blokes_gestion_log_table() {
     global $wpdb;
@@ -8442,6 +8465,7 @@ function superadmin_gestion_cambiar_grupo($request) {
         $nuevas_selecciones['pa_horario'] = $horario_nuevo;
         $nuevas_selecciones['pa_edad']    = $edad_nuevo;
         $item->add_meta_data('_step_form_selections', $nuevas_selecciones, true);
+        blokes_gestion_actualizar_meta_visible_grupo($item, $clave_dia_actual, $clave_dia_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo);
         $item->set_subtotal($precio_nuevo);
         $item->set_total($precio_nuevo);
         $item->save();
@@ -8456,6 +8480,51 @@ function superadmin_gestion_cambiar_grupo($request) {
     blokes_gestion_log($sub_id, 'cambiar_grupo', $antes, $despues);
 
     return rest_ensure_response(array('success' => true, 'data' => array('subId' => $sub_id, 'antes' => $antes, 'despues' => $despues)));
+}
+
+// Corrige la meta visible (Día/Horario/Edad del alumno) de toda suscripción que ya pasó por
+// "Cambiar de grupo" ANTES de este arreglo (cowork, 07/11 08:15) — usa el "después" ya guardado
+// en blokes_gestion_log para cada una (el último cambio de cada sub, si hubo más de uno). No
+// toca precio, variación ni _step_form_selections (ya estaban bien); solo la meta visible que
+// se enseña en la línea del pedido y se copia a cada renovación/factura.
+function superadmin_cambiar_grupo_arreglar_meta_visible($request) {
+    if (!function_exists('wcs_get_subscription') || !class_exists('RocoMadrid_Step_Form')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions o RocoMadrid Step Form no disponibles.', array('status' => 503));
+    }
+    global $wpdb;
+    $tabla = blokes_gestion_log_table();
+    $filas = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$tabla} WHERE accion = %s ORDER BY id ASC", 'cambiar_grupo'), ARRAY_A);
+    $ultimo_por_sub = array();
+    foreach ($filas as $fila) { $ultimo_por_sub[intval($fila['sub_id'])] = $fila; } // el más reciente pisa al anterior
+
+    $product_classes_id = RocoMadrid_Step_Form::product_tarifas_id();
+    $product_single_id  = RocoMadrid_Step_Form::product_dias_sueltos_id();
+    $resultado = array();
+    foreach ($ultimo_por_sub as $sub_id => $fila) {
+        $despues = json_decode($fila['despues'], true);
+        if (!is_array($despues) || empty($despues['dia']) || empty($despues['horario'])) {
+            $resultado[] = array('subId' => $sub_id, 'error' => 'log sin dia/horario'); continue;
+        }
+        $sub = wcs_get_subscription($sub_id);
+        if (!$sub) { $resultado[] = array('subId' => $sub_id, 'error' => 'suscripción no encontrada'); continue; }
+        $item = null;
+        foreach ($sub->get_items() as $it) {
+            $pid = intval($it->get_product_id());
+            if ($pid === intval($product_classes_id) || $pid === intval($product_single_id)) { $item = $it; break; }
+        }
+        if (!$item) { $resultado[] = array('subId' => $sub_id, 'error' => 'sin línea de clases/días sueltos'); continue; }
+
+        $es_dias_sueltos = (intval($item->get_product_id()) === intval($product_single_id));
+        $clave_dia  = $es_dias_sueltos ? 'pa_dia-suelto' : 'pa_dias';
+        $otra_clave = $es_dias_sueltos ? 'pa_dias' : 'pa_dia-suelto';
+        $edad = $despues['edad'] ?? 'Adultos';
+        blokes_gestion_sin_emails(function() use ($item, $clave_dia, $otra_clave, $despues, $edad) {
+            blokes_gestion_actualizar_meta_visible_grupo($item, $otra_clave, $clave_dia, $despues['dia'], $despues['horario'], $edad);
+            $item->save();
+        });
+        $resultado[] = array('subId' => $sub_id, 'dia' => $despues['dia'], 'horario' => $despues['horario'], 'edad' => $edad);
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $resultado));
 }
 
 // Nombre real (facturación) y teléfono del alumno, editable desde Grupos sin tocar wp-admin —
