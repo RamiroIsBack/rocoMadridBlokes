@@ -24,17 +24,20 @@ const COLOR_HEX = {
   negro: '#1f2937', blanco: '#e5e7eb', naranja: '#f97316', morado: '#8b5cf6', rosa: '#ec4899',
 }
 
-// Primera pieza de "la compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 07/11):
-// apuntar top/zona/intentos desde el móvil mientras el modo compe está activo. Validación,
-// pantalla de la tele, modo tablet/recepción y resultados finales llegan en las siguientes
-// partes — de momento esto es solo "estoy en la compe y apunto lo que he hecho".
+// "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md). Parte 1: apuntar top/zona/intentos.
+// Parte 2 (Ramiro, 07/11 09:11): validación de buena fe (cualquier compañero o profe que lo haya
+// visto, sin cola de jueces fija) y la ventana de 1h30 desde el primer top. Pendiente: pantalla
+// de la tele, modo tablet/recepción/participante rápido, resultados finales y liga de temporada.
 export default function CompePage() {
   const sd = window.blokesSiteData || {}
   const [estado, setEstado] = useState(null)
   const [misResultados, setMisResultados] = useState({})
+  const [ventana, setVentana] = useState(null)
+  const [pendientes, setPendientes] = useState([])
+  const [tab, setTab] = useState('apuntar')
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
-  const [guardando, setGuardando] = useState(null) // compBlockId en curso
+  const [guardando, setGuardando] = useState(null) // compBlockId o resultadoId en curso
 
   const cargar = useCallback(() => {
     setLoading(true)
@@ -42,8 +45,12 @@ export default function CompePage() {
       .then(r => {
         setEstado(r.data)
         if (r.data?.activo && sd.isLoggedIn) {
-          return api('GET', `/compe/mis-resultados?competitionId=${r.data.competitionId}`)
-            .then(rr => setMisResultados(rr.data || {}))
+          return Promise.all([
+            api('GET', `/compe/mis-resultados?competitionId=${r.data.competitionId}`)
+              .then(rr => { setMisResultados(rr.data || {}); setVentana(rr.ventana || null) }),
+            api('GET', `/compe/pendientes-validar?competitionId=${r.data.competitionId}`)
+              .then(rr => setPendientes(rr.data || [])),
+          ])
         }
       })
       .catch(e => setErr(e.message))
@@ -57,6 +64,18 @@ export default function CompePage() {
     try {
       await api('POST', '/compe/resultado', { compBlockId, ...cambios })
       setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios, estado: 'pendiente' } }))
+    } catch (e) {
+      setErr(e.message)
+    } finally {
+      setGuardando(null)
+    }
+  }
+
+  async function validar(resultadoId, accion) {
+    setGuardando(resultadoId)
+    try {
+      await api('POST', '/compe/validar', { resultadoId, accion })
+      setPendientes(prev => prev.filter(p => p.resultadoId !== resultadoId))
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -91,21 +110,44 @@ export default function CompePage() {
     <div className="compe-page">
       <h1>{estado.nombre}</h1>
       <p className="compe-page__muted">
-        Marca Top (y Zona si no llegas al Top) y cuántos intentos te ha costado. Queda pendiente
-        hasta que un juez lo valide.
+        Para que cuente, un compañero o profe que te haya visto tiene que validártelo.
       </p>
+      {ventana && (
+        <p className={`compe-ventana${ventana.cerrada ? ' compe-ventana--cerrada' : ''}`}>
+          {ventana.cerrada
+            ? 'Tu ventana de 1h30 para esta compe ya se cerró — lo que apuntes de más cuenta para ligas, no para la compe.'
+            : `Te quedan ${ventana.minutosRestantes} min de tu ventana de 1h30.`}
+        </p>
+      )}
       {err && <p className="compe-page__error">{err}</p>}
-      <div className="compe-page__grid">
-        {estado.bloques.map(b => (
-          <BloqueFila
-            key={b.compBlockId}
-            bloque={b}
-            resultado={misResultados[b.compBlockId]}
-            guardando={guardando === b.compBlockId}
-            onGuardar={cambios => guardar(b.compBlockId, cambios)}
-          />
-        ))}
+
+      <div className="compe-tabs">
+        <button className={`compe-tab${tab === 'apuntar' ? ' compe-tab--activo' : ''}`} onClick={() => setTab('apuntar')}>Apuntar</button>
+        <button className={`compe-tab${tab === 'validar' ? ' compe-tab--activo' : ''}`} onClick={() => setTab('validar')}>
+          Validar{pendientes.length > 0 ? ` (${pendientes.length})` : ''}
+        </button>
       </div>
+
+      {tab === 'apuntar' ? (
+        <div className="compe-page__grid">
+          {estado.bloques.map(b => (
+            <BloqueFila
+              key={b.compBlockId}
+              bloque={b}
+              resultado={misResultados[b.compBlockId]}
+              guardando={guardando === b.compBlockId}
+              onGuardar={cambios => guardar(b.compBlockId, cambios)}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="compe-page__grid">
+          {pendientes.length === 0 && <p className="compe-page__muted">Nada pendiente de validar ahora mismo.</p>}
+          {pendientes.map(p => (
+            <PendienteFila key={p.resultadoId} p={p} guardando={guardando === p.resultadoId} onValidar={accion => validar(p.resultadoId, accion)} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -114,6 +156,7 @@ function BloqueFila({ bloque, resultado, guardando, onGuardar }) {
   const [top, setTop] = useState(!!resultado?.top)
   const [zona, setZona] = useState(!!resultado?.zona)
   const [intentos, setIntentos] = useState(resultado?.intentos ?? 0)
+  const [verIntentos, setVerIntentos] = useState(false)
 
   useEffect(() => {
     setTop(!!resultado?.top); setZona(!!resultado?.zona); setIntentos(resultado?.intentos ?? 0)
@@ -137,10 +180,15 @@ function BloqueFila({ bloque, resultado, guardando, onGuardar }) {
             <input type="checkbox" checked={zona} onChange={e => setZona(e.target.checked)} disabled={top} />
             Zona
           </label>
-          <label className="compe-intentos">
-            Intentos
-            <input type="number" min="0" value={intentos} onChange={e => setIntentos(Math.max(0, Number(e.target.value)))} />
-          </label>
+          {/* Los intentos no cuentan para nada (Ramiro, 07/11 09:11) — opcional y escondido */}
+          {verIntentos ? (
+            <label className="compe-intentos">
+              Intentos
+              <input type="number" min="0" value={intentos} onChange={e => setIntentos(Math.max(0, Number(e.target.value)))} />
+            </label>
+          ) : (
+            <button type="button" className="compe-intentos-link" onClick={() => setVerIntentos(true)}>+ intentos</button>
+          )}
         </div>
         <div className="compe-bloque__pie">
           {estadoLabel && <span className={`compe-estado compe-estado--${resultado.estado}`}>{estadoLabel}</span>}
@@ -151,6 +199,25 @@ function BloqueFila({ bloque, resultado, guardando, onGuardar }) {
           >
             {guardando ? 'Guardando…' : 'Guardar'}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PendienteFila({ p, guardando, onValidar }) {
+  const color = COLOR_HEX[(p.color || '').toLowerCase()] || '#9ca3af'
+  return (
+    <div className="compe-bloque">
+      <div className="compe-bloque__numero" style={{ background: color }}>{p.numero}</div>
+      <div className="compe-bloque__cuerpo">
+        <p className="compe-pendiente__texto">
+          <strong>{p.participante || 'Alguien'}</strong> dice {p.top ? 'Top' : 'Zona'}
+          {p.intentos ? ` · ${p.intentos} intentos` : ''} · hace {p.hace}
+        </p>
+        <div className="compe-bloque__pie">
+          <button className="compe-bloque__guardar compe-bloque__guardar--rechazar" disabled={guardando} onClick={() => onValidar('rechazar')}>No lo vi así</button>
+          <button className="compe-bloque__guardar" disabled={guardando} onClick={() => onValidar('validar')}>{guardando ? '…' : 'Confirmo, lo vi'}</button>
         </div>
       </div>
     </div>

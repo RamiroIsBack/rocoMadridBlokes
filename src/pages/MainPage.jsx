@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useWordPressPosts } from '../hooks/useWordPressPosts'
 import { useCompletions } from '../hooks/useCompletions'
 import FilterBar from '../components/FilterBar'
@@ -16,6 +16,31 @@ const COLECCION_SLIDES = [
   { title: 'Marca lo que has hecho', text: 'Toca aquí para marcar este bloke como completado. Así vas construyendo tu progreso.', target: '[data-tutorial="done-btn"]' },
   { title: 'Valora tus favoritos', text: 'Toca la estrella para destacar los blokes que más te hayan gustado.', target: '[data-tutorial="star-btn"]' },
 ]
+
+const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
+
+// Leyenda cuando el modo compe está activo (Ramiro, 07/11 09:11: validación de buena fe, sin
+// jueces fijos). Propia e independiente de la carga de blokes/completions — si esto falla no
+// debe afectar a Colección, solo no se enseña el aviso.
+function CompeLegendBanner() {
+  const [activo, setActivo] = useState(false)
+  useEffect(() => {
+    fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/estado`)
+      .then(r => r.ok ? r.json() : null)
+      .then(j => setActivo(!!j?.data?.activo))
+      .catch(() => {})
+  }, [])
+  if (!activo) return null
+  return (
+    <div style={{
+      background: '#111827', color: '#fff', textAlign: 'center', fontSize: '0.85rem',
+      padding: '8px 12px', position: 'relative', zIndex: 5,
+    }}>
+      🧗 Modo compe activo — para que cuente, un compañero o profe que te haya visto tiene que validártelo en{' '}
+      <a href="/blokes/compe" style={{ color: '#fbbf24', fontWeight: 600 }}>Compe</a>.
+    </div>
+  )
+}
 
 function MainPage() {
   const { cards, loading, error } = useWordPressPosts()
@@ -89,6 +114,7 @@ function MainPage() {
 
   return (
     <div className="app">
+      <CompeLegendBanner />
       {showTutorial && !loading && filteredCards.length > 0 && (
         <OnboardingTutorial
           storageKey={COLECCION_TUTORIAL_KEY}
