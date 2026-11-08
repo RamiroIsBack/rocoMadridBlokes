@@ -93,20 +93,28 @@ function blokes_get_app_role_real() {
 // profesor de verdad — también lo que responde el servidor (p. ej. la privacidad del dinero),
 // no solo lo que se pinta. Solo restringe, nunca amplía: la cabecera solo se respeta si el rol
 // REAL es socio; para cualquier otro rol se ignora sin más, así que no sirve para ganar acceso.
+// "Ver como: Tablet" (Ramiro, 08/11 21:19, corrige el "modo tablet" anterior) es DISTINTO:
+// "es para que los profes puedan loguear los tops de los usuarios, simplemente tiene que
+// simular como cuando estás logueado como si fueses el usuario tablet" — así que, a diferencia
+// de gestion/profesor (solo socio, solo lectura), esto SÍ deja escribir y lo pueden simular los
+// 3 roles que ya pueden actuar en nombre de otro (blokes_can_supervise): socio, profesor y
+// gestion. Quién lo apunta de verdad (get_current_user_id(), nunca tocado por esta cabecera)
+// sigue siendo la sesión real, así que queda registrado igual que si no hubiera "ver como".
 function blokes_get_app_role() {
     $real = blokes_get_app_role_real();
-    if ($real === 'socio') {
-        $ver_como = isset($_SERVER['HTTP_X_BLOKES_VER_COMO']) ? sanitize_key($_SERVER['HTTP_X_BLOKES_VER_COMO']) : '';
-        if (in_array($ver_como, array('gestion', 'profesor'), true)) {
-            // Respaldo del filtro rest_pre_dispatch: en algunos namespaces (progreso/v1) no
-            // corta la escritura a tiempo, así que lo repetimos aquí dentro, que se llama
-            // desde todos los permission_callback de todos los namespaces sin excepción.
-            $metodo = isset($_SERVER['REQUEST_METHOD']) ? strtoupper($_SERVER['REQUEST_METHOD']) : 'GET';
-            if (in_array($metodo, array('POST', 'PUT', 'PATCH', 'DELETE'), true) && defined('REST_REQUEST') && REST_REQUEST) {
-                wp_send_json(array('code' => 'ver_como_solo_lectura', 'message' => 'Estás en modo "Ver como": vuelve a Socio para cambiar cosas.'), 403);
-            }
-            return $ver_como;
+    $ver_como = isset($_SERVER['HTTP_X_BLOKES_VER_COMO']) ? sanitize_key($_SERVER['HTTP_X_BLOKES_VER_COMO']) : '';
+    if ($ver_como === 'tablet' && in_array($real, array('socio', 'profesor', 'gestion'), true)) {
+        return 'tablet';
+    }
+    if ($real === 'socio' && in_array($ver_como, array('gestion', 'profesor'), true)) {
+        // Respaldo del filtro rest_pre_dispatch: en algunos namespaces (progreso/v1) no
+        // corta la escritura a tiempo, así que lo repetimos aquí dentro, que se llama
+        // desde todos los permission_callback de todos los namespaces sin excepción.
+        $metodo = isset($_SERVER['REQUEST_METHOD']) ? strtoupper($_SERVER['REQUEST_METHOD']) : 'GET';
+        if (in_array($metodo, array('POST', 'PUT', 'PATCH', 'DELETE'), true) && defined('REST_REQUEST') && REST_REQUEST) {
+            wp_send_json(array('code' => 'ver_como_solo_lectura', 'message' => 'Estás en modo "Ver como": vuelve a Socio para cambiar cosas.'), 403);
         }
+        return $ver_como;
     }
     return $real;
 }
@@ -13575,27 +13583,15 @@ function progreso_compe_apuntar_resultado($request) {
     return rest_ensure_response(array('success' => true, 'data' => array('estado' => $datos['estado'])));
 }
 
-// "Nombre G. (nickname)" — mismo recorte que ya usa progreso_compe_clasificacion() para los
-// participantes rápidos, reutilizable aquí para el modo quiosco (Ramiro, 08/11 12:00: "en modo
-// tablet la búsqueda no puede enseñar apellidos completos, es pantalla pública en el Roco").
-function blokes_nombre_corto_quiosco($nombre_completo, $nick = null) {
-    $partes = array_values(array_filter(explode(' ', trim((string) $nombre_completo))));
-    $corto = $partes[0] ?? 'Alguien';
-    if (isset($partes[1]) && $partes[1] !== '') $corto .= ' ' . mb_substr($partes[1], 0, 1) . '.';
-    return $nick ? "{$corto} ({$nick})" : $corto;
-}
-
 // GET /progreso/v1/compe/buscar-participante?q=X&competitionId=Y — "¿quién eres?" de recepción
 // (Ramiro, 07/11 08:46/08:48): busca entre usuarios reales de WordPress (nombre/nickname, en el
 // sitio Principal) y entre los participantes rápidos YA creados en esta compe (para no crear
 // uno nuevo cada vez que vuelve la misma persona sin cuenta). Solo quien puede supervisar
-// (profe/gestión/socio/tablet). `kiosco=1` (modo tablet, pantalla pública): nombres acortados,
-// nunca el apellido completo — en Recepción con sesión normal sigue saliendo completo.
+// (profe/gestión/socio/tablet).
 function progreso_compe_buscar_participante($request) {
     if (!blokes_can_supervise()) return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
     $q = trim((string) $request->get_param('q'));
     $competition_id = intval($request->get_param('competitionId'));
-    $kiosco = (bool) $request->get_param('kiosco');
     if (mb_strlen($q) < 2) return new WP_Error('bad_request', 'Escribe al menos 2 caracteres.', array('status' => 400));
 
     global $wpdb;
@@ -13608,10 +13604,7 @@ function progreso_compe_buscar_participante($request) {
     ));
     foreach ($usuarios as $u) {
         $nick = blokes_get_user_nickname($u->ID);
-        $nombre_mostrar = $kiosco
-            ? blokes_nombre_corto_quiosco($u->display_name, $nick)
-            : ($nick ? "{$u->display_name} ({$nick})" : $u->display_name);
-        $resultado[] = array('tipo' => 'user', 'id' => $u->ID, 'nombreMostrar' => $nombre_mostrar);
+        $resultado[] = array('tipo' => 'user', 'id' => $u->ID, 'nombreMostrar' => $nick ? "{$u->display_name} ({$nick})" : $u->display_name);
     }
     if ($es_multisite) restore_current_blog();
 
@@ -13621,8 +13614,7 @@ function progreso_compe_buscar_participante($request) {
             $competition_id, '%' . $wpdb->esc_like($q) . '%'
         ), ARRAY_A);
         foreach ($rapidos as $r) {
-            $nombre_mostrar = $kiosco ? blokes_nombre_corto_quiosco($r['nombre']) : $r['nombre'];
-            $resultado[] = array('tipo' => 'rapido', 'id' => intval($r['id']), 'nombreMostrar' => $nombre_mostrar . ' (sin cuenta)');
+            $resultado[] = array('tipo' => 'rapido', 'id' => intval($r['id']), 'nombreMostrar' => $r['nombre'] . ' (sin cuenta)');
         }
     }
     return rest_ensure_response(array('success' => true, 'data' => $resultado));

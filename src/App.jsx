@@ -21,7 +21,6 @@ import CalendarioPage from './pages/CalendarioPage'
 import CompePage from './pages/CompePage'
 import CompeDirectoPage from './pages/CompeDirectoPage'
 import { setVerComo, clearVerComo } from './utils/verComo'
-import { getModoTablet, setModoTablet } from './utils/modoTablet'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
 import { useProfile } from './hooks/useProfile'
@@ -77,22 +76,12 @@ function buildLoginUrl(sd) {
   return window.location.origin + '/wp-login.php?redirect_to=' + encodeURIComponent(base + '/')
 }
 
-const PUEDE_MODO_TABLET = ['socio', 'profesor', 'gestion']
-
 export default function App() {
-  const sd = window.blokesSiteData || {}
-  // Modo tablet (Ramiro, 08/11 11:11): deja el dispositivo entero mostrando solo la pantalla de
-  // recepción de la compe. Es un modo de pantalla fijo para esta carga (solo cambia con un
-  // recargado explícito desde ModoTabletShell/el selector), así que comprobarlo ANTES de
-  // cualquier hook no rompe las reglas de hooks — nunca varía a media vida de este componente.
-  if (PUEDE_MODO_TABLET.includes(sd.userRoleReal || sd.userRole) && getModoTablet()) {
-    return <ModoTabletShell />
-  }
-
   const [logoutOpen, setLogoutOpen] = useState(false)
   const [navFloating, setNavFloating] = useState(false)
   const [navVisible, setNavVisible] = useState(false)
   const lastScrollY = useRef(0)
+  const sd = window.blokesSiteData || {}
   const canEvents = useEventsAccess()
   const canCalendar = useCalendarAccess().can
 
@@ -218,11 +207,10 @@ export default function App() {
                       onClick={() => setLogoutOpen(true)}
                     >× Log out</button>
                     {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
-                    {/* Cowork, 08/11 12:00: un socio viendo como Profe/Eva no veía este botón
-                        (userRoleReal seguía siendo "socio") — mirar el rol EFECTIVO (userRole)
-                        hace que, simulando Profe/Eva, el socio vea exactamente el mismo botón
-                        que verían ellos, además de su propio selector. */}
-                    {['profesor', 'gestion'].includes(sd.userRole) && <ModoTabletToggleSimple />}
+                    {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
+                        EFECTIVO para que vean exactamente el mismo botón): su único "ver como"
+                        es pasar a la cuenta tablet y volver (Ramiro, 08/11 21:19). */}
+                    {['profesor', 'gestion'].includes(sd.userRole) && <ModoTabletToggleSimple sd={sd} />}
                   </div>
                 </div>
                 {sd.subscription && (
@@ -417,7 +405,7 @@ export default function App() {
   )
 }
 
-const VER_COMO_LABEL = { gestion: 'Eva (gestión)', profesor: 'Profe' }
+const VER_COMO_LABEL = { gestion: 'Eva (gestión)', profesor: 'Profe', tablet: 'Tablet' }
 
 // Selector "Ver como" (Ramiro, 1/11 18:30), solo para socio — al lado de Log out. Cambiar de
 // rol recarga la página: es la forma más simple de que TODA la app (decenas de sitios que leen
@@ -427,11 +415,6 @@ function VerComoSelector({ sd }) {
   const actual = sd.userRole !== sd.userRoleReal ? sd.userRole : ''
   const cambiar = e => {
     const valor = e.target.value
-    // "Modo tablet" (Ramiro, 08/11 11:11) no es un rol simulado de "ver como" — es un modo de
-    // pantalla aparte (modoTablet.js) que un socio también puede encender desde aquí mismo. Si
-    // esto estuviera activo no veríamos este selector (App() ya habría enseñado ModoTabletShell
-    // en su lugar), así que seleccionarlo siempre significa "encenderlo ahora".
-    if (valor === 'tablet') { setModoTablet(true); window.location.reload(); return }
     if (valor) setVerComo(valor); else clearVerComo()
     window.location.reload()
   }
@@ -440,68 +423,45 @@ function VerComoSelector({ sd }) {
       <option value="">Ver como: Socio</option>
       <option value="gestion">Ver como: Eva (gestión)</option>
       <option value="profesor">Ver como: Profe</option>
-      <option value="tablet">Modo tablet</option>
+      <option value="tablet">Ver como: Tablet</option>
     </select>
   )
 }
 
-// Para profe/Eva (Ramiro, 08/11 11:11, punto 3): nada de "ver como" (no pueden simular otros
-// roles) — solo un botón para pasar a su propio "Modo tablet" y volver, con su propia sesión.
-function ModoTabletToggleSimple() {
-  return (
-    <button
-      type="button" className="app-header__ver-como"
-      onClick={() => { setModoTablet(true); window.location.reload() }}
-    >
-      Modo tablet
-    </button>
-  )
-}
-
-// Pantalla única del "modo tablet": solo Recepción de la compe, sin cabecera ni menú normal
-// (nada de gestión, dinero ni datos personales — Ramiro, 08/11 11:11). Salir exige mantener
-// pulsado 2 s, para que nadie lo cierre sin querer con un toque suelto en la tablet.
-function ModoTabletShell() {
-  return (
-    <div style={{ minHeight: '100vh', background: '#f3f4f6' }}>
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        padding: '10px 16px', background: '#111827',
-      }}>
-        <span style={{ color: '#fff', fontWeight: 700 }}>🔒 Modo tablet</span>
-        <SalirModoTabletBoton />
-      </div>
-      <div style={{ padding: '0 16px' }}>
-        <CompePage modoQuiosco />
-      </div>
-    </div>
-  )
-}
-
-function SalirModoTabletBoton() {
+// Profe/Eva (Ramiro, 08/11 21:19: "el modo tablet es para que los profes puedan loguear los
+// tops de los usuarios, simplemente tiene que simular como si fueses el usuario tablet") — su
+// único "ver como" es pasar a la cuenta tablet (toda la app se ve como la ve ella: Colección
+// con el picker "¿quién eres?", Progreso, Ligas, Compe/Recepción — nada especial, solo el rol
+// efectivo cambia) y volver. Entrar es un toque; salir exige mantener pulsado 2 s, para que un
+// toque suelto en el dispositivo no saque a nadie de "modo tablet" sin querer.
+function ModoTabletToggleSimple({ sd }) {
+  const activo = sd.userRole === 'tablet'
   const [pulsando, setPulsando] = useState(false)
   const timerRef = useRef(null)
 
+  if (!activo) {
+    return (
+      <button type="button" className="app-header__ver-como" onClick={() => { setVerComo('tablet'); window.location.reload() }}>
+        Modo tablet
+      </button>
+    )
+  }
+
   const empezar = () => {
     setPulsando(true)
-    timerRef.current = setTimeout(() => { setModoTablet(false); window.location.reload() }, 2000)
+    timerRef.current = setTimeout(() => { clearVerComo(); window.location.reload() }, 2000)
   }
   const soltar = () => {
     setPulsando(false)
     clearTimeout(timerRef.current)
   }
-
   return (
     <button
-      type="button"
+      type="button" className="app-header__ver-como"
       onPointerDown={empezar} onPointerUp={soltar} onPointerLeave={soltar}
-      style={{
-        padding: '6px 14px', borderRadius: 8, border: '1px solid #4b5563',
-        background: pulsando ? '#4b5563' : 'transparent', color: '#fff',
-        fontSize: '0.8rem', cursor: 'pointer',
-      }}
+      style={pulsando ? { background: '#4b5563', color: '#fff' } : undefined}
     >
-      {pulsando ? 'Manteniendo…' : 'Mantén pulsado para salir'}
+      {pulsando ? 'Manteniendo…' : '🔒 Modo tablet — mantén pulsado para salir'}
     </button>
   )
 }

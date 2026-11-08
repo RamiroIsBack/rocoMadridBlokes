@@ -32,10 +32,7 @@ const PUEDE_RECEPCION = ['profesor', 'gestion', 'socio', 'tablet']
 // apuntado cuenta al momento, lo valida la palabra de los compañeros, no la app — en la tablet
 // (rol "tablet", incluido en PUEDE_RECEPCION) cada uno busca su propio nombre en "Recepción" y
 // apunta, sin PIN.
-// `modoQuiosco` (Ramiro, 08/11 11:11, "Modo tablet" en "Ver como"): usado por App.jsx cuando el
-// dispositivo entero se pone en modo tablet — enseña solo Recepción, sin pestañas ni cabecera
-// normal (eso lo monta App.jsx alrededor).
-export default function CompePage({ modoQuiosco = false }) {
+export default function CompePage() {
   const sd = window.blokesSiteData || {}
   const puedeRecepcion = PUEDE_RECEPCION.includes(sd.userRole)
   const [estado, setEstado] = useState(null)
@@ -97,23 +94,6 @@ export default function CompePage({ modoQuiosco = false }) {
     )
   }
 
-  if (modoQuiosco) {
-    return (
-      <div className="compe-page">
-        <h1>{estado.nombre}</h1>
-        <p className="compe-page__muted">
-          Norma de honor: lo que apuntes cuenta al momento — que un compañero o profe te haya visto hacerlo.
-        </p>
-        {err && <p className="compe-page__error">{err}</p>}
-        {puedeRecepcion ? (
-          <RecepcionTab bloques={estado.bloques} competitionId={estado.competitionId} kiosco />
-        ) : (
-          <p className="compe-page__error">Este rol no puede usar la pantalla de recepción.</p>
-        )}
-      </div>
-    )
-  }
-
   return (
     <div className="compe-page">
       <h1>{estado.nombre}</h1>
@@ -162,7 +142,7 @@ export default function CompePage({ modoQuiosco = false }) {
 // apunta por él/ella. En la tablet del Roco (rol "tablet") es también donde cada participante
 // busca su propio nombre y se apunta a sí mismo, sin PIN (Ramiro, 07/11: sin validación en la
 // app, cuenta al momento).
-function RecepcionTab({ bloques, competitionId, kiosco = false }) {
+function RecepcionTab({ bloques, competitionId }) {
   const [q, setQ] = useState('')
   const [resultados, setResultados] = useState(null)
   const [buscando, setBuscando] = useState(false)
@@ -195,10 +175,7 @@ function RecepcionTab({ bloques, competitionId, kiosco = false }) {
     if (q.trim().length < 2) { if (!silencioso) setErr('Escribe al menos 2 caracteres.'); return }
     setBuscando(true); if (!silencioso) setErr(null)
     try {
-      // En modo quiosco (tablet, pantalla pública en el Roco) la búsqueda no puede enseñar
-      // apellidos completos — kiosco=1 le dice al backend que acorte los nombres (Ramiro,
-      // 08/11 12:00).
-      const r = await api('GET', `/compe/buscar-participante?q=${encodeURIComponent(q.trim())}&competitionId=${competitionId}${kiosco ? '&kiosco=1' : ''}`)
+      const r = await api('GET', `/compe/buscar-participante?q=${encodeURIComponent(q.trim())}&competitionId=${competitionId}`)
       setResultados(r.data || [])
     } catch (e) {
       if (!silencioso) setErr(e.message)

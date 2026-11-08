@@ -4,7 +4,7 @@
 // las pestañas que llevan horas en segundo plano para ahorrar memoria). No es un bug de Blokes,
 // pero la app puede evitar el síntoma ("hay que recargar Supervisión"): si la pestaña estuvo
 // oculta más de UMBRAL_MS y vuelve a primer plano, se recarga sola para que el nonce y los datos
-// de cada pantalla arranquen frescos — importante también para el "modo tablet" (modoTablet.js),
+// de cada pantalla arranquen frescos — importante también para "ver como: tablet" (verComo.js),
 // que va a estar con la pantalla abierta horas.
 const UMBRAL_MS = 5 * 60 * 1000 // 5 min
 

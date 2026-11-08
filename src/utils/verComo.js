@@ -3,12 +3,29 @@
 // servidor (privacidad del dinero), no solo lo que se pinta. Solo restringe, nunca amplía:
 // el servidor (`blokes_get_app_role()`) solo hace caso de la cabecera si el usuario real es
 // socio, y cualquier escritura (POST/PUT/DELETE) en modo "ver como" se rechaza con 403.
+//
+// "Ver como: Tablet" (Ramiro, 08/11 21:19, corrige el "modo tablet" que era una pantalla
+// aparte) es un "ver como" DISTINTO: "es para que los profes puedan loguear los tops de los
+// usuarios, simplemente tiene que simular como cuando estás logueado como si fueses el usuario
+// tablet" — así que, a diferencia de gestion/profesor (privacidad, solo socio, solo lectura),
+// este SÍ deja escribir (el servidor no lo bloquea) y lo pueden poner los 3 roles que ya pueden
+// actuar en nombre de otro: socio, profesor y gestión (no amplía nada — ya podían hacerlo sin
+// esto, solo cambia qué pantalla ven).
 const KEY = 'blokes_ver_como'
 const HEADER = 'X-Blokes-Ver-Como'
-const ROLES_SIMULABLES = ['gestion', 'profesor']
+const ROLES_SOLO_SOCIO = ['gestion', 'profesor']
+const ROLES_PARA_SUPERVISORES = ['tablet']
 
 export function getVerComo() {
   try { return sessionStorage.getItem(KEY) || '' } catch { return '' }
+}
+
+function rolSimuladoPara(real) {
+  const guardado = getVerComo()
+  if (!guardado) return ''
+  if (real === 'socio' && ROLES_SOLO_SOCIO.includes(guardado)) return guardado
+  if (['socio', 'profesor', 'gestion'].includes(real) && ROLES_PARA_SUPERVISORES.includes(guardado)) return guardado
+  return ''
 }
 
 // Aplica (o quita) el rol simulado sobre `blokesSiteData.userRole` — el campo que ya consulta
@@ -18,14 +35,14 @@ export function applyVerComo() {
   if (!window.blokesSiteData) return
   const real = window.blokesSiteData.userRoleReal || window.blokesSiteData.userRole
   window.blokesSiteData.userRoleReal = real
-  const sim = real === 'socio' ? getVerComo() : ''
-  window.blokesSiteData.userRole = sim && ROLES_SIMULABLES.includes(sim) ? sim : real
+  const sim = rolSimuladoPara(real)
+  window.blokesSiteData.userRole = sim || real
   window.dispatchEvent(new Event('blokes:ver-como-cambiado'))
 }
 
 export function setVerComo(role) {
   try {
-    if (role && ROLES_SIMULABLES.includes(role)) sessionStorage.setItem(KEY, role)
+    if (role && (ROLES_SOLO_SOCIO.includes(role) || ROLES_PARA_SUPERVISORES.includes(role))) sessionStorage.setItem(KEY, role)
     else sessionStorage.removeItem(KEY)
   } catch { /* sin almacenamiento: el cambio solo dura esta carga de página */ }
   applyVerComo()
@@ -41,8 +58,7 @@ export function installVerComoFetch() {
   installed = true
   const original = window.fetch.bind(window)
   window.fetch = (input, init = {}) => {
-    const real = window.blokesSiteData?.userRoleReal
-    const sim = real === 'socio' ? getVerComo() : ''
+    const sim = rolSimuladoPara(window.blokesSiteData?.userRoleReal)
     if (!sim) return original(input, init)
     const headers = new Headers(init.headers || {})
     headers.set(HEADER, sim)
