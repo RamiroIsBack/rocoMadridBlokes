@@ -218,7 +218,11 @@ export default function App() {
                       onClick={() => setLogoutOpen(true)}
                     >× Log out</button>
                     {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
-                    {['profesor', 'gestion'].includes(sd.userRoleReal) && <ModoTabletToggleSimple />}
+                    {/* Cowork, 08/11 12:00: un socio viendo como Profe/Eva no veía este botón
+                        (userRoleReal seguía siendo "socio") — mirar el rol EFECTIVO (userRole)
+                        hace que, simulando Profe/Eva, el socio vea exactamente el mismo botón
+                        que verían ellos, además de su propio selector. */}
+                    {['profesor', 'gestion'].includes(sd.userRole) && <ModoTabletToggleSimple />}
                   </div>
                 </div>
                 {sd.subscription && (

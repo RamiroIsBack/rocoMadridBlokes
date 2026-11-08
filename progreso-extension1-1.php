@@ -13575,15 +13575,27 @@ function progreso_compe_apuntar_resultado($request) {
     return rest_ensure_response(array('success' => true, 'data' => array('estado' => $datos['estado'])));
 }
 
+// "Nombre G. (nickname)" — mismo recorte que ya usa progreso_compe_clasificacion() para los
+// participantes rápidos, reutilizable aquí para el modo quiosco (Ramiro, 08/11 12:00: "en modo
+// tablet la búsqueda no puede enseñar apellidos completos, es pantalla pública en el Roco").
+function blokes_nombre_corto_quiosco($nombre_completo, $nick = null) {
+    $partes = array_values(array_filter(explode(' ', trim((string) $nombre_completo))));
+    $corto = $partes[0] ?? 'Alguien';
+    if (isset($partes[1]) && $partes[1] !== '') $corto .= ' ' . mb_substr($partes[1], 0, 1) . '.';
+    return $nick ? "{$corto} ({$nick})" : $corto;
+}
+
 // GET /progreso/v1/compe/buscar-participante?q=X&competitionId=Y — "¿quién eres?" de recepción
 // (Ramiro, 07/11 08:46/08:48): busca entre usuarios reales de WordPress (nombre/nickname, en el
 // sitio Principal) y entre los participantes rápidos YA creados en esta compe (para no crear
 // uno nuevo cada vez que vuelve la misma persona sin cuenta). Solo quien puede supervisar
-// (profe/gestión/socio/tablet).
+// (profe/gestión/socio/tablet). `kiosco=1` (modo tablet, pantalla pública): nombres acortados,
+// nunca el apellido completo — en Recepción con sesión normal sigue saliendo completo.
 function progreso_compe_buscar_participante($request) {
     if (!blokes_can_supervise()) return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
     $q = trim((string) $request->get_param('q'));
     $competition_id = intval($request->get_param('competitionId'));
+    $kiosco = (bool) $request->get_param('kiosco');
     if (mb_strlen($q) < 2) return new WP_Error('bad_request', 'Escribe al menos 2 caracteres.', array('status' => 400));
 
     global $wpdb;
@@ -13596,7 +13608,10 @@ function progreso_compe_buscar_participante($request) {
     ));
     foreach ($usuarios as $u) {
         $nick = blokes_get_user_nickname($u->ID);
-        $resultado[] = array('tipo' => 'user', 'id' => $u->ID, 'nombreMostrar' => $nick ? "{$u->display_name} ({$nick})" : $u->display_name);
+        $nombre_mostrar = $kiosco
+            ? blokes_nombre_corto_quiosco($u->display_name, $nick)
+            : ($nick ? "{$u->display_name} ({$nick})" : $u->display_name);
+        $resultado[] = array('tipo' => 'user', 'id' => $u->ID, 'nombreMostrar' => $nombre_mostrar);
     }
     if ($es_multisite) restore_current_blog();
 
@@ -13606,7 +13621,8 @@ function progreso_compe_buscar_participante($request) {
             $competition_id, '%' . $wpdb->esc_like($q) . '%'
         ), ARRAY_A);
         foreach ($rapidos as $r) {
-            $resultado[] = array('tipo' => 'rapido', 'id' => intval($r['id']), 'nombreMostrar' => $r['nombre'] . ' (sin cuenta)');
+            $nombre_mostrar = $kiosco ? blokes_nombre_corto_quiosco($r['nombre']) : $r['nombre'];
+            $resultado[] = array('tipo' => 'rapido', 'id' => intval($r['id']), 'nombreMostrar' => $nombre_mostrar . ' (sin cuenta)');
         }
     }
     return rest_ensure_response(array('success' => true, 'data' => $resultado));

@@ -106,7 +106,7 @@ export default function CompePage({ modoQuiosco = false }) {
         </p>
         {err && <p className="compe-page__error">{err}</p>}
         {puedeRecepcion ? (
-          <RecepcionTab bloques={estado.bloques} competitionId={estado.competitionId} />
+          <RecepcionTab bloques={estado.bloques} competitionId={estado.competitionId} kiosco />
         ) : (
           <p className="compe-page__error">Este rol no puede usar la pantalla de recepción.</p>
         )}
@@ -162,7 +162,7 @@ export default function CompePage({ modoQuiosco = false }) {
 // apunta por él/ella. En la tablet del Roco (rol "tablet") es también donde cada participante
 // busca su propio nombre y se apunta a sí mismo, sin PIN (Ramiro, 07/11: sin validación en la
 // app, cuenta al momento).
-function RecepcionTab({ bloques, competitionId }) {
+function RecepcionTab({ bloques, competitionId, kiosco = false }) {
   const [q, setQ] = useState('')
   const [resultados, setResultados] = useState(null)
   const [buscando, setBuscando] = useState(false)
@@ -195,7 +195,10 @@ function RecepcionTab({ bloques, competitionId }) {
     if (q.trim().length < 2) { if (!silencioso) setErr('Escribe al menos 2 caracteres.'); return }
     setBuscando(true); if (!silencioso) setErr(null)
     try {
-      const r = await api('GET', `/compe/buscar-participante?q=${encodeURIComponent(q.trim())}&competitionId=${competitionId}`)
+      // En modo quiosco (tablet, pantalla pública en el Roco) la búsqueda no puede enseñar
+      // apellidos completos — kiosco=1 le dice al backend que acorte los nombres (Ramiro,
+      // 08/11 12:00).
+      const r = await api('GET', `/compe/buscar-participante?q=${encodeURIComponent(q.trim())}&competitionId=${competitionId}${kiosco ? '&kiosco=1' : ''}`)
       setResultados(r.data || [])
     } catch (e) {
       if (!silencioso) setErr(e.message)
