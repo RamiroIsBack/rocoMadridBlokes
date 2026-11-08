@@ -758,6 +758,11 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/compe/estado', array(
         'methods' => 'GET', 'callback' => 'progreso_compe_estado', 'permission_callback' => '__return_true',
     ));
+    // Mantenimiento: limpia blokes de compe de prueba que quedaron en la papelera de rondas
+    // anteriores (cowork, 08/11 11:15) — solo socio.
+    register_rest_route('progreso/v1', '/compe/limpiar-blokes-prueba-antiguos', array(
+        'methods' => 'POST', 'callback' => 'progreso_compe_limpiar_blokes_prueba_antiguos', 'permission_callback' => function() { return blokes_es_socio(); },
+    ));
     register_rest_route('progreso/v1', '/compe/resultado', array(
         'methods' => 'POST', 'callback' => 'progreso_compe_apuntar_resultado', 'permission_callback' => 'is_user_logged_in',
     ));
@@ -13186,6 +13191,49 @@ function progreso_equip_delete_competition($request) {
         $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d'));
     }
     return rest_ensure_response(array('success' => true, 'diagnosticoBlokes' => $diagnostico_blokes));
+}
+
+// POST /progreso/v1/compe/limpiar-blokes-prueba-antiguos — barrido de mantenimiento (cowork,
+// 08/11 11:15: 45 blokes de prueba quedaron en la papelera del sitio Principal de rondas
+// anteriores, de antes de arreglar el borrado de verdad). Solo socio. Nunca toca un bloke real:
+// busca por `_comp_competition_id` (meta que SOLO pone progreso_equip_set_modo_compe() al crear
+// un bloke de compe) en la papelera del blog 1, con el mismo camino seguro de
+// progreso_equip_delete_competition() (SQL directo si wp_delete_post() no puede por los hooks de
+// WooCommerce/Subscriptions). Se puede volver a llamar sin riesgo si vuelve a quedar alguno.
+function progreso_compe_limpiar_blokes_prueba_antiguos($request) {
+    if (!blokes_es_socio()) return new WP_Error('forbidden', 'Solo un socio puede hacer esta limpieza.', array('status' => 403));
+    global $wpdb;
+    $es_multisite = is_multisite();
+    if ($es_multisite) switch_to_blog(1);
+    $bloke_ids = $wpdb->get_col(
+        "SELECT p.ID FROM {$wpdb->posts} p
+         JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = '_comp_competition_id'
+         WHERE p.post_type = 'blokes' AND p.post_status = 'trash'"
+    );
+    $diagnostico = array();
+    foreach ($bloke_ids as $bloke_id) {
+        $bloke_id = intval($bloke_id);
+        clean_post_cache($bloke_id);
+        $tipo_real = $wpdb->get_var($wpdb->prepare("SELECT post_type FROM {$wpdb->posts} WHERE ID = %d", $bloke_id));
+        $fila_diag = array('blokePostId' => $bloke_id, 'postType' => $tipo_real);
+        if ($tipo_real === 'blokes') {
+            blokes_quitar_completions_de_bloke($bloke_id);
+            $ok = wp_delete_post($bloke_id, true);
+            if (!$ok) {
+                $wpdb->delete($wpdb->postmeta, array('post_id' => $bloke_id), array('%d'));
+                $wpdb->delete($wpdb->term_relationships, array('object_id' => $bloke_id), array('%d'));
+                $wpdb->delete($wpdb->posts, array('ID' => $bloke_id), array('%d'));
+                clean_post_cache($bloke_id);
+                $ok = ($wpdb->get_var($wpdb->prepare("SELECT ID FROM {$wpdb->posts} WHERE ID = %d", $bloke_id)) === null);
+            }
+            $fila_diag['borrado'] = (bool) $ok;
+        } else {
+            $fila_diag['borrado'] = false;
+        }
+        $diagnostico[] = $fila_diag;
+    }
+    if ($es_multisite) restore_current_blog();
+    return rest_ensure_response(array('success' => true, 'data' => $diagnostico));
 }
 
 function progreso_equip_update_comp_block($request) {

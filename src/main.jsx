@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App'
 import { applyVerComo, installVerComoFetch } from './utils/verComo'
+import { installVisibilityRefresh } from './utils/visibilityRefresh'
 
 // eslint-disable-next-line no-undef
 console.log('Blokes build', __BUILD_TIME__)
@@ -17,6 +18,7 @@ if (window.blokesSiteData) {
 // se vuelve a aplicar antes de que nada compruebe `blokesSiteData.userRole`.
 installVerComoFetch()
 applyVerComo()
+installVisibilityRefresh()
 
 // App instalable: el service worker vive en la raíz de /blokes/ (o /blokes-dev/)
 if ('serviceWorker' in navigator && import.meta.env.PROD) {

@@ -32,7 +32,10 @@ const PUEDE_RECEPCION = ['profesor', 'gestion', 'socio', 'tablet']
 // apuntado cuenta al momento, lo valida la palabra de los compañeros, no la app — en la tablet
 // (rol "tablet", incluido en PUEDE_RECEPCION) cada uno busca su propio nombre en "Recepción" y
 // apunta, sin PIN.
-export default function CompePage() {
+// `modoQuiosco` (Ramiro, 08/11 11:11, "Modo tablet" en "Ver como"): usado por App.jsx cuando el
+// dispositivo entero se pone en modo tablet — enseña solo Recepción, sin pestañas ni cabecera
+// normal (eso lo monta App.jsx alrededor).
+export default function CompePage({ modoQuiosco = false }) {
   const sd = window.blokesSiteData || {}
   const puedeRecepcion = PUEDE_RECEPCION.includes(sd.userRole)
   const [estado, setEstado] = useState(null)
@@ -90,6 +93,23 @@ export default function CompePage() {
         <h1>{estado.nombre}</h1>
         <p className="compe-page__muted">Entra con tu cuenta para apuntar tus resultados.</p>
         <a className="compe-page__login" href={sd.loginUrl}>Entrar</a>
+      </div>
+    )
+  }
+
+  if (modoQuiosco) {
+    return (
+      <div className="compe-page">
+        <h1>{estado.nombre}</h1>
+        <p className="compe-page__muted">
+          Norma de honor: lo que apuntes cuenta al momento — que un compañero o profe te haya visto hacerlo.
+        </p>
+        {err && <p className="compe-page__error">{err}</p>}
+        {puedeRecepcion ? (
+          <RecepcionTab bloques={estado.bloques} competitionId={estado.competitionId} />
+        ) : (
+          <p className="compe-page__error">Este rol no puede usar la pantalla de recepción.</p>
+        )}
       </div>
     )
   }
@@ -155,6 +175,7 @@ function RecepcionTab({ bloques, competitionId }) {
   const [crearEmail, setCrearEmail] = useState('')
   const [creando, setCreando] = useState(false)
   const [mostrarCrear, setMostrarCrear] = useState(false)
+  const [aviso, setAviso] = useState(null)
 
   function volverABuscar() {
     setSeleccionado(null); setMisResultados({}); setQ(''); setResultados(null)
@@ -170,18 +191,26 @@ function RecepcionTab({ bloques, competitionId }) {
     return () => clearTimeout(id)
   }, [seleccionado, misResultados])
 
-  async function buscar() {
-    if (q.trim().length < 2) { setErr('Escribe al menos 2 caracteres.'); return }
-    setBuscando(true); setErr(null)
+  async function buscar(silencioso = false) {
+    if (q.trim().length < 2) { if (!silencioso) setErr('Escribe al menos 2 caracteres.'); return }
+    setBuscando(true); if (!silencioso) setErr(null)
     try {
       const r = await api('GET', `/compe/buscar-participante?q=${encodeURIComponent(q.trim())}&competitionId=${competitionId}`)
       setResultados(r.data || [])
     } catch (e) {
-      setErr(e.message)
+      if (!silencioso) setErr(e.message)
     } finally {
       setBuscando(false)
     }
   }
+
+  // Cowork, 08/11 11:15: que busque sola mientras se escribe (desde 2 letras), no solo con el
+  // botón — más rápido en la tablet. El botón y Enter (buscar() sin debounce) siguen ahí.
+  useEffect(() => {
+    if (q.trim().length < 2) { setResultados(null); return }
+    const id = setTimeout(() => buscar(true), 350)
+    return () => clearTimeout(id)
+  }, [q]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function elegir(p) {
     setSeleccionado(p)
@@ -217,6 +246,12 @@ function RecepcionTab({ bloques, competitionId }) {
       const target = seleccionado.tipo === 'rapido' ? { targetParticipanteRapidoId: seleccionado.id } : { targetUserId: seleccionado.id }
       await api('POST', '/compe/resultado', { compBlockId, ...cambios, ...target })
       setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios } }))
+      // Aviso de confirmación (cowork, 08/11 11:15: "vuelve a la búsqueda sin decir nada, que
+      // quien está en la tablet sepa que se guardó") — sobrevive a volverABuscar, que solo
+      // limpia la selección/búsqueda, no este aviso.
+      const numero = bloques.find(b => b.compBlockId === compBlockId)?.numero
+      setAviso(`✓ ${cambios.top ? 'Top' : 'Zona'} apuntado a ${seleccionado.nombreMostrar} (bloque ${numero})`)
+      setTimeout(() => setAviso(null), 3000)
       // Tras guardar, vuelve sola a la búsqueda (Ramiro, 07/11 16:35) — con un momento para que
       // se vea «Apuntado ✓» antes de que desaparezca la pantalla de esta persona.
       setTimeout(volverABuscar, 1200)
@@ -234,6 +269,7 @@ function RecepcionTab({ bloques, competitionId }) {
           Apuntando por <strong>{seleccionado.nombreMostrar}</strong>.{' '}
           <button type="button" className="compe-intentos-link" onClick={() => { setSeleccionado(null); setMisResultados({}) }}>Elegir otra persona</button>
         </p>
+        {aviso && <p className="compe-recepcion-aviso">{aviso}</p>}
         {err && <p className="compe-page__error">{err}</p>}
         <div className="compe-page__grid">
           {bloques.map(b => (
@@ -252,6 +288,7 @@ function RecepcionTab({ bloques, competitionId }) {
 
   return (
     <div>
+      {aviso && <p className="compe-recepcion-aviso">{aviso}</p>}
       <label className="compe-grp-field">
         <input
           className="compe-recepcion-input" type="text" value={q} autoFocus
@@ -260,7 +297,7 @@ function RecepcionTab({ bloques, competitionId }) {
           placeholder="Nombre de quien lo ha hecho…"
         />
       </label>
-      <button className="compe-bloque__guardar" disabled={buscando} onClick={buscar}>{buscando ? 'Buscando…' : 'Buscar'}</button>
+      <button className="compe-bloque__guardar" disabled={buscando} onClick={() => buscar()}>{buscando ? 'Buscando…' : 'Buscar'}</button>
       {err && <p className="compe-page__error">{err}</p>}
 
       {resultados !== null && (

@@ -71,3 +71,7 @@
   border: 1px solid #e5e7eb; background: #f9fafb; font-size: 0.95rem; cursor: pointer;
 }
 .compe-recepcion-resultado:hover { background: #f3f4f6; }
+.compe-recepcion-aviso {
+  background: #dcfce7; color: #166534; font-weight: 600; font-size: 0.95rem;
+  padding: 10px 12px; border-radius: 8px; margin-bottom: 10px;
+}
