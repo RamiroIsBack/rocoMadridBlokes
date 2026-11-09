@@ -1,4 +1,7 @@
-/* ── Instala Blokes (/instalar) ── */
+/* ── Instala Blokes (/instalar) ──
+   Hereda los tokens reales de la app (index.css): fondo crema, texto oscuro — no un tema
+   oscuro aparte (cowork, 09/11 12:25: el texto gris claro que puse antes era casi invisible
+   sobre el fondo crema real). */
 .instalar {
   max-width: 480px;
   margin: 0 auto;
@@ -6,9 +9,9 @@
   text-align: center;
 }
 .instalar__logo { width: 72px; height: 72px; border-radius: 16px; margin-bottom: 12px; }
-.instalar__titulo { font-size: 1.5rem; margin: 0 0 6px; }
-.instalar__gancho { font-size: 1rem; color: #D0962B; font-weight: 600; margin: 0 0 24px; line-height: 1.5; }
-.instalar__cuenta-atras { font-size: 0.9rem; color: #aaa; font-weight: 500; }
+.instalar__titulo { font-size: 1.5rem; margin: 0 0 6px; color: var(--color-text-primary); }
+.instalar__gancho { font-size: 1rem; color: var(--color-accent-hover); font-weight: 600; margin: 0 0 24px; line-height: 1.5; }
+.instalar__cuenta-atras { font-size: 0.9rem; color: var(--color-text-secondary); font-weight: 500; }
 
 .instalar__cta {
   display: block;
@@ -16,40 +19,47 @@
   padding: 16px;
   border: 0;
   border-radius: 12px;
-  background: #D0962B;
+  background: var(--color-accent);
   color: #1f1f1f;
   font-size: 1.1rem;
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
 }
+.instalar__cta--secundario {
+  margin-top: 10px;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+}
 
 .instalar__ya-tienes {
   padding: 14px;
   border-radius: 12px;
-  background: #14301f;
-  color: #34d399;
+  background: #e3f3e9;
+  color: var(--state-good);
   font-weight: 700;
 }
 
 .instalar__pasos {
   text-align: left;
-  background: rgba(255,255,255,0.04);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   padding: 16px 18px;
   margin-top: 16px;
 }
-.instalar__pasos h2 { font-size: 0.95rem; margin: 0 0 10px; color: #ccc; }
-.instalar__pasos ol { margin: 0; padding-left: 20px; font-size: 0.9rem; line-height: 1.6; color: #ddd; }
+.instalar__pasos h2 { font-size: 0.95rem; margin: 0 0 10px; color: var(--color-text-primary); }
+.instalar__pasos ol { margin: 0; padding-left: 20px; font-size: 0.9rem; line-height: 1.6; color: var(--color-text-primary); }
 
 .instalar__about {
   text-align: left;
   margin-top: 32px;
   font-size: 0.85rem;
   line-height: 1.6;
-  color: #bbb;
+  color: var(--color-text-secondary);
 }
-.instalar__about h2 { font-size: 0.95rem; color: #f0ece0; margin: 0 0 10px; }
+.instalar__about h2 { font-size: 0.95rem; color: var(--color-text-primary); margin: 0 0 10px; }
 .instalar__about ul { margin: 0; padding-left: 20px; }
 .instalar__about li { margin-bottom: 6px; }
 
@@ -60,9 +70,9 @@
   min-height: 44px;
   margin-top: 28px;
   padding: 10px 18px;
-  border: 1px solid #444;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
-  color: #60a5fa;
+  color: var(--color-accent-hover);
   font-size: 0.9rem;
   text-decoration: none;
 }

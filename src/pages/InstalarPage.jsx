@@ -57,10 +57,13 @@ export default function InstalarPage() {
       .then(d => { if (d?.success && d.data) setCompe(d.data) })
       .catch(() => {})
 
-    // Solo aquí se captura beforeinstallprompt — y solo aquí se hace preventDefault(), para
-    // no tapar el aviso nativo de Chrome en el resto de la app (Ramiro, 09/11 11:53).
+    // main.jsx ya lo captura en cuanto carga el script, antes de que React monte este
+    // efecto (cowork, 09/11 12:25: con el service worker ya instalado, Chrome a veces lanza
+    // el evento antes de llegar aquí, y se perdía). Si ya llegó, está en window.blokesInstallEvent.
+    if (window.blokesInstallEvent) promptEventRef.current = window.blokesInstallEvent
     const onBeforeInstall = (e) => {
       e.preventDefault()
+      window.blokesInstallEvent = e
       promptEventRef.current = e
     }
     window.addEventListener('beforeinstallprompt', onBeforeInstall)
@@ -82,6 +85,7 @@ export default function InstalarPage() {
     try {
       await evento.prompt()
       promptEventRef.current = null
+      window.blokesInstallEvent = null
     } catch {
       registrarEvento('prompt_fail')
       setSinPrompt(true)
@@ -129,6 +133,15 @@ export default function InstalarPage() {
       ) : (
         <>
           <button className="instalar__cta" onClick={instalar}>📲 Instalar Blokes</button>
+          {sinPrompt && entorno.esAndroid && (
+            // Pestaña personalizada (Custom Tab) abierta desde WhatsApp sin "WhatsApp" en el
+            // user-agent: se ve como Chrome normal pero no tiene el menú ⋮ → "Instalar
+            // aplicación" (cowork, 09/11 12:25). El botón de abrir en Chrome de verdad es
+            // la salida segura ahí; en Chrome normal no hace daño, solo reabre la misma página.
+            <button className="instalar__cta instalar__cta--secundario" onClick={abrirEnChrome}>
+              Abrir en Chrome para instalar
+            </button>
+          )}
           {sinPrompt && (
             <div className="instalar__pasos">
               <h2>Tu navegador no deja instalar con un botón. Hazlo así:</h2>
