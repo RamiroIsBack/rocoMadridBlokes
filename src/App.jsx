@@ -29,6 +29,8 @@ import { useEventsAccess } from './hooks/useEvents'
 import { useCalendarAccess } from './hooks/useCalendar'
 import './App.css'
 
+const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
+
 const PRODUCT_NAMES = { 'Classes': 'Clases', 'Single Days': 'Días sueltos' }
 
 const SUBSALA_POSITIONS = {
@@ -188,6 +190,36 @@ export default function App() {
   // abierto), así no hace falta duplicar nada por pantalla.
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false)
 
+  // "Instala Blokes" (Ramiro, 09/11): si venimos de la página de aterrizaje (?instalar=1),
+  // lanza el prompt nativo en cuanto el navegador lo tenga disponible — puede que ya haya
+  // llegado (guardado en main.jsx) o que tarde un poco más que el montaje de este efecto.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('instalar') !== '1') return
+    let intentos = 0
+    const tryPrompt = () => {
+      if (window.blokesInstallEvent) {
+        window.blokesInstallEvent.prompt()
+        window.blokesInstallEvent = null
+      } else if (intentos++ < 20) {
+        setTimeout(tryPrompt, 250)
+      }
+    }
+    tryPrompt()
+  }, [])
+
+  // Para ver en Supervisión si el gancho de "Instala Blokes" funciona — una vez por sesión,
+  // no en cada navegación dentro de la app.
+  useEffect(() => {
+    const esStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches
+    if (!esStandalone || sessionStorage.getItem('_blokes_standalone_ping')) return
+    sessionStorage.setItem('_blokes_standalone_ping', '1')
+    fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/install-event`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo: 'standalone_open' }),
+    }).catch(() => {})
+  }, [])
+
   return (
     <BrowserRouter basename={detectBasename()}>
       <div className="app">
@@ -240,10 +272,16 @@ export default function App() {
                 </div>
                 <div className={`app-header__extra${menuMovilAbierto ? ' app-header__extra--abierto' : ''}`}>
                   {!profileFetching && nickname && <span className="app-header__user-nick">@{nickname}</span>}
-                  <button
-                    className="app-header__logout-btn"
-                    onClick={() => setLogoutOpen(true)}
-                  >× Log out</button>
+                  {/* Cowork, 09/11 09:05 (confirmado): en "Ver como: Tablet" se esconde — cerrar
+                      sesión ahí echaría la sesión REAL de quien lo simula (socio/profe/Eva), no
+                      una sesión de prueba. En la cuenta tablet real (sin simular nada) se deja
+                      como siempre. */}
+                  {!(sd.userRole === 'tablet' && sd.userRoleReal !== 'tablet') && (
+                    <button
+                      className="app-header__logout-btn"
+                      onClick={() => setLogoutOpen(true)}
+                    >× Log out</button>
+                  )}
                   {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
                   {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
                       EFECTIVO para que vean exactamente el mismo botón): su único "ver como"

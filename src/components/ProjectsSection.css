@@ -101,7 +101,7 @@
 .pr-link {
   background: none;
   border: none;
-  padding: 0;
+  padding: 10px 0; /* antes 0 (18 px de alto) — Ramiro, 09/11 09:05 */
   color: #a78bfa;
   font: inherit;
   cursor: pointer;

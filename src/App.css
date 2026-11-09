@@ -474,10 +474,33 @@
     align-items: center;
   }
 
+  /* Cowork, 09/11 09:05: plegar el mapa no ganaba nada de pantalla — el alto real lo marcaba
+     logo-section (339 px), una columna con logo/subtítulo/usuario/⋯/Apúntate/Tecnificación/
+     mapa uno debajo de otro, sin relación con el mapa. En fila: logo + subtítulo + usuario a
+     la izquierda, el resto (apodo, Log out, Ver como, suscripción, los 2 CTA, el botón del
+     mapa) a la derecha, todo en una sola fila que envuelve si no cabe. El "⋯" ya no hace
+     falta aquí (en fila ya se ve todo siempre), así que se oculta. */
   .app-header__logo-section {
     flex-shrink: 0;
     width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
   }
+  .app-header__logo { height: 48px; width: 48px; }
+  .app-header__subtitle { margin: 0; }
+  .app-header__user { margin-top: 0; width: auto; }
+  .app-header__menu-toggle { display: none; }
+  .app-header__extra {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+  }
+  .app-header__links { margin-top: 0; }
 
   .app-header__salas-wrap {
     margin-left: var(--spacing-md);

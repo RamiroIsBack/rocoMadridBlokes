@@ -149,6 +149,10 @@
 @media (max-width: 720px) {
   .ev-week { grid-template-columns: 1fr; }
   .ev-week__day { min-height: 0; }
+  /* En semana ya es 1 columna por día (como una agenda) — seguro subir el hueco libre ahí
+     (cowork, 09/11 09:05: 20 px). El de dentro de la rejilla de MES (`.ev-month .ev-free`,
+     justo abajo) se deja tan pequeño como está, eso va con el rediseño a vista agenda. */
+  .ev-free { padding: 10px 6px; font-size: 0.8rem; }
   .ev-month { gap: 2px; }
   .ev-month__cell { min-height: 56px; padding: 2px; }
   .ev-month .ev-chip__time { display: none; }

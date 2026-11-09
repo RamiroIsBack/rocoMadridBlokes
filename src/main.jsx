@@ -27,6 +27,22 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
   })
 }
 
+// "Instala Blokes" (Ramiro, 09/11): el evento puede llegar antes de que <App> monte el
+// efecto que lo espera (useEffect corre después del primer render) — se guarda aquí, lo
+// antes posible, para no perderlo.
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault()
+  window.blokesInstallEvent = e
+})
+window.addEventListener('appinstalled', () => {
+  const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
+  fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/install-event`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tipo: 'appinstalled' }),
+  }).catch(() => {})
+})
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <App />

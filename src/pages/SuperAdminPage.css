@@ -669,6 +669,11 @@ details[open] .sa-collapsible__arrow {
   /* Ramiro, 09/11 08:30: .sa-filter-btn a 24 px y .sa-pay-action a 23 px — mínimo táctil 44 px. */
   .sa-filter-btn { padding: 12px 16px; font-size: 0.8rem; min-height: 44px; }
   .sa-pay-action { padding: 11px 14px; font-size: 0.8rem; min-height: 44px; }
+  /* Cowork, 09/11 09:05: sueltos, fuera de rejilla — .sa-period__btn 24 px, .sa-list-save__btn
+     24 px, .sa-cat-header 34 px. */
+  .sa-period__btn    { padding: 12px 14px; font-size: 0.78rem; min-height: 44px; }
+  .sa-list-save__btn { padding: 12px 16px; font-size: 0.78rem; min-height: 44px; }
+  .sa-cat-header     { padding: 13px 12px; min-height: 44px; }
 }
 
 /* ── Main tab nav ── */

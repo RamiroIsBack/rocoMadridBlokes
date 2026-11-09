@@ -179,6 +179,163 @@ add_filter('show_admin_bar', function($show) {
     return $show;
 });
 
+// ============================================================
+//  "Instala Blokes" — página de aterrizaje para compartir por WhatsApp
+//  (NOTAS_PARA_CODE_instalar_app.md). Server-rendered aparte (no la SPA de
+//  React) porque el crawler de WhatsApp no ejecuta JS: necesita las etiquetas
+//  og:* en el HTML que devuelve el servidor a la primera, no inyectadas luego.
+//  Vive en /app (URL corta para el mensaje) y también en /blokes/instalar y
+//  /blokes-dev/instalar, por si Ramiro comparte esa en vez de /app.
+// ============================================================
+
+// Priority 0: tiene que ganar a la SPA de abajo (prioridad 1), que si no
+// también atendería /blokes/instalar como si fuese una ruta normal de React.
+add_action('template_redirect', function() {
+    $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+    $es_instalar = ($path === 'app');
+    if (!$es_instalar) {
+        foreach ($GLOBALS['blokes_app_slugs'] as $s) {
+            if ($path === $s . '/instalar') { $es_instalar = true; break; }
+        }
+    }
+    if (!$es_instalar) return;
+
+    nocache_headers();
+
+    // Fecha de la próxima compe real (no de prueba) para el gancho — si no hay
+    // ninguna programada, se enseña el texto genérico sin fecha.
+    $compe = null;
+    switch_to_blog(3);
+    global $wpdb;
+    $row = $wpdb->get_row(
+        "SELECT name, comp_date, comp_end_date FROM " . progreso_equip_table('competitions') . "
+         WHERE is_test = 0 AND comp_date >= CURDATE() ORDER BY comp_date ASC LIMIT 1", ARRAY_A
+    );
+    if ($row) $compe = $row;
+    restore_current_blog();
+
+    $app_url      = home_url('/app');
+    $abrir_app_url = home_url('/blokes/?instalar=1');
+    $login_url    = home_url('/blokes/');
+    $icon_url     = home_url('/blokes/icons/icon-512.png');
+    $qr_url       = 'https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=' . rawurlencode($app_url);
+
+    $compe_nombre = $compe ? $compe['name'] : '';
+    $compe_fecha  = $compe ? $compe['comp_date'] : '';
+    $compe_fin    = $compe && $compe['comp_end_date'] ? $compe['comp_end_date'] : $compe_fecha;
+
+    $og_desc = $compe
+        ? "Instálala en el móvil antes de la compe del " . date_i18n('j \d\e F', strtotime($compe_fecha)) . ": apunta tus tops en segundos."
+        : 'La app de Rocoteca Madrid para apuntar tus tops de búlder.';
+
+    header('Content-Type: text/html; charset=UTF-8');
+    ?><!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instala Blokes — Rocoteca Madrid</title>
+<meta name="description" content="<?php echo esc_attr($og_desc); ?>">
+<meta property="og:title" content="Blokes — la app de Rocoteca Madrid">
+<meta property="og:description" content="<?php echo esc_attr($og_desc); ?>">
+<meta property="og:image" content="<?php echo esc_url($icon_url); ?>">
+<meta property="og:type" content="website">
+<meta property="og:url" content="<?php echo esc_url($app_url); ?>">
+<link rel="icon" href="<?php echo esc_url($icon_url); ?>">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: #1f1f1f; color: #f4f0e4; font-family: system-ui, -apple-system, sans-serif; }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 32px 20px 48px; text-align: center; }
+  .logo { width: 72px; height: 72px; border-radius: 16px; margin-bottom: 12px; }
+  h1 { font-size: 1.5rem; margin: 0 0 6px; }
+  .hook { font-size: 1rem; color: #D0962B; font-weight: 600; margin: 0 0 24px; }
+  .cta { display: block; width: 100%; padding: 16px; border: 0; border-radius: 12px; background: #D0962B; color: #1f1f1f; font-size: 1.1rem; font-weight: 700; cursor: pointer; text-decoration: none; }
+  .ya-tienes { display: none; padding: 14px; border-radius: 12px; background: #14301f; color: #34d399; font-weight: 700; }
+  .ya-tienes.show { display: block; }
+  .cta.hide { display: none; }
+  .pasos { text-align: left; background: rgba(255,255,255,0.04); border-radius: 12px; padding: 16px 18px; margin-top: 20px; }
+  .pasos h2 { font-size: 0.95rem; margin: 0 0 10px; color: #ccc; }
+  .pasos ol { margin: 0; padding-left: 20px; font-size: 0.9rem; line-height: 1.6; color: #ddd; }
+  .pasos.oculto { display: none; }
+  .qr-block { margin-top: 24px; }
+  .qr-block img { border-radius: 8px; background: #fff; padding: 8px; }
+  .qr-block p { font-size: 0.85rem; color: #999; }
+  .about { margin-top: 32px; text-align: left; font-size: 0.85rem; line-height: 1.6; color: #bbb; }
+  .about h2 { font-size: 0.95rem; color: #f0ece0; margin: 0 0 8px; }
+  .login { display: block; margin-top: 28px; color: #60a5fa; font-size: 0.9rem; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img class="logo" src="<?php echo esc_url($icon_url); ?>" alt="Blokes">
+  <h1>Blokes</h1>
+  <?php if ($compe): ?>
+  <p class="hook" id="hook"><?php echo esc_html($compe_nombre); ?> — <span id="cuenta-atras">calculando…</span></p>
+  <?php else: ?>
+  <p class="hook">La app para apuntar tus tops de búlder</p>
+  <?php endif; ?>
+
+  <div class="ya-tienes" id="ya-tienes">✓ Ya la tienes instalada</div>
+  <a class="cta" id="cta" href="<?php echo esc_url($abrir_app_url); ?>">📲 Instalar Blokes</a>
+
+  <div class="pasos" id="pasos-iphone">
+    <h2>En iPhone (no sale un botón, se hace así):</h2>
+    <ol>
+      <li>Abre este enlace en <strong>Safari</strong>.</li>
+      <li>Toca el icono de compartir <strong>⬆️</strong> (abajo en el navegador).</li>
+      <li>Elige <strong>"Añadir a pantalla de inicio"</strong>.</li>
+    </ol>
+  </div>
+
+  <div class="qr-block" id="qr-block">
+    <img src="<?php echo esc_url($qr_url); ?>" width="200" height="200" alt="Código QR">
+    <p>Escanea con la cámara del móvil para abrir esta página ahí.</p>
+  </div>
+
+  <div class="about">
+    <h2>Cómo funciona la compe</h2>
+    <p>Cada bloque numerado tiene un color según su dificultad. Lo intentas, y cuando lo completas —entero (top) o solo hasta la marca (zona)— lo apuntas en la app con el número de intentos. La clasificación se calcula sola con esos datos, en directo.</p>
+  </div>
+
+  <a class="login" href="<?php echo esc_url($login_url); ?>">Inicia sesión o crea tu cuenta →</a>
+</div>
+<script>
+(function () {
+  var esStandalone = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+  if (esStandalone) {
+    document.getElementById('ya-tienes').classList.add('show');
+    document.getElementById('cta').classList.add('hide');
+    document.getElementById('pasos-iphone').classList.add('oculto');
+    document.getElementById('qr-block').style.display = 'none';
+  } else {
+    var esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+    if (!esIOS) document.getElementById('pasos-iphone').classList.add('oculto');
+    var esMovil = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+    if (esMovil) document.getElementById('qr-block').style.display = 'none';
+  }
+
+  <?php if ($compe): ?>
+  var fin = new Date('<?php echo esc_js($compe_fin); ?>T23:59:59');
+  var inicio = new Date('<?php echo esc_js($compe_fecha); ?>T00:00:00');
+  function pintarCuenta() {
+    var ahora = new Date();
+    var el = document.getElementById('cuenta-atras');
+    if (!el) return;
+    if (ahora > fin) { el.textContent = 'ya celebrada'; return; }
+    if (ahora >= inicio) { el.textContent = '¡hoy toca!'; return; }
+    var dias = Math.ceil((inicio - ahora) / 86400000);
+    el.textContent = dias === 1 ? 'mañana' : 'en ' + dias + ' días';
+  }
+  pintarCuenta();
+  <?php endif; ?>
+})();
+</script>
+</body>
+</html>
+    <?php
+    exit;
+}, 0);
+
 // Priority 1: runs before WordPress's redirect_canonical (priority 10).
 // Catches both the exact slug (/blokes-dev/) and any subroute (/blokes-dev/superadmin).
 // Serves the SPA HTML directly — no redirect round-trip needed.
@@ -514,6 +671,14 @@ add_action('rest_api_init', function() {
     register_rest_route('blokes/v1', '/upload-image', array(
         'methods'             => 'POST',
         'callback'            => 'blokes_upload_image',
+        'permission_callback' => '__return_true',
+    ));
+
+    // "Instala Blokes" (NOTAS_PARA_CODE_instalar_app.md) — para ver en Supervisión si el
+    // gancho funciona. Público porque appinstalled puede dispararse sin sesión iniciada.
+    register_rest_route('blokes/v1', '/install-event', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_registrar_install_event',
         'permission_callback' => '__return_true',
     ));
 
@@ -2086,6 +2251,37 @@ function blokes_upload_image($request) {
             ),
         ),
     ));
+}
+
+// "Instala Blokes" — tabla propia (no progreso_equip_table: esto vive en el blog
+// 1, donde corre /app, no en el 3 de Equipación) para poder enseñarlo en
+// Supervisión más adelante si Ramiro lo pide.
+function blokes_install_events_ensure_table() {
+    global $wpdb;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE {$wpdb->prefix}blokes_install_events (
+        id         bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        tipo       varchar(30)         NOT NULL,
+        user_id    bigint(20) UNSIGNED NULL,
+        created_at datetime            NOT NULL,
+        PRIMARY KEY (id)
+    ) {$charset};");
+}
+
+function blokes_registrar_install_event($request) {
+    $tipo = sanitize_key((string) $request->get_param('tipo'));
+    if (!in_array($tipo, array('appinstalled', 'standalone_open', 'instalar_click'), true)) {
+        return new WP_Error('tipo_invalido', 'Tipo no reconocido.', array('status' => 400));
+    }
+    blokes_install_events_ensure_table();
+    global $wpdb;
+    $wpdb->insert($wpdb->prefix . 'blokes_install_events', array(
+        'tipo'       => $tipo,
+        'user_id'    => is_user_logged_in() ? get_current_user_id() : null,
+        'created_at' => current_time('mysql'),
+    ));
+    return rest_ensure_response(array('success' => true));
 }
 
 // ============================================================
