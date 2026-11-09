@@ -136,7 +136,11 @@ function WeekSummary({ items, start, onShift, onOpen }) {
 }
 
 // ─── Mes ────────────────────────────────────────────────────────────────────
+// En móvil la cuadrícula de 7 columnas no cabe bien (celdas diminutas, chips ilegibles) — se
+// empieza plegada y «Resumen del mes», justo debajo, hace de vista agenda (cowork, punto 4 de
+// la cola de prioridad). En ordenador sigue abierta por defecto, como siempre.
 function MonthCalendar({ items, month, onMonth, onOpen, legend }) {
+  const [verRejilla, setVerRejilla] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 720)
   const cells = monthCells(month)
   return (
     <div className="sa-section">
@@ -146,20 +150,25 @@ function MonthCalendar({ items, month, onMonth, onOpen, legend }) {
           <button className="sa-pay-action" onClick={() => onMonth(shiftMonth(month, -1))}>←</button>
           <button className="sa-pay-action" onClick={() => onMonth(monthOf(today()))}>Hoy</button>
           <button className="sa-pay-action" onClick={() => onMonth(shiftMonth(month, 1))}>→</button>
+          <button className="sa-pay-action" onClick={() => setVerRejilla(v => !v)}>
+            {verRejilla ? 'Ocultar cuadrícula ▴' : 'Ver cuadrícula ▾'}
+          </button>
         </div>
       </div>
-      <div className="ev-month">
-        {DAYS.map(d => <div key={d} className="ev-month__head">{d}</div>)}
-        {cells.map(d => {
-          const weekend = ['Sáb', 'Dom'].includes(dayName(d))
-          return (
-            <div key={d} className={`ev-month__cell${monthOf(d) !== month ? ' ev-month__cell--out' : ''}${d === today() ? ' ev-month__cell--today' : ''}${weekend ? ' ev-month__cell--weekend' : ''}`}>
-              <span className="ev-month__num">{parse(d).getDate()}</span>
-              {items.filter(it => covers(it, d)).sort(byTime).map(it => <Chip key={it.key} it={it} onClick={() => onOpen(it)} />)}
-            </div>
-          )
-        })}
-      </div>
+      {verRejilla && (
+        <div className="ev-month">
+          {DAYS.map(d => <div key={d} className="ev-month__head">{d}</div>)}
+          {cells.map(d => {
+            const weekend = ['Sáb', 'Dom'].includes(dayName(d))
+            return (
+              <div key={d} className={`ev-month__cell${monthOf(d) !== month ? ' ev-month__cell--out' : ''}${d === today() ? ' ev-month__cell--today' : ''}${weekend ? ' ev-month__cell--weekend' : ''}`}>
+                <span className="ev-month__num">{parse(d).getDate()}</span>
+                {items.filter(it => covers(it, d)).sort(byTime).map(it => <Chip key={it.key} it={it} onClick={() => onOpen(it)} />)}
+              </div>
+            )
+          })}
+        </div>
+      )}
       <div className="ev-legend">
         {legend.map(([label, color]) => <span key={label}><i style={{ background: color }} />{label}</span>)}
         <span><b className="cal-chip__ok">✓</b> Listo (Notion) / confirmada (Eventos)</span>
