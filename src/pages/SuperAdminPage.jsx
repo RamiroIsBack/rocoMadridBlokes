@@ -10,6 +10,7 @@ import PayrollSection from '../components/PayrollSection'
 import PresupuestosSection from '../components/PresupuestosSection'
 import BudgetSection from '../components/BudgetSection'
 import ProjectsSection from '../components/ProjectsSection'
+import BlokesMapSection from '../components/BlokesMapSection'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
 import { getCalendarAccess, saveCalendarAccess } from '../hooks/useCalendar'
 import './SuperAdminPage.css'
@@ -1105,6 +1106,7 @@ export default function SuperAdminPage() {
     { key: 'acceso',   label: 'Acceso' },
     { key: 'presupuestos', label: 'Presupuestos' },
     { key: 'proyectos', label: 'Proyectos' },
+    { key: 'mapa',      label: 'Mapa de Blokes' },
   ]
 
   return (
@@ -1131,6 +1133,7 @@ export default function SuperAdminPage() {
       {saTab === 'acceso'   && <ListasSection />}
       {saTab === 'presupuestos' && <PresupuestosSection />}
       {saTab === 'proyectos' && <ProjectsSection />}
+      {saTab === 'mapa'      && <BlokesMapSection />}
     </div>
   )
 }
