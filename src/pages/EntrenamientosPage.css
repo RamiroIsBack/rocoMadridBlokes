@@ -59,7 +59,7 @@
 .entrena__active-tag {
   display: inline-block;
   margin-left: 8px;
-  font-size: 0.62rem;
+  font-size: 0.8rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -74,7 +74,7 @@
 .entrena__manual-tag {
   display: inline-block;
   margin-left: 8px;
-  font-size: 0.62rem;
+  font-size: 0.8rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -89,7 +89,7 @@
 .entrena__missing-tag {
   display: inline-block;
   margin-left: 8px;
-  font-size: 0.62rem;
+  font-size: 0.8rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -207,7 +207,7 @@
 }
 
 .entrena__filter-field label {
-  font-size: 0.68rem;
+  font-size: 0.8rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -421,7 +421,7 @@
   .entrena__table td[data-label]::before {
     content: attr(data-label);
     display: block;
-    font-size: 0.62rem;
+    font-size: 0.72rem;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
