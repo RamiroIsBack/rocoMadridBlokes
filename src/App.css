@@ -409,6 +409,17 @@
   border: 2px solid rgba(255,255,255,0.65);
 }
 
+/* "Dónde está cada bloque" en Colección modo compe (Ramiro, 09/11): resalta la subzona al
+   tocarla en la tarjeta. */
+.map-bubble-group--resaltada { animation: subsala-pulso 1s ease-in-out 3; }
+.map-bubble--marcador {
+  width: 26px; height: 26px; background: #fbbf24; border-color: #fff;
+}
+@keyframes subsala-pulso {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.35); }
+}
+
 @media (min-width: 1125px) {
   .app-header__salas-wrap {
     max-width: 800px;

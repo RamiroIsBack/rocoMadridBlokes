@@ -106,7 +106,7 @@ export default function IdentityPicker({ title = '¿Quién eres?', allowCreate =
                     className="idpicker__row"
                     onClick={() => pick(a)}
                   >
-                    <span className="idpicker__row-name">{a.cliente}</span>
+                    <span className="idpicker__row-name">{a.cliente}{a.nickname ? ` (${a.nickname})` : ''}</span>
                     <span className="idpicker__row-meta">{a.dia || 'Sin día'} · {a.horario || 'Sin horario'}</span>
                   </button>
                 ))}

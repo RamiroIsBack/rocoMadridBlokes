@@ -2376,6 +2376,10 @@ function progreso_get_alumnos($request) {
             if ($wp_user) $uid = $wp_user->ID;
         }
         $sub['user_id'] = $uid;
+        // Apodo (Ramiro, 09/11 05:45: "¿quién lo ha hecho?" tiene que enseñar también el
+        // nickname, hay varios "Ramiro" y con solo el nombre + clase no se sabe cuál es) —
+        // usermeta es global de la red, se puede leer desde el Club sin cambiar de blog.
+        $sub['nickname'] = $uid ? blokes_get_user_nickname($uid) : '';
         return $sub;
     }, $filtered);
 
@@ -13374,6 +13378,34 @@ function blokes_marcar_completado_si_no_estaba($user_id, $post_id) {
     blokes_register_top_for_leagues($user_id, intval($post_id));
 }
 
+// Igual que blokes_marcar_completado_si_no_estaba() pero para un alumno manual sin cuenta de
+// WordPress (comp_resultados.participante_tipo = 'placeholder') — mismo criterio no-toggle,
+// reutilizando la tabla e inserción que ya usa blokes_toggle_completion_placeholder().
+function blokes_marcar_completado_placeholder_si_no_estaba($placeholder_id, $post_id) {
+    global $wpdb;
+    blokes_ensure_placeholder_completions_table();
+    $table = blokes_placeholder_completions_table();
+    $ya = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM {$table} WHERE placeholder_id = %d AND post_id = %d", $placeholder_id, $post_id
+    ));
+    if ($ya) return; // ya contaba, no duplicar
+    $color = sanitize_text_field(get_field('bloke_color', $post_id) ?: 'green');
+    $sala  = sanitize_text_field(get_field('bloke_sala', $post_id) ?: 'entrada');
+    $wpdb->insert($table, array(
+        'placeholder_id' => intval($placeholder_id), 'post_id' => intval($post_id),
+        'color' => $color, 'sala' => $sala, 'completed_at' => current_time('mysql'), 'logged_by' => get_current_user_id(),
+    ), array('%d', '%d', '%s', '%s', '%s', '%d'));
+    $count = (int) get_post_meta($post_id, '_bloke_completion_count', true) + 1;
+    update_post_meta($post_id, '_bloke_completion_count', $count);
+    if ($count === 1) {
+        $nombre = $wpdb->get_var($wpdb->prepare("SELECT nombre FROM " . blokes_placeholder_table() . " WHERE id = %d", $placeholder_id));
+        $first_name = $nombre ? explode(' ', trim($nombre))[0] : '';
+        update_post_meta($post_id, '_bloke_first_ascent', array(
+            'placeholder_id' => intval($placeholder_id), 'name' => $first_name ?: $nombre, 'timestamp' => current_time('c'),
+        ));
+    }
+}
+
 // POST /equipacion/competitions/{id}/modo-compe — body {activo: bool}. Solo un socio (Ramiro,
 // 07/11 08:46: "lo enciende/apaga un socio"). Al ENCENDER: crea (si no existía ya) un bloke real
 // por cada uno de los 16 comp_blocks, oculto (post_status 'draft') hasta que alguien lo publique
@@ -13464,11 +13496,12 @@ function progreso_equip_set_modo_compe($request) {
         // tablas de resultados son de equipación) — se aplican después, ya en blog 1, junto con
         // el resto de lo que toca un bloke/usuario/liga. Sin validación en la app (Ramiro, 07/11
         // 16:36): todo lo apuntado (estado siempre 'validado' desde ese cambio) cuenta al apagar,
-        // no solo "lo validado" de antes. Solo participantes con cuenta ('user') — un rápido no
-        // tiene usuario al que ponerle la completion; sus tops quedan en comp_resultados hasta
-        // que, si crea cuenta, se le asocien (pendiente, ver notas).
+        // no solo "lo validado" de antes. Participantes con cuenta ('user') y alumnos manuales
+        // ('placeholder', 09/11: picker de Colección en modo tablet) sí tienen un sitio donde
+        // guardar su completion — un rápido no, sus tops quedan en comp_resultados hasta que, si
+        // crea cuenta, se le asocien (pendiente, ver notas).
         $resultados = $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND top = 1 AND participante_tipo = 'user'", $id
+            "SELECT * FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND top = 1 AND participante_tipo IN ('user', 'placeholder')", $id
         ), ARRAY_A);
         $bloque_a_post = array();
         foreach ($blocks as $b) { $bloque_a_post[intval($b['id'])] = intval($b['bloke_post_id']); }
@@ -13493,7 +13526,12 @@ function progreso_equip_set_modo_compe($request) {
         // pendientes/rechazados: igual que antes de apagar el modo, esos no cuentan para nada.
         foreach ($resultados as $r) {
             $post_id = $bloque_a_post[intval($r['comp_block_id'])] ?? 0;
-            if ($post_id) blokes_marcar_completado_si_no_estaba(intval($r['participante_id']), $post_id);
+            if (!$post_id) continue;
+            if ($r['participante_tipo'] === 'placeholder') {
+                blokes_marcar_completado_placeholder_si_no_estaba(intval($r['participante_id']), $post_id);
+            } else {
+                blokes_marcar_completado_si_no_estaba(intval($r['participante_id']), $post_id);
+            }
         }
         if ($es_multisite) restore_current_blog();
     }
@@ -13513,12 +13551,24 @@ function progreso_compe_estado($request) {
     );
     if (!$comp) return rest_ensure_response(array('success' => true, 'data' => array('activo' => false)));
     $blocks = $wpdb->get_results($wpdb->prepare(
-        "SELECT id, number, grade_color, bloke_post_id FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $comp['id']
+        "SELECT id, number, grade_color, bloke_post_id, subzone FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $comp['id']
     ), ARRAY_A);
+    // "Dónde está cada bloque" (Ramiro, 09/11 05:45): misma subzona que ya guarda Organización
+    // (comp_blocks.subzone) y la misma tabla sala↔subzona de progreso_equip_set_modo_compe() —
+    // si el bloque no tiene subzona asignada todavía, "zona por confirmar" en vez de adivinar.
+    $sala_de = array(1 => 'entrada', 2 => 'entrada', 3 => 'sala_grande', 4 => 'sala_grande', 5 => 'sala_grande', 6 => 'sala_grande', 7 => 'sala_grande', 8 => 'cueva');
+    $sala_label = array('entrada' => 'Entrada', 'sala_grande' => 'Sala Grande', 'cueva' => 'Cueva');
     return rest_ensure_response(array('success' => true, 'data' => array(
         'activo' => true, 'competitionId' => intval($comp['id']), 'nombre' => $comp['name'],
-        'bloques' => array_map(function($b) {
-            return array('compBlockId' => intval($b['id']), 'blokePostId' => intval($b['bloke_post_id']), 'numero' => intval($b['number']), 'color' => $b['grade_color']);
+        'compDate' => $comp['comp_date'], 'compEndDate' => $comp['comp_end_date'] ?: $comp['comp_date'],
+        'bloques' => array_map(function($b) use ($sala_de, $sala_label) {
+            $subzona = $b['subzone'] !== null ? intval($b['subzone']) : null;
+            $sala = $subzona && isset($sala_de[$subzona]) ? $sala_de[$subzona] : null;
+            return array(
+                'compBlockId' => intval($b['id']), 'blokePostId' => intval($b['bloke_post_id']),
+                'numero' => intval($b['number']), 'color' => $b['grade_color'],
+                'subzona' => $subzona, 'sala' => $sala ? $sala_label[$sala] : null,
+            );
         }, $blocks),
     )));
 }
@@ -13540,12 +13590,16 @@ function progreso_compe_apuntar_resultado($request) {
     // Participante rápido (Ramiro, 07/11 08:48: pase de día sin cuenta) — siempre lo crea
     // recepción.
     $target_rapido_id = intval($request->get_param('targetParticipanteRapidoId'));
+    // Alumno manual sin cuenta de WordPress (Ramiro, 09/11: reutilizar el picker "¿quién lo ha
+    // hecho?" de Colección en modo tablet — ese picker también puede devolver uno de estos, no
+    // solo cuentas reales).
+    $target_placeholder_id = intval($request->get_param('targetPlaceholderId'));
     if (!$comp_block_id) return new WP_Error('bad_request', 'Falta compBlockId.', array('status' => 400));
-    if (($target_user_id || $target_rapido_id) && !blokes_can_supervise()) {
+    if (($target_user_id || $target_rapido_id || $target_placeholder_id) && !blokes_can_supervise()) {
         return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
     }
-    $participante_tipo = $target_rapido_id ? 'rapido' : 'user';
-    $participante_id = $target_rapido_id ?: ($target_user_id ?: get_current_user_id());
+    $participante_tipo = $target_rapido_id ? 'rapido' : ($target_placeholder_id ? 'placeholder' : 'user');
+    $participante_id = $target_rapido_id ?: ($target_placeholder_id ?: ($target_user_id ?: get_current_user_id()));
 
     $block = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $comp_block_id), ARRAY_A);
     if (!$block) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
@@ -13597,6 +13651,18 @@ function progreso_compe_buscar_participante($request) {
     global $wpdb;
     $resultado = array();
 
+    // Clase de cada uno (Ramiro, 09/11 05:45: "hay 3 Ramiro, con solo nombre+apodo o
+    // nombre+clase no se sabe cuál es — usa nombre + (apodo) + clase en los dos sitios") —
+    // RocoMadrid_SF_Stats vive en el Club, así que el mapa se construye AQUÍ, antes de
+    // cualquier switch_to_blog(1): dentro del switch el prefijo de WooCommerce ya no sería el
+    // del Club y saldría vacío o mal.
+    $clase_por_email = array();
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (($sub['status'] ?? '') !== 'active' || empty($sub['email'])) continue;
+        $clase = trim(($sub['dia'] ?? '') . (!empty($sub['horario']) ? ' ' . $sub['horario'] : ''));
+        if ($clase) $clase_por_email[strtolower($sub['email'])] = $clase;
+    }
+
     $es_multisite = is_multisite();
     if ($es_multisite) switch_to_blog(1);
     $usuarios = get_users(array(
@@ -13604,7 +13670,10 @@ function progreso_compe_buscar_participante($request) {
     ));
     foreach ($usuarios as $u) {
         $nick = blokes_get_user_nickname($u->ID);
-        $resultado[] = array('tipo' => 'user', 'id' => $u->ID, 'nombreMostrar' => $nick ? "{$u->display_name} ({$nick})" : $u->display_name);
+        $nombre_mostrar = $nick ? "{$u->display_name} ({$nick})" : $u->display_name;
+        $clase = $clase_por_email[strtolower($u->user_email)] ?? '';
+        if ($clase) $nombre_mostrar .= " · {$clase}";
+        $resultado[] = array('tipo' => 'user', 'id' => $u->ID, 'nombreMostrar' => $nombre_mostrar);
     }
     if ($es_multisite) restore_current_blog();
 
@@ -13723,6 +13792,22 @@ function progreso_compe_clasificacion($request) {
         foreach ($filas_rapidos as $fr) $nombres_rapidos[intval($fr['id'])] = $fr['nombre'];
     }
 
+    // Alumnos manuales sin cuenta (Ramiro, 09/11: el picker "¿quién lo ha hecho?" de Colección
+    // en modo tablet también puede devolver uno de estos) — mismo trato que un rápido.
+    $nombres_placeholder = array();
+    $placeholder_ids = array();
+    foreach ($filas as $f) {
+        if ($f['participante_tipo'] === 'placeholder') $placeholder_ids[intval($f['participante_id'])] = true;
+    }
+    $placeholder_ids = array_keys($placeholder_ids);
+    if ($placeholder_ids) {
+        $ph = implode(',', array_fill(0, count($placeholder_ids), '%d'));
+        $filas_placeholder = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, nombre FROM " . blokes_placeholder_table() . " WHERE id IN ($ph)", ...$placeholder_ids
+        ), ARRAY_A);
+        foreach ($filas_placeholder as $fp) $nombres_placeholder[intval($fp['id'])] = $fp['nombre'];
+    }
+
     $por_participante = array();
     foreach ($filas as $f) {
         $clave = $f['participante_tipo'] . ':' . intval($f['participante_id']);
@@ -13737,18 +13822,19 @@ function progreso_compe_clasificacion($request) {
 
     $es_multisite = is_multisite();
     if ($es_multisite) switch_to_blog(1);
-    $nombre_de = function($tipo, $id) use ($nombres_rapidos) {
-        if ($tipo === 'rapido') {
-            // Público (tele/clasificación): nunca apellidos (Ramiro, punto 7) — un rápido se
-            // escribe entero en Recepción (nombre y apellidos sueltos, sin un campo separado),
-            // así que aquí solo se enseña la primera palabra + la inicial de la siguiente si hay
-            // (cowork, 07/11 16:30: "Rápido P."). En Recepción (interno) sí sale completo.
-            $partes = array_filter(explode(' ', trim($nombres_rapidos[$id] ?? 'Alguien')));
-            $partes = array_values($partes);
-            $nombre_corto = $partes[0] ?? 'Alguien';
-            if (isset($partes[1]) && $partes[1] !== '') $nombre_corto .= ' ' . mb_substr($partes[1], 0, 1) . '.';
-            return $nombre_corto . ' (sin cuenta)';
-        }
+    $acortar_sin_cuenta = function($nombre_completo) {
+        // Público (tele/clasificación): nunca apellidos (Ramiro, punto 7) — un rápido/alumno
+        // manual se escribe entero (nombre y apellidos sueltos, sin un campo separado), así que
+        // aquí solo se enseña la primera palabra + la inicial de la siguiente si hay (cowork,
+        // 07/11 16:30: "Rápido P.").
+        $partes = array_values(array_filter(explode(' ', trim((string) $nombre_completo))));
+        $nombre_corto = $partes[0] ?? 'Alguien';
+        if (isset($partes[1]) && $partes[1] !== '') $nombre_corto .= ' ' . mb_substr($partes[1], 0, 1) . '.';
+        return $nombre_corto . ' (sin cuenta)';
+    };
+    $nombre_de = function($tipo, $id) use ($nombres_rapidos, $nombres_placeholder, $acortar_sin_cuenta) {
+        if ($tipo === 'rapido') return $acortar_sin_cuenta($nombres_rapidos[$id] ?? 'Alguien');
+        if ($tipo === 'placeholder') return $acortar_sin_cuenta($nombres_placeholder[$id] ?? 'Alguien');
         $u = get_userdata($id);
         if (!$u) return 'Alguien';
         $nombre = $u->first_name ?: explode(' ', trim($u->display_name))[0];

@@ -35,10 +35,13 @@ const PUEDE_RECEPCION = ['profesor', 'gestion', 'socio', 'tablet']
 export default function CompePage() {
   const sd = window.blokesSiteData || {}
   const puedeRecepcion = PUEDE_RECEPCION.includes(sd.userRole)
+  // La tablet no tiene "yo" (igual que en Colección/Progreso, cowork 08/11 21:50) — con rol
+  // tablet solo tiene sentido Recepción, nunca "Apuntar" (apuntarse tops a sí misma).
+  const esTablet = sd.userRole === 'tablet'
   const [estado, setEstado] = useState(null)
   const [misResultados, setMisResultados] = useState({})
   const [ventana, setVentana] = useState(null)
-  const [tab, setTab] = useState('apuntar')
+  const [tab, setTab] = useState(esTablet ? 'recepcion' : 'apuntar')
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
   const [guardando, setGuardando] = useState(null) // compBlockId en curso
@@ -109,14 +112,14 @@ export default function CompePage() {
       )}
       {err && <p className="compe-page__error">{err}</p>}
 
-      {puedeRecepcion && (
+      {puedeRecepcion && !esTablet && (
         <div className="compe-tabs">
           <button className={`compe-tab${tab === 'apuntar' ? ' compe-tab--activo' : ''}`} onClick={() => setTab('apuntar')}>Apuntar</button>
           <button className={`compe-tab${tab === 'recepcion' ? ' compe-tab--activo' : ''}`} onClick={() => setTab('recepcion')}>Recepción</button>
         </div>
       )}
 
-      {tab === 'apuntar' && (
+      {tab === 'apuntar' && !esTablet && (
         <div className="compe-page__grid">
           {estado.bloques.map(b => (
             <BloqueFila
@@ -129,7 +132,7 @@ export default function CompePage() {
           ))}
         </div>
       )}
-      {tab === 'recepcion' && puedeRecepcion && (
+      {(tab === 'recepcion' || esTablet) && puedeRecepcion && (
         <RecepcionTab bloques={estado.bloques} competitionId={estado.competitionId} />
       )}
     </div>
@@ -226,15 +229,15 @@ function RecepcionTab({ bloques, competitionId }) {
       const target = seleccionado.tipo === 'rapido' ? { targetParticipanteRapidoId: seleccionado.id } : { targetUserId: seleccionado.id }
       await api('POST', '/compe/resultado', { compBlockId, ...cambios, ...target })
       setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios } }))
-      // Aviso de confirmación (cowork, 08/11 11:15: "vuelve a la búsqueda sin decir nada, que
-      // quien está en la tablet sepa que se guardó") — sobrevive a volverABuscar, que solo
-      // limpia la selección/búsqueda, no este aviso.
+      // Aviso de confirmación (cowork, 08/11 11:15).
       const numero = bloques.find(b => b.compBlockId === compBlockId)?.numero
       setAviso(`✓ ${cambios.top ? 'Top' : 'Zona'} apuntado a ${seleccionado.nombreMostrar} (bloque ${numero})`)
       setTimeout(() => setAviso(null), 3000)
-      // Tras guardar, vuelve sola a la búsqueda (Ramiro, 07/11 16:35) — con un momento para que
-      // se vea «Apuntado ✓» antes de que desaparezca la pantalla de esta persona.
-      setTimeout(volverABuscar, 1200)
+      // Cowork, 09/11 05:30: "los profes loguean los tops de varios usuarios, un profe suele
+      // apuntar varios bloques seguidos a la misma persona" — ya NO vuelve sola a la búsqueda
+      // tras guardar (eso era para la tablet de autoservicio, que apunta un único bloque por
+      // persona); se queda en la misma persona hasta que se pulse "Otra persona", o hasta los
+      // 60 s sin tocar nada (el temporizador de abajo).
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -245,10 +248,12 @@ function RecepcionTab({ bloques, competitionId }) {
   if (seleccionado) {
     return (
       <div>
-        <p className="compe-page__muted">
-          Apuntando por <strong>{seleccionado.nombreMostrar}</strong>.{' '}
-          <button type="button" className="compe-intentos-link" onClick={() => { setSeleccionado(null); setMisResultados({}) }}>Elegir otra persona</button>
-        </p>
+        <div className="compe-recepcion-persona">
+          <p className="compe-page__muted" style={{ margin: 0 }}>
+            Apuntando por <strong>{seleccionado.nombreMostrar}</strong>
+          </p>
+          <button type="button" className="compe-recepcion-otra" onClick={volverABuscar}>Otra persona</button>
+        </div>
         {aviso && <p className="compe-recepcion-aviso">{aviso}</p>}
         {err && <p className="compe-page__error">{err}</p>}
         <div className="compe-page__grid">

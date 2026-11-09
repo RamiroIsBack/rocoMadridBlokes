@@ -163,6 +163,20 @@ export default function App() {
     return acc
   }, [cards])
 
+  // "Dónde está cada bloque" en Colección modo compe (Ramiro, 09/11 05:45, punto opcional):
+  // al tocar la zona de una tarjeta, resalta esa subzona aquí en el mapa de la cabecera — un
+  // evento suelto porque MainPage.jsx (quien lo dispara) y este mapa viven en componentes
+  // distintos.
+  const [subsalaResaltada, setSubsalaResaltada] = useState(null)
+  useEffect(() => {
+    const onResaltar = e => {
+      setSubsalaResaltada(String(e.detail))
+      setTimeout(() => setSubsalaResaltada(null), 3000)
+    }
+    window.addEventListener('blokes:resaltar-subsala', onResaltar)
+    return () => window.removeEventListener('blokes:resaltar-subsala', onResaltar)
+  }, [])
+
   return (
     <BrowserRouter basename={detectBasename()}>
       <div className="app">
@@ -271,10 +285,18 @@ export default function App() {
             />
             {Object.entries(SUBSALA_POSITIONS).map(([subsala, pos]) => {
               const colorCounts = subsalaStats[subsala]
-              if (!colorCounts) return null
+              const resaltada = subsalaResaltada === subsala
+              // Durante la compe los 16 bloques son borrador (sin contar en el mapa normal) —
+              // si no hay burbujas de siempre pero esta subzona SÍ se está resaltando, igual se
+              // enseña un marcador, para que resaltar no se quede sin efecto visible.
+              if (!colorCounts && !resaltada) return null
               return (
-                <div key={subsala} className={`map-bubble-group${subsala === '5' ? ' map-bubble-group--5' : ''}`} style={{ position: 'absolute', ...pos }}>
-                  {Object.entries(colorCounts).map(([color, count]) => (
+                <div
+                  key={subsala}
+                  className={`map-bubble-group${subsala === '5' ? ' map-bubble-group--5' : ''}${resaltada ? ' map-bubble-group--resaltada' : ''}`}
+                  style={{ position: 'absolute', ...pos }}
+                >
+                  {colorCounts ? Object.entries(colorCounts).map(([color, count]) => (
                     <div
                       key={color}
                       className="map-bubble"
@@ -282,7 +304,9 @@ export default function App() {
                     >
                       {count}
                     </div>
-                  ))}
+                  )) : (
+                    <div className="map-bubble map-bubble--marcador" />
+                  )}
                 </div>
               )
             })}

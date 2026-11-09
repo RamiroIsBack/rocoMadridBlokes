@@ -24,6 +24,26 @@ const COMPE_COLOR_HEX = {
   negro: '#1f2937', blanco: '#e5e7eb', naranja: '#f97316', morado: '#8b5cf6', rosa: '#ec4899',
 }
 
+function getAuthHeadersCompe() {
+  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
+  return nonce ? { 'X-WP-Nonce': nonce } : {}
+}
+
+// Apunta un top de compe para quien eligió el picker "¿quién lo ha hecho?" (Ramiro, 09/11:
+// en modo tablet, tocar un bloque de la compe tiene que hacer lo mismo que un bloke normal —
+// abrir el picker — en vez de llevar a /compe). Siempre Top (y Zona, que ya cuenta con el top).
+async function apuntarCompeParaIdentidad(compBlockId, identity) {
+  const target = identity.kind === 'ph' ? { targetPlaceholderId: identity.placeholder_id } : { targetUserId: identity.user_id }
+  const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/resultado`, {
+    method: 'POST', credentials: 'include',
+    headers: { ...getAuthHeadersCompe(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ compBlockId, top: true, zona: true, ...target }),
+  })
+  const json = await res.json().catch(() => null)
+  if (!res.ok) throw new Error(json?.message || `Error ${res.status}`)
+  return json
+}
+
 // Modo compe (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 07/11 08:46: "Colección solo con los 16
 // bloques de la compe, sin foto") — propia e independiente de la carga normal de blokes/
 // completions: si esto falla, Colección sigue funcionando como siempre, solo no sale el aviso.
@@ -38,9 +58,40 @@ function useCompeEstado() {
   return estado
 }
 
+// Resalta la subzona en el mapa de la cabecera (App.jsx) al tocar "dónde está" — un evento
+// suelto en vez de un estado compartido porque el mapa vive en otro componente (Ramiro, 09/11
+// 05:45, punto opcional).
+function resaltarSubsala(subzona) {
+  if (subzona) window.dispatchEvent(new CustomEvent('blokes:resaltar-subsala', { detail: subzona }))
+}
+
 // Colección en modo compe: SOLO los 16 bloques, número y color, nunca la foto (se enseña al
-// apagar el modo) — para que nadie sepa cómo son antes de probarlos.
+// apagar el modo) — para que nadie sepa cómo son antes de probarlos. En rol "tablet" (Ramiro,
+// 09/11: "lo mismo que sin compe") tocar un bloque abre el mismo picker "¿quién lo ha hecho?"
+// de Colección en vez de llevar a /compe, y el top se apunta como de la compe.
 function ColeccionModoCompe({ estado }) {
+  const isTablet = window.blokesSiteData?.userRole === 'tablet'
+  const [pickerBloque, setPickerBloque] = useState(null)
+  const [celebration, setCelebration] = useState(null)
+
+  const tocar = useCallback((e, b) => {
+    if (!isTablet) return
+    e.preventDefault()
+    setPickerBloque(b)
+  }, [isTablet])
+
+  const completarParaIdentidad = useCallback(async (identity) => {
+    const bloque = pickerBloque
+    setPickerBloque(null)
+    if (!bloque) return
+    try {
+      await apuntarCompeParaIdentidad(bloque.compBlockId, identity)
+      setCelebration({ nombre: identity.name, numero: bloque.numero })
+    } catch (e) {
+      console.error('Tablet compe completion failed:', e)
+    }
+  }, [pickerBloque])
+
   return (
     <main className="app-main">
       <div style={{
@@ -52,19 +103,42 @@ function ColeccionModoCompe({ estado }) {
         <a href="/blokes/compe" style={{ color: '#fbbf24', fontWeight: 600 }}>Compe</a>, que un
         compañero o profe te haya visto hacerlos.
       </div>
+      {pickerBloque && (
+        <IdentityPicker
+          title={`¿Quién ha hecho el bloque ${pickerBloque.numero}?`}
+          onPick={completarParaIdentidad}
+          onClose={() => setPickerBloque(null)}
+        />
+      )}
+      {celebration && (
+        <div style={{
+          background: '#dcfce7', color: '#166534', textAlign: 'center', fontWeight: 700,
+          padding: '10px 12px', borderRadius: 10, marginBottom: 16,
+        }}>
+          ✓ Bloque {celebration.numero} apuntado a {celebration.nombre}{' '}
+          <button type="button" onClick={() => setCelebration(null)} style={{ marginLeft: 8, background: 'none', border: 'none', color: '#166534', textDecoration: 'underline', cursor: 'pointer' }}>Vale</button>
+        </div>
+      )}
       <div className="cards-grid">
         {(estado.bloques || []).map(b => (
           <a
             key={b.compBlockId}
             href="/blokes/compe"
+            onClick={e => tocar(e, b)}
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              aspectRatio: '1', borderRadius: 16, textDecoration: 'none',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              aspectRatio: '1', borderRadius: 16, textDecoration: 'none', gap: 4,
               background: COMPE_COLOR_HEX[(b.color || '').toLowerCase()] || '#9ca3af',
               color: '#fff', fontSize: '2.2rem', fontWeight: 800,
             }}
           >
             {b.numero}
+            <span
+              onClick={e => { e.stopPropagation(); e.preventDefault(); resaltarSubsala(b.subzona) }}
+              style={{ fontSize: '0.7rem', fontWeight: 600, opacity: 0.9, textAlign: 'center', lineHeight: 1.1 }}
+            >
+              {b.sala ? `${b.sala} · zona ${b.subzona}` : 'Zona por confirmar'}
+            </span>
           </a>
         ))}
       </div>
