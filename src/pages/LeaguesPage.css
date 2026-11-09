@@ -1,10 +1,8 @@
 .league-page {
-  /* Ramiro, 09/11 06:36: pidió max-width:none en todas las páginas salvo texto corrido,
-     formularios y diálogos — dejo esta en un ancho generoso (no "none") a propósito: es una
-     clasificación de una sola columna (rango, nombre, puntos), sin rejilla ni tabla que
-     aprovechar; a todo el ancho en un monitor de 2400 px el hueco entre el nombre y los puntos
-     sería enorme sin añadir nada. Dímelo si lo quieres igualmente a ancho completo. */
-  max-width: 820px;
+  /* Ramiro, 09/11 07:05: confirmó que la quiere a ancho completo igualmente — la clasificación
+     pasa a 2 columnas en pantalla ancha (ver `.league-leaderboard` más abajo) para que el
+     ancho de verdad se note en algo, no solo en márgenes más grandes. */
+  max-width: none;
   margin: 0 auto;
   padding: 16px 0 40px;
 }
@@ -48,6 +46,13 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+/* Pantalla ancha (Ramiro, 09/11 07:05): 2 columnas en vez de una sola lista altísima con
+   márgenes enormes — "column" (no grid) porque reparte el número de miembros que haya sola,
+   sin saber de antemano cuántas filas caben en cada columna. */
+@media (min-width: 900px) {
+  .league-leaderboard { display: block; column-count: 2; column-gap: 24px; }
+  .league-member { break-inside: avoid-column; margin-bottom: 2px; }
 }
 
 .league-member {

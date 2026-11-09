@@ -113,6 +113,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Botón "⋯" (abre app-header__extra en móvil/tablet) y el propio menú plegable — Ramiro,
+   09/11 07:05. En ordenador el botón no hace falta y el menú va siempre desplegado
+   (`display: contents`: sus hijos quedan en el sitio de siempre, sin caja propia). */
+.app-header__menu-toggle {
+  display: none;
+  background: none; border: 1px solid rgba(245, 200, 66, 0.4); color: #f5c842;
+  font-size: 18px; font-weight: 700; line-height: 1; width: 32px; height: 32px;
+  border-radius: 50%; margin-left: auto; cursor: pointer; flex-shrink: 0;
+}
+.app-header__extra { display: contents; }
 .app-header__user-nick {
   font-size: 0.68rem;
   color: #aaa;
@@ -559,10 +570,30 @@
    sola fila con scroll horizontal en vez de envolver en 3-5 filas. */
 @media (max-width: 999px) {
   .app-header { padding: 10px 14px; }
-  .app-header__logo { height: 44px; width: 44px; }
+  /* Una sola fila arriba (Ramiro, 09/11 07:05): logo pequeño a la izquierda, nombre, avatar a
+     la derecha — logo y .app-header__user son hijos directos de logo-section, así que para
+     que compartan fila sin tocar el resto del orden, logo-section pasa a fila con wrap y los
+     bloques que van DEBAJO (extra, links) se fuerzan a su propia línea con flex-basis: 100%. */
+  .app-header__logo-section { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .app-header__logo-section > a { flex: 0 0 auto; }
+  .app-header__logo { height: 36px; width: 36px; }
   .app-header__subtitle { display: none; }
-  .app-header__user { margin-top: 2px; }
-  .app-header__links { margin-top: 6px; }
+  .app-header__user { margin-top: 0; width: auto; flex: 1 1 auto; min-width: 0; }
+  .app-header__menu-toggle { display: inline-flex; align-items: center; justify-content: center; }
+  /* Cerrado por defecto: ni apodo, ni Log out, ni "Ver como", ni suscripción — con eso era
+     buena parte de la cabecera (Ramiro, 09/11 07:05). Se abre con el botón "⋯" de arriba. */
+  .app-header__extra {
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    flex-basis: 100%;
+    gap: 6px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+  .app-header__extra--abierto { display: flex; }
+  .app-header__links { margin-top: 6px; flex-basis: 100%; }
   .app-header__link { font-size: 13px; padding: 5px 10px; }
   .app-header__link-hint { display: none; } /* texto largo de promo, prescindible aquí */
   .app-header__mapa-toggle { display: block; }
@@ -1024,6 +1055,12 @@
   .cards-grid {
     grid-template-columns: 1fr;
   }
+  /* Tarjetas de la compe (Ramiro, 09/11 07:05): "1 por fila, 16 bloques = 6 pantallas de
+     scroll" — 2 columnas en móvil (más específico que `.cards-grid` de arriba, así que gana
+     sin depender del orden). */
+  .cards-grid.compe-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 
   .filter-bar {
     gap: var(--spacing-sm);
@@ -1050,9 +1087,13 @@
     padding: 0 6px;
   }
 
+  /* Cowork, 09/11 07:05: esta regla (sin tocar desde entonces) ponía `flex-wrap: wrap` y, al
+     venir DESPUÉS en el archivo que el `nowrap` de la media query de 999px, ganaba en móvil y
+     dejaba el menú partido en varias filas otra vez — de ahí "sigue partido en 5 filas" aunque
+     el nowrap ya estuviera puesto en el sitio correcto (`.app-nav__list`, no en `.app-nav`).
+     Sin `flex-wrap` aquí, manda la regla de scroll horizontal de la media query de 999px. */
   .app-nav__list {
     gap: var(--spacing-sm);
-    flex-wrap: wrap;
     justify-content: flex-start;
   }
 

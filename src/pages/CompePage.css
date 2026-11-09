@@ -32,8 +32,10 @@
 .compe-bloque__toggles { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 
 .compe-toggle {
-  display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px;
-  border-radius: 999px; border: 1px solid #d1d5db; font-size: 0.9rem; cursor: pointer; user-select: none;
+  /* Ramiro, 09/11 07:05: los Top/Zona de Recepción salían por debajo de 36 px de alto —
+     zona táctil mínima 44 px, para pulsarlos bien con el dedo. */
+  display: inline-flex; align-items: center; gap: 6px; padding: 10px 14px; min-height: 44px;
+  border-radius: 999px; border: 1px solid #d1d5db; font-size: 0.95rem; cursor: pointer; user-select: none;
 }
 .compe-toggle--on { background: #16a34a; color: #fff; border-color: #16a34a; }
 .compe-toggle input { margin: 0; }

@@ -182,6 +182,12 @@ export default function App() {
   // salían del dibujo en pantallas estrechas). En ordenador sigue siempre abierto.
   const [mapaAbierto, setMapaAbierto] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1000)
 
+  // Cabecera de una sola fila en móvil/tablet (Ramiro, 09/11 07:05): apodo, Log out, Ver como,
+  // suscripción y el logo de "ver mapa" ya no se quedan siempre desplegados ahí — se pliegan en
+  // este menú, que se abre al tocar "⋯" junto al avatar. En ordenador se ignora (CSS: siempre
+  // abierto), así no hace falta duplicar nada por pantalla.
+  const [menuMovilAbierto, setMenuMovilAbierto] = useState(false)
+
   return (
     <BrowserRouter basename={detectBasename()}>
       <div className="app">
@@ -220,39 +226,51 @@ export default function App() {
                   )}
                   <div className="app-header__user-info">
                     <span className="app-header__user-name">{sd.userName || 'Tú'}</span>
-                    {!profileFetching && nickname && <span className="app-header__user-nick">@{nickname}</span>}
-                    <button
-                      className="app-header__logout-btn"
-                      onClick={() => setLogoutOpen(true)}
-                    >× Log out</button>
-                    {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
-                    {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
-                        EFECTIVO para que vean exactamente el mismo botón): su único "ver como"
-                        es pasar a la cuenta tablet y volver (Ramiro, 08/11 21:19). */}
-                    {['profesor', 'gestion'].includes(sd.userRole) && <ModoTabletToggleSimple sd={sd} />}
                   </div>
+                  {/* Móvil/tablet (Ramiro, 09/11 07:05): todo lo demás (apodo, Log out, Ver
+                      como, suscripción, los 2 CTA) estaba siempre desplegado y por sí solo era
+                      buena parte de por qué el contenido empezaba a media pantalla. En
+                      ordenador sigue siempre abierto (ver CSS); este botón solo se ve en
+                      móvil/tablet. */}
+                  <button
+                    type="button" className="app-header__menu-toggle"
+                    onClick={() => setMenuMovilAbierto(v => !v)}
+                    aria-label="Más opciones"
+                  >⋯</button>
                 </div>
-                {sd.subscription && (
-                  <div className="app-header__sub">
-                    <span className={`app-header__sub-dot app-header__sub-dot--${sd.subscription.status === 'active' ? 'active' : 'inactive'}`} />
-                    <span className="app-header__sub-name">
-                      {PRODUCT_NAMES[sd.subscription.name] || sd.subscription.name || 'Suscripción'}
-                      {(sd.subscription.dia || sd.subscription.horario) && (
-                        <span className="app-header__sub-class">
-                          {[sd.subscription.dia, sd.subscription.horario].filter(Boolean).join(' · ')}
-                        </span>
+                <div className={`app-header__extra${menuMovilAbierto ? ' app-header__extra--abierto' : ''}`}>
+                  {!profileFetching && nickname && <span className="app-header__user-nick">@{nickname}</span>}
+                  <button
+                    className="app-header__logout-btn"
+                    onClick={() => setLogoutOpen(true)}
+                  >× Log out</button>
+                  {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
+                  {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
+                      EFECTIVO para que vean exactamente el mismo botón): su único "ver como"
+                      es pasar a la cuenta tablet y volver (Ramiro, 08/11 21:19). */}
+                  {['profesor', 'gestion'].includes(sd.userRole) && <ModoTabletToggleSimple sd={sd} />}
+                  {sd.subscription && (
+                    <div className="app-header__sub">
+                      <span className={`app-header__sub-dot app-header__sub-dot--${sd.subscription.status === 'active' ? 'active' : 'inactive'}`} />
+                      <span className="app-header__sub-name">
+                        {PRODUCT_NAMES[sd.subscription.name] || sd.subscription.name || 'Suscripción'}
+                        {(sd.subscription.dia || sd.subscription.horario) && (
+                          <span className="app-header__sub-class">
+                            {[sd.subscription.dia, sd.subscription.horario].filter(Boolean).join(' · ')}
+                          </span>
+                        )}
+                      </span>
+                      {sd.subscription.status !== 'active' && (
+                        <a href={sd.subscription.renewUrl} className="app-header__renew-btn">
+                          {[0,1,2,3].map(i => (
+                            <span key={i} className="app-header__renew-star" style={{'--i': i}} aria-hidden="true">✦</span>
+                          ))}
+                          Renovar
+                        </a>
                       )}
-                    </span>
-                    {sd.subscription.status !== 'active' && (
-                      <a href={sd.subscription.renewUrl} className="app-header__renew-btn">
-                        {[0,1,2,3].map(i => (
-                          <span key={i} className="app-header__renew-star" style={{'--i': i}} aria-hidden="true">✦</span>
-                        ))}
-                        Renovar
-                      </a>
-                    )}
-                  </div>
-                )}
+                    </div>
+                  )}
+                </div>
               </>
             ) : (
               <a href={buildLoginUrl(sd)} className="app-header__login-btn">
