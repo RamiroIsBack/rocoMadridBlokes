@@ -120,7 +120,7 @@
 .app-header__menu-toggle {
   display: none;
   background: none; border: 1px solid rgba(245, 200, 66, 0.4); color: #f5c842;
-  font-size: 18px; font-weight: 700; line-height: 1; width: 32px; height: 32px;
+  font-size: 18px; font-weight: 700; line-height: 1; width: 44px; height: 44px; /* antes 32px — Ramiro, 09/11 07:45 */
   border-radius: 50%; margin-left: auto; cursor: pointer; flex-shrink: 0;
 }
 .app-header__extra { display: contents; }
@@ -181,6 +181,12 @@
   font-family: inherit;
 }
 .app-ver-como-banner button:hover { background: rgba(255,255,255,0.15); }
+
+/* Cowork, 09/11 07:45: en móvil contaba como 37 px de los ~295 antes de ningún contenido. */
+@media (max-width: 999px) {
+  .app-ver-como-banner { padding: 4px 10px; font-size: 0.72rem; }
+  .app-ver-como-banner button { font-size: 0.68rem; padding: 1px 7px; }
+}
 .app-header__user-x {
   background: none;
   border: none;
@@ -404,8 +410,8 @@
 .app-header__mapa-toggle {
   display: none;
   background: none; border: 1px solid rgba(245, 200, 66, 0.4); color: #f5c842;
-  font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 6px;
-  margin: 4px auto; cursor: pointer; font-family: inherit;
+  font-size: 14px; font-weight: 600; padding: 12px 14px; min-height: 44px; /* antes 31 px — Ramiro, 09/11 07:45 */
+  border-radius: 6px; margin: 4px auto; cursor: pointer; font-family: inherit;
 }
 
 .map-bubble-group {

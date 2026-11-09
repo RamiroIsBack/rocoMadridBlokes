@@ -534,11 +534,17 @@
         font-size: 1.25rem;
     }
 
+    /* Ramiro, 09/11 07:45: por debajo de 36 px de alto (y el texto del emoji a 10 px) — zona
+       táctil mínima 44 px en móvil. */
     .event-card__rating-btn {
-        height: 26px;
-        padding: 0 5px;
-        font-size: 10px;
+        height: 40px;
+        padding: 0 8px;
+        font-size: 13px;
     }
+
+    /* Letra mínima 12 px en etiquetas (Ramiro, 09/11 07:45: 9.6 y 10.4 px en móvil). */
+    .event-card__done-tops { font-size: 0.75rem; }
+    .event-card__sala { font-size: 0.72rem; }
 }
 
 /* Touch device improvements */

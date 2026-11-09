@@ -41,7 +41,7 @@
 
 @media (max-width: 400px) {
   .progreso-idx__tab {
-    font-size: 0.72rem;
+    font-size: 0.85rem; /* antes 0.72rem (11.5 px) — Ramiro, 09/11 07:45 */
     letter-spacing: 0.05em;
     padding: 14px 8px;
   }

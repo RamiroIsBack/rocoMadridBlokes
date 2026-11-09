@@ -218,7 +218,7 @@
 }
 
 .progreso__rank-num {
-  font-size: 0.7rem;
+  font-size: 0.8rem; /* antes 0.7rem (11.2 px) — Ramiro, 09/11 07:45, mínimo 12 px en etiquetas */
   font-weight: 700;
   color: var(--color-text-secondary);
   width: 24px;

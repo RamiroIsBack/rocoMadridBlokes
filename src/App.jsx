@@ -270,43 +270,54 @@ export default function App() {
                       )}
                     </div>
                   )}
+                  {/* Cowork, 09/11 07:35: "Apúntate a clases/Tecnificación/Ver mapa" seguían
+                      siempre desplegados debajo de la fila de arriba (~120 px) — entran aquí
+                      también, dentro del mismo "⋯". */}
+                  <div className="app-header__links">
+                    <div className="app-header__link-wrap">
+                      {sd.subscription?.status === 'active' ? (
+                        <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta">
+                          Apúntate al curso de tecnificación
+                        </a>
+                      ) : (
+                        <>
+                          <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
+                          <a href="https://rocomadrid.com/club" className="app-header__link app-header__link--cta">Apúntate a clases</a>
+                          <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta app-header__link--small">
+                            Tecnificación
+                          </a>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <button type="button" className="app-header__mapa-toggle" onClick={() => setMapaAbierto(v => !v)}>
+                    {mapaAbierto ? 'Ocultar mapa ▴' : 'Ver mapa ▾'}
+                  </button>
                 </div>
               </>
             ) : (
-              <a href={buildLoginUrl(sd)} className="app-header__login-btn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M10 17l5-5-5-5v3H3v4h7v3z"/>
-                  <path d="M19 3H5c-1.1 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
-                </svg>
-                Acceder
-              </a>
-            )}
-            <div className="app-header__links">
-              <div className="app-header__link-wrap">
-                {sd.subscription?.status === 'active' ? (
-                  <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta">
-                    Apúntate al curso de tecnificación
-                  </a>
-                ) : (
-                  <>
+              <>
+                <a href={buildLoginUrl(sd)} className="app-header__login-btn">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M10 17l5-5-5-5v3H3v4h7v3z"/>
+                    <path d="M19 3H5c-1.1 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                  </svg>
+                  Acceder
+                </a>
+                <div className="app-header__links">
+                  <div className="app-header__link-wrap">
                     <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
                     <a href="https://rocomadrid.com/club" className="app-header__link app-header__link--cta">Apúntate a clases</a>
                     <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta app-header__link--small">
                       Tecnificación
                     </a>
-                  </>
-                )}
-              </div>
-            </div>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="app-header__salas-wrap">
-            <button
-              type="button" className="app-header__mapa-toggle"
-              onClick={() => setMapaAbierto(v => !v)}
-            >
-              {mapaAbierto ? 'Ocultar mapa ▴' : 'Ver mapa ▾'}
-            </button>
             {mapaAbierto && <img
               src="https://rocomadrid.com/wp-content/uploads/2026/03/salas-rocomadrid-estilo-retro.png"
               alt="Salas Rocoteca Madrid"
@@ -421,6 +432,9 @@ export default function App() {
             <Route path="/compe/directo" element={<CompeDirectoPage />} />
             <Route path="/eventos" element={<EventosPage />} />
             <Route path="/calendario" element={<CalendarioPage />} />
+            {/* Cowork, 09/11 07:45: una ruta inexistente (p. ej. /blokes/coleccion) dejaba el
+                contenido en blanco — sin catch-all, react-router no renderiza nada. */}
+            <Route path="*" element={<PaginaNoExiste />} />
           </Routes>
         </main>
 
@@ -516,6 +530,15 @@ function ModoTabletToggleSimple({ sd }) {
     >
       {pulsando ? 'Manteniendo…' : '🔒 Modo tablet — mantén pulsado para salir'}
     </button>
+  )
+}
+
+function PaginaNoExiste() {
+  return (
+    <div style={{ textAlign: 'center', padding: '60px 16px' }}>
+      <p style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12 }}>Esta página no existe.</p>
+      <Link to="/" style={{ color: 'var(--color-accent)', fontWeight: 600 }}>Volver a Colección</Link>
+    </div>
   )
 }
 
