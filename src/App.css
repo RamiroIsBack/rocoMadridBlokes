@@ -409,10 +409,13 @@
   object-fit: contain;
 }
 
-/* Mapa plegable (Ramiro, 09/11 06:26: en móvil/tablet se pliega por defecto — ver el media
-   query de más abajo). En ordenador el botón no hace falta, el mapa va siempre abierto. */
+/* Mapa plegable (Ramiro, 09/11 06:26: en móvil/tablet se pliega por defecto). En ordenador
+   sigue abierto por defecto (cowork, 09/11: "el contenido empieza a 402 px por el mapa, creo
+   que es a propósito") — decisión de Code, 09/11 09:00: se deja abierto por defecto (tiene
+   información real, un monitor sobra de alto de sobra para eso) pero el botón para plegarlo
+   ahora se ve también en ordenador, por si alguien prefiere ganar esa pantalla. */
 .app-header__mapa-toggle {
-  display: none;
+  display: inline-block;
   background: none; border: 1px solid rgba(245, 200, 66, 0.4); color: #f5c842;
   font-size: 14px; font-weight: 600; padding: 12px 14px; min-height: 44px; /* antes 31 px — Ramiro, 09/11 07:45 */
   border-radius: 6px; margin: 4px auto; cursor: pointer; font-family: inherit;
