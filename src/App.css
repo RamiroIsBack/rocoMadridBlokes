@@ -184,8 +184,12 @@
 
 /* Cowork, 09/11 07:45: en móvil contaba como 37 px de los ~295 antes de ningún contenido. */
 @media (max-width: 999px) {
-  .app-ver-como-banner { padding: 4px 10px; font-size: 0.72rem; }
-  .app-ver-como-banner button { font-size: 0.68rem; padding: 1px 7px; }
+  /* Cowork, 09/11 08:30: el botón «Volver a Socio» salía a 18 px — dentro de un aviso tan
+     compacto no cabe un botón de 44 px entero sin volver a hacerlo alto (justo lo que se quería
+     evitar); subo algo el padding como término medio, más tocable sin que el aviso vuelva a
+     los 37 px de antes. */
+  .app-ver-como-banner { padding: 6px 10px; font-size: 0.72rem; }
+  .app-ver-como-banner button { font-size: 0.72rem; padding: 6px 10px; }
 }
 .app-header__user-x {
   background: none;

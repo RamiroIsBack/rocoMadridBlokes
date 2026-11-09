@@ -109,6 +109,12 @@
 .ev-week__day--weekend { background: rgba(167,139,250,0.04); }
 .ev-week__day--today { border-color: #a78bfa; }
 .ev-week__date { font-size: 0.68rem; font-weight: 700; color: #888; text-transform: capitalize; }
+@media (max-width: 720px) {
+  /* En móvil la semana ya es 1 columna (como una agenda) — aquí sí es seguro subir la etiqueta
+     del día sin romper nada (Ramiro, 09/11 08:30: 10.9 px). Los chips del MES se dejan para el
+     rediseño a vista agenda — en la rejilla de mes agrandarlos rompería las celdas. */
+  .ev-week__date { font-size: 0.85rem; }
+}
 
 /* Mes */
 .ev-month {

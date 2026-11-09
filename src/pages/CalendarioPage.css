@@ -112,4 +112,11 @@
 @media (max-width: 720px) {
   .cal-token-link { margin-left: 0; }
   .cal-filters__sep { display: none; }
+  /* Ramiro, 09/11 08:30: .cal-cat a 22 px y .cal-sum__item a 21 px — ninguno va dentro de una
+     celda de la rejilla mensual (eso se deja para la vista agenda), son botón/lista sueltos,
+     seguro subirlos. */
+  .cal-cat { padding: 11px 14px; font-size: 0.8rem; min-height: 44px; }
+  .cal-sum__item { padding: 10px 0; }
+  .cal-sum__date, .cal-sum__name { font-size: 0.85rem; }
+  .cal-chip__ok { font-size: 0.8rem; }
 }

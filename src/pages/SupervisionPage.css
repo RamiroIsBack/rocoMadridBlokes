@@ -781,7 +781,15 @@
   .sv-kpi       { min-width: 100%; }
   .sv-class-row__label { width: 110px; }
   .sv-section   { padding: 14px 12px 18px; }
-  .sv-tab       { padding: 8px 14px; font-size: 0.78rem; }
+  /* Ramiro, 09/11 08:30: .sv-tab salía a 33 px (esta regla lo encogía más, no al revés),
+     .sv-filter-btn a 27 px y .sv-period__btn a 24 px — mínimo táctil 44 px. */
+  .sv-tab         { padding: 13px 16px; font-size: 0.85rem; min-height: 44px; }
+  .sv-filter-btn  { padding: 12px 16px; font-size: 0.8rem; min-height: 44px; }
+  .sv-period__btn { padding: 12px 14px; font-size: 0.78rem; min-height: 44px; }
+  .sv-member__name  { font-size: 0.85rem; }  /* antes 11.5 px */
+  .sv-member__phone { font-size: 0.8rem; }   /* antes 10.2 px */
+  /* Leyenda de los gráficos (Recharts) — antes 10 px. */
+  .recharts-legend-item-text { font-size: 13px !important; }
 }
 
 /* ── Horas extra ── */
