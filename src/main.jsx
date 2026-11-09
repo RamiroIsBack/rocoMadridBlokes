@@ -27,13 +27,12 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
   })
 }
 
-// "Instala Blokes" (Ramiro, 09/11): el evento puede llegar antes de que <App> monte el
-// efecto que lo espera (useEffect corre después del primer render) — se guarda aquí, lo
-// antes posible, para no perderlo.
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault()
-  window.blokesInstallEvent = e
-})
+// "Instala Blokes" (Ramiro, 09/11 11:53): beforeinstallprompt NO se captura aquí a nivel
+// global — hacerlo con preventDefault() en toda la app tapaba también el aviso automático
+// de Chrome ("Añadir Blokes a la pantalla de inicio") en el resto de páginas. Solo
+// InstalarPage.jsx (la ruta /instalar) lo captura, y solo ahí porque necesita lanzar
+// prompt() desde el toque del botón. appinstalled sí se registra aquí: no necesita gesto,
+// y puede dispararse desde cualquier página si la instalación la hizo el aviso de Chrome.
 window.addEventListener('appinstalled', () => {
   const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
   fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/install-event`, {

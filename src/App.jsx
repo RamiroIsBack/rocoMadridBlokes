@@ -20,6 +20,7 @@ import EventosPage from './pages/EventosPage'
 import CalendarioPage from './pages/CalendarioPage'
 import CompePage from './pages/CompePage'
 import CompeDirectoPage from './pages/CompeDirectoPage'
+import InstalarPage from './pages/InstalarPage'
 import { setVerComo, clearVerComo } from './utils/verComo'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
@@ -44,7 +45,7 @@ const SUBSALA_POSITIONS = {
   '8': { top: '44.5%', right: '18%', transform: 'translateX(50%)' },
 }
 
-const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground', '/eventos', '/calendario', '/compe']
+const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground', '/eventos', '/calendario', '/compe', '/instalar']
 
 function detectBasename() {
   const injected = window.blokesSiteData?.appBasename
@@ -189,23 +190,6 @@ export default function App() {
   // este menú, que se abre al tocar "⋯" junto al avatar. En ordenador se ignora (CSS: siempre
   // abierto), así no hace falta duplicar nada por pantalla.
   const [menuMovilAbierto, setMenuMovilAbierto] = useState(false)
-
-  // "Instala Blokes" (Ramiro, 09/11): si venimos de la página de aterrizaje (?instalar=1),
-  // lanza el prompt nativo en cuanto el navegador lo tenga disponible — puede que ya haya
-  // llegado (guardado en main.jsx) o que tarde un poco más que el montaje de este efecto.
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('instalar') !== '1') return
-    let intentos = 0
-    const tryPrompt = () => {
-      if (window.blokesInstallEvent) {
-        window.blokesInstallEvent.prompt()
-        window.blokesInstallEvent = null
-      } else if (intentos++ < 20) {
-        setTimeout(tryPrompt, 250)
-      }
-    }
-    tryPrompt()
-  }, [])
 
   // Para ver en Supervisión si el gancho de "Instala Blokes" funciona — una vez por sesión,
   // no en cada navegación dentro de la app.
@@ -468,6 +452,7 @@ export default function App() {
             <Route path="/ligas" element={<LeaguesPage />} />
             <Route path="/compe" element={<CompePage />} />
             <Route path="/compe/directo" element={<CompeDirectoPage />} />
+            <Route path="/instalar" element={<InstalarPage />} />
             <Route path="/eventos" element={<EventosPage />} />
             <Route path="/calendario" element={<CalendarioPage />} />
             {/* Cowork, 09/11 07:45: una ruta inexistente (p. ej. /blokes/coleccion) dejaba el
