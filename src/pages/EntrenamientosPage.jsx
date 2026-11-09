@@ -135,21 +135,21 @@ function TestModeRow({ alumno, testId, ambiguousActive, faltantes, onLogged }) {
 
   return (
     <tr className={`entrena__test-row${faltantes ? ' entrena__row--missing' : ''}`} style={missingRowStyle(faltantes)}>
-      <td className="entrena__test-row__name">
+      <td className="entrena__test-row__name" data-label="Nombre">
         {alumno.cliente || alumno.nombre || '—'}
         {ambiguousActive && <span className="entrena__active-tag" title="Hay varias personas con este nombre — esta es la que tiene suscripción activa">activo ahora</span>}
         {alumno.is_placeholder && <span className="entrena__manual-tag" title="Alumno manual, sin cuenta vinculada">manual</span>}
         {faltantes > 0 && <span className="entrena__missing-tag" title={`Le faltan ${faltantes} test${faltantes !== 1 ? 's' : ''} por hacer`}>faltan {faltantes}</span>}
       </td>
-      <td className="entrena__test-row__meta">{alumno.dia} · {alumno.horario}</td>
-      <td className="entrena__test-row__last">
+      <td className="entrena__test-row__meta" data-label="Clase">{alumno.dia} · {alumno.horario}</td>
+      <td className="entrena__test-row__last" data-label="Último valor">
         {loading ? <span className="entrena__test-loading">…</span>
           : last ? <span title={formatDate(last.logged_at)}>{last.value_kg} {TEST_MAP[testId]?.unit || 'kg'}{editable ? '' : ' ·hist'}</span>
           : <span className="entrena__test-empty">—</span>
         }
         {last?.note && <div className="entrena__test-note">📝 {last.note}</div>}
       </td>
-      <td className="entrena__test-row__input">
+      <td className="entrena__test-row__input" data-label="Actualizar">
         <div className="entrena__test-input-wrap">
           <input
             type="number"
@@ -785,15 +785,15 @@ export default function EntrenamientosPage() {
                       style={missingRowStyle(faltantes)}
                       onClick={() => setSelectedAlumno(isSelected ? null : a)}
                     >
-                      <td>
+                      <td data-label="Nombre">
                         {a.cliente || a.nombre || '—'}
                         {isAmbiguousActive(a) && <span className="entrena__active-tag" title="Hay varias personas con este nombre — esta es la que tiene suscripción activa">activo ahora</span>}
                         {a.is_placeholder && <span className="entrena__manual-tag" title="Alumno manual, sin cuenta vinculada">manual</span>}
                         {faltantes > 0 && <span className="entrena__missing-tag" title={`Le faltan ${faltantes} test${faltantes !== 1 ? 's' : ''} por hacer`}>faltan {faltantes}</span>}
                       </td>
-                      <td>{FRECUENCIA_LABEL[a.frecuencia] || a.producto || '—'}</td>
-                      <td>{a.dia || '—'}</td>
-                      <td>{a.horario || '—'}</td>
+                      <td data-label="Frecuencia">{FRECUENCIA_LABEL[a.frecuencia] || a.producto || '—'}</td>
+                      <td data-label="Día">{a.dia || '—'}</td>
+                      <td data-label="Horario">{a.horario || '—'}</td>
                     </tr>
                     {isSelected && (
                       <tr className="entrena__inline-panel">

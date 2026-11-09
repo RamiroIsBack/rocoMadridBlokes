@@ -388,15 +388,66 @@
   .entrena__filter-field {
     flex: 0 0 100%;
   }
+}
 
-  .entrena__table {
-    font-size: 0.76rem;
+/* Tarjetas en vez de tabla en móvil (Ramiro/cowork, 09/11: los profes lo usan en clase con
+   el móvil, y la tabla con scroll horizontal no se ve bien ahí). Cada <tr> pasa a ser una
+   tarjeta; cada <td> muestra su etiqueta de columna encima (atributo data-label en el JSX),
+   salvo el Nombre, que hace de título de la tarjeta. */
+@media (max-width: 680px) {
+  .entrena__table-wrap { overflow-x: visible; }
+
+  .entrena__table thead { display: none; }
+  .entrena__table,
+  .entrena__table tbody { display: block; width: 100%; }
+
+  .entrena__table tr {
+    display: block;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+    border: 1px solid #e3dcc5;
+    border-radius: 8px;
+    background: var(--color-surface);
   }
+  .entrena__table tr:last-child { margin-bottom: 0; }
+  .entrena__table tr.entrena__inline-panel { padding: 0; border-color: #c8bc9a; }
 
-  .entrena__table th,
   .entrena__table td {
-    padding: 7px 7px;
+    display: block;
+    padding: 4px 0;
+    border-bottom: none;
+    font-size: 0.85rem;
   }
+  .entrena__table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-text-secondary);
+  }
+  .entrena__table td[data-label="Nombre"] {
+    font-size: 1rem;
+    font-weight: 700;
+    padding-top: 0;
+  }
+  .entrena__table td[data-label="Nombre"]::before { display: none; }
+
+  /* El resaltado de fila activa/hover se pone en la tarjeta entera, no celda a celda. */
+  .entrena__row:hover td,
+  .entrena__row--active td { background: none; }
+  .entrena__row:hover { background: #fdf7e6; }
+  .entrena__row--active { background: #fef3c7; }
+
+  /* Igual con el aviso de "le faltan tests": antes solo el borde de la primera celda, aquí
+     toda la tarjeta. */
+  .entrena__row--missing td:first-child { animation: none; box-shadow: none; }
+  .entrena__row--missing { animation: entrena-missing-pulse 1.8s ease-in-out infinite; }
+
+  .entrena__test-row__input .entrena__test-input-wrap { width: 100%; }
+  .entrena__test-input { flex: 1; width: auto; min-height: 40px; font-size: 0.95rem; }
+  .entrena__test-save  { min-height: 40px; min-width: 48px; font-size: 0.85rem; }
 }
 
 /* ── Mode toggle ── */
