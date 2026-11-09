@@ -200,6 +200,9 @@ add_action('template_redirect', function() {
     }
     if (!$es_instalar) return;
 
+    // WP ya marcó esta URL como 404 en parse_request (no hay página "app"), así que sin esto
+    // el navegador y los crawlers (WhatsApp incluido) verían un 404 aunque el HTML sea bueno.
+    status_header(200);
     nocache_headers();
 
     // Fecha de la próxima compe real (no de prueba) para el gancho — si no hay
