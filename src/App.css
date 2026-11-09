@@ -388,6 +388,15 @@
   object-fit: contain;
 }
 
+/* Mapa plegable (Ramiro, 09/11 06:26: en móvil/tablet se pliega por defecto — ver el media
+   query de más abajo). En ordenador el botón no hace falta, el mapa va siempre abierto. */
+.app-header__mapa-toggle {
+  display: none;
+  background: none; border: 1px solid rgba(245, 200, 66, 0.4); color: #f5c842;
+  font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 6px;
+  margin: 4px auto; cursor: pointer; font-family: inherit;
+}
+
 .map-bubble-group {
   display: flex;
   flex-wrap: wrap;
@@ -544,13 +553,50 @@
   transform: translateY(0);
 }
 
+/* Móvil/tablet (< 1000 px, Ramiro 09/11 06:26, medido con la app real): la cabecera ocupaba
+   toda la primera pantalla antes de ningún contenido (779/844 en móvil, 686/1180 en tablet) —
+   logo más pequeño, sin subtítulo, mapa plegado por defecto (botón de arriba), menú en una
+   sola fila con scroll horizontal en vez de envolver en 3-5 filas. */
+@media (max-width: 999px) {
+  .app-header { padding: 10px 14px; }
+  .app-header__logo { height: 44px; width: 44px; }
+  .app-header__subtitle { display: none; }
+  .app-header__user { margin-top: 2px; }
+  .app-header__links { margin-top: 6px; }
+  .app-header__link { font-size: 13px; padding: 5px 10px; }
+  .app-header__link-hint { display: none; } /* texto largo de promo, prescindible aquí */
+  .app-header__mapa-toggle { display: block; }
+  .app-header__salas-wrap { justify-content: center; }
+  .app-header__salas { height: 140px; }
+
+  .app-nav__list {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .app-nav__list::-webkit-scrollbar { display: none; }
+  .app-nav__item { flex: 0 0 auto; }
+
+  /* Letra mínima 14 px / botones 16 px donde es sencillo subirla sin rehacer el diseño
+     (Ramiro, 09/11 06:26, "21 textos < 12 px") — el resto de la app se revisa aparte según lo
+     que se vea mal en la prueba, no se puede auditar a ciegas sin ver la pantalla. */
+  .app-header__user-name { font-size: 14px; }
+  .app-header__user-nick { font-size: 13px; }
+  .app-header__logout-btn { font-size: 13px; padding: 4px 0; }
+  .app-header__ver-como { font-size: 13px; padding: 6px 8px; }
+  .app-header__sub-name { font-size: 13px; }
+  .app-header__sub-class { font-size: 12px; }
+}
+
 /* Mobile: reduce header padding */
 @media (max-width: 640px) {
   .app-header {
     padding: var(--spacing-md) var(--spacing-md);
   }
   .app-nav__link {
-    font-size: 12px;
+    font-size: 13px;
     padding: 11px 10px;
     letter-spacing: 0.05em;
   }
@@ -560,8 +606,11 @@
 
 .app-main {
   flex: 1;
-  padding: var(--spacing-lg) var(--spacing-md);
-  max-width: 1280px;
+  /* Ramiro, 09/11 06:26: "en el ordenador no ocupa todo el ancho" — en una pantalla de 1920 px
+     quedaban ~320 px vacíos a cada lado. El límite de cada página sigue siendo el suyo (cada
+     .css de página tiene el suyo, revisados aparte); este es solo el límite exterior. */
+  padding: var(--spacing-lg) clamp(12px, 2vw, 32px);
+  max-width: 2400px;
   margin: 0 auto;
   width: 100%;
   position: relative;
@@ -686,10 +735,32 @@
 
 .cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  /* Ramiro, 09/11 06:26: más columnas en pantallas anchas (antes 280px mínimo dejaba la
+     cuadrícula de Colección en ~1000 px aunque hubiera sitio para más). */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: var(--spacing-lg);
   position: relative;
 }
+
+/* Tarjetas de la compe en Colección (Ramiro, 09/11 06:26): número y zona tienen que llenar la
+   tarjeta, con un tamaño relativo al ANCHO DE LA TARJETA (no del viewport, que en una
+   cuadrícula de varias columnas sería demasiado grande) — de ahí container queries (`cqw`).
+   `container-type: inline-size` convierte cada tarjeta en su propio contenedor de medida. */
+.compe-card {
+  container-type: inline-size;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  aspect-ratio: 1; border-radius: 16px; gap: 4%;
+}
+.compe-card__numero {
+  font-size: clamp(2.5rem, 46cqw, 9rem);
+  font-weight: 800; line-height: 1;
+}
+.compe-card__zona {
+  font-size: clamp(0.75rem, 11cqw, 1.6rem);
+  font-weight: 700; text-align: center; line-height: 1.15; padding: 0 6%;
+}
+/* Navegadores sin container queries: se queda en el tamaño mínimo del clamp (legible, aunque
+   no llene la tarjeta) en vez de romperse — degradación aceptable. */
 
 /* ============================================
    EVENT CARD

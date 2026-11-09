@@ -177,6 +177,11 @@ export default function App() {
     return () => window.removeEventListener('blokes:resaltar-subsala', onResaltar)
   }, [])
 
+  // El mapa de salas se pliega por defecto en móvil/tablet (Ramiro, 09/11 06:26: "la cabecera
+  // ocupa toda la primera pantalla" — el mapa era buena parte de eso, y además los círculos se
+  // salían del dibujo en pantallas estrechas). En ordenador sigue siempre abierto.
+  const [mapaAbierto, setMapaAbierto] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1000)
+
   return (
     <BrowserRouter basename={detectBasename()}>
       <div className="app">
@@ -278,12 +283,18 @@ export default function App() {
           </div>
 
           <div className="app-header__salas-wrap">
-            <img
+            <button
+              type="button" className="app-header__mapa-toggle"
+              onClick={() => setMapaAbierto(v => !v)}
+            >
+              {mapaAbierto ? 'Ocultar mapa ▴' : 'Ver mapa ▾'}
+            </button>
+            {mapaAbierto && <img
               src="https://rocomadrid.com/wp-content/uploads/2026/03/salas-rocomadrid-estilo-retro.png"
               alt="Salas Rocoteca Madrid"
               className="app-header__salas"
-            />
-            {Object.entries(SUBSALA_POSITIONS).map(([subsala, pos]) => {
+            />}
+            {mapaAbierto && Object.entries(SUBSALA_POSITIONS).map(([subsala, pos]) => {
               const colorCounts = subsalaStats[subsala]
               const resaltada = subsalaResaltada === subsala
               // Durante la compe los 16 bloques son borrador (sin contar en el mapa normal) —

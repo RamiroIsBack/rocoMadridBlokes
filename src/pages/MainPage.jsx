@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import CelebrationDialog from '../components/CelebrationDialog'
 import OnboardingTutorial, { tutorialSeen } from '../components/OnboardingTutorial'
 import IdentityPicker from '../components/IdentityPicker'
+import { colorPorNumeroBloque } from '../utils/compeColorScale'
 
 const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
 
@@ -18,11 +19,6 @@ const COLECCION_SLIDES = [
 ]
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
-
-const COMPE_COLOR_HEX = {
-  verde: '#22c55e', azul: '#3b82f6', amarillo: '#eab308', rojo: '#ef4444',
-  negro: '#1f2937', blanco: '#e5e7eb', naranja: '#f97316', morado: '#8b5cf6', rosa: '#ec4899',
-}
 
 function getAuthHeadersCompe() {
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
@@ -119,28 +115,27 @@ function ColeccionModoCompe({ estado }) {
           <button type="button" onClick={() => setCelebration(null)} style={{ marginLeft: 8, background: 'none', border: 'none', color: '#166534', textDecoration: 'underline', cursor: 'pointer' }}>Vale</button>
         </div>
       )}
-      <div className="cards-grid">
-        {(estado.bloques || []).map(b => (
-          <a
-            key={b.compBlockId}
-            href="/blokes/compe"
-            onClick={e => tocar(e, b)}
-            style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-              aspectRatio: '1', borderRadius: 16, textDecoration: 'none', gap: 4,
-              background: COMPE_COLOR_HEX[(b.color || '').toLowerCase()] || '#9ca3af',
-              color: '#fff', fontSize: '2.2rem', fontWeight: 800,
-            }}
-          >
-            {b.numero}
-            <span
-              onClick={e => { e.stopPropagation(); e.preventDefault(); resaltarSubsala(b.subzona) }}
-              style={{ fontSize: '0.7rem', fontWeight: 600, opacity: 0.9, textAlign: 'center', lineHeight: 1.1 }}
+      <div className="cards-grid compe-cards-grid">
+        {(estado.bloques || []).map(b => {
+          const color = colorPorNumeroBloque(b.numero)
+          return (
+            <a
+              key={b.compBlockId}
+              href="/blokes/compe"
+              onClick={e => tocar(e, b)}
+              className="compe-card"
+              style={{ background: color.bg, color: color.text, textDecoration: 'none' }}
             >
-              {b.sala ? `${b.sala} · zona ${b.subzona}` : 'Zona por confirmar'}
-            </span>
-          </a>
-        ))}
+              <span className="compe-card__numero">{b.numero}</span>
+              <span
+                className="compe-card__zona"
+                onClick={e => { e.stopPropagation(); e.preventDefault(); resaltarSubsala(b.subzona) }}
+              >
+                {b.sala ? `${b.sala} · zona ${b.subzona}` : 'Zona por confirmar'}
+              </span>
+            </a>
+          )
+        })}
       </div>
     </main>
   )

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { colorPorNumeroBloque } from '../utils/compeColorScale'
 import './CompePage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -17,11 +18,6 @@ async function api(method, path, body) {
   const json = await res.json().catch(() => null)
   if (!res.ok) throw new Error(json?.message || `Error ${res.status}`)
   return json
-}
-
-const COLOR_HEX = {
-  verde: '#22c55e', azul: '#3b82f6', amarillo: '#eab308', rojo: '#ef4444',
-  negro: '#1f2937', blanco: '#e5e7eb', naranja: '#f97316', morado: '#8b5cf6', rosa: '#ec4899',
 }
 
 const PUEDE_RECEPCION = ['profesor', 'gestion', 'socio', 'tablet']
@@ -331,12 +327,12 @@ function BloqueFila({ bloque, resultado, guardando, onGuardar }) {
     setTop(!!resultado?.top); setZona(!!resultado?.zona); setIntentos(resultado?.intentos ?? 0)
   }, [resultado?.top, resultado?.zona, resultado?.intentos])
 
-  const color = COLOR_HEX[(bloque.color || '').toLowerCase()] || '#9ca3af'
+  const color = colorPorNumeroBloque(bloque.numero)
   const estadoLabel = resultado ? 'Apuntado ✓' : ''
 
   return (
     <div className="compe-bloque">
-      <div className="compe-bloque__numero" style={{ background: color }}>{bloque.numero}</div>
+      <div className="compe-bloque__numero" style={{ background: color.bg, color: color.text }}>{bloque.numero}</div>
       <div className="compe-bloque__cuerpo">
         <div className="compe-bloque__toggles">
           <label className={`compe-toggle${top ? ' compe-toggle--on' : ''}`}>

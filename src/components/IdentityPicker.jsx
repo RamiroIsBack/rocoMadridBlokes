@@ -9,6 +9,23 @@ function getAuthHeaders() {
   return nonce ? { 'X-WP-Nonce': nonce } : {}
 }
 
+const DIAS_SEMANA = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado']
+
+// "Sugeridos" antes de escribir (Ramiro, 09/11 06:15): la clase que está en curso AHORA mismo
+// — el "día" de un alumno puede ser una pareja ("Lunes-Miércoles") o uno solo, y el "horario"
+// viene como "14:00-15:30".
+function claseEnCurso(dia, horario) {
+  if (!dia || !horario) return false
+  const m = horario.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/)
+  if (!m) return false
+  const ahora = new Date()
+  if (!dia.split('-').includes(DIAS_SEMANA[ahora.getDay()])) return false
+  const minutosAhora = ahora.getHours() * 60 + ahora.getMinutes()
+  const inicio = parseInt(m[1], 10) * 60 + parseInt(m[2], 10)
+  const fin = parseInt(m[3], 10) * 60 + parseInt(m[4], 10)
+  return minutosAhora >= inicio && minutosAhora <= fin
+}
+
 // "¿Quién eres?" — used from the shared tablet to attribute an action (mark
 // a bloke, view "Yo") to a real person instead of whoever has the tablet's
 // own session open. Searches the full roster (any horario, not just a
@@ -34,10 +51,11 @@ export default function IdentityPicker({ title = '¿Quién eres?', allowCreate =
   }, [])
 
   const consolidated = useMemo(() => consolidateAlumnos(alumnos), [alumnos])
+  const sugeridos = useMemo(() => consolidated.filter(a => claseEnCurso(a.dia, a.horario)).slice(0, 20), [consolidated])
   const searchNorm = normalizeName(search)
   const results = searchNorm
     ? consolidated.filter(a => normalizeName(a.cliente || a.nombre).includes(searchNorm)).slice(0, 30)
-    : []
+    : sugeridos
 
   const pick = a => {
     if (a.is_placeholder) onPick({ kind: 'ph', placeholder_id: a.placeholder_id, name: a.cliente })
@@ -94,12 +112,13 @@ export default function IdentityPicker({ title = '¿Quién eres?', allowCreate =
             />
             {loading ? (
               <p className="idpicker__hint">Cargando...</p>
-            ) : !searchNorm ? (
+            ) : !searchNorm && results.length === 0 ? (
               <p className="idpicker__hint">Empieza a escribir para buscarte.</p>
-            ) : results.length === 0 ? (
+            ) : searchNorm && results.length === 0 ? (
               <p className="idpicker__hint">Nadie coincide con "{search.trim()}".</p>
             ) : (
               <div className="idpicker__list">
+                {!searchNorm && <p className="idpicker__hint">Clase en curso ahora:</p>}
                 {results.map((a, i) => (
                   <button
                     key={i}

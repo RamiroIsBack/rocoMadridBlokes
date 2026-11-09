@@ -1,22 +1,26 @@
 import { useState, useEffect } from 'react'
+import { colorPorNumeroBloque } from '../utils/compeColorScale'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 const REFRESCO_MS = 30000 // Ramiro: "sondeo cada 30 s, nada pesado" — ver el problema de pestañas colgadas
 
-const COLOR_HEX = {
-  verde: '#22c55e', azul: '#3b82f6', amarillo: '#eab308', rojo: '#ef4444',
-  negro: '#1f2937', blanco: '#e5e7eb', naranja: '#f97316', morado: '#8b5cf6', rosa: '#ec4899',
-}
-
-// Cuenta atrás de lo que queda de compe (cowork, 09/11 05:30: "casi toda la pantalla vacía,
-// letra mucho más grande") — comp_date/comp_end_date son fechas sin hora, así que el final
-// cuenta como el final de ESE día.
-function cuentaAtras(compEndDate) {
+// Cuenta atrás de lo que queda de compe (cowork, 09/11 05:30/06:15: antes de empezar decía
+// "quedan 25 días" en vez de avisar que no ha empezado) — comp_date/comp_end_date son fechas
+// sin hora: el inicio cuenta desde el principio de ese día y el final hasta el final de ese día.
+function cuentaAtras(compDate, compEndDate) {
+  const ahora = new Date()
+  if (compDate) {
+    const inicio = new Date(compDate + 'T00:00:00')
+    const msHastaEmpezar = inicio - ahora
+    if (msHastaEmpezar > 0) {
+      const dias = Math.ceil(msHastaEmpezar / 86400000)
+      return `Empieza en ${dias} día${dias === 1 ? '' : 's'}`
+    }
+  }
   if (!compEndDate) return null
   const fin = new Date(compEndDate + 'T23:59:59')
-  const ahora = new Date()
   const ms = fin - ahora
-  if (ms <= 0) return 'Última hora de la compe'
+  if (ms <= 0) return 'Compe terminada · resultados finales'
   const dias = Math.floor(ms / 86400000)
   const horas = Math.floor((ms % 86400000) / 3600000)
   if (dias >= 1) return `Quedan ${dias} día${dias === 1 ? '' : 's'} y ${horas} h de compe`
@@ -82,7 +86,7 @@ export default function CompeDirectoPage() {
 
   const general = clasif?.categorias?.[0]?.clasificacion || []
   const ultimos = clasif?.ultimosValidados || []
-  const cuenta = cuentaAtras(estado.compEndDate)
+  const cuenta = cuentaAtras(estado.compDate, estado.compEndDate)
 
   return (
     <div style={estilos.pagina}>
@@ -123,7 +127,7 @@ export default function CompeDirectoPage() {
               <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #1f2937' }}>
                 <span style={{
                   width: 18, height: 18, borderRadius: '50%', flex: '0 0 auto',
-                  background: COLOR_HEX[(u.color || '').toLowerCase()] || '#9ca3af',
+                  background: colorPorNumeroBloque(u.numero).bg,
                 }} />
                 <span><strong>{u.nombreMostrar}</strong> · bloque {u.numero} · hace {u.hace}</span>
               </li>

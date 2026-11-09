@@ -1,5 +1,5 @@
 .compe-page {
-  max-width: 720px;
+  max-width: 900px;
   margin: 0 auto;
   padding: 16px 16px 80px;
 }
@@ -72,8 +72,12 @@
 }
 .compe-recepcion-resultado:hover { background: #f3f4f6; }
 .compe-recepcion-aviso {
-  background: #dcfce7; color: #166534; font-weight: 600; font-size: 0.95rem;
-  padding: 10px 12px; border-radius: 8px; margin-bottom: 10px;
+  /* Flotante, no en el flujo (cowork, 09/11 06:15): si empuja la lista, en la tablet se pulsa
+     el bloque de al lado justo cuando aparece/desaparece — "marqué el 3 queriendo el 2". */
+  position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 50;
+  background: #166534; color: #fff; font-weight: 600; font-size: 0.95rem;
+  padding: 12px 16px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  text-align: center;
 }
 .compe-recepcion-persona {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
