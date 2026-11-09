@@ -10,6 +10,7 @@ import PayrollSection from '../components/PayrollSection'
 import PresupuestosSection from '../components/PresupuestosSection'
 import BudgetSection from '../components/BudgetSection'
 import ProjectsSection from '../components/ProjectsSection'
+import BlokesMapSection from '../components/BlokesMapSection'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
 import { getCalendarAccess, saveCalendarAccess } from '../hooks/useCalendar'
 import './SuperAdminPage.css'
@@ -1096,6 +1097,7 @@ const SA_GROUPS = [
     { key: 'proyectos',    label: 'Proyectos' },
   ] },
   { key: 'acceso', label: 'Acceso' },
+  { key: 'mapa',   label: 'Mapa de Blokes' },
 ]
 const SA_ALL_TABS = SA_GROUPS.flatMap(g => g.tabs ? g.tabs.map(t => t.key) : [g.key])
 // Última subpestaña abierta de cada apartado, para volver a ella al cambiar de apartado
@@ -1163,6 +1165,7 @@ export default function SuperAdminPage() {
       {saTab === 'acceso'   && <ListasSection />}
       {saTab === 'presupuestos' && <PresupuestosSection />}
       {saTab === 'proyectos' && <ProjectsSection />}
+      {saTab === 'mapa'      && <BlokesMapSection />}
     </div>
   )
 }
