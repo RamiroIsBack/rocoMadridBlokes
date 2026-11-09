@@ -8,6 +8,7 @@ import ExpensesSection from '../components/ExpensesSection'
 import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
 import PayrollSection from '../components/PayrollSection'
 import PresupuestosSection from '../components/PresupuestosSection'
+import BudgetSection from '../components/BudgetSection'
 import ProjectsSection from '../components/ProjectsSection'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
 import { getCalendarAccess, saveCalendarAccess } from '../hooks/useCalendar'
@@ -1081,9 +1082,38 @@ function PLAccordion({ live2026, lastMonth }) {
 }
 
 // ─── Main page ───────────────────────────────────────────────────────
+// Pestañas agrupadas: arriba los apartados y, dentro de Tesorería y Gestión, sus subpestañas.
+const SA_GROUPS = [
+  { key: 'tesoreria', label: 'Tesorería', tabs: [
+    { key: 'ingresos',          label: 'Ingresos' },
+    { key: 'gastos',            label: 'Gastos banco' },
+    { key: 'presupuesto-anual', label: 'Presupuesto anual' },
+    { key: 'pl',                label: 'P&L' },
+  ] },
+  { key: 'nominas', label: 'Nóminas' },
+  { key: 'gestion', label: 'Gestión', tabs: [
+    { key: 'presupuestos', label: 'Presupuestos' },
+    { key: 'proyectos',    label: 'Proyectos' },
+  ] },
+  { key: 'acceso', label: 'Acceso' },
+]
+const SA_ALL_TABS = SA_GROUPS.flatMap(g => g.tabs ? g.tabs.map(t => t.key) : [g.key])
+// Última subpestaña abierta de cada apartado, para volver a ella al cambiar de apartado
+const lastSubTab = {}
+
+// Recordar la última pestaña abierta en este navegador (si el almacenamiento falla, se empieza en Ingresos)
+const LAST_TAB_KEY = 'sa-last-tab'
+function loadLastTab() {
+  try {
+    const t = localStorage.getItem(LAST_TAB_KEY)
+    return SA_ALL_TABS.includes(t) ? t : 'ingresos'
+  } catch { return 'ingresos' }
+}
+function saveLastTab(t) { try { localStorage.setItem(LAST_TAB_KEY, t) } catch { /* sin almacenamiento */ } }
+
 export default function SuperAdminPage() {
   const role = window.blokesSiteData?.userRole
-  const [saTab, setSaTab]               = useState('ingresos')
+  const [saTab, setSaTab]               = useState(loadLastTab)
   const [excludeTransfer, setExclude]   = useState(false)
 
   if (role !== 'socio') {
@@ -1095,26 +1125,30 @@ export default function SuperAdminPage() {
     )
   }
 
-  const TABS = [
-    { key: 'ingresos', label: 'Ingresos' },
-    { key: 'gastos',   label: 'Gastos banco' },
-    { key: 'pl',       label: 'P&L' },
-    { key: 'nominas',  label: 'Nóminas' },
-    { key: 'acceso',   label: 'Acceso' },
-    { key: 'presupuestos', label: 'Presupuestos' },
-    { key: 'proyectos', label: 'Proyectos' },
-  ]
+  const group    = SA_GROUPS.find(g => g.key === saTab || g.tabs?.some(t => t.key === saTab)) || SA_GROUPS[0]
+  const openTab  = key => { setSaTab(key); saveLastTab(key) }
+  const openGroup = g => openTab(g.tabs ? (lastSubTab[g.key] || g.tabs[0].key) : g.key)
+  if (group.tabs && group.tabs.some(t => t.key === saTab)) lastSubTab[group.key] = saTab
 
   return (
     <div className="sa-page">
       <h1 className="sa-page__title">Superadmin</h1>
       <div className="sa-main-tabs">
-        {TABS.map(t => (
-          <button key={t.key} className={`sa-main-tab${saTab === t.key ? ' sa-main-tab--active' : ''}`} onClick={() => setSaTab(t.key)}>
-            {t.label}
+        {SA_GROUPS.map(g => (
+          <button key={g.key} className={`sa-main-tab${group.key === g.key ? ' sa-main-tab--active' : ''}`} onClick={() => openGroup(g)}>
+            {g.label}
           </button>
         ))}
       </div>
+      {group.tabs && (
+        <div className="sa-pl-tabs sa-sub-tabs">
+          {group.tabs.map(t => (
+            <button key={t.key} className={`sa-pl-tab${saTab === t.key ? ' sa-pl-tab--active' : ''}`} onClick={() => openTab(t.key)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
       {saTab === 'ingresos' && (
         <>
           <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
@@ -1125,6 +1159,7 @@ export default function SuperAdminPage() {
       {saTab === 'gastos'   && <ExpensesSection />}
       {saTab === 'pl'       && <PLTab />}
       {saTab === 'nominas'  && <PayrollSection />}
+      {saTab === 'presupuesto-anual' && <BudgetSection />}
       {saTab === 'acceso'   && <ListasSection />}
       {saTab === 'presupuestos' && <PresupuestosSection />}
       {saTab === 'proyectos' && <ProjectsSection />}

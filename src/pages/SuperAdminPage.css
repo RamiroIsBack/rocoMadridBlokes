@@ -1232,3 +1232,65 @@ details[open] .sa-collapsible__arrow {
 .sa-pay-table--wide th, .sa-pay-table--wide td { padding-left: 7px; padding-right: 7px; }
 .sa-pay-person-pay__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; } .sa-pay-person-pay__head .sa-pay-person-pay__title { margin: 0; }
 .sa-pay-tags { margin-top: 3px; white-space: nowrap; } .sa-pay-tags .sa-pay-tag:first-child { margin-left: 15px; } .sa-pay-name { white-space: nowrap; }
+
+/* ── Presupuesto vs. bancos ── */
+.bud-import { border: 1px solid #2a2015; border-radius: 2px; padding: 14px; margin-bottom: 20px; background: #0c0a06; }
+.bud-primary { border-color: #34d399; color: #34d399; }
+.bud-small { font-size: 0.7rem; }
+.bud-select {
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 0.75rem;
+  padding: 3px 6px;
+  font-family: inherit;
+  max-width: 220px;
+}
+.bud-select:focus { outline: none; border-color: #f5c842; }
+.bud-month-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.bud-row { cursor: pointer; }
+.bud-caret { display: inline-block; width: 14px; color: #888; }
+.bud-lines { font-size: 0.66rem; color: #888; margin: 2px 0 0 14px; }
+.bud-detail > td { background: #0c0a06; padding: 6px 10px 12px 24px !important; }
+.bud-items { font-size: 0.75rem; }
+.bud-pos { color: #34d399 !important; }
+.bud-neg { color: #f87171 !important; }
+.bud-year td, .bud-year th { padding: 5px 7px; }
+.bud-cell { font-size: 0.72rem; }
+.bud-status { font-size: 0.7rem; font-weight: 700; white-space: nowrap; }
+.bud-status--cumplido       { color: #34d399; }
+.bud-status--ahorro         { color: #34d399; }
+.bud-status--sobrecoste     { color: #f87171; }
+.bud-status--imprevisto     { color: #f97316; }
+.bud-status--sin-movimiento { color: #f5c842; }
+.bud-status--sin-datos      { color: #888; }
+/* Matriz partidas × meses */
+.bud-mx-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.bud-mx-bar .bud-mx-modes { margin: 0; }
+.bud-matrix td, .bud-matrix th { padding: 5px 7px; font-size: 0.74rem; white-space: nowrap; }
+.bud-matrix .bud-mx-name { position: sticky; left: 0; z-index: 1; background: #100e09; min-width: 170px; white-space: normal; }
+.bud-matrix thead .bud-mx-name, .bud-matrix tfoot .bud-mx-name { background: #15110b; }
+.bud-mx-both span { display: block; line-height: 1.25; }
+.bud-mx-b { color: #888; font-size: 0.68rem; }
+.bud-mx-r { font-weight: 600; }
+.bud-mx-extra td { font-style: italic; }
+.bud-mx-shared { margin-left: 5px; color: #888; cursor: help; }
+.bud-mx-diff td { border-top: 1px solid #2a2015; font-weight: 700; }
+.bud-mx-section td { font-size: 0.66rem !important; text-transform: uppercase; letter-spacing: 0.08em; color: #f5c842; padding-top: 12px !important; font-weight: 700; }
+.bud-mx-sec { position: sticky; left: 7px; }
+.bud-mx-income td { background: rgba(52, 211, 153, 0.04); }
+.bud-mx-income .bud-mx-name { background: #111209; }
+.bud-mx-result td { border-top: 2px solid #f5c842; }
+/* Grupo de gasto: cabecera con el subtotal del grupo; sus partidas van sangradas debajo */
+.bud-mx-group td, .bud-group-row td { border-top: 1px solid rgba(245, 200, 66, 0.35); font-weight: 700; background: rgba(245, 200, 66, 0.04); }
+.bud-mx-group .bud-mx-name { background: #17130b; color: #f5c842; }
+.bud-group-row td:first-child { color: #f5c842; }
+.bud-mx-indent .bud-mx-name, .bud-indent > td:first-child { padding-left: 20px !important; }
+.bud-mx-goal td { background: rgba(245, 200, 66, 0.05); color: #f5c842; }
+.bud-mx-goal .bud-mx-name { background: #17130a; font-weight: 700; }
+.bud-rules { margin-top: 28px; border-top: 1px solid #2a2015; padding-top: 14px; }
+.bud-rules .sa-pay-table { margin-top: 8px; }
+
+/* ── Subpestañas de cada apartado (Tesorería, Gestión) ── */
+.sa-sub-tabs { margin: -14px 0 22px; }
