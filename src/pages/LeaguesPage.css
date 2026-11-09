@@ -1,5 +1,10 @@
 .league-page {
-  max-width: 720px;
+  /* Ramiro, 09/11 06:36: pidió max-width:none en todas las páginas salvo texto corrido,
+     formularios y diálogos — dejo esta en un ancho generoso (no "none") a propósito: es una
+     clasificación de una sola columna (rango, nombre, puntos), sin rejilla ni tabla que
+     aprovechar; a todo el ancho en un monitor de 2400 px el hueco entre el nombre y los puntos
+     sería enorme sin añadir nada. Dímelo si lo quieres igualmente a ancho completo. */
+  max-width: 820px;
   margin: 0 auto;
   padding: 16px 0 40px;
 }

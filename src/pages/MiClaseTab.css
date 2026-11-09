@@ -1,5 +1,7 @@
 .mi-clase {
-  max-width: 820px;
+  /* Ramiro, 09/11 06:36: tiene una rejilla propia con auto-fill (top blokes) — a todo el ancho
+     se reparte sola; el resto es texto/estadísticas de una clase, no se estira mal. */
+  max-width: none;
   margin: 0 auto;
   padding: 24px 16px 48px;
 }

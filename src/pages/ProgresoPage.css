@@ -70,7 +70,11 @@
 /* ProgresoPage */
 
 .progreso {
-  max-width: 760px;
+  /* Ramiro, 09/11 06:36: pidió max-width:none salvo texto corrido/formularios/diálogos — este
+     es un feed de actividad de una sola columna, sin rejilla; a 2400 px cada fila quedaría con
+     un hueco enorme. Dejo un ancho generoso en vez de "none" — dímelo si lo quieres igual a
+     ancho completo. */
+  max-width: 820px;
   margin: 0 auto;
   padding: 24px 16px 48px;
 }

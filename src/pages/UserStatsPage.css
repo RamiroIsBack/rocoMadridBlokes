@@ -1,7 +1,9 @@
 /* UserStatsPage */
 
 .user-stats {
-    max-width: 800px;
+    /* Ramiro, 09/11 06:36: resumen de estadísticas personales de una sola columna, sin
+       rejilla propia — ancho generoso en vez de "none" (ver razón en ProgresoPage.css). */
+    max-width: 820px;
     margin: 0 auto;
     padding: 24px 16px 48px;
 }

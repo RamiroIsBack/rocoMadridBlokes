@@ -1,5 +1,8 @@
 .org {
-  max-width: 1000px;
+  /* Ramiro, 09/11 06:36: "el contenedor de página a todo el ancho — los max-width pequeños
+     solo para texto corrido, formularios y diálogos, nunca para tableros/tablas/rejillas" —
+     el tablero Hoy/Semana es justo eso. El límite exterior lo sigue poniendo .app-main. */
+  max-width: none;
   margin: 0 auto;
   padding: 20px 16px 48px;
 }
@@ -369,15 +372,18 @@
 }
 
 /* ── Semana: tablero de columnas por persona con tiles arrastrables ── */
+/* Ramiro, 09/11 06:36: con pantalla ancha, todos los trabajadores a la vez, sin scroll
+   horizontal — antes eran columnas de ancho fijo en una fila (`flex`), así que por mucho que
+   el contenedor se ensanchara, seguían sin caber y salía la barra. Con `grid` + `auto-fit` se
+   reparten solas: más columnas en pantalla ancha, menos (hasta 1) en móvil, sin scroll. */
 .org__board {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 10px;
-  overflow-x: auto;
   padding-bottom: 8px;
   touch-action: none;
 }
 .org__board-col {
-  flex: 0 0 220px;
   background: #fdf7e6;
   border: 1.5px solid #e5ddc8;
   padding: 10px;

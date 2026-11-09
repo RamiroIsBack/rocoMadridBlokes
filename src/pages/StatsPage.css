@@ -3,7 +3,8 @@
 /* Stats Page Layout */
 .stats-page {
     padding: 20px;
-    max-width: 1500px;
+    /* Ramiro, 09/11 06:36: ya tiene rejillas con auto-fit — a todo el ancho se reparten solas. */
+    max-width: none;
     margin: 0 auto;
 }
 

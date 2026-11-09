@@ -1,5 +1,7 @@
 .compe-page {
-  max-width: 900px;
+  /* Ramiro, 09/11 06:36: el contenedor de página a todo el ancho (sin tope pequeño) — las
+     listas de bloques/Recepción son justo lo que pedía ensanchar, no texto corrido. */
+  max-width: none;
   margin: 0 auto;
   padding: 16px 16px 80px;
 }
@@ -12,7 +14,10 @@
   background: #111827; color: #fff; text-decoration: none; font-weight: 600;
 }
 
-.compe-page__grid { display: flex; flex-direction: column; gap: 10px; }
+/* Ramiro, 09/11 06:36: "nunca max-width pequeño para... listas" — en vez de una sola columna
+   altísima en pantalla ancha, varias columnas de bloques a la vez (se pliega a 1 sola en
+   móvil, igual que el tablero de Organización). */
+.compe-page__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; }
 
 .compe-bloque {
   display: flex; gap: 12px; align-items: flex-start;
