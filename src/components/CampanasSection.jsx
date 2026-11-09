@@ -12,6 +12,11 @@ const LISTA_LABEL = {
   bajas: 'Bajas de mensajes', sin_clasificar: 'Sin clasificar',
 }
 const CAMPANA_LISTAS = ['actuales', 'nuevos', 'en_espera', 'antiguos']
+// El filtro "ya en vigor ahora mismo" solo tiene sentido en una campaña de solo-antiguos (no
+// mandar "¿te animas a volver?" a quien ya viene). En una campaña que incluye actuales/nuevos/
+// en_espera, esas personas SON el destinatario — filtrarlas escondía a 184 de 185 (Ramiro,
+// 09/11 11:40, campaña #2 "Compe RocoMadrid + app Blokes").
+const LISTAS_VIGENTES = ['actuales', 'nuevos', 'en_espera']
 
 // Marca de consentimiento de WhatsApp, igual en Contactos y en la lista de envío de una
 // campaña: gris = sin preguntar, verde = sí, rojo = no/BAJA.
@@ -417,7 +422,8 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
   if (error)   return <p className="cmp-error">Error: {error}</p>
   if (!data)   return null
 
-  const base = (data.destinatarios || []).filter(d => !d.yaEnVigor)
+  const esCampanaVigentes = data.campana.listas.some(l => LISTAS_VIGENTES.includes(l))
+  const base = esCampanaVigentes ? (data.destinatarios || []) : (data.destinatarios || []).filter(d => !d.yaEnVigor)
   const porEstado = { pendientes: 0, enviados: 0, respondieron: 0, bajas: 0, apuntados: 0 }
   base.forEach(d => { porEstado[clasificarDestinatario(d)]++ })
 

@@ -7457,12 +7457,16 @@ function blokes_campanas_clasificar($telefono, $subs_por_tel, $externos_por_tel,
         $sub_obj = !empty($sub['id']) ? wcs_get_subscription(intval($sub['id'])) : null;
 
         // "on-hold" en esta web es casi siempre impago, no una pausa de verdad (esa guarda
-        // _rm_pausa_motivo aparte — mismo criterio que el estado "en_espera" de Grupos). Sin
-        // motivo de pausa, solo cuenta como en vigor si el impago es reciente (~45 días);
-        // si no, ya se fue de verdad y pasa a antiguos.
+        // _rm_pausa_motivo aparte — mismo criterio que el estado "en_espera" de Grupos). Siempre
+        // "en_espera" mientras siga on-hold sin cancelar, sin importar cuánto lleve impagado —
+        // antes, a partir de 45 días pasaba a "antiguos", pero más abajo (destinatarios) a esta
+        // misma persona ya se la contaba "yaEnVigor" por seguir on-hold, así que quedaba
+        // "antiguos" + "yaEnVigor" a la vez: en una campaña de antiguos no se le mandaba nada (el
+        // filtro de yaEnVigor ya la tapaba) pero tampoco entraba en una campaña de en_espera,
+        // donde Ramiro SÍ la quiere (cowork, 09/11 11:40 — 16 alumnos de Grupos en impago largo,
+        // "los quiere dentro" de la campaña #2). Si de verdad se cancela, pasa a 'cancelled' o
+        // 'pending-cancel' más abajo y ahí sí es "antiguos".
         if ($sub['status'] === 'on-hold' && $sub_obj && !get_post_meta($sub_obj->get_id(), '_rm_pausa_motivo', true)) {
-            $dias_impago = ($t = blokes_campanas_ultimo_pago_ts($sub_obj)) ? (time() - $t) / DAY_IN_SECONDS : 9999;
-            if ($dias_impago > 45) return 'antiguos';
             return 'en_espera';
         }
 
