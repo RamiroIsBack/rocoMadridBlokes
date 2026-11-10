@@ -16,6 +16,7 @@ import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
 import CampanasSection from '../components/CampanasSection'
 import { BASE as STAFF_BASE, PROF_ORDER } from '../data/staffSchedule'
+import { useTabParam } from '../hooks/useTabParam'
 import './SupervisionPage.css'
 
 // Profesor(es) de un grupo de Grupos, a partir del horario de referencia de staffSchedule.js
@@ -1630,6 +1631,7 @@ function GruposTab() {
   const { data, loading, error, refetch } = useGestionGrupos(4)
   const [grupoKey, setGrupoKey] = useState('')
   const [vista, setVista]     = useState('grupos') // 'grupos' | 'duplicados' | 'cobrar' | 'pausados' | 'bajas' | 'sindatos'
+  useTabParam('vista', v => ['grupos', 'duplicados', 'cobrar', 'pausados', 'bajas', 'sindatos', 'campanas'].includes(v), setVista)
   const [menuFor, setMenuFor] = useState(null)   // alumno con el menú de acciones abierto
   const [accion, setAccion]   = useState(null)   // { alumno, tipo } con el modal abierto
   const [buscador, setBuscador] = useState(false) // modal de "Añadir alumno" (buscar)
@@ -2226,6 +2228,7 @@ export default function SupervisionPage() {
   ]
 
   const [tab, setTab] = useState('excelmuerte')
+  useTabParam('tab', t => ['excelmuerte', 'grupos', 'horasextra', 'timeoff', 'historico'].includes(t), setTab)
 
   if (!canAccess) {
     return (

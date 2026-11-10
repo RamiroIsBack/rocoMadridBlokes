@@ -95,3 +95,25 @@ export const BLOKES_MAP = [
 
   { id: 'horarios-profes', title: 'Horarios Profes', who: 'socios', desc: 'Playground de horarios: horario base, reasignar clases, añadir horas.' },
 ]
+
+// A dónde lleva pulsar cada elemento del mapa (ruta de la app y, si hace falta,
+// la pestaña). Los que no tienen pantalla propia no llevan enlace.
+export const MAP_LINKS = {
+  publico: '/', cabecera: '/', blokes: '/', 'blokes-filtros': '/', 'blokes-tarjeta': '/', 'blokes-tops': '/', 'blokes-insignias': '/',
+  progreso: '/progreso/comunidad', 'progreso-mi': '/progreso/comunidad', 'progreso-clase': '/progreso/clase', 'progreso-misblokes': '/progreso/yo',
+  ligas: '/ligas', logros: '/progreso/yo',
+  profes: '/entrenamientos',
+  entrenamientos: '/entrenamientos', 'entrena-alumno': '/entrenamientos?tab=alumno', 'entrena-test': '/entrenamientos?tab=test', 'entrena-defs': '/entrenamientos?tab=definiciones',
+  tareas: '/tareas/crear-bloke', 'tareas-crear': '/tareas/crear-bloke', 'tareas-organizacion': '/tareas/organizacion', 'tareas-stats': '/tareas/estadisticas',
+  fichaje: '/fichaje', timeoff: '/time-off',
+  'eventos-cal': '/eventos',
+  eventos: '/eventos', 'eventos-reservas': '/eventos?tab=reservas', 'eventos-disponibilidad': '/eventos?tab=calendario', 'eventos-cobros': '/eventos?tab=cobros', 'eventos-web': '/eventos?tab=cobros',
+  calendario: '/calendario',
+  supervision: '/supervision?tab=excelmuerte', 'sv-excelmuerte': '/supervision?tab=excelmuerte', 'sv-grupos': '/supervision?tab=grupos&vista=grupos',
+  'sv-horasextra': '/supervision?tab=horasextra', 'sv-campanas': '/supervision?tab=grupos&vista=campanas', 'sv-timeoff': '/supervision?tab=timeoff', 'sv-historico': '/supervision?tab=historico',
+  superadmin: '/superadmin?tab=ingresos',
+  'sa-tesoreria': '/superadmin?tab=ingresos', 'sa-ingresos': '/superadmin?tab=ingresos', 'sa-gastos': '/superadmin?tab=gastos', 'sa-presupuesto-anual': '/superadmin?tab=presupuesto-anual', 'sa-pl': '/superadmin?tab=pl',
+  'sa-nominas': '/superadmin?tab=nominas', 'sa-gestion': '/superadmin?tab=presupuestos', 'sa-presupuestos': '/superadmin?tab=presupuestos', 'sa-proyectos': '/superadmin?tab=proyectos',
+  'sa-acceso': '/superadmin?tab=acceso',
+  'horarios-profes': '/playground',
+}

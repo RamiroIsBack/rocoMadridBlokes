@@ -179,3 +179,8 @@
   .bm-list { padding-left: 12px; }
   .bm-add-wrap--leaf .bm-add { opacity: 1; }
 }
+
+/* Título que lleva a la pantalla */
+.bm-row__link { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+.bm-row__link:hover { color: var(--brand-peacock); border-bottom-style: solid; }
+.bm-row__go { font-size: 0.8em; opacity: 0.55; }

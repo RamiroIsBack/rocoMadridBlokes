@@ -7,6 +7,7 @@ import { useRevenue, useProducts, useExpenses, useClasses } from '../hooks/useSu
 import ExpensesSection from '../components/ExpensesSection'
 import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
 import PayrollSection from '../components/PayrollSection'
+import { useTabParam } from '../hooks/useTabParam'
 import PresupuestosSection from '../components/PresupuestosSection'
 import BudgetSection from '../components/BudgetSection'
 import ProjectsSection from '../components/ProjectsSection'
@@ -1116,6 +1117,7 @@ function saveLastTab(t) { try { localStorage.setItem(LAST_TAB_KEY, t) } catch { 
 export default function SuperAdminPage() {
   const role = window.blokesSiteData?.userRole
   const [saTab, setSaTab]               = useState(loadLastTab)
+  useTabParam('tab', t => SA_ALL_TABS.includes(t), t => { setSaTab(t); saveLastTab(t) })
   const [excludeTransfer, setExclude]   = useState(false)
 
   if (role !== 'socio') {

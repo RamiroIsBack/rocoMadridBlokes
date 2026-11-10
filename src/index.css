@@ -23,7 +23,7 @@
      claros (blancos y grises) y los secundarios solo para detalles. */
   --color-bg: #f5f4f0;            /* gris muy claro, cálido */
   --color-surface: #ffffff;
-  --color-header: #ffffff;
+  --color-header: #e9eef6; /* gris azulado claro de la franja superior */
   --color-text-primary: #1d1d1b;  /* negro de la marca, suavizado para texto */
   --color-text-secondary: #5c5b57;
   --color-border: #dddbd3;

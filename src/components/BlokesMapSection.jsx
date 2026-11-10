@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
-import { BLOKES_MAP, DECISIONS, WHO } from '../utils/blokesMap'
+import { Link } from 'react-router-dom'
+import { BLOKES_MAP, DECISIONS, WHO, MAP_LINKS } from '../utils/blokesMap'
 import './BlokesMapSection.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -40,7 +41,7 @@ function MapNode({ node, depth, ctx }) {
   const [note, setNote]         = useState(it.note || '')
   const [ideaOpen, setIdeaOpen] = useState(false)
   const [idea, setIdea]         = useState('')
-  const [open, setOpen]         = useState(depth < 1)
+  const [open, setOpen]         = useState(false)   // siempre empieza plegado
   useEffect(() => { setNote(it.note || '') }, [it.note])
 
   const kids     = [...(node.children || []), ...extras.filter(x => x.parent === node.id).map(x => ({ ...x, extra: true }))]
@@ -65,7 +66,9 @@ function MapNode({ node, depth, ctx }) {
       <div className="bm-row__main">
         <div className="bm-row__title">
           {node.extra && <span className="bm-tag bm-tag--idea">Idea</span>}
-          <span>{node.title}</span>
+          {MAP_LINKS[node.id]
+            ? <Link to={MAP_LINKS[node.id]} className="bm-row__link" title="Ir a esta pantalla">{node.title} <span className="bm-row__go" aria-hidden="true">↗</span></Link>
+            : <span>{node.title}</span>}
           {node.who && <span className="bm-tag">{WHO[node.who]}</span>}
         </div>
         {node.desc && <p className="bm-row__desc">{node.desc}</p>}
@@ -183,7 +186,7 @@ export default function BlokesMapSection() {
         <h2 className="bm-head__title">Mapa de Blokes</h2>
         <p className="bm-head__hint">
           Todo lo que hay en la app. Marca cada cosa — ✅ se queda, 🛠 mejorar, 💡 idea nueva, 🗑 sobra — y apunta una nota.
-          Lo que marquéis Ramiro y tú se guarda para los dos.
+          Pulsa ▸ para desplegar y el nombre para ir a esa pantalla. Lo que marquéis Ramiro y tú se guarda para los dos.
         </p>
         <div className="bm-filters">
           {FILTERS.map(f => (
