@@ -636,7 +636,9 @@
   :root:not([data-theme="light"]) .org__switch-btn {
     color: var(--color-text-primary);
   }
-  :root:not([data-theme="light"]) .org__board-day-label { color: var(--color-accent-hover); }
+  :root:not([data-theme="light"]) .org__board-day-label,
+  :root:not([data-theme="light"]) .org__add-btn,
+  :root:not([data-theme="light"]) .org__tile-postpone { color: var(--color-accent-hover); }
   :root:not([data-theme="light"]) .org__btn--ghost { color: var(--color-text-primary); border-color: var(--color-border); }
   :root:not([data-theme="light"]) .org__link-btn { color: var(--color-accent-hover); }
   /* 🐞 Cowork 11/11 12:15: regresión — al oscurecer el fondo de .org__tile/.org__block-row
@@ -679,7 +681,9 @@
 :root[data-theme="dark"] .org__switch-btn {
   color: var(--color-text-primary);
 }
-:root[data-theme="dark"] .org__board-day-label { color: var(--color-accent-hover); }
+:root[data-theme="dark"] .org__board-day-label,
+:root[data-theme="dark"] .org__add-btn,
+:root[data-theme="dark"] .org__tile-postpone { color: var(--color-accent-hover); }
 :root[data-theme="dark"] .org__btn--ghost { color: var(--color-text-primary); border-color: var(--color-border); }
 :root[data-theme="dark"] .org__link-btn { color: var(--color-accent-hover); }
 :root[data-theme="dark"] .org__tile-edit { color: var(--color-text-secondary); }

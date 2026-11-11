@@ -587,14 +587,32 @@
   :root:not([data-theme="light"]) .user-stats__title,
   :root:not([data-theme="light"]) .user-stats__color-count,
   :root:not([data-theme="light"]) .user-stats__month-count,
-  :root:not([data-theme="light"]) .user-stats__rating-count {
+  :root:not([data-theme="light"]) .user-stats__rating-count,
+  :root:not([data-theme="light"]) .user-stats__sala-count,
+  :root:not([data-theme="light"]) .user-stats__training-locked-title {
     color: var(--color-text-primary);
+  }
+  /* Cowork 11/11 13:20: .user-stats__sala-name y .user-stats__training-locked-text ya usaban
+     la variable de texto correcta, pero su caja (.user-stats__sala-badge,
+     .user-stats__training-locked) tenía fondo claro fijo que no seguía el tema — en oscuro el
+     texto "para fondo oscuro" quedaba sobre una caja que seguía siendo clara (2.1:1). */
+  :root:not([data-theme="light"]) .user-stats__sala-badge,
+  :root:not([data-theme="light"]) .user-stats__training-locked {
+    background: var(--color-surface);
+    border-color: var(--color-border);
   }
 }
 :root[data-theme="dark"] .user-stats__title,
 :root[data-theme="dark"] .user-stats__color-count,
 :root[data-theme="dark"] .user-stats__month-count,
-:root[data-theme="dark"] .user-stats__rating-count {
+:root[data-theme="dark"] .user-stats__rating-count,
+:root[data-theme="dark"] .user-stats__sala-count,
+:root[data-theme="dark"] .user-stats__training-locked-title {
   color: var(--color-text-primary);
+}
+:root[data-theme="dark"] .user-stats__sala-badge,
+:root[data-theme="dark"] .user-stats__training-locked {
+  background: var(--color-surface);
+  border-color: var(--color-border);
 }
 
