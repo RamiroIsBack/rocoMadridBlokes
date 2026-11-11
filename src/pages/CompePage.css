@@ -14,6 +14,16 @@
   background: #111827; color: #fff; text-decoration: none; font-weight: 600;
 }
 
+/* Precompe: mientras no hay compe activa pero hay una real programada (cowork, 11/11 05:40) —
+   antes esto era un callejón sin salida durante los 19 días previos. */
+.compe-precompe { max-width: 480px; }
+.compe-precompe__fechas { color: var(--color-text-secondary); font-size: 0.95rem; margin: 0 0 4px; }
+.compe-precompe__cuenta { font-weight: 700; color: var(--color-accent-hover); font-size: 1.1rem; margin: 0 0 20px; }
+.compe-precompe__que-hacer { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; padding: 14px 18px; }
+.compe-precompe__que-hacer h2 { font-size: 0.95rem; margin: 0 0 10px; }
+.compe-precompe__que-hacer ul { margin: 0; padding-left: 20px; font-size: 0.88rem; line-height: 1.6; }
+.compe-precompe__que-hacer li { margin-bottom: 6px; }
+
 /* Ramiro, 09/11 06:36: "nunca max-width pequeño para... listas" — en vez de una sola columna
    altísima en pantalla ancha, varias columnas de bloques a la vez (se pliega a 1 sola en
    móvil, igual que el tablero de Organización). */

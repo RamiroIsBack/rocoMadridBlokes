@@ -36,6 +36,7 @@ function cuentaAtras(compDate, compEndDate) {
 // (temporada)" cada X s — de momento solo hay "Esta compe", así que no hace falta rotar nada.
 export default function CompeDirectoPage() {
   const [estado, setEstado] = useState(null)
+  const [proxima, setProxima] = useState(null)
   const [clasif, setClasif] = useState(null)
   const [err, setErr] = useState(null)
 
@@ -52,6 +53,12 @@ export default function CompeDirectoPage() {
               .then(r => r.json())
               .then(jj => { if (activo) setClasif(jj.data) })
           }
+          // Sin compe activa: enseña la próxima compe real en vez de quedarse 19 días en blanco
+          // con solo el logo (cowork, 11/11 05:40).
+          return fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/proxima`)
+            .then(r => r.json())
+            .then(jj => { if (activo) setProxima(jj.data || null) })
+            .catch(() => {})
         })
         .catch(e => activo && setErr(e.message))
     }
@@ -69,16 +76,26 @@ export default function CompeDirectoPage() {
   }
 
   if (!estado?.activo) {
+    const cuentaProxima = proxima ? cuentaAtras(proxima.compDate, proxima.compEndDate) : null
     return (
       <div style={estilos.pagina}>
-        <div style={{ margin: 'auto', textAlign: 'center' }}>
+        <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 900 }}>
           <img
             src="https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png"
             alt="Rocoteca Madrid" style={{ height: 160, marginBottom: 24 }}
           />
-          <p style={{ fontSize: '1.8rem', color: '#9ca3af' }}>
-            {err ? 'Sin conexión — reintentando…' : 'No hay compe activa ahora mismo.'}
-          </p>
+          {err ? (
+            <p style={{ fontSize: '1.8rem', color: '#9ca3af' }}>Sin conexión — reintentando…</p>
+          ) : proxima ? (
+            <>
+              <p style={{ fontSize: '2.4rem', fontWeight: 800, margin: '0 0 8px' }}>{proxima.nombre}</p>
+              {cuentaProxima && <p style={{ fontSize: '2rem', color: '#f5c842', fontWeight: 700, margin: '0 0 36px' }}>{cuentaProxima}</p>}
+              <p style={{ fontSize: '1.4rem', color: '#d1d5db', margin: '0 0 12px' }}>Instala Blokes y apúntate: <strong style={{ color: '#fff' }}>rocomadrid.com/app</strong></p>
+              <p style={{ fontSize: '1.1rem', color: '#9ca3af' }}>Apunta tus tops desde el móvil, o pide ayuda en recepción.</p>
+            </>
+          ) : (
+            <p style={{ fontSize: '1.8rem', color: '#9ca3af' }}>No hay compe activa ahora mismo.</p>
+          )}
         </div>
       </div>
     )

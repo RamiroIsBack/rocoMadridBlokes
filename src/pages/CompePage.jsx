@@ -22,6 +22,23 @@ async function api(method, path, body) {
 
 const PUEDE_RECEPCION = ['profesor', 'gestion', 'socio', 'tablet']
 
+function fechaRangoCompe(compDate, compEndDate) {
+  const opts = { day: 'numeric', month: 'long' }
+  const ini = new Date(`${compDate}T00:00:00`).toLocaleDateString('es-ES', opts)
+  if (!compEndDate || compEndDate === compDate) return ini
+  const fin = new Date(`${compEndDate}T00:00:00`).toLocaleDateString('es-ES', opts)
+  return `${ini} – ${fin}`
+}
+function cuentaAtrasCompe(compDate, compEndDate) {
+  const ahora = new Date()
+  const inicio = new Date(`${compDate}T00:00:00`)
+  const fin = new Date(`${compEndDate || compDate}T23:59:59`)
+  if (ahora > fin) return 'Ya celebrada'
+  if (ahora >= inicio) return '¡Empieza hoy!'
+  const dias = Math.ceil((inicio - ahora) / 86400000)
+  return dias === 1 ? 'Empieza mañana' : `Empieza en ${dias} días`
+}
+
 // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md). Parte 1: apuntar top/zona/intentos.
 // Parte 4 (Ramiro, 07/11 08:46/08:48): recepción apuntando por otra persona (profe/Eva/socio) +
 // participante rápido sin cuenta. Sin validación en la app (Ramiro, 07/11 más tarde): todo lo
@@ -35,6 +52,7 @@ export default function CompePage() {
   // tablet solo tiene sentido Recepción, nunca "Apuntar" (apuntarse tops a sí misma).
   const esTablet = sd.userRole === 'tablet'
   const [estado, setEstado] = useState(null)
+  const [proxima, setProxima] = useState(null)
   const [misResultados, setMisResultados] = useState({})
   const [ventana, setVentana] = useState(null)
   const [tab, setTab] = useState(esTablet ? 'recepcion' : 'apuntar')
@@ -50,6 +68,11 @@ export default function CompePage() {
         if (r.data?.activo && sd.isLoggedIn) {
           return api('GET', `/compe/mis-resultados?competitionId=${r.data.competitionId}`)
             .then(rr => { setMisResultados(rr.data || {}); setVentana(rr.ventana || null) })
+        }
+        // Sin compe activa: en vez de un callejón sin salida durante los días previos, se
+        // enseña la próxima compe real (si hay) con fecha y cuenta atrás (cowork, 11/11 05:40).
+        if (!r.data?.activo) {
+          return api('GET', '/compe/proxima').then(rr => setProxima(rr.data || null)).catch(() => {})
         }
       })
       .catch(e => setErr(e.message))
@@ -77,8 +100,26 @@ export default function CompePage() {
   if (!estado?.activo) {
     return (
       <div className="compe-page">
-        <h1>Compe</h1>
-        <p className="compe-page__muted">No hay ninguna compe activa ahora mismo. Vuelve cuando empiece.</p>
+        {proxima ? (
+          <div className="compe-precompe">
+            <h1>{proxima.nombre}</h1>
+            <p className="compe-precompe__fechas">{fechaRangoCompe(proxima.compDate, proxima.compEndDate)}</p>
+            <p className="compe-precompe__cuenta">{cuentaAtrasCompe(proxima.compDate, proxima.compEndDate)}</p>
+            <div className="compe-precompe__que-hacer">
+              <h2>Qué hay que hacer</h2>
+              <ul>
+                <li>Instala la app desde <a href="https://rocomadrid.com/app">rocomadrid.com/app</a> para apuntar tus tops desde el móvil.</li>
+                <li>El día de la compe, apunta tu Top/Zona en cuanto lo consigas — o pide ayuda en recepción.</li>
+                <li>Norma de honor: para que cuente, que te haya visto un compañero o un profe.</li>
+              </ul>
+            </div>
+          </div>
+        ) : (
+          <>
+            <h1>Compe</h1>
+            <p className="compe-page__muted">No hay ninguna compe activa ahora mismo. Vuelve cuando empiece.</p>
+          </>
+        )}
       </div>
     )
   }
