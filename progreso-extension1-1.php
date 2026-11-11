@@ -13043,11 +13043,13 @@ function progreso_equip_contar_blokes_reales_semana($week_start, $nombres_por_as
     }
     restore_current_blog();
 
-    // La tilde puede llegar en forma Unicode "descompuesta" (p. ej. de Notion/Mac) y
-    // remove_accents() solo reconoce la forma "precompuesta" — se limpia cualquier resto no
-    // alfanumérico tras remove_accents, sin depender de la extensión intl.
+    // 🎯 Cowork 11/11 11:05 (gracias al diagnóstico): el orden estaba al revés. strtolower() no
+    // toca "Á" (no es multibyte) y se quedaba igual; remove_accents() después la convertía en
+    // "A" MAYÚSCULA (conserva mayúsculas); y el preg_replace solo dejaba a-z minúsculas, así que
+    // esa "A" se borraba — "Álvaro" → "lvaro", que nunca coincidía con "alvaro". Las tildes van
+    // primero, las minúsculas después.
     $normaliza = function($s) {
-        $s = remove_accents(strtolower(trim((string) $s)));
+        $s = strtolower(remove_accents(trim((string) $s)));
         $s = preg_replace('/[^a-z0-9\s]/', '', $s);
         $partes = preg_split('/\s+/', trim($s));
         return $partes[0] ?? '';
