@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react'
 import mapaEquipacion from '../assets/mapa-equipacion.jpg'
+import { colorPorNumeroBloque } from '../utils/compeColorScale'
 import { fetchWithNonceRetry } from '../utils/wpNonce'
 import './OrganizacionPage.css'
 
@@ -1637,8 +1638,9 @@ function CreateCompForm({ onDone, onCancel }) {
 // filtro por persona para que cada uno vea solo lo suyo (encargo "Preparador de compes", 1/11).
 function CompePlanView({ compId, taskTypeById, workers }) {
   const [plan, setPlan] = useState(null)
-  const [filterWorker, setFilterWorker] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [columnaExpandida, setColumnaExpandida] = useState(null)
+  const [reasignando, setReasignando] = useState(null)
   const showToast = useToast()
 
   const reload = useCallback(() => {
@@ -1663,10 +1665,50 @@ function CompePlanView({ compId, taskTypeById, workers }) {
     finally { reload() }
   }
 
-  const tasks = (plan?.tasks || []).filter(t => !filterWorker || String(t.workerId) === filterWorker)
-  const byWeek = {}
-  tasks.forEach(t => { (byWeek[t.weekStart] = byWeek[t.weekStart] || []).push(t) })
+  // Punto 7 (Ramiro, 11/11 05:01): "se mueven arrastrando, igual que las tareas" — en vez de
+  // montar drag&drop (bastante más esfuerzo/riesgo para lo que aporta aquí), se mueve tocando el
+  // bloque y eligiendo el nuevo equipador en un desplegable — mismo resultado, menos piezas.
+  const reasignarBloque = async (blockId, nuevoEquipador) => {
+    setReasignando(null)
+    setPlan(p => ({ ...p, blocks: p.blocks.map(b => b.id === blockId ? { ...b, equipador: nuevoEquipador } : b) }))
+    try { await api('PUT', `/equipacion/comp-blocks/${blockId}`, { equipador: nuevoEquipador }) }
+    catch { showToast('No se ha podido mover el bloque — deshecho.'); reload() }
+  }
+
   const today = todayStr()
+  const tasks = plan?.tasks || []
+  const blocks = plan?.blocks || []
+  const totalBloques = blocks.length || 16
+
+  // Columnas por equipador: el nombre es la clave que une tareas (workerName) y bloques
+  // (equipador, un texto libre elegido en la ficha de la misma lista de personas — ver
+  // CompBlockFicha) — cuando coinciden, caen en la misma columna. "La lista de abajo... se
+  // quita: se ve muy feo y mal" (Ramiro) — sustituida por este tablero.
+  const nombres = new Set([...(workers || []).filter(w => w.active).map(w => w.name)])
+  tasks.forEach(t => nombres.add(t.workerName))
+  blocks.forEach(b => { if (b.equipador) nombres.add(b.equipador) })
+  const columnas = Array.from(nombres).sort().map(nombre => ({
+    nombre,
+    tareas: tasks.filter(t => t.workerName === nombre).sort((a, b) => a.date.localeCompare(b.date)),
+    bloques: blocks.filter(b => b.equipador === nombre).sort((a, b) => a.number - b.number),
+  })).filter(c => c.tareas.length > 0 || c.bloques.length > 0 || (workers || []).some(w => w.name === c.nombre && w.active))
+  const bloquesSinAsignar = blocks.filter(b => !b.equipador).sort((a, b) => a.number - b.number)
+  const columnasAMostrar = columnaExpandida ? columnas.filter(c => c.nombre === columnaExpandida) : columnas
+
+  const chipReasignable = (b, nombreActual) => (
+    <span key={b.id} className={`org__comp-plan-bloque-chip${b.tested ? ' org__comp-plan-bloque-chip--probado' : ''}`}>
+      <span className="org__comp-plan-bloque-color" style={{ background: colorPorNumeroBloque(b.number, totalBloques) }} />
+      #{b.number}
+      {reasignando === b.id ? (
+        <select autoFocus value={nombreActual} onChange={e => reasignarBloque(b.id, e.target.value)} onBlur={() => setReasignando(null)}>
+          <option value="">Sin asignar</option>
+          {Array.from(nombres).sort().map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+      ) : (
+        <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignando(b.id)} title="Mover a otro equipador">⇄</button>
+      )}
+    </span>
+  )
 
   return (
     <div className="org__section">
@@ -1678,26 +1720,45 @@ function CompePlanView({ compId, taskTypeById, workers }) {
       )}
       <div className="org__add-actions">
         <button className="org__btn" onClick={generate} disabled={generating}>{generating ? 'Generando...' : (plan?.total ? 'Regenerar plan' : 'Generar plan')}</button>
-        <select value={filterWorker} onChange={e => setFilterWorker(e.target.value)}>
-          <option value="">Tablero completo</option>
-          {workers.map(w => <option key={w.id} value={w.id}>Mi parte: {w.name}</option>)}
-        </select>
+        {columnaExpandida && (
+          <button className="org__link-btn" onClick={() => setColumnaExpandida(null)}>← Ver todas las columnas</button>
+        )}
       </div>
-      {Object.keys(byWeek).sort().map(weekStart => (
-        <div key={weekStart} className="org__historico-row">
-          <p className="org__historico-title">Semana del {weekLabel(weekStart)}</p>
-          <ul className="org__task-list">
-            {byWeek[weekStart].map(t => (
-              <li key={t.id} className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}`}>
-                <label>
-                  <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
-                  {' '}{taskTypeById[t.taskTypeId]?.name || t.taskTypeId} — {t.workerName} ({dayLabel(t.date)})
-                </label>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+
+      <div className="org__board org__board--compe-plan">
+        {columnasAMostrar.map(col => (
+          <div key={col.nombre} className={`org__board-col${columnaExpandida ? ' org__board-col--expandida' : ''}`}>
+            <button
+              type="button"
+              className="org__board-col-title org__board-col-title--btn"
+              onClick={() => setColumnaExpandida(columnaExpandida === col.nombre ? null : col.nombre)}
+              title="Ver esta columna en grande"
+            >
+              {col.nombre}
+            </button>
+            {col.bloques.length > 0 && (
+              <div className="org__comp-plan-bloques">{col.bloques.map(b => chipReasignable(b, col.nombre))}</div>
+            )}
+            <ul className="org__task-list">
+              {col.tareas.map(t => (
+                <li key={t.id} className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}`}>
+                  <label>
+                    <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
+                    {' '}{taskTypeById[t.taskTypeId]?.name || t.taskTypeId} ({dayLabel(t.date)})
+                  </label>
+                </li>
+              ))}
+            </ul>
+            {col.tareas.length === 0 && col.bloques.length === 0 && <p className="org__hint">Sin tareas ni bloques.</p>}
+          </div>
+        ))}
+        {!columnaExpandida && bloquesSinAsignar.length > 0 && (
+          <div className="org__board-col org__board-col--sin-asignar">
+            <p className="org__board-col-title">Sin asignar</p>
+            <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -2003,6 +2064,9 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
           config={config} holdsets={holdsets} workers={workers || []} blocks={blocks}
           onClose={() => setEditingBlockId(null)}
           onSaved={patch => { setBlocks(cur => cur.map(b => b.id === editingBlockId ? { ...b, ...patch } : b)) }}
+          onSwapped={(id1, numero1, id2, numero2) => {
+            setBlocks(cur => cur.map(b => b.id === id1 ? { ...b, number: numero1 } : b.id === id2 ? { ...b, number: numero2 } : b))
+          }}
         />
       )}
 
@@ -2014,7 +2078,9 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
 // Ficha de un bloque de compe: subzona, color, presas, volúmenes, equipador, foto (subida
 // desde el móvil) y probado sí/no — Álvaro la rellena tocando una burbuja del mapa (Ramiro,
 // 1/11 17:20).
-function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onSaved }) {
+function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onSaved, onSwapped }) {
+  const [fijado, setFijado] = useState(false)
+  const [swapping, setSwapping] = useState(false)
   const [subzone, setSubzone] = useState(block.subzone ?? '')
   const [grade, setGrade] = useState(block.grade || '')
   const [holdSetIds, setHoldSetIds] = useState(block.holdSetIds || [])
@@ -2037,6 +2103,23 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
   const [equipador, setEquipador] = useState(block.equipador || '')
 
   const toggleHoldSet = id => setHoldSetIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+
+  // Punto 8 (Ramiro, 11/11 05:01): "Fijar bloque" — con la palanca activada el número se puede
+  // clicar para intercambiarlo con otro bloque ya puesto (p. ej. resultó demasiado difícil para
+  // su número). Solo cambia el número; burbuja, ficha y resultados ya apuntados siguen con el
+  // bloque físico (su id), no con el número.
+  const intercambiarNumero = async () => {
+    const otroNumero = window.prompt('¿Con qué número quieres intercambiarlo?')
+    if (otroNumero === null || otroNumero.trim() === '') return
+    const n = Number(otroNumero)
+    if (!Number.isInteger(n) || n === block.number) { window.alert('Número no válido.'); return }
+    setSwapping(true)
+    try {
+      const res = await api('POST', `/equipacion/comp-blocks/${block.id}/intercambiar-numero`, { otroNumero: n })
+      onSwapped(res.data.bloqueId, res.data.nuevoNumero, res.data.otroBloqueId, res.data.otroNuevoNumero)
+      onClose()
+    } catch (e) { window.alert(e.message) } finally { setSwapping(false) }
+  }
 
   const uploadPhoto = async e => {
     const file = e.target.files?.[0]
@@ -2076,9 +2159,22 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
   return (
     <div className="org__add-form">
       <div className="org__semana-actions">
-        <p className="org__comp-block-title">Bloque <strong>#{block.number}</strong></p>
+        <p className="org__comp-block-title">
+          Bloque{' '}
+          {fijado ? (
+            <button type="button" className="org__comp-block-numero--fijado" onClick={intercambiarNumero} disabled={swapping}>
+              #{block.number}
+            </button>
+          ) : (
+            <strong>#{block.number}</strong>
+          )}
+        </p>
         <button className="org__link-btn" onClick={onClose}>Cerrar</button>
       </div>
+      <label className="org__add-row org__add-row--check org__comp-block-fijar">
+        <input type="checkbox" checked={fijado} onChange={e => setFijado(e.target.checked)} />
+        <span>Fijar bloque — este bloque ya está empezado, puedes cambiar la dificultad (número) para intercambiarla con otro bloque</span>
+      </label>
       <div className="org__add-row">
         <label>Subzona</label>
         <select value={subzone} onChange={e => setSubzone(e.target.value)}>

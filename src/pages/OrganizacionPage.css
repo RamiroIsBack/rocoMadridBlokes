@@ -397,6 +397,14 @@
 .org__comp-block-title { font-size: 1.4rem; font-weight: 800; margin: 0; }
 .org__comp-block-title strong { font-size: 1.7rem; }
 
+/* "Fijar bloque" — intercambiar el número (Ramiro, 11/11 05:01, punto 8) */
+.org__comp-block-fijar { margin-bottom: 14px; background: var(--color-bg); border: 1px dashed var(--color-border); border-radius: var(--radius-sm); padding: 8px 10px; }
+.org__comp-block-numero--fijado {
+  font-size: 1.7rem; font-weight: 800; background: var(--state-warn); color: #fff;
+  border: none; border-radius: var(--radius-sm); padding: 2px 10px; cursor: pointer;
+}
+.org__comp-block-numero--fijado:disabled { opacity: 0.6; cursor: wait; }
+
 /* ── Mover tarea (Semana, detalle) / editar periodicidad (Normas) ── */
 .org__task-move {
   display: flex;
@@ -561,3 +569,24 @@
   z-index: 1000;
   box-shadow: 0 4px 10px rgba(0,0,0,0.3);
 }
+
+/* ── Plan de la compe: columnas por equipador (Ramiro, 11/11 05:01, punto 7) — sustituye a la
+   lista plana "Semana del lunes... · Compe: ... — Álvaro" ("se ve muy feo y mal"). Reaprovecha
+   .org__board/.org__board-col de las semanas normales. ── */
+.org__board--compe-plan .org__board-col-title--btn {
+  background: none; border: none; width: 100%; text-align: left; padding: 0; cursor: pointer;
+  font-weight: 700; color: #2a2015; margin: 0 0 6px; font-size: 0.95rem; text-decoration: underline dotted;
+}
+.org__board-col--expandida { grid-column: 1 / -1; max-width: 480px; }
+.org__comp-plan-bloques { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.org__comp-plan-bloque-chip {
+  display: inline-flex; align-items: center; gap: 4px; background: var(--color-surface);
+  border: 1px solid var(--color-border); border-radius: 999px; padding: 2px 8px; font-size: 0.78rem; font-weight: 700;
+}
+.org__comp-plan-bloque-chip--probado { border-color: var(--state-ok); }
+.org__comp-plan-bloque-color { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.org__comp-plan-bloque-mover {
+  background: none; border: none; cursor: pointer; font-size: 0.85rem; padding: 0 0 0 2px; color: var(--color-text-secondary);
+}
+.org__comp-plan-bloque-chip select { font-size: 0.72rem; max-width: 110px; }
+.org__board-col--sin-asignar { background: var(--color-bg); border-style: dashed; }

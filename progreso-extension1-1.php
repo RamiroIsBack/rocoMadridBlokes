@@ -835,6 +835,12 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)', array(
         'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_comp_block', 'permission_callback' => $equip_perm,
     ));
+    // Punto 8 (Ramiro, 11/11 05:01): "Fijar bloque" — intercambiar el número de dos bloques ya
+    // puestos sin mover burbujas/fichas/resultados, que van con el id del bloque físico, no con
+    // el número.
+    register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)/intercambiar-numero', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_intercambiar_numero_comp_block', 'permission_callback' => $equip_perm,
+    ));
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/generate-plan', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_competition_generate_plan', 'permission_callback' => $equip_perm,
     ));
@@ -13867,6 +13873,38 @@ function progreso_equip_update_comp_block($request) {
     return rest_ensure_response(array('success' => true));
 }
 
+// POST /equipacion/comp-blocks/{id}/intercambiar-numero — punto 8 (Ramiro, 11/11 05:01): un
+// bloque ya empezado a equipar resulta demasiado difícil/fácil para su número; se intercambia
+// solo el número con otro bloque de la misma compe (lo que depende del número, como el color de
+// escala o la posición en el ranking/tele, se recalcula solo porque se basa en este campo). La
+// burbuja, la ficha (posición, presas, equipador, foto) y los resultados ya apuntados se quedan
+// con su bloque físico (id), no se tocan.
+function progreso_equip_intercambiar_numero_comp_block($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $otro_numero = $request->get_param('otroNumero');
+    if ($otro_numero === null || $otro_numero === '') {
+        return new WP_Error('invalid_data', 'Falta el número con el que intercambiar.', array('status' => 400));
+    }
+    $otro_numero = intval($otro_numero);
+    $table = progreso_equip_table('comp_blocks');
+    $bloque = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d", $id), ARRAY_A);
+    if (!$bloque) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
+    if (intval($bloque['number']) === $otro_numero) {
+        return new WP_Error('invalid_data', 'Es el mismo número.', array('status' => 400));
+    }
+    $otro = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $table WHERE competition_id = %d AND number = %d", $bloque['competition_id'], $otro_numero
+    ), ARRAY_A);
+    if (!$otro) return new WP_Error('not_found', 'No hay ningún bloque con ese número en esta compe.', array('status' => 404));
+    $wpdb->update($table, array('number' => $otro_numero), array('id' => $id), array('%d'), array('%d'));
+    $wpdb->update($table, array('number' => intval($bloque['number'])), array('id' => intval($otro['id'])), array('%d'), array('%d'));
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'bloqueId' => $id, 'nuevoNumero' => $otro_numero,
+        'otroBloqueId' => intval($otro['id']), 'otroNuevoNumero' => intval($bloque['number']),
+    )));
+}
+
 // POST /equipacion/competitions/{id}/comp-blocks — "Vamos bien de tiempo, añadir el 17 y 18"
 // (Ramiro, 11/11 05:01): un bloque más, numerado detrás del último que ya hubiera. El cartel y
 // el resto de sitios que cuentan bloques leen siempre COUNT(comp_blocks), nunca un 16 fijo.
@@ -14832,9 +14870,23 @@ function progreso_equip_get_competition_plan($request) {
         );
     }
     $total = count($tasks);
+
+    // Punto 7 (Ramiro, 11/11 05:01): el plan de la compe en columnas por equipador necesita
+    // también los bloques, no solo las tareas — antes solo salían en el mapa.
+    $blocks = $wpdb->get_results($wpdb->prepare(
+        "SELECT id, number, equipador, subzone, tested FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $id
+    ), ARRAY_A);
+    $out_blocks = array_map(function($b) {
+        return array(
+            'id' => intval($b['id']), 'number' => intval($b['number']), 'equipador' => $b['equipador'],
+            'subzone' => $b['subzone'] !== null ? intval($b['subzone']) : null, 'tested' => (bool) $b['tested'],
+        );
+    }, $blocks);
+
     return rest_ensure_response(array('success' => true, 'data' => array(
         'tasks' => $out, 'total' => $total, 'hechas' => $hechas, 'retrasadas' => $retrasadas,
         'pctHecho' => $total ? round($hechas / $total * 100) : 0,
+        'blocks' => $out_blocks,
     )));
 }
 
