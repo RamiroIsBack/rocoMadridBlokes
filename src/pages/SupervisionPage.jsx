@@ -3,6 +3,7 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
+import useTemaOscuro from '../hooks/useTemaOscuro'
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
   gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente,
@@ -252,13 +253,16 @@ function ScheduleGrid({ classes, filter }) {
   )
 }
 
-const CHART_STYLE = {
-  tooltip: { background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 },
-  label:   { color: '#f5c842' },
-  // Auditoría de contraste (cowork, 11/11, causa 4): #888 a 10 px casi invisible en claro —
-  // var(--color-text-secondary) sigue el tema, y 11 px es el mínimo pedido.
-  tick:    { fill: 'var(--color-text-secondary)', fontSize: 11 },
-  grid:    '#2a2015',
+// Cowork 11/11 13:55: con var(--color-text-secondary) en el fill, Recharts pintaba el <text>
+// del eje con un atributo SVG fijo que no se repintaba solo al cambiar de tema — seguía en gris
+// claro sobre fondo claro. Se resuelve el color a mano en JS con useTemaOscuro() (ver el hook).
+function chartStyle(oscuro) {
+  return {
+    tooltip: { background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 },
+    label:   { color: '#f5c842' },
+    tick:    { fill: oscuro ? '#b3ab9a' : '#5e5650', fontSize: 11 },
+    grid:    '#2a2015',
+  }
 }
 
 const CLASS_COLORS = [
@@ -268,6 +272,7 @@ const CLASS_COLORS = [
 ]
 
 function MonthlyBarChart({ data, bars, height = 160, stacked = false }) {
+  const CHART_STYLE = chartStyle(useTemaOscuro())
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -339,6 +344,7 @@ function classLabel(c) {
 }
 
 function TrendCharts({ data, months, selectedKey, onSelectKey }) {
+  const CHART_STYLE = chartStyle(useTemaOscuro())
   const mRange = useMemo(() => monthRange(months), [months])
 
   const classKey = selectedKey || (data[0] ? `${data[0].dia}|${data[0].horario}|${data[0].edad}` : '')

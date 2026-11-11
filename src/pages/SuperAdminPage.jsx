@@ -4,6 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import { useRevenue, useProducts, useExpenses, useClasses } from '../hooks/useSuperAdmin'
+import useTemaOscuro from '../hooks/useTemaOscuro'
 import ExpensesSection from '../components/ExpensesSection'
 import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
 import PayrollSection from '../components/PayrollSection'
@@ -69,6 +70,9 @@ function currentQuarterMonths() {
 
 // ─── Revenue section ────────────────────────────────────────────────
 function RevenueSection({ excludeTransfer, onToggleExclude }) {
+  // Cowork 11/11 13:55: var(--color-text-secondary) en el fill de Recharts no se repinta solo
+  // al cambiar de tema (atributo SVG fijo) — se resuelve a mano con useTemaOscuro().
+  const tickFill = useTemaOscuro() ? '#b3ab9a' : '#5e5650'
   const [months, setMonths]      = useState(12)
   const { data, loading, error } = useRevenue(months, excludeTransfer)
 
@@ -148,8 +152,8 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
                 ))}
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-              <XAxis dataKey="month" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
-              <YAxis tickFormatter={v => `${v}€`} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={56} />
+              <XAxis dataKey="month" tick={{ fill: tickFill, fontSize: 11 }} />
+              <YAxis tickFormatter={v => `${v}€`} tick={{ fill: tickFill, fontSize: 11 }} width={56} />
               <Tooltip
                 contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                 labelStyle={{ color: '#f5c842' }}
@@ -167,8 +171,8 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
             <ResponsiveContainer width="100%" height={110}>
               <BarChart data={ivaData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                <XAxis dataKey="month" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
-                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={48} />
+                <XAxis dataKey="month" tick={{ fill: tickFill, fontSize: 11 }} />
+                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: tickFill, fontSize: 11 }} width={48} />
                 <Tooltip
                   contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                   labelStyle={{ color: IVA_COLOR }}
@@ -287,6 +291,7 @@ function MarginCalculator({ products, months }) {
 
 // ─── Products section ────────────────────────────────────────────────
 function ProductsSection({ excludeTransfer }) {
+  const tickFill = useTemaOscuro() ? '#b3ab9a' : '#5e5650'
   const [months,      setMonths    ] = useState(12)
   const [storeFilter, setStore     ] = useState('Todas')
   const [openCats,    setOpenCats  ] = useState(() => new Set())
@@ -441,8 +446,8 @@ function ProductsSection({ excludeTransfer }) {
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                <XAxis dataKey="month" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
-                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={52} />
+                <XAxis dataKey="month" tick={{ fill: tickFill, fontSize: 11 }} />
+                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: tickFill, fontSize: 11 }} width={52} />
                 <Tooltip
                   contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                   labelStyle={{ color: '#f5c842' }}
@@ -830,6 +835,7 @@ function fmtPLVal(v) {
 }
 
 function PLTab() {
+  const tickFill = useTemaOscuro() ? '#b3ab9a' : '#5e5650'
   const { data: expData, loading } = useExpenses('', 'all', true)
   const [metric,  setMetric ] = useState('ventas')
   const [view,    setView   ] = useState('comparativa')
@@ -972,8 +978,8 @@ function PLTab() {
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={comparativaData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-            <XAxis dataKey="month" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
-            <YAxis tickFormatter={tickFmt} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={44} />
+            <XAxis dataKey="month" tick={{ fill: tickFill, fontSize: 11 }} />
+            <YAxis tickFormatter={tickFmt} tick={{ fill: tickFill, fontSize: 11 }} width={44} />
             <Tooltip {...chartTooltip} />
             {[2024, 2025, 2026].map(yr => (
               <Line key={yr} type="monotone" dataKey={`y${yr}`} stroke={PL_YEAR_COLORS[yr]} strokeWidth={2}
@@ -989,8 +995,8 @@ function PLTab() {
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={historicoData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-            <XAxis dataKey="label" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} interval={2} />
-            <YAxis tickFormatter={tickFmt} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={44} />
+            <XAxis dataKey="label" tick={{ fill: tickFill, fontSize: 11 }} interval={2} />
+            <YAxis tickFormatter={tickFmt} tick={{ fill: tickFill, fontSize: 11 }} width={44} />
             <Tooltip {...chartTooltip} />
             {[2024, 2025, 2026].map(yr => (
               <Line key={yr} type="monotone" dataKey={`y${yr}`} stroke={PL_YEAR_COLORS[yr]} strokeWidth={2}

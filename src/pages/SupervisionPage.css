@@ -160,16 +160,16 @@
 }
 .sv-note {
   font-size: 0.7rem;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-style: italic;
   line-height: 1.55;
   margin: 0 0 14px;
 }
 
 /* ── Loading / Error / Empty ── */
-.sv-loading { color: #a3a3a3; font-style: italic; padding: 40px 0; text-align: center; font-size: 0.85rem; }
+.sv-loading { color: var(--color-text-secondary); font-style: italic; padding: 40px 0; text-align: center; font-size: 0.85rem; }
 .sv-error   { color: #f97316; padding: 12px 0; font-size: 0.82rem; }
-.sv-empty   { color: #a3a3a3; font-style: italic; font-size: 0.82rem; padding: 16px 0; margin: 0; }
+.sv-empty   { color: var(--color-text-secondary); font-style: italic; font-size: 0.82rem; padding: 16px 0; margin: 0; }
 /* .sv-error también vive en fondo claro (Grupos, Campañas, ExcelMuerte): #f97316 ahí da 2,46:1
    (NOTAS_PARA_CODE_contraste.md). Los modales/menús oscuros mantienen el naranja original. */
 .sv-tab-panel:not(.sv-to-root) .sv-error { color: var(--state-orange); }
@@ -188,7 +188,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   margin-right: 2px;
 }
 .sv-legend__item {
@@ -224,11 +224,11 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   border-bottom: 2px solid #2a2015;
   white-space: nowrap;
 }
-.sv-th--time  { text-align: left; padding-left: 0; color: #a3a3a3; }
+.sv-th--time  { text-align: left; padding-left: 0; color: var(--color-text-secondary); }
 .sv-th--total { color: var(--color-text-secondary); }
 
 .sv-tr { border-bottom: 1px solid #1a1710; }
@@ -259,7 +259,7 @@
   line-height: 1;
 }
 
-.sv-cell--empty      .sv-cell-num { color: #2a2a2a; }
+.sv-cell--empty      .sv-cell-num { color: #808080; }
 .sv-cell--sched-empty .sv-cell-num { background: #3d1028; color: #f472b6; }
 .sv-cell--low        .sv-cell-num { background: #14532d; color: #86efac; }
 .sv-cell--med        .sv-cell-num { background: #713f12; color: #fde68a; }
@@ -271,7 +271,7 @@
   text-align: center;
   font-size: 0.78rem;
   font-weight: 700;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -323,7 +323,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   margin-top: 5px;
 }
 
@@ -349,7 +349,7 @@
 .sv-class-row:hover { background: rgba(255,255,255,0.03); }
 .sv-class-row--active { background: rgba(52,211,153,0.07) !important; border: 1px solid rgba(52,211,153,0.2); }
 
-.sv-class-row__pos    { font-size: 0.65rem; color: #a3a3a3; width: 22px; flex-shrink: 0; text-align: right; }
+.sv-class-row__pos    { font-size: 0.65rem; color: var(--color-text-secondary); width: 22px; flex-shrink: 0; text-align: right; }
 .sv-class-row__label  { font-size: 0.78rem; color: #ccc; width: 160px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sv-class-row__bar-wrap { flex: 1; height: 6px; background: #1e1a12; border-radius: 3px; overflow: hidden; }
 .sv-class-row__bar    { height: 100%; background: #34d399; border-radius: 3px; }
@@ -396,7 +396,7 @@
 .sv-soon__icon   { font-size: 2.5rem; display: block; margin-bottom: 16px; }
 .sv-soon__name   { font-size: 1.1rem; font-weight: 700; color: var(--color-text-secondary); margin: 0 0 8px; }
 .sv-soon__text   { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: #34d399; margin: 0 0 12px; }
-.sv-soon__detail { font-size: 0.78rem; color: #a3a3a3; margin: 0; }
+.sv-soon__detail { font-size: 0.78rem; color: var(--color-text-secondary); margin: 0; }
 
 /* ── CTRL Training Tests ── */
 .sv-ctrl-tests { padding: 4px 0 40px; }
@@ -415,7 +415,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   border-bottom: 1px solid #2a2015;
   white-space: nowrap;
 }
@@ -470,12 +470,12 @@
 
 .sv-tests-mock-cell { white-space: nowrap; }
 .sv-tests-mock-val  { color: #34d399; font-size: 0.78rem; margin-right: 4px; }
-.sv-tests-none      { color: #a3a3a3; }
+.sv-tests-none      { color: var(--color-text-secondary); }
 
 .sv-tests-clear {
   background: none;
   border: none;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   cursor: pointer;
   font-size: 0.9rem;
   padding: 0 2px;
@@ -758,7 +758,7 @@
 }
 .sv-group-summary__lbl {
   font-size: 0.68rem;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -773,7 +773,7 @@
 .sv-group-summary__chip--best  { background: #1a2e1a; color: #86efac; }
 .sv-group-summary__chip--worst { background: #2e1a0d; color: #fdba74; }
 .sv-group-summary__chip--empty { background: #3d1028; color: #f472b6; }
-.sv-group-summary__none { font-size: 0.7rem; color: #a3a3a3; font-style: italic; }
+.sv-group-summary__none { font-size: 0.7rem; color: var(--color-text-secondary); font-style: italic; }
 
 /* ── Mobile ── */
 @media (max-width: 600px) {
@@ -819,7 +819,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
 }
 .sv-ot-field--grow { flex: 1; min-width: 200px; }
 .sv-ot-input--date   { width: 140px; color-scheme: dark; }
@@ -885,7 +885,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   margin-bottom: 6px;
 }
 .sv-ot-people__list {
@@ -908,10 +908,10 @@
 }
 .sv-ot-person:hover { background: rgba(255,255,255,0.02); }
 .sv-ot-person__name { flex: 1; min-width: 100px; }
-.sv-ot-person--inactive .sv-ot-person__name { color: #a3a3a3; text-decoration: line-through; }
+.sv-ot-person--inactive .sv-ot-person__name { color: var(--color-text-secondary); text-decoration: line-through; }
 .sv-ot-person__tag {
   font-size: 0.65rem;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   border: 1px solid #333;
   border-radius: 10px;
   padding: 1px 7px;
@@ -921,7 +921,7 @@
 .sv-ot-people__add { flex-wrap: wrap; }
 .sv-tests-add:disabled { opacity: 0.4; cursor: default; }
 .sv-ot-type-select { font-size: 0.72rem; padding: 2px 4px; }
-.sv-ot-row--empty td { color: #a3a3a3; }
+.sv-ot-row--empty td { color: var(--color-text-secondary); }
 /* #777 era para fondo oscuro; la mayoría de usos (Grupos, Campañas…) están sobre el fondo
    claro de la página — 1054 elementos a 3,9:1 (NOTAS_PARA_CODE_contraste.md). Los modales
    oscuros (sv-grp-modal) mantienen su gris claro justo debajo. */

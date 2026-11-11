@@ -11,7 +11,9 @@
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 1.5rem;
   font-weight: 800;
-  color: #a78bfa;
+  /* Cowork 11/11 13:55: #a78bfa es justo el morado "para fondo oscuro" (dark --state-purple) —
+     fallaba en claro (2.4:1). La variable ya está oscurecida para claro y vivaz para oscuro. */
+  color: var(--state-purple);
   margin: 0 0 28px;
   letter-spacing: -0.02em;
 }
@@ -55,7 +57,7 @@
   padding: 4px 12px;
   background: none;
   border: 1px solid #3a3020;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -95,7 +97,7 @@
 }
 
 /* ── Loading / Error ── */
-.sa-loading { color: #a3a3a3; font-style: italic; padding: 24px 0; text-align: center; font-size: 0.85rem; }
+.sa-loading { color: var(--color-text-secondary); font-style: italic; padding: 24px 0; text-align: center; font-size: 0.85rem; }
 .sa-error   { color: #f97316; padding: 12px 0; font-size: 0.82rem; }
 
 /* ── Period selector ── */
@@ -145,7 +147,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   margin-top: 5px;
 }
 
@@ -186,9 +188,9 @@
 .sa-product-row:hover { background: rgba(255,255,255,0.03); }
 .sa-product-row--active { background: rgba(245, 200, 66, 0.07) !important; border: 1px solid rgba(245,200,66,0.2); }
 
-.sa-product-row__pos  { font-size: 0.65rem; color: #a3a3a3; width: 22px; flex-shrink: 0; text-align: right; }
+.sa-product-row__pos  { font-size: 0.65rem; color: var(--color-text-secondary); width: 22px; flex-shrink: 0; text-align: right; }
 .sa-product-row__name { font-size: 0.78rem; color: #ccc; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-product-row__store{ font-size: 0.65rem; color: #a3a3a3; flex-shrink: 0; }
+.sa-product-row__store{ font-size: 0.65rem; color: var(--color-text-secondary); flex-shrink: 0; }
 .sa-product-row__bar-wrap { width: 70px; height: 6px; background: #1e1a12; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
 .sa-product-row__bar  { height: 100%; background: #f5c842; border-radius: 3px; }
 .sa-product-row__rev  { font-size: 0.78rem; font-weight: 700; color: #f5c842; width: 68px; text-align: right; flex-shrink: 0; }
@@ -231,7 +233,7 @@
 .sa-class-row:hover { background: rgba(255,255,255,0.03); }
 .sa-class-row--active { background: rgba(245,200,66,0.07) !important; border: 1px solid rgba(245,200,66,0.2); }
 
-.sa-class-row__pos    { font-size: 0.65rem; color: #a3a3a3; width: 22px; flex-shrink: 0; text-align: right; }
+.sa-class-row__pos    { font-size: 0.65rem; color: var(--color-text-secondary); width: 22px; flex-shrink: 0; text-align: right; }
 .sa-class-row__label  { font-size: 0.78rem; color: #ccc; width: 150px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-class-row__bar-wrap { flex: 1; height: 6px; background: #1e1a12; border-radius: 3px; overflow: hidden; }
 .sa-class-row__bar    { height: 100%; background: #f5c842; border-radius: 3px; }
@@ -240,7 +242,7 @@
 
 .sa-pending-note {
   font-size: 0.72rem;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-style: italic;
   margin-top: 12px;
   padding: 8px 10px;
@@ -250,7 +252,8 @@
   font-size: 0.7rem;
   background: #1a1710;
   padding: 1px 4px;
-  color: var(--color-text-secondary);
+  /* Fondo propio fijo siempre oscuro — mismo caso que .sa-cat-count. */
+  color: #a3a3a3;
   border-radius: 2px;
 }
 
@@ -310,7 +313,7 @@ details[open] .sa-collapsible__arrow {
 /* ── Listas de acceso ── */
 .sa-lists-note {
   font-size: 0.72rem;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   margin: 0 0 16px;
   font-style: italic;
 }
@@ -338,7 +341,7 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-list-group__acceso {
   font-size: 0.68rem;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 .sa-list-group__emails {
@@ -357,7 +360,7 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-list-empty {
   font-size: 0.72rem;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-style: italic;
 }
 
@@ -370,7 +373,7 @@ details[open] .sa-collapsible__arrow {
 .sa-list-email__remove {
   background: none;
   border: none;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   cursor: pointer;
   font-size: 0.8rem;
   line-height: 1;
@@ -464,12 +467,15 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-cat-header:hover   { background: rgba(255,255,255,0.025); }
 .sa-cat-header--open   { background: rgba(245,200,66,0.04); }
-.sa-cat-arrow { font-size: 0.6rem; color: #a3a3a3; flex-shrink: 0; width: 10px; }
+.sa-cat-arrow { font-size: 0.6rem; color: var(--color-text-secondary); flex-shrink: 0; width: 10px; }
 .sa-cat-name  { font-size: 0.82rem; font-weight: 700; color: #f0ece0; flex: 1; text-align: left; }
 .sa-cat-count {
   font-size: 0.62rem;
   font-weight: 700;
-  color: var(--color-text-secondary);
+  /* Este chip tiene su propio fondo oscuro fijo (como .sa-cat-name, en claro/oscuro) — con la
+     variable de tema, en claro se volvía oscuro-sobre-oscuro (2.2:1). Gris claro fijo, como el
+     resto de esta fila. */
+  color: #a3a3a3;
   background: #2a2015;
   padding: 1px 7px;
   border-radius: 10px;
@@ -496,12 +502,12 @@ details[open] .sa-collapsible__arrow {
   gap: 8px;
   padding: 5px 14px 5px 28px;
 }
-.sa-product-inner__pos   { font-size: 0.6rem; color: #a3a3a3; width: 20px; text-align: right; flex-shrink: 0; }
+.sa-product-inner__pos   { font-size: 0.6rem; color: var(--color-text-secondary); width: 20px; text-align: right; flex-shrink: 0; }
 .sa-product-inner__name  { font-size: 0.76rem; color: #bbb; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-product-inner__store { font-size: 0.62rem; color: #a3a3a3; flex-shrink: 0; }
+.sa-product-inner__store { font-size: 0.62rem; color: var(--color-text-secondary); flex-shrink: 0; }
 .sa-product-inner__bar-wrap { width: 60px; height: 4px; background: #1e1a12; border-radius: 2px; overflow: hidden; flex-shrink: 0; }
 .sa-product-inner__bar   { height: 100%; background: #f5c842; border-radius: 2px; opacity: 0.6; }
-.sa-product-inner__units { font-size: 0.62rem; color: #a3a3a3; flex-shrink: 0; width: 42px; text-align: right; }
+.sa-product-inner__units { font-size: 0.62rem; color: var(--color-text-secondary); flex-shrink: 0; width: 42px; text-align: right; }
 .sa-product-inner__rev   { font-size: 0.72rem; font-weight: 700; color: #c8a830; flex-shrink: 0; min-width: 60px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ── Product trend chart ── */
@@ -559,7 +565,7 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   border-bottom: 1px solid #2a2015;
 }
 .sa-margin-table th:first-child { text-align: left; }
@@ -581,16 +587,16 @@ details[open] .sa-collapsible__arrow {
   text-align: right;
 }
 .sa-margin-input:focus { outline: none; border-color: #f5c842; color: #f5c842; }
-.sa-mt__profit { padding: 7px 8px; text-align: right; font-weight: 700; color: #a3a3a3; font-variant-numeric: tabular-nums; }
+.sa-mt__profit { padding: 7px 8px; text-align: right; font-weight: 700; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .sa-mt__profit--pos { color: #34d399; }
 .sa-mt__profit--neg { color: #f87171; }
-.sa-mt__pct   { padding: 7px 8px; text-align: right; color: #a3a3a3; font-weight: 700; }
+.sa-mt__pct   { padding: 7px 8px; text-align: right; color: var(--color-text-secondary); font-weight: 700; }
 .sa-mt__pct--hi  { color: #34d399; }
 .sa-mt__pct--mid { color: #f5c842; }
 .sa-mt__pct--lo  { color: #f97316; }
 
 .sa-margin-table tfoot td { padding: 8px 8px; border-top: 1px solid #2a2015; }
-.sa-mt__total-lbl { text-align: left; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #a3a3a3; }
+.sa-mt__total-lbl { text-align: left; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-secondary); }
 .sa-mt__total     { text-align: right; font-size: 0.88rem; font-weight: 800; color: #34d399; font-variant-numeric: tabular-nums; }
 .sa-mt__total--neg { color: #f87171; }
 
@@ -609,7 +615,7 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   border-bottom: 1px solid #2a2015;
   white-space: nowrap;
 }
@@ -622,13 +628,13 @@ details[open] .sa-collapsible__arrow {
 .sa-profit__label { padding: 7px 10px; color: #bbb; text-align: left; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-profit__prof  { padding: 7px 10px; text-align: left; font-weight: 700; font-size: 0.72rem; white-space: nowrap; }
 .sa-profit__num   { padding: 7px 10px; text-align: right; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
-.sa-profit__ben   { padding: 7px 10px; text-align: right; font-weight: 700; color: #a3a3a3; font-variant-numeric: tabular-nums; }
+.sa-profit__ben   { padding: 7px 10px; text-align: right; font-weight: 700; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .sa-profit__ben--pos { color: #34d399; }
 .sa-profit__ben--neg { color: #f87171; }
 
 .sa-profit-note {
   font-size: 0.65rem;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   margin-top: 12px;
   font-style: italic;
   line-height: 1.5;
@@ -637,7 +643,7 @@ details[open] .sa-collapsible__arrow {
 /* ── Section legend / explanation text ── */
 .sa-legend {
   font-size: 0.7rem;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-style: italic;
   line-height: 1.55;
   margin: -6px 0 16px;
@@ -651,11 +657,11 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-profit__sub-label {
   padding: 4px 10px 4px 26px;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   text-align: left;
 }
 .sa-profit__num--dim {
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
 }
 
 @media (max-width: 600px) {
@@ -690,7 +696,7 @@ details[open] .sa-collapsible__arrow {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
@@ -709,7 +715,7 @@ details[open] .sa-collapsible__arrow {
   padding: 5px 14px;
   background: none;
   border: 1px solid #3a3020;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-size: 0.72rem;
   font-weight: 600;
   cursor: pointer;
@@ -727,7 +733,7 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   margin: 28px 0 12px;
   padding-bottom: 8px;
   border-bottom: 1px solid #2a2015;
@@ -755,7 +761,7 @@ details[open] .sa-collapsible__arrow {
 .sa-pl-pill { font-size: 0.65rem; font-weight: 700; padding: 2px 7px; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sa-pl-pill--25 { background: rgba(96,165,250,0.12); color: #60a5fa; }
 .sa-pl-pill--26 { background: rgba(52,211,153,0.1);  color: #34d399; }
-.sa-pl-acc-chevron { color: #a3a3a3; font-size: 0.7rem; transition: transform 0.2s; flex-shrink: 0; }
+.sa-pl-acc-chevron { color: var(--color-text-secondary); font-size: 0.7rem; transition: transform 0.2s; flex-shrink: 0; }
 .sa-pl-acc-chevron--open { transform: rotate(180deg); }
 .sa-pl-acc-body { padding: 0 14px 12px; }
 .sa-pl-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
@@ -766,14 +772,14 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   border-bottom: 1px solid #2a2015;
 }
 .sa-pl-table th:first-child { text-align: left; }
 .sa-pl-table__metric { padding: 5px 8px; text-align: left; color: #aaa; font-size: 0.7rem; border-bottom: 1px solid rgba(42,32,21,0.5); }
 .sa-pl-table__val { padding: 5px 8px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: #f0ece0; border-bottom: 1px solid rgba(42,32,21,0.5); }
 .sa-pl-table__val--26 { color: #34d399; }
-.sa-pl-table__delta { padding: 5px 8px; text-align: right; font-weight: 700; color: #a3a3a3; border-bottom: 1px solid rgba(42,32,21,0.5); }
+.sa-pl-table__delta { padding: 5px 8px; text-align: right; font-weight: 700; color: var(--color-text-secondary); border-bottom: 1px solid rgba(42,32,21,0.5); }
 .sa-pl-table__delta--pos { color: #34d399; }
 .sa-pl-table__delta--neg { color: #f87171; }
 
@@ -795,7 +801,7 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-pay-note {
   font-size: 0.7rem;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   font-style: italic;
   line-height: 1.55;
   margin: 10px 0 0;
@@ -816,7 +822,7 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   border-bottom: 1px solid #2a2015;
   white-space: nowrap;
 }
@@ -831,7 +837,7 @@ details[open] .sa-collapsible__arrow {
 .sa-pay-num    { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sa-pay-nowrap { white-space: nowrap; }
 .sa-pay-strong { font-weight: 700; color: #f0ece0 !important; }
-.sa-pay-muted  { color: #a3a3a3 !important; }
+.sa-pay-muted  { color: var(--color-text-secondary) !important; }
 .sa-pay-reason { min-width: 180px; color: #aaa !important; }
 .sa-pay-warn   { color: #f97316; font-weight: 700; }
 
@@ -918,7 +924,7 @@ details[open] .sa-collapsible__arrow {
   resize: vertical;
 }
 .sa-pay-textarea:focus { outline: none; border-color: #f5c842; }
-.sa-pay-info { color: #a3a3a3; cursor: help; font-size: 0.72rem; }
+.sa-pay-info { color: var(--color-text-secondary); cursor: help; font-size: 0.72rem; }
 
 /* ── Nóminas: fichas ── */
 .sa-pay-print { margin-right: 8px; }
@@ -970,7 +976,7 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   margin-bottom: 3px;
 }
 .sa-pay-file__item dd { margin: 0; font-size: 0.84rem; color: #ddd; word-break: break-word; }
@@ -1163,7 +1169,7 @@ details[open] .sa-collapsible__arrow {
 
 /* ── Nóminas: sin asistencia ── */
 .sa-pay-tag--absent { color: #f97316; border-color: #5a2e0f; }
-.sa-pay-struck      { color: #a3a3a3; text-decoration: line-through; }
+.sa-pay-struck      { color: var(--color-text-secondary); text-decoration: line-through; }
 .sa-pay-row-actions { display: flex; gap: 6px; }
 .sa-pay-action--on  { border-color: #f97316; color: #f97316; }
 
@@ -1232,7 +1238,7 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #a3a3a3;
+  color: var(--color-text-secondary);
   margin-bottom: 4px;
 }
 .sa-pay-person-pay__list { list-style: none; margin: 10px 0 0; padding: 0; font-size: 0.76rem; color: #ccc; }
