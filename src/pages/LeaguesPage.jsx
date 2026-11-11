@@ -28,13 +28,18 @@ function ClassmateTag() {
   )
 }
 
+// Cowork 11/11 12:15: el color de cada liga usado como texto («Liga Albarracín») fallaba en
+// claro (1.7:1) — eran colores vivos pensados para fondo oscuro. Las variables --state-* ya
+// están pensadas para texto de color legible en los dos modos (oscurecidas en claro, vivas en
+// oscuro — NOTAS_PARA_CODE_contraste.md), así que reaprovechan la misma identidad de color por
+// nivel en vez de un hex fijo.
 const TIER_META = {
-  1: { color: '#6b7280', emoji: '⛰️' },
-  2: { color: '#84cc16', emoji: '🌿' },
-  3: { color: '#3b82f6', emoji: '💧' },
-  4: { color: '#f59e0b', emoji: '🌄' },
-  5: { color: '#f97316', emoji: '🔥' },
-  6: { color: '#ef4444', emoji: '💎' },
+  1: { color: 'var(--color-text-secondary)', emoji: '⛰️' },
+  2: { color: 'var(--state-ok)', emoji: '🌿' },
+  3: { color: 'var(--state-info)', emoji: '💧' },
+  4: { color: 'var(--state-warn)', emoji: '🌄' },
+  5: { color: 'var(--state-orange)', emoji: '🔥' },
+  6: { color: 'var(--state-bad)', emoji: '💎' },
 }
 
 function MemberRow({ member, isClassmate }) {

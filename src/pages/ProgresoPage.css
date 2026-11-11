@@ -36,7 +36,7 @@
 
 .progreso-league__count {
   font-size: 0.68rem;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 .progreso-league__members {
@@ -341,7 +341,8 @@
   :root:not([data-theme="light"]) .progreso__legend-name,
   :root:not([data-theme="light"]) .progreso__legend-count,
   :root:not([data-theme="light"]) .progreso__rank-name,
-  :root:not([data-theme="light"]) .progreso__rank-value {
+  :root:not([data-theme="light"]) .progreso__rank-value,
+  :root:not([data-theme="light"]) .progreso__benefits-title {
     color: var(--color-text-primary);
   }
   :root:not([data-theme="light"]) .progreso__rank-bar-wrap { background: var(--color-surface); }
@@ -350,7 +351,8 @@
 :root[data-theme="dark"] .progreso__legend-name,
 :root[data-theme="dark"] .progreso__legend-count,
 :root[data-theme="dark"] .progreso__rank-name,
-:root[data-theme="dark"] .progreso__rank-value {
+:root[data-theme="dark"] .progreso__rank-value,
+:root[data-theme="dark"] .progreso__benefits-title {
   color: var(--color-text-primary);
 }
 :root[data-theme="dark"] .progreso__rank-bar-wrap { background: var(--color-surface); }

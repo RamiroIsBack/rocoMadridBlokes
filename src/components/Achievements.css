@@ -134,10 +134,15 @@
 }
 
 .achievements__circle--locked {
+  /* 🐞 Cowork 11/11 12:15: "en oscuro un candado negro no se ve" — el círculo gris claro era
+     siempre el mismo, pero con opacity:0.5 se mezclaba con el fondo oscuro de la página de
+     detrás y quedaba un gris sucio oscuro, donde el 🔒 (oscuro en casi toda fuente de emoji)
+     se perdía. La opacidad de "apagado" pasa al emoji, el círculo se queda opaco y claro
+     siempre, para que el candado se siga viendo encima en los dos modos. */
   background: #e5e7eb !important;
   box-shadow: none;
-  opacity: 0.5;
 }
+.achievements__circle--locked .achievements__emoji { opacity: 0.55; }
 
 /* ── Fire effect: 🔥 badges (consistent, improve_25) ── */
 .achievements__circle--fire {
@@ -254,21 +259,25 @@
 
 .achievements__badge--locked .achievements__emoji { font-size: 20px; }
 
+/* Auditoría de contraste (cowork, 11/11 12:15): #374151/#9ca3af fallaban en los DOS modos — no
+   es un problema de tema, el gris era insuficiente diga lo que diga el fondo. Las variables
+   compartidas ya están pensadas para cumplir contraste contra el fondo de la página en
+   cualquiera de los dos modos. */
 .achievements__title {
   font-size: 0.62rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--color-text-primary);
   text-align: center;
   line-height: 1.2;
 }
 
-.achievements__badge--locked .achievements__title { color: #9ca3af; }
+.achievements__badge--locked .achievements__title { color: var(--color-text-secondary); }
 
 .achievements__locked-label {
   font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #9ca3af;
+  color: var(--color-text-secondary);
   margin: 12px 0 6px;
 }
