@@ -9,8 +9,16 @@ const ROTACION_MS = 22000 // "Precompe" rota entre cuenta atrás+cartel y el map
 const LOGO_URL = 'https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png'
 
 // Recorte en círculo (cowork, 11/11 05:15: el PNG tiene las esquinas blancas, no transparentes
-// — sobre el fondo oscuro de la tele se ve como un cuadrado blanco feo).
-const logoEstilo = size => ({ height: size, width: size, borderRadius: '50%', objectFit: 'cover' })
+// — sobre el fondo oscuro de la tele se ve como un cuadrado blanco feo). `flexShrink: 0` es
+// la causa real de "medio logo, desplazado" (cowork, 11/11 07:05): dentro de un contenedor
+// flex, sin esto el ancho se podía encoger por debajo del alto, dejando una caja rectangular
+// en vez de cuadrada — con `object-fit: cover` eso recorta el círculo de forma asimétrica.
+// `contain` de más por si el recorte viniera de otro sitio: así nunca se corta el logo entero,
+// a lo sumo se ve un pelín más pequeño dentro del círculo.
+const logoEstilo = size => ({
+  height: size, width: size, minWidth: size, minHeight: size, flexShrink: 0,
+  borderRadius: '50%', objectFit: 'contain', background: '#fff',
+})
 
 // Cuenta atrás de lo que queda de compe (cowork, 09/11 05:30/06:15: antes de empezar decía
 // "quedan 25 días" en vez de avisar que no ha empezado) — comp_date/comp_end_date son fechas

@@ -1843,23 +1843,30 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
   // que se pulsa, nunca da por hecho que son 16. Se puede deshacer mientras el añadido todavía
   // no se haya colocado en el mapa.
   const [addingBlock, setAddingBlock] = useState(false)
+  // Qué bloques se han añadido EN ESTA SESIÓN con "+ Añadir bloque" (cowork, 11/11 07:05: antes
+  // "Deshacer" ofrecía quitar cualquier bloque sin colocar, incluido uno de los 16 originales,
+  // en vez de solo el recién añadido). Solo estos se pueden deshacer, y solo mientras sigan sin
+  // colocar.
+  const [recienAnadidos, setRecienAnadidos] = useState([])
   const addBlock = async () => {
     setAddingBlock(true)
     try {
       const res = await api('POST', `/equipacion/competitions/${comp.id}/comp-blocks`, {})
       setBlocks(cur => [...cur, { id: res.id, number: res.number, xPct: null, yPct: null, subzone: null, grade: '', holdSetIds: [], volumes: '', equipador: '', tested: false, photoUrl: '' }])
+      setRecienAnadidos(cur => [...cur, res.id])
     } catch (e) {
       showToast(e.message || 'No se ha podido añadir el bloque.')
     } finally {
       setAddingBlock(false)
     }
   }
-  const ultimoSinColocar = unplaced.length ? unplaced.reduce((a, b) => a.number > b.number ? a : b) : null
+  const ultimoSinColocar = unplaced.find(b => recienAnadidos.includes(b.id)) || null
   const undoAddBlock = async () => {
     if (!ultimoSinColocar) return
     try {
       await api('DELETE', `/equipacion/comp-blocks/${ultimoSinColocar.id}`)
       setBlocks(cur => cur.filter(b => b.id !== ultimoSinColocar.id))
+      setRecienAnadidos(cur => cur.filter(id => id !== ultimoSinColocar.id))
     } catch (e) {
       showToast(e.message || 'No se ha podido deshacer.')
     }
@@ -1889,6 +1896,9 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
           </button>
         </div>
       )}
+      <a className="org__link-btn" href="/blokes/compe/directo" target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginBottom: 16 }}>
+        📺 Abrir en la tele
+      </a>
 
       {unplaced.length > 0 && (
         <div className="org__comp-tray">
@@ -1939,7 +1949,7 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
       {canManage && (
         <div className="org__semana-actions" style={{ marginBottom: 20 }}>
           <button className="org__link-btn" onClick={addBlock} disabled={addingBlock}>
-            {addingBlock ? 'Añadiendo...' : `+ Añadir bloque (vamos bien de tiempo — serían ${blocks.length + 1})`}
+            {addingBlock ? 'Añadiendo...' : `Vamos bien de tiempo, añadir el ${blocks.length + 1}`}
           </button>
           {ultimoSinColocar && (
             <button className="org__link-btn" onClick={undoAddBlock}>Deshacer el bloque #{ultimoSinColocar.number}</button>

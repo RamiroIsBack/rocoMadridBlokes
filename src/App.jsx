@@ -310,6 +310,7 @@ export default function App() {
                           </a>
                         </>
                       )}
+                      <Link to="/instalar" className="app-header__link app-header__link--small">📲 Instalar la app</Link>
                     </div>
                   </div>
                   <button type="button" className="app-header__mapa-toggle" onClick={() => setMapaAbierto(v => !v)}>
@@ -333,6 +334,7 @@ export default function App() {
                     <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta app-header__link--small">
                       Tecnificación
                     </a>
+                    <Link to="/instalar" className="app-header__link app-header__link--small">📲 Instalar la app</Link>
                   </div>
                 </div>
               </>
