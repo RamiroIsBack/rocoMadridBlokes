@@ -709,3 +709,97 @@
 /* ── Nota por test (vista por test) ── */
 .entrena__test-note { font-size: 0.72rem; font-style: italic; color: #7a5a10; margin-top: 2px; }
 .entrena__test-note-input { width: 100%; margin-top: 4px; padding: 4px 6px; font-size: 0.8rem; border: 1px solid #cfc9b8; background: #fff; box-sizing: border-box; }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   MODO OSCURO — Entrenamientos (auditoría de Cowork, 11/11 10:05: "toda la tabla de alumnos
+   (td) a 1.1: no se lee ningún nombre" — 686 fallos, la peor pantalla). Casi toda la página
+   usaba fondos cream/blancos fijos con texto oscuro fijo, sin variables, así que con el
+   sistema en oscuro el texto se quedaba oscuro sobre el fondo oscuro de la página (que sí
+   sigue la variable). Mismo patrón que Organización: solo añade overrides en oscuro, no toca
+   el aspecto en claro. ── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .entrena__header h1,
+  :root:not([data-theme="light"]) .entrena__modal h2,
+  :root:not([data-theme="light"]) .entrena__empty-title,
+  :root:not([data-theme="light"]) .entrena__table td,
+  :root:not([data-theme="light"]) .entrena__search-input,
+  :root:not([data-theme="light"]) .entrena__filter-field input,
+  :root:not([data-theme="light"]) .entrena__filter-field select,
+  :root:not([data-theme="light"]) .entrena__modal input,
+  :root:not([data-theme="light"]) .entrena__modal select,
+  :root:not([data-theme="light"]) .entrena__defs-item__name,
+  :root:not([data-theme="light"]) .entrena__test-row__name,
+  :root:not([data-theme="light"]) .entrena__suggest-row,
+  :root:not([data-theme="light"]) .entrena__suggest-btn,
+  :root:not([data-theme="light"]) .entrena__test-desc strong,
+  :root:not([data-theme="light"]) .entrena__test-input {
+    color: var(--color-text-primary);
+  }
+  :root:not([data-theme="light"]) .entrena__reset:hover { color: var(--color-text-primary); }
+  :root:not([data-theme="light"]) .entrena__filters,
+  :root:not([data-theme="light"]) .entrena__modal,
+  :root:not([data-theme="light"]) .entrena__search-input,
+  :root:not([data-theme="light"]) .entrena__filter-field input,
+  :root:not([data-theme="light"]) .entrena__filter-field select,
+  :root:not([data-theme="light"]) .entrena__modal input,
+  :root:not([data-theme="light"]) .entrena__modal select,
+  :root:not([data-theme="light"]) .entrena__test-desc,
+  :root:not([data-theme="light"]) .entrena__defs-item,
+  :root:not([data-theme="light"]) .entrena__test-input,
+  :root:not([data-theme="light"]) .entrena__test-note-input {
+    background: var(--color-surface);
+    border-color: var(--color-border);
+  }
+  :root:not([data-theme="light"]) .entrena__row:hover td { background: var(--color-bg); }
+  :root:not([data-theme="light"]) .entrena__row--active td { background: rgba(245, 200, 66, 0.16); }
+  /* Tarjetas en móvil (los profes lo usan en clase con el móvil): el resaltado va en la
+     tarjeta entera, no celda a celda — mismo arreglo, selector distinto. */
+  :root:not([data-theme="light"]) .entrena__row:hover { background: var(--color-bg); }
+  :root:not([data-theme="light"]) .entrena__row--active { background: rgba(245, 200, 66, 0.16); }
+  :root:not([data-theme="light"]) .entrena__inline-panel td { background: var(--color-bg); }
+  :root:not([data-theme="light"]) .entrena__suggest { background: var(--color-bg); }
+  :root:not([data-theme="light"]) .entrena__defs-item--hidden { background: var(--color-bg); }
+  :root:not([data-theme="light"]) .entrena__search-input,
+  :root:not([data-theme="light"]) .entrena__suggest-btn { border-color: var(--color-text-primary); }
+}
+:root[data-theme="dark"] .entrena__header h1,
+:root[data-theme="dark"] .entrena__modal h2,
+:root[data-theme="dark"] .entrena__empty-title,
+:root[data-theme="dark"] .entrena__table td,
+:root[data-theme="dark"] .entrena__search-input,
+:root[data-theme="dark"] .entrena__filter-field input,
+:root[data-theme="dark"] .entrena__filter-field select,
+:root[data-theme="dark"] .entrena__modal input,
+:root[data-theme="dark"] .entrena__modal select,
+:root[data-theme="dark"] .entrena__defs-item__name,
+:root[data-theme="dark"] .entrena__test-row__name,
+:root[data-theme="dark"] .entrena__suggest-row,
+:root[data-theme="dark"] .entrena__suggest-btn,
+:root[data-theme="dark"] .entrena__test-desc strong,
+:root[data-theme="dark"] .entrena__test-input {
+  color: var(--color-text-primary);
+}
+:root[data-theme="dark"] .entrena__reset:hover { color: var(--color-text-primary); }
+:root[data-theme="dark"] .entrena__filters,
+:root[data-theme="dark"] .entrena__modal,
+:root[data-theme="dark"] .entrena__search-input,
+:root[data-theme="dark"] .entrena__filter-field input,
+:root[data-theme="dark"] .entrena__filter-field select,
+:root[data-theme="dark"] .entrena__modal input,
+:root[data-theme="dark"] .entrena__modal select,
+:root[data-theme="dark"] .entrena__test-desc,
+:root[data-theme="dark"] .entrena__defs-item,
+:root[data-theme="dark"] .entrena__test-input,
+:root[data-theme="dark"] .entrena__test-note-input {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+:root[data-theme="dark"] .entrena__row:hover td { background: var(--color-bg); }
+:root[data-theme="dark"] .entrena__row--active td { background: rgba(245, 200, 66, 0.16); }
+:root[data-theme="dark"] .entrena__row:hover { background: var(--color-bg); }
+:root[data-theme="dark"] .entrena__row--active { background: rgba(245, 200, 66, 0.16); }
+:root[data-theme="dark"] .entrena__inline-panel td { background: var(--color-bg); }
+:root[data-theme="dark"] .entrena__suggest { background: var(--color-bg); }
+:root[data-theme="dark"] .entrena__defs-item--hidden { background: var(--color-bg); }
+:root[data-theme="dark"] .entrena__search-input,
+:root[data-theme="dark"] .entrena__suggest-btn { border-color: var(--color-text-primary); }
