@@ -4,9 +4,14 @@ import './index.css'
 import App from './App'
 import { applyVerComo, installVerComoFetch } from './utils/verComo'
 import { installVisibilityRefresh } from './utils/visibilityRefresh'
+import { instalarTemaAuto } from './utils/theme'
 
 // eslint-disable-next-line no-undef
 console.log('Blokes build', __BUILD_TIME__)
+
+// Modo claro/oscuro (Ramiro, 11/11 05:08): lo antes posible, antes de que React pinte nada,
+// para no enseñar un parpadeo del tema por defecto y cambiar justo después.
+instalarTemaAuto()
 
 if (window.blokesSiteData) {
   const r = window.blokesSiteData.userRole

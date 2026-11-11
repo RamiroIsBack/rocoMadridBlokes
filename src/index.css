@@ -75,6 +75,58 @@
   --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.12), 0 0 0 1px #bfb89e;
 }
 
+/* ============================================
+   MODO OSCURO (Ramiro, 11/11 05:08)
+   Se activa con [data-theme="dark"] puesto a mano (selector claro/oscuro/auto, ver
+   src/utils/theme.js), o solo con la media query si no hay preferencia explícita puesta
+   ("auto", sigue al sistema). [data-theme="light"] fuerza claro incluso con el sistema en
+   oscuro. Los --state-* vuelven a los tonos claros originales — son justo los "pensados para
+   fondo oscuro" que NOTAS_PARA_CODE_contraste.md tuvo que oscurecer para el modo claro; aquí
+   sobre fondo oscuro ya cumplen contraste tal cual.
+   La tele (/compe/directo) nunca llama a instalarTemaAuto(): se queda siempre oscura, pintada
+   entera con estilos en línea propios, sin depender de estas variables.
+   ============================================ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #1a1714;
+    --color-surface: #242019;
+    --color-header: #1f1f1f;
+    --color-text-primary: #f0ece0;
+    --color-text-secondary: #b3ab9a;
+    --color-border: #44402f;
+    --color-accent: #d19d02;
+    --color-accent-hover: #f5c842;
+    --state-ok:      #34d399;
+    --state-good:    #34d399;
+    --state-warn:    #f5c842;
+    --state-info:    #60a5fa;
+    --state-purple:  #a78bfa;
+    --state-bad:     #f87171;
+    --state-orange:  #fb923c;
+    --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--color-border);
+    --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 0 1px #5a543d;
+  }
+}
+:root[data-theme="dark"] {
+  --color-bg: #1a1714;
+  --color-surface: #242019;
+  --color-header: #1f1f1f;
+  --color-text-primary: #f0ece0;
+  --color-text-secondary: #b3ab9a;
+  --color-border: #44402f;
+  --color-accent: #d19d02;
+  --color-accent-hover: #f5c842;
+  --state-ok:      #34d399;
+  --state-good:    #34d399;
+  --state-warn:    #f5c842;
+  --state-info:    #60a5fa;
+  --state-purple:  #a78bfa;
+  --state-bad:     #f87171;
+  --state-orange:  #fb923c;
+  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--color-border);
+  --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 0 1px #5a543d;
+}
+
 html {
   font-size: var(--font-size-base);
   scroll-behavior: smooth;

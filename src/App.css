@@ -160,6 +160,20 @@
   cursor: pointer;
 }
 
+/* Modo claro/oscuro (Ramiro, 11/11 05:08) — misma cabecera siempre oscura que el resto de
+   estos controles, independientemente del tema elegido para el resto de la app. */
+.app-header__tema { display: inline-flex; gap: 2px; margin-top: 4px; }
+.app-header__tema-btn {
+  background: #2a2015;
+  border: 1px solid #5a5244;
+  color: #ccc;
+  font-size: 0.8rem;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.app-header__tema-btn--activo { border-color: #f5c842; background: #3a2d12; }
+
 .app-ver-como-banner {
   background: #7c2d12;
   color: #fff;
@@ -834,9 +848,9 @@
    ============================================ */
 
 .event-card {
-  background-color: #fdfaf0;
+  background-color: var(--color-surface);
   border-radius: 8px;
-  border: 1px solid #c8bc9a;
+  border: 1px solid var(--color-border);
   box-shadow: 3px 4px 0 #c4b99a;
   overflow: visible;
   display: flex;
@@ -872,7 +886,7 @@
   flex-direction: column;
   gap: var(--spacing-sm);
   flex: 1;
-  background-color: #fdfaf0;
+  background-color: var(--color-surface);
 }
 
 .event-card__header {

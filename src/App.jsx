@@ -22,6 +22,7 @@ import CompePage from './pages/CompePage'
 import CompeDirectoPage from './pages/CompeDirectoPage'
 import InstalarPage from './pages/InstalarPage'
 import { setVerComo, clearVerComo } from './utils/verComo'
+import { getTema, setTema } from './utils/theme'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
 import { useProfile } from './hooks/useProfile'
@@ -255,6 +256,7 @@ export default function App() {
                   >⋯</button>
                 </div>
                 <div className={`app-header__extra${menuMovilAbierto ? ' app-header__extra--abierto' : ''}`}>
+                  <TemaSelector />
                   {!profileFetching && nickname && <span className="app-header__user-nick">@{nickname}</span>}
                   {/* Cowork, 09/11 09:05 (confirmado): en "Ver como: Tablet" se esconde — cerrar
                       sesión ahí echaría la sesión REAL de quien lo simula (socio/profe/Eva), no
@@ -320,6 +322,7 @@ export default function App() {
               </>
             ) : (
               <>
+                <TemaSelector />
                 <a href={buildLoginUrl(sd)} className="app-header__login-btn">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                     <path d="M10 17l5-5-5-5v3H3v4h7v3z"/>
@@ -498,6 +501,21 @@ export default function App() {
 }
 
 const VER_COMO_LABEL = { gestion: 'Eva (gestión)', profesor: 'Profe', tablet: 'Tablet' }
+
+// Modo claro/oscuro (Ramiro, 11/11 05:08) — tres botones en vez de un <select> porque son solo
+// 3 opciones y así se ve de un vistazo cuál está activa, sin abrir nada. No hace falta recargar
+// la página: aplicarTema() solo toca el atributo data-theme y las variables CSS reaccionan solas.
+function TemaSelector() {
+  const [tema, setTemaLocal] = useState(getTema)
+  const elegir = t => { setTema(t); setTemaLocal(t) }
+  return (
+    <div className="app-header__tema" title="Modo claro/oscuro" role="group" aria-label="Modo claro/oscuro">
+      <button type="button" className={`app-header__tema-btn${tema === 'claro' ? ' app-header__tema-btn--activo' : ''}`} onClick={() => elegir('claro')} aria-label="Claro">☀️</button>
+      <button type="button" className={`app-header__tema-btn${tema === 'oscuro' ? ' app-header__tema-btn--activo' : ''}`} onClick={() => elegir('oscuro')} aria-label="Oscuro">🌙</button>
+      <button type="button" className={`app-header__tema-btn${tema === 'auto' ? ' app-header__tema-btn--activo' : ''}`} onClick={() => elegir('auto')} aria-label="Automático">🔄</button>
+    </div>
+  )
+}
 
 // Selector "Ver como" (Ramiro, 1/11 18:30), solo para socio — al lado de Log out. Cambiar de
 // rol recarga la página: es la forma más simple de que TODA la app (decenas de sitios que leen
