@@ -109,6 +109,23 @@
 }
 .org__block-info { font-size: 0.85rem; color: #2a2015; flex: 1; }
 .org__block-upload { font-size: 0.75rem; color: var(--color-text-secondary); display: flex; align-items: center; gap: 4px; }
+
+/* Bloques planificados (Ramiro, 11/11 04:27): decididos de antemano, pero sin poner todavía —
+   más apagados que uno ya puesto, para que se distingan de un vistazo en la columna. */
+.org__block-row--planificado { background: #faf7ee; border-style: dashed; opacity: 0.85; }
+.org__block-planificado-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #92400e;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 3px;
+  padding: 1px 6px;
+}
 .org__remove-btn {
   background: none; border: none; color: #b42318; cursor: pointer; font-size: 0.9rem;
 }

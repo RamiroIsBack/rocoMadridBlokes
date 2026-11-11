@@ -13001,6 +13001,44 @@ function progreso_equip_create_week($request) {
     return rest_ensure_response(array('success' => true, 'week_id' => $week_id, 'assignment_ids' => $created_assignments, 'warnings' => $warnings));
 }
 
+// Cuenta, por asignación (persona), cuántos blokes REALES (blog 1, Crear bloke) se crearon
+// durante esa semana con ese equipador — comparado por nombre normalizado (minúsculas, sin
+// acentos, primera palabra), porque `bloke_equipador` guarda un slug tipo "alvaro" y el nombre
+// del trabajador es "Álvaro". Mismo límite que ya tiene Crear bloke: si hay dos personas que
+// normalizan igual (p. ej. "Álvaro" y "Álvaro V."), Crear bloke tampoco las distingue — no es
+// algo que esta cuenta pueda arreglar por su cuenta.
+function progreso_equip_contar_blokes_reales_semana($week_start, $nombres_por_assignment) {
+    if (!$nombres_por_assignment) return array();
+    $fin = date('Y-m-d', strtotime($week_start) + 6 * 86400);
+    switch_to_blog(1);
+    global $wpdb;
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT pm.meta_value AS equipador, COUNT(*) AS n
+         FROM {$wpdb->posts} p
+         JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = 'bloke_equipador'
+         WHERE p.post_type = 'blokes' AND p.post_status IN ('publish', 'draft')
+           AND DATE(p.post_date) BETWEEN %s AND %s
+         GROUP BY pm.meta_value", $week_start, $fin
+    ), ARRAY_A);
+    restore_current_blog();
+
+    $normaliza = function($s) {
+        $s = remove_accents(strtolower(trim((string) $s)));
+        $partes = preg_split('/\s+/', $s);
+        return $partes[0] ?? '';
+    };
+    $por_nombre = array();
+    foreach ($rows as $r) {
+        $clave = $normaliza($r['equipador']);
+        $por_nombre[$clave] = ($por_nombre[$clave] ?? 0) + intval($r['n']);
+    }
+    $out = array();
+    foreach ($nombres_por_assignment as $assignment_id => $nombre) {
+        $out[$assignment_id] = $por_nombre[$normaliza($nombre)] ?? 0;
+    }
+    return $out;
+}
+
 function progreso_equip_get_week_detail($request) {
     global $wpdb;
     progreso_equip_ensure_tables();
@@ -13060,7 +13098,14 @@ function progreso_equip_get_week_detail($request) {
         }
     }
 
-    $out_assignments = array_map(function($a) use ($tasks_by_assignment, $blocks_by_assignment) {
+    // "0 bloques puestos esta semana" aunque el equipador sí creó blokes reales en Crear bloke
+    // (cowork, 11/11 04:45: el contador solo miraba equip_blocks, nunca los blokes reales de la
+    // app). Se suman aparte, nunca se mezclan con `blocks` (que sigue siendo solo lo planeado).
+    $nombres_por_assignment = array();
+    foreach ($assignments as $a) $nombres_por_assignment[intval($a['id'])] = $a['worker_name'];
+    $reales_por_assignment = progreso_equip_contar_blokes_reales_semana($week['start_date'], $nombres_por_assignment);
+
+    $out_assignments = array_map(function($a) use ($tasks_by_assignment, $blocks_by_assignment, $reales_por_assignment) {
         $id = intval($a['id']);
         return array(
             'id' => $id, 'workerId' => intval($a['worker_id']), 'workerName' => $a['worker_name'], 'isLead' => (bool) $a['is_lead'],
@@ -13068,6 +13113,7 @@ function progreso_equip_get_week_detail($request) {
             'blocksMin' => intval($a['blocks_min']), 'blocksMax' => intval($a['blocks_max']), 'status' => $a['status'],
             'workDays' => array_values(array_filter(explode(',', $a['work_days']))),
             'tasks' => $tasks_by_assignment[$id] ?? array(), 'blocks' => $blocks_by_assignment[$id] ?? array(),
+            'blokesRealesCreados' => intval($reales_por_assignment[$id] ?? 0),
         );
     }, $assignments);
 
@@ -13497,13 +13543,18 @@ function progreso_equip_create_block($request) {
         }
     }
 
+    // Bloques planificados (Ramiro, 11/11 04:27: "vale, hacerlo" — la tabla grado→presas que
+    // Álvaro llevaba en Notion, dentro de "Poner bloques"): por defecto sigue creándose como
+    // "ya puesto" (done=1, para no romper el uso de siempre), pero si se manda done=false se
+    // crea como plan — grado y presas decididos de antemano, pendiente de equipar de verdad.
+    $done = $request->get_param('done') === null ? 1 : ($request->get_param('done') ? 1 : 0);
     $wpdb->insert(progreso_equip_table('blocks'), array(
         'assignment_id'   => $assignment_id,
         'subzone'         => $subzone,
         'grade_color'     => $grade,
         'hold_set_ids'    => implode(',', $hold_set_ids),
         'is_traverse'     => $is_traverse ? 1 : 0,
-        'done'            => 1,
+        'done'            => $done,
         'uploaded_webapp' => 0,
         'created_at'      => current_time('mysql'),
     ), array('%d', '%d', '%s', '%s', '%d', '%d', '%d', '%s'));

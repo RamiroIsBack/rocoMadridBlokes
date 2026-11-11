@@ -346,7 +346,18 @@ function HoyView({ config, workers, workerId, onChooseWorker, canEdit }) {
                       />
                     ) : <button className="org__link-btn" onClick={() => setAddingTaskFor(a.id)}>+ Tarea</button>
                   )}
-                  <p className="org__board-col-meta">{a.blocks.length} bloque{a.blocks.length === 1 ? '' : 's'} puesto{a.blocks.length === 1 ? '' : 's'} esta semana</p>
+                  {(() => {
+                    const puestosAqui = a.blocks.filter(b => b.done).length
+                    const planificados = a.blocks.length - puestosAqui
+                    const total = puestosAqui + (a.blokesRealesCreados || 0)
+                    return (
+                      <p className="org__board-col-meta">
+                        {total} bloque{total === 1 ? '' : 's'} puesto{total === 1 ? '' : 's'} esta semana
+                        {a.blokesRealesCreados > 0 && <span className="org__hint"> ({puestosAqui} aquí + {a.blokesRealesCreados} en Crear bloke)</span>}
+                        {planificados > 0 && <span className="org__hint"> · {planificados} planificado{planificados === 1 ? '' : 's'}</span>}
+                      </p>
+                    )
+                  })()}
                   {a.blocks.length > 0 && (
                     <ul className="org__block-list">
                       {a.blocks.map(b => <BlockRow key={b.id} block={b} holdsets={holdsets} onChanged={reload} />)}
@@ -443,6 +454,13 @@ function BlockRow({ block, holdsets, onChanged }) {
     try { await api('PUT', `/equipacion/blocks/${block.id}`, { uploadedWebapp: !block.uploadedWebapp }); onChanged() }
     finally { setBusy(false) }
   }
+  // Bloques planificados (Ramiro, 11/11 04:27): decididos de antemano (grado + presas), pero
+  // sin poner todavía — se marcan "puesto" cuando de verdad se equipan.
+  const marcarPuesto = async () => {
+    setBusy(true)
+    try { await api('PUT', `/equipacion/blocks/${block.id}`, { done: true }); onChanged() }
+    finally { setBusy(false) }
+  }
   const remove = async () => {
     if (!window.confirm('¿Borrar este bloque?')) return
     setBusy(true)
@@ -450,15 +468,20 @@ function BlockRow({ block, holdsets, onChanged }) {
     finally { setBusy(false) }
   }
   return (
-    <li className="org__block-row">
+    <li className={`org__block-row${!block.done ? ' org__block-row--planificado' : ''}`}>
       <span className="org__block-grade" style={{ background: GRADE_COLOR[block.grade] || '#ccc' }}>{block.grade}</span>
       <span className="org__block-info">
         Subzona #{block.subzone}{block.isTraverse ? ' · travesía' : ''}{holdsetNames ? ` · ${holdsetNames}` : ''}
+        {!block.done && <span className="org__block-planificado-tag">planificado</span>}
       </span>
-      <label className="org__block-upload">
-        <input type="checkbox" checked={block.uploadedWebapp} onChange={toggleUploaded} disabled={busy} />
-        subido a la webapp
-      </label>
+      {block.done ? (
+        <label className="org__block-upload">
+          <input type="checkbox" checked={block.uploadedWebapp} onChange={toggleUploaded} disabled={busy} />
+          subido a la webapp
+        </label>
+      ) : (
+        <button className="org__link-btn" onClick={marcarPuesto} disabled={busy}>✓ Marcar puesto</button>
+      )}
       <button className="org__remove-btn" onClick={remove} disabled={busy}>✕</button>
     </li>
   )
@@ -469,6 +492,9 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
   const [grade, setGrade] = useState('VERDE')
   const [holdSetIds, setHoldSetIds] = useState([])
   const [isTraverse, setIsTraverse] = useState(false)
+  // Bloques planificados (Ramiro, 11/11 04:27): la tabla grado→presas que Álvaro llevaba en
+  // Notion, para decidir de antemano qué va en cada subzona antes de ponerlo de verdad.
+  const [planificado, setPlanificado] = useState(false)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
 
@@ -479,7 +505,7 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
   const submit = async () => {
     setSaving(true); setError(null)
     try {
-      const res = await api('POST', '/equipacion/blocks', { assignmentId, subzone, grade, holdSetIds, isTraverse })
+      const res = await api('POST', '/equipacion/blocks', { assignmentId, subzone, grade, holdSetIds, isTraverse, done: !planificado })
       if (res.warning) { window.alert(`⚠ ${res.warning}`) }
       onDone()
     } catch (e) {
@@ -506,6 +532,9 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
       <div className="org__add-row">
         <label><input type="checkbox" checked={isTraverse} onChange={e => setIsTraverse(e.target.checked)} /> Es travesía</label>
       </div>
+      <div className="org__add-row">
+        <label><input type="checkbox" checked={planificado} onChange={e => setPlanificado(e.target.checked)} /> Solo planificado (lo pondré luego)</label>
+      </div>
       <div className="org__add-row org__add-row--holdsets">
         <label>Juego(s) de presas</label>
         <div className="org__holdset-chips">
@@ -521,7 +550,7 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
       {error && <p className="org__error">{error}</p>}
       <div className="org__add-actions">
         <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
-        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Guardando...' : 'Guardar bloque'}</button>
+        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Guardando...' : planificado ? 'Planificar' : 'Guardar bloque'}</button>
       </div>
     </div>
   )
@@ -776,7 +805,18 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
                   )
                 })}
                 {allDates.length === 0 && <p className="org__hint">Sin tareas (no le tocó ninguna esta semana).</p>}
-                <p className="org__assignment-tasks">{a.blocks.length} bloques puestos</p>
+                {(() => {
+                  const puestosAqui = a.blocks.filter(b => b.done).length
+                  const planificados = a.blocks.length - puestosAqui
+                  const total = puestosAqui + (a.blokesRealesCreados || 0)
+                  return (
+                    <p className="org__assignment-tasks">
+                      {total} bloques puestos
+                      {a.blokesRealesCreados > 0 && ` (${puestosAqui} aquí + ${a.blokesRealesCreados} en Crear bloke)`}
+                      {planificados > 0 && ` · ${planificados} planificado${planificados === 1 ? '' : 's'}`}
+                    </p>
+                  )
+                })()}
               </div>
             )
           })}
