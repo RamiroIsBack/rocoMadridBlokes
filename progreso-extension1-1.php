@@ -848,14 +848,6 @@ add_action('rest_api_init', function() {
         'methods' => 'GET', 'callback' => 'progreso_equip_get_competition_plan', 'permission_callback' => $equip_perm,
     ));
 
-    // Endpoint de diagnóstico TEMPORAL (cowork, 11/11 10:30): el conteo de "Crear bloke" sigue a
-    // 0 para todos tras get_field() — en vez de seguir adivinando, esto enseña exactamente lo
-    // que ve la consulta (posts encontrados, meta en bruto vs get_field(), clave normalizada).
-    // Quitar cuando el conteo quede resuelto.
-    register_rest_route('progreso/v1', '/equipacion/debug/blokes-reales', array(
-        'methods' => 'GET', 'callback' => 'progreso_equip_debug_blokes_reales', 'permission_callback' => $equip_perm,
-    ));
-
     // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 7/11). Encender/apagar el
     // modo compe es solo de un socio; estado es público (lo lee el móvil sin login para saber si
     // hay compe activa, y más adelante la pantalla de la tele); apuntar/leer resultado necesita
@@ -13064,52 +13056,6 @@ function progreso_equip_contar_blokes_reales_semana($week_start, $nombres_por_as
         $out[$assignment_id] = $por_nombre[$normaliza($nombre)] ?? 0;
     }
     return $out;
-}
-
-// GET /equipacion/debug/blokes-reales?weekId=36 (o weekStart=2026-11-09) — diagnóstico TEMPORAL
-// (cowork, 11/11 10:30): el conteo de "Crear bloke" sigue a 0 tras get_field(). En vez de seguir
-// adivinando, esto enseña los posts que encuentra la consulta de fechas, el meta en bruto
-// (wp_postmeta directo) y lo que devuelve get_field() para cada uno, lado a lado.
-function progreso_equip_debug_blokes_reales($request) {
-    global $wpdb;
-    $week_start = $request->get_param('weekStart');
-    $week_id = $request->get_param('weekId');
-    if (!$week_start && $week_id) {
-        $week_start = $wpdb->get_var($wpdb->prepare(
-            "SELECT start_date FROM " . progreso_equip_table('weeks') . " WHERE id = %d", intval($week_id)
-        ));
-    }
-    if (!$week_start) return new WP_Error('invalid_data', 'Falta weekId o weekStart.', array('status' => 400));
-    $fin = date('Y-m-d', strtotime($week_start) + 6 * 86400);
-
-    switch_to_blog(1);
-    $posts = $wpdb->get_results($wpdb->prepare(
-        "SELECT ID, post_date, post_status FROM {$wpdb->posts}
-         WHERE post_type = 'blokes' AND post_status IN ('publish', 'draft')
-           AND DATE(post_date) BETWEEN %s AND %s ORDER BY post_date ASC", $week_start, $fin
-    ), ARRAY_A);
-    $detalle = array();
-    foreach ($posts as $p) {
-        $post_id = intval($p['ID']);
-        $meta_en_bruto = $wpdb->get_var($wpdb->prepare(
-            "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = 'bloke_equipador'", $post_id
-        ));
-        $todas_las_claves_equipador = $wpdb->get_results($wpdb->prepare(
-            "SELECT meta_key, meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key LIKE %s",
-            $post_id, '%equipador%'
-        ), ARRAY_A);
-        $detalle[] = array(
-            'postId' => $post_id, 'postDate' => $p['post_date'], 'postStatus' => $p['post_status'],
-            'metaEnBruto' => $meta_en_bruto,
-            'getField' => function_exists('get_field') ? get_field('bloke_equipador', $post_id) : '(get_field no existe)',
-            'todasLasClavesConEquipador' => $todas_las_claves_equipador,
-        );
-    }
-    restore_current_blog();
-
-    return rest_ensure_response(array('success' => true, 'data' => array(
-        'weekStart' => $week_start, 'weekEnd' => $fin, 'totalPosts' => count($detalle), 'posts' => $detalle,
-    )));
 }
 
 function progreso_equip_get_week_detail($request) {
