@@ -16139,3 +16139,106 @@ function calendar_save_token($request) {
     update_option('blokes_notion_cache_v', time(), false);
     return rest_ensure_response(array('success' => true));
 }
+
+// ============================================================
+//  superadmin/v1 — Mapa de Blokes: esquema de toda la app para revisarlo
+//  entre socios. El árbol vive en el frontend (src/utils/blokesMap.js); aquí
+//  solo se guarda, por id, la decisión (keep/improve/idea/remove) y la nota de
+//  cada elemento, y las ideas nuevas que se añaden. Option blokes_map.
+// ============================================================
+
+add_action('rest_api_init', function() {
+    $socio_perm = function() { return blokes_es_socio(); };
+    register_rest_route('superadmin/v1', '/blokes-map', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_map_get',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/blokes-map/item', array(
+        'methods'             => 'PUT',
+        'callback'            => 'blokes_map_save_item',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/blokes-map/extra', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_map_add_extra',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/blokes-map/extra/(?P<id>x-[a-z0-9-]+)', array(
+        'methods'             => 'DELETE',
+        'callback'            => 'blokes_map_delete_extra',
+        'permission_callback' => $socio_perm,
+    ));
+});
+
+function blokes_map_load() {
+    $doc = get_option('blokes_map', array());
+    $doc = is_array($doc) ? $doc : array();
+    return array(
+        'items'  => is_array($doc['items'] ?? null) ? $doc['items'] : array(),
+        'extras' => is_array($doc['extras'] ?? null) ? array_values($doc['extras']) : array(),
+    );
+}
+
+function blokes_map_store($doc) {
+    update_option('blokes_map', $doc, false);
+}
+
+function blokes_map_valid_id($id) {
+    return is_string($id) && preg_match('/^[a-z0-9-]{1,60}$/', $id);
+}
+
+function blokes_map_get() {
+    $doc = blokes_map_load();
+    return rest_ensure_response(array('items' => (object) $doc['items'], 'extras' => $doc['extras']));
+}
+
+// Cambia la decisión y/o la nota de un elemento (solo lo que llega), y apunta quién y cuándo.
+function blokes_map_save_item($request) {
+    $body = $request->get_json_params();
+    $id   = (string) ($body['id'] ?? '');
+    if (!blokes_map_valid_id($id)) return new WP_Error('bad_id', 'Elemento no válido', array('status' => 400));
+    $doc  = blokes_map_load();
+    $item = is_array($doc['items'][$id] ?? null) ? $doc['items'][$id] : array();
+    if (array_key_exists('decision', $body)) {
+        $d = (string) $body['decision'];
+        $item['decision'] = in_array($d, array('keep', 'improve', 'idea', 'remove'), true) ? $d : '';
+    }
+    if (array_key_exists('note', $body)) {
+        $item['note'] = mb_substr(trim(sanitize_textarea_field((string) $body['note'])), 0, 2000);
+    }
+    $item['by'] = timeoff_user_name();
+    $item['at'] = current_time('mysql');
+    $doc['items'][$id] = $item;
+    blokes_map_store($doc);
+    return rest_ensure_response(array('success' => true, 'item' => $item));
+}
+
+function blokes_map_add_extra($request) {
+    $body   = $request->get_json_params();
+    $parent = (string) ($body['parent'] ?? '');
+    $title  = mb_substr(trim(sanitize_text_field((string) ($body['title'] ?? ''))), 0, 120);
+    if (!blokes_map_valid_id($parent) || $title === '') return new WP_Error('bad_extra', 'Falta el título o dónde va', array('status' => 400));
+    $doc = blokes_map_load();
+    if (count($doc['extras']) >= 300) return new WP_Error('too_many', 'Demasiadas ideas', array('status' => 400));
+    $id  = 'x-' . substr(str_replace('-', '', wp_generate_uuid4()), 0, 12);
+    $doc['extras'][] = array('id' => $id, 'parent' => $parent, 'title' => $title, 'by' => timeoff_user_name(), 'at' => current_time('mysql'));
+    $doc['items'][$id] = array('decision' => 'idea', 'note' => '', 'by' => timeoff_user_name(), 'at' => current_time('mysql'));
+    blokes_map_store($doc);
+    return rest_ensure_response(array('success' => true, 'extras' => $doc['extras'], 'items' => (object) $doc['items']));
+}
+
+// Borra una idea añadida y lo que colgara de ella.
+function blokes_map_delete_extra($request) {
+    $id  = (string) $request['id'];
+    $doc = blokes_map_load();
+    $gone = array($id);
+    do {
+        $before = count($gone);
+        foreach ($doc['extras'] as $x) if (in_array($x['parent'], $gone, true) && !in_array($x['id'], $gone, true)) $gone[] = $x['id'];
+    } while (count($gone) > $before);
+    $doc['extras'] = array_values(array_filter($doc['extras'], function($x) use ($gone) { return !in_array($x['id'], $gone, true); }));
+    foreach ($gone as $g) unset($doc['items'][$g]);
+    blokes_map_store($doc);
+    return rest_ensure_response(array('success' => true, 'extras' => $doc['extras']));
+}
