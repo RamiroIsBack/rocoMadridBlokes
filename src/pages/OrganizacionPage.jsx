@@ -1077,10 +1077,21 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
 
 // Tarea suelta para un día concreto, del catálogo o con texto libre (creador de tareas de
 // Álvaro, Ramiro 1/11 17:20) — se usa igual en el tablero de Semana y en Hoy.
+// Día por defecto: hoy, salvo que hoy quede fuera de la semana que se está viendo (una semana
+// futura o pasada) — ahí sí tiene más sentido el lunes de esa semana (cowork, 11/11 05:40: el
+// formulario arrancaba siempre en lunes, aunque se estuviera viendo la semana actual).
+function defaultTaskDate(defaultDate, weekStart) {
+  if (defaultDate) return defaultDate
+  if (!weekStart) return todayStr()
+  const hoy = todayStr()
+  return (hoy >= weekStart && hoy <= addDays(weekStart, 6)) ? hoy : weekStart
+}
+
 function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, byWorkerId, onDone, onCancel }) {
   const [taskTypeId, setTaskTypeId] = useState('')
   const [customText, setCustomText] = useState('')
-  const [date, setDate] = useState(defaultDate || weekStart || todayStr())
+  const [date, setDate] = useState(() => defaultTaskDate(defaultDate, weekStart))
+  const [subzona, setSubzona] = useState('')
   const [notas, setNotas] = useState('')
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -1089,7 +1100,7 @@ function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, byWorkerI
     if (!taskTypeId && !customText.trim()) { setError('Elige un tipo del catálogo o escribe un texto.'); return }
     setSaving(true); setError(null)
     try {
-      await api('POST', '/equipacion/tasks', { assignmentId, date, taskTypeId, customText: customText.trim(), notas, byWorkerId })
+      await api('POST', '/equipacion/tasks', { assignmentId, date, taskTypeId, customText: customText.trim(), subzona: subzona || null, notas, byWorkerId })
       onDone()
     } catch (e) { setError(e.message) } finally { setSaving(false) }
   }
@@ -1108,7 +1119,14 @@ function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, byWorkerI
         <input type="text" value={customText} onChange={e => { setCustomText(e.target.value); if (e.target.value) setTaskTypeId('') }} placeholder="p. ej. arreglar una presa suelta" />
       </div>
       <div className="org__add-row"><label>Día</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-      {taskTypeId && <div className="org__add-row"><label>Notas (opcional)</label><input type="text" value={notas} onChange={e => setNotas(e.target.value)} /></div>}
+      <div className="org__add-row">
+        <label>Subzona (opcional)</label>
+        <select value={subzona} onChange={e => setSubzona(e.target.value)}>
+          <option value="">— sin especificar —</option>
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(n => <option key={n} value={n}>#{n}</option>)}
+        </select>
+      </div>
+      <div className="org__add-row"><label>Notas (opcional)</label><input type="text" value={notas} onChange={e => setNotas(e.target.value)} /></div>
       {error && <p className="org__error">{error}</p>}
       <div className="org__add-actions">
         <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
@@ -1124,6 +1142,7 @@ function TaskEditForm({ task, byWorkerId, assignments, assignmentId, onDone, onC
   const esLibre = task.taskTypeId === 'custom'
   const [texto, setTexto] = useState(task.params?.texto || '')
   const [notas, setNotas] = useState(task.params?.notas || '')
+  const [subzona, setSubzona] = useState(task.params?.subzona || '')
   const [date, setDate] = useState(task.date)
   const [persona, setPersona] = useState(assignmentId)
   const [error, setError] = useState(null)
@@ -1136,6 +1155,7 @@ function TaskEditForm({ task, byWorkerId, assignments, assignmentId, onDone, onC
       body.customText = texto.trim()
     }
     if (notas.trim() !== (task.params?.notas || '')) body.notas = notas.trim()
+    if (subzona !== (task.params?.subzona || '')) body.subzona = subzona || null
     if (date !== task.date) body.date = date
     if (assignments && persona !== assignmentId) body.assignmentId = persona
     if (Object.keys(body).length === 1) { onCancel(); return }
@@ -1150,6 +1170,13 @@ function TaskEditForm({ task, byWorkerId, assignments, assignmentId, onDone, onC
     <div className="org__add-form">
       {esLibre && <div className="org__add-row"><label>Texto</label><input type="text" value={texto} onChange={e => setTexto(e.target.value)} /></div>}
       <div className="org__add-row"><label>Notas</label><input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="opcional" /></div>
+      <div className="org__add-row">
+        <label>Subzona</label>
+        <select value={subzona} onChange={e => setSubzona(e.target.value)}>
+          <option value="">— sin especificar —</option>
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(n => <option key={n} value={n}>#{n}</option>)}
+        </select>
+      </div>
       <div className="org__add-row"><label>Día</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
       {assignments && (
         <div className="org__add-row">
@@ -1176,14 +1203,22 @@ function TaskEditForm({ task, byWorkerId, assignments, assignmentId, onDone, onC
 function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canEdit, onEdit, onDelete, deleting }) {
   const params = Object.entries(task.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
   const movedAway = task.status === 'retrasada' && task.movedToTaskId
-  const isRetrasada = task.status === 'retrasada'
+  // Una tarea ya hecha no es "un atraso visible" — solo importa que quede constancia discreta
+  // de que venía de antes (cowork, 11/11 05:40: en rojo a todo volumen parecía que Álvaro lo
+  // lleva todo atrasado en la demo). El aviso llamativo solo es para lo que SIGUE sin hacer.
+  const isRetrasada = task.status === 'retrasada' && !task.done
   const canPostpone = !task.done && !movedAway
   const rastro = rastroTarea(task)
 
   let badge = null
-  if (movedAway) badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
-  else if (task.postponedCount > 0) badge = `RETRASADA (×${task.postponedCount}) · prevista ${dayLabel(task.originalDate || task.date)}`
-  else if (isMissed) badge = 'FALTÓ'
+  if (task.done) {
+    if (movedAway) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
+    else if (task.postponedCount > 0) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
+  } else {
+    if (movedAway) badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
+    else if (task.postponedCount > 0) badge = `RETRASADA (×${task.postponedCount}) · prevista ${dayLabel(task.originalDate || task.date)}`
+    else if (isMissed) badge = 'FALTÓ'
+  }
 
   return (
     <div

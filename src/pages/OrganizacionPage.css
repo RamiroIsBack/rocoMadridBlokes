@@ -436,6 +436,9 @@
   border-radius: 3px;
 }
 .org__tile--retrasada .org__tile-badge { background: #c8961e; }
+/* Tarea ya hecha que venía de antes: solo una nota discreta, no la alarma roja/ámbar de
+   arriba — esa es para lo que SIGUE sin hacer (cowork, 11/11 05:40). */
+.org__tile--done .org__tile-badge { background: none; color: var(--color-text-secondary); font-weight: 600; letter-spacing: normal; padding: 0; }
 .org__tile-postpone {
   flex: 0 0 100%;
   background: none;

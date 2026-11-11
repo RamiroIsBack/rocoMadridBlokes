@@ -11349,17 +11349,19 @@ function progreso_equip_create_loose_task($request) {
 
     $custom_text = trim((string) $request->get_param('customText'));
     $task_type_id = sanitize_text_field((string) $request->get_param('taskTypeId'));
+    // subzona/notas valen igual para una tarea de texto libre que para una del catálogo
+    // (cowork, 11/11 05:40: antes se perdían silenciosamente en texto libre).
+    $params = array();
     if ($custom_text !== '') {
         $task_type_id = 'custom';
-        $params = array('texto' => sanitize_text_field($custom_text));
-    } else {
-        if ($task_type_id === '') return new WP_Error('invalid_data', 'Elige un tipo del catálogo o escribe un texto.', array('status' => 400));
-        $params = array();
-        $subzona = $request->get_param('subzona');
-        if ($subzona !== null && $subzona !== '') $params['subzona'] = intval($subzona);
-        $notas = trim((string) $request->get_param('notas'));
-        if ($notas !== '') $params['notas'] = sanitize_text_field($notas);
+        $params['texto'] = sanitize_text_field($custom_text);
+    } elseif ($task_type_id === '') {
+        return new WP_Error('invalid_data', 'Elige un tipo del catálogo o escribe un texto.', array('status' => 400));
     }
+    $subzona = $request->get_param('subzona');
+    if ($subzona !== null && $subzona !== '') $params['subzona'] = intval($subzona);
+    $notas = trim((string) $request->get_param('notas'));
+    if ($notas !== '') $params['notas'] = sanitize_text_field($notas);
 
     $wpdb->insert(progreso_equip_table('tasks'), array(
         'assignment_id' => $assignment_id, 'task_type_id' => $task_type_id, 'task_date' => $date,
@@ -12942,9 +12944,9 @@ function progreso_equip_update_task($request) {
         $upd['assignment_id'] = $new_assignment_id;
         $fmt[] = '%d';
     }
-    // Editar el texto (tareas de texto libre) o las notas (Ramiro, 5/11 06:54: hasta ahora solo
-    // se podía mover o quitar una tarea, no corregirla).
-    if ($request->get_param('customText') !== null || $request->get_param('notas') !== null) {
+    // Editar el texto (tareas de texto libre), las notas (Ramiro, 5/11 06:54) o la subzona
+    // (cowork, 11/11 05:40: "+ Tarea" ya admitía subzona al crear, pero editarla no se podía).
+    if ($request->get_param('customText') !== null || $request->get_param('notas') !== null || $request->get_param('subzona') !== null) {
         $row = $wpdb->get_row($wpdb->prepare("SELECT task_type_id, params FROM " . progreso_equip_table('tasks') . " WHERE id = %d", $id), ARRAY_A);
         if (!$row) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
         $params = json_decode($row['params'], true) ?: array();
@@ -12956,6 +12958,10 @@ function progreso_equip_update_task($request) {
         if ($request->get_param('notas') !== null) {
             $notas = sanitize_text_field(trim((string) $request->get_param('notas')));
             if ($notas === '') unset($params['notas']); else $params['notas'] = $notas;
+        }
+        if ($request->get_param('subzona') !== null) {
+            $subzona = intval($request->get_param('subzona'));
+            if ($subzona < 1 || $subzona > 8) unset($params['subzona']); else $params['subzona'] = $subzona;
         }
         $upd['params'] = wp_json_encode($params ?: new stdClass()); $fmt[] = '%s';
     }
