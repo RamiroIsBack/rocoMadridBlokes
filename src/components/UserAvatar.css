@@ -35,7 +35,7 @@
 }
 
 .ua__initials {
-  color: #888;
+  color: var(--color-text-secondary);
   font-weight: 700;
   font-family: inherit;
   line-height: 1;
@@ -60,7 +60,10 @@
 }
 
 .ua-nick {
-  color: #ccc;
+  /* Auditoría de contraste (cowork, 11/11 10:05, causa 3): "#ccc" estaba pensado para un fondo
+     siempre oscuro — aquí este componente se usa en páginas que siguen el tema (Ligas,
+     Progreso → Yo), así que en claro quedaba gris claro sobre crema (1.4:1). */
+  color: var(--color-text-secondary);
   font-size: 0.82rem;
   font-weight: 500;
   overflow: hidden;
@@ -75,6 +78,6 @@
 .ua-nick--lg  { font-size: 1rem;    max-width: 180px; }
 
 .ua-nick--me {
-  color: #f5c842;
+  color: var(--color-accent-hover);
   font-weight: 700;
 }

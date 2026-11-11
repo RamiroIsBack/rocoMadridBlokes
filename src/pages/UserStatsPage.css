@@ -515,11 +515,15 @@
   font-weight: 800;
   letter-spacing: 0.03em;
   line-height: 1.1;
+  color: var(--color-text-primary);
 }
 
+/* Auditoría de contraste (cowork, 11/11 10:05, causa 3): este widget estaba pensado para un
+   fondo siempre oscuro (grises/dorado claros), pero vive en una página que sigue el tema — en
+   claro quedaba casi invisible sobre crema. */
 .usl-info {
   font-size: 0.75rem;
-  color: #aaa;
+  color: var(--color-text-secondary);
   margin-top: 2px;
 }
 
@@ -544,35 +548,53 @@
   background: rgba(245,200,66,0.07);
 }
 
-.usl-row--me .ua-nick { color: #f5c842; font-weight: 700; }
+.usl-row--me .ua-nick { color: var(--color-accent-hover); font-weight: 700; }
 
 .usl-row .ua-wrap { flex: 1; min-width: 0; }
 
 .usl-rank {
   font-size: 0.68rem;
-  color: #555;
+  color: var(--color-text-secondary);
   min-width: 24px;
   font-variant-numeric: tabular-nums;
 }
 
 .usl-pts {
   font-size: 0.72rem;
-  color: #777;
+  color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.usl-row--me .usl-pts { color: #f5c842; }
+.usl-row--me .usl-pts { color: var(--color-accent-hover); }
 
 .usl-link {
   display: block;
   text-align: right;
   font-size: 0.72rem;
-  color: #f5c842;
+  color: var(--color-accent-hover);
   text-decoration: none;
   padding: 4px 10px;
   opacity: 0.8;
 }
 
 .usl-link:hover { opacity: 1; }
+
+/* Auditoría de contraste (cowork, 11/11 10:05): título y contadores con color fijo oscuro, sin
+   fondo propio — en modo oscuro quedaban negros sobre el fondo oscuro de la página (1.1:1).
+   Solo override en oscuro, el claro no cambia. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .user-stats__title,
+  :root:not([data-theme="light"]) .user-stats__color-count,
+  :root:not([data-theme="light"]) .user-stats__month-count,
+  :root:not([data-theme="light"]) .user-stats__rating-count {
+    color: var(--color-text-primary);
+  }
+}
+:root[data-theme="dark"] .user-stats__title,
+:root[data-theme="dark"] .user-stats__color-count,
+:root[data-theme="dark"] .user-stats__month-count,
+:root[data-theme="dark"] .user-stats__rating-count {
+  color: var(--color-text-primary);
+}
 

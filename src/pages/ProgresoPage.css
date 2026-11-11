@@ -31,7 +31,7 @@
   flex: 1;
   font-size: 0.84rem;
   font-weight: 700;
-  color: #ccc;
+  color: var(--color-text-secondary);
 }
 
 .progreso-league__count {
@@ -59,7 +59,7 @@
 .progreso-league__link {
   display: block;
   font-size: 0.7rem;
-  color: #f5c842;
+  color: var(--color-accent-hover);
   text-decoration: none;
   margin-top: 6px;
   opacity: 0.8;
@@ -332,3 +332,25 @@
     height: 140px;
   }
 }
+
+/* Auditoría de contraste (cowork, 11/11 10:05): título y textos de la lista/ranking con color
+   fijo oscuro, sin fondo propio — en modo oscuro quedaban negros sobre el fondo oscuro de la
+   página (1.1:1). Solo override en oscuro, el claro no cambia. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .progreso__title,
+  :root:not([data-theme="light"]) .progreso__legend-name,
+  :root:not([data-theme="light"]) .progreso__legend-count,
+  :root:not([data-theme="light"]) .progreso__rank-name,
+  :root:not([data-theme="light"]) .progreso__rank-value {
+    color: var(--color-text-primary);
+  }
+  :root:not([data-theme="light"]) .progreso__rank-bar-wrap { background: var(--color-surface); }
+}
+:root[data-theme="dark"] .progreso__title,
+:root[data-theme="dark"] .progreso__legend-name,
+:root[data-theme="dark"] .progreso__legend-count,
+:root[data-theme="dark"] .progreso__rank-name,
+:root[data-theme="dark"] .progreso__rank-value {
+  color: var(--color-text-primary);
+}
+:root[data-theme="dark"] .progreso__rank-bar-wrap { background: var(--color-surface); }
