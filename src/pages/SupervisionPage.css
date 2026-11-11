@@ -6,6 +6,11 @@
   font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
+/* Cowork 11/11 15:00: Recharts pinta el texto de la leyenda del mismo color que la serie
+   (vivo, pensado para fondo oscuro) — en claro falla igual que los ejes. El color de la serie
+   ya lo lleva el cuadradito de al lado; el texto pasa a uno solo, de tema. */
+.recharts-legend-item-text { color: var(--color-text-primary) !important; }
+
 .sv-page__title {
   font-size: 1.5rem;
   font-weight: 800;
@@ -241,7 +246,7 @@
 
 .sv-td-time {
   padding: 7px 16px 7px 0;
-  color: #aaa;
+  color: var(--color-text-secondary);
   font-size: 0.78rem;
   font-weight: 600;
   white-space: nowrap;
@@ -264,7 +269,7 @@
   line-height: 1;
 }
 
-.sv-cell--empty      .sv-cell-num { color: #808080; }
+.sv-cell--empty      .sv-cell-num { color: #999; }
 .sv-cell--sched-empty .sv-cell-num { background: #3d1028; color: #f472b6; }
 .sv-cell--low        .sv-cell-num { background: #14532d; color: #86efac; }
 .sv-cell--med        .sv-cell-num { background: #713f12; color: #fde68a; }
@@ -281,8 +286,8 @@
 }
 
 .sv-tr-foot { border-top: 2px solid #2a2015; }
-.sv-tr-foot .sv-td-time { color: #f0ece0; font-weight: 800; }
-.sv-tr-foot .sv-td-total { color: #f5c842; }
+.sv-tr-foot .sv-td-time { color: var(--color-text-primary); font-weight: 800; }
+.sv-tr-foot .sv-td-total { color: var(--color-accent-hover); }
 
 .sv-td-grand {
   padding: 7px 12px;
@@ -601,7 +606,7 @@
   align-items: center;
   gap: 5px;
   font-size: 0.65rem;
-  color: #6b5e41;
+  color: var(--color-text-secondary);
 }
 .sv-member-legend__item::before {
   content: '';
@@ -753,6 +758,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
+  color: var(--color-text-primary);
   margin-bottom: 2px;
 }
 .sv-group-summary__row {

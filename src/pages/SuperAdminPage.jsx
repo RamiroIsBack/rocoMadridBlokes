@@ -26,6 +26,22 @@ const PERIOD_OPTIONS = [
 const STORE_COLORS = { store1: '#f5c842', store2: '#60a5fa', total: '#34d399' }
 const STORE_LABELS = { store1: 'Rocoteca', store2: 'Club', total: 'Total' }
 
+// Cowork 11/11 15:00: los colores de KPI (--kpi-color) son vivos, pensados para el panel
+// siempre oscuro de antes — ahora que el panel sigue el tema (d84e788), en claro fallan sobre
+// crema. Versión oscurecida de cada uno para claro, solo cuando se usan como TEXTO (no para
+// las líneas/puntos decorativos de las gráficas, que se quedan vivos en los dos modos).
+const KPI_COLOR_CLARO = {
+  '#f5c842': '#8a6400',
+  '#60a5fa': '#1d4ed8',
+  '#34d399': '#047857',
+  '#f97316': '#c2410c',
+  '#a78bfa': '#6d28d9',
+  '#888':    '#5e5650',
+}
+function kpiColorTema(hex, oscuro) {
+  return oscuro ? hex : (KPI_COLOR_CLARO[hex] || hex)
+}
+
 function fmtEur(v) { return `${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €` }
 function fmtMonth(m) {
   if (!m) return ''
@@ -72,7 +88,8 @@ function currentQuarterMonths() {
 function RevenueSection({ excludeTransfer, onToggleExclude }) {
   // Cowork 11/11 13:55: var(--color-text-secondary) en el fill de Recharts no se repinta solo
   // al cambiar de tema (atributo SVG fijo) — se resuelve a mano con useTemaOscuro().
-  const tickFill = useTemaOscuro() ? '#b3ab9a' : '#5e5650'
+  const oscuro = useTemaOscuro()
+  const tickFill = oscuro ? '#b3ab9a' : '#5e5650'
   const [months, setMonths]      = useState(12)
   const { data, loading, error } = useRevenue(months, excludeTransfer)
 
@@ -130,12 +147,12 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
               { key: 'store2', label: 'Tienda Club' },
               { key: 'total',  label: 'Total combinado' },
             ].map(({ key, label }) => (
-              <div key={key} className="sa-kpi" style={{ '--kpi-color': STORE_COLORS[key] }}>
+              <div key={key} className="sa-kpi" style={{ '--kpi-color': kpiColorTema(STORE_COLORS[key], oscuro) }}>
                 <span className="sa-kpi__value">{fmtEur(totals[key] || 0)}</span>
                 <span className="sa-kpi__label">{label}</span>
               </div>
             ))}
-            <div className="sa-kpi" style={{ '--kpi-color': IVA_COLOR }}>
+            <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema(IVA_COLOR, oscuro) }}>
               <span className="sa-kpi__value">{fmtEur(quarterIva)}</span>
               <span className="sa-kpi__label">IVA {quarterLabel()}</span>
             </div>
@@ -518,6 +535,7 @@ function classRevPerStudent(c) {
 }
 
 function ClassProfitabilitySection() {
+  const oscuro = useTemaOscuro()
   const [months, setMonths] = useState(6)
   const { data, loading, error } = useClasses(months)
 
@@ -712,11 +730,11 @@ function ClassesSection_UNUSED() {
         <>
           {hasRevenue && (
             <div className="sa-kpis">
-              <div className="sa-kpi" style={{ '--kpi-color': '#34d399' }}>
+              <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#34d399', oscuro) }}>
                 <span className="sa-kpi__value">{fmtEur(totalRevenue)}</span>
                 <span className="sa-kpi__label">Ingresos WC clases ({months}m)</span>
               </div>
-              <div className="sa-kpi" style={{ '--kpi-color': '#888' }}>
+              <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#888', oscuro) }}>
                 <span className="sa-kpi__value">—</span>
                 <span className="sa-kpi__label">Ing. banco clases (pendiente PHP /expenses income_tpv)</span>
               </div>
@@ -835,7 +853,8 @@ function fmtPLVal(v) {
 }
 
 function PLTab() {
-  const tickFill = useTemaOscuro() ? '#b3ab9a' : '#5e5650'
+  const oscuro = useTemaOscuro()
+  const tickFill = oscuro ? '#b3ab9a' : '#5e5650'
   const { data: expData, loading } = useExpenses('', 'all', true)
   const [metric,  setMetric ] = useState('ventas')
   const [view,    setView   ] = useState('comparativa')
@@ -952,7 +971,7 @@ function PLTab() {
 
       <div className="sa-kpis">
         {[2024, 2025, 2026].map(yr => (
-          <div key={yr} className="sa-kpi" style={{ '--kpi-color': PL_YEAR_COLORS[yr] }}>
+          <div key={yr} className="sa-kpi" style={{ '--kpi-color': kpiColorTema(PL_YEAR_COLORS[yr], oscuro) }}>
             <span className="sa-kpi__value">{fmtPLVal(kpis[yr].total)}</span>
             <span className="sa-kpi__label">{yr}{kpis[yr].n < 12 ? ` (${kpis[yr].n} m)` : ''}{yr === 2026 ? ' · banco' : ''}</span>
           </div>
@@ -1012,6 +1031,7 @@ function PLTab() {
 }
 
 function PLAccordion({ live2026, lastMonth }) {
+  const oscuro = useTemaOscuro()
   const [open, setOpen] = useState(new Set())
 
   useEffect(() => {
@@ -1053,9 +1073,9 @@ function PLAccordion({ live2026, lastMonth }) {
                   <thead>
                     <tr>
                       <th>Métrica</th>
-                      <th style={{ color: PL_YEAR_COLORS[2024] }}>2024</th>
-                      <th style={{ color: PL_YEAR_COLORS[2025] }}>2025</th>
-                      <th style={{ color: PL_YEAR_COLORS[2026] }}>2026 banco</th>
+                      <th style={{ color: kpiColorTema(PL_YEAR_COLORS[2024], oscuro) }}>2024</th>
+                      <th style={{ color: kpiColorTema(PL_YEAR_COLORS[2025], oscuro) }}>2025</th>
+                      <th style={{ color: kpiColorTema(PL_YEAR_COLORS[2026], oscuro) }}>2026 banco</th>
                       <th>Var. 25/24</th>
                     </tr>
                   </thead>

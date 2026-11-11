@@ -4,6 +4,23 @@ import {
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import useTemaOscuro from '../hooks/useTemaOscuro'
+
+// Cowork 11/11 15:00: mismo caso que Superadmin — los --kpi-color vivos de las pestañas que
+// ya eran "siempre oscuras" (Alumnos/Evolución/Clases/Histórico, dentro de .sv-section) ahora
+// que el panel sigue el tema (d84e788) fallan en claro. NO aplica a los --kpi-color de Grupos
+// (GruposTab, zona "siempre clara" independiente del selector — pregunta abierta a Ramiro en
+// contraste.md, ahí no se toca hasta que responda).
+const KPI_COLOR_CLARO = {
+  '#f5c842': '#8a6400',
+  '#60a5fa': '#1d4ed8',
+  '#34d399': '#047857',
+  '#f97316': '#c2410c',
+  '#a78bfa': '#6d28d9',
+  '#f87171': '#b91c1c',
+}
+function kpiColorTema(hex, oscuro) {
+  return oscuro ? hex : (KPI_COLOR_CLARO[hex] || hex)
+}
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
   gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente,
@@ -344,7 +361,8 @@ function classLabel(c) {
 }
 
 function TrendCharts({ data, months, selectedKey, onSelectKey }) {
-  const CHART_STYLE = chartStyle(useTemaOscuro())
+  const oscuro = useTemaOscuro()
+  const CHART_STYLE = chartStyle(oscuro)
   const mRange = useMemo(() => monthRange(months), [months])
 
   const classKey = selectedKey || (data[0] ? `${data[0].dia}|${data[0].horario}|${data[0].edad}` : '')
@@ -581,9 +599,9 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
         />
         <div className="sv-group-summary">
           {[
-            { label: 'Niños',           classes: classGroups.kids,    color: '#34d399' },
-            { label: 'Mañanas adultos', classes: classGroups.morning, color: '#f5c842' },
-            { label: 'Tardes adultos',  classes: classGroups.evening, color: '#60a5fa' },
+            { label: 'Niños',           classes: classGroups.kids,    color: kpiColorTema('#34d399', oscuro) },
+            { label: 'Mañanas adultos', classes: classGroups.morning, color: kpiColorTema('#f5c842', oscuro) },
+            { label: 'Tardes adultos',  classes: classGroups.evening, color: kpiColorTema('#60a5fa', oscuro) },
           ].map(({ label, classes, color }) => {
             const nonEmpty = classes.filter(c => c.effectiveActive > 0)
             const empty    = classes.filter(c => c.effectiveActive === 0)
@@ -641,6 +659,7 @@ const BUCKET_LABEL = { adultos_grupo: 'Adultos (grupo)', ninos_adolescentes: 'Ni
 // suscripción (distinto del pagador), "persona" aquí es en realidad "cuenta": una familia
 // con una sola cuenta para varios hijos cuenta como 1.
 function PeopleSummaryKpis() {
+  const oscuro = useTemaOscuro()
   const { data, loading, error } = usePeopleSummary()
   if (loading) return <div className="sv-loading">Cargando personas…</div>
   if (error)   return <div className="sv-error">Error: {error}</div>
@@ -654,25 +673,25 @@ function PeopleSummaryKpis() {
 
   return (
     <div className="sv-kpis">
-      <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }}
+      <div className="sv-kpi" style={{ '--kpi-color': kpiColorTema('#60a5fa', oscuro) }}
         title="Cuentas de facturación con una suscripción en vigor (activa o ya cancelada pero con acceso hasta fin de periodo). No es el nº exacto de alumnos: una cuenta puede tener varios hijos/hermanos — eso lo resolverá el campo «Alumno» de la migración (sección 8).">
         <span className="sv-kpi__value">{data.cuentas_total}</span>
         <span className="sv-kpi__label">Cuentas en vigor ⓘ</span>
       </div>
       {Object.keys(BUCKET_LABEL).map(b => (
-        <div key={b} className="sv-kpi" style={{ '--kpi-color': '#a78bfa' }}
+        <div key={b} className="sv-kpi" style={{ '--kpi-color': kpiColorTema('#a78bfa', oscuro) }}
           title={`Días a la semana de ${BUCKET_LABEL[b]}: cuántas cuentas de este grupo vienen 1, 2 o 3+ días (sumando todas sus suscripciones). Niños/adolescentes y Pilates/Yoga van aparte del resto. Solo cuenta lo que hay suscrito en la web — un alumno que paga por fuera (transferencia, efectivo) y no tiene suscripción en la web no sale aquí.`}>
           <span className="sv-kpi__value">{porDias(b)}</span>
           <span className="sv-kpi__label">{BUCKET_LABEL[b]} ⓘ</span>
         </div>
       ))}
-      <div className="sv-kpi" style={{ '--kpi-color': '#34d399' }}
+      <div className="sv-kpi" style={{ '--kpi-color': kpiColorTema('#34d399', oscuro) }}
         title="Suma de plazas por sesión (día + hora): una suscripción Martes-Jueves cuenta una vez en martes y una vez en jueves. Mismo criterio que la columna Total de «Horario por día», salvo que aquí sí se incluyen las pending-cancel (ya cancelaron, pero siguen viniendo hasta fin de periodo) — por eso puede salir algo más alto que el total de «Horario por día», que las cuenta aparte.">
         <span className="sv-kpi__value">{data.sesiones_semana}</span>
         <span className="sv-kpi__label">Sesiones/semana ⓘ</span>
       </div>
       {data.ingreso_mes_total != null && (
-        <div className="sv-kpi" style={{ '--kpi-color': '#f5c842' }}
+        <div className="sv-kpi" style={{ '--kpi-color': kpiColorTema('#f5c842', oscuro) }}
           title="Ingreso mensual equivalente de todas las suscripciones en vigor: las trimestrales se dividen por 3 y las anuales por 12, para poder comparar con un mes normal.">
           <span className="sv-kpi__value">{fmtEur(data.ingreso_mes_total)}</span>
           <span className="sv-kpi__label">Ingreso mensual equiv. ⓘ</span>
@@ -684,6 +703,7 @@ function PeopleSummaryKpis() {
 
 // ─── Clases tab ───────────────────────────────────────────────────────────────
 function ClasesTab() {
+  const oscuro = useTemaOscuro()
   const [months, setMonths]           = useState(6)
   const [filter, setFilter]           = useState('todos')
   const [selectedClassKey, setSelectedClassKey] = useState('')
@@ -752,7 +772,7 @@ function ClasesTab() {
 
           {hasRevenue && (
             <div className="sv-kpis">
-              <div className="sv-kpi" style={{ '--kpi-color': '#34d399' }}>
+              <div className="sv-kpi" style={{ '--kpi-color': kpiColorTema('#34d399', oscuro) }}>
                 <span className="sv-kpi__value">{fmtEur(totalRevenue)}</span>
                 <span className="sv-kpi__label">Ingresos WC clases ({months}m)</span>
               </div>
