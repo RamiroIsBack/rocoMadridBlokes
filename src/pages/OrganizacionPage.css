@@ -572,16 +572,32 @@
 
 /* ── Plan de la compe: columnas por equipador (Ramiro, 11/11 05:01, punto 7) — sustituye a la
    lista plana "Semana del lunes... · Compe: ... — Álvaro" ("se ve muy feo y mal"). Reaprovecha
-   .org__board/.org__board-col de las semanas normales. ── */
+   .org__board/.org__board-col de las semanas normales.
+   🐞 Cowork 11/11 10:15: en vez del grid de las semanas (que deja huecos vacíos cuando las
+   columnas no llenan la fila exacta, porque aquí hay pocas columnas más anchas, una por
+   persona), fila única con scroll horizontal — "como las semanas normales" se refería al
+   aspecto, no al grid en concreto. ── */
+.org__board--compe-plan {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 10px;
+}
+.org__board--compe-plan .org__board-col {
+  flex: 0 0 280px;
+  min-width: 280px;
+}
+.org__board-col--expandida { flex: 1 1 100%; max-width: 480px; }
 .org__board--compe-plan .org__board-col-title--btn {
   background: none; border: none; width: 100%; text-align: left; padding: 0; cursor: pointer;
-  font-weight: 700; color: #2a2015; margin: 0 0 6px; font-size: 0.95rem; text-decoration: underline dotted;
+  font-weight: 700; color: var(--color-text-primary); margin: 0 0 6px; font-size: 0.95rem;
 }
-.org__board-col--expandida { grid-column: 1 / -1; max-width: 480px; }
+.org__board--compe-plan .org__board-col-title--btn::before { content: '▸ '; color: var(--color-text-secondary); }
 .org__comp-plan-bloques { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .org__comp-plan-bloque-chip {
   display: inline-flex; align-items: center; gap: 4px; background: var(--color-surface);
   border: 1px solid var(--color-border); border-radius: 999px; padding: 2px 8px; font-size: 0.78rem; font-weight: 700;
+  color: var(--color-text-primary);
 }
 .org__comp-plan-bloque-chip--probado { border-color: var(--state-ok); }
 .org__comp-plan-bloque-color { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
@@ -590,3 +606,89 @@
 }
 .org__comp-plan-bloque-chip select { font-size: 0.72rem; max-width: 110px; }
 .org__board-col--sin-asignar { background: var(--color-bg); border-style: dashed; }
+/* 🐞 Cowork 11/11 10:15: "el checkbox se monta encima de la primera letra" — el plan de la
+   compe reutiliza .org__task-list, pero .org__task label más abajo en este mismo fichero pone
+   gap:0 pensado para la fila de "mover tarea" (que añade su propio margen con margin-left:auto
+   en .org__task-move). Se le da su hueco aquí sin tocar esa regla compartida. */
+.org__board--compe-plan .org__task-list input[type="checkbox"] { margin-right: 8px; }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   MODO OSCURO — Organización (Ramiro/Cowork, 11/11 10:05: auditoría de contraste, "siguiente
+   pantalla a pasar: Organización, porque se usa a diario"). Resto de la página sigue con los
+   mismos colores de siempre: esto solo añade overrides cuando [data-theme="dark"] (o el
+   sistema en oscuro sin elegir "Claro" a mano), sin tocar ninguna regla de arriba. Cubre las
+   tarjetas/tableros de uso diario (Hoy, Semana, plan de la compe) y los títulos — el resto de
+   Organización (reglas, danger zone, chips de holdsets) queda para la siguiente ronda, según
+   lo acordado ("pantalla a pantalla"). ── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .org__section-title,
+  :root:not([data-theme="light"]) .org__who-name,
+  :root:not([data-theme="light"]) .org__board-col-title,
+  :root:not([data-theme="light"]) .org__tile-name,
+  :root:not([data-theme="light"]) .org__task-name,
+  :root:not([data-theme="light"]) .org__worker-name,
+  :root:not([data-theme="light"]) .org__assignment-name,
+  :root:not([data-theme="light"]) .org__compe-card-nombre,
+  :root:not([data-theme="light"]) .org__compe-resumen-nombre,
+  :root:not([data-theme="light"]) .org__historico-title,
+  :root:not([data-theme="light"]) .org__block-info,
+  :root:not([data-theme="light"]) .org__whoami-btn {
+    color: var(--color-text-primary);
+  }
+  :root:not([data-theme="light"]) .org__board-day-label { color: var(--color-accent-hover); }
+  :root:not([data-theme="light"]) .org__btn--ghost { color: var(--color-text-primary); border-color: var(--color-border); }
+  :root:not([data-theme="light"]) .org__link-btn { color: var(--color-accent-hover); }
+  :root:not([data-theme="light"]) .org__switch-btn,
+  :root:not([data-theme="light"]) .org__whoami-btn,
+  :root:not([data-theme="light"]) .org__board-col,
+  :root:not([data-theme="light"]) .org__tile,
+  :root:not([data-theme="light"]) .org__task,
+  :root:not([data-theme="light"]) .org__block-row,
+  :root:not([data-theme="light"]) .org__week-row,
+  :root:not([data-theme="light"]) .org__historico-row,
+  :root:not([data-theme="light"]) .org__compe-card,
+  :root:not([data-theme="light"]) .org__holdset-chip {
+    background: var(--color-surface);
+    border-color: var(--color-border);
+  }
+  :root:not([data-theme="light"]) .org__compe-resumen { background: var(--color-bg); border-color: var(--state-warn); }
+  :root:not([data-theme="light"]) .org__block-row--planificado { background: var(--color-bg); }
+  :root:not([data-theme="light"]) .org__tile--missed { background: rgba(248, 113, 113, 0.14); }
+  :root:not([data-theme="light"]) .org__tile--retrasada,
+  :root:not([data-theme="light"]) .org__task--retrasada { background: rgba(245, 200, 66, 0.14); }
+}
+:root[data-theme="dark"] .org__section-title,
+:root[data-theme="dark"] .org__who-name,
+:root[data-theme="dark"] .org__board-col-title,
+:root[data-theme="dark"] .org__tile-name,
+:root[data-theme="dark"] .org__task-name,
+:root[data-theme="dark"] .org__worker-name,
+:root[data-theme="dark"] .org__assignment-name,
+:root[data-theme="dark"] .org__compe-card-nombre,
+:root[data-theme="dark"] .org__compe-resumen-nombre,
+:root[data-theme="dark"] .org__historico-title,
+:root[data-theme="dark"] .org__block-info,
+:root[data-theme="dark"] .org__whoami-btn {
+  color: var(--color-text-primary);
+}
+:root[data-theme="dark"] .org__board-day-label { color: var(--color-accent-hover); }
+:root[data-theme="dark"] .org__btn--ghost { color: var(--color-text-primary); border-color: var(--color-border); }
+:root[data-theme="dark"] .org__link-btn { color: var(--color-accent-hover); }
+:root[data-theme="dark"] .org__switch-btn,
+:root[data-theme="dark"] .org__whoami-btn,
+:root[data-theme="dark"] .org__board-col,
+:root[data-theme="dark"] .org__tile,
+:root[data-theme="dark"] .org__task,
+:root[data-theme="dark"] .org__block-row,
+:root[data-theme="dark"] .org__week-row,
+:root[data-theme="dark"] .org__historico-row,
+:root[data-theme="dark"] .org__compe-card,
+:root[data-theme="dark"] .org__holdset-chip {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+:root[data-theme="dark"] .org__compe-resumen { background: var(--color-bg); border-color: var(--state-warn); }
+:root[data-theme="dark"] .org__block-row--planificado { background: var(--color-bg); }
+:root[data-theme="dark"] .org__tile--missed { background: rgba(248, 113, 113, 0.14); }
+:root[data-theme="dark"] .org__tile--retrasada,
+:root[data-theme="dark"] .org__task--retrasada { background: rgba(245, 200, 66, 0.14); }

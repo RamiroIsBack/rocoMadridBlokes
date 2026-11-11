@@ -13016,23 +13016,28 @@ function progreso_equip_create_week($request) {
 function progreso_equip_contar_blokes_reales_semana($week_start, $nombres_por_assignment) {
     if (!$nombres_por_assignment) return array();
     $fin = date('Y-m-d', strtotime($week_start) + 6 * 86400);
-    switch_to_blog(1);
     global $wpdb;
-    $rows = $wpdb->get_results($wpdb->prepare(
-        "SELECT pm.meta_value AS equipador, COUNT(*) AS n
-         FROM {$wpdb->posts} p
-         JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID AND pm.meta_key = 'bloke_equipador'
-         WHERE p.post_type = 'blokes' AND p.post_status IN ('publish', 'draft')
-           AND DATE(p.post_date) BETWEEN %s AND %s
-         GROUP BY pm.meta_value", $week_start, $fin
-    ), ARRAY_A);
+    switch_to_blog(1);
+    // 🐞 Cowork 11/11 10:15: seguía a 0 para todos (no solo Álvaro) tras la normalización de
+    // tildes — señal de que el problema real era otro: `bloke_equipador` se lee aquí con SQL
+    // directo contra `meta_key = 'bloke_equipador'`, pero el campo ACF puede guardarse con otra
+    // clave real si vive dentro de un grupo. Se cambia a `get_field()` (la propia API de ACF,
+    // la misma que usa BlokeForm.jsx para escribirlo vía update_field()) para no depender de
+    // adivinar la clave de wp_postmeta.
+    $post_ids = $wpdb->get_col($wpdb->prepare(
+        "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'blokes' AND post_status IN ('publish', 'draft')
+         AND DATE(post_date) BETWEEN %s AND %s", $week_start, $fin
+    ));
+    $rows = array();
+    foreach ($post_ids as $post_id) {
+        $equipador = get_field('bloke_equipador', intval($post_id));
+        if ($equipador) $rows[] = array('equipador' => $equipador, 'n' => 1);
+    }
     restore_current_blog();
 
-    // 🐞 Cowork 11/11 09:40: el conteo no sumaba para Álvaro. Causa probable: la tilde llega en
-    // forma Unicode "descompuesta" (p. ej. de Notion/Mac) y remove_accents() solo reconoce la
-    // forma "precompuesta" — se queda una marca diacrítica suelta e invisible que rompe la
-    // igualdad de strings. Se limpia cualquier resto no alfanumérico tras remove_accents, sin
-    // depender de la extensión intl.
+    // La tilde puede llegar en forma Unicode "descompuesta" (p. ej. de Notion/Mac) y
+    // remove_accents() solo reconoce la forma "precompuesta" — se limpia cualquier resto no
+    // alfanumérico tras remove_accents, sin depender de la extensión intl.
     $normaliza = function($s) {
         $s = remove_accents(strtolower(trim((string) $s)));
         $s = preg_replace('/[^a-z0-9\s]/', '', $s);

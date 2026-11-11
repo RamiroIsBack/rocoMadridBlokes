@@ -12,6 +12,12 @@ const GRADE_COLOR = {
   INTRO: '#9ca3af', VERDE: '#22c55e', AZUL: '#3b82f6', AMARILLO: '#eab308',
   ROJO: '#ef4444', NEGRO: '#1f2937', BLANCO: '#e5e7eb',
 }
+// Auditoría de contraste (cowork, 11/11 10:05, causa 5): texto blanco fijo sobre AMARILLO/VERDE
+// sale a 1.9-2.x. Negro en los fondos claros, blanco en los oscuros.
+const GRADE_TEXTO_OSCURO = new Set(['INTRO', 'VERDE', 'AMARILLO', 'BLANCO'])
+function textoSobreGrado(grado) {
+  return GRADE_TEXTO_OSCURO.has(grado) ? '#1f1f1f' : '#fff'
+}
 
 function getAuthHeaders() {
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
@@ -470,7 +476,7 @@ function BlockRow({ block, holdsets, onChanged }) {
   }
   return (
     <li className={`org__block-row${!block.done ? ' org__block-row--planificado' : ''}`}>
-      <span className="org__block-grade" style={{ background: GRADE_COLOR[block.grade] || '#ccc' }}>{block.grade}</span>
+      <span className="org__block-grade" style={{ background: GRADE_COLOR[block.grade] || '#ccc', color: textoSobreGrado(block.grade) }}>{block.grade}</span>
       <span className="org__block-info">
         Subzona #{block.subzone}{block.isTraverse ? ' · travesía' : ''}{holdsetNames ? ` · ${holdsetNames}` : ''}
         {!block.done && <span className="org__block-planificado-tag">planificado</span>}
@@ -1412,7 +1418,7 @@ function NormasView({ config, workers, canManage, onConfigChanged }) {
           <tbody>
             {config.grades.map(g => (
               <tr key={g.color}>
-                <td><span className="org__block-grade" style={{ background: GRADE_COLOR[g.color] }}>{g.color}</span></td>
+                <td><span className="org__block-grade" style={{ background: GRADE_COLOR[g.color], color: textoSobreGrado(g.color) }}>{g.color}</span></td>
                 <td>{g.range}{g.nota ? ` (${g.nota})` : ''}</td>
                 <td>{g.planificado ? 'Sí' : 'No'}{g.aviso ? ` — ⚠ ${g.aviso}` : ''}</td>
               </tr>
