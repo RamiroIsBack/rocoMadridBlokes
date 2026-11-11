@@ -148,8 +148,8 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
                 ))}
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-              <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 11 }} />
-              <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 11 }} width={56} />
+              <XAxis dataKey="month" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+              <YAxis tickFormatter={v => `${v}€`} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={56} />
               <Tooltip
                 contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                 labelStyle={{ color: '#f5c842' }}
@@ -167,8 +167,8 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
             <ResponsiveContainer width="100%" height={110}>
               <BarChart data={ivaData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
-                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={48} />
+                <XAxis dataKey="month" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={48} />
                 <Tooltip
                   contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                   labelStyle={{ color: IVA_COLOR }}
@@ -441,8 +441,8 @@ function ProductsSection({ excludeTransfer }) {
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
-                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={52} />
+                <XAxis dataKey="month" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={52} />
                 <Tooltip
                   contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                   labelStyle={{ color: '#f5c842' }}
@@ -724,10 +724,10 @@ function ClassesSection_UNUSED() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" horizontal={false} />
                 <XAxis
                   type="number"
-                  tick={{ fill: '#888', fontSize: 10 }}
+                  tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
                   tickFormatter={mode === 'ingresos' ? v => `${v}€` : undefined}
                 />
-                <YAxis type="category" dataKey="name" width={130} tick={{ fill: '#ccc', fontSize: 10 }} />
+                <YAxis type="category" dataKey="name" width={130} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
                 <Tooltip
                   contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                   labelStyle={{ color: '#f5c842' }}
@@ -781,8 +781,8 @@ function ClassesSection_UNUSED() {
               <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={histData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                  <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
-                  <YAxis allowDecimals={false} tick={{ fill: '#888', fontSize: 10 }} width={28} />
+                  <XAxis dataKey="month" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                  <YAxis allowDecimals={false} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={28} />
                   <Tooltip
                     contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                     labelStyle={{ color: '#f5c842' }}
@@ -972,8 +972,8 @@ function PLTab() {
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={comparativaData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-            <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 11 }} />
-            <YAxis tickFormatter={tickFmt} tick={{ fill: '#888', fontSize: 11 }} width={44} />
+            <XAxis dataKey="month" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+            <YAxis tickFormatter={tickFmt} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={44} />
             <Tooltip {...chartTooltip} />
             {[2024, 2025, 2026].map(yr => (
               <Line key={yr} type="monotone" dataKey={`y${yr}`} stroke={PL_YEAR_COLORS[yr]} strokeWidth={2}
@@ -989,8 +989,8 @@ function PLTab() {
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={historicoData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-            <XAxis dataKey="label" tick={{ fill: '#888', fontSize: 10 }} interval={2} />
-            <YAxis tickFormatter={tickFmt} tick={{ fill: '#888', fontSize: 11 }} width={44} />
+            <XAxis dataKey="label" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} interval={2} />
+            <YAxis tickFormatter={tickFmt} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={44} />
             <Tooltip {...chartTooltip} />
             {[2024, 2025, 2026].map(yr => (
               <Line key={yr} type="monotone" dataKey={`y${yr}`} stroke={PL_YEAR_COLORS[yr]} strokeWidth={2}

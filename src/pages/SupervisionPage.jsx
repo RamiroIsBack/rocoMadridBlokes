@@ -255,7 +255,9 @@ function ScheduleGrid({ classes, filter }) {
 const CHART_STYLE = {
   tooltip: { background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 },
   label:   { color: '#f5c842' },
-  tick:    { fill: '#888', fontSize: 10 },
+  // Auditoría de contraste (cowork, 11/11, causa 4): #888 a 10 px casi invisible en claro —
+  // var(--color-text-secondary) sigue el tema, y 11 px es el mínimo pedido.
+  tick:    { fill: 'var(--color-text-secondary)', fontSize: 11 },
   grid:    '#2a2015',
 }
 
