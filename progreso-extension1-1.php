@@ -13028,9 +13028,15 @@ function progreso_equip_contar_blokes_reales_semana($week_start, $nombres_por_as
     ), ARRAY_A);
     restore_current_blog();
 
+    // 🐞 Cowork 11/11 09:40: el conteo no sumaba para Álvaro. Causa probable: la tilde llega en
+    // forma Unicode "descompuesta" (p. ej. de Notion/Mac) y remove_accents() solo reconoce la
+    // forma "precompuesta" — se queda una marca diacrítica suelta e invisible que rompe la
+    // igualdad de strings. Se limpia cualquier resto no alfanumérico tras remove_accents, sin
+    // depender de la extensión intl.
     $normaliza = function($s) {
         $s = remove_accents(strtolower(trim((string) $s)));
-        $partes = preg_split('/\s+/', $s);
+        $s = preg_replace('/[^a-z0-9\s]/', '', $s);
+        $partes = preg_split('/\s+/', trim($s));
         return $partes[0] ?? '';
     };
     $por_nombre = array();

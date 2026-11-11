@@ -20,6 +20,28 @@ const logoEstilo = size => ({
   borderRadius: '50%', objectFit: 'contain', background: '#fff',
 })
 
+// Contenido de una diapositiva de la Tele del Roco — se usa tanto sin compe como programada
+// (rotando con la cuenta atrás y el mapa).
+function renderSlide(slide) {
+  return (
+    <>
+      {slide.imagenUrl && (
+        <img src={slide.imagenUrl} alt={slide.titulo} style={{ maxHeight: 420, maxWidth: '100%', borderRadius: 14, marginBottom: 28, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }} />
+      )}
+      <p style={{ fontSize: '3rem', fontWeight: 800, margin: '0 0 14px' }}>{slide.titulo}</p>
+      {slide.texto && <p style={{ fontSize: '1.6rem', color: '#d1d5db', margin: '0 0 24px' }}>{slide.texto}</p>}
+      {slide.qrUrl && (
+        <div style={{ background: '#fff', padding: 14, borderRadius: 14, display: 'inline-block' }}>
+          <img
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(slide.qrUrl)}`}
+            alt="Código QR" width={200} height={200}
+          />
+        </div>
+      )}
+    </>
+  )
+}
+
 // Cuenta atrás de lo que queda de compe (cowork, 09/11 05:30/06:15: antes de empezar decía
 // "quedan 25 días" en vez de avisar que no ha empezado) — comp_date/comp_end_date son fechas
 // sin hora: el inicio cuenta desde el principio de ese día y el final hasta el final de ese día.
@@ -62,10 +84,19 @@ export default function CompeDirectoPage() {
   const [slides, setSlides] = useState([])
   const [slideIndex, setSlideIndex] = useState(0)
 
+  // 🐞 Cowork 11/11 09:40: con una compe programada, la tele no enseñaba nunca las diapositivas
+  // de Superadmin → Tele (solo rotaba cuenta atrás ↔ mapa). Ahora, si hay diapositivas, "slide"
+  // entra como tercera fase de la rotación.
   useEffect(() => {
-    const id = setInterval(() => setVistaPrecompe(v => v === 'cuenta' ? 'mapa' : 'cuenta'), ROTACION_MS)
+    const id = setInterval(() => {
+      setVistaPrecompe(v => {
+        const fases = slides.length > 0 ? ['cuenta', 'mapa', 'slide'] : ['cuenta', 'mapa']
+        const i = fases.indexOf(v)
+        return fases[(i + 1) % fases.length] ?? 'cuenta'
+      })
+    }, ROTACION_MS)
     return () => clearInterval(id)
-  }, [])
+  }, [slides.length])
 
   useEffect(() => {
     let activo = true
@@ -133,6 +164,8 @@ export default function CompeDirectoPage() {
     const cuentaProxima = proxima ? cuentaAtras(proxima.compDate, proxima.compEndDate) : null
     const bloquesColocados = (proxima?.bloques || []).filter(b => b.xPct != null)
     const mostrarMapa = vistaPrecompe === 'mapa' && bloquesColocados.length > 0
+    const mostrarSlide = vistaPrecompe === 'slide' && slides.length > 0
+    const slideActual = slides[slideIndex] || null
 
     if (err && !proxima) {
       return (
@@ -153,23 +186,7 @@ export default function CompeDirectoPage() {
         <div style={estilos.pagina}>
           <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 1200 }}>
             <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(110), marginBottom: 20 }} />
-            {slide ? (
-              <>
-                {slide.imagenUrl && (
-                  <img src={slide.imagenUrl} alt={slide.titulo} style={{ maxHeight: 420, maxWidth: '100%', borderRadius: 14, marginBottom: 28, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }} />
-                )}
-                <p style={{ fontSize: '3rem', fontWeight: 800, margin: '0 0 14px' }}>{slide.titulo}</p>
-                {slide.texto && <p style={{ fontSize: '1.6rem', color: '#d1d5db', margin: '0 0 24px' }}>{slide.texto}</p>}
-                {slide.qrUrl && (
-                  <div style={{ background: '#fff', padding: 14, borderRadius: 14, display: 'inline-block' }}>
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(slide.qrUrl)}`}
-                      alt="Código QR" width={200} height={200}
-                    />
-                  </div>
-                )}
-              </>
-            ) : (
+            {slide ? renderSlide(slide) : (
               <p style={{ fontSize: '2rem', color: '#9ca3af' }}>No hay compe activa ahora mismo.</p>
             )}
           </div>
@@ -189,7 +206,9 @@ export default function CompeDirectoPage() {
             </p>
           )}
 
-          {!mostrarMapa ? (
+          {mostrarSlide && slideActual ? (
+            <div style={{ maxWidth: 1000, margin: '0 auto' }}>{renderSlide(slideActual)}</div>
+          ) : !mostrarMapa ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 56, flexWrap: 'wrap' }}>
               <img src={cartelCompe} alt={proxima.nombre} style={{ maxHeight: 440, borderRadius: 14, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }} />
               <div style={{ textAlign: 'center' }}>
