@@ -215,7 +215,10 @@ add_action('template_redirect', function() {
     restore_current_blog();
 
     $app_url      = home_url('/app');
-    $instalar_url = home_url('/blokes/instalar');
+    // Los utm_source/utm_campaign que añade /c/{token} llegan aquí en la query de /app — si no
+    // se pasan a /blokes/instalar se pierden (cowork, 11/11 07:30).
+    $query_utm = isset($_GET) ? array_intersect_key($_GET, array_flip(array('utm_source', 'utm_campaign', 'utm_medium'))) : array();
+    $instalar_url = home_url('/blokes/instalar') . ($query_utm ? '?' . http_build_query($query_utm) : '');
     $icon_url     = home_url('/blokes/icons/icon-512.png');
 
     $og_desc = $compe
@@ -7750,6 +7753,14 @@ function superadmin_campanas_listar($request) {
             "SELECT COUNT(*) total, SUM(enviado_at IS NOT NULL) enviados, SUM(respondio) respondidos, SUM(baja) bajas, SUM(apuntado) apuntados
              FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d", $r['id']
         ), ARRAY_A);
+        // Mínimo pedido por cowork (11/11 07:30) antes de montar el embudo completo (partes
+        // B-D): clics únicos, para ver hoy mismo si los envíos de las 10:00 se abren. "Único" =
+        // destinatarios distintos que han hecho clic al menos una vez, no clics totales.
+        $clics_unicos = intval($wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(DISTINCT cl.token) FROM " . blokes_campana_clics_table() . " cl
+             JOIN " . blokes_campana_enlaces_table() . " en ON en.token = cl.token
+             WHERE en.campana_id = %d", $r['id']
+        )));
         $out[] = array(
             'id' => intval($r['id']), 'nombre' => $r['nombre'],
             'plantillaAdulto' => $r['plantilla_adulto'], 'plantillaMenor' => $r['plantilla_menor'],
@@ -7758,6 +7769,7 @@ function superadmin_campanas_listar($request) {
             'fechaFin' => $r['fecha_fin'], 'activa' => (bool) $r['activa'], 'createdAt' => $r['created_at'],
             'enviados' => intval($stats['enviados'] ?? 0), 'respondidos' => intval($stats['respondidos'] ?? 0),
             'bajas' => intval($stats['bajas'] ?? 0), 'apuntados' => intval($stats['apuntados'] ?? 0),
+            'clicsUnicos' => $clics_unicos,
         );
     }
     return rest_ensure_response(array('success' => true, 'data' => $out));

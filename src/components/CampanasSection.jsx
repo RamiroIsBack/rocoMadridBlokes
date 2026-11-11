@@ -568,6 +568,7 @@ function CampanasPanel({ sugeridas }) {
           </div>
           <div className="cmp-campana-stats">
             <span>Enviados: {c.enviados}</span>
+            <span>Clics (únicos): {c.clicsUnicos ?? 0}</span>
             <span>Respondidos: {c.respondidos}</span>
             <span>Bajas: {c.bajas}</span>
             <span>Se apuntaron: {c.apuntados}</span>
