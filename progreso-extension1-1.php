@@ -13743,14 +13743,28 @@ function progreso_compe_estado($request) {
 function progreso_compe_proxima($request) {
     global $wpdb;
     $comp = $wpdb->get_row(
-        "SELECT name, comp_date, comp_end_date FROM " . progreso_equip_table('competitions') . "
+        "SELECT id, name, comp_date, comp_end_date FROM " . progreso_equip_table('competitions') . "
          WHERE is_test = 0 AND comp_date >= CURDATE() ORDER BY comp_date ASC LIMIT 1", ARRAY_A
     );
     if (!$comp) return rest_ensure_response(array('success' => true, 'data' => null));
+    // Posiciones de los bloques ya colocados en el mapa, para la pantalla "Próximamente" de
+    // la tele (cowork, 11/11 05:15: "falta... mapa de los 16 bloques, cartel y cuenta atrás
+    // en movimiento").
+    $blocks = $wpdb->get_results($wpdb->prepare(
+        "SELECT number, x_pct, y_pct, tested FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", intval($comp['id'])
+    ), ARRAY_A);
     return rest_ensure_response(array('success' => true, 'data' => array(
         'nombre'      => $comp['name'],
         'compDate'    => $comp['comp_date'],
         'compEndDate' => $comp['comp_end_date'] ?: $comp['comp_date'],
+        'bloques'     => array_map(function($b) {
+            return array(
+                'numero' => intval($b['number']),
+                'xPct'   => $b['x_pct'] !== null ? floatval($b['x_pct']) : null,
+                'yPct'   => $b['y_pct'] !== null ? floatval($b['y_pct']) : null,
+                'tested' => (bool) $b['tested'],
+            );
+        }, $blocks),
     )));
 }
 

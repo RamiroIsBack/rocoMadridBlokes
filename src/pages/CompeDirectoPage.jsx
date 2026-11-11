@@ -1,8 +1,16 @@
 import { useState, useEffect } from 'react'
 import { colorPorNumeroBloque } from '../utils/compeColorScale'
+import mapaEquipacion from '../assets/mapa-equipacion.jpg'
+import cartelCompe from '../assets/cartel-compe-1fase-26-27.jpg'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 const REFRESCO_MS = 30000 // Ramiro: "sondeo cada 30 s, nada pesado" — ver el problema de pestañas colgadas
+const ROTACION_MS = 22000 // "Precompe" rota entre cuenta atrás+cartel y el mapa cada 20-30 s
+const LOGO_URL = 'https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png'
+
+// Recorte en círculo (cowork, 11/11 05:15: el PNG tiene las esquinas blancas, no transparentes
+// — sobre el fondo oscuro de la tele se ve como un cuadrado blanco feo).
+const logoEstilo = size => ({ height: size, width: size, borderRadius: '50%', objectFit: 'cover' })
 
 // Cuenta atrás de lo que queda de compe (cowork, 09/11 05:30/06:15: antes de empezar decía
 // "quedan 25 días" en vez de avisar que no ha empezado) — comp_date/comp_end_date son fechas
@@ -39,6 +47,12 @@ export default function CompeDirectoPage() {
   const [proxima, setProxima] = useState(null)
   const [clasif, setClasif] = useState(null)
   const [err, setErr] = useState(null)
+  const [vistaPrecompe, setVistaPrecompe] = useState('cuenta')
+
+  useEffect(() => {
+    const id = setInterval(() => setVistaPrecompe(v => v === 'cuenta' ? 'mapa' : 'cuenta'), ROTACION_MS)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     let activo = true
@@ -77,24 +91,74 @@ export default function CompeDirectoPage() {
 
   if (!estado?.activo) {
     const cuentaProxima = proxima ? cuentaAtras(proxima.compDate, proxima.compEndDate) : null
+    const bloquesColocados = (proxima?.bloques || []).filter(b => b.xPct != null)
+    const mostrarMapa = vistaPrecompe === 'mapa' && bloquesColocados.length > 0
+
+    if (err && !proxima) {
+      return (
+        <div style={estilos.pagina}>
+          <div style={{ margin: 'auto', textAlign: 'center' }}>
+            <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(160), marginBottom: 24 }} />
+            <p style={{ fontSize: '2rem', color: '#9ca3af' }}>Sin conexión — reintentando…</p>
+          </div>
+        </div>
+      )
+    }
+    if (!proxima) {
+      return (
+        <div style={estilos.pagina}>
+          <div style={{ margin: 'auto', textAlign: 'center' }}>
+            <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(160), marginBottom: 24 }} />
+            <p style={{ fontSize: '2rem', color: '#9ca3af' }}>No hay compe activa ahora mismo.</p>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div style={estilos.pagina}>
-        <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 900 }}>
-          <img
-            src="https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png"
-            alt="Rocoteca Madrid" style={{ height: 160, marginBottom: 24 }}
-          />
-          {err ? (
-            <p style={{ fontSize: '1.8rem', color: '#9ca3af' }}>Sin conexión — reintentando…</p>
-          ) : proxima ? (
-            <>
-              <p style={{ fontSize: '2.4rem', fontWeight: 800, margin: '0 0 8px' }}>{proxima.nombre}</p>
-              {cuentaProxima && <p style={{ fontSize: '2rem', color: '#f5c842', fontWeight: 700, margin: '0 0 36px' }}>{cuentaProxima}</p>}
-              <p style={{ fontSize: '1.4rem', color: '#d1d5db', margin: '0 0 12px' }}>Instala Blokes y apúntate: <strong style={{ color: '#fff' }}>rocomadrid.com/app</strong></p>
-              <p style={{ fontSize: '1.1rem', color: '#9ca3af' }}>Apunta tus tops desde el móvil, o pide ayuda en recepción.</p>
-            </>
+        <style>{'@keyframes compeDirectoCuentaMov{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}'}</style>
+        <div style={{ margin: 'auto', textAlign: 'center', width: '100%', maxWidth: 1400 }}>
+          <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(110), marginBottom: 20 }} />
+          <p style={{ fontSize: '3.4rem', fontWeight: 800, margin: '0 0 10px' }}>{proxima.nombre}</p>
+          {cuentaProxima && (
+            <p style={{ fontSize: '3rem', color: '#f5c842', fontWeight: 800, margin: '0 0 40px', display: 'inline-block', animation: 'compeDirectoCuentaMov 2.2s ease-in-out infinite' }}>
+              {cuentaProxima}
+            </p>
+          )}
+
+          {!mostrarMapa ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 56, flexWrap: 'wrap' }}>
+              <img src={cartelCompe} alt={proxima.nombre} style={{ maxHeight: 440, borderRadius: 14, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }} />
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ background: '#fff', padding: 16, borderRadius: 14, display: 'inline-block' }}>
+                  <img
+                    src="https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=https%3A%2F%2Frocomadrid.com%2Fapp"
+                    alt="QR para instalar Blokes" width={260} height={260}
+                  />
+                </div>
+                <p style={{ fontSize: '1.8rem', fontWeight: 700, margin: '20px 0 6px' }}>rocomadrid.com/app</p>
+                <p style={{ fontSize: '1.3rem', color: '#d1d5db', margin: 0 }}>Instala Blokes y apúntate</p>
+              </div>
+            </div>
           ) : (
-            <p style={{ fontSize: '1.8rem', color: '#9ca3af' }}>No hay compe activa ahora mismo.</p>
+            <div>
+              <div style={{ position: 'relative', maxWidth: 1100, margin: '0 auto' }}>
+                <img src={mapaEquipacion} alt="Mapa del rocódromo" style={{ width: '100%', display: 'block', borderRadius: 10 }} />
+                {bloquesColocados.map(b => (
+                  <div key={b.numero} style={{
+                    position: 'absolute', left: `${b.xPct}%`, top: `${b.yPct}%`, transform: 'translate(-50%,-50%)',
+                    width: 56, height: 56, borderRadius: '50%', background: colorPorNumeroBloque(b.numero, proxima.bloques.length).bg,
+                    color: '#1f2937', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '1.6rem', fontWeight: 800, border: b.tested ? '3px solid #22c55e' : '3px solid #1f1f1f',
+                    boxShadow: '0 3px 8px rgba(0,0,0,0.5)',
+                  }}>{b.numero}</div>
+                ))}
+              </div>
+              <p style={{ fontSize: '1.4rem', color: '#d1d5db', marginTop: 24 }}>
+                Los {bloquesColocados.length} bloques ya colocados — apunta tus tops desde el móvil, o pide ayuda en recepción.
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -109,10 +173,7 @@ export default function CompeDirectoPage() {
     <div style={estilos.pagina}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          <img
-            src="https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png"
-            alt="Rocoteca Madrid" style={{ height: 80 }}
-          />
+          <img src={LOGO_URL} alt="Rocoteca Madrid" style={logoEstilo(80)} />
           <h1 style={{ fontSize: '3rem', margin: 0 }}>{estado.nombre}</h1>
         </div>
         <div style={{ textAlign: 'right' }}>
