@@ -269,7 +269,7 @@
   line-height: 1;
 }
 
-.sv-cell--empty      .sv-cell-num { color: #999; }
+.sv-cell--empty      .sv-cell-num { color: var(--color-text-secondary); }
 .sv-cell--sched-empty .sv-cell-num { background: #3d1028; color: #f472b6; }
 .sv-cell--low        .sv-cell-num { background: #14532d; color: #86efac; }
 .sv-cell--med        .sv-cell-num { background: #713f12; color: #fde68a; }
@@ -294,7 +294,7 @@
   text-align: center;
   font-size: 0.88rem;
   font-weight: 800;
-  color: #34d399;
+  color: var(--state-ok);
   font-variant-numeric: tabular-nums;
 }
 

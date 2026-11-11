@@ -493,7 +493,7 @@ details[open] .sa-collapsible__arrow {
 .sa-cat-rev {
   font-size: 0.78rem;
   font-weight: 700;
-  color: #f5c842;
+  color: var(--color-accent-hover);
   flex-shrink: 0;
   min-width: 72px;
   text-align: right;
@@ -634,12 +634,12 @@ details[open] .sa-collapsible__arrow {
 .sa-profit-table tbody tr:hover { background: rgba(255,255,255,0.02); }
 .sa-profit-row--loss { background: rgba(248,113,113,0.03); }
 
-.sa-profit__label { padding: 7px 10px; color: #bbb; text-align: left; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-profit__prof  { padding: 7px 10px; text-align: left; font-weight: 700; font-size: 0.72rem; white-space: nowrap; }
+.sa-profit__label { padding: 7px 10px; color: var(--color-text-secondary); text-align: left; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-profit__prof  { padding: 7px 10px; text-align: left; font-weight: 700; font-size: 0.72rem; white-space: nowrap; color: var(--color-text-primary); }
 .sa-profit__num   { padding: 7px 10px; text-align: right; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .sa-profit__ben   { padding: 7px 10px; text-align: right; font-weight: 700; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
-.sa-profit__ben--pos { color: #34d399; }
-.sa-profit__ben--neg { color: #f87171; }
+.sa-profit__ben--pos { color: var(--state-ok); }
+.sa-profit__ben--neg { color: var(--state-bad); }
 
 .sa-profit-note {
   font-size: 0.65rem;
@@ -716,7 +716,7 @@ details[open] .sa-collapsible__arrow {
   transition: color 0.15s, border-color 0.15s;
 }
 .sa-main-tab:hover { color: var(--color-text-secondary); }
-.sa-main-tab--active { color: #a78bfa; border-bottom-color: #a78bfa; }
+.sa-main-tab--active { color: var(--state-purple); border-bottom-color: var(--state-purple); }
 
 /* ── P&L metric tabs ── */
 .sa-pl-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
