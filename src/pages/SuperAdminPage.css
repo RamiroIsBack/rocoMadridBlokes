@@ -30,8 +30,12 @@
 /* ── Section ── */
 .sa-section {
   margin-bottom: 48px;
-  background: #100e09;
-  border: 1px solid #2a2015;
+  /* Cowork 11/11 14:30: este panel tenía fondo negro FIJO (nunca seguía el tema), pero dentro
+     ya había pasado mucho texto a la variable de tema — en claro quedaba texto oscuro sobre
+     este negro de siempre (372 fallos). El panel pasa también a variable: así todo lo de
+     dentro (KPIs, tablas, título) vuelve a tener sentido en los dos modos. */
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 20px 20px 24px;
   border-radius: 2px;
 }
@@ -91,7 +95,7 @@
   font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 1.0rem;
   font-weight: 700;
-  color: #f0ece0;
+  color: var(--color-text-primary);
   margin: 0;
   letter-spacing: 0.01em;
 }

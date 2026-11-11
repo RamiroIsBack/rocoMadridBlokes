@@ -146,15 +146,20 @@
 /* ── Section ── */
 .sv-section {
   margin-bottom: 24px;
-  background: #100e09;
-  border: 1px solid #2a2015;
+  /* Cowork 11/11 14:30: mismo caso que .sa-section — panel con fondo negro fijo mientras el
+     texto de dentro ya seguía el tema, dejaba texto oscuro sobre negro en claro. Usado solo
+     por las pestañas "siempre oscuras" de Supervisión (Alumnos/Evolución/Clases/Histórico),
+     nunca por Grupos/Campañas/ExcelMuerte, así que sí puede seguir el tema sin pisar la zona
+     "siempre clara" de esas otras pestañas. */
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 20px 20px 24px;
   border-radius: 2px;
 }
 .sv-section-title {
   font-size: 0.92rem;
   font-weight: 700;
-  color: #f0ece0;
+  color: var(--color-text-primary);
   margin: 0 0 10px;
   letter-spacing: 0.01em;
 }
