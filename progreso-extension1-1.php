@@ -7327,18 +7327,28 @@ function blokes_campana_enlace_token($campana_id, $contacto_id) {
 add_action('template_redirect', function() {
     $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
     if (!preg_match('#^c/([A-Za-z0-9]{6,8})$#', $path, $m)) return;
+    $token = $m[1];
+
+    // /c/ vive en el sitio Principal (blog 1, para que el enlace sea corto), pero las tablas
+    // de campañas son del Club (blog 3) — todo lo que las llama viene siempre de
+    // /club/wp-json/... (cowork, 11/11 06:55: sin este switch_to_blog, aquí se consultaban las
+    // tablas del blog 1, que están vacías, y el token "nunca se encontraba").
+    switch_to_blog(3);
     blokes_ensure_campanas_tables();
     global $wpdb;
-    $token = $m[1];
     $enlace = $wpdb->get_row($wpdb->prepare(
         "SELECT campana_id FROM " . blokes_campana_enlaces_table() . " WHERE token = %s", $token
     ), ARRAY_A);
-    if (!$enlace) { wp_safe_redirect(home_url('/'), 302); exit; }
+    if (!$enlace) {
+        restore_current_blog();
+        wp_safe_redirect(home_url('/'), 302);
+        exit;
+    }
 
     $campana = $wpdb->get_row($wpdb->prepare(
         "SELECT nombre, destino_enlace FROM " . blokes_campanas_table() . " WHERE id = %d", intval($enlace['campana_id'])
     ), ARRAY_A);
-    $destino = ($campana && $campana['destino_enlace']) ? $campana['destino_enlace'] : home_url('/');
+    $destino = ($campana && $campana['destino_enlace']) ? $campana['destino_enlace'] : get_home_url(1, '/');
 
     $ua = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
     $es_bot_vista_previa = (bool) preg_match('#WhatsApp|facebookexternalhit|Facebot|Twitterbot|TelegramBot#i', $ua);
@@ -7350,6 +7360,7 @@ add_action('template_redirect', function() {
             'token' => $token, 'dispositivo' => $dispositivo, 'repetido' => $repetido, 'created_at' => current_time('mysql'),
         ));
     }
+    restore_current_blog();
 
     $slug = $campana ? sanitize_title($campana['nombre']) : 'campana';
     $sep  = (strpos($destino, '?') !== false) ? '&' : '?';
@@ -7817,7 +7828,11 @@ function blokes_campanas_personalizar($plantilla, $nombres, $remitente, $saludo 
     // se gasta un token si la plantilla de verdad lo usa.
     if ($campana_id && $contacto_id && strpos($txt, '{enlace}') !== false) {
         $token = blokes_campana_enlace_token($campana_id, $contacto_id);
-        $txt = str_replace('{enlace}', home_url('/c/' . $token), $txt);
+        // Esto se llama siempre desde una petición que llegó por /club/wp-json/... (blog 3), así
+        // que home_url() aquí da "rocomadrid.com/club" — el enlace corto tiene que ser del sitio
+        // Principal (blog 1), no del Club (cowork, 11/11 06:55: salía "/club/c/XXXXX" y daba
+        // 404). get_home_url(1, ...) fuerza el dominio del blog 1 sin cambiar de blog de verdad.
+        $txt = str_replace('{enlace}', get_home_url(1, '/c/' . $token), $txt);
     }
     return $txt;
 }
