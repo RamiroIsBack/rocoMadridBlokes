@@ -7167,6 +7167,8 @@ function superadmin_hist_pagos_estadisticas($request) {
 function blokes_contactos_table()      { global $wpdb; return $wpdb->prefix . 'blokes_contactos'; }
 function blokes_campanas_table()       { global $wpdb; return $wpdb->prefix . 'blokes_campanas'; }
 function blokes_campana_envios_table() { global $wpdb; return $wpdb->prefix . 'blokes_campana_envios'; }
+function blokes_campana_enlaces_table() { global $wpdb; return $wpdb->prefix . 'blokes_campana_enlaces'; }
+function blokes_campana_clics_table()   { global $wpdb; return $wpdb->prefix . 'blokes_campana_clics'; }
 
 function blokes_ensure_campanas_tables() {
     global $wpdb;
@@ -7213,6 +7215,7 @@ function blokes_ensure_campanas_tables() {
         listas            varchar(100) NOT NULL DEFAULT '',
         fecha_fin         date         NULL,
         activa            tinyint(1)   NOT NULL DEFAULT 1,
+        destino_enlace    varchar(255) NOT NULL DEFAULT '',
         created_at        datetime     NOT NULL,
         created_by        varchar(100) NOT NULL DEFAULT '',
         PRIMARY KEY (id)
@@ -7259,7 +7262,100 @@ function blokes_ensure_campanas_tables() {
         }
         update_option('blokes_campanas_utf8mb4', 1, false);
     }
+
+    // Trazabilidad de campañas (Ramiro, 11/11 05:35, prioridad 1: "lo hacemos a partir de
+    // ahora" — lo ya enviado sin enlace no se puede medir). Un token por campaña+contacto; el
+    // destino vive en la campaña (destino_enlace), no aquí, para que si se corrige se arregle
+    // también en los enlaces ya generados.
+    dbDelta("CREATE TABLE " . blokes_campana_enlaces_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        token       varchar(10)  NOT NULL DEFAULT '',
+        campana_id  bigint(20) UNSIGNED NOT NULL,
+        contacto_id bigint(20) UNSIGNED NOT NULL,
+        created_at  datetime     NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY token (token),
+        UNIQUE KEY campana_contacto (campana_id, contacto_id)
+    ) {$charset};");
+    // Log de clics (no cuenta a los bots de vista previa de WhatsApp/Facebook, que abren el
+    // enlace solos para hacer la tarjeta) — pensado para el embudo de Superadmin más adelante.
+    dbDelta("CREATE TABLE " . blokes_campana_clics_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        token       varchar(10)  NOT NULL DEFAULT '',
+        dispositivo varchar(20)  NOT NULL DEFAULT '',
+        repetido    tinyint(1)   NOT NULL DEFAULT 0,
+        created_at  datetime     NOT NULL,
+        PRIMARY KEY (id),
+        KEY token (token)
+    ) {$charset};");
+
+    // Destinos conocidos de hoy (Ramiro, 11/11 05:35) — solo rellena las campañas que ya
+    // existen y todavía no tienen destino puesto, nunca sobreescribe uno editado a mano.
+    if (!get_option('blokes_campanas_destinos_iniciales')) {
+        global $wpdb;
+        $wpdb->query("UPDATE " . blokes_campanas_table() . " SET destino_enlace = 'https://rocomadrid.com/club/actividades-para-socios/' WHERE id = 1 AND destino_enlace = ''");
+        $wpdb->query("UPDATE " . blokes_campanas_table() . " SET destino_enlace = 'https://rocomadrid.com/app' WHERE id = 2 AND destino_enlace = ''");
+        update_option('blokes_campanas_destinos_iniciales', 1, false);
+    }
 }
+
+// Token de 6-8 caracteres para /c/{token} — uno por campaña+contacto, reutilizable (si ya
+// existe, se devuelve el mismo en vez de crear otro).
+function blokes_campana_enlace_token($campana_id, $contacto_id) {
+    global $wpdb;
+    $existente = $wpdb->get_var($wpdb->prepare(
+        "SELECT token FROM " . blokes_campana_enlaces_table() . " WHERE campana_id = %d AND contacto_id = %d",
+        $campana_id, $contacto_id
+    ));
+    if ($existente) return $existente;
+    $alfabeto = 'abcdefghijkmnpqrstuvwxyz23456789'; // sin 0/o/1/l/i, para que no se confundan al teclearlo a mano
+    do {
+        $token = '';
+        for ($i = 0; $i < 7; $i++) $token .= $alfabeto[random_int(0, strlen($alfabeto) - 1)];
+        $ya_existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . blokes_campana_enlaces_table() . " WHERE token = %s", $token));
+    } while ($ya_existe);
+    $wpdb->insert(blokes_campana_enlaces_table(), array(
+        'token' => $token, 'campana_id' => $campana_id, 'contacto_id' => $contacto_id, 'created_at' => current_time('mysql'),
+    ));
+    return $token;
+}
+
+// /c/{token} — público, sin login: registra el clic (salvo que sea el bot de vista previa de
+// WhatsApp/Facebook, que abre el enlace solo para construir la tarjeta del mensaje) y redirige
+// al destino de la campaña con utm_source/utm_campaign. Prioridad 0, igual que /app — sin esto
+// WordPress marca la URL como 404 en parse_request y el redirect no llega a dispararse.
+add_action('template_redirect', function() {
+    $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+    if (!preg_match('#^c/([A-Za-z0-9]{6,8})$#', $path, $m)) return;
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $token = $m[1];
+    $enlace = $wpdb->get_row($wpdb->prepare(
+        "SELECT campana_id FROM " . blokes_campana_enlaces_table() . " WHERE token = %s", $token
+    ), ARRAY_A);
+    if (!$enlace) { wp_safe_redirect(home_url('/'), 302); exit; }
+
+    $campana = $wpdb->get_row($wpdb->prepare(
+        "SELECT nombre, destino_enlace FROM " . blokes_campanas_table() . " WHERE id = %d", intval($enlace['campana_id'])
+    ), ARRAY_A);
+    $destino = ($campana && $campana['destino_enlace']) ? $campana['destino_enlace'] : home_url('/');
+
+    $ua = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
+    $es_bot_vista_previa = (bool) preg_match('#WhatsApp|facebookexternalhit|Facebot|Twitterbot|TelegramBot#i', $ua);
+    if (!$es_bot_vista_previa) {
+        $repetido = isset($_COOKIE['roco_cmp']) ? 1 : 0;
+        setcookie('roco_cmp', $token, time() + 60 * DAY_IN_SECONDS, '/', '', is_ssl(), true);
+        $dispositivo = preg_match('#Mobi|Android|iPhone|iPad#i', $ua) ? 'movil' : 'escritorio';
+        $wpdb->insert(blokes_campana_clics_table(), array(
+            'token' => $token, 'dispositivo' => $dispositivo, 'repetido' => $repetido, 'created_at' => current_time('mysql'),
+        ));
+    }
+
+    $slug = $campana ? sanitize_title($campana['nombre']) : 'campana';
+    $sep  = (strpos($destino, '?') !== false) ? '&' : '?';
+    wp_safe_redirect($destino . $sep . 'utm_source=whatsapp&utm_campaign=' . $slug, 302);
+    exit;
+}, 0);
 
 // Última suscripción relevante de cada teléfono: gana la más "fuerte" (en vigor > de baja a
 // fin de mes > cancelada), para no clasificar mal a quien tiene varias suscripciones viejas.
@@ -7647,6 +7743,7 @@ function superadmin_campanas_listar($request) {
             'id' => intval($r['id']), 'nombre' => $r['nombre'],
             'plantillaAdulto' => $r['plantilla_adulto'], 'plantillaMenor' => $r['plantilla_menor'],
             'remitente' => $r['remitente'], 'listas' => array_filter(explode(',', $r['listas'])),
+            'destinoEnlace' => $r['destino_enlace'] ?: '',
             'fechaFin' => $r['fecha_fin'], 'activa' => (bool) $r['activa'], 'createdAt' => $r['created_at'],
             'enviados' => intval($stats['enviados'] ?? 0), 'respondidos' => intval($stats['respondidos'] ?? 0),
             'bajas' => intval($stats['bajas'] ?? 0), 'apuntados' => intval($stats['apuntados'] ?? 0),
@@ -7672,6 +7769,7 @@ function superadmin_campanas_crear($request) {
         'remitente' => sanitize_text_field((string) ($body['remitente'] ?? '')),
         'listas' => implode(',', $listas),
         'fecha_fin' => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fechaFin'] ?? '')) ? $body['fechaFin'] : null,
+        'destino_enlace' => esc_url_raw((string) ($body['destinoEnlace'] ?? '')),
         'activa' => 1, 'created_at' => current_time('mysql'), 'created_by' => $u ? $u->user_login : '',
     ));
     return rest_ensure_response(array('success' => true, 'data' => array('id' => $wpdb->insert_id)));
@@ -7692,6 +7790,7 @@ function superadmin_campanas_editar($request) {
     if (isset($body['plantillaAdulto'])) $campos['plantilla_adulto'] = sanitize_textarea_field((string) $body['plantillaAdulto']);
     if (isset($body['plantillaMenor']))  $campos['plantilla_menor']  = sanitize_textarea_field((string) $body['plantillaMenor']);
     if (isset($body['remitente'])) $campos['remitente'] = sanitize_text_field((string) $body['remitente']);
+    if (isset($body['destinoEnlace'])) $campos['destino_enlace'] = esc_url_raw((string) $body['destinoEnlace']);
     if (isset($body['listas'])) {
         $listas = is_array($body['listas']) ? array_intersect($body['listas'], array('actuales', 'nuevos', 'en_espera', 'antiguos')) : array();
         if (empty($listas)) return new WP_Error('bad_request', 'Elige al menos una lista.', array('status' => 400));
@@ -7710,10 +7809,16 @@ function superadmin_campanas_editar($request) {
 // El saludo (nombre de pila elegido a mano, p. ej. de la carga inicial del xlsx) tiene
 // preferencia sobre el nombre completo del Excel para el "Hola {nombre}!" — es el que se usa
 // de verdad en los mensajes que ya escribió Ramiro.
-function blokes_campanas_personalizar($plantilla, $nombres, $remitente, $saludo = '') {
+function blokes_campanas_personalizar($plantilla, $nombres, $remitente, $saludo = '', $campana_id = 0, $contacto_id = 0) {
     $nombre = $saludo ?: (count($nombres) > 1 ? implode(' y ', array_slice($nombres, 0, 2)) : ($nombres[0] ?? ''));
     $txt = str_replace('{nombre}', $nombre, $plantilla);
     $txt = str_replace('{remitente}', $remitente, $txt);
+    // {enlace}: enlace propio por destinatario para medir clics (Ramiro, 11/11 05:35) — solo
+    // se gasta un token si la plantilla de verdad lo usa.
+    if ($campana_id && $contacto_id && strpos($txt, '{enlace}') !== false) {
+        $token = blokes_campana_enlace_token($campana_id, $contacto_id);
+        $txt = str_replace('{enlace}', home_url('/c/' . $token), $txt);
+    }
     return $txt;
 }
 
@@ -7728,6 +7833,11 @@ function superadmin_campanas_destinatarios($request) {
     $campana = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_campanas_table() . " WHERE id = %d", $id), ARRAY_A);
     if (!$campana) return new WP_Error('not_found', 'Campaña no encontrada.', array('status' => 404));
     $listas = array_filter(explode(',', $campana['listas']));
+    // La "conversión automática" de abajo (apuntado solo al estar ya en vigor) tiene sentido
+    // en una campaña de antiguos ("volvió"), pero no en una de actuales/nuevos/en_espera: ahí
+    // casi todos YA están en vigor antes de mandarles nada, y salían "Se apuntaron" sin haber
+    // hecho nada (cowork, 10/11 13:10 — campaña #2, 10 de 12 enviados marcados así de golpe).
+    $es_campana_vigentes = (bool) array_intersect($listas, array('actuales', 'nuevos', 'en_espera'));
 
     $subs_por_tel     = blokes_campanas_subs_por_telefono();
     $externos_por_tel = blokes_campanas_externos_por_telefono();
@@ -7758,8 +7868,9 @@ function superadmin_campanas_destinatarios($request) {
         $plantilla = $c['tipo'] === 'menor' ? $campana['plantilla_menor'] : $campana['plantilla_adulto'];
 
         // Conversión automática: si ya está en vigor y se le había enviado algo, se marca
-        // apuntado solo (aunque nadie haya pulsado el botón a mano).
-        if ($ya_en_vigor && $envio && !empty($envio['enviado_at']) && !$envio['apuntado']) {
+        // apuntado solo (aunque nadie haya pulsado el botón a mano) — solo en campañas de
+        // antiguos, donde "ya en vigor" de verdad significa que volvió.
+        if (!$es_campana_vigentes && $ya_en_vigor && $envio && !empty($envio['enviado_at']) && !$envio['apuntado']) {
             $wpdb->update(blokes_campana_envios_table(), array('apuntado' => 1, 'apuntado_at' => current_time('mysql'), 'updated_at' => current_time('mysql')), array('id' => $envio['id']));
             $envio['apuntado'] = 1;
             $envio['apuntado_at'] = current_time('mysql');
@@ -7767,7 +7878,7 @@ function superadmin_campanas_destinatarios($request) {
 
         $out[] = array(
             'contactoId' => intval($c['id']), 'telefono' => $tel, 'nombres' => $nombres, 'tipo' => $c['tipo'],
-            'mensaje' => blokes_campanas_personalizar($plantilla, $nombres, $campana['remitente'], $c['saludo'] ?? ''),
+            'mensaje' => blokes_campanas_personalizar($plantilla, $nombres, $campana['remitente'], $c['saludo'] ?? '', $id, intval($c['id'])),
             'yaEnVigor' => (bool) $ya_en_vigor, 'optinWhatsapp' => $c['optin_whatsapp'] ?: null,
             'enviado' => $envio && !empty($envio['enviado_at']) ? array('fecha' => $envio['enviado_at'], 'por' => $envio['enviado_por']) : null,
             'respondio' => $envio && $envio['respondio'] ? array('fecha' => $envio['respondio_at'], 'por' => $envio['respondio_por']) : false,

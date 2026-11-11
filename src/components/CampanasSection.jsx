@@ -269,6 +269,7 @@ function CrearCampanaPanel({ sugeridas, onCreated, editando, onEdited, onCancelE
   const [plantillaAdulto, setPlantillaAdulto] = useState(base.plantillaAdulto || '')
   const [plantillaMenor, setPlantillaMenor]   = useState(base.plantillaMenor || '')
   const [remitente, setRemitente]         = useState(base.remitente || '')
+  const [destinoEnlace, setDestinoEnlace] = useState(base.destinoEnlace || '')
   const [fechaFin, setFechaFin]           = useState(base.fechaFin || '')
   const [saving, setSaving]               = useState(false)
   const [error, setError]                 = useState(null)
@@ -288,7 +289,7 @@ function CrearCampanaPanel({ sugeridas, onCreated, editando, onEdited, onCancelE
     if (!listasElegidas.length) { setError('Elige al menos una lista.'); return }
     setSaving(true)
     try {
-      const body = { nombre, listas: listasElegidas, plantillaAdulto, plantillaMenor, remitente, fechaFin: fechaFin || null }
+      const body = { nombre, listas: listasElegidas, plantillaAdulto, plantillaMenor, remitente, destinoEnlace, fechaFin: fechaFin || null }
       if (editando) {
         await campanasEditar(editando.id, body)
         if (onEdited) onEdited()
@@ -319,10 +320,13 @@ function CrearCampanaPanel({ sugeridas, onCreated, editando, onEdited, onCancelE
       <label className="cmp-field">Remitente
         <input className="cmp-input" type="text" value={remitente} onChange={e => setRemitente(e.target.value)} placeholder="Ramiro" />
       </label>
-      <label className="cmp-field">Plantilla adultos — usa {'{nombre}'} y {'{remitente}'}
+      <label className="cmp-field">Enlace de destino para medir clics (opcional) — si lo pones, usa {'{enlace}'} en la plantilla
+        <input className="cmp-input" type="text" value={destinoEnlace} onChange={e => setDestinoEnlace(e.target.value)} placeholder="https://rocomadrid.com/..." />
+      </label>
+      <label className="cmp-field">Plantilla adultos — usa {'{nombre}'}, {'{remitente}'}{destinoEnlace ? <> y {'{enlace}'}</> : null}
         <textarea className="cmp-textarea" rows={5} value={plantillaAdulto} onChange={e => setPlantillaAdulto(e.target.value)} />
       </label>
-      <label className="cmp-field">Plantilla menores/familias — usa {'{nombre}'} y {'{remitente}'}
+      <label className="cmp-field">Plantilla menores/familias — usa {'{nombre}'}, {'{remitente}'}{destinoEnlace ? <> y {'{enlace}'}</> : null}
         <textarea className="cmp-textarea" rows={5} value={plantillaMenor} onChange={e => setPlantillaMenor(e.target.value)} />
       </label>
       <label className="cmp-field">Fecha fin de la oferta (opcional)
