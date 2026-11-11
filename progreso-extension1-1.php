@@ -861,6 +861,10 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/compe/proxima', array(
         'methods' => 'GET', 'callback' => 'progreso_compe_proxima', 'permission_callback' => '__return_true',
     ));
+    // Tele del Roco: lectura pública de las diapositivas activas, para la tele (sin login).
+    register_rest_route('progreso/v1', '/tele/diapositivas', array(
+        'methods' => 'GET', 'callback' => 'progreso_tele_diapositivas', 'permission_callback' => '__return_true',
+    ));
     // Mantenimiento: limpia blokes de compe de prueba que quedaron en la papelera de rondas
     // anteriores (cowork, 08/11 11:15) — solo socio.
     register_rest_route('progreso/v1', '/compe/limpiar-blokes-prueba-antiguos', array(
@@ -1320,6 +1324,20 @@ add_action('rest_api_init', function() {
         'methods'             => 'POST',
         'callback'            => 'superadmin_campanas_recalcular_indirectas',
         'permission_callback' => $sa_perm,
+    ));
+
+    // Tele del Roco (NOTAS_PARA_CODE_tele_roco.md) — gestión de diapositivas, solo socio/gestión.
+    register_rest_route('superadmin/v1', '/tele-slides', array(
+        'methods' => 'GET', 'callback' => 'superadmin_tele_slides_listar', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/tele-slides', array(
+        'methods' => 'POST', 'callback' => 'superadmin_tele_slides_crear', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/tele-slides/(?P<id>\d+)', array(
+        'methods' => 'PUT', 'callback' => 'superadmin_tele_slides_editar', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/tele-slides/(?P<id>\d+)', array(
+        'methods' => 'DELETE', 'callback' => 'superadmin_tele_slides_borrar', 'permission_callback' => $sa_perm,
     ));
 });
 
@@ -2188,6 +2206,134 @@ function blokes_upload_image($request) {
             ),
         ),
     ));
+}
+
+// Tele del Roco (NOTAS_PARA_CODE_tele_roco.md, Ramiro 11/11 05:39): diapositivas de la tele
+// fija cuando no hay compe activa — gestionadas a mano desde Superadmin → Tele por ahora
+// (primera versión; las automáticas de cada actividad/evento quedan para una ronda aparte).
+// Vive en el blog del Club (igual que Superadmin/Campañas), con lectura pública para que la
+// tele (que corre en el blog de Blokes) pueda leerlas sin sesión.
+function blokes_tele_slides_table() { global $wpdb; return $wpdb->prefix . 'blokes_tele_slides'; }
+function blokes_tele_ensure_table() {
+    global $wpdb;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE " . blokes_tele_slides_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        titulo      varchar(190) NOT NULL DEFAULT '',
+        imagen_url  varchar(500) NOT NULL DEFAULT '',
+        texto       text         NOT NULL,
+        qr_url      varchar(500) NOT NULL DEFAULT '',
+        fecha_inicio date        NULL,
+        fecha_fin    date        NULL,
+        duracion_seg tinyint(3) UNSIGNED NOT NULL DEFAULT 12,
+        orden        int(10)     NOT NULL DEFAULT 0,
+        activo       tinyint(1)  NOT NULL DEFAULT 1,
+        created_at   datetime    NOT NULL,
+        PRIMARY KEY (id)
+    ) {$charset};");
+
+    // Precarga (Ramiro, 11/11 05:39: "precarga ya el cartel de la compe, la promo del 10 %
+    // trimestral y el Instala Blokes") — una sola vez, para que la tele tenga algo desde el
+    // primer momento sin que Ramiro tenga que crearlo a mano.
+    if (!get_option('blokes_tele_precarga')) {
+        $wpdb->insert(blokes_tele_slides_table(), array(
+            'titulo' => 'Compe RocoMadrid', 'texto' => '30 de noviembre – 4 de diciembre. Instala Blokes y apúntate.',
+            'qr_url' => 'https://rocomadrid.com/app', 'fecha_fin' => '2026-12-04', 'duracion_seg' => 14, 'orden' => 1,
+            'activo' => 1, 'created_at' => current_time('mysql'),
+        ));
+        $wpdb->insert(blokes_tele_slides_table(), array(
+            'titulo' => '10 % en el primer trimestre', 'texto' => 'Pagando trimestral, hasta el 31 de diciembre. 2 días/semana de tarde: 232 € en vez de 258 €.',
+            'qr_url' => 'https://rocomadrid.com/club', 'fecha_fin' => '2026-12-31', 'duracion_seg' => 12, 'orden' => 2,
+            'activo' => 1, 'created_at' => current_time('mysql'),
+        ));
+        $wpdb->insert(blokes_tele_slides_table(), array(
+            'titulo' => 'Instala Blokes', 'texto' => 'Apunta tus tops desde el móvil.',
+            'qr_url' => 'https://rocomadrid.com/app', 'fecha_fin' => null, 'duracion_seg' => 10, 'orden' => 3,
+            'activo' => 1, 'created_at' => current_time('mysql'),
+        ));
+        update_option('blokes_tele_precarga', 1, false);
+    }
+}
+
+function blokes_tele_slide_fila($r) {
+    return array(
+        'id' => intval($r['id']), 'titulo' => $r['titulo'], 'imagenUrl' => $r['imagen_url'],
+        'texto' => $r['texto'], 'qrUrl' => $r['qr_url'],
+        'fechaInicio' => $r['fecha_inicio'], 'fechaFin' => $r['fecha_fin'],
+        'duracionSeg' => intval($r['duracion_seg']), 'orden' => intval($r['orden']), 'activo' => (bool) $r['activo'],
+    );
+}
+
+// GET /superadmin/v1/tele-slides — todas (activas e inactivas), para gestionarlas.
+function superadmin_tele_slides_listar($request) {
+    blokes_tele_ensure_table();
+    global $wpdb;
+    $rows = $wpdb->get_results("SELECT * FROM " . blokes_tele_slides_table() . " ORDER BY orden ASC, id ASC", ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array_map('blokes_tele_slide_fila', $rows)));
+}
+
+function superadmin_tele_slides_crear($request) {
+    blokes_tele_ensure_table();
+    global $wpdb;
+    $body = $request->get_json_params();
+    if (trim((string) ($body['titulo'] ?? '')) === '') return new WP_Error('bad_request', 'Falta el título.', array('status' => 400));
+    $wpdb->insert(blokes_tele_slides_table(), array(
+        'titulo'       => sanitize_text_field((string) $body['titulo']),
+        'imagen_url'   => esc_url_raw((string) ($body['imagenUrl'] ?? '')),
+        'texto'        => sanitize_textarea_field((string) ($body['texto'] ?? '')),
+        'qr_url'       => esc_url_raw((string) ($body['qrUrl'] ?? '')),
+        'fecha_inicio' => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fechaInicio'] ?? '')) ? $body['fechaInicio'] : null,
+        'fecha_fin'    => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fechaFin'] ?? '')) ? $body['fechaFin'] : null,
+        'duracion_seg' => max(5, min(60, intval($body['duracionSeg'] ?? 12))),
+        'orden'        => intval($body['orden'] ?? 0),
+        'activo'       => 1, 'created_at' => current_time('mysql'),
+    ));
+    return rest_ensure_response(array('success' => true, 'data' => array('id' => $wpdb->insert_id)));
+}
+
+function superadmin_tele_slides_editar($request) {
+    blokes_tele_ensure_table();
+    global $wpdb;
+    $id = intval($request['id']);
+    $actual = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . blokes_tele_slides_table() . " WHERE id = %d", $id));
+    if (!$actual) return new WP_Error('not_found', 'Diapositiva no encontrada.', array('status' => 404));
+    $body = $request->get_json_params();
+    $campos = array();
+    if (isset($body['titulo']))      $campos['titulo']     = sanitize_text_field((string) $body['titulo']);
+    if (isset($body['imagenUrl']))   $campos['imagen_url'] = esc_url_raw((string) $body['imagenUrl']);
+    if (isset($body['texto']))       $campos['texto']      = sanitize_textarea_field((string) $body['texto']);
+    if (isset($body['qrUrl']))       $campos['qr_url']     = esc_url_raw((string) $body['qrUrl']);
+    if (array_key_exists('fechaInicio', $body)) $campos['fecha_inicio'] = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['fechaInicio']) ? $body['fechaInicio'] : null;
+    if (array_key_exists('fechaFin', $body))    $campos['fecha_fin']    = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['fechaFin']) ? $body['fechaFin'] : null;
+    if (isset($body['duracionSeg']))  $campos['duracion_seg'] = max(5, min(60, intval($body['duracionSeg'])));
+    if (isset($body['orden']))        $campos['orden']        = intval($body['orden']);
+    if (isset($body['activo']))       $campos['activo']       = !empty($body['activo']) ? 1 : 0;
+    if (empty($campos)) return new WP_Error('bad_request', 'Nada que actualizar.', array('status' => 400));
+    $wpdb->update(blokes_tele_slides_table(), $campos, array('id' => $id));
+    return rest_ensure_response(array('success' => true));
+}
+
+function superadmin_tele_slides_borrar($request) {
+    blokes_tele_ensure_table();
+    global $wpdb;
+    $wpdb->delete(blokes_tele_slides_table(), array('id' => intval($request['id'])));
+    return rest_ensure_response(array('success' => true));
+}
+
+// GET /progreso/v1/tele/diapositivas — público: solo las activas y dentro de su rango de
+// fechas (si tienen), para que la tele del Roco rote entre ellas sin sesión.
+function progreso_tele_diapositivas($request) {
+    blokes_tele_ensure_table();
+    global $wpdb;
+    $rows = $wpdb->get_results(
+        "SELECT * FROM " . blokes_tele_slides_table() . "
+         WHERE activo = 1
+           AND (fecha_inicio IS NULL OR fecha_inicio <= CURDATE())
+           AND (fecha_fin    IS NULL OR fecha_fin    >= CURDATE())
+         ORDER BY orden ASC, id ASC", ARRAY_A
+    );
+    return rest_ensure_response(array('success' => true, 'data' => array_map('blokes_tele_slide_fila', $rows)));
 }
 
 // "Instala Blokes" — tabla propia (no progreso_equip_table: esto vive en el blog

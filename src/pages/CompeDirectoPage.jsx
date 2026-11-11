@@ -56,10 +56,42 @@ export default function CompeDirectoPage() {
   const [clasif, setClasif] = useState(null)
   const [err, setErr] = useState(null)
   const [vistaPrecompe, setVistaPrecompe] = useState('cuenta')
+  // Tele del Roco (NOTAS_PARA_CODE_tele_roco.md): sin compe en marcha ni próxima, un carrusel
+  // de diapositivas gestionadas a mano desde Superadmin → Tele — primera versión, sin las
+  // automáticas por actividad/evento ni los vídeos de blokes, que quedan para más adelante.
+  const [slides, setSlides] = useState([])
+  const [slideIndex, setSlideIndex] = useState(0)
 
   useEffect(() => {
     const id = setInterval(() => setVistaPrecompe(v => v === 'cuenta' ? 'mapa' : 'cuenta'), ROTACION_MS)
     return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    let activo = true
+    const cargarSlides = () => {
+      fetch(`${CLUB_URL}/wp-json/progreso/v1/tele/diapositivas`)
+        .then(r => r.json())
+        .then(j => { if (activo) setSlides(j.data || []) })
+        .catch(() => {})
+    }
+    cargarSlides()
+    const id = setInterval(cargarSlides, 5 * 60000) // cada 5 min como mucho, como pide la nota
+    return () => { activo = false; clearInterval(id) }
+  }, [])
+
+  useEffect(() => {
+    if (slides.length < 2) return
+    const dur = (slides[slideIndex]?.duracionSeg || 12) * 1000
+    const id = setTimeout(() => setSlideIndex(i => (i + 1) % slides.length), dur)
+    return () => clearTimeout(id)
+  }, [slides, slideIndex])
+
+  // La tele está encendida todo el día — recarga sola cada 2,5 h para no acumular memoria ni
+  // quedarse colgada con una pestaña vieja (el problema de siempre de Chrome).
+  useEffect(() => {
+    const id = setTimeout(() => window.location.reload(), 2.5 * 3600000)
+    return () => clearTimeout(id)
   }, [])
 
   useEffect(() => {
@@ -113,11 +145,33 @@ export default function CompeDirectoPage() {
       )
     }
     if (!proxima) {
+      // Tele del Roco: sin compe en marcha ni programada, rota las diapositivas de
+      // Superadmin → Tele (cartel, promociones, Instala Blokes...) en vez de quedarse en un
+      // mensaje muerto.
+      const slide = slides[slideIndex] || null
       return (
         <div style={estilos.pagina}>
-          <div style={{ margin: 'auto', textAlign: 'center' }}>
-            <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(160), marginBottom: 24 }} />
-            <p style={{ fontSize: '2rem', color: '#9ca3af' }}>No hay compe activa ahora mismo.</p>
+          <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 1200 }}>
+            <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(110), marginBottom: 20 }} />
+            {slide ? (
+              <>
+                {slide.imagenUrl && (
+                  <img src={slide.imagenUrl} alt={slide.titulo} style={{ maxHeight: 420, maxWidth: '100%', borderRadius: 14, marginBottom: 28, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }} />
+                )}
+                <p style={{ fontSize: '3rem', fontWeight: 800, margin: '0 0 14px' }}>{slide.titulo}</p>
+                {slide.texto && <p style={{ fontSize: '1.6rem', color: '#d1d5db', margin: '0 0 24px' }}>{slide.texto}</p>}
+                {slide.qrUrl && (
+                  <div style={{ background: '#fff', padding: 14, borderRadius: 14, display: 'inline-block' }}>
+                    <img
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(slide.qrUrl)}`}
+                      alt="Código QR" width={200} height={200}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <p style={{ fontSize: '2rem', color: '#9ca3af' }}>No hay compe activa ahora mismo.</p>
+            )}
           </div>
         </div>
       )
