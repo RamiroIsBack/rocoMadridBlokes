@@ -106,7 +106,9 @@ function blokes_get_app_role() {
     if ($ver_como === 'tablet' && in_array($real, array('socio', 'profesor', 'gestion'), true)) {
         return 'tablet';
     }
-    if ($real === 'socio' && in_array($ver_como, array('gestion', 'profesor'), true)) {
+    // "member" = "Usuario" en el selector (Ramiro, 11/11 05:01: para que el socio vea lo que ve
+    // la gente normal, sin ningún rol especial).
+    if ($real === 'socio' && in_array($ver_como, array('gestion', 'profesor', 'member'), true)) {
         // Respaldo del filtro rest_pre_dispatch: en algunos namespaces (progreso/v1) no
         // corta la escritura a tiempo, así que lo repetimos aquí dentro, que se llama
         // desde todos los permission_callback de todos los namespaces sin excepción.
@@ -141,7 +143,7 @@ function blokes_es_socio() {
 add_filter('rest_pre_dispatch', function($result, $server, $request) {
     if (!in_array($request->get_method(), array('POST', 'PUT', 'PATCH', 'DELETE'), true)) return $result;
     $ver_como = isset($_SERVER['HTTP_X_BLOKES_VER_COMO']) ? sanitize_key($_SERVER['HTTP_X_BLOKES_VER_COMO']) : '';
-    if (!in_array($ver_como, array('gestion', 'profesor'), true)) return $result;
+    if (!in_array($ver_como, array('gestion', 'profesor', 'member'), true)) return $result;
     if (blokes_get_app_role_real() !== 'socio') return $result; // la cabecera no sirve para nadie más
     return new WP_Error('ver_como_solo_lectura', 'Estás en modo "Ver como": vuelve a Socio para cambiar cosas.', array('status' => 403));
 }, 10, 3);
@@ -821,6 +823,14 @@ add_action('rest_api_init', function() {
     ));
     register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)/photo', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_upload_comp_block_photo', 'permission_callback' => $equip_perm,
+    ));
+    // "Vamos bien de tiempo, añadir el 17 y 18" (Ramiro, 11/11 05:01) — nunca dar por hecho que
+    // una compe tiene 16 bloques fijos.
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/comp-blocks', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_add_comp_block', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)', array(
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_comp_block', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/generate-plan', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_competition_generate_plan', 'permission_callback' => $equip_perm,
@@ -13398,6 +13408,36 @@ function progreso_equip_update_comp_block($request) {
     if ($request->get_param('status') !== null) { $upd['status'] = sanitize_text_field($request->get_param('status')); $fmt[] = '%s'; }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     $wpdb->update(progreso_equip_table('comp_blocks'), $upd, array('id' => $id), $fmt, array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /equipacion/competitions/{id}/comp-blocks — "Vamos bien de tiempo, añadir el 17 y 18"
+// (Ramiro, 11/11 05:01): un bloque más, numerado detrás del último que ya hubiera. El cartel y
+// el resto de sitios que cuentan bloques leen siempre COUNT(comp_blocks), nunca un 16 fijo.
+function progreso_equip_add_comp_block($request) {
+    global $wpdb;
+    $comp_id = intval($request['id']);
+    $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $comp_id));
+    if (!$existe) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+    $siguiente = intval($wpdb->get_var($wpdb->prepare(
+        "SELECT COALESCE(MAX(number), 0) + 1 FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d", $comp_id
+    )));
+    $wpdb->insert(progreso_equip_table('comp_blocks'), array(
+        'competition_id' => $comp_id, 'number' => $siguiente, 'status' => 'planeado',
+    ), array('%d', '%d', '%s'));
+    return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id, 'number' => $siguiente));
+}
+
+// DELETE /equipacion/comp-blocks/{id} — deshacer un bloque añadido de más, solo mientras no se
+// haya colocado en el mapa (si ya está colocado o tiene datos, se queda — igual que cualquier
+// otro bloque de la compe; para quitarlo de verdad hay que hacerlo a propósito desde fuera).
+function progreso_equip_delete_comp_block($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $block = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id), ARRAY_A);
+    if (!$block) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
+    if ($block['x_pct'] !== null) return new WP_Error('placed', 'Este bloque ya está colocado en el mapa — quítalo del mapa antes de borrarlo.', array('status' => 400));
+    $wpdb->delete(progreso_equip_table('comp_blocks'), array('id' => $id), array('%d'));
     return rest_ensure_response(array('success' => true));
 }
 

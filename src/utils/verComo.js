@@ -13,7 +13,9 @@
 // esto, solo cambia qué pantalla ven).
 const KEY = 'blokes_ver_como'
 const HEADER = 'X-Blokes-Ver-Como'
-const ROLES_SOLO_SOCIO = ['gestion', 'profesor']
+// "member" = "Usuario" en el selector — socio normal, sin ningún rol especial (Ramiro,
+// 11/11 05:01: "para que Ramiro vea lo que ve la gente").
+const ROLES_SOLO_SOCIO = ['gestion', 'profesor', 'member']
 const ROLES_PARA_SUPERVISORES = ['tablet']
 
 export function getVerComo() {

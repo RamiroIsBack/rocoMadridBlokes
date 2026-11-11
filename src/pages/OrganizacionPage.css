@@ -339,7 +339,29 @@
 .org__comp-bubble:active { cursor: grabbing; }
 .org__comp-bubble--ghost { opacity: 0.6; pointer-events: none; border-style: dashed; }
 .org__comp-bubble--tested { box-shadow: 0 0 0 2px #22c55e, 0 2px 4px rgba(0,0,0,0.4); }
+/* Marca de "probado (forerunning)" sobre la burbuja (Ramiro, 11/11 05:01) — el halo verde de
+   arriba ya avisaba, pero quería un ✓ explícito, con "Forerun hecho" al pasar el ratón/tocar. */
+.org__comp-bubble__tested-mark {
+  position: absolute;
+  top: -6px; right: -6px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #22c55e;
+  color: #052e16;
+  font-size: 0.6rem;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #052e16;
+  pointer-events: none;
+}
 .org__comp-block-photo { max-width: 160px; display: block; margin-bottom: 6px; border: 1px solid #c8bc9a; }
+/* "Bloque #3" se leía mal en la ficha (Ramiro, 11/11 05:01) — más grande y en negrita, el
+   número sobre todo. No se toca .org__section-title (compartido con cabeceras de otras
+   secciones) para no afectar a nada más. */
+.org__comp-block-title { font-size: 1.4rem; font-weight: 800; margin: 0; }
+.org__comp-block-title strong { font-size: 1.7rem; }
 
 /* ── Mover tarea (Semana, detalle) / editar periodicidad (Normas) ── */
 .org__task-move {

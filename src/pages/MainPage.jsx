@@ -117,7 +117,9 @@ function ColeccionModoCompe({ estado }) {
       )}
       <div className="cards-grid compe-cards-grid">
         {(estado.bloques || []).map(b => {
-          const color = colorPorNumeroBloque(b.numero)
+          // Nunca dar por hecho que son 16 — Ramiro, 11/11 05:01: tiene que poder añadir
+          // bloques (17, 18...) sin que la escala de color se quede corta.
+          const color = colorPorNumeroBloque(b.numero, estado.bloques.length)
           return (
             <a
               key={b.compBlockId}

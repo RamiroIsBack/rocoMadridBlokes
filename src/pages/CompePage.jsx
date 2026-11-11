@@ -162,6 +162,7 @@ export default function CompePage() {
             <BloqueFila
               key={b.compBlockId}
               bloque={b}
+              totalBloques={estado.bloques.length}
               resultado={misResultados[b.compBlockId]}
               guardando={guardando === b.compBlockId}
               onGuardar={cambios => guardar(b.compBlockId, cambios)}
@@ -298,6 +299,7 @@ function RecepcionTab({ bloques, competitionId }) {
             <BloqueFila
               key={b.compBlockId}
               bloque={b}
+              totalBloques={bloques.length}
               resultado={misResultados[b.compBlockId]}
               guardando={guardando === b.compBlockId}
               onGuardar={cambios => guardarPara(b.compBlockId, cambios)}
@@ -358,7 +360,7 @@ function RecepcionTab({ bloques, competitionId }) {
   )
 }
 
-function BloqueFila({ bloque, resultado, guardando, onGuardar }) {
+function BloqueFila({ bloque, totalBloques, resultado, guardando, onGuardar }) {
   const [top, setTop] = useState(!!resultado?.top)
   const [zona, setZona] = useState(!!resultado?.zona)
   const [intentos, setIntentos] = useState(resultado?.intentos ?? 0)
@@ -368,7 +370,7 @@ function BloqueFila({ bloque, resultado, guardando, onGuardar }) {
     setTop(!!resultado?.top); setZona(!!resultado?.zona); setIntentos(resultado?.intentos ?? 0)
   }, [resultado?.top, resultado?.zona, resultado?.intentos])
 
-  const color = colorPorNumeroBloque(bloque.numero)
+  const color = colorPorNumeroBloque(bloque.numero, totalBloques)
   const estadoLabel = resultado ? 'Apuntado ✓' : ''
 
   return (

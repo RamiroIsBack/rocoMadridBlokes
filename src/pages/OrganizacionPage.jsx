@@ -1662,6 +1662,26 @@ function CompePlanView({ compId, taskTypeById, workers }) {
   )
 }
 
+// Rectángulos aproximados (en % del mapa `mapa-equipacion.jpg`, 1600×570 px) de cada subzona
+// dibujada en el plano, para deducir la subzona sola al colocar/mover una burbuja (Ramiro,
+// 11/11 05:01). Sacados a ojo del propio dibujo (los rótulos "SUBZONA #n" ya están en la
+// imagen) — no son exactos pixel a pixel, por eso la ficha deja corregirla a mano si hace
+// falta. Se comprueban en este orden; la primera que encaja gana.
+const SUBZONA_RECTS = [
+  { subzona: 1, x: [34.5, 66],   y: [4,  30] },
+  { subzona: 2, x: [0,   35],    y: [4,  41] },
+  { subzona: 4, x: [35,  65],    y: [43, 57] },
+  { subzona: 3, x: [8,   34],    y: [43, 62] },
+  { subzona: 5, x: [53,  66],    y: [56, 96] },
+  { subzona: 6, x: [28,  53],    y: [77, 96] },
+  { subzona: 7, x: [0,   28],    y: [60, 96] },
+  { subzona: 8, x: [78,  100],   y: [24, 68] },
+]
+function subzonaDesdePosicion(xPct, yPct) {
+  const r = SUBZONA_RECTS.find(z => xPct >= z.x[0] && xPct <= z.x[1] && yPct >= z.y[0] && yPct <= z.y[1])
+  return r ? r.subzona : null
+}
+
 // Arrastra una burbuja ya colocada para moverla, o toca un número sin
 // colocar y luego el sitio del mapa — pensado para funcionar igual con
 // ratón que con el dedo en la tablet.
@@ -1680,6 +1700,21 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
 
   useEffect(() => { setBlocks(comp.blocks) }, [comp])
   useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
+
+  // Relleno de una vez: bloques ya colocados en el mapa de antes de este cambio, que se
+  // quedaron sin subzona (Ramiro, 11/11 05:01: "los 6 bloques ya colocados sin subzona se
+  // rellenan con esa misma lógica"). Solo toca los que de verdad están vacíos, nunca
+  // sobreescribe una subzona ya puesta a mano.
+  useEffect(() => {
+    const sinSubzona = comp.blocks.filter(b => b.xPct != null && b.subzone == null)
+    if (!sinSubzona.length) return
+    sinSubzona.forEach(b => {
+      const subzona = subzonaDesdePosicion(b.xPct, b.yPct)
+      if (subzona == null) return
+      setBlocks(cur => cur.map(x => x.id === b.id ? { ...x, subzone: subzona } : x))
+      api('PUT', `/equipacion/comp-blocks/${b.id}`, { subzone: subzona }).catch(() => {})
+    })
+  }, [comp.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const clampPct = v => Math.max(2, Math.min(98, v))
   const posFromClient = (clientX, clientY) => {
@@ -1714,15 +1749,22 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
     if (id == null) return
     if (!moved) { setEditingBlockId(id); return }
     const b = blocks.find(x => x.id === id)
-    if (b) { try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: b.xPct, yPct: b.yPct }) } catch { showToast('No se ha podido guardar la posición.') } }
+    if (b) {
+      // La subzona se recalcula sola al mover la burbuja — se puede corregir a mano después
+      // en la ficha (Ramiro, 11/11 05:01).
+      const subzona = subzonaDesdePosicion(b.xPct, b.yPct)
+      setBlocks(cur => cur.map(x => x.id === id ? { ...x, subzone: subzona } : x))
+      try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: b.xPct, yPct: b.yPct, subzone: subzona }) } catch { showToast('No se ha podido guardar la posición.') }
+    }
   }
   const onWrapClick = async e => {
     if (dragIdRef.current != null || !selectedToPlace) return
     const { x, y } = posFromClient(e.clientX, e.clientY)
     const id = selectedToPlace
-    setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: x, yPct: y } : b))
+    const subzona = subzonaDesdePosicion(x, y)
+    setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: x, yPct: y, subzone: subzona } : b))
     setSelectedToPlace(null)
-    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: x, yPct: y }) }
+    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: x, yPct: y, subzone: subzona }) }
     catch { showToast('No se ha podido colocar el bloque.'); setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: null, yPct: null } : b)) }
   }
   // Arrastrar un número de la bandeja hasta el mapa (además de tocar y
@@ -1751,9 +1793,10 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
     const within = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom
     if (!within) return
     const { x, y } = posFromClient(e.clientX, e.clientY)
+    const subzona = subzonaDesdePosicion(x, y)
     setSelectedToPlace(null)
-    setBlocks(cur => cur.map(b => b.id === st.id ? { ...b, xPct: x, yPct: y } : b))
-    try { await api('PUT', `/equipacion/comp-blocks/${st.id}`, { xPct: x, yPct: y }) }
+    setBlocks(cur => cur.map(b => b.id === st.id ? { ...b, xPct: x, yPct: y, subzone: subzona } : b))
+    try { await api('PUT', `/equipacion/comp-blocks/${st.id}`, { xPct: x, yPct: y, subzone: subzona }) }
     catch { showToast('No se ha podido colocar el bloque.'); setBlocks(cur => cur.map(b => b.id === st.id ? { ...b, xPct: null, yPct: null } : b)) }
   }
 
@@ -1771,6 +1814,32 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
     if (!window.confirm(`¿Borrar la competición "${comp.name}"? No se puede deshacer.`)) return
     try { await api('DELETE', `/equipacion/competitions/${comp.id}`); onBack() }
     catch { showToast('No se ha podido borrar la competición.') }
+  }
+
+  // "Vamos bien de tiempo, añadir el 17 y 18" (Ramiro, 11/11 05:01) — un bloque más cada vez
+  // que se pulsa, nunca da por hecho que son 16. Se puede deshacer mientras el añadido todavía
+  // no se haya colocado en el mapa.
+  const [addingBlock, setAddingBlock] = useState(false)
+  const addBlock = async () => {
+    setAddingBlock(true)
+    try {
+      const res = await api('POST', `/equipacion/competitions/${comp.id}/comp-blocks`, {})
+      setBlocks(cur => [...cur, { id: res.id, number: res.number, xPct: null, yPct: null, subzone: null, grade: '', holdSetIds: [], volumes: '', equipador: '', tested: false, photoUrl: '' }])
+    } catch (e) {
+      showToast(e.message || 'No se ha podido añadir el bloque.')
+    } finally {
+      setAddingBlock(false)
+    }
+  }
+  const ultimoSinColocar = unplaced.length ? unplaced.reduce((a, b) => a.number > b.number ? a : b) : null
+  const undoAddBlock = async () => {
+    if (!ultimoSinColocar) return
+    try {
+      await api('DELETE', `/equipacion/comp-blocks/${ultimoSinColocar.id}`)
+      setBlocks(cur => cur.filter(b => b.id !== ultimoSinColocar.id))
+    } catch (e) {
+      showToast(e.message || 'No se ha podido deshacer.')
+    }
   }
 
   return (
@@ -1814,8 +1883,11 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
             style={{ left: `${b.xPct}%`, top: `${b.yPct}%`, borderColor: b.grade ? (GRADE_COLOR[b.grade] || '#fff') : undefined }}
             onPointerDown={startDrag(b.id)}
             onDoubleClick={() => unplace(b.id)}
-            title="Toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa"
-          >{b.number}</div>
+            title={b.tested ? 'Forerun hecho — toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa' : 'Toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa'}
+          >
+            {b.number}
+            {b.tested && <span className="org__comp-bubble__tested-mark" aria-hidden="true">✓</span>}
+          </div>
         ))}
         {trayDrag && (
           <div className="org__comp-bubble org__comp-bubble--ghost" style={{ left: `${trayDrag.x}%`, top: `${trayDrag.y}%` }}>
@@ -1825,10 +1897,21 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
       </div>
       <p className="org__hint">{placed.length} de {blocks.length} bloques colocados. Toca una burbuja para su ficha, doble clic para quitarla del mapa.</p>
 
+      {canManage && (
+        <div className="org__semana-actions" style={{ marginBottom: 20 }}>
+          <button className="org__link-btn" onClick={addBlock} disabled={addingBlock}>
+            {addingBlock ? 'Añadiendo...' : `+ Añadir bloque (vamos bien de tiempo — serían ${blocks.length + 1})`}
+          </button>
+          {ultimoSinColocar && (
+            <button className="org__link-btn" onClick={undoAddBlock}>Deshacer el bloque #{ultimoSinColocar.number}</button>
+          )}
+        </div>
+      )}
+
       {editingBlockId != null && (
         <CompBlockFicha
           block={blocks.find(b => b.id === editingBlockId)}
-          config={config} holdsets={holdsets}
+          config={config} holdsets={holdsets} workers={workers || []} blocks={blocks}
           onClose={() => setEditingBlockId(null)}
           onSaved={patch => { setBlocks(cur => cur.map(b => b.id === editingBlockId ? { ...b, ...patch } : b)) }}
         />
@@ -1842,16 +1925,27 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
 // Ficha de un bloque de compe: subzona, color, presas, volúmenes, equipador, foto (subida
 // desde el móvil) y probado sí/no — Álvaro la rellena tocando una burbuja del mapa (Ramiro,
 // 1/11 17:20).
-function CompBlockFicha({ block, config, holdsets, onClose, onSaved }) {
+function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onSaved }) {
   const [subzone, setSubzone] = useState(block.subzone ?? '')
   const [grade, setGrade] = useState(block.grade || '')
   const [holdSetIds, setHoldSetIds] = useState(block.holdSetIds || [])
   const [volumes, setVolumes] = useState(block.volumes || '')
-  const [equipador, setEquipador] = useState(block.equipador || '')
   const [tested, setTested] = useState(!!block.tested)
   const [photoUrl, setPhotoUrl] = useState(block.photoUrl || '')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  // Equipador: desplegable de personas de equipación (activas, fijas y eventuales), más
+  // cualquier nombre "Otro…" que ya se haya usado en OTRO bloque de ESTA MISMA compe (vale
+  // solo mientras algún bloque lo siga usando — no crea una persona de equipación de verdad),
+  // y al final "Otro…" para escribir uno nuevo (Ramiro, 11/11 05:01).
+  const nombresWorkers = (workers || []).filter(w => w.active).map(w => w.name)
+  const nombresOtros = Array.from(new Set(
+    (blocks || []).map(b => b.equipador).filter(n => n && n.trim() && !nombresWorkers.includes(n))
+  ))
+  const equipadorOpciones = [...nombresWorkers, ...nombresOtros]
+  const [modoOtro, setModoOtro] = useState(!!block.equipador && !equipadorOpciones.includes(block.equipador))
+  const [equipador, setEquipador] = useState(block.equipador || '')
 
   const toggleHoldSet = id => setHoldSetIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
 
@@ -1893,7 +1987,7 @@ function CompBlockFicha({ block, config, holdsets, onClose, onSaved }) {
   return (
     <div className="org__add-form">
       <div className="org__semana-actions">
-        <p className="org__section-title" style={{ margin: 0 }}>Bloque #{block.number}</p>
+        <p className="org__comp-block-title">Bloque <strong>#{block.number}</strong></p>
         <button className="org__link-btn" onClick={onClose}>Cerrar</button>
       </div>
       <div className="org__add-row">
@@ -1924,7 +2018,23 @@ function CompBlockFicha({ block, config, holdsets, onClose, onSaved }) {
       </div>
       <div className="org__add-row">
         <label>Equipador</label>
-        <input type="text" value={equipador} onChange={e => setEquipador(e.target.value)} />
+        {modoOtro ? (
+          <div className="org__add-row--holdsets">
+            <input type="text" value={equipador} onChange={e => setEquipador(e.target.value)} placeholder="Nombre" autoFocus />
+            {equipadorOpciones.length > 0 && (
+              <button type="button" className="org__link-btn" onClick={() => { setModoOtro(false); setEquipador(equipadorOpciones[0] || '') }}>← elegir de la lista</button>
+            )}
+          </div>
+        ) : (
+          <select
+            value={equipador}
+            onChange={e => { if (e.target.value === '__otro__') { setModoOtro(true); setEquipador('') } else setEquipador(e.target.value) }}
+          >
+            <option value="">Sin asignar</option>
+            {equipadorOpciones.map(n => <option key={n} value={n}>{n}</option>)}
+            <option value="__otro__">Otro…</option>
+          </select>
+        )}
       </div>
       <div className="org__add-row">
         <label>Foto</label>

@@ -511,6 +511,7 @@ function VerComoSelector({ sd }) {
   return (
     <select className="app-header__ver-como" value={actual} onChange={cambiar} title="Ver como">
       <option value="">Ver como: Socio</option>
+      <option value="member">Ver como: Usuario</option>
       <option value="gestion">Ver como: Eva (gestión)</option>
       <option value="profesor">Ver como: Profe</option>
       <option value="tablet">Ver como: Tablet</option>

@@ -144,7 +144,7 @@ export default function CompeDirectoPage() {
               <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #1f2937' }}>
                 <span style={{
                   width: 18, height: 18, borderRadius: '50%', flex: '0 0 auto',
-                  background: colorPorNumeroBloque(u.numero).bg,
+                  background: colorPorNumeroBloque(u.numero, estado.bloques?.length).bg,
                 }} />
                 <span><strong>{u.nombreMostrar}</strong> · bloque {u.numero} · hace {u.hace}</span>
               </li>
