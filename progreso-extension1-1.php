@@ -1314,6 +1314,13 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_campanas_deshacer_enviados',
         'permission_callback' => $sa_perm,
     ));
+    // Parte C de la trazabilidad (Ramiro, 11/11 05:35): cruce indirecto por teléfono, para lo ya
+    // enviado sin enlace y para quien no hace clic pero vuelve igual.
+    register_rest_route('superadmin/v1', '/campanas/(?P<id>\d+)/recalcular-indirectas', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_campanas_recalcular_indirectas',
+        'permission_callback' => $sa_perm,
+    ));
 });
 
 // ============================================================
@@ -2211,6 +2218,20 @@ function blokes_registrar_install_event($request) {
         'user_id'    => is_user_logged_in() ? get_current_user_id() : null,
         'created_at' => current_time('mysql'),
     ));
+    // Parte B de la trazabilidad (Ramiro, 11/11 05:35): instalación real de la app con la
+    // cookie de una campaña puesta (p. ej. la de la compe) cuenta como conversión directa. Esta
+    // ruta vive en el blog 1 (donde está Blokes), pero las tablas de campañas son del Club
+    // (blog 3) — switch_to_blog, igual que en /c/{token}.
+    if ($tipo === 'appinstalled' && !empty($_COOKIE['roco_cmp'])) {
+        $token = sanitize_text_field($_COOKIE['roco_cmp']);
+        switch_to_blog(3);
+        blokes_ensure_campanas_tables();
+        $enlace = blokes_campana_enlace_por_token($token);
+        if ($enlace) {
+            blokes_campana_registrar_conversion(intval($enlace['campana_id']), intval($enlace['contacto_id']), 'instalacion', 'directa');
+        }
+        restore_current_blog();
+    }
     return rest_ensure_response(array('success' => true));
 }
 
@@ -7172,6 +7193,7 @@ function blokes_campanas_table()       { global $wpdb; return $wpdb->prefix . 'b
 function blokes_campana_envios_table() { global $wpdb; return $wpdb->prefix . 'blokes_campana_envios'; }
 function blokes_campana_enlaces_table() { global $wpdb; return $wpdb->prefix . 'blokes_campana_enlaces'; }
 function blokes_campana_clics_table()   { global $wpdb; return $wpdb->prefix . 'blokes_campana_clics'; }
+function blokes_campana_conversiones_table() { global $wpdb; return $wpdb->prefix . 'blokes_campana_conversiones'; }
 
 function blokes_ensure_campanas_tables() {
     global $wpdb;
@@ -7291,6 +7313,20 @@ function blokes_ensure_campanas_tables() {
         PRIMARY KEY (id),
         KEY token (token)
     ) {$charset};");
+    // Conversiones (partes B/C de la nota de trazabilidad): alta/pedido tras un clic con
+    // cookie ("directa"), o mismo teléfono/email con alta nueva sin haber hecho clic
+    // ("indirecta"); e instalación de la app para la campaña de la compe.
+    dbDelta("CREATE TABLE " . blokes_campana_conversiones_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        campana_id  bigint(20) UNSIGNED NOT NULL,
+        contacto_id bigint(20) UNSIGNED NOT NULL,
+        tipo        varchar(20)  NOT NULL DEFAULT '',
+        atribucion  varchar(10)  NOT NULL DEFAULT '',
+        detalle     varchar(190) NOT NULL DEFAULT '',
+        created_at  datetime     NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY campana_contacto_tipo (campana_id, contacto_id, tipo)
+    ) {$charset};");
 
     // Destinos conocidos de hoy (Ramiro, 11/11 05:35) — solo rellena las campañas que ya
     // existen y todavía no tienen destino puesto, nunca sobreescribe uno editado a mano.
@@ -7322,6 +7358,41 @@ function blokes_campana_enlace_token($campana_id, $contacto_id) {
     ));
     return $token;
 }
+
+// Busca campaña+contacto a partir de un token — lo usan /c/{token}, el checkout de WooCommerce
+// y la instalación de la app. Asume que ya se está en el blog del Club (donde viven las tablas
+// de campañas) cuando se llama.
+function blokes_campana_enlace_por_token($token) {
+    global $wpdb;
+    return $wpdb->get_row($wpdb->prepare(
+        "SELECT campana_id, contacto_id FROM " . blokes_campana_enlaces_table() . " WHERE token = %s", $token
+    ), ARRAY_A);
+}
+
+// Registra una conversión una sola vez por campaña+contacto+tipo — la clave única de la tabla
+// hace de guarda, así que llamarlo dos veces para lo mismo no duplica nada.
+function blokes_campana_registrar_conversion($campana_id, $contacto_id, $tipo, $atribucion, $detalle = '') {
+    global $wpdb;
+    $wpdb->query($wpdb->prepare(
+        "INSERT IGNORE INTO " . blokes_campana_conversiones_table() . " (campana_id, contacto_id, tipo, atribucion, detalle, created_at)
+         VALUES (%d, %d, %s, %s, %s, %s)",
+        $campana_id, $contacto_id, $tipo, $atribucion, $detalle, current_time('mysql')
+    ));
+}
+
+// Parte B de la trazabilidad (Ramiro, 11/11 05:35): si quien acaba de pagar llegó con la
+// cookie de una campaña, se registra como conversión "directa" de tipo "pedido". El checkout
+// vive en el Club (blog 3), igual que las tablas de campañas — no hace falta switch_to_blog.
+add_action('woocommerce_checkout_order_processed', function($order_id, $posted_data, $order) {
+    if (empty($_COOKIE['roco_cmp'])) return;
+    $token = sanitize_text_field($_COOKIE['roco_cmp']);
+    blokes_ensure_campanas_tables();
+    $enlace = blokes_campana_enlace_por_token($token);
+    if (!$enlace) return;
+    blokes_campana_registrar_conversion(
+        intval($enlace['campana_id']), intval($enlace['contacto_id']), 'pedido', 'directa', 'pedido #' . $order_id
+    );
+}, 30, 3);
 
 // /c/{token} — público, sin login: registra el clic (salvo que sea el bot de vista previa de
 // WhatsApp/Facebook, que abre el enlace solo para construir la tarjeta del mensaje) y redirige
@@ -7761,6 +7832,12 @@ function superadmin_campanas_listar($request) {
              JOIN " . blokes_campana_enlaces_table() . " en ON en.token = cl.token
              WHERE en.campana_id = %d", $r['id']
         )));
+        // Parte D (mínima): conversiones directas + indirectas, por destinatario distinto
+        // (partes B/C). Recuentos, nunca importes en euros (cowork, 11/11 05:35).
+        $conversiones = $wpdb->get_row($wpdb->prepare(
+            "SELECT COUNT(*) total, SUM(atribucion = 'directa') directas, SUM(atribucion = 'indirecta') indirectas
+             FROM " . blokes_campana_conversiones_table() . " WHERE campana_id = %d", $r['id']
+        ), ARRAY_A);
         $out[] = array(
             'id' => intval($r['id']), 'nombre' => $r['nombre'],
             'plantillaAdulto' => $r['plantilla_adulto'], 'plantillaMenor' => $r['plantilla_menor'],
@@ -7770,6 +7847,9 @@ function superadmin_campanas_listar($request) {
             'enviados' => intval($stats['enviados'] ?? 0), 'respondidos' => intval($stats['respondidos'] ?? 0),
             'bajas' => intval($stats['bajas'] ?? 0), 'apuntados' => intval($stats['apuntados'] ?? 0),
             'clicsUnicos' => $clics_unicos,
+            'conversiones' => intval($conversiones['total'] ?? 0),
+            'conversionesDirectas' => intval($conversiones['directas'] ?? 0),
+            'conversionesIndirectas' => intval($conversiones['indirectas'] ?? 0),
         );
     }
     return rest_ensure_response(array('success' => true, 'data' => $out));
@@ -7998,6 +8078,46 @@ function superadmin_campanas_deshacer_enviados($request) {
     );
     blokes_gestion_log(0, 'campana_deshacer_enviados', array(), array('campanaId' => $campana_id, 'filas' => $n));
     return rest_ensure_response(array('success' => true, 'data' => array('filas' => intval($n))));
+}
+
+// POST /campanas/{id}/recalcular-indirectas — parte C de la trazabilidad: para quien no hizo
+// clic (o se le envió antes de que existiera el enlace), busca si su teléfono tiene ahora una
+// suscripción en vigor dada de alta DESPUÉS del envío — si la hay, cuenta como conversión
+// "indirecta". Se puede llamar las veces que haga falta sin duplicar (clave única de la tabla).
+function superadmin_campanas_recalcular_indirectas($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $id = intval($request['id']);
+    $campana = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . blokes_campanas_table() . " WHERE id = %d", $id), ARRAY_A);
+    if (!$campana) return new WP_Error('not_found', 'Campaña no encontrada.', array('status' => 404));
+
+    $envios = $wpdb->get_results($wpdb->prepare(
+        "SELECT contacto_id, enviado_at FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d AND enviado_at IS NOT NULL", $id
+    ), ARRAY_A);
+    if (!$envios) return rest_ensure_response(array('success' => true, 'data' => array('revisados' => 0, 'nuevas' => 0)));
+
+    $subs_por_tel = blokes_campanas_subs_por_telefono();
+    $nuevas = 0;
+    foreach ($envios as $e) {
+        $contacto_id = intval($e['contacto_id']);
+        $ya = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM " . blokes_campana_conversiones_table() . " WHERE campana_id = %d AND contacto_id = %d AND tipo = 'pedido'", $id, $contacto_id
+        ));
+        if ($ya) continue; // ya contada (directa o una indirecta de antes) — no hace falta repetir
+        $contacto = $wpdb->get_row($wpdb->prepare("SELECT telefono FROM " . blokes_contactos_table() . " WHERE id = %d", $contacto_id), ARRAY_A);
+        if (!$contacto) continue;
+        $tel = blokes_externos_normaliza_telefono($contacto['telefono']);
+        $sub = $subs_por_tel[$tel] ?? null;
+        if (!$sub || !in_array($sub['status'], array('active', 'on-hold', 'pending'), true)) continue;
+        $sub_obj  = (!empty($sub['id']) && function_exists('wcs_get_subscription')) ? wcs_get_subscription(intval($sub['id'])) : null;
+        $alta_iso = $sub_obj ? $sub_obj->get_date('date_created') : null;
+        $alta_ts  = $alta_iso ? strtotime($alta_iso) : 0;
+        $envio_ts = strtotime($e['enviado_at']);
+        if (!$alta_ts || $alta_ts < $envio_ts) continue; // la alta tiene que ser DESPUÉS del envío, si no, no la provocó la campaña
+        blokes_campana_registrar_conversion($id, $contacto_id, 'pedido', 'indirecta', 'sub #' . intval($sub['id'] ?? 0));
+        $nuevas++;
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array('revisados' => count($envios), 'nuevas' => $nuevas)));
 }
 
 // GET /gestion/bajas-motivo — bajas de clases por mes y por motivo, para ver si una campaña de

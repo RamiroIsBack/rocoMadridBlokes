@@ -112,6 +112,8 @@ export const campanasMarcarAccion      = (id, contactoId, accion) => gestionPost
 // Quita el "enviado" de TODOS los contactos de esta campaña de golpe (Ramiro, 3/11 12:10: quedaron
 // marcados por pruebas, sin haberse enviado nada de verdad). No toca respondio/baja/apuntado.
 export const campanasDeshacerEnviados  = id                       => gestionPost(`/campanas/${id}/deshacer-enviados`)
+// Trazabilidad (11/11): cruce indirecto por teléfono, para quien no hizo clic pero volvió igual.
+export const campanasRecalcularIndirectas = id                    => gestionPost(`/campanas/${id}/recalcular-indirectas`)
 export const gestionBajasMotivo        = (meses = 12)              => gestionCall('GET', `/gestion/bajas-motivo?meses=${meses}`)
 
 // Calendario de días especiales del club (NOTAS_PARA_CODE_calendario.md): festivos, cierres y

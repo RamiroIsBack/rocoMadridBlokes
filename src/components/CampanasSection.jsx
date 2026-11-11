@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx'
 import {
   campanasContactosImportar, campanasContactosGet, campanasContactoBorrar, campanasEnviosHoyGet,
   campanasListar, campanasCrear, campanasEditar, campanasDestinatarios, campanasMarcarAccion,
-  campanasDeshacerEnviados,
+  campanasDeshacerEnviados, campanasRecalcularIndirectas,
 } from '../hooks/useSuperAdmin'
 import './CampanasSection.css'
 
@@ -540,6 +540,18 @@ function CampanasPanel({ sugeridas }) {
     setRefresh(k => k + 1)
   }
 
+  // Parte C de la trazabilidad (11/11): cruce indirecto por teléfono — para quien no hizo
+  // clic (o se le envió antes de que existiera el enlace) pero volvió igual.
+  const [recalculando, setRecalculando] = useState(null)
+  const recalcularIndirectas = async c => {
+    setRecalculando(c.id)
+    try {
+      const res = await campanasRecalcularIndirectas(c.id)
+      window.alert(`Revisados ${res.revisados}: ${res.nuevas} conversión(es) indirecta(s) nueva(s).`)
+    } catch (e) { window.alert(e.message) }
+    finally { setRecalculando(null); setRefresh(k => k + 1) }
+  }
+
   const visibles = (campanas || []).filter(c => verArchivadas || c.activa)
 
   return (
@@ -569,6 +581,7 @@ function CampanasPanel({ sugeridas }) {
           <div className="cmp-campana-stats">
             <span>Enviados: {c.enviados}</span>
             <span>Clics (únicos): {c.clicsUnicos ?? 0}</span>
+            <span>Conversiones: {c.conversiones ?? 0} ({c.conversionesDirectas ?? 0} directas, {c.conversionesIndirectas ?? 0} indirectas)</span>
             <span>Respondidos: {c.respondidos}</span>
             <span>Bajas: {c.bajas}</span>
             <span>Se apuntaron: {c.apuntados}</span>
@@ -577,6 +590,11 @@ function CampanasPanel({ sugeridas }) {
             <button className="cmp-btn cmp-btn--primary" onClick={() => setAbierta(c)}>Enviar / ver destinatarios</button>
             <button className="cmp-btn" onClick={() => setEditando(c)}>Editar</button>
             <button className="cmp-btn" onClick={() => archivar(c, !c.activa)}>{c.activa ? 'Archivar' : 'Reactivar'}</button>
+            {c.enviados > 0 && (
+              <button className="cmp-btn" onClick={() => recalcularIndirectas(c)} disabled={recalculando === c.id}>
+                {recalculando === c.id ? 'Revisando…' : 'Buscar conversiones indirectas'}
+              </button>
+            )}
             {c.enviados > 0 && (
               <button className="cmp-btn" onClick={() => deshacerEnviados(c)}>Deshacer enviados (eran pruebas)</button>
             )}
