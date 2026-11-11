@@ -357,6 +357,23 @@
   pointer-events: none;
 }
 .org__comp-block-photo { max-width: 160px; display: block; margin-bottom: 6px; border: 1px solid #c8bc9a; }
+
+/* Botón de encender/apagar el modo compe, bien visible (Ramiro, 11/11 05:01: "tiene que
+   quedar claro para el socio"). */
+.org__modo-compe {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  border-radius: 8px;
+  background: #f3f0e4;
+  border: 1.5px solid #c8bc9a;
+}
+.org__modo-compe--activo { background: #e8f7ec; border-color: #22c55e; }
+.org__modo-compe__estado { font-weight: 800; margin: 0 0 4px; }
 /* "Bloque #3" se leía mal en la ficha (Ramiro, 11/11 05:01) — más grande y en negrita, el
    número sobre todo. No se toca .org__section-title (compartido con cabeceras de otras
    secciones) para no afectar a nada más. */

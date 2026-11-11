@@ -15,10 +15,52 @@
 }
 
 /* Precompe: mientras no hay compe activa pero hay una real programada (cowork, 11/11 05:40) —
-   antes esto era un callejón sin salida durante los 19 días previos. */
-.compe-precompe { max-width: 480px; }
+   antes esto era un callejón sin salida durante los 19 días previos. Con cartel y animación
+   (Ramiro, 11/11 05:01: "hay que mejorarla"). */
+.compe-precompe { max-width: 480px; text-align: center; }
+.compe-precompe__proximamente {
+  display: inline-block;
+  margin: 0 0 14px;
+  padding: 4px 14px;
+  border-radius: 20px;
+  background: var(--color-accent);
+  color: #1f1f1f;
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  animation: compe-precompe-pulse 2.2s ease-in-out infinite;
+}
+@keyframes compe-precompe-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
+.compe-precompe__cartel {
+  width: 100%;
+  max-width: 320px;
+  border-radius: 10px;
+  margin: 0 auto 18px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  animation: compe-precompe-cartel 0.6s ease-out;
+}
+@keyframes compe-precompe-cartel {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.compe-precompe h1 { text-align: center; }
 .compe-precompe__fechas { color: var(--color-text-secondary); font-size: 0.95rem; margin: 0 0 4px; }
-.compe-precompe__cuenta { font-weight: 700; color: var(--color-accent-hover); font-size: 1.1rem; margin: 0 0 20px; }
+.compe-precompe__cuenta {
+  font-weight: 800;
+  color: var(--color-accent-hover);
+  font-size: 1.3rem;
+  margin: 0 0 20px;
+  animation: compe-precompe-cuenta 1.8s ease-in-out infinite;
+}
+@keyframes compe-precompe-cuenta {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+.compe-precompe__que-hacer { text-align: left; }
 .compe-precompe__que-hacer { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; padding: 14px 18px; }
 .compe-precompe__que-hacer h2 { font-size: 0.95rem; margin: 0 0 10px; }
 .compe-precompe__que-hacer ul { margin: 0; padding-left: 20px; font-size: 0.88rem; line-height: 1.6; }

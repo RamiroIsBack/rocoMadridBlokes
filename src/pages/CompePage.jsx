@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { colorPorNumeroBloque } from '../utils/compeColorScale'
+import cartelCompe from '../assets/cartel-compe-1fase-26-27.jpg'
 import './CompePage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -102,6 +103,8 @@ export default function CompePage() {
       <div className="compe-page">
         {proxima ? (
           <div className="compe-precompe">
+            <p className="compe-precompe__proximamente">Próximamente</p>
+            <img src={cartelCompe} alt={proxima.nombre} className="compe-precompe__cartel" />
             <h1>{proxima.nombre}</h1>
             <p className="compe-precompe__fechas">{fechaRangoCompe(proxima.compDate, proxima.compEndDate)}</p>
             <p className="compe-precompe__cuenta">{cuentaAtrasCompe(proxima.compDate, proxima.compEndDate)}</p>

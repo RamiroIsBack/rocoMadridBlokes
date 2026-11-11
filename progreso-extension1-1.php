@@ -13159,6 +13159,7 @@ function progreso_equip_competition_fila($r) {
         'tasksStartDate' => date('Y-m-d', strtotime($r['comp_date']) - intval($r['lead_weeks']) * 7 * 86400),
         'tasksTotal' => $tasks_total, 'tasksHechas' => $tasks_hechas,
         'blocksTotal' => $blocks_total, 'blocksColocados' => $blocks_colocados,
+        'modoActivo' => (bool) $r['modo_activo'],
     );
 }
 

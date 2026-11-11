@@ -1697,9 +1697,32 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
   const dragStartRef = useRef(null)
   const [trayDrag, setTrayDrag] = useState(null)
   const trayPointerRef = useRef(null)
+  const [modoActivo, setModoActivo] = useState(!!comp.modoActivo)
+  const [cambiandoModo, setCambiandoModo] = useState(false)
 
   useEffect(() => { setBlocks(comp.blocks) }, [comp])
+  useEffect(() => { setModoActivo(!!comp.modoActivo) }, [comp.modoActivo])
   useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
+
+  // Botón bien visible para encender/apagar el modo compe (Ramiro, 11/11 05:01: "tiene que
+  // quedar claro para el socio") — antes había que llamar a la API a mano.
+  const toggleModoCompe = async () => {
+    const encender = !modoActivo
+    const confirmacion = encender
+      ? `¿Encender el modo compe de "${comp.name}"?\n\nSe crea un bloke real (oculto) por cada uno de los ${blocks.length} bloques. A partir de ahí, lo que se apunte en /compe cuenta como resultado de la compe.`
+      : `¿Apagar el modo compe de "${comp.name}"?\n\nLos bloques pasan a publicados de verdad en la Colección (con su foto, si la tenían) y todo lo apuntado durante la compe cuenta ya para la zona personal y las ligas de cada uno.`
+    if (!window.confirm(confirmacion)) return
+    setCambiandoModo(true)
+    try {
+      await api('POST', `/equipacion/competitions/${comp.id}/modo-compe`, { activo: encender })
+      setModoActivo(encender)
+      showToast(encender ? 'Modo compe encendido.' : 'Modo compe apagado — bloques publicados.')
+    } catch (e) {
+      showToast(e.message || 'No se ha podido cambiar el modo compe.')
+    } finally {
+      setCambiandoModo(false)
+    }
+  }
 
   // Relleno de una vez: bloques ya colocados en el mapa de antes de este cambio, que se
   // quedaron sin subzona (Ramiro, 11/11 05:01: "los 6 bloques ya colocados sin subzona se
@@ -1850,6 +1873,22 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
       </div>
       <h3 className="org__section-title">{comp.name} — {comp.compDate}{comp.compEndDate && comp.compEndDate !== comp.compDate ? ` al ${comp.compEndDate}` : ''}</h3>
       <p className="org__hint">Las tareas de equipación para esta compe empiezan el {comp.tasksStartDate}.</p>
+
+      {canManage && (
+        <div className={`org__modo-compe${modoActivo ? ' org__modo-compe--activo' : ''}`}>
+          <div>
+            <p className="org__modo-compe__estado">{modoActivo ? '🟢 Modo compe ENCENDIDO' : '⚪ Modo compe apagado'}</p>
+            <p className="org__hint" style={{ margin: 0 }}>
+              {modoActivo
+                ? 'Los bloques están ocultos en la Colección, apuntando como compe. Al apagarlo se publican de verdad y lo apuntado cuenta para zona personal y ligas.'
+                : `Al encenderlo se crea un bloke real (oculto) por cada uno de los ${blocks.length} bloques, y lo que se apunte en /compe cuenta como resultado de esta compe.`}
+            </p>
+          </div>
+          <button className="org__btn" onClick={toggleModoCompe} disabled={cambiandoModo}>
+            {cambiandoModo ? 'Cambiando...' : modoActivo ? 'Apagar modo compe' : 'Encender modo compe'}
+          </button>
+        </div>
+      )}
 
       {unplaced.length > 0 && (
         <div className="org__comp-tray">
