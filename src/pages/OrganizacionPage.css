@@ -406,6 +406,14 @@
   border: none; border-radius: var(--radius-sm); padding: 2px 10px; cursor: pointer;
 }
 .org__comp-block-numero--fijado:disabled { opacity: 0.6; cursor: wait; }
+.org__comp-block-numero--cambiando {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 1rem; font-weight: 700;
+  vertical-align: middle;
+}
+.org__comp-block-numero--cambiando input[type="number"] {
+  width: 56px; padding: 2px 6px; font-size: 1rem; text-align: center;
+  border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary);
+}
 
 /* ── Mover tarea (Semana, detalle) / editar periodicidad (Normas) ── */
 .org__task-move {

@@ -2366,17 +2366,19 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
   // clicar para intercambiarlo con otro bloque ya puesto (p. ej. resultó demasiado difícil para
   // su número). Solo cambia el número; burbuja, ficha y resultados ya apuntados siguen con el
   // bloque físico (su id), no con el número.
+  // Cowork 12/11 10:20: el confirm() nativo bloquea el navegador — mismo arreglo que "Quitar
+  // foto", un input en la propia ficha en vez de un prompt() del sistema.
+  const [cambiandoNumero, setCambiandoNumero] = useState(false)
+  const [numeroDestino, setNumeroDestino] = useState('')
   const intercambiarNumero = async () => {
-    const otroNumero = window.prompt('¿Con qué número quieres intercambiarlo?')
-    if (otroNumero === null || otroNumero.trim() === '') return
-    const n = Number(otroNumero)
+    const n = Number(numeroDestino)
     if (!Number.isInteger(n) || n === block.number) { window.alert('Número no válido.'); return }
     setSwapping(true)
     try {
       const res = await api('POST', `/equipacion/comp-blocks/${block.id}/intercambiar-numero`, { otroNumero: n })
       onSwapped(res.data.bloqueId, res.data.nuevoNumero, res.data.otroBloqueId, res.data.otroNuevoNumero)
       onClose()
-    } catch (e) { window.alert(e.message) } finally { setSwapping(false) }
+    } catch (e) { window.alert(e.message) } finally { setSwapping(false); setCambiandoNumero(false) }
   }
 
   const uploadPhoto = async e => {
@@ -2401,8 +2403,11 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
 
   // Cowork 12/11 09:30: no había forma de quitar una foto desde la pantalla (solo con la API a
   // mano). Igual que subir, es inmediato — no espera al botón "Guardar" de abajo.
+  // Cowork 12/11 10:20: el confirm() nativo bloquea el navegador — confirmación en la propia
+  // pantalla en vez de un cuadro de diálogo del sistema.
+  const [confirmandoQuitarFoto, setConfirmandoQuitarFoto] = useState(false)
   const removePhoto = async () => {
-    if (!window.confirm('¿Quitar la foto de este bloque? Se borra también de Medios.')) return
+    setConfirmandoQuitarFoto(false)
     setUploading(true)
     try {
       await api('PUT', `/equipacion/comp-blocks/${block.id}`, { photoUrl: '' })
@@ -2431,9 +2436,22 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
         <p className="org__comp-block-title">
           Bloque{' '}
           {fijado ? (
-            <button type="button" className="org__comp-block-numero--fijado" onClick={intercambiarNumero} disabled={swapping}>
-              #{block.number}
-            </button>
+            cambiandoNumero ? (
+              <span className="org__comp-block-numero--cambiando">
+                #{block.number} →{' '}
+                <input
+                  type="number" value={numeroDestino} autoFocus
+                  onChange={e => setNumeroDestino(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') intercambiarNumero() }}
+                />
+                <button type="button" className="org__link-btn" onClick={intercambiarNumero} disabled={swapping}>Intercambiar</button>
+                <button type="button" className="org__link-btn" onClick={() => setCambiandoNumero(false)} disabled={swapping}>Cancelar</button>
+              </span>
+            ) : (
+              <button type="button" className="org__comp-block-numero--fijado" onClick={() => { setNumeroDestino(''); setCambiandoNumero(true) }} disabled={swapping}>
+                #{block.number}
+              </button>
+            )
           ) : (
             <strong>#{block.number}</strong>
           )}
@@ -2495,7 +2513,16 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
         {photoUrl && (
           <>
             <img src={photoUrl} alt={`Bloque #${block.number}`} className="org__comp-block-photo" />
-            <button type="button" className="org__link-btn org__link-btn--danger" onClick={removePhoto} disabled={uploading || saving}>✕ Quitar foto</button>
+            {confirmandoQuitarFoto ? (
+              <span className="org__hint">
+                ¿Seguro? Se borra también de Medios.{' '}
+                <button type="button" className="org__link-btn org__link-btn--danger" onClick={removePhoto} disabled={uploading || saving}>Sí, quitar</button>
+                {' '}
+                <button type="button" className="org__link-btn" onClick={() => setConfirmandoQuitarFoto(false)} disabled={uploading || saving}>Cancelar</button>
+              </span>
+            ) : (
+              <button type="button" className="org__link-btn org__link-btn--danger" onClick={() => setConfirmandoQuitarFoto(true)} disabled={uploading || saving}>✕ Quitar foto</button>
+            )}
           </>
         )}
         <input type="file" accept="image/*" capture="environment" onChange={uploadPhoto} disabled={uploading || saving} />
