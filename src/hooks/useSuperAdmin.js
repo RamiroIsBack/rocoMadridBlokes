@@ -103,6 +103,9 @@ export const gestionExpenseSenderSet  = (sender, category)      => gestionPost('
 export const campanasContactosImportar = body                     => gestionPost('/campanas/contactos/importar', body)
 export const campanasContactosGet      = (lista, tipo)            => gestionCall('GET', `/campanas/contactos?lista=${lista}&tipo=${tipo}`)
 export const campanasContactoBorrar    = id                       => gestionCall('DELETE', `/campanas/contactos/${id}`)
+// Ramiro 12/11 15:52: "menor" por el alumno (grupo niños/adolescentes), no por de quién es el
+// teléfono — un número de padre/madre puede quedar como "adulto" por error.
+export const campanasReclasificarTipo  = ()                       => gestionPost('/campanas/contactos/reclasificar-tipo')
 export const campanasEnviosHoyGet      = ()                       => gestionCall('GET', '/campanas/envios-hoy')
 export const campanasListar            = ()                       => gestionCall('GET', '/campanas')
 export const campanasCrear             = body                     => gestionPost('/campanas', body)

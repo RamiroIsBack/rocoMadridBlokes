@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx'
 import {
   campanasContactosImportar, campanasContactosGet, campanasContactoBorrar, campanasEnviosHoyGet,
   campanasListar, campanasCrear, campanasEditar, campanasDestinatarios, campanasMarcarAccion,
-  campanasDeshacerEnviados, campanasRecalcularIndirectas,
+  campanasDeshacerEnviados, campanasRecalcularIndirectas, campanasReclasificarTipo,
 } from '../hooks/useSuperAdmin'
 import './CampanasSection.css'
 
@@ -176,6 +176,20 @@ function ContactosPanel({ onPlantillasSugeridas }) {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(null)
   const [refreshKey, setRefresh] = useState(0)
+  const [reclasificando, setReclasificando] = useState(false)
+
+  // Ramiro 12/11 15:52: reclasifica a mano, cuando haga falta (p. ej. tras un Sync Grupos que
+  // traiga más alumnos menores con el teléfono de un padre/madre).
+  const reclasificarTipo = async () => {
+    setReclasificando(true)
+    try {
+      const res = await campanasReclasificarTipo()
+      window.alert(res.cambiados > 0
+        ? `${res.cambiados} contacto(s) pasado(s) de adulto a menor:\n${res.detalle.map(d => `${d.telefono} — ${(d.nombres || []).join(', ')}`).join('\n')}`
+        : 'Ningún contacto ha cambiado — ya estaban bien clasificados.')
+      setRefresh(k => k + 1)
+    } catch (e) { window.alert(e.message) } finally { setReclasificando(false) }
+  }
 
   useEffect(() => {
     setLoading(true); setError(null)
@@ -219,6 +233,9 @@ function ContactosPanel({ onPlantillasSugeridas }) {
             <option value="sin_preguntar">Sin preguntar ({data.resumenOptin?.sin_preguntar || 0})</option>
           </select>
         )}
+        <button className="cmp-btn cmp-btn--sm" onClick={reclasificarTipo} disabled={reclasificando}>
+          {reclasificando ? 'Reclasificando...' : 'Reclasificar por edad'}
+        </button>
       </div>
 
       {loading && <p className="cmp-hint">Cargando…</p>}
@@ -407,13 +424,15 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
     } catch (e) { setError(e.message) }
   }
 
+  // Ramiro 12/11 15:52: "Abrir WhatsApp" ya NO marca enviado al abrir — antes, abrir sin llegar
+  // a mandar (dato equivocado, pestaña cerrada a tiempo...) dejaba la fila en "enviado" igual.
+  // Ahora hace falta pulsar "✓ Enviado" aparte, después de mandarlo de verdad.
   const abrirWhatsapp = (d) => {
     // web.whatsapp.com/send, no wa.me: wa.me pasa por api.whatsapp.com, que abre la app de
     // escritorio en vez de la pestaña de WhatsApp Web ya abierta y rompía los emojis del mensaje
     // (NOTAS_PARA_CODE_pestanas_grupos.md, 3/11 10:45). Ventana con nombre fijo para reutilizarla.
     const url = `https://web.whatsapp.com/send?phone=34${d.telefono}&text=${encodeURIComponent(d.mensaje)}`
     window.open(url, 'blokes_whatsapp')
-    accion(d.contactoId, 'enviado')
   }
 
   const marcarBaja = (d) => {
@@ -491,11 +510,12 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
                 </td>
                 <td className="cmp-acciones">
                   <button className="cmp-btn cmp-btn--sm cmp-btn--primary" onClick={() => abrirWhatsapp(d)}>Abrir WhatsApp</button>
-                  {/* Cowork 12/11 13:00: "Abrir WhatsApp" marcó enviado a Cristina pero el mensaje
-                      nunca se mandó de verdad (dato de otra persona) — por destinatario, no toda
-                      la campaña de golpe (eso ya existía, "Deshacer enviados (eran pruebas)"). */}
-                  {d.enviado && (
+                  {/* Ramiro 12/11 15:52: "✓ Enviado" se pulsa aparte, después de mandarlo de
+                      verdad — "Abrir WhatsApp" ya no lo marca solo con abrir la pestaña. */}
+                  {d.enviado ? (
                     <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'enviado_deshacer')}>Deshacer enviado</button>
+                  ) : (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'enviado')}>✓ Enviado</button>
                   )}
                   {/* "Deshacer" para Respondió y Se apuntó, igual que ya existía para BAJA — pedido
                       por cowork el 10/11 (un clic mal dado) y otra vez el 12/11 (los 11 "Se

@@ -1309,6 +1309,13 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_campanas_importar_contactos',
         'permission_callback' => $sa_perm,
     ));
+    // Ramiro 12/11 15:52: "menor" por el alumno (grupo niños/adolescentes), no por de quién es
+    // el teléfono.
+    register_rest_route('superadmin/v1', '/campanas/contactos/reclasificar-tipo', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_campanas_reclasificar_tipo',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/campanas/contactos', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_campanas_listar_contactos',
@@ -7520,6 +7527,40 @@ function blokes_ensure_campanas_tables() {
         $wpdb->query("UPDATE " . blokes_campanas_table() . " SET destino_enlace = 'https://rocomadrid.com/app' WHERE id = 2 AND destino_enlace = ''");
         update_option('blokes_campanas_destinos_iniciales', 1, false);
     }
+}
+
+// Marca como "menor" cualquier contacto que hoy esté como "adulto" pero cuyo teléfono
+// pertenezca (también) a un alumno en un grupo de niños o adolescentes (edad != 'Adultos') —
+// Ramiro 12/11 15:52: el teléfono suele ser el del padre o la madre, pero la plantilla tiene
+// que ser la de familias según el alumno, no según de quién es el número. Devuelve la lista de
+// contactos cambiados (para el recuento que pide Ramiro). No se dispara sola: la llama a mano
+// quien tenga el permiso, desde Contactos → "Reclasificar por edad".
+function blokes_campanas_reclasificar_tipo_por_edad() {
+    global $wpdb;
+    $subs_por_tel = blokes_sync_grupos_subs_por_telefono();
+    $contactos = $wpdb->get_results(
+        "SELECT id, telefono, nombres FROM " . blokes_contactos_table() . " WHERE tipo = 'adulto'", ARRAY_A
+    );
+    $cambiados = array();
+    foreach ($contactos as $c) {
+        $tel = blokes_externos_normaliza_telefono($c['telefono']);
+        $subs = $subs_por_tel[$tel] ?? array();
+        $tiene_menor = false;
+        foreach ($subs as $s) {
+            if (($s['edad'] ?? 'Adultos') !== 'Adultos') { $tiene_menor = true; break; }
+        }
+        if (!$tiene_menor) continue;
+        $wpdb->update(blokes_contactos_table(), array('tipo' => 'menor', 'updated_at' => current_time('mysql')), array('id' => intval($c['id'])));
+        $cambiados[] = array('id' => intval($c['id']), 'telefono' => $tel, 'nombres' => json_decode($c['nombres'], true) ?: array());
+    }
+    return $cambiados;
+}
+
+// POST /campanas/contactos/reclasificar-tipo — botón "Reclasificar por edad" en Contactos.
+function superadmin_campanas_reclasificar_tipo($request) {
+    blokes_ensure_campanas_tables();
+    $cambiados = blokes_campanas_reclasificar_tipo_por_edad();
+    return rest_ensure_response(array('success' => true, 'data' => array('cambiados' => count($cambiados), 'detalle' => $cambiados)));
 }
 
 // Token de 6-8 caracteres para /c/{token} — uno por campaña+contacto, reutilizable (si ya
