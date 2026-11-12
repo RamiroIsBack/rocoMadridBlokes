@@ -868,7 +868,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
                           key={t.id}
                           task={t}
                           typeName={taskLabel(t, taskTypeById)}
-                          isMissed={!t.done && t.date < todayS && t.status !== 'retrasada'}
+                          isMissed={!t.done && t.date < todayS && t.status !== 'retrasada' && !t.postponedCount}
                           dragging={dragTaskId === t.id}
                           postponing={postponing === t.id}
                           onPointerDown={onTileDown(t.id, t.date, a.id)}
@@ -1515,7 +1515,11 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
     else if (task.postponedCount > 0) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
   } else {
     if (movedAway) badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
-    else if (task.postponedCount > 0) badge = `RETRASADA (×${task.postponedCount}) · prevista ${dayLabel(task.originalDate || task.date)}`
+    // Arrastre automático (de la semana anterior, o del barrido de "Hoy"): no es una tarea
+    // retrasada A DÍA DE HOY, solo viene de antes — la misma marca discreta que ya se usa en
+    // las hechas, nunca el aviso llamativo (Ramiro 12/11 10:45: "en rojo a todo volumen" daba la
+    // impresión de que todo estaba atrasado).
+    else if (task.postponedCount > 0) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
     else if (isMissed) badge = 'FALTÓ'
   }
 
@@ -1894,12 +1898,26 @@ function CreateCompForm({ onDone, onCancel }) {
 
 // Vista "Mi parte"/tablero del plan generado de una compe: % hecho, lo retrasado en rojo, y un
 // filtro por persona para que cada uno vea solo lo suyo (encargo "Preparador de compes", 1/11).
+const COMP_TAREA_VACIA = { taskTypeId: '', customText: '', date: '', notas: '' }
+
 function CompePlanView({ compId, taskTypeById, workers }) {
   const [plan, setPlan] = useState(null)
   const [generating, setGenerating] = useState(false)
   const [columnaExpandida, setColumnaExpandida] = useState(null)
   const [reasignando, setReasignando] = useState(null)
+  const [reasignandoTarea, setReasignandoTarea] = useState(null)
+  const [quitandoTarea, setQuitandoTarea] = useState(null)
+  const [addingTareaFor, setAddingTareaFor] = useState(null)
+  const [nuevaTarea, setNuevaTarea] = useState(COMP_TAREA_VACIA)
+  const [savingTarea, setSavingTarea] = useState(false)
+  const [dragTareaId, setDragTareaId] = useState(null)
   const showToast = useToast()
+
+  const compTaskTypes = useMemo(
+    () => Object.values(taskTypeById || {}).filter(t => t.id?.startsWith('comp_')).sort((a, b) => a.name.localeCompare(b.name)),
+    [taskTypeById]
+  )
+  const tareaLabel = t => t.taskTypeId === 'custom' ? (t.params?.texto || '(sin texto)') : (taskTypeById[t.taskTypeId]?.name || t.taskTypeId)
 
   const reload = useCallback(() => {
     api('GET', `/equipacion/competitions/${compId}/plan`).then(r => setPlan(r.data)).catch(() => setPlan(null))
@@ -1907,7 +1925,7 @@ function CompePlanView({ compId, taskTypeById, workers }) {
   useEffect(() => { reload() }, [reload])
 
   const generate = async () => {
-    if (!window.confirm('¿Generar (o regenerar) el plan de tareas de esta compe? Si ya había uno, se sustituye por el nuevo.')) return
+    if (!window.confirm('¿Generar (o regenerar) el plan de tareas de esta compe? Las tareas puestas a mano no se tocan.')) return
     setGenerating(true)
     try {
       const res = await api('POST', `/equipacion/competitions/${compId}/generate-plan`)
@@ -1921,6 +1939,50 @@ function CompePlanView({ compId, taskTypeById, workers }) {
     try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) }
     catch { showToast('No se ha podido guardar — deshecho.') }
     finally { reload() }
+  }
+
+  const abrirNuevaTarea = nombre => {
+    setAddingTareaFor(nombre)
+    setNuevaTarea({ ...COMP_TAREA_VACIA, date: today })
+  }
+
+  const guardarNuevaTarea = async () => {
+    if (!nuevaTarea.date || (!nuevaTarea.taskTypeId && !nuevaTarea.customText.trim())) {
+      showToast('Falta el día, y el tipo o el texto.')
+      return
+    }
+    setSavingTarea(true)
+    try {
+      await api('POST', `/equipacion/competitions/${compId}/tasks`, {
+        workerName: addingTareaFor, date: nuevaTarea.date,
+        taskTypeId: nuevaTarea.taskTypeId || undefined,
+        customText: nuevaTarea.customText.trim() || undefined,
+        notas: nuevaTarea.notas.trim() || undefined,
+      })
+      setAddingTareaFor(null)
+      setNuevaTarea(COMP_TAREA_VACIA)
+      await reload()
+    } catch (e) { showToast(e.message) } finally { setSavingTarea(false) }
+  }
+
+  // "sin window.confirm()" (Ramiro 12/11 10:44) — el nativo bloqueaba el navegador en las
+  // pruebas de cowork. Borrado directo, igual que "✕ Quitar" en el tablero normal de la semana.
+  const quitarTarea = async taskId => {
+    setQuitandoTarea(taskId)
+    setPlan(p => ({ ...p, tasks: p.tasks.filter(t => t.id !== taskId) }))
+    try { await api('DELETE', `/equipacion/tasks/${taskId}`) }
+    catch (e) { showToast('No se ha podido quitar — deshecho.'); await reload() }
+    finally { setQuitandoTarea(null) }
+  }
+
+  // Arrastrar (ratón) o "⇄ Mover a..." (móvil/tablet) — punto 5, mismo patrón ya aceptado para
+  // los bloques más abajo (chipReasignable).
+  const moverTarea = async (taskId, nuevoNombre) => {
+    setReasignandoTarea(null)
+    if (!nuevoNombre) return
+    setPlan(p => ({ ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, workerName: nuevoNombre } : t) }))
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { workerName: nuevoNombre }) }
+    catch { showToast('No se ha podido mover la tarea — deshecho.'); reload() }
   }
 
   // Punto 7 (Ramiro, 11/11 05:01): "se mueven arrastrando, igual que las tareas" — en vez de
@@ -1997,16 +2059,63 @@ function CompePlanView({ compId, taskTypeById, workers }) {
             {col.bloques.length > 0 && (
               <div className="org__comp-plan-bloques">{col.bloques.map(b => chipReasignable(b, col.nombre))}</div>
             )}
-            <ul className="org__task-list">
+            <ul
+              className="org__task-list"
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => { e.preventDefault(); if (dragTareaId) moverTarea(dragTareaId, col.nombre); setDragTareaId(null) }}
+            >
               {col.tareas.map(t => (
-                <li key={t.id} className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}`}>
+                <li
+                  key={t.id}
+                  draggable
+                  onDragStart={() => setDragTareaId(t.id)}
+                  onDragEnd={() => setDragTareaId(null)}
+                  className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}${t.manual ? ' org__task--manual' : ''}${dragTareaId === t.id ? ' org__task--dragging' : ''}`}
+                >
                   <label>
                     <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
-                    {' '}{taskTypeById[t.taskTypeId]?.name || t.taskTypeId} ({dayLabel(t.date)})
+                    {' '}{tareaLabel(t)} ({dayLabel(t.date)})
+                    {t.params?.notas && <span className="org__task-params"> · {t.params.notas}</span>}
+                    {t.manual && <span className="org__task-manual-badge" title="Puesta a mano">a mano</span>}
                   </label>
+                  <span className="org__task-actions">
+                    {reasignandoTarea === t.id ? (
+                      <select autoFocus value={col.nombre} onChange={e => moverTarea(t.id, e.target.value)} onBlur={() => setReasignandoTarea(null)}>
+                        {Array.from(nombres).sort().map(n => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                    ) : (
+                      <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignandoTarea(t.id)} title="Mover a otra persona">⇄</button>
+                    )}
+                    <button
+                      type="button"
+                      className="org__tile-delete"
+                      onClick={() => quitarTarea(t.id)}
+                      disabled={quitandoTarea === t.id}
+                      title="Quitar esta tarea"
+                    >{quitandoTarea === t.id ? '...' : '✕'}</button>
+                  </span>
                 </li>
               ))}
             </ul>
+            {addingTareaFor === col.nombre ? (
+              <div className="org__add-form org__add-form--compe-tarea">
+                <select value={nuevaTarea.taskTypeId} onChange={e => setNuevaTarea(n => ({ ...n, taskTypeId: e.target.value, customText: '' }))}>
+                  <option value="">— Texto libre —</option>
+                  {compTaskTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                {!nuevaTarea.taskTypeId && (
+                  <input type="text" placeholder="Texto de la tarea" value={nuevaTarea.customText} onChange={e => setNuevaTarea(n => ({ ...n, customText: e.target.value }))} />
+                )}
+                <input type="date" value={nuevaTarea.date} onChange={e => setNuevaTarea(n => ({ ...n, date: e.target.value }))} />
+                <input type="text" placeholder="Notas (opcional)" value={nuevaTarea.notas} onChange={e => setNuevaTarea(n => ({ ...n, notas: e.target.value }))} />
+                <div className="org__add-actions">
+                  <button type="button" className="org__btn" onClick={guardarNuevaTarea} disabled={savingTarea}>{savingTarea ? 'Guardando...' : 'Añadir'}</button>
+                  <button type="button" className="org__link-btn" onClick={() => setAddingTareaFor(null)}>Cancelar</button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="org__link-btn" onClick={() => abrirNuevaTarea(col.nombre)}>+ Tarea</button>
+            )}
             {col.tareas.length === 0 && col.bloques.length === 0 && <p className="org__hint">Sin tareas ni bloques.</p>}
           </div>
         ))}

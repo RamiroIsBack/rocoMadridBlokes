@@ -863,6 +863,10 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/plan', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_competition_plan', 'permission_callback' => $equip_perm,
     ));
+    // "+ Tarea" a mano en una columna del plan (Ramiro 12/11 10:44).
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/tasks', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_competition_add_task', 'permission_callback' => $equip_perm,
+    ));
 
     // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 7/11). Encender/apagar el
     // modo compe es solo de un socio; estado es público (lo lee el móvil sin login para saber si
@@ -11925,7 +11929,11 @@ function progreso_equip_ensure_tables() {
     // verdad, no solo la referencia). weeks.zona_id/zona_sugerida_id y nueva tabla zonas
     // (Ramiro 12/11 09:31/09:35/09:37: calendario de semanas + rotación de zonas — Pasillo,
     // Salón izquierda, Salón derecha, Cueva).
-    $version = '14';
+    // v15: nada de esquema — solo para disparar `progreso_equip_limpiar_retrasadas_global()` una
+    // vez (Ramiro 12/11 10:45: quitar las marcas rojas de los arrastres de octubre sin borrar ni
+    // completar ninguna tarea). tasks.manual (Ramiro 12/11 10:44: "+ Tarea" a mano en el plan de
+    // la compe — para que "Regenerar" nunca la toque, aunque coincida tipo+fecha con el plan).
+    $version = '15';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -12005,6 +12013,7 @@ function progreso_equip_ensure_tables() {
         moved_to_task_id  bigint(20) UNSIGNED NULL,
         original_worker_id bigint(20) UNSIGNED NULL,
         competition_id    bigint(20) UNSIGNED NULL,
+        manual             tinyint(1)          NOT NULL DEFAULT 0,
         created_by        varchar(100)        NULL,
         created_at        datetime            NULL,
         updated_by        varchar(100)        NULL,
@@ -12137,6 +12146,7 @@ function progreso_equip_ensure_tables() {
     progreso_equip_seed_task_types_if_empty();
     progreso_equip_seed_comp_task_types_if_missing();
     progreso_equip_marcar_eventuales_ramiro_1();
+    progreso_equip_limpiar_retrasadas_global();
     progreso_equip_backfill_semanas_auto();
 
     // Periodicidades reales de Ramiro (1/11 17:20): se habían quedado todas a 1 (cowork
@@ -13561,6 +13571,26 @@ function progreso_equip_delete_week($request) {
     return rest_ensure_response(array('success' => true, 'mode' => 'archived', 'doneTasks' => $done_tasks, 'blocks' => $blocks_count, 'retrasadaTasks' => $retrasada_tasks));
 }
 
+// Una vez (Ramiro 12/11 10:45, NOTAS_PARA_CODE_equipacion.md: "urgente antes de la reunión con
+// Álvaro, quitar todo lo marcado como retrasado sin borrar ni completar ninguna tarea"). Mismo
+// gesto que `progreso_equip_limpiar_retrasadas_falsas`, pero para TODAS las semanas de golpe, no
+// solo una: quita la marca de retraso (status, contador, fecha original, enlace a la tarea
+// "siguiente") de cualquier tarea sin hacer que hoy sale en rojo o con "RETRASADA (×n)" —
+// incluidas las copias viejas ya sustituidas (quedan como una tarea suelta más en su semana de
+// origen, no se borran) y las "copias vivas" que arrastraron el contador. Nada se marca como
+// hecho ni se borra.
+function progreso_equip_limpiar_retrasadas_global() {
+    if (get_option('blokes_equip_limpieza_retrasadas_12_11')) return;
+    global $wpdb;
+    $tasks_table = progreso_equip_table('tasks');
+    $wpdb->query(
+        "UPDATE {$tasks_table}
+         SET status = 'pendiente', postponed_count = 0, original_date = task_date, moved_to_task_id = NULL
+         WHERE done = 0 AND (status = 'retrasada' OR postponed_count > 0)"
+    );
+    update_option('blokes_equip_limpieza_retrasadas_12_11', 1, false);
+}
+
 // POST /equipacion/weeks/{id}/limpiar-retrasadas-falsas — arreglo puntual (cowork, 1/11 18:25 y
 // 18:45): el cálculo de "semana actual" en domingo creó una semana ya pasada, y su barrido
 // arrastró tareas a la semana siguiente marcándolas "retrasada ×1" sin que ese retraso hubiera
@@ -13698,6 +13728,23 @@ function progreso_equip_update_task($request) {
         ));
         if (!$target) return new WP_Error('not_found', 'Esa asignación no existe.', array('status' => 404));
         $upd['assignment_id'] = $new_assignment_id;
+        $fmt[] = '%d';
+    }
+    // Mover la tarea a otra persona por nombre, en la misma semana en la que ya está — "⇄ Mover
+    // a..." del plan de la compe (Ramiro 12/11 10:44/10:45, punto 5): el frontend no siempre
+    // tiene a mano el assignmentId de alguien que todavía no tenía ninguna tarea esa semana, así
+    // que aquí se resuelve (o se crea) solo.
+    if ($request->get_param('workerName') !== null) {
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT a.week_id FROM " . progreso_equip_table('tasks') . " t
+             JOIN " . progreso_equip_table('assignments') . " a ON a.id = t.assignment_id
+             WHERE t.id = %d", $id
+        ), ARRAY_A);
+        if (!$row) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
+        $worker_name = sanitize_text_field((string) $request->get_param('workerName'));
+        $worker = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . progreso_equip_table('workers') . " WHERE name = %s", $worker_name), ARRAY_A);
+        if (!$worker) return new WP_Error('invalid_data', 'No existe esa persona.', array('status' => 400));
+        $upd['assignment_id'] = progreso_equip_ensure_assignment(intval($row['week_id']), intval($worker['id']));
         $fmt[] = '%d';
     }
     // Editar el texto (tareas de texto libre), las notas (Ramiro, 5/11 06:54) o la subzona
@@ -14988,6 +15035,85 @@ function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warning
     return array(intval($week_id), intval($assignment_id));
 }
 
+// Asignación de una persona en una semana, creándola si todavía no existe — usado tanto por
+// "+ Tarea" a mano en el plan de la compe como por "⇄ Mover a..." cuando esa persona todavía no
+// tenía ninguna tarea esa semana.
+function progreso_equip_ensure_assignment($week_id, $worker_id) {
+    global $wpdb;
+    $assignment_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d AND worker_id = %d",
+        intval($week_id), intval($worker_id)
+    ));
+    if ($assignment_id) return intval($assignment_id);
+    $wpdb->insert(progreso_equip_table('assignments'), array(
+        'week_id' => intval($week_id), 'worker_id' => intval($worker_id), 'subzones' => '', 'status' => 'pendiente',
+    ), array('%d', '%d', '%s', '%s'));
+    return $wpdb->insert_id;
+}
+
+// Semana mínima para colgar una tarea de compe puesta a mano en un día que todavía no tiene
+// ninguna — sin el reparto normal completo de `progreso_equip_ensure_week_for_lead` (eso es solo
+// para las fases del plan automático).
+function progreso_equip_ensure_week_simple($monday, $is_test) {
+    global $wpdb;
+    $week_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('weeks') . " WHERE start_date = %s AND is_test = %d", $monday, $is_test ? 1 : 0
+    ));
+    if ($week_id) return intval($week_id);
+    $wpdb->insert(progreso_equip_table('weeks'), array(
+        'start_date' => $monday, 'subzones' => '',
+        'notes' => 'Generada por una tarea a mano del plan de una competición.',
+        'is_test' => $is_test ? 1 : 0, 'created_at' => current_time('mysql'),
+    ), array('%s', '%s', '%s', '%d', '%s'));
+    return $wpdb->insert_id;
+}
+
+// POST /equipacion/competitions/{id}/tasks — "+ Tarea" a mano en una columna del plan de la
+// compe (Ramiro 12/11 10:44): tipo del catálogo "Compe: ..." o texto libre, día y notas. Se
+// marca `manual = 1` para que "Regenerar" nunca la toque (ver el filtro `$tocada` en
+// progreso_equip_competition_generate_plan), aunque coincida tipo+fecha con una fase del plan.
+function progreso_equip_competition_add_task($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $comp_id = intval($request['id']);
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $comp_id), ARRAY_A);
+    if (!$comp) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+
+    $worker_name = sanitize_text_field((string) $request->get_param('workerName'));
+    if ($worker_name === '') return new WP_Error('invalid_data', 'Elige a quién se asigna la tarea.', array('status' => 400));
+    $worker = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . progreso_equip_table('workers') . " WHERE name = %s", $worker_name), ARRAY_A);
+    if (!$worker) return new WP_Error('invalid_data', 'No existe esa persona.', array('status' => 400));
+
+    $date = sanitize_text_field((string) $request->get_param('date'));
+    if (!$date || !strtotime($date)) return new WP_Error('invalid_data', 'Fecha no válida.', array('status' => 400));
+    $date = date('Y-m-d', strtotime($date));
+
+    $task_type_id = sanitize_text_field((string) $request->get_param('taskTypeId'));
+    $custom_text = trim((string) $request->get_param('customText'));
+    $params = array();
+    if ($custom_text !== '') {
+        $task_type_id = 'custom';
+        $params['texto'] = sanitize_text_field($custom_text);
+    } elseif ($task_type_id === '') {
+        return new WP_Error('invalid_data', 'Elige un tipo del catálogo o escribe un texto.', array('status' => 400));
+    }
+    $notas = trim((string) $request->get_param('notas'));
+    if ($notas !== '') $params['notas'] = sanitize_text_field($notas);
+
+    $monday = progreso_equip_monday_of($date);
+    $week_id = progreso_equip_ensure_week_simple($monday, (bool) $comp['is_test']);
+    $assignment_id = progreso_equip_ensure_assignment($week_id, intval($worker['id']));
+
+    $wpdb->insert(progreso_equip_table('tasks'), array(
+        'assignment_id' => $assignment_id, 'task_type_id' => $task_type_id, 'task_date' => $date,
+        'params' => wp_json_encode($params), 'done' => 0, 'status' => 'pendiente', 'original_date' => $date,
+        'competition_id' => $comp_id, 'manual' => 1,
+        'created_by' => progreso_equip_actor($request), 'created_at' => current_time('mysql'),
+    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%d', '%s', '%s'));
+
+    return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
+}
+
 function progreso_equip_insert_comp_task($assignment_id, $task_type_id, $date, $competition_id, $params = array()) {
     global $wpdb;
     $wpdb->insert(progreso_equip_table('tasks'), array(
@@ -15158,7 +15284,9 @@ function progreso_equip_competition_generate_plan($request) {
     // nunca se borra trabajo real por regenerar el plan.
     $borradas = 0;
     foreach ($existentes as $t) {
-        $tocada = $t['done'] || $t['status'] !== 'pendiente' || $t['task_date'] !== $t['original_date']
+        // Ramiro 12/11 10:44: una tarea puesta a mano ("+ Tarea") no se borra nunca al
+        // regenerar, aunque por casualidad coincida tipo+fecha con una fase del plan actual.
+        $tocada = $t['manual'] || $t['done'] || $t['status'] !== 'pendiente' || $t['task_date'] !== $t['original_date']
             || intval($t['worker_id']) !== intval($lead['id']) || $t['moved_to_task_id'];
         if ($tocada) {
             $warnings[] = "La tarea «{$t['task_type_id']}» del {$t['original_date']} ya no está en el plan actual, pero como ya se tocó (movida, hecha o aplazada) no se ha borrado — revísala a mano si ya no hace falta.";
@@ -15193,6 +15321,7 @@ function progreso_equip_get_competition_plan($request) {
             'id' => intval($t['id']), 'taskTypeId' => $t['task_type_id'], 'date' => $t['task_date'],
             'weekStart' => $t['week_start'], 'workerId' => intval($t['worker_id']), 'workerName' => $t['worker_name'],
             'done' => (bool) $t['done'], 'assignmentId' => intval($t['assignment_id']),
+            'manual' => (bool) $t['manual'], 'params' => $t['params'] ? (json_decode($t['params'], true) ?: array()) : array(),
         );
     }
     $total = count($tasks);

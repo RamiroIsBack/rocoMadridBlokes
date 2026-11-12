@@ -622,6 +622,19 @@
    en .org__task-move). Se le da su hueco aquí sin tocar esa regla compartida. */
 .org__board--compe-plan .org__task-list input[type="checkbox"] { margin-right: 8px; }
 
+/* Mezcla de tareas generadas + a mano, "+ Tarea", "✕ Quitar" y "⇄ Mover a..." del plan de la
+   compe (Ramiro 12/11 10:44/10:45, punto 2 y 5). */
+.org__board--compe-plan .org__task { cursor: grab; }
+.org__board--compe-plan .org__task--dragging { opacity: 0.4; }
+.org__task-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.org__task-actions select { font-size: 0.72rem; max-width: 110px; }
+.org__task-manual-badge {
+  font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--color-accent-hover); border: 1px solid var(--color-accent-hover); border-radius: 999px; padding: 1px 6px;
+}
+.org__add-form--compe-tarea { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.org__add-form--compe-tarea input[type="text"] { flex: 1; min-width: 120px; }
+
 /* ══════════════════════════════════════════════════════════════════════════════════════
    MODO OSCURO — Organización (Ramiro/Cowork, 11/11 10:05: auditoría de contraste, "siguiente
    pantalla a pasar: Organización, porque se usa a diario"). Resto de la página sigue con los
