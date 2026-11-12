@@ -135,7 +135,9 @@ export default function OrganizacionPage() {
   const [config, setConfig] = useState(null)
   const [workers, setWorkers] = useState([])
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState('hoy') // 'hoy' | 'semana' | 'normas' | 'compe'
+  // Ramiro, 12/11 11:45: "quitar el HOY... dejar solo la semana para dar algo de libertad" — las
+  // tareas son de la semana, no de un día concreto. "Semana" es ahora la vista por defecto.
+  const [view, setView] = useState('semana') // 'semana' | 'normas' | 'compe'
   const [workerId, setWorkerId] = useState(() => {
     try { return Number(localStorage.getItem(WHOAMI_KEY)) || null } catch { return null }
   })
@@ -175,26 +177,43 @@ export default function OrganizacionPage() {
 
   if (loading) return <div className="org"><p className="org__hint">Cargando...</p></div>
 
+  const currentWorkerName = currentWorker?.name
+
   return (
     <ToastProvider>
       <div className="org">
+        {/* Identidad ("¿quién soy?"), antes solo dentro de la vista "Hoy" que se ha quitado —
+            sigue haciendo falta para firmar lo que se añade o cambia desde cualquier vista. */}
+        <div className="org__who-row">
+          {currentWorkerName ? (
+            <>
+              <span className="org__who-name">{currentWorkerName}{currentWorker?.isLead ? ' · responsable' : ''}</span>
+              <button className="org__link-btn" onClick={() => chooseWorker(null)}>No soy yo</button>
+            </>
+          ) : (
+            <>
+              <span className="org__hint">¿Quién eres? (solo para firmar lo que añadas o cambies)</span>
+              <select value="" onChange={e => { if (e.target.value) chooseWorker(Number(e.target.value)) }}>
+                <option value="">— elige —</option>
+                {workers.map(w => <option key={w.id} value={w.id}>{w.name}{w.eventual ? ' (solo compe)' : ''}</option>)}
+              </select>
+            </>
+          )}
+        </div>
+
         <div className="org__switch">
-          <button className={`org__switch-btn${view === 'hoy' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('hoy')}>Hoy</button>
           <button className={`org__switch-btn${view === 'semana' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('semana')}>Semana</button>
           <button className={`org__switch-btn${view === 'normas' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('normas')}>Normas</button>
           <button className={`org__switch-btn${view === 'compe' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('compe')}>Compe</button>
         </div>
 
-        {view === 'hoy' && <CompeResumenHoy workerId={workerId} onGoToCompe={() => setView('compe')} />}
-        {view === 'hoy' && (
-          <HoyView
-            config={config} workers={workers}
-            workerId={workerId} onChooseWorker={chooseWorker} canEdit={canEdit} canManage={canManage}
-          />
-        )}
+        <CompeResumenHoy workerId={workerId} onGoToCompe={() => setView('compe')} />
+
         {view === 'semana' && <SemanaView config={config} workers={workers} workerId={workerId} canEdit={canEdit} canManage={canManage} onWorkersChanged={reloadWorkers} />}
         {view === 'normas' && <NormasView config={config} workers={workers} canManage={canEdit} onConfigChanged={reloadConfig} />}
         {view === 'compe' && <CompeView config={config} workers={workers} canManage={canManage} />}
+
+        {view === 'semana' && <MiParteCompesHoy config={config} />}
       </div>
     </ToastProvider>
   )
@@ -239,163 +258,6 @@ function CompeResumenHoy({ workerId, onGoToCompe }) {
   )
 }
 
-// ─── Hoy ──────────────────────────────────────────────────────────────
-// Antes había que elegir primero "¿quién eres?" para ver nada; ahora el tablero del día se ve
-// siempre, con una columna por persona, igual que la vista semanal — Ramiro, 5/11: "no des a
-// elegir entre los equipadores, que salgan todos como en la vista semanal". "¿Quién soy?" sigue
-// disponible, pero solo para firmar lo que añadas/edites (igual que ya hacía Semana), nunca para
-// filtrar lo que se ve.
-function HoyView({ config, workers, workerId, onChooseWorker, canEdit, canManage }) {
-  const [detail, setDetail] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState(null)
-  const [holdsets, setHoldsets] = useState([])
-  const [addingTaskFor, setAddingTaskFor] = useState(null)
-  const [addingBlockFor, setAddingBlockFor] = useState(null)
-  const [editingTask, setEditingTask] = useState(null)
-  const [postponing, setPostponing] = useState(null)
-  const [deletingTask, setDeletingTask] = useState(null)
-
-  const worker = workers.find(w => w.id === workerId)
-  const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
-  const showToast = useToast()
-  const today = todayStr()
-
-  useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
-
-  const reload = useCallback(() => {
-    setLoading(true)
-    setLoadError(null)
-    api('GET', '/equipacion/weeks').then(r => {
-      const wk = (r.data || []).find(w => today >= w.startDate && today < addDays(w.startDate, 7))
-      if (!wk) { setDetail(null); return null }
-      return api('GET', `/equipacion/weeks/${wk.id}`).then(r2 => setDetail(r2.data))
-    }).catch(e => { setLoadError(e.message); showToast('No se ha podido cargar el día de hoy.') }).finally(() => setLoading(false))
-  }, [today, showToast])
-
-  useEffect(() => { reload() }, [reload])
-
-  const toggleTask = async (taskId, done) => {
-    setDetail(d => ({ ...d, assignments: d.assignments.map(a => ({ ...a, tasks: a.tasks.map(t => t.id === taskId ? { ...t, done } : t) })) }))
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { showToast('No se ha podido guardar — deshecho.'); reload() }
-  }
-  const postponeTask = async taskId => {
-    setPostponing(taskId)
-    try { await api('POST', `/equipacion/tasks/${taskId}/postpone`) } catch { showToast('No se ha podido posponer la tarea.') }
-    await reload()
-    setPostponing(null)
-  }
-  const deleteTask = async taskId => {
-    if (!window.confirm('¿Quitar esta tarea? No se puede deshacer.')) return
-    setDeletingTask(taskId)
-    try { await api('DELETE', `/equipacion/tasks/${taskId}`) } catch { showToast('No se ha podido quitar la tarea.') }
-    await reload()
-    setDeletingTask(null)
-  }
-
-  return (
-    <div>
-      <div className="org__who-row">
-        {worker ? (
-          <>
-            <span className="org__who-name">{worker.name}{worker.isLead ? ' · responsable' : ''}</span>
-            <button className="org__link-btn" onClick={() => onChooseWorker(null)}>No soy yo</button>
-          </>
-        ) : (
-          <>
-            <span className="org__hint">¿Quién eres? (solo para firmar lo que añadas o cambies)</span>
-            <select value="" onChange={e => { if (e.target.value) onChooseWorker(Number(e.target.value)) }}>
-              <option value="">— elige —</option>
-              {workers.map(w => <option key={w.id} value={w.id}>{w.name}{w.eventual ? ' (solo compe)' : ''}</option>)}
-            </select>
-          </>
-        )}
-      </div>
-
-      {loading && <p className="org__hint">Cargando...</p>}
-
-      {!loading && loadError && (
-        <p className="org__hint">
-          No se ha podido cargar el día de hoy ({loadError}). <button className="org__link-btn" onClick={reload}>Reintentar</button>
-        </p>
-      )}
-
-      {!loading && !loadError && !detail && (
-        <p className="org__hint">No hay semana planificada para hoy: pide a Álvaro que la cree.</p>
-      )}
-
-      {!loading && detail && (
-        <>
-          <h3 className="org__section-title">Hoy — {dayLabel(today)}</h3>
-          <div className="org__board">
-            {detail.assignments.map(a => {
-              const tasksHoy = a.tasks.filter(t => t.date === today)
-              return (
-                <div key={a.id} className="org__board-col">
-                  <p className="org__board-col-title">{a.workerName}{a.isLead ? ' · responsable' : ''}</p>
-                  {tasksHoy.length === 0 ? (
-                    <p className="org__hint">Sin tareas hoy.</p>
-                  ) : (
-                    tasksHoy.map(t => editingTask === t.id ? (
-                      <TaskEditForm
-                        key={t.id} task={t} byWorkerId={workerId}
-                        assignments={detail.assignments} assignmentId={a.id}
-                        onDone={() => { setEditingTask(null); reload() }}
-                        onCancel={() => setEditingTask(null)}
-                      />
-                    ) : (
-                      <TaskTile
-                        key={t.id} task={t} typeName={taskLabel(t, taskTypeById)}
-                        isMissed={false} dragging={false} postponing={postponing === t.id}
-                        onPointerDown={() => {}} onToggleDone={toggleTask} onPostpone={postponeTask}
-                        canManage={canManage} onEdit={() => setEditingTask(t.id)} onDelete={deleteTask} deleting={deletingTask === t.id}
-                      />
-                    ))
-                  )}
-                  {canManage && (
-                    addingTaskFor === a.id ? (
-                      <LooseTaskForm
-                        config={config} assignmentId={a.id} defaultDate={today} byWorkerId={workerId}
-                        onDone={() => { setAddingTaskFor(null); reload() }}
-                        onCancel={() => setAddingTaskFor(null)}
-                      />
-                    ) : <button className="org__link-btn" onClick={() => setAddingTaskFor(a.id)}>+ Tarea</button>
-                  )}
-                  {(() => {
-                    const puestosAqui = a.blocks.filter(b => b.done).length
-                    const planificados = a.blocks.length - puestosAqui
-                    const total = puestosAqui + (a.blokesRealesCreados || 0)
-                    return (
-                      <p className="org__board-col-meta">
-                        {total} bloque{total === 1 ? '' : 's'} puesto{total === 1 ? '' : 's'} esta semana
-                        {a.blokesRealesCreados > 0 && <span className="org__hint"> ({puestosAqui} aquí + {a.blokesRealesCreados} en Crear bloke)</span>}
-                        {planificados > 0 && <span className="org__hint"> · {planificados} planificado{planificados === 1 ? '' : 's'}</span>}
-                      </p>
-                    )
-                  })()}
-                  {a.blocks.length > 0 && (
-                    <ul className="org__block-list">
-                      {a.blocks.map(b => <BlockRow key={b.id} block={b} holdsets={holdsets} onChanged={reload} />)}
-                    </ul>
-                  )}
-                  {addingBlockFor === a.id ? (
-                    <AddBlockForm
-                      config={config} holdsets={holdsets} assignmentId={a.id}
-                      onDone={() => { setAddingBlockFor(null); reload() }}
-                      onCancel={() => setAddingBlockFor(null)}
-                    />
-                  ) : <button className="org__add-btn" onClick={() => setAddingBlockFor(a.id)}>+ Añadir bloque</button>}
-                </div>
-              )
-            })}
-          </div>
-
-          <MiParteCompesHoy config={config} />
-        </>
-      )}
-    </div>
-  )
-}
 
 // Tareas de compe de HOY, agrupadas por persona (Ramiro, 5/11: Hoy ya no filtra por "quién
 // soy" — esta sección tampoco debe hacerlo, se ve el reparto de todos igual que en el tablero
@@ -579,6 +441,12 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
   const [createDate, setCreateDate] = useState(null)
   const [showWorkers, setShowWorkers] = useState(false)
   const [showHistorico, setShowHistorico] = useState(false)
+  // Ramiro 12/11 11:45: con la vista "Hoy" quitada, registrar bloques (fotos, grado, presas) se
+  // hace desde aquí — mismo "+ Añadir bloque" que tenía Hoy, abierto a cualquier profe/gestión
+  // (no restringido por canManage, es trabajo propio, no edición de tareas de otros).
+  const [holdsets, setHoldsets] = useState([])
+  const [addingBlockFor, setAddingBlockFor] = useState(null)
+  useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
   // Las semanas de prueba no salen en la lista normal del equipo (cowork las necesita para
   // probar sin dejar residuos) — este botón las enseña aparte para poder gestionarlas.
   const [showTest, setShowTest] = useState(false)
@@ -611,6 +479,15 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
     api('GET', `/equipacion/weeks${showTest ? '?test=1' : ''}`).then(r => setWeeks(r.data || [])).catch(() => showToast('No se ha podido cargar la lista de semanas.'))
   }, [showTest, showToast])
   useEffect(() => { reloadWeeks() }, [reloadWeeks])
+
+  // Ramiro 12/11 11:45: "Semana" es ahora la vista por defecto, "abierta en la semana actual" —
+  // antes había que tocar la tira a mano (cowork, 12/11 10:20: "sale «Toca una semana...»").
+  useEffect(() => {
+    if (detail || showCreate) return
+    const w = weeks.find(x => x.startDate === selectedDate)
+    if (w) openWeek(w.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weeks, selectedDate])
 
   // Si se pide abrir otra semana (o recargar la misma) antes de que responda la petición
   // anterior, esa respuesta vieja no debe pisar a la nueva al llegar tarde — guardamos solo la
@@ -665,6 +542,24 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
     try { await api('DELETE', `/equipacion/tasks/${taskId}`) } catch { showToast('No se ha podido quitar la tarea.') }
     await openWeek(detail.id)
     setDeletingTask(null)
+  }
+
+  // "⧉ Duplicar a..." (Ramiro 12/11 11:40): copia independiente de la tarea para cada persona
+  // marcada — útil para "balizar", que lo hacen varios. El backend ya evita duplicar a quien
+  // tenga esa misma tarea esa semana.
+  const [duplicandoTask, setDuplicandoTask] = useState(null)
+  const [duplicarSeleccion, setDuplicarSeleccion] = useState([])
+  const [duplicando, setDuplicando] = useState(false)
+  const toggleDuplicarWorker = wid => setDuplicarSeleccion(cur => cur.includes(wid) ? cur.filter(x => x !== wid) : [...cur, wid])
+  const confirmarDuplicar = async (todos = false) => {
+    setDuplicando(true)
+    try {
+      const body = todos ? { all: true } : { workerIds: duplicarSeleccion }
+      const res = await api('POST', `/equipacion/tasks/${duplicandoTask}/duplicar`, body)
+      showToast(`Duplicada a ${res.creadas} persona(s)${res.omitidas ? ` (${res.omitidas} ya la tenían)` : ''}.`)
+      setDuplicandoTask(null); setDuplicarSeleccion([])
+      await openWeek(detail.id)
+    } catch (e) { showToast(e.message) } finally { setDuplicando(false) }
   }
 
   const [editingDaysFor, setEditingDaysFor] = useState(null)
@@ -810,14 +705,14 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
           </p>
         )}
         {detail.isAuto && <p className="org__hint org__hint--auto">Semana creada automáticamente: reparte las tareas arrastrándolas.</p>}
-        <p className="org__hint">Arrastra una tarjeta a otra persona (o a otro día de esa persona) para reasignarla.</p>
+        {/* Ramiro 12/11 11:45: "las tareas son de la semana, no de un día concreto" — ya no se
+            arrastra entre días, solo entre personas. */}
+        <p className="org__hint">Arrastra una tarjeta a otra persona para reasignarla.</p>
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
           {detail.assignments.map(a => {
             const worker = workerById[a.workerId]
             const effectiveDays = a.workDays?.length ? a.workDays : (worker?.workDays || [])
-            const workerDates = effectiveDays.map(d => addDays(detail.startDate, DAY_OFFSET[d]))
-            const taskDates = a.tasks.map(t => t.date)
-            const allDates = Array.from(new Set([...workerDates, ...taskDates])).sort()
+            const tareasOrdenadas = [...a.tasks].sort((x, y) => x.date.localeCompare(y.date))
             return (
               <div
                 key={a.id}
@@ -853,39 +748,53 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
                     assignmentId={a.id}
                   />
                 )}
-                {allDates.map(date => {
-                  const tasksOnDate = a.tasks.filter(t => t.date === date)
-                  return (
-                    <div key={date} className="org__board-day" data-date={date}>
-                      <p className="org__board-day-label">{dayLabel(date)}</p>
-                      {tasksOnDate.map(t => editingTask === t.id ? (
-                        <TaskEditForm
-                          key={t.id} task={t} byWorkerId={workerId}
-                          assignments={detail.assignments} assignmentId={a.id}
-                          onDone={() => { setEditingTask(null); openWeek(detail.id) }}
-                          onCancel={() => setEditingTask(null)}
-                        />
-                      ) : (
-                        <TaskTile
-                          key={t.id}
-                          task={t}
-                          typeName={taskLabel(t, taskTypeById)}
-                          isMissed={!t.done && t.date < todayS && t.status !== 'retrasada' && !t.postponedCount}
-                          dragging={dragTaskId === t.id}
-                          postponing={postponing === t.id}
-                          onPointerDown={onTileDown(t.id, t.date, a.id)}
-                          onToggleDone={toggleTaskDone}
-                          onPostpone={postponeTask}
-                          canManage={canManage}
-                          onEdit={() => setEditingTask(t.id)}
-                          onDelete={deleteTask}
-                          deleting={deletingTask === t.id}
-                        />
+                {tareasOrdenadas.map(t => editingTask === t.id ? (
+                  <TaskEditForm
+                    key={t.id} task={t} byWorkerId={workerId}
+                    assignments={detail.assignments} assignmentId={a.id}
+                    onDone={() => { setEditingTask(null); openWeek(detail.id) }}
+                    onCancel={() => setEditingTask(null)}
+                  />
+                ) : (
+                  <TaskTile
+                    key={t.id}
+                    task={t}
+                    typeName={taskLabel(t, taskTypeById)}
+                    isMissed={!t.done && t.date < todayS && t.status !== 'retrasada' && !t.postponedCount}
+                    dragging={dragTaskId === t.id}
+                    postponing={postponing === t.id}
+                    onPointerDown={onTileDown(t.id, t.date, a.id)}
+                    onToggleDone={toggleTaskDone}
+                    onPostpone={postponeTask}
+                    canManage={canManage}
+                    onEdit={() => setEditingTask(t.id)}
+                    onDelete={deleteTask}
+                    deleting={deletingTask === t.id}
+                    onDuplicate={taskId => { setDuplicandoTask(taskId); setDuplicarSeleccion([]) }}
+                  />
+                ))}
+                {tareasOrdenadas.length === 0 && <p className="org__hint">Sin tareas (no le tocó ninguna esta semana).</p>}
+                {duplicandoTask && tareasOrdenadas.some(t => t.id === duplicandoTask) && (
+                  <div className="org__add-form">
+                    <p className="org__hint">Duplicar a:</p>
+                    <div className="org__holdset-chips">
+                      {detail.assignments.filter(other => other.id !== a.id).map(other => (
+                        <button
+                          key={other.id} type="button"
+                          className={`org__holdset-chip${duplicarSeleccion.includes(other.workerId) ? ' org__holdset-chip--on' : ''}`}
+                          onClick={() => toggleDuplicarWorker(other.workerId)}
+                        >{other.workerName}</button>
                       ))}
                     </div>
-                  )
-                })}
-                {allDates.length === 0 && <p className="org__hint">Sin tareas (no le tocó ninguna esta semana).</p>}
+                    <div className="org__add-actions">
+                      <button className="org__btn" onClick={() => confirmarDuplicar(false)} disabled={duplicando || duplicarSeleccion.length === 0}>
+                        {duplicando ? 'Duplicando...' : `Duplicar a ${duplicarSeleccion.length} persona(s)`}
+                      </button>
+                      <button className="org__btn" onClick={() => confirmarDuplicar(true)} disabled={duplicando}>Todos los de esta semana</button>
+                      <button className="org__link-btn" onClick={() => setDuplicandoTask(null)}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
                 {(() => {
                   const puestosAqui = a.blocks.filter(b => b.done).length
                   const planificados = a.blocks.length - puestosAqui
@@ -898,6 +807,20 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
                     </p>
                   )
                 })()}
+                {/* Registrar bloques (Ramiro 12/11 11:45: trasladado desde la vista "Hoy", que
+                    se quita) — abierto a cualquiera, como ya estaba. */}
+                {a.blocks.length > 0 && (
+                  <ul className="org__block-list">
+                    {a.blocks.map(b => <BlockRow key={b.id} block={b} holdsets={holdsets} onChanged={() => openWeek(detail.id)} />)}
+                  </ul>
+                )}
+                {addingBlockFor === a.id ? (
+                  <AddBlockForm
+                    config={config} holdsets={holdsets} assignmentId={a.id}
+                    onDone={() => { setAddingBlockFor(null); openWeek(detail.id) }}
+                    onCancel={() => setAddingBlockFor(null)}
+                  />
+                ) : <button className="org__add-btn" onClick={() => setAddingBlockFor(a.id)}>+ Añadir bloque</button>}
               </div>
             )
           })}
@@ -1502,7 +1425,7 @@ function TaskEditForm({ task, byWorkerId, assignments, assignmentId, onDone, onC
 // no se cancelan, solo se mueven a la semana siguiente ("→ Semana
 // siguiente"), y quedan marcadas "retrasada" para que no se pierda el
 // histórico de lo que se fue quedando atrás.
-function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canManage, onEdit, onDelete, deleting }) {
+function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canManage, onEdit, onDelete, deleting, onDuplicate }) {
   const params = Object.entries(task.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
   const movedAway = task.status === 'retrasada' && task.movedToTaskId
   // Una tarea ya hecha no es "un atraso visible" — solo importa que quede constancia discreta
@@ -1563,6 +1486,15 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
           onPointerDown={e => e.stopPropagation()}
           onClick={onEdit}
         >✎ Editar</button>
+      )}
+      {canManage && onDuplicate && (
+        <button
+          type="button"
+          className="org__tile-edit"
+          onPointerDown={e => e.stopPropagation()}
+          onClick={() => onDuplicate(task.id)}
+          title="Duplicar esta tarea para otras personas"
+        >⧉ Duplicar a…</button>
       )}
       {canManage && (
         <button
@@ -1998,6 +1930,21 @@ function CompePlanView({ compId, taskTypeById, workers, canManage }) {
     catch { showToast('No se ha podido mover la tarea — deshecho.'); reload() }
   }
 
+  // "⧉ Duplicar a..." (Ramiro 12/11 11:40) — igual que en la semana normal.
+  const [duplicandoTarea, setDuplicandoTarea] = useState(null)
+  const [duplicarSeleccionCompe, setDuplicarSeleccionCompe] = useState([])
+  const [duplicandoCompe, setDuplicandoCompe] = useState(false)
+  const confirmarDuplicarCompe = async todos => {
+    setDuplicandoCompe(true)
+    try {
+      const body = todos ? { all: true } : { workerIds: duplicarSeleccionCompe }
+      const res = await api('POST', `/equipacion/tasks/${duplicandoTarea}/duplicar`, body)
+      showToast(`Duplicada a ${res.creadas} persona(s)${res.omitidas ? ` (${res.omitidas} ya la tenían)` : ''}.`)
+      setDuplicandoTarea(null); setDuplicarSeleccionCompe([])
+      await reload()
+    } catch (e) { showToast(e.message) } finally { setDuplicandoCompe(false) }
+  }
+
   // Punto 7 (Ramiro, 11/11 05:01): "se mueven arrastrando, igual que las tareas" — en vez de
   // montar drag&drop (bastante más esfuerzo/riesgo para lo que aporta aquí), se mueve tocando el
   // bloque y eligiendo el nuevo equipador en un desplegable — mismo resultado, menos piezas.
@@ -2116,10 +2063,31 @@ function CompePlanView({ compId, taskTypeById, workers, canManage }) {
                       ) : (
                         <>
                           <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignandoTarea(t.id)} title="Mover a otra persona">⇄</button>
+                          <button type="button" className="org__tile-edit" onClick={() => { setDuplicandoTarea(t.id); setDuplicarSeleccionCompe([]) }} title="Duplicar esta tarea para otras personas">⧉ Duplicar a…</button>
                           <button type="button" className="org__tile-delete" onClick={() => setConfirmandoQuitar(t.id)} title="Quitar esta tarea">✕</button>
                         </>
                       )}
                     </span>
+                  )}
+                  {duplicandoTarea === t.id && (
+                    <div className="org__add-form org__add-form--compe-tarea">
+                      <p className="org__hint">Duplicar a:</p>
+                      <div className="org__holdset-chips">
+                        {(workers || []).filter(w => w.active && w.name !== col.nombre).map(w => (
+                          <button
+                            key={w.id} type="button"
+                            className={`org__holdset-chip${duplicarSeleccionCompe.includes(w.id) ? ' org__holdset-chip--on' : ''}`}
+                            onClick={() => setDuplicarSeleccionCompe(cur => cur.includes(w.id) ? cur.filter(x => x !== w.id) : [...cur, w.id])}
+                          >{w.name}</button>
+                        ))}
+                      </div>
+                      <div className="org__add-actions">
+                        <button className="org__btn" onClick={() => confirmarDuplicarCompe(false)} disabled={duplicandoCompe || duplicarSeleccionCompe.length === 0}>
+                          {duplicandoCompe ? 'Duplicando...' : `Duplicar a ${duplicarSeleccionCompe.length} persona(s)`}
+                        </button>
+                        <button className="org__link-btn" onClick={() => setDuplicandoTarea(null)}>Cancelar</button>
+                      </div>
+                    </div>
                   )}
                 </li>
               ))}

@@ -810,6 +810,10 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)/postpone', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_postpone_task', 'permission_callback' => $equip_jefe_perm,
     ));
+    // "⧉ Duplicar a..." (Ramiro 12/11 11:40).
+    register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)/duplicar', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_duplicar_tarea', 'permission_callback' => $equip_jefe_perm,
+    ));
     register_rest_route('progreso/v1', '/equipacion/weeks/historico', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_weeks_historico', 'permission_callback' => $equip_perm,
     ));
@@ -14111,6 +14115,49 @@ function progreso_equip_postpone_task($request) {
     );
 
     return rest_ensure_response(array('success' => true, 'queued' => false, 'newTaskId' => $new_task_id, 'nextWeekId' => intval($next_week['id'])));
+}
+
+// POST /equipacion/tasks/{id}/duplicar — "⧉ Duplicar a..." (Ramiro 12/11 11:40: "que se puedan
+// duplicar una tarea para que la tengan varios, como balizar"). Copia independiente para cada
+// persona marcada (mismo tipo, fecha, params y competición), done=0 siempre — cada una marca la
+// suya. `workerIds` (array) o `all: true` para todo el equipo de esa semana. Nunca duplica a
+// quien ya tenga esa misma tarea (tipo+fecha) esa semana, para no crear dobles.
+function progreso_equip_duplicar_tarea($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $tasks_table = progreso_equip_table('tasks');
+    $task = $wpdb->get_row($wpdb->prepare(
+        "SELECT t.*, a.week_id FROM {$tasks_table} t JOIN " . progreso_equip_table('assignments') . " a ON a.id = t.assignment_id WHERE t.id = %d", $id
+    ), ARRAY_A);
+    if (!$task) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
+
+    if ($request->get_param('all')) {
+        $worker_ids = $wpdb->get_col($wpdb->prepare(
+            "SELECT worker_id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d", intval($task['week_id'])
+        ));
+    } else {
+        $worker_ids = (array) $request->get_param('workerIds');
+    }
+    $worker_ids = array_values(array_unique(array_filter(array_map('intval', $worker_ids))));
+    if (!$worker_ids) return new WP_Error('invalid_data', 'Elige al menos una persona.', array('status' => 400));
+
+    $creadas = 0; $omitidas = 0;
+    foreach ($worker_ids as $wid) {
+        $assignment_id = progreso_equip_ensure_assignment(intval($task['week_id']), $wid);
+        $ya = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$tasks_table} WHERE assignment_id = %d AND task_type_id = %s AND task_date = %s",
+            $assignment_id, $task['task_type_id'], $task['task_date']
+        ));
+        if ($ya) { $omitidas++; continue; }
+        $wpdb->insert($tasks_table, array(
+            'assignment_id'  => $assignment_id, 'task_type_id' => $task['task_type_id'], 'task_date' => $task['task_date'],
+            'params'         => $task['params'], 'done' => 0, 'status' => 'pendiente', 'original_date' => $task['task_date'],
+            'competition_id' => $task['competition_id'], 'manual' => intval($task['manual']),
+            'created_by'     => progreso_equip_actor($request), 'created_at' => current_time('mysql'),
+        ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%d', '%s', '%s'));
+        $creadas++;
+    }
+    return rest_ensure_response(array('success' => true, 'creadas' => $creadas, 'omitidas' => $omitidas));
 }
 
 function progreso_equip_create_block($request) {
