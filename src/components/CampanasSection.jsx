@@ -516,9 +516,19 @@ function CampanasPanel({ sugeridas }) {
   const [editando, setEditando] = useState(null)
   const [verArchivadas, setVerArchivadas] = useState(false)
   const [refreshKey, setRefresh] = useState(0)
+  // Parte C de la trazabilidad (11/11): cruce indirecto por teléfono — para quien no hizo
+  // clic (o se le envió antes de que existiera el enlace) pero volvió igual.
+  // 🐞 Cowork 12/11 11:00: este useState estaba DESPUÉS del `return` de abajo — con `abierta`
+  // puesto, React veía menos hooks que en el render anterior y rompía toda la pantalla
+  // ("a is not a function"). Las reglas de Hooks exigen que se llamen siempre, en el mismo
+  // orden, nunca después de un return condicional — subido aquí con el resto de useState.
+  const [recalculando, setRecalculando] = useState(null)
 
-  const cargar = () => campanasListar().then(setCampanas).catch(e => setError(e.message))
-  useEffect(cargar, [refreshKey])
+  // 🐞 Cowork 12/11 11:00: `cargar` devolvía la Promise de `.then()/.catch()` (arrow de una
+  // sola expresión); `useEffect(cargar, ...)` la tomaba como función de limpieza y la
+  // llamaba al desmontar — "a is not a function". Envuelto en llaves para que no devuelva nada.
+  const cargar = () => { campanasListar().then(setCampanas).catch(e => setError(e.message)) }
+  useEffect(() => { cargar() }, [refreshKey])
 
   if (abierta) {
     return <DestinatariosPanel campana={abierta} onBack={() => { setAbierta(null); setRefresh(k => k + 1) }} onChanged={cargar} />
@@ -540,9 +550,6 @@ function CampanasPanel({ sugeridas }) {
     setRefresh(k => k + 1)
   }
 
-  // Parte C de la trazabilidad (11/11): cruce indirecto por teléfono — para quien no hizo
-  // clic (o se le envió antes de que existiera el enlace) pero volvió igual.
-  const [recalculando, setRecalculando] = useState(null)
   const recalcularIndirectas = async c => {
     setRecalculando(c.id)
     try {
