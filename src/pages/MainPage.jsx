@@ -163,7 +163,7 @@ function MainPage() {
     const currentCount = countOverrides[card.postId] ?? card.completionCount ?? 0
     const result = await toggleCompletion(card.postId, currentCount)
     if (result?.completed) {
-      setCelebration({ title: card.title, count: result.count, firstAscent: result.first_ascent === true })
+      setCelebration({ title: card.title, count: result.count, firstAscent: result.first_ascent === true, league: result.league || null })
     }
   }, [toggleCompletion, countOverrides, isTablet])
 
@@ -182,7 +182,7 @@ function MainPage() {
       })
       const data = await res.json()
       if (res.ok && data.completed) {
-        setCelebration({ title: `${card.title} — ${identity.name}`, count: data.count, firstAscent: data.first_ascent === true })
+        setCelebration({ title: `${card.title} — ${identity.name}`, count: data.count, firstAscent: data.first_ascent === true, league: data.league || null })
       }
     } catch (e) {
       console.error('Tablet completion failed:', e)
@@ -243,6 +243,7 @@ function MainPage() {
           title={celebration.title}
           count={celebration.count}
           firstAscent={celebration.firstAscent}
+          league={celebration.league}
           onClose={() => setCelebration(null)}
         />
       )}

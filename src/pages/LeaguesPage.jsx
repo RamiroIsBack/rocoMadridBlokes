@@ -188,6 +188,23 @@ export default function LeaguesPage() {
         </div>
       </div>
 
+      {/* Opciones 2 y 4 de NOTAS_PARA_CODE_ligas_incentivo.md: que se vea también aquí, no solo
+          al apuntar un top. */}
+      {(myLeague.pointsToPromote != null && myLeague.nextLeagueName) || myLeague.rachaSemanas > 0 ? (
+        <div className="league-incentivo">
+          {myLeague.pointsToPromote != null && myLeague.nextLeagueName && (
+            <p className="league-incentivo__linea">
+              Te faltan <strong>{myLeague.pointsToPromote}</strong> pts para subir a {myLeague.nextLeagueName}
+            </p>
+          )}
+          {myLeague.rachaSemanas > 0 && (
+            <p className="league-incentivo__linea">
+              🔥 Racha: {myLeague.rachaSemanas} semana{myLeague.rachaSemanas === 1 ? '' : 's'}
+            </p>
+          )}
+        </div>
+      ) : null}
+
       {/* Leaderboard */}
       <div className="league-leaderboard">
         {leaderboard.map(member => (

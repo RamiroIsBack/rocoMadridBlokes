@@ -9868,10 +9868,16 @@ function superadmin_classes($request) {
 
 // ── Instalación de tablas ─────────────────────────────────────
 add_action('plugins_loaded', function() {
-    if (get_option('blokes_leagues_db_version') !== '1.0') {
+    if (get_option('blokes_leagues_db_version') !== '1.1') {
         blokes_leagues_create_tables();
         blokes_leagues_seed();
-        update_option('blokes_leagues_db_version', '1.0');
+        // v1.1 (Ramiro 12/11 11:55, NOTAS_PARA_CODE_ligas_incentivo.md): nuevos tipos de evento
+        // bonus_nuevo/bonus_racha — el ENUM ya existente no lo coge dbDelta solo con el CREATE
+        // TABLE (es flojo con los ENUM), así que se fuerza aquí una vez.
+        global $wpdb;
+        $wpdb->query("ALTER TABLE {$wpdb->prefix}blokes_league_events
+            MODIFY event_type ENUM('promoted','demoted','top_scored','bonus_nuevo','bonus_racha') NOT NULL");
+        update_option('blokes_leagues_db_version', '1.1');
     }
 });
 
@@ -9908,7 +9914,7 @@ function blokes_leagues_create_tables() {
     dbDelta("CREATE TABLE IF NOT EXISTS {$wpdb->prefix}blokes_league_events (
         id                   INT UNSIGNED      NOT NULL AUTO_INCREMENT,
         user_id              BIGINT UNSIGNED   NOT NULL,
-        event_type           ENUM('promoted','demoted','top_scored') NOT NULL,
+        event_type           ENUM('promoted','demoted','top_scored','bonus_nuevo','bonus_racha') NOT NULL,
         from_league_id       SMALLINT UNSIGNED,
         to_league_id         SMALLINT UNSIGNED,
         points_at_event      INT               NOT NULL DEFAULT 0,
@@ -9955,15 +9961,140 @@ function blokes_calculate_points($post_id) {
     return ($color_base[$color] ?? 0) + ($grado_bonus[$grado] ?? 2);
 }
 
+// ── Incentivo (Ramiro 12/11 11:55, NOTAS_PARA_CODE_ligas_incentivo.md) ─────────
+// Opciones 1 (bloques nuevos ×2), 2 (racha semanal +5) y 4 (feedback "+X pts · te
+// faltan Y"). Los bonus se guardan como eventos con tipo propio en
+// blokes_league_events para poder auditarlos o deshacerlos — nunca se suman a
+// total_points sin dejar rastro.
+
+// Lunes de la semana de una fecha dada (o de ahora) — aritmética de días explícita,
+// nunca strtotime('monday this week') (ambiguo si la fecha YA es lunes).
+function blokes_monday_of($ts = null) {
+    $ts = $ts ?: current_time('timestamp');
+    $dow = (int) date('N', $ts); // 1 (lunes) .. 7 (domingo)
+    return date('Y-m-d', $ts - ($dow - 1) * 86400);
+}
+
+// Opción 1: un bloke puesto en las últimas 2 semanas vale el doble — empuja a
+// probar lo nuevo, igual encaja con la equipación semanal. post_date es la fecha
+// en la que se creó el bloke en WordPress (al equiparlo desde la app).
+function blokes_bloke_es_nuevo($post_id) {
+    $post = get_post($post_id);
+    if (!$post || !$post->post_date) return false;
+    $dias = (current_time('timestamp') - strtotime($post->post_date)) / 86400;
+    return $dias >= 0 && $dias <= 14;
+}
+
+// Opción 2: si esta semana ya hay (o esta tarea la deja en) al menos 3 tops
+// propios, +5 pts, una sola vez por semana. Cuenta solo tops que SIGAN puestos
+// (nada de duplicados por un toggle off/on, ni de un bloke que ya se borró —
+// aviso de la nota, ver blokes_quitar_completions_de_bloke).
+function blokes_check_racha_semanal($user_id) {
+    global $wpdb;
+    $ev = $wpdb->prefix . 'blokes_league_events';
+    $monday = blokes_monday_of();
+
+    $ya = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $ev WHERE user_id = %d AND event_type = 'bonus_racha' AND created_at >= %s",
+        $user_id, $monday . ' 00:00:00'
+    ));
+    if ($ya > 0) return 0;
+
+    $completados = get_user_meta($user_id, '_blokes_completed', true);
+    $completados = is_array($completados) ? array_map('intval', $completados) : array();
+    $log = get_user_meta($user_id, '_blokes_completion_log', true);
+    $log = is_array($log) ? $log : array();
+
+    $ids_esta_semana = array();
+    $inicio_semana = strtotime($monday . ' 00:00:00');
+    foreach ($log as $entry) {
+        $pid = intval($entry['postId'] ?? 0);
+        if (!$pid || !in_array($pid, $completados, true)) continue;
+        $ts = strtotime($entry['timestamp'] ?? '');
+        if ($ts && $ts >= $inicio_semana) $ids_esta_semana[$pid] = true;
+    }
+    if (count($ids_esta_semana) < 3) return 0;
+
+    $wpdb->insert($ev, array(
+        'user_id' => $user_id, 'event_type' => 'bonus_racha',
+        'from_league_id' => null, 'to_league_id' => null,
+        'points_at_event' => 5, 'triggered_by_user_id' => null,
+        'created_at' => current_time('mysql'), 'seen' => 0,
+    ));
+    return 5;
+}
+
+// "🔥 Racha: N semanas" en la ficha — semanas CONSECUTIVAS (terminando en la
+// actual o la pasada; si se rompió hace 2+ semanas, la racha ya está a 0) con el
+// bonus semanal conseguido. Se deriva del propio registro de eventos, nada de un
+// contador aparte que se pueda desincronizar.
+function blokes_calcular_racha_semanas($user_id) {
+    global $wpdb;
+    $ev = $wpdb->prefix . 'blokes_league_events';
+    $fechas = $wpdb->get_col($wpdb->prepare(
+        "SELECT created_at FROM $ev WHERE user_id = %d AND event_type = 'bonus_racha' ORDER BY created_at DESC",
+        $user_id
+    ));
+    if (!$fechas) return 0;
+
+    $mondays = array();
+    foreach ($fechas as $f) { $mondays[blokes_monday_of(strtotime($f))] = true; }
+    $mondays = array_keys($mondays);
+    rsort($mondays);
+
+    $hoy_monday = blokes_monday_of();
+    $semana_pasada = date('Y-m-d', strtotime($hoy_monday) - 7 * 86400);
+    if ($mondays[0] !== $hoy_monday && $mondays[0] !== $semana_pasada) return 0;
+
+    $racha = 0;
+    $cursor = $mondays[0];
+    foreach ($mondays as $m) {
+        if ($m !== $cursor) break;
+        $racha++;
+        $cursor = date('Y-m-d', strtotime($cursor) - 7 * 86400);
+    }
+    return $racha;
+}
+
+// Opción 4: cuántos puntos le faltan al usuario para superar al más flojo de la
+// liga de arriba (el mismo umbral que usa blokes_evaluate_league_change para el
+// swap) y cómo se llama esa liga — null/null en la liga top o si la de arriba
+// está vacía (nadie con quien hacer swap todavía).
+function blokes_liga_siguiente_info($league_id, $total_points) {
+    global $wpdb;
+    $ul = $wpdb->prefix . 'blokes_user_leagues';
+    $l  = $wpdb->prefix . 'blokes_leagues';
+
+    $current = $wpdb->get_row($wpdb->prepare("SELECT * FROM $l WHERE id = %d", $league_id));
+    if (!$current || (int) $current->tier >= 6) {
+        return array('pointsToPromote' => null, 'nextLeagueName' => null);
+    }
+    $next = $wpdb->get_row($wpdb->prepare("SELECT * FROM $l WHERE tier = %d", (int) $current->tier + 1));
+    if (!$next) return array('pointsToPromote' => null, 'nextLeagueName' => null);
+
+    $weakest = $wpdb->get_var($wpdb->prepare("SELECT MIN(total_points) FROM $ul WHERE league_id = %d", $next->id));
+    if ($weakest === null) return array('pointsToPromote' => null, 'nextLeagueName' => $next->name);
+
+    return array(
+        'pointsToPromote' => max(0, (int) $weakest - (int) $total_points + 1),
+        'nextLeagueName'  => $next->name,
+    );
+}
+
 // ── Lógica principal ──────────────────────────────────────────
 
 function blokes_register_top_for_leagues($user_id, $post_id) {
     global $wpdb;
     $ul = $wpdb->prefix . 'blokes_user_leagues';
     $l  = $wpdb->prefix . 'blokes_leagues';
+    $ev = $wpdb->prefix . 'blokes_league_events';
 
     $pts = blokes_calculate_points($post_id);
     if ($pts <= 0) return null;
+
+    // Opción 1: bloke nuevo (últimas 2 semanas) vale el doble — el bonus es el
+    // mismo importe que los puntos base, guardado como su propio evento.
+    $bonus_nuevo = blokes_bloke_es_nuevo($post_id) ? $pts : 0;
 
     $wpdb->query('START TRANSACTION');
 
@@ -9975,34 +10106,69 @@ function blokes_register_top_for_leagues($user_id, $post_id) {
         $pedri = $wpdb->get_row("SELECT * FROM $l WHERE tier = 1");
         if (!$pedri) { $wpdb->query('ROLLBACK'); return null; }
 
+        $total = $pts + $bonus_nuevo;
         $wpdb->insert($ul, array(
             'user_id'        => $user_id,
             'league_id'      => $pedri->id,
-            'total_points'   => $pts,
+            'total_points'   => $total,
             'rank_in_league' => 9999,
             'zone'           => 'stay',
             'joined_at'      => current_time('mysql'),
             'last_updated'   => current_time('mysql'),
         ));
+        if ($bonus_nuevo > 0) {
+            $wpdb->insert($ev, array(
+                'user_id' => $user_id, 'event_type' => 'bonus_nuevo',
+                'from_league_id' => null, 'to_league_id' => null,
+                'points_at_event' => $bonus_nuevo, 'triggered_by_user_id' => null,
+                'created_at' => current_time('mysql'), 'seen' => 0,
+            ));
+        }
         $wpdb->query('COMMIT');
         blokes_recalculate_league_ranks((int) $pedri->id);
         blokes_check_tier_overflow((int) $pedri->id);
-        return array('pointsEarned' => $pts, 'newTotal' => $pts, 'leagueChanged' => false);
+        $info = blokes_liga_siguiente_info((int) $pedri->id, $total);
+        return array(
+            'pointsEarned' => $total, 'bonusNuevo' => $bonus_nuevo, 'bonusRacha' => 0,
+            'newTotal' => $total, 'leagueChanged' => false,
+            'pointsToPromote' => $info['pointsToPromote'], 'nextLeagueName' => $info['nextLeagueName'],
+        );
     }
 
-    $new_total = (int) $row->total_points + $pts;
+    // Opción 2: racha semanal — se comprueba DESPUÉS de saber que esta tarea ya
+    // quedó registrada en el log (blokes_toggle_completion actualiza el log antes
+    // de llamar aquí), así que este mismo top ya cuenta si es el 3º de la semana.
+    $bonus_racha = blokes_check_racha_semanal($user_id);
+
+    $ganado = $pts + $bonus_nuevo + $bonus_racha;
+    $new_total = (int) $row->total_points + $ganado;
     $wpdb->update($ul,
         array('total_points' => $new_total, 'last_updated' => current_time('mysql')),
         array('user_id' => $user_id)
     );
+    if ($bonus_nuevo > 0) {
+        $wpdb->insert($ev, array(
+            'user_id' => $user_id, 'event_type' => 'bonus_nuevo',
+            'from_league_id' => null, 'to_league_id' => null,
+            'points_at_event' => $bonus_nuevo, 'triggered_by_user_id' => null,
+            'created_at' => current_time('mysql'), 'seen' => 0,
+        ));
+    }
     $wpdb->query('COMMIT');
 
     $change = blokes_evaluate_league_change((int) $user_id, $new_total, (int) $row->league_id);
+    $liga_final = $change['changed'] ? (int) $change['newLeague']['id'] : (int) $row->league_id;
+    $info = blokes_liga_siguiente_info($liga_final, $new_total);
+
     return array(
-        'pointsEarned'  => $pts,
-        'newTotal'      => $new_total,
-        'leagueChanged' => $change['changed'],
-        'newLeague'     => $change['newLeague'] ?? null,
+        'pointsEarned'    => $ganado,
+        'bonusNuevo'      => $bonus_nuevo,
+        'bonusRacha'      => $bonus_racha,
+        'newTotal'        => $new_total,
+        'leagueChanged'   => $change['changed'],
+        'newLeague'       => $change['newLeague'] ?? null,
+        'pointsToPromote' => $info['pointsToPromote'],
+        'nextLeagueName'  => $info['nextLeagueName'],
     );
 }
 
@@ -10223,6 +10389,15 @@ add_action('rest_api_init', function() {
         'callback'            => 'blokes_api_get_comunidad_leagues',
         'permission_callback' => '__return_true',
     ));
+    // Tele del Roco, opción 4 de NOTAS_PARA_CODE_ligas_incentivo.md — público, sin login, igual
+    // que el resto de endpoints que ya lee /compe/directo. Namespace blokes/v1 (no progreso/v1)
+    // a propósito: las tablas de ligas viven en el sitio Principal, igual que este namespace —
+    // así nos ahorramos el switch_to_blog que haría falta si esto corriera desde el Club.
+    register_rest_route('blokes/v1', '/tele/liga-semana', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_tele_liga_semana',
+        'permission_callback' => '__return_true',
+    ));
 });
 
 function blokes_api_get_leagues() {
@@ -10248,14 +10423,21 @@ function blokes_api_get_my_league() {
 
     if (!$row) return new WP_Error('no_league', 'Not placed yet', array('status' => 404));
 
+    // Opciones 2 y 4 de NOTAS_PARA_CODE_ligas_incentivo.md: que se vea en la ficha, no solo al
+    // apuntar el top.
+    $info = blokes_liga_siguiente_info((int) $row->league_id, (int) $row->total_points);
+
     return rest_ensure_response(array(
-        'leagueId'    => (int) $row->league_id,
-        'name'        => $row->name,
-        'slug'        => $row->slug,
-        'tier'        => (int) $row->tier,
-        'totalPoints' => (int) $row->total_points,
-        'rank'        => (int) $row->rank_in_league,
-        'zone'        => $row->zone,
+        'leagueId'        => (int) $row->league_id,
+        'name'            => $row->name,
+        'slug'            => $row->slug,
+        'tier'            => (int) $row->tier,
+        'totalPoints'     => (int) $row->total_points,
+        'rank'            => (int) $row->rank_in_league,
+        'zone'            => $row->zone,
+        'rachaSemanas'    => blokes_calcular_racha_semanas($uid),
+        'pointsToPromote' => $info['pointsToPromote'],
+        'nextLeagueName'  => $info['nextLeagueName'],
     ));
 }
 
@@ -10540,6 +10722,36 @@ function blokes_api_upload_avatar($request) {
     if (is_wp_error($attachment_id)) return $attachment_id;
 
     return rest_ensure_response(array('url' => wp_get_attachment_url($attachment_id)));
+}
+
+// GET /blokes/v1/tele/liga-semana — ver registro de la ruta más arriba. Nombre público igual
+// que el resto de pantallas compartidas (blokes_api_get_my_leaderboard): nombre de pila +
+// nickname entre paréntesis, nunca apellidos.
+function blokes_api_tele_liga_semana() {
+    global $wpdb;
+    $ev = $wpdb->prefix . 'blokes_league_events';
+    $l  = $wpdb->prefix . 'blokes_leagues';
+    $monday = blokes_monday_of();
+
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT ev.user_id, ev.created_at, lto.name AS to_name
+         FROM $ev ev JOIN $l lto ON lto.id = ev.to_league_id
+         WHERE ev.event_type = 'promoted' AND ev.created_at >= %s
+         ORDER BY ev.created_at DESC LIMIT 12", $monday . ' 00:00:00'
+    ));
+
+    $out = array();
+    foreach ($rows as $r) {
+        $u = get_userdata($r->user_id);
+        $first = $u ? trim($u->first_name ?? '') : '';
+        $name = $first ?: ($u ? (explode(' ', trim($u->display_name ?? ''))[0] ?? '') : '');
+        $nick = blokes_get_user_nickname($r->user_id);
+        $out[] = array(
+            'nombreMostrar' => trim(($name ?: 'Alguien') . ($nick ? " ({$nick})" : '')),
+            'liga'          => $r->to_name,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
 function blokes_api_get_comunidad_leagues() {

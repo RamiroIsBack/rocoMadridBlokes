@@ -4,6 +4,7 @@ import mapaEquipacion from '../assets/mapa-equipacion.jpg'
 import cartelCompe from '../assets/cartel-compe-1fase-26-27.jpg'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
+const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
 const REFRESCO_MS = 30000 // Ramiro: "sondeo cada 30 s, nada pesado" — ver el problema de pestañas colgadas
 const ROTACION_MS = 22000 // "Precompe" rota entre cuenta atrás+cartel y el mapa cada 20-30 s
 const LOGO_URL = 'https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png'
@@ -38,6 +39,23 @@ function renderSlide(slide) {
           />
         </div>
       )}
+    </>
+  )
+}
+
+// "Esta semana han subido: …" — opción 4 de NOTAS_PARA_CODE_ligas_incentivo.md. Mismo hueco de
+// la rotación que una diapositiva normal.
+function renderLigaSemana(ligaSemana) {
+  return (
+    <>
+      <p style={{ fontSize: '2.6rem', fontWeight: 800, margin: '0 0 28px' }}>🏆 Esta semana han subido</p>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '1.8rem', textAlign: 'left', display: 'inline-block' }}>
+        {ligaSemana.map((p, i) => (
+          <li key={i} style={{ padding: '10px 0', borderBottom: '1px solid #1f2937' }}>
+            <strong>{p.nombreMostrar}</strong> <span style={{ color: '#9ca3af' }}>→ {p.liga}</span>
+          </li>
+        ))}
+      </ul>
     </>
   )
 }
@@ -83,20 +101,26 @@ export default function CompeDirectoPage() {
   // automáticas por actividad/evento ni los vídeos de blokes, que quedan para más adelante.
   const [slides, setSlides] = useState([])
   const [slideIndex, setSlideIndex] = useState(0)
+  // Opción 4 de NOTAS_PARA_CODE_ligas_incentivo.md (Ramiro 12/11 11:55): "Esta semana han
+  // subido: …" — quién ha ascendido de liga en los últimos 7 días, como una fase más de la
+  // misma rotación que las diapositivas.
+  const [ligaSemana, setLigaSemana] = useState([])
 
   // 🐞 Cowork 11/11 09:40: con una compe programada, la tele no enseñaba nunca las diapositivas
   // de Superadmin → Tele (solo rotaba cuenta atrás ↔ mapa). Ahora, si hay diapositivas, "slide"
-  // entra como tercera fase de la rotación.
+  // entra como tercera fase de la rotación — y "liga" como cuarta si hubo ascensos esta semana.
   useEffect(() => {
     const id = setInterval(() => {
       setVistaPrecompe(v => {
-        const fases = slides.length > 0 ? ['cuenta', 'mapa', 'slide'] : ['cuenta', 'mapa']
+        const fases = ['cuenta', 'mapa']
+        if (slides.length > 0) fases.push('slide')
+        if (ligaSemana.length > 0) fases.push('liga')
         const i = fases.indexOf(v)
         return fases[(i + 1) % fases.length] ?? 'cuenta'
       })
     }, ROTACION_MS)
     return () => clearInterval(id)
-  }, [slides.length])
+  }, [slides.length, ligaSemana.length])
 
   useEffect(() => {
     let activo = true
@@ -108,6 +132,19 @@ export default function CompeDirectoPage() {
     }
     cargarSlides()
     const id = setInterval(cargarSlides, 5 * 60000) // cada 5 min como mucho, como pide la nota
+    return () => { activo = false; clearInterval(id) }
+  }, [])
+
+  useEffect(() => {
+    let activo = true
+    const cargarLiga = () => {
+      fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/tele/liga-semana`)
+        .then(r => r.json())
+        .then(j => { if (activo) setLigaSemana(j.data || []) })
+        .catch(() => {})
+    }
+    cargarLiga()
+    const id = setInterval(cargarLiga, 5 * 60000)
     return () => { activo = false; clearInterval(id) }
   }, [])
 
@@ -166,6 +203,7 @@ export default function CompeDirectoPage() {
     const mostrarMapa = vistaPrecompe === 'mapa' && bloquesColocados.length > 0
     const mostrarSlide = vistaPrecompe === 'slide' && slides.length > 0
     const slideActual = slides[slideIndex] || null
+    const mostrarLiga = vistaPrecompe === 'liga' && ligaSemana.length > 0
 
     if (err && !proxima) {
       return (
@@ -186,7 +224,7 @@ export default function CompeDirectoPage() {
         <div style={estilos.pagina}>
           <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 1200 }}>
             <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(110), marginBottom: 20 }} />
-            {slide ? renderSlide(slide) : (
+            {mostrarLiga ? renderLigaSemana(ligaSemana) : slide ? renderSlide(slide) : (
               <p style={{ fontSize: '2rem', color: '#9ca3af' }}>No hay compe activa ahora mismo.</p>
             )}
           </div>
@@ -206,7 +244,9 @@ export default function CompeDirectoPage() {
             </p>
           )}
 
-          {mostrarSlide && slideActual ? (
+          {mostrarLiga ? (
+            <div style={{ maxWidth: 1000, margin: '0 auto' }}>{renderLigaSemana(ligaSemana)}</div>
+          ) : mostrarSlide && slideActual ? (
             <div style={{ maxWidth: 1000, margin: '0 auto' }}>{renderSlide(slideActual)}</div>
           ) : !mostrarMapa ? (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 56, flexWrap: 'wrap' }}>

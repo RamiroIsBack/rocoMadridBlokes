@@ -73,6 +73,17 @@
   margin: 0 0 22px;
 }
 
+/* Opción 4 de NOTAS_PARA_CODE_ligas_incentivo.md — "+X pts · te faltan Y para subir a Liga Z" */
+.celeb-league {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #166534;
+  background: #f0fdf4;
+  border-radius: 10px;
+  padding: 6px 10px;
+  margin: 0 0 10px;
+}
+
 .celeb-btn {
   background: #1a1208;
   color: #f5c842;
