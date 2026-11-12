@@ -491,6 +491,12 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
                 </td>
                 <td className="cmp-acciones">
                   <button className="cmp-btn cmp-btn--sm cmp-btn--primary" onClick={() => abrirWhatsapp(d)}>Abrir WhatsApp</button>
+                  {/* Cowork 12/11 13:00: "Abrir WhatsApp" marcó enviado a Cristina pero el mensaje
+                      nunca se mandó de verdad (dato de otra persona) — por destinatario, no toda
+                      la campaña de golpe (eso ya existía, "Deshacer enviados (eran pruebas)"). */}
+                  {d.enviado && (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'enviado_deshacer')}>Deshacer enviado</button>
+                  )}
                   {/* "Deshacer" para Respondió y Se apuntó, igual que ya existía para BAJA — pedido
                       por cowork el 10/11 (un clic mal dado) y otra vez el 12/11 (los 11 "Se
                       apuntaron" falsos del bug de conversión automática, antes de arreglarlo). */}

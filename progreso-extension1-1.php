@@ -8245,7 +8245,7 @@ function superadmin_campanas_marcar_accion($request) {
     $campana_id  = intval($request['id']);
     $contacto_id = intval($request['contacto_id']);
     $accion = sanitize_key($request->get_param('accion'));
-    if (!in_array($accion, array('enviado', 'respondio', 'respondio_deshacer', 'baja', 'baja_deshacer', 'apuntado', 'apuntado_deshacer'), true)) {
+    if (!in_array($accion, array('enviado', 'enviado_deshacer', 'respondio', 'respondio_deshacer', 'baja', 'baja_deshacer', 'apuntado', 'apuntado_deshacer'), true)) {
         return new WP_Error('bad_request', 'Acción no reconocida.', array('status' => 400));
     }
     $u = wp_get_current_user();
@@ -8266,6 +8266,10 @@ function superadmin_campanas_marcar_accion($request) {
     // o los "Se apuntaron" falsos que dejó el bug de conversión automática antes de arreglarlo).
     if ($accion === 'respondio_deshacer') { $campos['respondio'] = 0; $campos['respondio_at'] = null; }
     if ($accion === 'apuntado_deshacer')  { $campos['apuntado']  = 0; $campos['apuntado_at']  = null; }
+    // Deshacer enviado, por destinatario (cowork 12/11 13:00: "Abrir WhatsApp" marcó enviado a
+    // Cristina pero el mensaje nunca se mandó — el dato era de otra persona). Antes solo existía
+    // el "deshacer enviados" de toda la campaña de golpe (superadmin_campanas_deshacer_enviados).
+    if ($accion === 'enviado_deshacer') { $campos['enviado_at'] = null; $campos['enviado_por'] = null; }
 
     if ($existente) {
         $wpdb->update(blokes_campana_envios_table(), $campos, array('id' => $existente['id']));
@@ -10139,7 +10143,16 @@ function blokes_liga_siguiente_info($league_id, $total_points) {
 
 // ── Lógica principal ──────────────────────────────────────────
 
+// Ramiro 12/11 12:30 (de cara al futuro, tras los tops de prueba de RamiroTop): una cuenta
+// marcada como "de pruebas" (_blokes_cuenta_prueba) no debe entrar en ligas — ni puntos, ni
+// bonus, ni ascensos/descensos de nadie real por su culpa. Se marca desde
+// POST /blokes/v1/admin/cuenta-prueba (solo socio).
+function blokes_es_cuenta_prueba($user_id) {
+    return (bool) get_user_meta((int) $user_id, '_blokes_cuenta_prueba', true);
+}
+
 function blokes_register_top_for_leagues($user_id, $post_id) {
+    if (blokes_es_cuenta_prueba($user_id)) return null;
     global $wpdb;
     $ul = $wpdb->prefix . 'blokes_user_leagues';
     $l  = $wpdb->prefix . 'blokes_leagues';
@@ -10453,6 +10466,21 @@ add_action('rest_api_init', function() {
         'methods'             => 'GET',
         'callback'            => 'blokes_api_tele_liga_semana',
         'permission_callback' => '__return_true',
+    ));
+    // Diagnóstico TEMPORAL, solo socio (Ramiro 12/11 12:30: deshacer los tops de prueba de
+    // RamiroTop, con el plan por delante antes de borrar nada) — se quita en cuanto se decida la
+    // limpieza. De solo lectura: no cambia nada.
+    register_rest_route('blokes/v1', '/admin/diag-cuenta', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_diag_cuenta',
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+    ));
+    // "Para el futuro" (Ramiro 12/11 12:30): marcar una cuenta como "de pruebas" para que sus
+    // tops dejen de contar en ligas/tele/clasificaciones.
+    register_rest_route('blokes/v1', '/admin/cuenta-prueba', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_api_set_cuenta_prueba',
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
     ));
 });
 
@@ -10798,6 +10826,7 @@ function blokes_api_tele_liga_semana() {
 
     $out = array();
     foreach ($rows as $r) {
+        if (blokes_es_cuenta_prueba($r->user_id)) continue; // Ramiro 12/11 12:30
         $u = get_userdata($r->user_id);
         $first = $u ? trim($u->first_name ?? '') : '';
         $name = $first ?: ($u ? (explode(' ', trim($u->display_name ?? ''))[0] ?? '') : '');
@@ -10808,6 +10837,75 @@ function blokes_api_tele_liga_semana() {
         );
     }
     return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// POST /blokes/v1/admin/cuenta-prueba — marca/desmarca una cuenta como "de pruebas" por nickname
+// (Ramiro 12/11 12:30: "para el futuro"). Solo evita que sus FUTUROS tops entren en ligas; no
+// deshace nada de lo que ya hubiera pasado antes de marcarla.
+function blokes_api_set_cuenta_prueba($request) {
+    global $wpdb;
+    $nickname = sanitize_text_field((string) $request->get_param('nickname'));
+    if (!$nickname) return new WP_Error('bad_request', 'Falta nickname.', array('status' => 400));
+    $user_id = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = '_blokes_nickname' AND meta_value = %s", $nickname
+    ));
+    if (!$user_id) return new WP_Error('not_found', 'No existe ese nickname.', array('status' => 404));
+    $es_prueba = (bool) $request->get_param('esPrueba');
+    if ($es_prueba) update_user_meta($user_id, '_blokes_cuenta_prueba', 1);
+    else delete_user_meta($user_id, '_blokes_cuenta_prueba');
+    return rest_ensure_response(array('success' => true, 'userId' => $user_id, 'esCuentaPrueba' => $es_prueba));
+}
+
+// GET /blokes/v1/admin/diag-cuenta?nickname=X — ver registro de la ruta más arriba. De solo
+// lectura, para plantar el plan de limpieza de una cuenta de pruebas antes de tocar nada:
+// estado actual, todos sus eventos de liga, y para cada "promoted" suyo, quién bajó a la vez
+// (mismo instante, triggered_by_user_id = esta cuenta) y su estado actual.
+function blokes_api_diag_cuenta($request) {
+    global $wpdb;
+    $nickname = sanitize_text_field((string) $request->get_param('nickname'));
+    if (!$nickname) return new WP_Error('bad_request', 'Falta nickname.', array('status' => 400));
+    $user_id = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = '_blokes_nickname' AND meta_value = %s", $nickname
+    ));
+    if (!$user_id) return new WP_Error('not_found', 'No existe ese nickname.', array('status' => 404));
+
+    $ul = $wpdb->prefix . 'blokes_user_leagues';
+    $l  = $wpdb->prefix . 'blokes_leagues';
+    $ev = $wpdb->prefix . 'blokes_league_events';
+
+    $actual = $wpdb->get_row($wpdb->prepare(
+        "SELECT ul.total_points, ul.rank_in_league, l.id as league_id, l.name, l.tier
+         FROM $ul ul JOIN $l l ON l.id = ul.league_id WHERE ul.user_id = %d", $user_id
+    ), ARRAY_A);
+
+    $eventos = $wpdb->get_results($wpdb->prepare(
+        "SELECT ev.*, lf.name as from_name, lt.name as to_name FROM $ev ev
+         LEFT JOIN $l lf ON lf.id = ev.from_league_id LEFT JOIN $l lt ON lt.id = ev.to_league_id
+         WHERE ev.user_id = %d ORDER BY ev.created_at ASC", $user_id
+    ), ARRAY_A);
+
+    $afectados = array();
+    foreach ($eventos as $e) {
+        if ($e['event_type'] !== 'promoted') continue;
+        $demotido = $wpdb->get_row($wpdb->prepare(
+            "SELECT ev.*, nick.meta_value as nickname FROM $ev ev
+             LEFT JOIN {$wpdb->usermeta} nick ON nick.user_id = ev.user_id AND nick.meta_key = '_blokes_nickname'
+             WHERE ev.event_type = 'demoted' AND ev.triggered_by_user_id = %d AND ev.created_at = %s",
+            $user_id, $e['created_at']
+        ), ARRAY_A);
+        if ($demotido) {
+            $estado_actual = $wpdb->get_row($wpdb->prepare(
+                "SELECT ul.total_points, l.name, l.tier FROM $ul ul JOIN $l l ON l.id = ul.league_id WHERE ul.user_id = %d",
+                intval($demotido['user_id'])
+            ), ARRAY_A);
+            $afectados[] = array_merge($demotido, array('estadoActual' => $estado_actual));
+        }
+    }
+
+    return rest_ensure_response(array(
+        'userId' => $user_id, 'nickname' => $nickname, 'actual' => $actual,
+        'eventos' => $eventos, 'afectadosPorPromocion' => $afectados,
+    ));
 }
 
 function blokes_api_get_comunidad_leagues() {
