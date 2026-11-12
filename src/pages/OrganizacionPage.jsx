@@ -161,15 +161,17 @@ export default function OrganizacionPage() {
     setWorkerId(id)
     try { localStorage.setItem(WHOAMI_KEY, String(id)) } catch {}
   }
-  // Crear, editar, quitar y mover tareas, añadir personas a una semana y tocar el catálogo:
-  // cualquier profe, Eva (gestión) o un socio (Ramiro, 5/11 06:54) — los mismos roles que deja
-  // el backend. Lo destructivo grande (borrar semana o competición) sigue solo para el
-  // responsable (Álvaro) o un socio. La identidad de "quién soy" en Organización es solo un
-  // selector local, así que canManage es un permiso de interfaz, no de seguridad.
+  // Ramiro, 12/11 11:35: "ni Ana ni Edu ni Sara" pueden crear, editar, mover ni quitar tareas —
+  // solo Álvaro (el jefe de equipación) o un socio. Antes `canManage` salía del selector local
+  // de "quién soy" (`currentWorker?.isLead`), que cualquiera puede cambiar sin ninguna
+  // comprobación real — "no basta con ocultar los botones". Ahora viene de
+  // `config.esJefeOSocio`, que el backend calcula con la sesión real
+  // (progreso_equip_es_jefe_o_socio()) y que esos mismos endpoints vuelven a comprobar por su
+  // cuenta devolviendo 403 si no toca — esto solo decide qué botones se pintan.
   const currentWorker = workers.find(w => w.id === workerId)
   const userRole = window.blokesSiteData?.userRole
   const canEdit = ['profesor', 'gestion', 'socio'].includes(userRole)
-  const canManage = !!currentWorker?.isLead || userRole === 'socio'
+  const canManage = !!config?.esJefeOSocio
 
   if (loading) return <div className="org"><p className="org__hint">Cargando...</p></div>
 
@@ -187,7 +189,7 @@ export default function OrganizacionPage() {
         {view === 'hoy' && (
           <HoyView
             config={config} workers={workers}
-            workerId={workerId} onChooseWorker={chooseWorker} canEdit={canEdit}
+            workerId={workerId} onChooseWorker={chooseWorker} canEdit={canEdit} canManage={canManage}
           />
         )}
         {view === 'semana' && <SemanaView config={config} workers={workers} workerId={workerId} canEdit={canEdit} canManage={canManage} onWorkersChanged={reloadWorkers} />}
@@ -243,7 +245,7 @@ function CompeResumenHoy({ workerId, onGoToCompe }) {
 // elegir entre los equipadores, que salgan todos como en la vista semanal". "¿Quién soy?" sigue
 // disponible, pero solo para firmar lo que añadas/edites (igual que ya hacía Semana), nunca para
 // filtrar lo que se ve.
-function HoyView({ config, workers, workerId, onChooseWorker, canEdit }) {
+function HoyView({ config, workers, workerId, onChooseWorker, canEdit, canManage }) {
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState(null)
@@ -346,11 +348,11 @@ function HoyView({ config, workers, workerId, onChooseWorker, canEdit }) {
                         key={t.id} task={t} typeName={taskLabel(t, taskTypeById)}
                         isMissed={false} dragging={false} postponing={postponing === t.id}
                         onPointerDown={() => {}} onToggleDone={toggleTask} onPostpone={postponeTask}
-                        canEdit={canEdit} onEdit={() => setEditingTask(t.id)} onDelete={deleteTask} deleting={deletingTask === t.id}
+                        canManage={canManage} onEdit={() => setEditingTask(t.id)} onDelete={deleteTask} deleting={deletingTask === t.id}
                       />
                     ))
                   )}
-                  {canEdit && (
+                  {canManage && (
                     addingTaskFor === a.id ? (
                       <LooseTaskForm
                         config={config} assignmentId={a.id} defaultDate={today} byWorkerId={workerId}
@@ -655,7 +657,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
   }
 
   // Quitar una tarea de verdad (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30) — distinto de
-  // "→ Semana siguiente", que la mueve. Lo ve cualquiera que pueda editar (canEdit).
+  // "→ Semana siguiente", que la mueve. Solo Álvaro o un socio (canManage, Ramiro 12/11 11:35).
   const [deletingTask, setDeletingTask] = useState(null)
   const deleteTask = async taskId => {
     if (!window.confirm('¿Quitar esta tarea? No se puede deshacer.')) return
@@ -727,7 +729,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
   const dragInfoRef = useRef(null)
 
   const onTileDown = (taskId, originalDate, originalAssignmentId) => e => {
-    if (moving) return
+    if (moving || !canManage) return
     e.preventDefault()
     dragInfoRef.current = { taskId, date: originalDate, assignmentId: originalAssignmentId }
     setDragTaskId(taskId)
@@ -764,7 +766,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
         <CalendarioSemanas
           weeks={weeks} zonas={zonas} selectedDate={selectedDate}
           onSelectDate={selectWeek} onCreateAt={askCreateAt}
-          onConfigurarZonas={() => setShowZonas(true)}
+          onConfigurarZonas={() => setShowZonas(true)} canManage={canManage}
         />
         {showZonas && (
           <ConfigurarZonasDialog
@@ -774,7 +776,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
           />
         )}
         <div className="org__semana-actions">
-          {canEdit && (addingPerson ? (
+          {canManage && (addingPerson ? (
             <select
               autoFocus value="" disabled={addPersonBusy}
               onChange={e => { if (e.target.value) addPerson(e.target.value) }}
@@ -826,7 +828,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
                 <p className="org__board-col-meta">
                   subzonas {a.subzones.map(s => `#${s}`).join(', ')} · bloques {a.blocksMin}-{a.blocksMax}
                   {a.workDays?.length > 0 && <> · días cambiados esta semana</>}
-                  {canEdit && <>{' '}<button className="org__link-btn" onClick={() => setEditingDaysFor(cur => cur === a.id ? null : a.id)}>editar días</button></>}
+                  {canManage && <>{' '}<button className="org__link-btn" onClick={() => setEditingDaysFor(cur => cur === a.id ? null : a.id)}>editar días</button></>}
                 </p>
                 {editingDaysFor === a.id && (
                   <div className="org__holdset-chips">
@@ -840,7 +842,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
                     <button className="org__link-btn" onClick={() => saveAssignmentDays(a.id, [])}>usar lo de siempre</button>
                   </div>
                 )}
-                {canEdit && (
+                {canManage && (
                   <button className="org__link-btn" onClick={() => setAddingTaskFor(cur => cur === a.id ? null : a.id)}>+ Tarea</button>
                 )}
                 {addingTaskFor === a.id && (
@@ -874,7 +876,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
                           onPointerDown={onTileDown(t.id, t.date, a.id)}
                           onToggleDone={toggleTaskDone}
                           onPostpone={postponeTask}
-                          canEdit={canEdit}
+                          canManage={canManage}
                           onEdit={() => setEditingTask(t.id)}
                           onDelete={deleteTask}
                           deleting={deletingTask === t.id}
@@ -922,7 +924,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
       <CalendarioSemanas
         weeks={weeks} zonas={zonas} selectedDate={selectedDate}
         onSelectDate={selectWeek} onCreateAt={askCreateAt}
-        onConfigurarZonas={() => setShowZonas(true)}
+        onConfigurarZonas={() => setShowZonas(true)} canManage={canManage}
       />
       {showZonas && (
         <ConfigurarZonasDialog
@@ -960,14 +962,15 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
 // Tira de 4 semanas — anterior, la seleccionada (en el centro, resaltada) y 2 siguientes
 // (Ramiro, 12/11 09:31). Cada tarjeta enseña la zona que le toca (nombre y color), hechas/total
 // y si hay festivo o compe esa semana; si la semana no existe todavía, ofrece crearla.
-function CalendarioSemanas({ weeks, zonas, selectedDate, onSelectDate, onCreateAt, onConfigurarZonas }) {
+function CalendarioSemanas({ weeks, zonas, selectedDate, onSelectDate, onCreateAt, onConfigurarZonas, canManage }) {
   const zonaById = useMemo(() => Object.fromEntries(zonas.map(z => [z.id, z])), [zonas])
   const dates = [-7, 0, 7, 14].map(n => addDays(selectedDate, n))
   return (
     <div className="org__calendario">
       <div className="org__calendario-nav">
         <button className="org__link-btn" onClick={() => onSelectDate(addDays(selectedDate, -7))}>↑ Semana anterior</button>
-        <button className="org__btn org__btn--ghost" onClick={onConfigurarZonas}>⚙️ Configurar zonas</button>
+        {/* Ramiro 12/11 11:35: configurar zonas y crear semanas es solo de Álvaro o un socio. */}
+        {canManage && <button className="org__btn org__btn--ghost" onClick={onConfigurarZonas}>⚙️ Configurar zonas</button>}
         <button className="org__link-btn" onClick={() => onSelectDate(addDays(selectedDate, 7))}>Semana siguiente ↓</button>
       </div>
       <div className="org__calendario-tira">
@@ -980,7 +983,7 @@ function CalendarioSemanas({ weeks, zonas, selectedDate, onSelectDate, onCreateA
               key={d}
               type="button"
               className={`org__calendario-card${esSel ? ' org__calendario-card--sel' : ''}${!w ? ' org__calendario-card--vacia' : ''}`}
-              onClick={() => w ? onSelectDate(d) : onCreateAt(d)}
+              onClick={() => w ? onSelectDate(d) : (canManage && onCreateAt(d))}
               style={zona ? { borderTopColor: zona.color } : undefined}
             >
               <span className="org__calendario-card__fecha">{fechaCorta(d)}</span>
@@ -988,7 +991,7 @@ function CalendarioSemanas({ weeks, zonas, selectedDate, onSelectDate, onCreateA
               {w ? (
                 <span className="org__calendario-card__tareas">{w.tasksHechas}/{w.tasksTotal} tareas</span>
               ) : (
-                <span className="org__calendario-card__nueva">+ crear</span>
+                canManage && <span className="org__calendario-card__nueva">+ crear</span>
               )}
               {(w?.tieneFestivo || w?.tieneCompe) && (
                 <span className="org__calendario-card__marcas">
@@ -1499,14 +1502,17 @@ function TaskEditForm({ task, byWorkerId, assignments, assignmentId, onDone, onC
 // no se cancelan, solo se mueven a la semana siguiente ("→ Semana
 // siguiente"), y quedan marcadas "retrasada" para que no se pierda el
 // histórico de lo que se fue quedando atrás.
-function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canEdit, onEdit, onDelete, deleting }) {
+function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canManage, onEdit, onDelete, deleting }) {
   const params = Object.entries(task.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
   const movedAway = task.status === 'retrasada' && task.movedToTaskId
   // Una tarea ya hecha no es "un atraso visible" — solo importa que quede constancia discreta
   // de que venía de antes (cowork, 11/11 05:40: en rojo a todo volumen parecía que Álvaro lo
   // lleva todo atrasado en la demo). El aviso llamativo solo es para lo que SIGUE sin hacer.
   const isRetrasada = task.status === 'retrasada' && !task.done
-  const canPostpone = !task.done && !movedAway
+  // Ramiro 12/11 11:35: mover a la semana siguiente, editar o quitar es solo de Álvaro o un
+  // socio — antes estos tres no comprobaban ningún permiso (canPostpone) o usaban el `canEdit`
+  // amplio (profesor/gestión/socio), así que Ana/Edu/Sara también los veían.
+  const canPostpone = !task.done && !movedAway && canManage
   const rastro = rastroTarea(task)
 
   let badge = null
@@ -1550,7 +1556,7 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
           disabled={postponing}
         >{postponing ? '...' : '→ Semana siguiente'}</button>
       )}
-      {canEdit && !movedAway && (
+      {canManage && !movedAway && (
         <button
           type="button"
           className="org__tile-edit"
@@ -1558,7 +1564,7 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
           onClick={onEdit}
         >✎ Editar</button>
       )}
-      {canEdit && (
+      {canManage && (
         <button
           type="button"
           className="org__tile-delete"
@@ -1904,7 +1910,7 @@ function CreateCompForm({ onDone, onCancel }) {
 // filtro por persona para que cada uno vea solo lo suyo (encargo "Preparador de compes", 1/11).
 const COMP_TAREA_VACIA = { taskTypeId: '', customText: '', date: '', notas: '' }
 
-function CompePlanView({ compId, taskTypeById, workers }) {
+function CompePlanView({ compId, taskTypeById, workers, canManage }) {
   const [plan, setPlan] = useState(null)
   const [generating, setGenerating] = useState(false)
   const [columnaExpandida, setColumnaExpandida] = useState(null)
@@ -2026,14 +2032,14 @@ function CompePlanView({ compId, taskTypeById, workers }) {
     <span key={b.id} className={`org__comp-plan-bloque-chip${b.tested ? ' org__comp-plan-bloque-chip--probado' : ''}`}>
       <span className="org__comp-plan-bloque-color" style={{ background: colorPorNumeroBloque(b.number, totalBloques) }} />
       #{b.number}
-      {reasignando === b.id ? (
+      {canManage && (reasignando === b.id ? (
         <select autoFocus value={nombreActual} onChange={e => reasignarBloque(b.id, e.target.value)} onBlur={() => setReasignando(null)}>
           <option value="">Sin asignar</option>
           {Array.from(nombres).sort().map(n => <option key={n} value={n}>{n}</option>)}
         </select>
       ) : (
         <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignando(b.id)} title="Mover a otro equipador">⇄</button>
-      )}
+      ))}
     </span>
   )
 
@@ -2046,7 +2052,10 @@ function CompePlanView({ compId, taskTypeById, workers }) {
         <p className="org__hint">{plan.pctHecho}% hecho ({plan.hechas}/{plan.total}) · {plan.retrasadas} retrasada(s)</p>
       )}
       <div className="org__add-actions">
-        <button className="org__btn" onClick={generate} disabled={generating}>{generating ? 'Generando...' : (plan?.total ? 'Regenerar plan' : 'Generar plan')}</button>
+        {/* Ramiro 12/11 11:35: generar/regenerar el plan es solo de Álvaro o un socio. */}
+        {canManage && (
+          <button className="org__btn" onClick={generate} disabled={generating}>{generating ? 'Generando...' : (plan?.total ? 'Regenerar plan' : 'Generar plan')}</button>
+        )}
         {columnaExpandida && (
           <button className="org__link-btn" onClick={() => setColumnaExpandida(null)}>← Ver todas las columnas</button>
         )}
@@ -2068,14 +2077,14 @@ function CompePlanView({ compId, taskTypeById, workers }) {
             )}
             <ul
               className="org__task-list"
-              onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); if (dragTareaId) moverTarea(dragTareaId, col.nombre); setDragTareaId(null) }}
+              onDragOver={e => { if (canManage) e.preventDefault() }}
+              onDrop={e => { if (!canManage) return; e.preventDefault(); if (dragTareaId) moverTarea(dragTareaId, col.nombre); setDragTareaId(null) }}
             >
               {col.tareas.map(t => (
                 <li
                   key={t.id}
-                  draggable
-                  onDragStart={() => setDragTareaId(t.id)}
+                  draggable={canManage}
+                  onDragStart={() => canManage && setDragTareaId(t.id)}
                   onDragEnd={() => setDragTareaId(null)}
                   className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}${t.manual ? ' org__task--manual' : ''}${dragTareaId === t.id ? ' org__task--dragging' : ''}`}
                 >
@@ -2089,29 +2098,33 @@ function CompePlanView({ compId, taskTypeById, workers }) {
                     </span>
                     {t.params?.notas && <span className="org__task-notas">{t.params.notas}</span>}
                   </div>
-                  <span className="org__task-actions">
-                    {confirmandoQuitar === t.id ? (
-                      <>
-                        <button type="button" className="org__link-btn org__link-btn--danger" onClick={() => quitarTarea(t.id)} disabled={quitandoTarea === t.id}>
-                          {quitandoTarea === t.id ? '...' : 'Sí, quitar'}
-                        </button>
-                        <button type="button" className="org__link-btn" onClick={() => setConfirmandoQuitar(null)}>Cancelar</button>
-                      </>
-                    ) : reasignandoTarea === t.id ? (
-                      <select autoFocus value={col.nombre} onChange={e => moverTarea(t.id, e.target.value)} onBlur={() => setReasignandoTarea(null)}>
-                        {Array.from(nombres).sort().map(n => <option key={n} value={n}>{n}</option>)}
-                      </select>
-                    ) : (
-                      <>
-                        <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignandoTarea(t.id)} title="Mover a otra persona">⇄</button>
-                        <button type="button" className="org__tile-delete" onClick={() => setConfirmandoQuitar(t.id)} title="Quitar esta tarea">✕</button>
-                      </>
-                    )}
-                  </span>
+                  {/* Ramiro 12/11 11:35: mover, quitar o editar una tarea es solo de Álvaro o un
+                      socio — Ana/Edu/Sara solo ven y marcan hecha (el checkbox de arriba). */}
+                  {canManage && (
+                    <span className="org__task-actions">
+                      {confirmandoQuitar === t.id ? (
+                        <>
+                          <button type="button" className="org__link-btn org__link-btn--danger" onClick={() => quitarTarea(t.id)} disabled={quitandoTarea === t.id}>
+                            {quitandoTarea === t.id ? '...' : 'Sí, quitar'}
+                          </button>
+                          <button type="button" className="org__link-btn" onClick={() => setConfirmandoQuitar(null)}>Cancelar</button>
+                        </>
+                      ) : reasignandoTarea === t.id ? (
+                        <select autoFocus value={col.nombre} onChange={e => moverTarea(t.id, e.target.value)} onBlur={() => setReasignandoTarea(null)}>
+                          {Array.from(nombres).sort().map(n => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      ) : (
+                        <>
+                          <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignandoTarea(t.id)} title="Mover a otra persona">⇄</button>
+                          <button type="button" className="org__tile-delete" onClick={() => setConfirmandoQuitar(t.id)} title="Quitar esta tarea">✕</button>
+                        </>
+                      )}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>
-            {addingTareaFor === col.nombre ? (
+            {canManage && (addingTareaFor === col.nombre ? (
               <div className="org__add-form org__add-form--compe-tarea">
                 <select value={nuevaTarea.taskTypeId} onChange={e => setNuevaTarea(n => ({ ...n, taskTypeId: e.target.value, customText: '' }))}>
                   <option value="">— Texto libre —</option>
@@ -2129,7 +2142,7 @@ function CompePlanView({ compId, taskTypeById, workers }) {
               </div>
             ) : (
               <button type="button" className="org__link-btn" onClick={() => abrirNuevaTarea(col.nombre)}>+ Tarea</button>
-            )}
+            ))}
             {col.tareas.length === 0 && col.bloques.length === 0 && <p className="org__hint">Sin tareas ni bloques.</p>}
           </div>
         ))}
@@ -2451,7 +2464,7 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
         />
       )}
 
-      <CompePlanView compId={comp.id} taskTypeById={taskTypeById} workers={workers || []} />
+      <CompePlanView compId={comp.id} taskTypeById={taskTypeById} workers={workers || []} canManage={canManage} />
     </div>
   )
 }

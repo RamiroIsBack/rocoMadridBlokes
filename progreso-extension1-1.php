@@ -709,6 +709,11 @@ add_action('rest_api_init', function() {
     // ── Organización (equipación / route-setting) ── visible solo a
     // profesor/gestión/socio, igual que el resto de "Tareas y setter".
     $equip_perm = function() { return in_array(blokes_get_app_role(), array('profesor', 'gestion', 'socio')); };
+    // Ramiro 12/11 11:35: "no pueden editar alguien que no sea Álvaro o los socios las tareas,
+    // ni Ana ni Edu ni Sara" — ni ocultando botones basta ("no basta con ocultar los botones"),
+    // tiene que devolver 403 también si llega directo a la API. progreso_equip_es_jefe_o_socio()
+    // está en progreso_equip_ensure_tables()/zona de funciones de abajo.
+    $equip_jefe_perm = function() { return progreso_equip_es_jefe_o_socio(); };
 
     register_rest_route('progreso/v1', '/equipacion/config', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_config', 'permission_callback' => $equip_perm,
@@ -726,7 +731,7 @@ add_action('rest_api_init', function() {
         'methods' => 'DELETE', 'callback' => 'progreso_equip_deactivate_task_type', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/tasks', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_create_loose_task', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_loose_task', 'permission_callback' => $equip_jefe_perm,
     ));
 
     register_rest_route('progreso/v1', '/equipacion/workers', array(
@@ -756,51 +761,54 @@ add_action('rest_api_init', function() {
         'methods' => 'GET', 'callback' => 'progreso_equip_get_weeks', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_create_week', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_week', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_week_detail', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
-        'methods' => 'PUT', 'callback' => 'progreso_equip_update_week', 'permission_callback' => $equip_perm,
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_week', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
-        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_week', 'permission_callback' => $equip_perm,
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_week', 'permission_callback' => $equip_jefe_perm,
     ));
     // Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31/09:35/09:37).
     register_rest_route('progreso/v1', '/equipacion/zonas', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_zonas', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/zonas', array(
-        'methods' => 'PUT', 'callback' => 'progreso_equip_update_zonas', 'permission_callback' => $equip_perm,
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_zonas', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/zonas/arranque', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_set_zona_arranque', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_set_zona_arranque', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/zonas/sugerida', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_zona_sugerida', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)/limpiar-retrasadas-falsas', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_limpiar_retrasadas_falsas', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_limpiar_retrasadas_falsas', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)/assignments', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_week_add_assignment', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_week_add_assignment', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/assignments/(?P<id>\d+)', array(
-        array('methods' => 'PUT',    'callback' => 'progreso_equip_update_assignment', 'permission_callback' => $equip_perm),
-        array('methods' => 'DELETE', 'callback' => 'progreso_equip_delete_assignment',  'permission_callback' => $equip_perm),
+        array('methods' => 'PUT',    'callback' => 'progreso_equip_update_assignment', 'permission_callback' => $equip_jefe_perm),
+        array('methods' => 'DELETE', 'callback' => 'progreso_equip_delete_assignment',  'permission_callback' => $equip_jefe_perm),
     ));
 
     register_rest_route('progreso/v1', '/equipacion/today', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_today', 'permission_callback' => $equip_perm,
     ));
 
+    // PUT se queda en $equip_perm (cualquier equipador puede marcar su propia tarea como
+    // hecha) — progreso_equip_update_task() comprueba por dentro si lo que llega es algo MÁS
+    // que "done" (fecha, persona, texto, notas, subzona) y ahí sí exige jefe_o_socio.
     register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)', array(
         array('methods' => 'PUT',    'callback' => 'progreso_equip_update_task', 'permission_callback' => $equip_perm),
-        array('methods' => 'DELETE', 'callback' => 'progreso_equip_delete_task',  'permission_callback' => $equip_perm),
+        array('methods' => 'DELETE', 'callback' => 'progreso_equip_delete_task',  'permission_callback' => $equip_jefe_perm),
     ));
     register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)/postpone', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_postpone_task', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_postpone_task', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/historico', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_weeks_historico', 'permission_callback' => $equip_perm,
@@ -858,14 +866,14 @@ add_action('rest_api_init', function() {
         'methods' => 'POST', 'callback' => 'progreso_equip_intercambiar_numero_comp_block', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/generate-plan', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_competition_generate_plan', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_competition_generate_plan', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/plan', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_competition_plan', 'permission_callback' => $equip_perm,
     ));
     // "+ Tarea" a mano en una columna del plan (Ramiro 12/11 10:44).
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/tasks', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_competition_add_task', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_competition_add_task', 'permission_callback' => $equip_jefe_perm,
     ));
 
     // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 7/11). Encender/apagar el
@@ -11775,6 +11783,26 @@ function progreso_equip_actor($request) {
     return ($user && $user->ID) ? ($user->display_name ?: $user->user_login) : '';
 }
 
+// Ramiro 12/11 11:35: "no pueden editar alguien que no sea Álvaro o los socios las tareas, ni
+// Ana ni Edu ni Sara" — ni en la interfaz ni en la API. Un socio siempre vale; para "Álvaro" (el
+// jefe de equipación) no se hardcodea el nombre — se mira qué worker tiene is_lead=1 y se
+// compara su email con el de la sesión real, igual que ya hace blokes_get_app_role_real() con
+// las listas de email. Así el "jefe" es asignable (basta con mover el is_lead a otro worker),
+// sin tocar código. Usa blokes_get_app_role() (no la "_real"), así que respeta "ver como": un
+// socio probando "ver como: profesor" también se queda sin estos permisos aquí (a menos que su
+// email sea literalmente el del jefe), igual que ya pasa con el resto de la app.
+function progreso_equip_es_jefe_o_socio() {
+    if (blokes_get_app_role() === 'socio') return true;
+    if (!is_user_logged_in()) return false;
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    if ($email === '') return false;
+    global $wpdb;
+    $lead_email = $wpdb->get_var(
+        "SELECT email FROM " . progreso_equip_table('workers') . " WHERE is_lead = 1 AND active = 1 ORDER BY id ASC LIMIT 1"
+    );
+    return $lead_email && $lead_email !== '' && strtolower(trim($lead_email)) === $email;
+}
+
 // POST /equipacion/tasks — tarea suelta para un día y persona concretos, sin esperar al
 // reparto automático (p. ej. arreglar una presa, comprar tornillos) — creador de tareas de
 // Álvaro (Ramiro, 1/11 17:20). `taskTypeId` de un tipo del catálogo, o `customText` libre (se
@@ -11837,10 +11865,13 @@ function progreso_equip_get_config() {
     // del encargo del 28/10), sin esperar al cron diario.
     progreso_equip_autocrear_semanas();
     return rest_ensure_response(array('success' => true, 'data' => array(
-        'subzones'  => progreso_equip_subzones(),
-        'grades'    => progreso_equip_grades(),
-        'taskTypes' => progreso_equip_task_types(),
-        'rules'     => progreso_equip_rules(),
+        'subzones'     => progreso_equip_subzones(),
+        'grades'       => progreso_equip_grades(),
+        'taskTypes'    => progreso_equip_task_types(),
+        'rules'        => progreso_equip_rules(),
+        // Ramiro 12/11 11:35: para que el frontend solo PINTE los botones de editar/mover/
+        // quitar tareas con la sesión real (nunca con el selector local de "quién soy").
+        'esJefeOSocio' => progreso_equip_es_jefe_o_socio(),
     )));
 }
 
@@ -13699,6 +13730,16 @@ function progreso_equip_update_task($request) {
     global $wpdb;
     progreso_equip_ensure_tables();
     $id = intval($request['id']);
+    // Ramiro 12/11 11:35: cualquier equipador puede marcar su propia tarea como hecha (`done`),
+    // pero editarla, moverla de persona, cambiarle el día, el texto o la subzona es solo de
+    // Álvaro o un socio — esos campos SÍ llegan por este mismo endpoint, así que el filtro va
+    // aquí dentro, no en el permission_callback de la ruta (que tiene que dejar pasar "done").
+    $campos_restringidos = array('date', 'assignmentId', 'workerName', 'customText', 'notas', 'subzona');
+    foreach ($campos_restringidos as $campo) {
+        if ($request->get_param($campo) !== null && !progreso_equip_es_jefe_o_socio()) {
+            return new WP_Error('forbidden', 'Solo Álvaro o un socio puede editar, mover o cambiar de día una tarea.', array('status' => 403));
+        }
+    }
     $upd = array(); $fmt = array();
     if ($request->get_param('done') !== null) {
         $done = (bool) $request->get_param('done');
@@ -14195,6 +14236,12 @@ function progreso_compe_limpiar_blokes_prueba_antiguos($request) {
 function progreso_equip_update_comp_block($request) {
     global $wpdb;
     $id = intval($request['id']);
+    // Ramiro 12/11 11:35: mover un bloque a otro equipador ("mover entre personas") es solo de
+    // Álvaro o un socio — registrar el propio trabajo (presas, volúmenes, subzona, foto) sigue
+    // abierto a cualquier equipador, es el supuesto pendiente de confirmar de la nota.
+    if ($request->get_param('equipador') !== null && !progreso_equip_es_jefe_o_socio()) {
+        return new WP_Error('forbidden', 'Solo Álvaro o un socio puede mover un bloque a otro equipador.', array('status' => 403));
+    }
     $upd = array(); $fmt = array();
     if ($request->get_param('unplace')) {
         // Quitar la burbuja del mapa — vuelve a la bandeja de "sin colocar".
