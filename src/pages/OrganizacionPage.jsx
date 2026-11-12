@@ -1510,16 +1510,20 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
   const rastro = rastroTarea(task)
 
   let badge = null
+  let badgeDiscreto = false
   if (task.done) {
     if (movedAway) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
     else if (task.postponedCount > 0) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
+    badgeDiscreto = true
   } else {
     if (movedAway) badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
     // Arrastre automático (de la semana anterior, o del barrido de "Hoy"): no es una tarea
     // retrasada A DÍA DE HOY, solo viene de antes — la misma marca discreta que ya se usa en
     // las hechas, nunca el aviso llamativo (Ramiro 12/11 10:45: "en rojo a todo volumen" daba la
-    // impresión de que todo estaba atrasado).
-    else if (task.postponedCount > 0) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
+    // impresión de que todo estaba atrasado). 🐞 Cowork 12/11 11:20: el texto ya cambiaba, pero
+    // el badge seguía con el rojo por defecto (.org__tile-badge sin ninguna clase que lo frene)
+    // — le falta esta clase --discreto para que de verdad no sea la alarma.
+    else if (task.postponedCount > 0) { badge = `viene del ${dayLabel(task.originalDate || task.date)}`; badgeDiscreto = true }
     else if (isMissed) badge = 'FALTÓ'
   }
 
@@ -1534,7 +1538,7 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
       <div className="org__tile-body">
         <span className="org__tile-name">{typeName}</span>
         {params && <span className="org__tile-params">{params}</span>}
-        {badge && <span className="org__tile-badge">{badge}</span>}
+        {badge && <span className={`org__tile-badge${badgeDiscreto ? ' org__tile-badge--discreto' : ''}`}>{badge}</span>}
         {rastro && <span className="org__task-rastro">{rastro}</span>}
       </div>
       {canPostpone && (
@@ -1906,6 +1910,7 @@ function CompePlanView({ compId, taskTypeById, workers }) {
   const [columnaExpandida, setColumnaExpandida] = useState(null)
   const [reasignando, setReasignando] = useState(null)
   const [reasignandoTarea, setReasignandoTarea] = useState(null)
+  const [confirmandoQuitar, setConfirmandoQuitar] = useState(null)
   const [quitandoTarea, setQuitandoTarea] = useState(null)
   const [addingTareaFor, setAddingTareaFor] = useState(null)
   const [nuevaTarea, setNuevaTarea] = useState(COMP_TAREA_VACIA)
@@ -1965,9 +1970,11 @@ function CompePlanView({ compId, taskTypeById, workers }) {
     } catch (e) { showToast(e.message) } finally { setSavingTarea(false) }
   }
 
-  // "sin window.confirm()" (Ramiro 12/11 10:44) — el nativo bloqueaba el navegador en las
-  // pruebas de cowork. Borrado directo, igual que "✕ Quitar" en el tablero normal de la semana.
+  // "sin window.confirm()" (Ramiro 12/11 10:44), pero SÍ con confirmación dentro de la página
+  // (punto 4) — cowork, 12/11 11:20: un clic sin querer borraba sin avisar. Mismo patrón de
+  // "¿Seguro? Sí/Cancelar" ya usado en la ficha de bloque.
   const quitarTarea = async taskId => {
+    setConfirmandoQuitar(null)
     setQuitandoTarea(taskId)
     setPlan(p => ({ ...p, tasks: p.tasks.filter(t => t.id !== taskId) }))
     try { await api('DELETE', `/equipacion/tasks/${taskId}`) }
@@ -2072,27 +2079,34 @@ function CompePlanView({ compId, taskTypeById, workers }) {
                   onDragEnd={() => setDragTareaId(null)}
                   className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}${t.manual ? ' org__task--manual' : ''}${dragTareaId === t.id ? ' org__task--dragging' : ''}`}
                 >
-                  <label>
+                  <label className="org__task-check" onPointerDown={e => e.stopPropagation()}>
                     <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
-                    {' '}{tareaLabel(t)} ({dayLabel(t.date)})
-                    {t.params?.notas && <span className="org__task-params"> · {t.params.notas}</span>}
-                    {t.manual && <span className="org__task-manual-badge" title="Puesta a mano">a mano</span>}
                   </label>
+                  <div className="org__task-body">
+                    <span className="org__task-title">
+                      {tareaLabel(t)} ({dayLabel(t.date)})
+                      {t.manual && <span className="org__task-manual-badge" title="Puesta a mano">a mano</span>}
+                    </span>
+                    {t.params?.notas && <span className="org__task-notas">{t.params.notas}</span>}
+                  </div>
                   <span className="org__task-actions">
-                    {reasignandoTarea === t.id ? (
+                    {confirmandoQuitar === t.id ? (
+                      <>
+                        <button type="button" className="org__link-btn org__link-btn--danger" onClick={() => quitarTarea(t.id)} disabled={quitandoTarea === t.id}>
+                          {quitandoTarea === t.id ? '...' : 'Sí, quitar'}
+                        </button>
+                        <button type="button" className="org__link-btn" onClick={() => setConfirmandoQuitar(null)}>Cancelar</button>
+                      </>
+                    ) : reasignandoTarea === t.id ? (
                       <select autoFocus value={col.nombre} onChange={e => moverTarea(t.id, e.target.value)} onBlur={() => setReasignandoTarea(null)}>
                         {Array.from(nombres).sort().map(n => <option key={n} value={n}>{n}</option>)}
                       </select>
                     ) : (
-                      <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignandoTarea(t.id)} title="Mover a otra persona">⇄</button>
+                      <>
+                        <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignandoTarea(t.id)} title="Mover a otra persona">⇄</button>
+                        <button type="button" className="org__tile-delete" onClick={() => setConfirmandoQuitar(t.id)} title="Quitar esta tarea">✕</button>
+                      </>
                     )}
-                    <button
-                      type="button"
-                      className="org__tile-delete"
-                      onClick={() => quitarTarea(t.id)}
-                      disabled={quitandoTarea === t.id}
-                      title="Quitar esta tarea"
-                    >{quitandoTarea === t.id ? '...' : '✕'}</button>
                   </span>
                 </li>
               ))}

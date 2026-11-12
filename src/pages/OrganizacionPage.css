@@ -513,6 +513,10 @@
 /* Tarea ya hecha que venía de antes: solo una nota discreta, no la alarma roja/ámbar de
    arriba — esa es para lo que SIGUE sin hacer (cowork, 11/11 05:40). */
 .org__tile--done .org__tile-badge { background: none; color: var(--color-text-secondary); font-weight: 600; letter-spacing: normal; padding: 0; }
+/* Arrastre automático sin hacer todavía: mismo estilo discreto de arriba, pero el tile NO es
+   "hecho" (cowork 12/11 11:20: el texto ya decía "viene del X" pero el fondo rojo por defecto
+   de .org__tile-badge seguía ahí porque el tile no tenía ni --done ni --retrasada). */
+.org__tile-badge--discreto { background: none; color: var(--color-text-secondary); font-weight: 600; letter-spacing: normal; padding: 0; }
 .org__tile-postpone {
   flex: 0 0 100%;
   background: none;
@@ -626,14 +630,24 @@
    compe (Ramiro 12/11 10:44/10:45, punto 2 y 5). */
 .org__board--compe-plan .org__task { cursor: grab; }
 .org__board--compe-plan .org__task--dragging { opacity: 0.4; }
-.org__task-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.org__task-check { display: flex; align-items: center; cursor: pointer; flex-shrink: 0; }
+.org__task-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.org__task-title { font-weight: 600; }
+/* Cowork 12/11 11:20: la nota salía apretada al lado del título, en una columnita estrecha —
+   ahora es su propia línea debajo, a todo el ancho de la tarjeta. */
+.org__task-notas { font-size: 0.78rem; color: var(--color-text-secondary); }
+.org__task-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
 .org__task-actions select { font-size: 0.72rem; max-width: 110px; }
 .org__task-manual-badge {
-  font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  margin-left: 6px; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--color-accent-hover); border: 1px solid var(--color-accent-hover); border-radius: 999px; padding: 1px 6px;
 }
-.org__add-form--compe-tarea { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
-.org__add-form--compe-tarea input[type="text"] { flex: 1; min-width: 120px; }
+/* Cowork 12/11 11:20: en columna estrecha se salía y cortaba "Cancelar" — en columna (no en
+   fila) cada campo ocupa el ancho disponible y nunca desborda. */
+.org__add-form--compe-tarea { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; max-width: 100%; }
+.org__add-form--compe-tarea select,
+.org__add-form--compe-tarea input { width: 100%; box-sizing: border-box; min-width: 0; }
+.org__add-form--compe-tarea .org__add-actions { margin-top: 2px; }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════
    MODO OSCURO — Organización (Ramiro/Cowork, 11/11 10:05: auditoría de contraste, "siguiente
@@ -657,7 +671,9 @@
   :root:not([data-theme="light"]) .org__block-info,
   :root:not([data-theme="light"]) .org__whoami-btn,
   :root:not([data-theme="light"]) .org__switch-btn,
-  :root:not([data-theme="light"]) .org__holdset-chip {
+  :root:not([data-theme="light"]) .org__holdset-chip,
+  :root:not([data-theme="light"]) .org__modo-compe__estado,
+  :root:not([data-theme="light"]) .org__modo-compe {
     color: var(--color-text-primary);
   }
   :root:not([data-theme="light"]) .org__board-day-label,
@@ -681,10 +697,12 @@
   :root:not([data-theme="light"]) .org__historico-row,
   :root:not([data-theme="light"]) .org__compe-card,
   :root:not([data-theme="light"]) .org__holdset-chip,
-  :root:not([data-theme="light"]) .org__add-form {
+  :root:not([data-theme="light"]) .org__add-form,
+  :root:not([data-theme="light"]) .org__modo-compe {
     background: var(--color-surface);
     border-color: var(--color-border);
   }
+  :root:not([data-theme="light"]) .org__modo-compe--activo { background: rgba(34, 197, 94, 0.14); }
   :root:not([data-theme="light"]) .org__warning { color: var(--state-warn); }
   :root:not([data-theme="light"]) .org__error { color: var(--state-bad); }
   :root:not([data-theme="light"]) .org__add-row select,
@@ -708,7 +726,9 @@
 :root[data-theme="dark"] .org__block-info,
 :root[data-theme="dark"] .org__whoami-btn,
 :root[data-theme="dark"] .org__switch-btn,
-:root[data-theme="dark"] .org__holdset-chip {
+:root[data-theme="dark"] .org__holdset-chip,
+:root[data-theme="dark"] .org__modo-compe__estado,
+:root[data-theme="dark"] .org__modo-compe {
   color: var(--color-text-primary);
 }
 :root[data-theme="dark"] .org__board-day-label,
@@ -729,10 +749,12 @@
 :root[data-theme="dark"] .org__historico-row,
 :root[data-theme="dark"] .org__compe-card,
 :root[data-theme="dark"] .org__holdset-chip,
-:root[data-theme="dark"] .org__add-form {
+:root[data-theme="dark"] .org__add-form,
+:root[data-theme="dark"] .org__modo-compe {
   background: var(--color-surface);
   border-color: var(--color-border);
 }
+:root[data-theme="dark"] .org__modo-compe--activo { background: rgba(34, 197, 94, 0.14); }
 :root[data-theme="dark"] .org__warning { color: var(--state-warn); }
 :root[data-theme="dark"] .org__error { color: var(--state-bad); }
 :root[data-theme="dark"] .org__add-row select,
