@@ -271,8 +271,17 @@ export default function App() {
                   {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
                   {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
                       EFECTIVO para que vean exactamente el mismo botón): su único "ver como"
-                      es pasar a la cuenta tablet y volver (Ramiro, 08/11 21:19). */}
-                  {['profesor', 'gestion'].includes(sd.userRole) && <ModoTabletToggleSimple sd={sd} />}
+                      es pasar a la cuenta tablet y volver (Ramiro, 08/11 21:19).
+                      🐞 Ramiro 12/11 16:30: una vez YA en modo tablet, el rol efectivo pasa a
+                      ser "tablet" (no "profesor"/"gestion"), así que esta condición escondía el
+                      botón entero — con él se iba también el "mantén pulsado para salir" de
+                      dentro, y un profe se quedaba sin ninguna salida (a diferencia de un
+                      socio, que siempre tiene el banner "Viendo como..." aparte). Se añade el
+                      caso "ya estoy en tablet, entré como profe/gestión real" para que el botón
+                      (ahora en su versión "salir") siga ahí. */}
+                  {(['profesor', 'gestion'].includes(sd.userRole)
+                    || (sd.userRole === 'tablet' && ['profesor', 'gestion'].includes(sd.userRoleReal))
+                  ) && <ModoTabletToggleSimple sd={sd} />}
                   {sd.subscription && (
                     <div className="app-header__sub">
                       <span className={`app-header__sub-dot app-header__sub-dot--${sd.subscription.status === 'active' ? 'active' : 'inactive'}`} />
