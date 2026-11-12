@@ -491,8 +491,19 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
                 </td>
                 <td className="cmp-acciones">
                   <button className="cmp-btn cmp-btn--sm cmp-btn--primary" onClick={() => abrirWhatsapp(d)}>Abrir WhatsApp</button>
-                  <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'respondio')}>Respondió</button>
-                  <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'apuntado')}>Se apuntó</button>
+                  {/* "Deshacer" para Respondió y Se apuntó, igual que ya existía para BAJA — pedido
+                      por cowork el 10/11 (un clic mal dado) y otra vez el 12/11 (los 11 "Se
+                      apuntaron" falsos del bug de conversión automática, antes de arreglarlo). */}
+                  {d.respondio ? (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'respondio_deshacer')}>Deshacer Respondió</button>
+                  ) : (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'respondio')}>Respondió</button>
+                  )}
+                  {d.apuntado ? (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'apuntado_deshacer')}>Deshacer Se apuntó</button>
+                  ) : (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'apuntado')}>Se apuntó</button>
+                  )}
                   {d.baja ? (
                     <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'baja_deshacer')}>Deshacer baja</button>
                   ) : (

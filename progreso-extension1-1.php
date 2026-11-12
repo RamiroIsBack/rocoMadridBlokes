@@ -8181,8 +8181,8 @@ function superadmin_campanas_marcar_accion($request) {
     $campana_id  = intval($request['id']);
     $contacto_id = intval($request['contacto_id']);
     $accion = sanitize_key($request->get_param('accion'));
-    if (!in_array($accion, array('enviado', 'respondio', 'baja', 'baja_deshacer', 'apuntado'), true)) {
-        return new WP_Error('bad_request', 'Acción no reconocida. Usa enviado, respondio, baja, baja_deshacer o apuntado.', array('status' => 400));
+    if (!in_array($accion, array('enviado', 'respondio', 'respondio_deshacer', 'baja', 'baja_deshacer', 'apuntado', 'apuntado_deshacer'), true)) {
+        return new WP_Error('bad_request', 'Acción no reconocida.', array('status' => 400));
     }
     $u = wp_get_current_user();
     $quien = $u ? $u->user_login : '';
@@ -8198,6 +8198,10 @@ function superadmin_campanas_marcar_accion($request) {
     // Deshacer BAJA: se queda el histórico de quién/cuándo la marcó al principio (por si hace
     // falta reconstruirlo), solo se apaga el flag — así vuelve a entrar en campañas futuras.
     if ($accion === 'baja_deshacer') $campos['baja'] = 0;
+    // Deshacer Respondió/Se apuntó (Ramiro 12/11 11:20 y cowork 10/11 13:10: un clic mal dado,
+    // o los "Se apuntaron" falsos que dejó el bug de conversión automática antes de arreglarlo).
+    if ($accion === 'respondio_deshacer') { $campos['respondio'] = 0; $campos['respondio_at'] = null; }
+    if ($accion === 'apuntado_deshacer')  { $campos['apuntado']  = 0; $campos['apuntado_at']  = null; }
 
     if ($existente) {
         $wpdb->update(blokes_campana_envios_table(), $campos, array('id' => $existente['id']));
