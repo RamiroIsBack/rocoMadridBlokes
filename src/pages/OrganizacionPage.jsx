@@ -2147,6 +2147,17 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
     }
   }
 
+  // Cowork 12/11 09:30: no había forma de quitar una foto desde la pantalla (solo con la API a
+  // mano). Igual que subir, es inmediato — no espera al botón "Guardar" de abajo.
+  const removePhoto = async () => {
+    if (!window.confirm('¿Quitar la foto de este bloque? Se borra también de Medios.')) return
+    setUploading(true)
+    try {
+      await api('PUT', `/equipacion/comp-blocks/${block.id}`, { photoUrl: '' })
+      setPhotoUrl('')
+    } catch (e) { window.alert(e.message) } finally { setUploading(false) }
+  }
+
   const save = async () => {
     setSaving(true)
     try {
@@ -2229,7 +2240,12 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
       </div>
       <div className="org__add-row">
         <label>Foto</label>
-        {photoUrl && <img src={photoUrl} alt={`Bloque #${block.number}`} className="org__comp-block-photo" />}
+        {photoUrl && (
+          <>
+            <img src={photoUrl} alt={`Bloque #${block.number}`} className="org__comp-block-photo" />
+            <button type="button" className="org__link-btn org__link-btn--danger" onClick={removePhoto} disabled={uploading}>✕ Quitar foto</button>
+          </>
+        )}
         <input type="file" accept="image/*" capture="environment" onChange={uploadPhoto} disabled={uploading} />
         {uploading && <span className="org__hint">Subiendo...</span>}
       </div>

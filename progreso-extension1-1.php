@@ -12021,6 +12021,7 @@ function progreso_equip_ensure_tables() {
         volumes        text                NOT NULL DEFAULT '',
         equipador      varchar(60)         NOT NULL DEFAULT '',
         photo_url      varchar(255)        NOT NULL DEFAULT '',
+        photo_attachment_id bigint(20) UNSIGNED NULL,
         tested         tinyint(1)          NOT NULL DEFAULT 0,
         status         varchar(20)         NOT NULL DEFAULT 'planeado',
         bloke_post_id  bigint(20) UNSIGNED NULL,
@@ -13791,6 +13792,14 @@ function progreso_equip_delete_competition($request) {
             if ($es_multisite) restore_current_blog();
         }
     }
+    // Ramiro 12/11 09:11: al borrar la compe entera, borrar también las fotos de sus bloques de
+    // Medios — si no, se quedan huérfanas. Paso aparte, antes de borrar las filas.
+    $fotos_de_la_compe = $wpdb->get_col($wpdb->prepare(
+        "SELECT photo_attachment_id FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d AND photo_attachment_id IS NOT NULL", $id
+    ));
+    foreach ($fotos_de_la_compe as $attachment_id) {
+        wp_delete_attachment(intval($attachment_id), true);
+    }
     $wpdb->delete(progreso_equip_table('comp_resultados'), array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('comp_participantes_rapidos'), array('competition_id' => $id), array('%d'));
     $wpdb->delete($tasks_table, array('competition_id' => $id), array('%d'));
@@ -13870,7 +13879,21 @@ function progreso_equip_update_comp_block($request) {
     if ($request->get_param('subzone') !== null) { $upd['subzone'] = intval($request->get_param('subzone')); $fmt[] = '%d'; }
     if ($request->get_param('volumes') !== null) { $upd['volumes'] = sanitize_textarea_field((string) $request->get_param('volumes')); $fmt[] = '%s'; }
     if ($request->get_param('equipador') !== null) { $upd['equipador'] = sanitize_text_field((string) $request->get_param('equipador')); $fmt[] = '%s'; }
-    if ($request->get_param('photoUrl') !== null) { $upd['photo_url'] = sanitize_text_field((string) $request->get_param('photoUrl')); $fmt[] = '%s'; }
+    if ($request->get_param('photoUrl') !== null) {
+        $nueva_url = sanitize_text_field((string) $request->get_param('photoUrl'));
+        $upd['photo_url'] = $nueva_url; $fmt[] = '%s';
+        // "✕ Quitar foto" (Ramiro 12/11 09:11): además de quitar la referencia, borrar de
+        // verdad el adjunto de Medios — nunca dejarlo huérfano.
+        if ($nueva_url === '') {
+            $bloque_actual = $wpdb->get_row($wpdb->prepare(
+                "SELECT photo_attachment_id FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id
+            ), ARRAY_A);
+            if ($bloque_actual && !empty($bloque_actual['photo_attachment_id'])) {
+                wp_delete_attachment(intval($bloque_actual['photo_attachment_id']), true);
+            }
+            $upd['photo_attachment_id'] = null; $fmt[] = '%d';
+        }
+    }
     if ($request->get_param('tested') !== null) { $upd['tested'] = $request->get_param('tested') ? 1 : 0; $fmt[] = '%d'; }
     if ($request->get_param('xPct') !== null) { $upd['x_pct'] = floatval($request->get_param('xPct')); $fmt[] = '%f'; }
     if ($request->get_param('yPct') !== null) { $upd['y_pct'] = floatval($request->get_param('yPct')); $fmt[] = '%f'; }
@@ -13944,6 +13967,9 @@ function progreso_equip_delete_comp_block($request) {
     $block = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id), ARRAY_A);
     if (!$block) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
     if ($block['x_pct'] !== null) return new WP_Error('placed', 'Este bloque ya está colocado en el mapa — quítalo del mapa antes de borrarlo.', array('status' => 400));
+    if (!empty($block['photo_attachment_id'])) {
+        wp_delete_attachment(intval($block['photo_attachment_id']), true);
+    }
     $wpdb->delete(progreso_equip_table('comp_blocks'), array('id' => $id), array('%d'));
     return rest_ensure_response(array('success' => true));
 }
@@ -13954,8 +13980,8 @@ function progreso_equip_delete_comp_block($request) {
 function progreso_equip_upload_comp_block_photo($request) {
     global $wpdb;
     $id = intval($request['id']);
-    $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id));
-    if (!$existe) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
+    $bloque = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id), ARRAY_A);
+    if (!$bloque) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
 
     $files = $request->get_file_params();
     if (empty($files['file'])) return new WP_Error('no_file', 'Falta el fichero.', array('status' => 400));
@@ -13967,7 +13993,18 @@ function progreso_equip_upload_comp_block_photo($request) {
     if (is_wp_error($attachment_id)) return $attachment_id;
     $url = wp_get_attachment_url($attachment_id);
 
-    $wpdb->update(progreso_equip_table('comp_blocks'), array('photo_url' => $url), array('id' => $id), array('%s'), array('%d'));
+    // Cowork 12/11 09:30, encargo de Ramiro: al subir una foto nueva encima de otra, la anterior
+    // se queda huérfana en Medios. Se borra la que hubiera antes (si la hay) de verdad, no solo
+    // la referencia en la fila.
+    if (!empty($bloque['photo_attachment_id'])) {
+        wp_delete_attachment(intval($bloque['photo_attachment_id']), true);
+    }
+
+    $wpdb->update(
+        progreso_equip_table('comp_blocks'),
+        array('photo_url' => $url, 'photo_attachment_id' => $attachment_id),
+        array('id' => $id), array('%s', '%d'), array('%d')
+    );
     return rest_ensure_response(array('success' => true, 'photoUrl' => $url));
 }
 

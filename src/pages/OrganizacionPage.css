@@ -235,7 +235,7 @@
 .org__mi-parte-semana { font-size: 0.78rem; font-weight: 700; color: var(--color-accent-hover); text-transform: uppercase; letter-spacing: 0.03em; margin: 10px 0 4px; }
 
 .org__danger-zone { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e5ddc8; text-align: right; }
-.org__link-btn--danger { color: #a33d33; }
+.org__link-btn--danger { color: var(--state-bad); }
 
 /* Aviso visible de error (Ramiro, 4/11 05:48: las llamadas fallidas no decían nada en pantalla). */
 .org__toast {
