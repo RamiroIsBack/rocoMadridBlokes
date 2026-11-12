@@ -2243,10 +2243,10 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
         {photoUrl && (
           <>
             <img src={photoUrl} alt={`Bloque #${block.number}`} className="org__comp-block-photo" />
-            <button type="button" className="org__link-btn org__link-btn--danger" onClick={removePhoto} disabled={uploading}>✕ Quitar foto</button>
+            <button type="button" className="org__link-btn org__link-btn--danger" onClick={removePhoto} disabled={uploading || saving}>✕ Quitar foto</button>
           </>
         )}
-        <input type="file" accept="image/*" capture="environment" onChange={uploadPhoto} disabled={uploading} />
+        <input type="file" accept="image/*" capture="environment" onChange={uploadPhoto} disabled={uploading || saving} />
         {uploading && <span className="org__hint">Subiendo...</span>}
       </div>
       <label className="org__add-row org__add-row--check">
@@ -2254,8 +2254,13 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
         <span>Probado (forerunning)</span>
       </label>
       <div className="org__add-actions">
-        <button className="org__btn org__btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button>
-        <button className="org__btn" onClick={save} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
+        {/* 🐞 Cowork 12/11 09:40: subir una foto y pulsar "Guardar" antes de que terminase la
+            subida dejaba el bloque sin foto y un adjunto huérfano. "Guardar" nunca manda
+            photoUrl (solo "Quitar foto" lo hace), pero sin esto el usuario podía cerrar la
+            ficha a medio subir — ahora no se puede pulsar ninguno de los dos mientras el otro
+            está en marcha. */}
+        <button className="org__btn org__btn--ghost" onClick={onClose} disabled={saving || uploading}>Cancelar</button>
+        <button className="org__btn" onClick={save} disabled={saving || uploading}>{saving ? 'Guardando...' : (uploading ? 'Subiendo foto...' : 'Guardar')}</button>
       </div>
     </div>
   )
