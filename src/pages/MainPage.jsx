@@ -46,7 +46,13 @@ async function apuntarCompeParaIdentidad(compBlockId, identity) {
 function useCompeEstado() {
   const [estado, setEstado] = useState(null)
   useEffect(() => {
-    fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/estado`)
+    // Vista previa del modo compe para un vídeo tutorial (Ramiro 12/11 16:15, NOTAS_PARA_CODE_
+    // compe_en_blokes.md): ?previewCompe=<id de una compe de prueba> en la URL — el backend solo
+    // la atiende si quien pide tiene sesión de socio, así que aquí no hace falta comprobar nada
+    // más; para cualquier otro no pasa nada, sigue mirando la compe real como siempre.
+    const previewId = new URLSearchParams(window.location.search).get('previewCompe')
+    const url = `${CLUB_URL}/wp-json/progreso/v1/compe/estado${previewId ? `?previewCompeId=${encodeURIComponent(previewId)}` : ''}`
+    fetch(url)
       .then(r => r.ok ? r.json() : null)
       .then(j => setEstado(j?.data || null))
       .catch(() => {})

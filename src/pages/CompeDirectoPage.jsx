@@ -164,8 +164,12 @@ export default function CompeDirectoPage() {
 
   useEffect(() => {
     let activo = true
+    // Vista previa para un vídeo tutorial (Ramiro 12/11 16:15): ?previewCompe=<id> en la URL de
+    // esta misma página de la tele — el backend solo la atiende con sesión de socio.
+    const previewId = new URLSearchParams(window.location.search).get('previewCompe')
+    const estadoUrl = `${CLUB_URL}/wp-json/progreso/v1/compe/estado${previewId ? `?previewCompeId=${encodeURIComponent(previewId)}` : ''}`
     const cargar = () => {
-      fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/estado`)
+      fetch(estadoUrl)
         .then(r => r.json())
         .then(j => {
           if (!activo) return

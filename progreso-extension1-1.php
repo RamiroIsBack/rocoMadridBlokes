@@ -15077,9 +15077,23 @@ function progreso_equip_set_modo_compe($request) {
 // qué — eso va aparte, con sesión, en el endpoint de apuntar/leer resultados.
 function progreso_compe_estado($request) {
     global $wpdb;
-    $comp = $wpdb->get_row(
-        "SELECT * FROM " . progreso_equip_table('competitions') . " WHERE modo_activo = 1 ORDER BY id DESC LIMIT 1", ARRAY_A
-    );
+    // Vista previa del modo compe para grabar un vídeo tutorial (Ramiro 12/11 16:15): con
+    // ?previewCompeId=X Y sesión de socio Y esa competición marcada is_test=1, se ve como si
+    // estuviera activa sin tocar modo_activo de ninguna compe real ni afectar a nadie más —
+    // "que solo vea quien la active". Cualquier otro caso (sin sesión, sin previewCompeId,
+    // compe real) sigue mirando la única con modo_activo=1 de siempre. Mira el rol REAL (no el
+    // de "ver como"): un socio tiene que poder combinar la vista previa con "Ver como: Usuario"
+    // para grabar exactamente lo que ve un alumno normal.
+    $preview_id = intval($request->get_param('previewCompeId'));
+    if ($preview_id && blokes_get_app_role_real() === 'socio') {
+        $comp = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM " . progreso_equip_table('competitions') . " WHERE id = %d AND is_test = 1", $preview_id
+        ), ARRAY_A);
+    } else {
+        $comp = $wpdb->get_row(
+            "SELECT * FROM " . progreso_equip_table('competitions') . " WHERE modo_activo = 1 ORDER BY id DESC LIMIT 1", ARRAY_A
+        );
+    }
     if (!$comp) return rest_ensure_response(array('success' => true, 'data' => array('activo' => false)));
     $blocks = $wpdb->get_results($wpdb->prepare(
         "SELECT id, number, grade_color, bloke_post_id, subzone FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $comp['id']
@@ -15165,8 +15179,11 @@ function progreso_compe_apuntar_resultado($request) {
 
     $block = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $comp_block_id), ARRAY_A);
     if (!$block) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
-    $comp = $wpdb->get_row($wpdb->prepare("SELECT modo_activo FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $block['competition_id']), ARRAY_A);
-    if (!$comp || !$comp['modo_activo']) {
+    // Una compe de PRUEBA deja apuntar siempre, sin encender modo_activo — así la vista previa
+    // del modo compe (Ramiro 12/11 16:15) puede demostrar "apuntar un top" en el vídeo sin
+    // afectar a la compe real.
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT modo_activo, is_test FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $block['competition_id']), ARRAY_A);
+    if (!$comp || (!$comp['modo_activo'] && !$comp['is_test'])) {
         return new WP_Error('modo_inactivo', 'El modo compe no está activo para este bloque.', array('status' => 409));
     }
     if ($target_rapido_id) {
