@@ -762,7 +762,23 @@ add_action('rest_api_init', function() {
         'methods' => 'GET', 'callback' => 'progreso_equip_get_week_detail', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_week', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
         'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_week', 'permission_callback' => $equip_perm,
+    ));
+    // Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31/09:35/09:37).
+    register_rest_route('progreso/v1', '/equipacion/zonas', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_zonas', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/zonas', array(
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_zonas', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/zonas/arranque', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_set_zona_arranque', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/zonas/sugerida', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_zona_sugerida', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)/limpiar-retrasadas-falsas', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_limpiar_retrasadas_falsas', 'permission_callback' => $equip_perm,
@@ -11905,7 +11921,11 @@ function progreso_equip_ensure_tables() {
     // NOTAS_PARA_CODE_compe_en_blokes.md). Nuevas tablas comp_resultados (top/zona/intentos de
     // cada participante por bloque, pendiente de validar) y comp_participantes_rapidos (gente
     // sin cuenta de Blokes dada de alta desde recepción).
-    $version = '13';
+    // v14: comp_blocks.photo_attachment_id (Ramiro 12/11 09:11: borrar el adjunto de Medios de
+    // verdad, no solo la referencia). weeks.zona_id/zona_sugerida_id y nueva tabla zonas
+    // (Ramiro 12/11 09:31/09:35/09:37: calendario de semanas + rotación de zonas — Pasillo,
+    // Salón izquierda, Salón derecha, Cueva).
+    $version = '14';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -11931,14 +11951,29 @@ function progreso_equip_ensure_tables() {
     ) {$charset};");
 
     dbDelta("CREATE TABLE " . progreso_equip_table('weeks') . " (
-        id         bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-        start_date date                NOT NULL,
-        subzones   varchar(50)         NOT NULL DEFAULT '',
-        notes      text                NULL,
-        archived   tinyint(1)          NOT NULL DEFAULT 0,
-        is_test    tinyint(1)          NOT NULL DEFAULT 0,
-        auto       tinyint(1)          NOT NULL DEFAULT 0,
-        created_at datetime            NOT NULL,
+        id               bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        start_date       date                NOT NULL,
+        subzones         varchar(50)         NOT NULL DEFAULT '',
+        notes            text                NULL,
+        archived         tinyint(1)          NOT NULL DEFAULT 0,
+        is_test          tinyint(1)          NOT NULL DEFAULT 0,
+        auto             tinyint(1)          NOT NULL DEFAULT 0,
+        zona_id          bigint(20) UNSIGNED NULL,
+        zona_sugerida_id bigint(20) UNSIGNED NULL,
+        created_at       datetime            NOT NULL,
+        PRIMARY KEY (id)
+    ) {$charset};");
+
+    // Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31/09:35/09:37): una zona
+    // (grupo de subzonas) por semana, para que cada bloque dure aproximadamente un mes.
+    // subzonas: lista "1,2" en el mismo orden de números que usa el resto de equipación.
+    dbDelta("CREATE TABLE " . progreso_equip_table('zonas') . " (
+        id       bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        nombre   varchar(60)         NOT NULL,
+        color    varchar(20)         NOT NULL DEFAULT '#60a5fa',
+        subzonas varchar(50)         NOT NULL DEFAULT '',
+        orden    tinyint(3)          NOT NULL DEFAULT 0,
+        activa   tinyint(1)          NOT NULL DEFAULT 1,
         PRIMARY KEY (id)
     ) {$charset};");
 
@@ -12098,6 +12133,7 @@ function progreso_equip_ensure_tables() {
 
     update_option('blokes_equip_tables_version', $version);
     progreso_equip_seed_if_empty();
+    progreso_equip_seed_zonas_if_empty();
     progreso_equip_seed_task_types_if_empty();
     progreso_equip_seed_comp_task_types_if_missing();
     progreso_equip_marcar_eventuales_ramiro_1();
@@ -12111,6 +12147,26 @@ function progreso_equip_ensure_tables() {
             $wpdb->update(progreso_equip_table('task_types'), array('periodicity_weeks' => 2), array('id' => $tipo_id), array('%d'), array('%s'));
         }
         update_option('blokes_equip_periodicidades_ramiro_1', 1, false);
+    }
+}
+
+// Semilla de las 4 zonas por defecto (Ramiro 12/11 09:35: "las zonas son pasillo, salón
+// izquierda, salón derecha y cueva" — 4 zonas = 4 semanas = cada bloque dura
+// aproximadamente un mes). Editable desde "⚙️ Configurar zonas" por si cambian algún día.
+function progreso_equip_seed_zonas_if_empty() {
+    global $wpdb;
+    $table = progreso_equip_table('zonas');
+    if ((int) $wpdb->get_var("SELECT COUNT(*) FROM $table") > 0) return;
+    $seed = array(
+        array('nombre' => 'Pasillo',          'color' => '#60a5fa', 'subzonas' => '1,2'),
+        array('nombre' => 'Salón izquierda',  'color' => '#34d399', 'subzonas' => '3,4,5'),
+        array('nombre' => 'Salón derecha',    'color' => '#f5c842', 'subzonas' => '6,7'),
+        array('nombre' => 'Cueva',            'color' => '#a78bfa', 'subzonas' => '8'),
+    );
+    foreach ($seed as $i => $z) {
+        $wpdb->insert($table, array(
+            'nombre' => $z['nombre'], 'color' => $z['color'], 'subzonas' => $z['subzonas'], 'orden' => $i, 'activa' => 1,
+        ), array('%s', '%s', '%s', '%d', '%d'));
     }
 }
 
@@ -12573,11 +12629,30 @@ function progreso_equip_get_weeks($request = null) {
         "SELECT * FROM " . progreso_equip_table('weeks') . " WHERE archived = 0 AND is_test = %d ORDER BY start_date DESC LIMIT 20",
         $solo_prueba ? 1 : 0
     ), ARRAY_A);
-    return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
+    $tasks_table = progreso_equip_table('tasks');
+    $assignments_table = progreso_equip_table('assignments');
+    // Calendario de semanas (Ramiro 12/11 09:31): cada tarjeta de la tira necesita hechas/total
+    // y si hay festivo o compe esa semana, sin tener que pedir el detalle entero.
+    return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) use ($wpdb, $tasks_table, $assignments_table) {
+        $week_id = intval($r['id']);
+        $hechas = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id
+             WHERE a.week_id = %d AND t.done = 1", $week_id
+        ));
+        $total = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id
+             WHERE a.week_id = %d", $week_id
+        ));
+        $fin = date('Y-m-d', strtotime($r['start_date']) + 6 * 86400);
+        $tiene_festivo = !empty(blokes_club_days_cerrados($r['start_date'], $fin));
         return array(
-            'id' => intval($r['id']), 'startDate' => $r['start_date'],
+            'id' => $week_id, 'startDate' => $r['start_date'],
             'subzones' => array_values(array_filter(array_map('intval', explode(',', $r['subzones'])))),
             'notes' => $r['notes'], 'isTest' => (bool) $r['is_test'], 'isAuto' => (bool) $r['auto'],
+            'zonaId' => $r['zona_id'] !== null ? intval($r['zona_id']) : null,
+            'zonaSugeridaId' => $r['zona_sugerida_id'] !== null ? intval($r['zona_sugerida_id']) : null,
+            'tasksHechas' => $hechas, 'tasksTotal' => $total,
+            'tieneFestivo' => $tiene_festivo, 'tieneCompe' => progreso_equip_semana_es_de_compe($r['start_date']),
         );
     }, $rows)));
 }
@@ -12749,6 +12824,163 @@ function progreso_equip_sweep_overdue_into_current_week() {
     }
 }
 
+// ============================================================
+//  Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31/09:35/09:37).
+// ============================================================
+
+function progreso_equip_zonas_activas() {
+    global $wpdb;
+    return $wpdb->get_results(
+        "SELECT * FROM " . progreso_equip_table('zonas') . " WHERE activa = 1 ORDER BY orden ASC", ARRAY_A
+    );
+}
+
+function progreso_equip_zona_fila($z) {
+    return array(
+        'id' => intval($z['id']), 'nombre' => $z['nombre'], 'color' => $z['color'],
+        'subzonas' => array_values(array_filter(array_map('intval', explode(',', $z['subzonas'])))),
+        'orden' => intval($z['orden']), 'activa' => (bool) $z['activa'],
+    );
+}
+
+// ¿Esta semana (start_date, +6 días) se salta la rotación de zonas? — se solapa con la
+// precompe (lead_weeks antes de comp_date) o la compe de una competición real (nunca una de
+// prueba, esas no deben afectar al reparto de verdad).
+function progreso_equip_semana_es_de_compe($start_date) {
+    global $wpdb;
+    $fin = date('Y-m-d', strtotime($start_date) + 6 * 86400);
+    $comps = $wpdb->get_results(
+        "SELECT comp_date, comp_end_date, lead_weeks FROM " . progreso_equip_table('competitions') . " WHERE is_test = 0",
+        ARRAY_A
+    );
+    foreach ($comps as $c) {
+        $precompe_inicio = date('Y-m-d', strtotime($c['comp_date']) - intval($c['lead_weeks']) * 7 * 86400);
+        $compe_fin = $c['comp_end_date'] ?: $c['comp_date'];
+        if ($start_date <= $compe_fin && $fin >= $precompe_inicio) return true;
+    }
+    return false;
+}
+
+function progreso_equip_zona_arranque() {
+    $v = get_option('blokes_equip_zona_arranque');
+    return (is_array($v) && !empty($v['zonaId']) && !empty($v['weekStart'])) ? $v : null;
+}
+
+// Qué zona le toca de verdad a una semana. Ancla: la semana existente más reciente, anterior a
+// esta, que ya tenga zona_id puesto — así una corrección manual ("esta semana repetimos...",
+// "saltamos a...") recoloca solas las semanas siguientes sin tener que tocarlas una a una. Sin
+// ninguna semana previa, usa el arranque guardado desde "⚙️ Configurar zonas"; sin arranque
+// tampoco, la primera zona activa siempre.
+function progreso_equip_calcular_zona_semana($start_date) {
+    global $wpdb;
+    $zonas = progreso_equip_zonas_activas();
+    if (!$zonas) return null;
+
+    $ancla = $wpdb->get_row($wpdb->prepare(
+        "SELECT start_date, zona_id FROM " . progreso_equip_table('weeks') . "
+         WHERE start_date < %s AND zona_id IS NOT NULL ORDER BY start_date DESC LIMIT 1", $start_date
+    ), ARRAY_A);
+
+    if ($ancla) {
+        $ancla_fecha = $ancla['start_date'];
+        $ancla_zona_id = intval($ancla['zona_id']);
+    } else {
+        $arranque = progreso_equip_zona_arranque();
+        if (!$arranque) return intval($zonas[0]['id']);
+        $ancla_fecha = $arranque['weekStart'];
+        $ancla_zona_id = intval($arranque['zonaId']);
+    }
+
+    $idx_ancla = 0;
+    foreach ($zonas as $i => $z) { if (intval($z['id']) === $ancla_zona_id) { $idx_ancla = $i; break; } }
+    if (strtotime($start_date) <= strtotime($ancla_fecha)) return intval($zonas[$idx_ancla]['id']);
+
+    $cursor = $ancla_fecha; $n = 0;
+    while (strtotime($cursor) < strtotime($start_date)) {
+        if (!progreso_equip_semana_es_de_compe($cursor)) $n++;
+        $cursor = date('Y-m-d', strtotime($cursor) + 7 * 86400);
+    }
+    $idx = ($idx_ancla + $n) % count($zonas);
+    return intval($zonas[$idx]['id']);
+}
+
+// GET /equipacion/zonas/sugerida?weekStart=YYYY-MM-DD — para enseñar "zona sugerida: Cueva
+// (#8)" en el formulario de crear semana, antes de guardar nada.
+function progreso_equip_get_zona_sugerida($request) {
+    progreso_equip_ensure_tables();
+    global $wpdb;
+    $week_start = sanitize_text_field((string) $request->get_param('weekStart'));
+    if (!$week_start || !strtotime($week_start)) {
+        return new WP_Error('invalid_data', 'Falta la semana.', array('status' => 400));
+    }
+    $week_start = date('Y-m-d', strtotime($week_start));
+    $zona_id = progreso_equip_calcular_zona_semana($week_start);
+    $zona = $zona_id ? $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM " . progreso_equip_table('zonas') . " WHERE id = %d", $zona_id
+    ), ARRAY_A) : null;
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'zona' => $zona ? progreso_equip_zona_fila($zona) : null,
+        'esSemanaDeCompe' => progreso_equip_semana_es_de_compe($week_start),
+    )));
+}
+
+function progreso_equip_get_zonas($request) {
+    progreso_equip_ensure_tables();
+    global $wpdb;
+    $zonas = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('zonas') . " ORDER BY orden ASC", ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'zonas' => array_map('progreso_equip_zona_fila', $zonas),
+        'arranque' => progreso_equip_zona_arranque(),
+    )));
+}
+
+// PUT /equipacion/zonas — sustituye la lista entera (reordenar, renombrar, cambiar subzonas o
+// color, activar/desactivar, añadir una nueva con id 0). Pensado para el diálogo "⚙️ Configurar
+// zonas", que manda siempre la lista completa ya en el orden que ha quedado.
+function progreso_equip_update_zonas($request) {
+    global $wpdb;
+    $zonas_in = $request->get_param('zonas');
+    if (!is_array($zonas_in)) return new WP_Error('invalid_data', 'Faltan las zonas.', array('status' => 400));
+    $table = progreso_equip_table('zonas');
+    $vistos = array();
+    foreach ($zonas_in as $i => $z) {
+        $nombre = sanitize_text_field((string) ($z['nombre'] ?? ''));
+        if ($nombre === '') continue;
+        $color = sanitize_text_field((string) ($z['color'] ?? '#60a5fa'));
+        $subzonas = is_array($z['subzonas'] ?? null) ? implode(',', array_map('intval', $z['subzonas'])) : '';
+        $activa = empty($z['activa']) ? 0 : 1;
+        $id = intval($z['id'] ?? 0);
+        if ($id > 0) {
+            $wpdb->update($table, array(
+                'nombre' => $nombre, 'color' => $color, 'subzonas' => $subzonas, 'orden' => $i, 'activa' => $activa,
+            ), array('id' => $id), array('%s', '%s', '%s', '%d', '%d'), array('%d'));
+            $vistos[] = $id;
+        } else {
+            $wpdb->insert($table, array(
+                'nombre' => $nombre, 'color' => $color, 'subzonas' => $subzonas, 'orden' => $i, 'activa' => $activa,
+            ), array('%s', '%s', '%s', '%d', '%d'));
+            $vistos[] = $wpdb->insert_id;
+        }
+    }
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /equipacion/zonas/arranque — fija por qué zona empieza la rotación y en qué semana
+// (Ramiro: "cuando se da aceptar empieza por la primera subzona que se quiere hacer esa
+// semana"). Solo hace falta una vez; en cuanto haya alguna semana con zona_id puesto, esa pasa
+// a ser el ancla real (ver progreso_equip_calcular_zona_semana) y esto queda como respaldo.
+function progreso_equip_set_zona_arranque($request) {
+    $zona_id = intval($request->get_param('zonaId'));
+    $week_start = sanitize_text_field((string) $request->get_param('weekStart'));
+    if (!$zona_id || !$week_start || !strtotime($week_start)) {
+        return new WP_Error('invalid_data', 'Falta la zona o la semana de arranque.', array('status' => 400));
+    }
+    update_option('blokes_equip_zona_arranque', array(
+        'zonaId' => $zona_id, 'weekStart' => date('Y-m-d', strtotime($week_start)),
+    ), false);
+    return rest_ensure_response(array('success' => true));
+}
+
 // Crea la semana y, para cada trabajador asignado, reparte el catálogo de
 // tareas entre sus días de trabajo reales esa semana — así nadie se queda
 // un día sin plan, que es justo el hueco que tenía el sistema de Notion.
@@ -12783,10 +13015,24 @@ function progreso_equip_create_week($request) {
     $is_test = $request->get_param('isTest') ? 1 : 0;
     $is_auto = $request->get_param('isAuto') ? 1 : 0;
 
+    // Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31): la zona que toca se
+    // calcula sola; si no mandan subzonas a propósito, se rellenan solas con las de esa zona
+    // ("se acaba lo de «— subzonas» vacío en la cabecera"). Las semanas de prueba no cuentan
+    // para la rotación — nunca mueven el ancla real.
+    $zona_sugerida_id = $is_test ? null : progreso_equip_calcular_zona_semana($start_date);
+    if (empty($subzones) && $zona_sugerida_id) {
+        $zona = $wpdb->get_row($wpdb->prepare(
+            "SELECT subzonas FROM " . progreso_equip_table('zonas') . " WHERE id = %d", $zona_sugerida_id
+        ), ARRAY_A);
+        if ($zona) $subzones = array_values(array_filter(array_map('intval', explode(',', $zona['subzonas']))));
+    }
+
     $wpdb->insert(progreso_equip_table('weeks'), array(
         'start_date' => $start_date, 'subzones' => implode(',', $subzones),
-        'notes' => $notes, 'is_test' => $is_test, 'auto' => $is_auto, 'created_at' => current_time('mysql'),
-    ), array('%s', '%s', '%s', '%d', '%d', '%s'));
+        'notes' => $notes, 'is_test' => $is_test, 'auto' => $is_auto,
+        'zona_id' => $zona_sugerida_id, 'zona_sugerida_id' => $zona_sugerida_id,
+        'created_at' => current_time('mysql'),
+    ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d', '%s'));
     $week_id = $wpdb->insert_id;
 
     $day_offset         = array('mon' => 0, 'tue' => 1, 'wed' => 2, 'thu' => 3, 'fri' => 4, 'sat' => 5, 'sun' => 6);
@@ -13141,6 +13387,8 @@ function progreso_equip_get_week_detail($request) {
         'id' => intval($week['id']), 'startDate' => $week['start_date'],
         'subzones' => array_values(array_filter(array_map('intval', explode(',', $week['subzones'])))),
         'notes' => $week['notes'], 'isTest' => (bool) $week['is_test'], 'isAuto' => (bool) $week['auto'], 'assignments' => $out_assignments,
+        'zonaId' => $week['zona_id'] !== null ? intval($week['zona_id']) : null,
+        'zonaSugeridaId' => $week['zona_sugerida_id'] !== null ? intval($week['zona_sugerida_id']) : null,
     )));
 }
 
@@ -13229,6 +13477,34 @@ function progreso_equip_delete_assignment($request) {
 // próxima vez que se cree una semana. Las semanas de prueba (`isTest`) se
 // borran siempre de verdad, aunque tengan hechas/retrasadas — cowork
 // (1/11) las necesita para poder probar sin dejar residuos en producción.
+// PUT /equipacion/weeks/{id} — corrección manual de la zona ("esta semana repetimos la
+// #3-4", "saltamos a la Cueva") desde "⚙️ Configurar zonas" si van retrasados o adelantados.
+// Al cambiar zona_id de una semana, las siguientes se recolocan solas (ver
+// progreso_equip_calcular_zona_semana, que siempre ancla en la semana puesta más reciente).
+// También sirve para tocar las subzonas o las notas sueltas de una semana ya creada.
+function progreso_equip_update_week($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $id));
+    if (!$existe) return new WP_Error('not_found', 'Semana no encontrada.', array('status' => 404));
+    $upd = array(); $fmt = array();
+    if ($request->get_param('zonaId') !== null) {
+        $zona_id = intval($request->get_param('zonaId'));
+        $upd['zona_id'] = $zona_id ?: null; $fmt[] = '%d';
+    }
+    if ($request->get_param('subzones') !== null) {
+        $subzones = $request->get_param('subzones');
+        $subzones = is_array($subzones) ? array_map('intval', $subzones) : array();
+        $upd['subzones'] = implode(',', $subzones); $fmt[] = '%s';
+    }
+    if ($request->get_param('notes') !== null) {
+        $upd['notes'] = sanitize_textarea_field((string) $request->get_param('notes')); $fmt[] = '%s';
+    }
+    if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    $wpdb->update(progreso_equip_table('weeks'), $upd, array('id' => $id), $fmt, array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
 function progreso_equip_delete_week($request) {
     global $wpdb;
     $week_id = intval($request['id']);

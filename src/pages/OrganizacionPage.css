@@ -721,3 +721,62 @@
 :root[data-theme="dark"] .org__tile--missed { background: rgba(248, 113, 113, 0.14); }
 :root[data-theme="dark"] .org__tile--retrasada,
 :root[data-theme="dark"] .org__task--retrasada { background: rgba(245, 200, 66, 0.14); }
+
+/* ══ Calendario de semanas + rotación de zonas (Ramiro, 12/11 09:31/09:35/09:37) ══
+   Escrito ya con variables de tema desde el principio — no hace falta otra ronda de arreglos
+   de contraste para esto. */
+.org__calendario { margin-bottom: 20px; }
+.org__calendario-nav {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 10px; flex-wrap: wrap;
+}
+.org__calendario-tira {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px;
+}
+.org__calendario-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-top: 4px solid var(--color-border); border-radius: var(--radius-sm);
+  padding: 10px 12px; cursor: pointer; text-align: left; font-family: inherit;
+}
+.org__calendario-card--sel { box-shadow: 0 0 0 2px var(--color-accent-hover) inset; }
+.org__calendario-card--vacia { opacity: 0.7; border-style: dashed; }
+.org__calendario-card__fecha { font-weight: 700; font-size: 0.95rem; color: var(--color-text-primary); }
+.org__calendario-card__zona { font-size: 0.78rem; font-weight: 700; }
+.org__calendario-card__tareas, .org__calendario-card__nueva { font-size: 0.78rem; color: var(--color-text-secondary); }
+.org__calendario-card__marcas { font-size: 0.85rem; }
+
+/* Diálogo genérico (⚙️ Configurar zonas y los que vengan después) */
+.org__modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 16px;
+}
+.org__modal {
+  background: var(--color-surface); border: 1.5px solid var(--color-border);
+  padding: 20px; max-width: 640px; width: 100%; max-height: 90vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+.org__zonas-mapa-wrap { position: relative; width: 100%; max-width: 480px; margin: 0 auto; }
+.org__zonas-mapa-img { width: 100%; height: auto; display: block; border-radius: 6px; }
+.org__zonas-mapa-num {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 26px; height: 26px; border-radius: 50%; color: #fff; font-weight: 800; font-size: 0.8rem;
+  display: flex; align-items: center; justify-content: center; border: 2px solid rgba(0,0,0,0.4);
+}
+.org__zonas-mapa-entrada {
+  position: absolute; transform: translate(-50%, -50%);
+  background: #1f1f1f; color: #fff; font-size: 0.68rem; font-weight: 700;
+  padding: 2px 6px; border-radius: 3px; white-space: nowrap;
+}
+
+.org__zona-fila {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+}
+.org__zona-fila__orden { display: flex; align-items: center; gap: 4px; font-weight: 700; color: var(--color-text-secondary); }
+.org__zona-fila__color { width: 28px; height: 28px; padding: 0; border: 1px solid var(--color-border); cursor: pointer; }
+.org__zona-fila__nombre {
+  padding: 6px 8px; border: 1.5px solid var(--color-border); background: var(--color-bg);
+  color: var(--color-text-primary); font-size: 0.85rem; min-width: 140px;
+}

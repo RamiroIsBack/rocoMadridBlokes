@@ -62,6 +62,12 @@ function weekLabel(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   return `${DOW_LABEL_LARGO[new Date(y, m - 1, d).getDay()]} ${d} de ${MES_LABEL_LARGO[m - 1]}`
 }
+// "2 nov" — para la tira de 4 semanas del calendario (Ramiro, 12/11 09:31), más compacto que
+// weekLabel.
+function fechaCorta(dateStr) {
+  const [, m, d] = dateStr.split('-').map(Number)
+  return `${d} ${MES_LABEL_CORTO[m - 1]}`
+}
 // Una tarea suelta con texto libre (sin tipo de catálogo) se guarda como taskTypeId "custom"
 // con el texto en params.texto (creador de tareas de Álvaro, Ramiro 1/11 17:20).
 function taskLabel(t, taskTypeById) {
@@ -568,12 +574,36 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
   const [weeks, setWeeks] = useState([])
   const [detail, setDetail] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [createDate, setCreateDate] = useState(null)
   const [showWorkers, setShowWorkers] = useState(false)
   const [showHistorico, setShowHistorico] = useState(false)
   // Las semanas de prueba no salen en la lista normal del equipo (cowork las necesita para
   // probar sin dejar residuos) — este botón las enseña aparte para poder gestionarlas.
   const [showTest, setShowTest] = useState(false)
   const showToast = useToast()
+
+  // Calendario de semanas + rotación de zonas (Ramiro, 12/11 09:31): tira de 4 semanas —
+  // anterior, la seleccionada (empieza siendo la actual), y 2 siguientes.
+  const [selectedDate, setSelectedDate] = useState(() => mondayOf(todayStr()))
+  const [zonas, setZonas] = useState([])
+  const [showZonas, setShowZonas] = useState(false)
+  const reloadZonas = useCallback(() => {
+    api('GET', '/equipacion/zonas').then(r => setZonas(r.data?.zonas || [])).catch(() => {})
+  }, [])
+  useEffect(() => { reloadZonas() }, [reloadZonas])
+
+  const selectWeek = date => {
+    setSelectedDate(date)
+    const w = weeks.find(x => x.startDate === date)
+    if (w) openWeek(w.id)
+    else setDetail(null)
+  }
+  const askCreateAt = date => {
+    setSelectedDate(date)
+    setCreateDate(date)
+    setDetail(null)
+    setShowCreate(true)
+  }
 
   const reloadWeeks = useCallback(() => {
     api('GET', `/equipacion/weeks${showTest ? '?test=1' : ''}`).then(r => setWeeks(r.data || [])).catch(() => showToast('No se ha podido cargar la lista de semanas.'))
@@ -657,6 +687,20 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
     await openWeek(detail.id)
   }
 
+  // "Si van retrasados o adelantados": cambiar la zona de ESTA semana concreta ("esta semana
+  // repetimos la #3-4", "saltamos a la Cueva") — las siguientes se recolocan solas, porque la
+  // rotación siempre ancla en la semana puesta más reciente (ver progreso_equip_calcular_zona_
+  // semana en el backend).
+  const [cambiandoZona, setCambiandoZona] = useState(false)
+  const changeWeekZone = async zonaId => {
+    setCambiandoZona(false)
+    try {
+      await api('PUT', `/equipacion/weeks/${detail.id}`, { zonaId: Number(zonaId) })
+      await openWeek(detail.id)
+      reloadWeeks()
+    } catch (e) { window.alert(e.message) }
+  }
+
   const deleteWeek = async () => {
     const doneTasks = detail.assignments.reduce((n, a) => n + a.tasks.filter(t => t.done).length, 0)
     const blocksCount = detail.assignments.reduce((n, a) => n + a.blocks.length, 0)
@@ -717,8 +761,19 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
     const todayS = todayStr()
     return (
       <div>
+        <CalendarioSemanas
+          weeks={weeks} zonas={zonas} selectedDate={selectedDate}
+          onSelectDate={selectWeek} onCreateAt={askCreateAt}
+          onConfigurarZonas={() => setShowZonas(true)}
+        />
+        {showZonas && (
+          <ConfigurarZonasDialog
+            zonas={zonas} config={config}
+            onClose={() => setShowZonas(false)}
+            onSaved={() => { setShowZonas(false); reloadZonas(); reloadWeeks() }}
+          />
+        )}
         <div className="org__semana-actions">
-          <button className="org__link-btn" onClick={() => setDetail(null)}>← Volver a semanas</button>
           {canEdit && (addingPerson ? (
             <select
               autoFocus value="" disabled={addPersonBusy}
@@ -735,6 +790,23 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
           ))}
         </div>
         <h3 className="org__section-title">Semana del {weekLabel(detail.startDate)} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
+        {canManage && (
+          <p className="org__hint">
+            Zona: {cambiandoZona ? (
+              <select autoFocus defaultValue={detail.zonaId ?? ''} onChange={e => changeWeekZone(e.target.value)} onBlur={() => setCambiandoZona(false)}>
+                {zonas.map(z => <option key={z.id} value={z.id}>{z.nombre}</option>)}
+              </select>
+            ) : (
+              <>
+                <strong style={{ color: zonas.find(z => z.id === detail.zonaId)?.color }}>
+                  {zonas.find(z => z.id === detail.zonaId)?.nombre || '— sin asignar —'}
+                </strong>
+                {' '}
+                <button className="org__link-btn" onClick={() => setCambiandoZona(true)}>cambiar (si van retrasados o adelantados)</button>
+              </>
+            )}
+          </p>
+        )}
         {detail.isAuto && <p className="org__hint org__hint--auto">Semana creada automáticamente: reparte las tareas arrastrándolas.</p>}
         <p className="org__hint">Arrastra una tarjeta a otra persona (o a otro día de esa persona) para reasignarla.</p>
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
@@ -847,8 +919,20 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
 
   return (
     <div>
+      <CalendarioSemanas
+        weeks={weeks} zonas={zonas} selectedDate={selectedDate}
+        onSelectDate={selectWeek} onCreateAt={askCreateAt}
+        onConfigurarZonas={() => setShowZonas(true)}
+      />
+      {showZonas && (
+        <ConfigurarZonasDialog
+          zonas={zonas} config={config}
+          onClose={() => setShowZonas(false)}
+          onSaved={() => { setShowZonas(false); reloadZonas(); reloadWeeks() }}
+        />
+      )}
       <div className="org__semana-actions">
-        {!showCreate && <button className="org__add-btn" onClick={() => setShowCreate(true)}>+ Crear semana nueva</button>}
+        {!showCreate && <button className="org__add-btn" onClick={() => { setCreateDate(null); setShowCreate(true) }}>+ Crear semana nueva</button>}
         <button className="org__link-btn" onClick={() => setShowWorkers(s => !s)}>
           {showWorkers ? 'Ocultar personas' : 'Gestionar personas'}
         </button>
@@ -862,20 +946,165 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
       {showWorkers && <WorkersAdmin workers={workers} onChanged={onWorkersChanged} />}
       {showCreate && (
         <CreateWeekForm
-          config={config} workers={workers}
-          onDone={() => { setShowCreate(false); reloadWeeks() }}
-          onCancel={() => setShowCreate(false)}
+          config={config} workers={workers} initialDate={createDate}
+          onDone={() => { setShowCreate(false); setCreateDate(null); reloadWeeks() }}
+          onCancel={() => { setShowCreate(false); setCreateDate(null) }}
         />
       )}
       {showHistorico && <HistoricoView />}
-      <ul className="org__week-list">
-        {weeks.map(w => (
-          <li key={w.id} className="org__week-row" onClick={() => openWeek(w.id)}>
-            <span>Semana del {weekLabel(w.startDate)}{w.isAuto ? ' · automática' : ''}</span>
-            <span className="org__week-subzones">{w.subzones.map(s => `#${s}`).join(', ')}</span>
-          </li>
+      {!showCreate && <p className="org__hint">Toca una semana de la tira de arriba para abrirla.</p>}
+    </div>
+  )
+}
+
+// Tira de 4 semanas — anterior, la seleccionada (en el centro, resaltada) y 2 siguientes
+// (Ramiro, 12/11 09:31). Cada tarjeta enseña la zona que le toca (nombre y color), hechas/total
+// y si hay festivo o compe esa semana; si la semana no existe todavía, ofrece crearla.
+function CalendarioSemanas({ weeks, zonas, selectedDate, onSelectDate, onCreateAt, onConfigurarZonas }) {
+  const zonaById = useMemo(() => Object.fromEntries(zonas.map(z => [z.id, z])), [zonas])
+  const dates = [-7, 0, 7, 14].map(n => addDays(selectedDate, n))
+  return (
+    <div className="org__calendario">
+      <div className="org__calendario-nav">
+        <button className="org__link-btn" onClick={() => onSelectDate(addDays(selectedDate, -7))}>↑ Semana anterior</button>
+        <button className="org__btn org__btn--ghost" onClick={onConfigurarZonas}>⚙️ Configurar zonas</button>
+        <button className="org__link-btn" onClick={() => onSelectDate(addDays(selectedDate, 7))}>Semana siguiente ↓</button>
+      </div>
+      <div className="org__calendario-tira">
+        {dates.map(d => {
+          const w = weeks.find(x => x.startDate === d)
+          const zona = w?.zonaId != null ? zonaById[w.zonaId] : null
+          const esSel = d === selectedDate
+          return (
+            <button
+              key={d}
+              type="button"
+              className={`org__calendario-card${esSel ? ' org__calendario-card--sel' : ''}${!w ? ' org__calendario-card--vacia' : ''}`}
+              onClick={() => w ? onSelectDate(d) : onCreateAt(d)}
+              style={zona ? { borderTopColor: zona.color } : undefined}
+            >
+              <span className="org__calendario-card__fecha">{fechaCorta(d)}</span>
+              {zona && <span className="org__calendario-card__zona" style={{ color: zona.color }}>{zona.nombre}</span>}
+              {w ? (
+                <span className="org__calendario-card__tareas">{w.tasksHechas}/{w.tasksTotal} tareas</span>
+              ) : (
+                <span className="org__calendario-card__nueva">+ crear</span>
+              )}
+              {(w?.tieneFestivo || w?.tieneCompe) && (
+                <span className="org__calendario-card__marcas">
+                  {w.tieneFestivo && <span title="Festivo esta semana">🌴</span>}
+                  {w.tieneCompe && <span title="Semana de compe">🏆</span>}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// Diálogo "⚙️ Configurar zonas" (Ramiro, 12/11 09:31/09:35/09:37): agrupar subzonas en zonas,
+// ordenarlas, y elegir por cuál empieza la rotación y en qué semana. Si van retrasados o
+// adelantados, se usa este mismo diálogo para cambiar el orden o la zona de una semana
+// concreta — eso se hace desde la ficha de la semana (PUT .../weeks/{id} con zonaId), no aquí.
+function ConfigurarZonasDialog({ zonas, config, onClose, onSaved }) {
+  const [filas, setFilas] = useState(() => zonas.map(z => ({ ...z })))
+  const [zonaArranqueId, setZonaArranqueId] = useState(String(zonas[0]?.id || ''))
+  const [semanaArranque, setSemanaArranque] = useState(mondayOf(todayStr()))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  const mover = (i, dir) => setFilas(cur => {
+    const next = [...cur]
+    const j = i + dir
+    if (j < 0 || j >= next.length) return cur
+    ;[next[i], next[j]] = [next[j], next[i]]
+    return next
+  })
+  const actualizar = (i, campo, valor) => setFilas(cur => cur.map((f, idx) => idx === i ? { ...f, [campo]: valor } : f))
+  const toggleSubzonaEnFila = (i, s) => setFilas(cur => cur.map((f, idx) => idx === i ? {
+    ...f, subzonas: f.subzonas.includes(s) ? f.subzonas.filter(x => x !== s) : [...f.subzonas, s].sort((a, b) => a - b),
+  } : f))
+  const quitarFila = i => setFilas(cur => cur.filter((_, idx) => idx !== i))
+  const añadirFila = () => setFilas(cur => [...cur, { id: 0, nombre: 'Nueva zona', color: '#888', subzonas: [], orden: cur.length, activa: true }])
+
+  const colorDeSubzona = s => filas.find(f => f.subzonas.includes(s))?.color
+
+  const guardar = async () => {
+    setSaving(true); setError(null)
+    try {
+      await api('PUT', '/equipacion/zonas', { zonas: filas })
+      if (zonaArranqueId && semanaArranque) {
+        await api('POST', '/equipacion/zonas/arranque', { zonaId: Number(zonaArranqueId), weekStart: semanaArranque })
+      }
+      onSaved()
+    } catch (e) { setError(e.message) } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="org__modal-overlay">
+      <div className="org__modal org__modal--zonas">
+        <div className="org__semana-actions">
+          <h2 className="org__comp-block-title">⚙️ Configurar zonas</h2>
+          <button className="org__link-btn" onClick={onClose}>Cerrar</button>
+        </div>
+        <p className="org__hint">
+          Una zona por semana, para que cada bloque dure aproximadamente un mes. ↑↓ para
+          ordenarlas; la entrada al Salón está marcada en el mapa para que "izquierda/derecha"
+          tengan sentido.
+        </p>
+
+        <div className="org__zonas-mapa-wrap">
+          <img src={mapaEquipacion} alt="Mapa del rocódromo" className="org__zonas-mapa-img" draggable={false} />
+          {SUBZONA_RECTS.map(r => (
+            <span
+              key={r.subzona} className="org__zonas-mapa-num"
+              style={{ left: `${(r.x[0] + r.x[1]) / 2}%`, top: `${(r.y[0] + r.y[1]) / 2}%`, background: colorDeSubzona(r.subzona) || '#888' }}
+            >{r.subzona}</span>
+          ))}
+          <span className="org__zonas-mapa-entrada" style={{ left: '17%', top: '58%' }}>⬆ Entrada al Salón</span>
+        </div>
+
+        {filas.map((f, i) => (
+          <div key={f.id || `nueva-${i}`} className="org__zona-fila">
+            <div className="org__zona-fila__orden">
+              <button type="button" className="org__link-btn" onClick={() => mover(i, -1)} disabled={i === 0}>↑</button>
+              <span>{i + 1}</span>
+              <button type="button" className="org__link-btn" onClick={() => mover(i, 1)} disabled={i === filas.length - 1}>↓</button>
+            </div>
+            <input type="color" value={f.color} onChange={e => actualizar(i, 'color', e.target.value)} className="org__zona-fila__color" />
+            <input type="text" value={f.nombre} onChange={e => actualizar(i, 'nombre', e.target.value)} className="org__zona-fila__nombre" />
+            <div className="org__holdset-chips">
+              {config.subzones.map(s => (
+                <button key={s} type="button" className={`org__holdset-chip${f.subzonas.includes(s) ? ' org__holdset-chip--on' : ''}`} onClick={() => toggleSubzonaEnFila(i, s)}>#{s}</button>
+              ))}
+            </div>
+            <label className="org__add-row--check" style={{ display: 'inline-flex' }}>
+              <input type="checkbox" checked={f.activa} onChange={e => actualizar(i, 'activa', e.target.checked)} />
+              <span>Activa</span>
+            </label>
+            <button type="button" className="org__link-btn org__link-btn--danger" onClick={() => quitarFila(i)}>✕ Quitar</button>
+          </div>
         ))}
-      </ul>
+        <button type="button" className="org__link-btn" onClick={añadirFila}>+ Añadir zona</button>
+
+        <div className="org__add-row">
+          <label>Empezar por esta zona, en la semana del</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <select value={zonaArranqueId} onChange={e => setZonaArranqueId(e.target.value)}>
+              {filas.filter(f => f.activa && f.id).map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+            </select>
+            <input type="date" value={semanaArranque} onChange={e => setSemanaArranque(mondayOf(e.target.value))} />
+          </div>
+        </div>
+
+        {error && <p className="org__error">{error}</p>}
+        <div className="org__add-actions">
+          <button className="org__btn org__btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button className="org__btn" onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : 'Aceptar'}</button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1016,8 +1245,8 @@ function WorkersAdmin({ workers, onChanged }) {
 const ALL_WEEK_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 const ALL_WEEK_DAYS_5 = ['mon', 'tue', 'wed', 'thu', 'fri']
 
-function CreateWeekForm({ config, workers, onDone, onCancel }) {
-  const [startDate, setStartDate] = useState(mondayOf(todayStr()))
+function CreateWeekForm({ config, workers, onDone, onCancel, initialDate }) {
+  const [startDate, setStartDate] = useState(initialDate || mondayOf(todayStr()))
   const [subzones, setSubzones] = useState([])
   const [included, setIncluded] = useState({})
   const [isTest, setIsTest] = useState(false)
@@ -1028,7 +1257,25 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  const toggleSubzone = s => setSubzones(cur => cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s])
+  // Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31): "dentro de la semana... las
+  // subzonas se rellenan solas" — se sugieren las de la zona que toca, sin obligar: en cuanto
+  // se toca algo a mano, deja de rellenarlas solo al cambiar de fecha.
+  const [zonaSugerida, setZonaSugerida] = useState(null)
+  const subzonesManualRef = useRef(false)
+  useEffect(() => {
+    let activo = true
+    api('GET', `/equipacion/zonas/sugerida?weekStart=${startDate}`).then(r => {
+      if (!activo) return
+      setZonaSugerida(r.data?.zona || null)
+      if (!subzonesManualRef.current && r.data?.zona) setSubzones(r.data.zona.subzonas)
+    }).catch(() => {})
+    return () => { activo = false }
+  }, [startDate])
+
+  const toggleSubzone = s => {
+    subzonesManualRef.current = true
+    setSubzones(cur => cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s])
+  }
   const chosenWorkers = workers.filter(w => included[w.id])
   const toggleDayOverride = (workerId, day) => setWorkDaysOverride(cur => {
     const current = cur[workerId] ?? workers.find(w => w.id === workerId)?.workDays ?? []
@@ -1044,7 +1291,6 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
         workerId: w.id, subzones, blocksMin: w.blocksMin, blocksMax: w.blocksMax,
         ...(workDaysOverride[w.id] ? { workDays: workDaysOverride[w.id] } : {}),
       }))
-      if (!subzones.length) throw new Error('Elige al menos una subzona')
       if (!assignments.length) throw new Error('Elige al menos un trabajador')
       const res = await api('POST', '/equipacion/weeks', { startDate, subzones, assignments, isTest })
       if (res.warnings?.length) window.alert(res.warnings.join('\n'))
@@ -1059,8 +1305,14 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
     <div className="org__add-form">
       <div className="org__add-row">
         <label>Lunes de la semana</label>
-        <input type="date" value={startDate} onChange={e => setStartDate(mondayOf(e.target.value))} />
+        <input type="date" value={startDate} onChange={e => { subzonesManualRef.current = false; setStartDate(mondayOf(e.target.value)) }} />
       </div>
+      {zonaSugerida && (
+        <p className="org__hint">
+          Zona sugerida: <strong style={{ color: zonaSugerida.color }}>{zonaSugerida.nombre}</strong>
+          {' '}({zonaSugerida.subzonas.map(s => `#${s}`).join(', ')}) — puedes cambiarlo si queda hueco para otras.
+        </p>
+      )}
       <div className="org__add-row">
         <label>Subzonas</label>
         <div className="org__holdset-chips">
