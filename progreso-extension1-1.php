@@ -8093,11 +8093,63 @@ function superadmin_campanas_editar($request) {
     return rest_ensure_response(array('success' => true));
 }
 
+// Ramiro 12/11 12:40/12:47 — BUG: un mismo teléfono con "Carlos Rodriguez" y "Carlos" (el
+// nombre completo del Excel y el nombre de pila de otro registro de LA MISMA persona, no un
+// hermano) salía como "¡Hola Carlos Rodriguez y Carlos!". Mismo lío con un alias de WhatsApp
+// junto al nombre real ("daniferro" + "Álvaro"). Si los dos nombres son la misma persona,
+// devuelve el "bueno" a usar en el saludo (el nombre de pila, o el que no sea un alias); si
+// parecen dos personas de verdad (hermanos), devuelve null.
+function blokes_campanas_mismo_nombre($a, $b) {
+    $na = mb_strtolower(remove_accents(trim($a)));
+    $nb = mb_strtolower(remove_accents(trim($b)));
+    if ($na === '' || $nb === '') return $na === '' ? $b : $a;
+    if ($na === $nb) return $a;
+
+    $palabras_a = preg_split('/\s+/', trim($a));
+    $palabras_b = preg_split('/\s+/', trim($b));
+    $primera_a = mb_strtolower(remove_accents($palabras_a[0]));
+    $primera_b = mb_strtolower(remove_accents($palabras_b[0]));
+    // Mismo nombre de pila: uno es "Nombre Apellido(s)" del Excel y el otro, de otro registro
+    // del mismo teléfono, solo "Nombre" — el "bueno" para el saludo es el de una sola palabra.
+    if ($primera_a === $primera_b) {
+        if (count($palabras_a) === 1 && count($palabras_b) > 1) return $a;
+        if (count($palabras_b) === 1 && count($palabras_a) > 1) return $b;
+        return $a;
+    }
+    // Alias de WhatsApp (todo en minúsculas, sin espacios — "daniferro") junto al nombre real
+    // del mismo teléfono: el "bueno" es el que no parece un alias.
+    $es_alias = function($s) { $s = trim($s); return $s !== '' && $s === mb_strtolower($s) && strpos($s, ' ') === false; };
+    if ($es_alias($a) && !$es_alias($b)) return $b;
+    if ($es_alias($b) && !$es_alias($a)) return $a;
+    return null; // no hay indicio de que sean la misma persona — hermanos de verdad
+}
+
+// Reduce la lista de nombres de un teléfono a la que de verdad hace falta para el saludo,
+// fusionando los que blokes_campanas_mismo_nombre() reconoce como la misma persona (puede haber
+// más de un registro duplicado, no solo dos) antes de juntar con " y " a los hermanos que de
+// verdad lo son.
+function blokes_campanas_nombre_saludo($nombres) {
+    $nombres = array_values(array_filter(array_map('trim', (array) $nombres), function($n) { return $n !== ''; }));
+    if (count($nombres) <= 1) return $nombres[0] ?? '';
+
+    $reducido = array($nombres[0]);
+    for ($i = 1; $i < count($nombres); $i++) {
+        $actual = $nombres[$i];
+        $fusionado = false;
+        foreach ($reducido as $j => $existente) {
+            $mejor = blokes_campanas_mismo_nombre($existente, $actual);
+            if ($mejor !== null) { $reducido[$j] = $mejor; $fusionado = true; break; }
+        }
+        if (!$fusionado) $reducido[] = $actual;
+    }
+    return count($reducido) > 1 ? implode(' y ', array_slice($reducido, 0, 2)) : $reducido[0];
+}
+
 // El saludo (nombre de pila elegido a mano, p. ej. de la carga inicial del xlsx) tiene
 // preferencia sobre el nombre completo del Excel para el "Hola {nombre}!" — es el que se usa
 // de verdad en los mensajes que ya escribió Ramiro.
 function blokes_campanas_personalizar($plantilla, $nombres, $remitente, $saludo = '', $campana_id = 0, $contacto_id = 0) {
-    $nombre = $saludo ?: (count($nombres) > 1 ? implode(' y ', array_slice($nombres, 0, 2)) : ($nombres[0] ?? ''));
+    $nombre = $saludo ?: blokes_campanas_nombre_saludo($nombres);
     $txt = str_replace('{nombre}', $nombre, $plantilla);
     $txt = str_replace('{remitente}', $remitente, $txt);
     // {enlace}: enlace propio por destinatario para medir clics (Ramiro, 11/11 05:35) — solo
