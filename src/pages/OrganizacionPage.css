@@ -210,7 +210,7 @@
 .org__compe-card-main { display: flex; flex-direction: column; gap: 3px; }
 .org__compe-card-nombre { font-weight: 700; color: #2a2015; font-size: 1rem; }
 .org__compe-card-fechas { font-size: 0.85rem; color: var(--color-text-secondary); }
-.org__compe-card-estado { font-size: 0.8rem; color: #8a6416; font-weight: 600; }
+.org__compe-card-estado { font-size: 0.8rem; color: var(--color-accent-hover); font-weight: 600; }
 .org__compe-card-flecha { font-weight: 700; color: var(--color-accent-hover); white-space: nowrap; }
 
 /* Tarjeta-resumen de la compe en curso, arriba de Hoy. */
@@ -229,10 +229,10 @@
   text-align: left;
 }
 .org__compe-resumen-nombre { font-weight: 700; color: #2a2015; font-size: 1rem; }
-.org__compe-resumen-datos { font-size: 0.82rem; color: #8a6416; }
+.org__compe-resumen-datos { font-size: 0.82rem; color: var(--color-accent-hover); }
 .org__compe-resumen-flecha { align-self: flex-end; font-weight: 700; color: var(--color-accent-hover); margin-top: -4px; }
 
-.org__mi-parte-semana { font-size: 0.78rem; font-weight: 700; color: #8a6416; text-transform: uppercase; letter-spacing: 0.03em; margin: 10px 0 4px; }
+.org__mi-parte-semana { font-size: 0.78rem; font-weight: 700; color: var(--color-accent-hover); text-transform: uppercase; letter-spacing: 0.03em; margin: 10px 0 4px; }
 
 .org__danger-zone { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e5ddc8; text-align: right; }
 .org__link-btn--danger { color: #a33d33; }
@@ -400,7 +400,9 @@
 /* "Fijar bloque" — intercambiar el número (Ramiro, 11/11 05:01, punto 8) */
 .org__comp-block-fijar { margin-bottom: 14px; background: var(--color-bg); border: 1px dashed var(--color-border); border-radius: var(--radius-sm); padding: 8px 10px; }
 .org__comp-block-numero--fijado {
-  font-size: 1.7rem; font-weight: 800; background: var(--state-warn); color: #fff;
+  /* --state-warn es ámbar oscuro en claro (blanco encima lee bien) pero amarillo vivo en
+     oscuro (blanco encima no) — texto oscuro fijo, que lee bien sobre los dos. */
+  font-size: 1.7rem; font-weight: 800; background: var(--state-warn); color: #1f1f1f;
   border: none; border-radius: var(--radius-sm); padding: 2px 10px; cursor: pointer;
 }
 .org__comp-block-numero--fijado:disabled { opacity: 0.6; cursor: wait; }
@@ -633,7 +635,8 @@
   :root:not([data-theme="light"]) .org__historico-title,
   :root:not([data-theme="light"]) .org__block-info,
   :root:not([data-theme="light"]) .org__whoami-btn,
-  :root:not([data-theme="light"]) .org__switch-btn {
+  :root:not([data-theme="light"]) .org__switch-btn,
+  :root:not([data-theme="light"]) .org__holdset-chip {
     color: var(--color-text-primary);
   }
   :root:not([data-theme="light"]) .org__board-day-label,
@@ -656,10 +659,15 @@
   :root:not([data-theme="light"]) .org__week-row,
   :root:not([data-theme="light"]) .org__historico-row,
   :root:not([data-theme="light"]) .org__compe-card,
-  :root:not([data-theme="light"]) .org__holdset-chip {
+  :root:not([data-theme="light"]) .org__holdset-chip,
+  :root:not([data-theme="light"]) .org__add-form {
     background: var(--color-surface);
     border-color: var(--color-border);
   }
+  :root:not([data-theme="light"]) .org__warning { color: var(--state-warn); }
+  :root:not([data-theme="light"]) .org__error { color: var(--state-bad); }
+  :root:not([data-theme="light"]) .org__add-row select,
+  :root:not([data-theme="light"]) .org__add-row input[type="date"] { color: #2a2015; }
   :root:not([data-theme="light"]) .org__compe-resumen { background: var(--color-bg); border-color: var(--state-warn); }
   :root:not([data-theme="light"]) .org__block-row--planificado { background: var(--color-bg); }
   :root:not([data-theme="light"]) .org__tile--missed { background: rgba(248, 113, 113, 0.14); }
@@ -678,7 +686,8 @@
 :root[data-theme="dark"] .org__historico-title,
 :root[data-theme="dark"] .org__block-info,
 :root[data-theme="dark"] .org__whoami-btn,
-:root[data-theme="dark"] .org__switch-btn {
+:root[data-theme="dark"] .org__switch-btn,
+:root[data-theme="dark"] .org__holdset-chip {
   color: var(--color-text-primary);
 }
 :root[data-theme="dark"] .org__board-day-label,
@@ -698,10 +707,15 @@
 :root[data-theme="dark"] .org__week-row,
 :root[data-theme="dark"] .org__historico-row,
 :root[data-theme="dark"] .org__compe-card,
-:root[data-theme="dark"] .org__holdset-chip {
+:root[data-theme="dark"] .org__holdset-chip,
+:root[data-theme="dark"] .org__add-form {
   background: var(--color-surface);
   border-color: var(--color-border);
 }
+:root[data-theme="dark"] .org__warning { color: var(--state-warn); }
+:root[data-theme="dark"] .org__error { color: var(--state-bad); }
+:root[data-theme="dark"] .org__add-row select,
+:root[data-theme="dark"] .org__add-row input[type="date"] { color: #2a2015; }
 :root[data-theme="dark"] .org__compe-resumen { background: var(--color-bg); border-color: var(--state-warn); }
 :root[data-theme="dark"] .org__block-row--planificado { background: var(--color-bg); }
 :root[data-theme="dark"] .org__tile--missed { background: rgba(248, 113, 113, 0.14); }
