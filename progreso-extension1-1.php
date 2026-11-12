@@ -220,6 +220,11 @@ add_action('template_redirect', function() {
     $query_utm = isset($_GET) ? array_intersect_key($_GET, array_flip(array('utm_source', 'utm_campaign', 'utm_medium'))) : array();
     $instalar_url = home_url('/blokes/instalar') . ($query_utm ? '?' . http_build_query($query_utm) : '');
     $icon_url     = home_url('/blokes/icons/icon-512.png');
+    // Vídeo tutorial (Ramiro, 12/11 16:40): portada como og:image (es vertical, 1080×1920 —
+    // distinto del 1200×630 habitual, pero es lo que pidió: "imagen = la portada") y og:video
+    // con el propio mp4, para que WhatsApp/Facebook tengan de dónde sacar una vista previa.
+    $video_poster_url = home_url('/blokes/media/Blokes_tutorial_poster.jpg');
+    $video_url        = home_url('/blokes/media/Blokes_tutorial_Roco.mp4');
 
     $og_desc = $compe
         ? "Instálala en el móvil antes de la compe del " . date_i18n('j \d\e F', strtotime($compe['comp_date'])) . ": apunta tus tops en segundos."
@@ -233,9 +238,15 @@ add_action('template_redirect', function() {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Instala Blokes — Rocoteca Madrid</title>
 <meta name="description" content="<?php echo esc_attr($og_desc); ?>">
-<meta property="og:title" content="Blokes — la app de Rocoteca Madrid">
+<meta property="og:title" content="Blokes, la app del Roco — mira cómo funciona">
 <meta property="og:description" content="<?php echo esc_attr($og_desc); ?>">
-<meta property="og:image" content="<?php echo esc_url($icon_url); ?>">
+<meta property="og:image" content="<?php echo esc_url($video_poster_url); ?>">
+<meta property="og:image:width" content="1080">
+<meta property="og:image:height" content="1920">
+<meta property="og:video" content="<?php echo esc_url($video_url); ?>">
+<meta property="og:video:type" content="video/mp4">
+<meta property="og:video:width" content="1080">
+<meta property="og:video:height" content="1920">
 <meta property="og:type" content="website">
 <meta property="og:url" content="<?php echo esc_url($app_url); ?>">
 <link rel="icon" href="<?php echo esc_url($icon_url); ?>">

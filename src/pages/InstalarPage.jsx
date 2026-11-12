@@ -4,6 +4,11 @@ import './InstalarPage.css'
 const CLUB_URL      = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
 const ICON_URL       = `${import.meta.env.BASE_URL}icons/icon-512.png`
+// Vídeo tutorial (Ramiro, 12/11 16:40/16:37) — ficheros estáticos en public/media/ (no pasan
+// por el hash del bundler), con nombre fijo para poder reemplazarlos luego por la versión con
+// el modo compe sin tocar código ni URLs.
+const VIDEO_TUTORIAL_URL  = `${import.meta.env.BASE_URL}media/Blokes_tutorial_Roco.mp4`
+const VIDEO_TUTORIAL_POSTER = `${import.meta.env.BASE_URL}media/Blokes_tutorial_poster.jpg`
 
 function detectarEntorno() {
   const ua = navigator.userAgent || ''
@@ -40,6 +45,34 @@ function fechaRango(compDate, compEndDate) {
   if (!compEndDate || compEndDate === compDate) return ini
   const fin = new Date(`${compEndDate}T00:00:00`).toLocaleDateString('es-ES', opts)
   return `${ini} – ${fin}`
+}
+
+// Plegado, con una miniatura grande (la portada + ▶ + texto), nunca un enlace o línea pequeña
+// (Ramiro, 12/11 16:37). Al tocarla se despliega y se reproduce ahí mismo, vertical, sin
+// sonido por defecto — el usuario lo activa con los controles del propio vídeo.
+function VideoTutorial() {
+  const [abierto, setAbierto] = useState(false)
+  if (!abierto) {
+    return (
+      <button type="button" className="instalar__video-miniatura" onClick={() => setAbierto(true)}>
+        <img src={VIDEO_TUTORIAL_POSTER} alt="" className="instalar__video-poster" />
+        <span className="instalar__video-play">▶</span>
+        <span className="instalar__video-texto">Ver cómo funciona · 1 min</span>
+      </button>
+    )
+  }
+  return (
+    <video
+      className="instalar__video"
+      src={VIDEO_TUTORIAL_URL}
+      poster={VIDEO_TUTORIAL_POSTER}
+      controls
+      playsInline
+      muted
+      autoPlay
+      preload="metadata"
+    />
+  )
 }
 
 export default function InstalarPage() {
@@ -153,6 +186,8 @@ export default function InstalarPage() {
           )}
         </>
       )}
+
+      <VideoTutorial />
 
       <div className="instalar__about">
         <h2>Cómo funciona la compe</h2>

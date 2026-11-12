@@ -52,6 +52,67 @@
 .instalar__pasos h2 { font-size: 0.95rem; margin: 0 0 10px; color: var(--color-text-primary); }
 .instalar__pasos ol { margin: 0; padding-left: 20px; font-size: 0.9rem; line-height: 1.6; color: var(--color-text-primary); }
 
+/* Vídeo tutorial (Ramiro, 12/11 16:40/16:37): plegado con una miniatura grande y visible,
+   nunca un enlace o línea pequeña. Vertical (1080×1920) — ancho máximo en ordenador, a todo
+   el ancho en móvil. */
+.instalar__video-miniatura {
+  display: block;
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+  margin: 20px auto 0;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  cursor: pointer;
+  background: none;
+  line-height: 0;
+}
+.instalar__video-poster {
+  display: block;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border-radius: 14px;
+}
+.instalar__video-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: rgba(31, 31, 31, 0.75);
+  color: #f4f0e4;
+  font-size: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.instalar__video-texto {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 10px 12px;
+  background: linear-gradient(to top, rgba(0,0,0,0.75), transparent);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-align: center;
+  line-height: 1.3;
+}
+.instalar__video {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin: 20px auto 0;
+  border-radius: 14px;
+  background: #000;
+}
+
 .instalar__about {
   text-align: left;
   margin-top: 32px;
