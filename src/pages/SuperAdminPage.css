@@ -176,9 +176,6 @@
 }
 .sa-filter-btn:hover { color: var(--color-text-secondary); }
 .sa-filter-btn--active { background: #2a2015; color: #f5c842; border-color: #f5c842; }
-/* Dentro de la barra siempre oscura de Calendario (.cal-controls) se queda con su borde oscuro
-   de siempre. */
-.cal-controls .sa-filter-btn { border-color: #3a3020; }
 
 /* ── Products layout ── */
 .sa-products-layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
@@ -906,10 +903,6 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-pay-action:hover:not(:disabled) { border-color: var(--state-ok); color: var(--state-ok); }
 .sa-pay-action:disabled { opacity: 0.4; cursor: default; }
-/* Dentro de la barra siempre oscura de Calendario (.cal-controls, CalendarioPage.css) se queda
-   con su aspecto oscuro de siempre, pase lo que pase con el tema de la página. */
-.cal-controls .sa-pay-action { border-color: #333; color: #999; }
-.cal-controls .sa-pay-action:hover:not(:disabled) { border-color: #34d399; color: #34d399; }
 
 .sa-pay-input {
   background: #111;

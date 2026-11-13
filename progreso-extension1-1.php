@@ -2437,110 +2437,218 @@ function blokes_sync_grupos_todas_las_filas() {
     return $todas;
 }
 
+// Nombre/teléfono "de verdad" de una suscripción — cadena de respaldo compartida por los 3
+// diagnósticos de Fase 0, para no repetirla (y para que los 23/7 de sin-telefono-diagnostico
+// se deban solo al filtro, no a que aquí faltara un respaldo). Cowork, 13/11 10:15: el nombre
+// de facturación puede venir vacío aunque exista suscripción — antes eso caía siempre a
+// $s['cliente'] solo si $sub_obj era null, nunca si el nombre de facturación estaba vacío.
+function blokes_alumno_nombre_de_sub($s, $uid = null) {
+    $sub_id = intval($s['id'] ?? 0);
+    $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription($sub_id) : null;
+    $nombre = $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : '';
+    if ($nombre === '') $nombre = trim((string) ($s['cliente'] ?? ''));
+    if ($nombre === '') {
+        if ($uid === null) $uid = intval(get_post_meta($sub_id, '_customer_user', true));
+        if ($uid) {
+            $u = get_userdata($uid);
+            if ($u && $u->display_name) $nombre = $u->display_name;
+        }
+    }
+    return $nombre;
+}
+function blokes_alumno_telefono_de_sub($s, $uid = null) {
+    $sub_id = intval($s['id'] ?? 0);
+    $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription($sub_id) : null;
+    $tel = $sub_obj ? blokes_externos_normaliza_telefono($sub_obj->get_billing_phone()) : '';
+    if ($tel === '') $tel = blokes_externos_normaliza_telefono((string) ($s['telefono'] ?? ''));
+    if ($tel === '') $tel = blokes_externos_normaliza_telefono(blokes_telefono_de_email($s['email'] ?? ''));
+    if ($tel === '') {
+        if ($uid === null) $uid = intval(get_post_meta($sub_id, '_customer_user', true));
+        if ($uid) $tel = blokes_externos_normaliza_telefono(get_user_meta($uid, 'billing_phone', true));
+    }
+    return $tel;
+}
+function blokes_alumno_customer_id_de_sub($s) {
+    return intval(get_post_meta(intval($s['id'] ?? 0), '_customer_user', true));
+}
+// Meses (sep/oct/nov 2026) con pago o exención de un alumno en el Excel, por teléfono o nombre.
+function blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel, $nombre) {
+    $fila = ($tel && isset($excel_por_tel[$tel])) ? $excel_por_tel[$tel]
+        : ($excel_por_nombre[blokes_sync_grupos_normalizar_nombre($nombre)] ?? null);
+    return $fila; // null, o array('meses' => ['09','10',...], 'pestana' => '...')
+}
+
 // GET /superadmin/v1/alumnos/onhold-diagnostico — Fase 0 punto 1 de
-// NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md: clasifica las suscripciones "on-hold" en
-// 3 grupos para que Ramiro decida qué hacer con cada una. SOLO LEE — no cambia ni un estado.
-// - "duplicados": el mismo teléfono tiene otra suscripción activa → candidata a cancelar.
-// - "pagaronExcel": no hay duplicado, pero el Excel de Eva tiene un pago o exención de
-//   octubre o noviembre 2026 a ese teléfono o nombre → candidata a "Marcar cobrado".
-// - "sinPago": ni lo uno ni lo otro → candidata a baja.
+// NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md. SOLO LEE — no cambia ni un estado.
+// Cowork, 13/11 10:15 (revisión de la primera versión, 28 de 50 "duplicados" eran de verdad):
+// - "duplicados" de verdad = mismo CLIENTE (customer_id) y misma CLASE (día+horario+edad) con
+//   otra suscripción activa → candidata a cancelar, con `activaId` de la que se queda.
+// - "revisar" = parece relacionado (mismo teléfono con otra activa en otra clase — hermano/a
+//   con el móvil de un adulto, o la misma persona en 2 clases; o misma clase con otro cliente
+//   — hermanos en el mismo grupo) pero NO es un duplicado real, no cancelar sin mirarlo.
+// - "pagaronNoviembre" = sin ser duplicado/revisar, el Excel tiene pago o exención de **noviembre**
+//   2026 → candidata a "Marcar cobrado". "pagaronSoloOctubre" = pagó octubre pero no noviembre
+//   (probablemente se fue) → decidir baja o recordatorio, NO marcar cobrado directamente.
+// - "sinPago" = nada de lo anterior → candidata a baja (la 7092, de pruebas de Ramiro, sale
+//   marcada `esPrueba` y no debe entrar en ninguna baja real).
 function superadmin_alumnos_onhold_diagnostico($request) {
     $todas = blokes_get_all_subscription_data();
     $on_hold = array_values(array_filter($todas, function($s) { return ($s['status'] ?? '') === 'on-hold'; }));
-    if (!$on_hold) {
-        return rest_ensure_response(array('success' => true, 'data' => array(
-            'duplicados' => array(), 'pagaronExcel' => array(), 'sinPago' => array(), 'total' => 0,
-        )));
-    }
+    $vacio = array('duplicados' => array(), 'revisar' => array(), 'pagaronNoviembre' => array(), 'pagaronSoloOctubre' => array(), 'sinPago' => array(), 'total' => 0);
+    if (!$on_hold) return rest_ensure_response(array('success' => true, 'data' => $vacio));
 
+    // Activas agrupadas por cliente (customer_id) — criterio principal de duplicado.
+    $activas_por_customer = array();
+    foreach ($todas as $s) {
+        if (($s['status'] ?? '') !== 'active') continue;
+        $uid = blokes_alumno_customer_id_de_sub($s);
+        if ($uid) $activas_por_customer[$uid][] = $s;
+    }
+    // Activas por teléfono — para detectar "mismo teléfono, misma clase, otro cliente"
+    // (hermanos en el mismo grupo) sin confundirlo con un duplicado de verdad.
     $por_tel = blokes_sync_grupos_subs_por_telefono();
 
-    // Cruce con el Excel — si no hay Hoja configurada o falla la llamada, la lista viene vacía
-    // y todo cae en "sinPago" en vez de romperse: más cauto marcar de más para revisar a mano.
+    // Cruce con el Excel, por MES (no "oct o nov" mezclados) — si no hay Hoja configurada o
+    // falla la llamada, las listas de Excel vienen vacías y todo cae en "sinPago": más cauto
+    // marcar de más para revisar a mano que romper el diagnóstico por un fallo de red.
     $excel_por_tel = array(); $excel_por_nombre = array();
     foreach (blokes_sync_grupos_todas_las_filas() as $f) {
-        $pago_oct_nov = !empty($f['pagos']['2026-10']) || !empty($f['pagos']['2026-11'])
-            || in_array('2026-10', $f['exentoMeses'], true) || in_array('2026-11', $f['exentoMeses'], true);
-        if (!$pago_oct_nov) continue;
-        if ($f['telefono']) $excel_por_tel[$f['telefono']] = $f['_pestana'];
-        $excel_por_nombre[blokes_sync_grupos_normalizar_nombre($f['nombre'])] = $f['_pestana'];
+        $meses = array();
+        foreach (array('09' => '2026-09', '10' => '2026-10', '11' => '2026-11') as $mm => $ym) {
+            if (!empty($f['pagos'][$ym]) || in_array($ym, $f['exentoMeses'], true)) $meses[] = $mm;
+        }
+        if (!$meses) continue;
+        $valor = array('meses' => $meses, 'pestana' => $f['_pestana']);
+        if ($f['telefono']) $excel_por_tel[$f['telefono']] = $valor;
+        $clave = blokes_sync_grupos_normalizar_nombre($f['nombre']);
+        if ($clave !== '') $excel_por_nombre[$clave] = $valor;
     }
 
-    $duplicados = array(); $sin_pago = array(); $pagaron_excel = array();
+    $duplicados = array(); $revisar = array(); $pagaron_nov = array(); $pagaron_solo_oct = array(); $sin_pago = array();
     foreach ($on_hold as $s) {
         $sub_id = intval($s['id'] ?? 0);
-        $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription($sub_id) : null;
-        $tel = $sub_obj ? blokes_externos_normaliza_telefono($sub_obj->get_billing_phone()) : '';
-        if ($tel === '') $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
-        $nombre = $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : ($s['cliente'] ?? '');
+        $uid = blokes_alumno_customer_id_de_sub($s);
+        $tel = blokes_alumno_telefono_de_sub($s, $uid);
+        $nombre = blokes_alumno_nombre_de_sub($s, $uid);
+        $dia = $s['dia'] ?? ''; $horario = $s['horario'] ?? ''; $edad = $s['edad'] ?? 'Adultos';
 
-        $info = array(
-            'subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel,
-            'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '', 'edad' => $s['edad'] ?? 'Adultos',
-        );
+        $info = array('subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad);
 
-        $tiene_activa = false;
-        if ($tel && !empty($por_tel[$tel])) {
-            foreach ($por_tel[$tel] as $otra) {
-                if (intval($otra['id'] ?? 0) === $sub_id) continue;
-                if (($otra['status'] ?? '') === 'active') { $tiene_activa = true; break; }
+        $activa_misma_clase = null; $activa_otra_clase = null;
+        if ($uid && !empty($activas_por_customer[$uid])) {
+            foreach ($activas_por_customer[$uid] as $otra) {
+                $misma_clase = ($otra['dia'] ?? '') === $dia && ($otra['horario'] ?? '') === $horario && ($otra['edad'] ?? 'Adultos') === $edad;
+                if ($misma_clase) { $activa_misma_clase = $otra; break; }
+                if (!$activa_otra_clase) $activa_otra_clase = $otra;
             }
         }
-        if ($tiene_activa) { $duplicados[] = $info; continue; }
+        if ($activa_misma_clase) {
+            $info['activaId'] = intval($activa_misma_clase['id'] ?? 0);
+            $info['motivo'] = 'Mismo cliente y misma clase con otra suscripción activa.';
+            $duplicados[] = $info;
+            continue;
+        }
 
-        $en_excel = ($tel && isset($excel_por_tel[$tel])) || isset($excel_por_nombre[blokes_sync_grupos_normalizar_nombre($nombre)]);
-        if ($en_excel) { $pagaron_excel[] = $info; continue; }
+        $activa_mismo_tel_otro_cliente = null;
+        if ($tel && !empty($por_tel[$tel])) {
+            foreach ($por_tel[$tel] as $otra) {
+                if (($otra['status'] ?? '') !== 'active' || intval($otra['id'] ?? 0) === $sub_id) continue;
+                if (($otra['dia'] ?? '') === $dia && ($otra['horario'] ?? '') === $horario && ($otra['edad'] ?? 'Adultos') === $edad) {
+                    $activa_mismo_tel_otro_cliente = $otra; break;
+                }
+            }
+        }
+        if ($activa_mismo_tel_otro_cliente) {
+            $info['activaId'] = intval($activa_mismo_tel_otro_cliente['id'] ?? 0);
+            $info['motivo'] = 'Mismo teléfono y misma clase, pero cliente distinto — probablemente hermanos en el mismo grupo, no cancelar sin mirarlo.';
+            $revisar[] = $info;
+            continue;
+        }
+        if ($activa_otra_clase) {
+            $info['activaId'] = intval($activa_otra_clase['id'] ?? 0);
+            $info['motivo'] = 'El mismo cliente tiene otra activa, pero en otra clase — puede ir a dos clases, o ser el teléfono de un familiar. No es duplicado.';
+            $revisar[] = $info;
+            continue;
+        }
 
+        $excel = blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel, $nombre);
+        if ($excel && in_array('11', $excel['meses'], true)) {
+            $info['mesesPagados'] = $excel['meses']; $info['pestanaExcel'] = $excel['pestana'];
+            $pagaron_nov[] = $info;
+            continue;
+        }
+        if ($excel && in_array('10', $excel['meses'], true)) {
+            $info['mesesPagados'] = $excel['meses']; $info['pestanaExcel'] = $excel['pestana'];
+            $pagaron_solo_oct[] = $info;
+            continue;
+        }
+
+        if ($sub_id === 7092) $info['esPrueba'] = true; // suscripción de pruebas de Ramiro
         $sin_pago[] = $info;
     }
 
     return rest_ensure_response(array('success' => true, 'data' => array(
-        'duplicados' => $duplicados, 'pagaronExcel' => $pagaron_excel, 'sinPago' => $sin_pago,
-        'total' => count($on_hold),
+        'duplicados' => $duplicados, 'revisar' => $revisar,
+        'pagaronNoviembre' => $pagaron_nov, 'pagaronSoloOctubre' => $pagaron_solo_oct,
+        'sinPago' => $sin_pago, 'total' => count($on_hold),
     )));
 }
 
-// GET /superadmin/v1/alumnos/edad-diagnostico — Fase 0 punto 2 (primera mitad) de la misma
-// nota: suscripciones activas u on-hold de Viernes, Martes o Martes-Jueves marcadas "Adultos"
-// — Ramiro confirmó que Viernes 18-19h, Martes 17:30-18:30 y Martes-Jueves 18:30-20:00 ("M-J
-// 18.30 MEDIANOS") son de niños/adolescentes. Solo lista (con el horario, para comprobar cuál
-// es cuál) — Ramiro confirma la edad exacta de cada franja antes de corregir la meta.
+// GET /superadmin/v1/alumnos/edad-diagnostico — Fase 0 punto 2 (primera mitad). Cowork,
+// 13/11 10:15: la primera versión devolvía 194 filas (todo Martes/M-J/Viernes "Adultos") — hace
+// falta solo las 3 franjas que Ramiro confirmó de niños/adolescentes: Viernes 18:00-19:00,
+// Martes 17:30-18:30 y Martes-Jueves 18:30-20:00 ("M-J 18.30 MEDIANOS"). Si el horario
+// guardado no coincide exactamente con estas cadenas, decídmelo con el valor real que veáis en
+// la lista para ajustar el filtro.
 function superadmin_alumnos_edad_diagnostico($request) {
+    $franjas = array(
+        array('dia' => 'Viernes', 'horario' => '18:00-19:00'),
+        array('dia' => 'Martes', 'horario' => '17:30-18:30'),
+        array('dia' => 'Martes-Jueves', 'horario' => '18:30-20:00'),
+    );
     $todas = blokes_get_all_subscription_data();
-    $candidatas = array_values(array_filter($todas, function($s) {
+    $candidatas = array_values(array_filter($todas, function($s) use ($franjas) {
         if (!in_array($s['status'] ?? '', array('active', 'on-hold'), true)) return false;
         if (($s['edad'] ?? 'Adultos') !== 'Adultos') return false;
-        return in_array($s['dia'] ?? '', array('Viernes', 'Martes', 'Martes-Jueves'), true);
+        foreach ($franjas as $f) {
+            if (($s['dia'] ?? '') === $f['dia'] && ($s['horario'] ?? '') === $f['horario']) return true;
+        }
+        return false;
     }));
     $out = array_map(function($s) {
-        $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription(intval($s['id'] ?? 0)) : null;
+        $uid = blokes_alumno_customer_id_de_sub($s);
         return array(
             'subId' => intval($s['id'] ?? 0),
-            'nombre' => $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : ($s['cliente'] ?? ''),
+            'nombre' => blokes_alumno_nombre_de_sub($s, $uid),
             'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '', 'edadActual' => $s['edad'] ?? 'Adultos', 'status' => $s['status'] ?? '',
         );
     }, $candidatas);
     return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
-// GET /superadmin/v1/alumnos/sin-telefono-diagnostico — Fase 0 punto 3 de la misma nota:
-// "nombre real y teléfono de cada alumno... si falta el teléfono en la web y está en el Excel,
-// completarlo desde el Excel". Solo lista — cruza por NOMBRE (no hay teléfono con que cruzar
-// por definición), así que el emparejamiento es más flojo que el de los otros diagnósticos;
-// Ramiro/Eva confirman cada uno antes de escribirlo en la suscripción.
+// GET /superadmin/v1/alumnos/sin-telefono-diagnostico — Fase 0 punto 3. Cowork, 13/11 10:15:
+// la primera versión (solo activas/on-hold) daba 7, la auditoría original encontró 23 — amplía
+// a CUALQUIER estado de suscripción, una fila por CLIENTE (no por suscripción, para no contar
+// 2 veces a quien tiene dos suscripciones) y con la misma cadena de respaldo de teléfono que
+// usa el resto de la sincronización (factura → `telefono` → email → user meta). Cruza por
+// NOMBRE con el Excel (no hay teléfono con que cruzar, por definición) — el emparejamiento es
+// más flojo que el de los otros diagnósticos; confirmad cada uno antes de escribirlo.
 function superadmin_alumnos_sin_telefono_diagnostico($request) {
     $todas = blokes_get_all_subscription_data();
+    $vistos = array();
     $sin_tel = array();
     foreach ($todas as $s) {
-        if (!in_array($s['status'] ?? '', array('active', 'on-hold'), true)) continue;
         $sub_id = intval($s['id'] ?? 0);
-        $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription($sub_id) : null;
-        $tel = $sub_obj ? blokes_externos_normaliza_telefono($sub_obj->get_billing_phone()) : '';
-        if ($tel === '') $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        $uid = blokes_alumno_customer_id_de_sub($s);
+        $clave_persona = $uid ? ('u' . $uid) : ('s' . $sub_id);
+        if (isset($vistos[$clave_persona])) continue;
+        $vistos[$clave_persona] = true;
+
+        $tel = blokes_alumno_telefono_de_sub($s, $uid);
         if ($tel !== '') continue;
-        $nombre = $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : ($s['cliente'] ?? '');
+        $nombre = blokes_alumno_nombre_de_sub($s, $uid);
         if (trim($nombre) === '') continue;
-        $sin_tel[] = array('subId' => $sub_id, 'nombre' => $nombre, 'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '');
+        $sin_tel[] = array('subId' => $sub_id, 'userId' => $uid ?: null, 'nombre' => $nombre, 'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '', 'status' => $s['status'] ?? '');
     }
     if (!$sin_tel) return rest_ensure_response(array('success' => true, 'data' => array()));
 
