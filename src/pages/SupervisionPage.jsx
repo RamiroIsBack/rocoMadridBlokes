@@ -2248,12 +2248,11 @@ function GruposTab() {
           {vista === 'grupos' && (
             <button className="sv-tab-mini" onClick={() => setBuscador(true)}>+ Añadir alumno</button>
           )}
-          {vista === 'grupos' && (
-            <button
-              className="sv-tab-mini"
-              onClick={() => setAccion({ alumno: { esExterno: true, alumno: '', telefono: '', notas: '', exento: false, externoDia: '', externoHorario: '', externoEdad: 'Adultos' }, tipo: 'ext_editar' })}
-            >+ Alta externa</button>
-          )}
+          {/* Ramiro, NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md Fase 0 punto 5: "quitar
+              el alta de externo... se elimina la opción" — los 4 que ya hay pasan a usuario +
+              suscripción a mano (Eva, con "+ Añadir alumno" → Crear cliente en la web). El botón
+              de alta ya no se ofrece, pero la edición/baja de los externos que queden sigue
+              funcionando (ext_editar más abajo) hasta que se migren. */}
         </div>
       </div>
 

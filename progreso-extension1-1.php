@@ -1421,6 +1421,18 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/tele-slides/(?P<id>\d+)', array(
         'methods' => 'DELETE', 'callback' => 'superadmin_tele_slides_borrar', 'permission_callback' => $sa_perm,
     ));
+
+    // NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, Fase 0 — solo lectura: listan para que
+    // Ramiro dé el OK antes de tocar nada, no cambian ningún dato.
+    register_rest_route('superadmin/v1', '/alumnos/onhold-diagnostico', array(
+        'methods' => 'GET', 'callback' => 'superadmin_alumnos_onhold_diagnostico', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/alumnos/edad-diagnostico', array(
+        'methods' => 'GET', 'callback' => 'superadmin_alumnos_edad_diagnostico', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/alumnos/sin-telefono-diagnostico', array(
+        'methods' => 'GET', 'callback' => 'superadmin_alumnos_sin_telefono_diagnostico', 'permission_callback' => $sa_perm,
+    ));
 });
 
 // ============================================================
@@ -2401,6 +2413,154 @@ function superadmin_tele_slides_borrar($request) {
     global $wpdb;
     $wpdb->delete(blokes_tele_slides_table(), array('id' => intval($request['id'])));
     return rest_ensure_response(array('success' => true));
+}
+
+// Todas las filas de todas las pestañas de la Hoja activa, en un solo array plano — usado por
+// los diagnósticos de solo lectura de Fase 0 (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md)
+// para cruzar con las suscripciones sin tener que repetir la lectura de la Hoja en cada uno.
+// Devuelve array vacío (no un error) si no hay Hoja configurada o falla la llamada — más cauto
+// marcar de más para revisar a mano que romper el diagnóstico entero por un fallo de red.
+function blokes_sync_grupos_todas_las_filas() {
+    $activa = blokes_sync_grupos_sheet_activa();
+    if (!$activa['id']) return array();
+    $meta = blokes_sync_grupos_get($activa['id'], '?fields=sheets.properties.title');
+    if (is_wp_error($meta)) return array();
+    $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
+    if (!$pestanas) return array();
+    $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($activa['id'], $pestanas);
+    if (is_wp_error($valores_por_pestana)) return array();
+    $todas = array();
+    foreach ($pestanas as $tab) {
+        $r = blokes_sync_grupos_leer_pestana_filas($valores_por_pestana[$tab] ?? array());
+        foreach ($r['filas'] as $f) { $f['_pestana'] = $tab; $todas[] = $f; }
+    }
+    return $todas;
+}
+
+// GET /superadmin/v1/alumnos/onhold-diagnostico — Fase 0 punto 1 de
+// NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md: clasifica las suscripciones "on-hold" en
+// 3 grupos para que Ramiro decida qué hacer con cada una. SOLO LEE — no cambia ni un estado.
+// - "duplicados": el mismo teléfono tiene otra suscripción activa → candidata a cancelar.
+// - "pagaronExcel": no hay duplicado, pero el Excel de Eva tiene un pago o exención de
+//   octubre o noviembre 2026 a ese teléfono o nombre → candidata a "Marcar cobrado".
+// - "sinPago": ni lo uno ni lo otro → candidata a baja.
+function superadmin_alumnos_onhold_diagnostico($request) {
+    $todas = blokes_get_all_subscription_data();
+    $on_hold = array_values(array_filter($todas, function($s) { return ($s['status'] ?? '') === 'on-hold'; }));
+    if (!$on_hold) {
+        return rest_ensure_response(array('success' => true, 'data' => array(
+            'duplicados' => array(), 'pagaronExcel' => array(), 'sinPago' => array(), 'total' => 0,
+        )));
+    }
+
+    $por_tel = blokes_sync_grupos_subs_por_telefono();
+
+    // Cruce con el Excel — si no hay Hoja configurada o falla la llamada, la lista viene vacía
+    // y todo cae en "sinPago" en vez de romperse: más cauto marcar de más para revisar a mano.
+    $excel_por_tel = array(); $excel_por_nombre = array();
+    foreach (blokes_sync_grupos_todas_las_filas() as $f) {
+        $pago_oct_nov = !empty($f['pagos']['2026-10']) || !empty($f['pagos']['2026-11'])
+            || in_array('2026-10', $f['exentoMeses'], true) || in_array('2026-11', $f['exentoMeses'], true);
+        if (!$pago_oct_nov) continue;
+        if ($f['telefono']) $excel_por_tel[$f['telefono']] = $f['_pestana'];
+        $excel_por_nombre[blokes_sync_grupos_normalizar_nombre($f['nombre'])] = $f['_pestana'];
+    }
+
+    $duplicados = array(); $sin_pago = array(); $pagaron_excel = array();
+    foreach ($on_hold as $s) {
+        $sub_id = intval($s['id'] ?? 0);
+        $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription($sub_id) : null;
+        $tel = $sub_obj ? blokes_externos_normaliza_telefono($sub_obj->get_billing_phone()) : '';
+        if ($tel === '') $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        $nombre = $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : ($s['cliente'] ?? '');
+
+        $info = array(
+            'subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel,
+            'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '', 'edad' => $s['edad'] ?? 'Adultos',
+        );
+
+        $tiene_activa = false;
+        if ($tel && !empty($por_tel[$tel])) {
+            foreach ($por_tel[$tel] as $otra) {
+                if (intval($otra['id'] ?? 0) === $sub_id) continue;
+                if (($otra['status'] ?? '') === 'active') { $tiene_activa = true; break; }
+            }
+        }
+        if ($tiene_activa) { $duplicados[] = $info; continue; }
+
+        $en_excel = ($tel && isset($excel_por_tel[$tel])) || isset($excel_por_nombre[blokes_sync_grupos_normalizar_nombre($nombre)]);
+        if ($en_excel) { $pagaron_excel[] = $info; continue; }
+
+        $sin_pago[] = $info;
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'duplicados' => $duplicados, 'pagaronExcel' => $pagaron_excel, 'sinPago' => $sin_pago,
+        'total' => count($on_hold),
+    )));
+}
+
+// GET /superadmin/v1/alumnos/edad-diagnostico — Fase 0 punto 2 (primera mitad) de la misma
+// nota: suscripciones activas u on-hold de Viernes, Martes o Martes-Jueves marcadas "Adultos"
+// — Ramiro confirmó que Viernes 18-19h, Martes 17:30-18:30 y Martes-Jueves 18:30-20:00 ("M-J
+// 18.30 MEDIANOS") son de niños/adolescentes. Solo lista (con el horario, para comprobar cuál
+// es cuál) — Ramiro confirma la edad exacta de cada franja antes de corregir la meta.
+function superadmin_alumnos_edad_diagnostico($request) {
+    $todas = blokes_get_all_subscription_data();
+    $candidatas = array_values(array_filter($todas, function($s) {
+        if (!in_array($s['status'] ?? '', array('active', 'on-hold'), true)) return false;
+        if (($s['edad'] ?? 'Adultos') !== 'Adultos') return false;
+        return in_array($s['dia'] ?? '', array('Viernes', 'Martes', 'Martes-Jueves'), true);
+    }));
+    $out = array_map(function($s) {
+        $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription(intval($s['id'] ?? 0)) : null;
+        return array(
+            'subId' => intval($s['id'] ?? 0),
+            'nombre' => $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : ($s['cliente'] ?? ''),
+            'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '', 'edadActual' => $s['edad'] ?? 'Adultos', 'status' => $s['status'] ?? '',
+        );
+    }, $candidatas);
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// GET /superadmin/v1/alumnos/sin-telefono-diagnostico — Fase 0 punto 3 de la misma nota:
+// "nombre real y teléfono de cada alumno... si falta el teléfono en la web y está en el Excel,
+// completarlo desde el Excel". Solo lista — cruza por NOMBRE (no hay teléfono con que cruzar
+// por definición), así que el emparejamiento es más flojo que el de los otros diagnósticos;
+// Ramiro/Eva confirman cada uno antes de escribirlo en la suscripción.
+function superadmin_alumnos_sin_telefono_diagnostico($request) {
+    $todas = blokes_get_all_subscription_data();
+    $sin_tel = array();
+    foreach ($todas as $s) {
+        if (!in_array($s['status'] ?? '', array('active', 'on-hold'), true)) continue;
+        $sub_id = intval($s['id'] ?? 0);
+        $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription($sub_id) : null;
+        $tel = $sub_obj ? blokes_externos_normaliza_telefono($sub_obj->get_billing_phone()) : '';
+        if ($tel === '') $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        if ($tel !== '') continue;
+        $nombre = $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : ($s['cliente'] ?? '');
+        if (trim($nombre) === '') continue;
+        $sin_tel[] = array('subId' => $sub_id, 'nombre' => $nombre, 'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '');
+    }
+    if (!$sin_tel) return rest_ensure_response(array('success' => true, 'data' => array()));
+
+    $tel_por_nombre_excel = array(); $pestana_por_nombre_excel = array();
+    foreach (blokes_sync_grupos_todas_las_filas() as $f) {
+        if (!$f['telefono']) continue;
+        $clave = blokes_sync_grupos_normalizar_nombre($f['nombre']);
+        if ($clave === '') continue;
+        $tel_por_nombre_excel[$clave] = $f['telefono'];
+        $pestana_por_nombre_excel[$clave] = $f['_pestana'];
+    }
+
+    $out = array_map(function($s) use ($tel_por_nombre_excel, $pestana_por_nombre_excel) {
+        $clave = blokes_sync_grupos_normalizar_nombre($s['nombre']);
+        $s['telefonoEnExcel'] = $tel_por_nombre_excel[$clave] ?? null;
+        $s['pestanaExcel']    = $pestana_por_nombre_excel[$clave] ?? null;
+        return $s;
+    }, $sin_tel);
+
+    return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
 // GET /progreso/v1/tele/diapositivas — público: solo las activas y dentro de su rango de
@@ -5931,15 +6091,25 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
 
     $filas = array();
     $r = 3; // fila 4 de Excel
+    $huecos_seguidos = 0;
     while (true) {
         if ($total_row !== null && $r >= $total_row) break;
         if ($r > 600) break;
         $nombre_cell = $valores[$r][2] ?? null;
         if ($nombre_cell === null || trim((string) $nombre_cell) === '') {
-            if ($total_row === null && $filas) break; // sin fila TOTAL: para en el primer hueco tras ver nombres
+            $huecos_seguidos++;
+            // Sin fila TOTAL: antes se paraba en el PRIMER hueco tras ver algún nombre, y se
+            // perdían alumnos reales debajo de una fila vacía usada como separador visual
+            // (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, cowork 12-13/11: "M-J 19.30
+            // ADOL pierde a Lucía Santos, fila 11"). Ahora tolera varios huecos seguidos antes
+            // de darse por vencido, para no perder nombres reales ni leer cientos de filas
+            // vacías de una pestaña larga sin fila TOTAL.
+            if ($total_row === null && $filas && $huecos_seguidos >= 8) break;
             $r++;
             continue;
         }
+        $tras_hueco = $huecos_seguidos > 0;
+        $huecos_seguidos = 0;
         $nombre = trim((string) $nombre_cell);
         if (mb_strtoupper($nombre) === 'TOTAL') break;
 
@@ -5960,6 +6130,10 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
         $fila = array(
             'nombre' => $nombre, 'telefono' => $tel, 'notas' => $notas, 'exento' => false, 'exentoMeses' => array(), 'pagos' => array(),
             '_row' => $r,
+            // true si justo antes había una fila vacía (posible lista de espera/reserva bajo un
+            // separador, no necesariamente un alumno activo normal) — se marca para revisar a
+            // mano en vez de adivinar, no se descarta ni se cuenta como alumno normal sin más.
+            'trasHueco' => $tras_hueco,
         );
         foreach ($bloques as $b) {
             list($pago, $exento) = blokes_sync_grupos_leer_pago($valores, $r, $b['layout']);
