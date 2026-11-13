@@ -1,5 +1,26 @@
-/* ── Tele del Roco (Superadmin) ── */
+/* ── Tele del Roco (ahora en Supervisión, para Eva — 13/11 07:06) ── */
 .tele-panel { max-width: 720px; }
+
+.tele-status {
+  background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface));
+  border: 1px solid var(--color-accent);
+  border-radius: 10px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+.tele-status__title { margin: 0 0 14px; font-size: 1.1rem; }
+.tele-status__row { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin-bottom: 14px; }
+.tele-status__url-col { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.tele-status__url {
+  font-size: 1.3rem; font-weight: 800; margin: 0; color: var(--color-accent-hover);
+  font-family: ui-monospace, monospace;
+}
+.tele-status__qr { border-radius: 6px; background: #fff; padding: 4px; flex-shrink: 0; }
+.tele-status__pasos {
+  margin: 0 0 14px; padding-left: 22px; font-size: 0.85rem; color: var(--color-text-secondary); line-height: 1.7;
+}
+.tele-status__hint { font-size: 0.82rem; font-weight: 600; color: var(--color-text-primary); margin: 0 0 6px; }
+.tele-status__list { margin: 0; padding-left: 20px; font-size: 0.85rem; color: var(--color-text-primary); line-height: 1.6; }
 .tele-hint { font-size: 0.85rem; color: var(--color-text-secondary); margin: 0 0 16px; line-height: 1.5; }
 .tele-hint code { background: var(--color-surface); padding: 1px 5px; border-radius: 3px; }
 .tele-error { color: var(--state-bad); font-size: 0.85rem; margin: 8px 0; }

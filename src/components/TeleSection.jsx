@@ -3,6 +3,9 @@ import './TeleSection.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 const BASE     = `${CLUB_URL}/wp-json/superadmin/v1`
+// Atajo corto, fácil de teclear con el mando (redirige a /blokes/compe/directo — PHP, ver
+// progreso-extension1-1.php). Antes era rocomadrid.com/blokes/compe/directo a secas.
+const TELE_URL = 'https://rocomadrid.com/tele'
 
 async function request(path, method = 'GET', body) {
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
@@ -61,10 +64,52 @@ export default function TeleSection() {
     catch (e) { setError(e.message) }
   }
 
+  const hoy = new Date().toISOString().slice(0, 10)
+  const hoyActivas = (slides || []).filter(s =>
+    s.activo && (!s.fechaInicio || s.fechaInicio <= hoy) && (!s.fechaFin || s.fechaFin >= hoy)
+  )
+
   return (
     <div className="tele-panel">
+      {/* Ramiro, 13/11 07:06: "para que lo pueda manejar Eva" — caja de arriba del todo con lo
+          que hace falta para encender la tele física, sin tener que entender nada de código. */}
+      <div className="tele-status">
+        <h3 className="tele-status__title">📺 Poner en la tele</h3>
+        <div className="tele-status__row">
+          <div className="tele-status__url-col">
+            <p className="tele-status__url">{TELE_URL}</p>
+            <a className="tele-btn tele-btn--primary" href={TELE_URL} target="_blank" rel="noreferrer">▶ Vista previa</a>
+          </div>
+          <img
+            className="tele-status__qr"
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=130x130&data=${encodeURIComponent(TELE_URL)}`}
+            alt="Código QR de la tele"
+            width={130} height={130}
+          />
+        </div>
+        <ol className="tele-status__pasos">
+          <li>Encender la tele y abrir el navegador.</li>
+          <li>Escribir <strong>{TELE_URL}</strong> (o apuntar el móvil al QR y pasarlo a la tele).</li>
+          <li>Tocar el botón de pantalla completa que aparece unos segundos al cargar (o F11 en un PC).</li>
+        </ol>
+        <p className="tele-status__hint">
+          Lo que rota hoy sin compe en marcha{!slides && ' (cargando…)'}:
+        </p>
+        {slides && hoyActivas.length === 0 && (
+          <p className="tele-hint">Nada activo hoy — solo saldrá el mapa/cuenta atrás de la compe si hay una programada.</p>
+        )}
+        {hoyActivas.length > 0 && (
+          <ul className="tele-status__list">
+            {hoyActivas.map(s => (
+              <li key={s.id}>{s.titulo} <span className="tele-muted">· {s.duracionSeg}s</span></li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="tele-divider" />
+
       <p className="tele-hint">
-        Estas diapositivas rotan en la tele del Roco (<code>/compe/directo</code>) cuando no hay
+        Estas diapositivas rotan en la tele del Roco (<code>{TELE_URL}</code>) cuando no hay
         compe en marcha. Sin fecha de fin, la diapositiva no caduca sola — bórrala o desactívala
         a mano cuando toque.
       </p>

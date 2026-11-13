@@ -83,6 +83,63 @@ function cuentaAtras(compDate, compEndDate) {
   return `Quedan ${horas} h de compe`
 }
 
+// Botón de pantalla completa (NOTAS_PARA_CODE_tele_roco.md, Ramiro 13/11 07:06) — aparece al
+// cargar/recargar y con cualquier toque/clic/tecla, y se oculta solo a los pocos segundos de
+// quietud (en una tele encendida todo el día no hace falta verlo siempre). La API de
+// Fullscreen no necesita sesión ni permisos especiales, pero sí un gesto del usuario — por eso
+// es un botón, no algo automático al cargar.
+function useAutoHide(ms) {
+  const [visible, setVisible] = useState(true)
+  useEffect(() => {
+    let t = setTimeout(() => setVisible(false), ms)
+    const mostrar = () => {
+      setVisible(true)
+      clearTimeout(t)
+      t = setTimeout(() => setVisible(false), ms)
+    }
+    window.addEventListener('mousemove', mostrar)
+    window.addEventListener('touchstart', mostrar)
+    window.addEventListener('keydown', mostrar)
+    window.addEventListener('click', mostrar)
+    return () => {
+      clearTimeout(t)
+      window.removeEventListener('mousemove', mostrar)
+      window.removeEventListener('touchstart', mostrar)
+      window.removeEventListener('keydown', mostrar)
+      window.removeEventListener('click', mostrar)
+    }
+  }, [ms])
+  return visible
+}
+
+function BotonPantallaCompleta() {
+  const visible = useAutoHide(5000)
+  const [completa, setCompleta] = useState(() => !!document.fullscreenElement)
+  useEffect(() => {
+    const onChange = () => setCompleta(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', onChange)
+    return () => document.removeEventListener('fullscreenchange', onChange)
+  }, [])
+  const alternar = () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {})
+    else document.exitFullscreen?.().catch(() => {})
+  }
+  return (
+    <button
+      type="button" onClick={alternar}
+      style={{
+        position: 'fixed', bottom: 20, right: 20, zIndex: 10000,
+        background: 'rgba(0,0,0,0.6)', color: '#fff', border: '1px solid rgba(255,255,255,0.35)',
+        borderRadius: 8, padding: '10px 16px', fontSize: '1rem', cursor: 'pointer',
+        fontFamily: 'system-ui, sans-serif', opacity: visible ? 1 : 0,
+        pointerEvents: visible ? 'auto' : 'none', transition: 'opacity 0.4s ease',
+      }}
+    >
+      {completa ? '⤡ Salir de pantalla completa' : '⛶ Pantalla completa'}
+    </button>
+  )
+}
+
 // Pantalla de la tele del Roco (NOTAS_PARA_CODE_compe_en_blokes.md, punto 5) — pública, sin
 // login, pensada para 1080p en la tele que ya tenía el canal de YouTube. Letra grande, se
 // refresca sola. "Solo nombre y nickname entre paréntesis, nunca apellidos" ya lo hace el
@@ -212,6 +269,7 @@ export default function CompeDirectoPage() {
     if (err && !proxima) {
       return (
         <div style={estilos.pagina}>
+          <BotonPantallaCompleta />
           <div style={{ margin: 'auto', textAlign: 'center' }}>
             <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(160), marginBottom: 24 }} />
             <p style={{ fontSize: '2rem', color: '#9ca3af' }}>Sin conexión — reintentando…</p>
@@ -226,6 +284,7 @@ export default function CompeDirectoPage() {
       const slide = slides[slideIndex] || null
       return (
         <div style={estilos.pagina}>
+          <BotonPantallaCompleta />
           <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 1200 }}>
             <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(110), marginBottom: 20 }} />
             {mostrarLiga ? renderLigaSemana(ligaSemana) : slide ? renderSlide(slide) : (
@@ -238,6 +297,7 @@ export default function CompeDirectoPage() {
 
     return (
       <div style={estilos.pagina}>
+        <BotonPantallaCompleta />
         <style>{'@keyframes compeDirectoCuentaMov{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}'}</style>
         <div style={{ margin: 'auto', textAlign: 'center', width: '100%', maxWidth: 1400 }}>
           <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(110), marginBottom: 20 }} />
@@ -296,6 +356,7 @@ export default function CompeDirectoPage() {
 
   return (
     <div style={estilos.pagina}>
+      <BotonPantallaCompleta />
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
           <img src={LOGO_URL} alt="Rocoteca Madrid" style={logoEstilo(80)} />

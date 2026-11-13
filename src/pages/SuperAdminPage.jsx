@@ -12,7 +12,6 @@ import PresupuestosSection from '../components/PresupuestosSection'
 import BudgetSection from '../components/BudgetSection'
 import ProjectsSection from '../components/ProjectsSection'
 import BlokesMapSection from '../components/BlokesMapSection'
-import TeleSection from '../components/TeleSection'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
 import { getCalendarAccess, saveCalendarAccess } from '../hooks/useCalendar'
 import './SuperAdminPage.css'
@@ -1134,7 +1133,6 @@ export default function SuperAdminPage() {
     { key: 'presupuestos', label: 'Presupuestos' },
     { key: 'proyectos', label: 'Proyectos' },
     { key: 'mapa',      label: 'Mapa de Blokes' },
-    { key: 'tele',      label: 'Tele' },
   ]
 
   return (
@@ -1162,7 +1160,6 @@ export default function SuperAdminPage() {
       {saTab === 'presupuestos' && <PresupuestosSection />}
       {saTab === 'proyectos' && <ProjectsSection />}
       {saTab === 'mapa'      && <BlokesMapSection />}
-      {saTab === 'tele'      && <TeleSection />}
     </div>
   )
 }

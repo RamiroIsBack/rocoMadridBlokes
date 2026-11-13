@@ -263,6 +263,17 @@ a{color:#D0962B;font-weight:700}</style>
     exit;
 }, 0);
 
+// Atajo corto para la tele física del Roco — fácil de teclear con el mando del Chromecast/TV
+// (NOTAS_PARA_CODE_tele_roco.md, Ramiro 13/11 07:06: "mejor una corta y fácil de teclear con el
+// mando: rocomadrid.com/tele"). Redirige a la pantalla real de la tele.
+add_action('template_redirect', function() {
+    $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+    if ($path === 'tele') {
+        wp_safe_redirect(home_url('/blokes/compe/directo'), 302);
+        exit;
+    }
+}, 0);
+
 // Priority 1: runs before WordPress's redirect_canonical (priority 10).
 // Catches both the exact slug (/blokes-dev/) and any subroute (/blokes-dev/superadmin).
 // Serves the SPA HTML directly — no redirect round-trip needed.

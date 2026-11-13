@@ -34,6 +34,7 @@ import { useClases } from '../hooks/useClases'
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
 import CampanasSection from '../components/CampanasSection'
+import TeleSection from '../components/TeleSection'
 import { BASE as STAFF_BASE, PROF_ORDER } from '../data/staffSchedule'
 import './SupervisionPage.css'
 
@@ -2749,6 +2750,10 @@ export default function SupervisionPage() {
     { id: 'grupos',      label: 'Grupos'        },
     { id: 'campanas',    label: 'Campañas'      },
     { id: 'horasextra',  label: 'Horas extra'    },
+    // Ramiro, 13/11 07:06: "el control de la tele tiene que estar en supervisión para que lo
+    // pueda manejar Eva" — mismo TeleSection de antes (sin dinero, los endpoints ya aceptan
+    // gestión), movido aquí desde Superadmin.
+    { id: 'tele',        label: 'Tele'           },
     // Lleva sueldos, nóminas y P&L: solo socios
     ...(role === 'socio' ? [{ id: 'timeoff', label: 'CTRL Time Off' }, { id: 'historico', label: 'Histórico' }] : []),
   ]
@@ -2782,6 +2787,7 @@ export default function SupervisionPage() {
       {tab === 'grupos'      && <GruposTab />}
       {tab === 'campanas'    && <CampanasSection />}
       {tab === 'horasextra'  && <OvertimeTab />}
+      {tab === 'tele'        && <TeleSection />}
       {tab === 'timeoff'     && role === 'socio' && <TimeOffTab />}
       {tab === 'historico'   && role === 'socio' && <HistoricoTab />}
     </div>

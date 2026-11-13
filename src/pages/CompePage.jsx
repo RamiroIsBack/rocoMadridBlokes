@@ -116,7 +116,6 @@ export default function CompePage() {
                 <li>Norma de honor: para que cuente, que te haya visto un compañero o un profe.</li>
               </ul>
             </div>
-            <a className="compe-page__tele-link" href="/blokes/compe/directo" target="_blank" rel="noreferrer">📺 Pantalla de la tele</a>
           </div>
         ) : (
           <>
@@ -141,7 +140,6 @@ export default function CompePage() {
   return (
     <div className="compe-page">
       <h1>{estado.nombre}</h1>
-      <a className="compe-page__tele-link" href="/blokes/compe/directo" target="_blank" rel="noreferrer">📺 Pantalla de la tele</a>
       <p className="compe-page__muted">
         Norma de honor: lo que apuntes cuenta al momento — que un compañero o profe te haya visto hacerlo.
       </p>
