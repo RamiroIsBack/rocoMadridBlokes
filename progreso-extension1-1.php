@@ -296,7 +296,7 @@ add_action('template_redirect', function() {
 
     header('Content-Type: text/html; charset=UTF-8');
     ?><!DOCTYPE html>
-<html <?php language_attributes(); ?>>
+<html <?php language_attributes(); ?> data-theme="dark">
 <head>
 <meta charset="<?php bloginfo('charset'); ?>">
 <meta name="viewport" content="width=device-width, initial-scale=1">
