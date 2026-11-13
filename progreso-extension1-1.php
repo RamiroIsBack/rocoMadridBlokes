@@ -2420,15 +2420,21 @@ function superadmin_tele_slides_borrar($request) {
 // para cruzar con las suscripciones sin tener que repetir la lectura de la Hoja en cada uno.
 // Devuelve array vacío (no un error) si no hay Hoja configurada o falla la llamada — más cauto
 // marcar de más para revisar a mano que romper el diagnóstico entero por un fallo de red.
-function blokes_sync_grupos_todas_las_filas() {
+// $error_out (opcional, por referencia): si viene no-null al terminar, algo falló al leer la
+// Hoja (sin Hoja configurada, fallo de red/cuota de Google) y el array vacío devuelto NO
+// significa "nadie pagó" — para que los diagnósticos que cruzan con el Excel puedan avisarlo
+// en vez de enseñar 0 coincidencias en silencio (cowork, 13/11 11:15: el cruce con el Excel se
+// fue a 0 sin que se pudiera saber si era un fallo de lectura o un bug real de comparación).
+function blokes_sync_grupos_todas_las_filas(&$error_out = null) {
+    $error_out = null;
     $activa = blokes_sync_grupos_sheet_activa();
-    if (!$activa['id']) return array();
+    if (!$activa['id']) { $error_out = 'Sin Hoja de Grupos configurada.'; return array(); }
     $meta = blokes_sync_grupos_get($activa['id'], '?fields=sheets.properties.title');
-    if (is_wp_error($meta)) return array();
+    if (is_wp_error($meta)) { $error_out = 'Error leyendo pestañas: ' . $meta->get_error_message(); return array(); }
     $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
-    if (!$pestanas) return array();
+    if (!$pestanas) { $error_out = 'La Hoja no tiene pestañas.'; return array(); }
     $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($activa['id'], $pestanas);
-    if (is_wp_error($valores_por_pestana)) return array();
+    if (is_wp_error($valores_por_pestana)) { $error_out = 'Error leyendo valores: ' . $valores_por_pestana->get_error_message(); return array(); }
     $todas = array();
     foreach ($pestanas as $tab) {
         $r = blokes_sync_grupos_leer_pestana_filas($valores_por_pestana[$tab] ?? array());
@@ -2437,18 +2443,25 @@ function blokes_sync_grupos_todas_las_filas() {
     return $todas;
 }
 
-// Nombre/teléfono "de verdad" de una suscripción — cadena de respaldo compartida por los 3
-// diagnósticos de Fase 0, para no repetirla (y para que los 23/7 de sin-telefono-diagnostico
-// se deban solo al filtro, no a que aquí faltara un respaldo). Cowork, 13/11 10:15: el nombre
-// de facturación puede venir vacío aunque exista suscripción — antes eso caía siempre a
-// $s['cliente'] solo si $sub_obj era null, nunca si el nombre de facturación estaba vacío.
-function blokes_alumno_nombre_de_sub($s, $uid = null) {
+// Suscripción "de verdad" (objeto WC_Subscription) para un alumno de Fase 0, cargada UNA sola
+// vez y reutilizada por las 3 funciones de abajo — antes cada una llamaba a wcs_get_subscription()
+// por su cuenta (hasta 3 veces por fila de on-hold), el doble de trabajo de lo necesario y, con
+// muchas filas, more probable que la sincronización con el Excel se quede sin tiempo (cowork,
+// 13/11 11:15: el cruce con el Excel se fue a 0 justo al añadir estos 3 ayudantes).
+function blokes_alumno_sub_obj($s) {
     $sub_id = intval($s['id'] ?? 0);
-    $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription($sub_id) : null;
+    return ($sub_id && function_exists('wcs_get_subscription')) ? wcs_get_subscription($sub_id) : null;
+}
+// Nombre/teléfono/cliente "de verdad" de una suscripción — cadena de respaldo compartida por
+// los 3 diagnósticos de Fase 0. Cowork, 13/11 10:15: el nombre de facturación puede venir
+// vacío aunque exista suscripción — antes eso caía siempre a $s['cliente'] solo si $sub_obj
+// era null, nunca si el nombre de facturación estaba vacío.
+function blokes_alumno_nombre_de_sub($s, $uid = null, $sub_obj = false) {
+    if ($sub_obj === false) $sub_obj = blokes_alumno_sub_obj($s);
     $nombre = $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : '';
     if ($nombre === '') $nombre = trim((string) ($s['cliente'] ?? ''));
     if ($nombre === '') {
-        if ($uid === null) $uid = intval(get_post_meta($sub_id, '_customer_user', true));
+        if ($uid === null) $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
         if ($uid) {
             $u = get_userdata($uid);
             if ($u && $u->display_name) $nombre = $u->display_name;
@@ -2456,20 +2469,29 @@ function blokes_alumno_nombre_de_sub($s, $uid = null) {
     }
     return $nombre;
 }
-function blokes_alumno_telefono_de_sub($s, $uid = null) {
-    $sub_id = intval($s['id'] ?? 0);
-    $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription($sub_id) : null;
+function blokes_alumno_telefono_de_sub($s, $uid = null, $sub_obj = false) {
+    if ($sub_obj === false) $sub_obj = blokes_alumno_sub_obj($s);
     $tel = $sub_obj ? blokes_externos_normaliza_telefono($sub_obj->get_billing_phone()) : '';
     if ($tel === '') $tel = blokes_externos_normaliza_telefono((string) ($s['telefono'] ?? ''));
     if ($tel === '') $tel = blokes_externos_normaliza_telefono(blokes_telefono_de_email($s['email'] ?? ''));
     if ($tel === '') {
-        if ($uid === null) $uid = intval(get_post_meta($sub_id, '_customer_user', true));
+        if ($uid === null) $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
         if ($uid) $tel = blokes_externos_normaliza_telefono(get_user_meta($uid, 'billing_phone', true));
     }
     return $tel;
 }
-function blokes_alumno_customer_id_de_sub($s) {
-    return intval(get_post_meta(intval($s['id'] ?? 0), '_customer_user', true));
+// Cowork, 13/11 11:15: 27 de 31 "revisar" tenían en realidad el MISMO cliente que su activa
+// (comprobado con /wc/v3/subscriptions) — leer solo el meta `_customer_user` directo no es
+// fiable con HPOS (igual que ya advertía el comentario de la línea ~9820, "preferir el id de
+// cliente de la API de Woo, fiable con HPOS"); aquí se usaba SOLO el meta, nunca el objeto.
+// Ahora: meta primero (rápido, vale para la mayoría) y, si da 0, el id de verdad de la
+// suscripción — así no se paga el coste de cargar el objeto en el camino normal.
+function blokes_alumno_customer_id_de_sub($s, $sub_obj = false) {
+    $sub_id = intval($s['id'] ?? 0);
+    $uid = intval(get_post_meta($sub_id, '_customer_user', true));
+    if ($uid) return $uid;
+    if ($sub_obj === false) $sub_obj = blokes_alumno_sub_obj($s);
+    return $sub_obj ? intval($sub_obj->get_customer_id()) : 0;
 }
 // Meses (sep/oct/nov 2026) con pago o exención de un alumno en el Excel, por teléfono o nombre.
 function blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel, $nombre) {
@@ -2497,22 +2519,13 @@ function superadmin_alumnos_onhold_diagnostico($request) {
     $vacio = array('duplicados' => array(), 'revisar' => array(), 'pagaronNoviembre' => array(), 'pagaronSoloOctubre' => array(), 'sinPago' => array(), 'total' => 0);
     if (!$on_hold) return rest_ensure_response(array('success' => true, 'data' => $vacio));
 
-    // Activas agrupadas por cliente (customer_id) — criterio principal de duplicado.
-    $activas_por_customer = array();
-    foreach ($todas as $s) {
-        if (($s['status'] ?? '') !== 'active') continue;
-        $uid = blokes_alumno_customer_id_de_sub($s);
-        if ($uid) $activas_por_customer[$uid][] = $s;
-    }
-    // Activas por teléfono — para detectar "mismo teléfono, misma clase, otro cliente"
-    // (hermanos en el mismo grupo) sin confundirlo con un duplicado de verdad.
-    $por_tel = blokes_sync_grupos_subs_por_telefono();
-
-    // Cruce con el Excel, por MES (no "oct o nov" mezclados) — si no hay Hoja configurada o
-    // falla la llamada, las listas de Excel vienen vacías y todo cae en "sinPago": más cauto
-    // marcar de más para revisar a mano que romper el diagnóstico por un fallo de red.
+    // Cruce con el Excel, por MES (no "oct o nov" mezclados) — primero de todo, antes de cargar
+    // objetos de suscripción de Woo para las activas (cowork, 13/11 11:15: el cruce se fue a 0
+    // justo cuando esta parte pasó a ir DETRÁS de ese trabajo; `$excel_error` dice si de verdad
+    // falló la lectura de la Hoja en vez de limitarse a no encontrar coincidencias).
+    $excel_error = null;
     $excel_por_tel = array(); $excel_por_nombre = array();
-    foreach (blokes_sync_grupos_todas_las_filas() as $f) {
+    foreach (blokes_sync_grupos_todas_las_filas($excel_error) as $f) {
         $meses = array();
         foreach (array('09' => '2026-09', '10' => '2026-10', '11' => '2026-11') as $mm => $ym) {
             if (!empty($f['pagos'][$ym]) || in_array($ym, $f['exentoMeses'], true)) $meses[] = $mm;
@@ -2524,12 +2537,24 @@ function superadmin_alumnos_onhold_diagnostico($request) {
         if ($clave !== '') $excel_por_nombre[$clave] = $valor;
     }
 
+    // Activas agrupadas por cliente (customer_id) — criterio principal de duplicado.
+    $activas_por_customer = array();
+    foreach ($todas as $s) {
+        if (($s['status'] ?? '') !== 'active') continue;
+        $uid = blokes_alumno_customer_id_de_sub($s);
+        if ($uid) $activas_por_customer[$uid][] = $s;
+    }
+    // Activas por teléfono — para detectar "mismo teléfono, misma clase, otro cliente"
+    // (hermanos en el mismo grupo) sin confundirlo con un duplicado de verdad.
+    $por_tel = blokes_sync_grupos_subs_por_telefono();
+
     $duplicados = array(); $revisar = array(); $pagaron_nov = array(); $pagaron_solo_oct = array(); $sin_pago = array();
     foreach ($on_hold as $s) {
         $sub_id = intval($s['id'] ?? 0);
-        $uid = blokes_alumno_customer_id_de_sub($s);
-        $tel = blokes_alumno_telefono_de_sub($s, $uid);
-        $nombre = blokes_alumno_nombre_de_sub($s, $uid);
+        $sub_obj = blokes_alumno_sub_obj($s);
+        $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
+        $tel = blokes_alumno_telefono_de_sub($s, $uid, $sub_obj);
+        $nombre = blokes_alumno_nombre_de_sub($s, $uid, $sub_obj);
         $dia = $s['dia'] ?? ''; $horario = $s['horario'] ?? ''; $edad = $s['edad'] ?? 'Adultos';
 
         $info = array('subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad);
@@ -2591,6 +2616,9 @@ function superadmin_alumnos_onhold_diagnostico($request) {
         'duplicados' => $duplicados, 'revisar' => $revisar,
         'pagaronNoviembre' => $pagaron_nov, 'pagaronSoloOctubre' => $pagaron_solo_oct,
         'sinPago' => $sin_pago, 'total' => count($on_hold),
+        // Si no es null, la Hoja no se pudo leer y "sinPago" está inflado de más — no significa
+        // que de verdad nadie pagó (cowork, 13/11 11:15).
+        'avisoExcel' => $excel_error,
     )));
 }
 
@@ -2616,10 +2644,11 @@ function superadmin_alumnos_edad_diagnostico($request) {
         return false;
     }));
     $out = array_map(function($s) {
-        $uid = blokes_alumno_customer_id_de_sub($s);
+        $sub_obj = blokes_alumno_sub_obj($s);
+        $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
         return array(
             'subId' => intval($s['id'] ?? 0),
-            'nombre' => blokes_alumno_nombre_de_sub($s, $uid),
+            'nombre' => blokes_alumno_nombre_de_sub($s, $uid, $sub_obj),
             'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '', 'edadActual' => $s['edad'] ?? 'Adultos', 'status' => $s['status'] ?? '',
         );
     }, $candidatas);
@@ -2639,21 +2668,25 @@ function superadmin_alumnos_sin_telefono_diagnostico($request) {
     $sin_tel = array();
     foreach ($todas as $s) {
         $sub_id = intval($s['id'] ?? 0);
-        $uid = blokes_alumno_customer_id_de_sub($s);
+        $sub_obj = blokes_alumno_sub_obj($s);
+        $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
         $clave_persona = $uid ? ('u' . $uid) : ('s' . $sub_id);
         if (isset($vistos[$clave_persona])) continue;
         $vistos[$clave_persona] = true;
 
-        $tel = blokes_alumno_telefono_de_sub($s, $uid);
+        $tel = blokes_alumno_telefono_de_sub($s, $uid, $sub_obj);
         if ($tel !== '') continue;
-        $nombre = blokes_alumno_nombre_de_sub($s, $uid);
+        $nombre = blokes_alumno_nombre_de_sub($s, $uid, $sub_obj);
         if (trim($nombre) === '') continue;
         $sin_tel[] = array('subId' => $sub_id, 'userId' => $uid ?: null, 'nombre' => $nombre, 'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '', 'status' => $s['status'] ?? '');
     }
     if (!$sin_tel) return rest_ensure_response(array('success' => true, 'data' => array()));
 
+    // No se cambia la forma de "data" (sigue siendo la lista plana que cowork ya confirmó, 35
+    // filas) — el aviso, si lo hay, va como cabecera HTTP para no romper lo que ya está bien.
+    $excel_error = null;
     $tel_por_nombre_excel = array(); $pestana_por_nombre_excel = array();
-    foreach (blokes_sync_grupos_todas_las_filas() as $f) {
+    foreach (blokes_sync_grupos_todas_las_filas($excel_error) as $f) {
         if (!$f['telefono']) continue;
         $clave = blokes_sync_grupos_normalizar_nombre($f['nombre']);
         if ($clave === '') continue;
@@ -2668,7 +2701,9 @@ function superadmin_alumnos_sin_telefono_diagnostico($request) {
         return $s;
     }, $sin_tel);
 
-    return rest_ensure_response(array('success' => true, 'data' => $out));
+    $respuesta = rest_ensure_response(array('success' => true, 'data' => $out));
+    if ($excel_error) $respuesta->header('X-Blokes-Aviso-Excel', $excel_error);
+    return $respuesta;
 }
 
 // GET /progreso/v1/tele/diapositivas — público: solo las activas y dentro de su rango de
