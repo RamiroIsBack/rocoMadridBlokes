@@ -63,9 +63,9 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #34d399;
-  background: rgba(34, 197, 94, 0.16);
-  border: 1px solid rgba(34, 197, 94, 0.35);
+  color: var(--state-ok);
+  background: color-mix(in srgb, var(--state-ok) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-ok) 35%, transparent);
   border-radius: 3px;
   padding: 1px 6px;
   vertical-align: middle;
@@ -78,9 +78,9 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #fbbf24;
-  background: rgba(217, 119, 6, 0.18);
-  border: 1px solid rgba(217, 119, 6, 0.4);
+  color: var(--state-warn);
+  background: color-mix(in srgb, var(--state-warn) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-warn) 40%, transparent);
   border-radius: 3px;
   padding: 1px 6px;
   vertical-align: middle;

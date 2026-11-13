@@ -4,13 +4,15 @@ import './index.css'
 import App from './App'
 import { applyVerComo, installVerComoFetch } from './utils/verComo'
 import { installVisibilityRefresh } from './utils/visibilityRefresh'
+import { instalarTema } from './utils/theme'
 
 // eslint-disable-next-line no-undef
 console.log('Blokes build', __BUILD_TIME__)
 
-// Ramiro, 13/11 05:30: "quita también el modo claro/oscuro" — Blokes siempre en oscuro.
-// data-theme="dark" ya viene fijo desde index.html (sin esperar a JS, para que no haya
-// parpadeo claro al cargar); aquí no queda nada que instalar.
+// Ramiro, 13/11: 2 modos (claro/oscuro, sin automático). El <head> (index.html / plantilla
+// PHP) ya pone el `data-theme` correcto en el primer pintado para que no haya parpadeo; esto
+// solo asegura el meta theme-color y deja listo el evento de cambio para useTemaOscuro().
+instalarTema()
 
 if (window.blokesSiteData) {
   const r = window.blokesSiteData.userRole

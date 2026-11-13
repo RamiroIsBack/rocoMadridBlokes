@@ -109,12 +109,12 @@
 .idpicker__dupes {
   margin: 4px 0 8px;
   padding: 10px 12px;
-  background: rgba(245, 200, 66, 0.12);
+  background: color-mix(in srgb, var(--state-warn) 14%, transparent);
   border: 1px dashed #c8961e;
 }
 
 .idpicker__error {
-  color: #fca5a5;
+  color: var(--state-bad);
   font-size: 0.85rem;
   margin: 4px 0;
 }

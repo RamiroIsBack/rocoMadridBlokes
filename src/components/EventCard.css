@@ -400,18 +400,18 @@
    parches claros sueltos dentro de la card oscura. Mismo color de cada sala, en tonos para
    fondo oscuro (traslúcido + texto claro) en vez de otro color fijo. */
 .event-card__sala--entrada {
-    background-color: rgba(59, 130, 246, 0.18);
-    color: #93c5fd;
+    background-color: var(--sala-entrada-bg);
+    color: var(--sala-entrada-text);
 }
 
 .event-card__sala--grande {
-    background-color: rgba(217, 119, 6, 0.2);
-    color: #fbbf24;
+    background-color: var(--sala-grande-bg);
+    color: var(--sala-grande-text);
 }
 
 .event-card__sala--cueva {
-    background-color: rgba(124, 58, 237, 0.2);
-    color: #c4b5fd;
+    background-color: var(--sala-cueva-bg);
+    color: var(--sala-cueva-text);
 }
 
 /* Rating icons - left side of photo bottom */

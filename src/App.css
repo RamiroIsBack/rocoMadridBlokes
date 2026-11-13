@@ -160,6 +160,22 @@
   cursor: pointer;
 }
 
+/* Interruptor claro/oscuro (Ramiro, 13/11: 2 modos, un solo botón) — cabecera siempre oscura
+   fija en los dos modos, así que el botón usa su propia paleta fija, como el resto de botones
+   de aquí (.app-header__ver-como), no las variables del tema del contenido. */
+.app-header__tema-btn {
+  background: none;
+  border: 1px solid rgba(245, 200, 66, 0.4);
+  color: #f5c842;
+  font-size: 0.78rem;
+  line-height: 1;
+  padding: 3px 6px;
+  margin-top: 4px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+.app-header__tema-btn:hover { background: rgba(245, 200, 66, 0.12); }
+
 .app-ver-como-banner {
   background: #7c2d12;
   color: #fff;
@@ -791,9 +807,9 @@
 
 .filter-bar__sort-btn--active {
   border-color: var(--color-accent);
-  /* Ramiro, 13/11 05:30: fondo crema fijo (#fffbe6) con el texto ya en var(--color-text-primary)
-     (claro en oscuro) — contraste 1,1, invisible. Dorado traslúcido sobre el fondo oscuro de
-     siempre, en vez de otro color fijo. */
+  /* Ramiro, 13/11: fondo crema fijo (#fffbe6) con el texto ya en var(--color-text-primary) —
+     invisible en oscuro (1,1). Dorado traslúcido en vez de otro color fijo: funciona como
+     resalte en los dos modos, el texto sigue la variable. */
   background: rgba(245, 200, 66, 0.18);
   color: var(--color-text-primary);
   filter: grayscale(0);
@@ -1065,11 +1081,11 @@
    ============================================ */
 
 .error-message {
-  background-color: rgba(239, 68, 68, 0.16);
-  border: 1px solid rgba(239, 68, 68, 0.4);
+  background-color: color-mix(in srgb, var(--state-bad) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-bad) 40%, transparent);
   border-radius: var(--radius-md);
   padding: var(--spacing-md);
-  color: #fca5a5;
+  color: var(--state-bad);
   text-align: center;
   margin: var(--spacing-lg) 0;
 }

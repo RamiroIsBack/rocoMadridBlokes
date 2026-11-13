@@ -22,6 +22,7 @@ import CompePage from './pages/CompePage'
 import CompeDirectoPage from './pages/CompeDirectoPage'
 import InstalarPage from './pages/InstalarPage'
 import { setVerComo, clearVerComo } from './utils/verComo'
+import { getTema, setTema } from './utils/theme'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
 import { useProfile } from './hooks/useProfile'
@@ -266,6 +267,7 @@ export default function App() {
                       onClick={() => setLogoutOpen(true)}
                     >× Log out</button>
                   )}
+                  <TemaToggle />
                   {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
                   {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
                       EFECTIVO para que vean exactamente el mismo botón): su único "ver como"
@@ -336,6 +338,7 @@ export default function App() {
                   </svg>
                   Acceder
                 </a>
+                <TemaToggle />
                 <div className="app-header__links">
                   <div className="app-header__link-wrap">
                     <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
@@ -527,6 +530,28 @@ function VerComoSelector({ sd }) {
       <option value="profesor">Ver como: Profe</option>
       <option value="tablet">Ver como: Tablet</option>
     </select>
+  )
+}
+
+// Selector de tema — Ramiro, 13/11: 2 modos (claro/oscuro), sin el tercero "automático" que
+// sobraba. Un solo botón que cambia de uno al otro, con el icono y el `title` del modo actual
+// (cowork, 11/11 09:40: "mejor un solo botón que cambie de modo, con un title que diga el modo
+// actual" — pedido cuando aún eran 3 modos, pero sigue aplicando con 2).
+function TemaToggle() {
+  const [tema, setTemaState] = useState(getTema)
+  const cambiar = () => {
+    const siguiente = tema === 'dark' ? 'light' : 'dark'
+    setTema(siguiente)
+    setTemaState(siguiente)
+  }
+  return (
+    <button
+      type="button" className="app-header__tema-btn"
+      onClick={cambiar}
+      title={tema === 'dark' ? 'Modo oscuro — toca para claro' : 'Modo claro — toca para oscuro'}
+    >
+      {tema === 'dark' ? '🌙' : '☀️'}
+    </button>
   )
 }
 

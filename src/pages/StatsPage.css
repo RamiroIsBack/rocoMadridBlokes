@@ -51,9 +51,9 @@
 }
 
 .stats-page__error {
-    color: #fca5a5;
+    color: var(--state-bad);
     padding: 20px;
-    background: rgba(239, 68, 68, 0.16);
+    background: color-mix(in srgb, var(--state-bad) 16%, transparent);
     border-radius: 8px;
 }
 
@@ -528,9 +528,9 @@
     }
 
     .stats-modal__warning {
-        color: #fca5a5;
+        color: var(--state-bad);
         font-size: 0.875rem;
-        background-color: rgba(239, 68, 68, 0.16);
+        background-color: color-mix(in srgb, var(--state-bad) 16%, transparent);
         padding: 8px 12px;
         border-radius: 6px;
         margin-bottom: 16px;

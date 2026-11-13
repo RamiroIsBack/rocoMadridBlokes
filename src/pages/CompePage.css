@@ -119,8 +119,8 @@
 }
 .compe-bloque__guardar:disabled { opacity: 0.6; cursor: default; }
 
-.compe-ventana { font-size: 0.85rem; color: #93c5fd; background: rgba(59, 130, 246, 0.18); border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }
-.compe-ventana--cerrada { background: rgba(245, 200, 66, 0.18); color: var(--state-warn); }
+.compe-ventana { font-size: 0.85rem; color: var(--state-info); background: color-mix(in srgb, var(--state-info) 16%, transparent); border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }
+.compe-ventana--cerrada { background: color-mix(in srgb, var(--state-warn) 16%, transparent); color: var(--state-warn); }
 
 .compe-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
 .compe-tab {

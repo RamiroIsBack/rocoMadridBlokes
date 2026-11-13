@@ -123,9 +123,9 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #fbbf24;
-  background: rgba(217, 119, 6, 0.2);
-  border: 1px solid rgba(217, 119, 6, 0.4);
+  color: var(--state-warn);
+  background: color-mix(in srgb, var(--state-warn) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-warn) 40%, transparent);
   border-radius: 3px;
   padding: 1px 6px;
 }
@@ -275,8 +275,8 @@
 
 .org__rule { padding: 8px 10px; font-size: 0.85rem; color: var(--color-text-primary); }
 .org__rule--info { background: var(--color-surface); border: 1px solid var(--color-border); }
-.org__rule--warning { background: rgba(200, 150, 30, 0.16); border: 1px solid #c8961e; color: #fbbf24; }
-.org__rule--validation { background: rgba(239, 68, 68, 0.16); border: 1px solid #ef4444; color: #fca5a5; }
+.org__rule--warning { background: color-mix(in srgb, var(--state-warn) 16%, transparent); border: 1px solid #c8961e; color: var(--state-warn); }
+.org__rule--validation { background: color-mix(in srgb, var(--state-bad) 16%, transparent); border: 1px solid var(--state-bad); color: var(--state-bad); }
 
 /* ── Semana: acciones + gestor de personas ── */
 .org__semana-actions {

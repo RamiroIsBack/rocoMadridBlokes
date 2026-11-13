@@ -1,16 +1,29 @@
 <!DOCTYPE html>
-<html lang="es" data-theme="dark">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Blokes — Problemas de búlder en Rocoteca Madrid" />
     <title>Blokes — Rocoteca Madrid</title>
     <link rel="manifest" href="/blokes/manifest.webmanifest" />
-    <meta name="theme-color" content="#1f1f1f" />
+    <meta name="theme-color" content="#1a1714" />
+    <!-- Ramiro, 13/11: 2 modos (claro/oscuro, sin automático) — se fija el data-theme aquí,
+         antes del CSS, para que no haya parpadeo claro al cargar en quien tiene oscuro
+         guardado (o no ha elegido nunca: por defecto oscuro, igual que hasta ahora). -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('blokes_tema')
+          document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark')
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark')
+        }
+      })()
+    </script>
     <link rel="icon" type="image/png" sizes="32x32" href="/blokes/icons/favicon-32.png" />
     <link rel="apple-touch-icon" href="/blokes/icons/apple-touch-icon.png" />
-    <script type="module" crossorigin src="/blokes/assets/index-e33a4169.js"></script>
-    <link rel="stylesheet" href="/blokes/assets/index-67e18533.css">
+    <script type="module" crossorigin src="/blokes/assets/index-c689de2d.js"></script>
+    <link rel="stylesheet" href="/blokes/assets/index-223c7d67.css">
   </head>
   <body>
     <div id="root"></div>

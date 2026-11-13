@@ -296,11 +296,26 @@ add_action('template_redirect', function() {
 
     header('Content-Type: text/html; charset=UTF-8');
     ?><!DOCTYPE html>
-<html <?php language_attributes(); ?> data-theme="dark">
+<html <?php language_attributes(); ?>>
 <head>
 <meta charset="<?php bloginfo('charset'); ?>">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
+<?php /* Ramiro, 13/11: 2 modos (claro/oscuro, sin automático) — se fija el data-theme aquí,
+         antes del CSS, para que no haya parpadeo claro al cargar en quien tiene oscuro
+         guardado (o no ha elegido nunca: por defecto oscuro, igual que hasta ahora). Este
+         <html> es el que de verdad sirve /blokes y /club (no dist/index.html), así que
+         necesita el mismo script que index.html. */ ?>
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem('blokes_tema')
+    document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark')
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'dark')
+  }
+})()
+</script>
 <?php if ($css_url): ?>
 <link rel="stylesheet" href="<?php echo esc_url($css_url); ?>">
 <?php endif; ?>

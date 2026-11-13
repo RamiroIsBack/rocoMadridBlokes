@@ -34,21 +34,21 @@
 .training-panel__close:hover { color: var(--color-text-primary); }
 
 .training-panel__link-box {
-  background: rgba(217, 119, 6, 0.16);
-  border: 1px solid rgba(217, 119, 6, 0.4);
+  background: color-mix(in srgb, var(--state-warn) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-warn) 40%, transparent);
   border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 16px;
 }
 .training-panel__link-hint {
   font-size: 0.8rem;
-  color: #fbbf24;
+  color: var(--state-warn);
   margin: 0 0 8px;
 }
 .training-panel__delete-btn {
   background: none;
   border: none;
-  color: #f87171;
+  color: var(--state-bad);
   font-size: 0.75rem;
   font-weight: 700;
   text-decoration: underline;

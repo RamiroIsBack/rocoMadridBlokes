@@ -49,6 +49,26 @@
   --color-entrenamiento: #27ae60;
   --color-coordinacion: #e67e22;
 
+  /* Chips de color de presa y de sala (EventCard) — fondo translúcido + texto del mismo tono,
+     con su propia pareja para cada modo (el texto claro del modo oscuro no se lee sobre fondo
+     claro, y al revés). Valores de claro oscurecidos con el mismo criterio que --state-*. */
+  --chip-azules-bg: rgba(37, 99, 235, 0.14);           --chip-azules-text: #1d4ed8;
+  --chip-blancas-bg: rgba(107, 114, 128, 0.12);        --chip-blancas-text: #4b5563;
+  --chip-negras-bg: rgba(31, 41, 55, 0.12);            --chip-negras-text: #1f2937;
+  --chip-rojas-bg: rgba(220, 38, 38, 0.14);            --chip-rojas-text: #b91c1c;
+  --chip-amarillas-bg: rgba(217, 119, 6, 0.16);        --chip-amarillas-text: #92400e;
+  --chip-verdes-bg: rgba(5, 150, 105, 0.14);           --chip-verdes-text: #047857;
+  --chip-moradas-bg: rgba(109, 40, 217, 0.14);         --chip-moradas-text: #6d28d9;
+  --chip-rosas-bg: rgba(219, 39, 119, 0.14);           --chip-rosas-text: #9d174d;
+  --chip-grises-bg: rgba(107, 114, 128, 0.16);         --chip-grises-text: #374151;
+  --chip-turquesa-bg: rgba(13, 148, 136, 0.14);        --chip-turquesa-text: #0f766e;
+  --chip-amarillo-fluor-bg: rgba(101, 163, 13, 0.16);  --chip-amarillo-fluor-text: #3f6212;
+  --chip-naranja-bg: rgba(194, 65, 12, 0.14);          --chip-naranja-text: #9a3412;
+  --chip-color-raro-bg: rgba(107, 114, 128, 0.1);      --chip-color-raro-text: #57534e;
+  --sala-entrada-bg: rgba(37, 99, 235, 0.14);          --sala-entrada-text: #1d4ed8;
+  --sala-grande-bg: rgba(217, 119, 6, 0.16);           --sala-grande-text: #92400e;
+  --sala-cueva-bg: rgba(109, 40, 217, 0.14);           --sala-cueva-text: #6d28d9;
+
   /* Spacing */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
@@ -76,14 +96,19 @@
 }
 
 /* ============================================
-   MODO OSCURO (Ramiro, 11/11 05:08; "quita el modo claro", 13/11 05:30)
-   Blokes siempre en oscuro: data-theme="dark" fijo en <html> desde index.html (sin esperar a
-   JS, para que no haya parpadeo claro al cargar) — ya no hay selector claro/oscuro/auto ni
-   src/utils/theme.js. Las reglas [data-theme="light"] / prefers-color-scheme:light de aquí
-   abajo se quedan sin usar (Ramiro: "se pueden borrar después", no urgente) — con data-theme
-   siempre en "dark" nunca llegan a aplicarse. Los --state-* vuelven a los tonos claros
-   originales — son justo los "pensados para fondo oscuro" que NOTAS_PARA_CODE_contraste.md
-   tuvo que oscurecer para el modo claro; aquí sobre fondo oscuro ya cumplen contraste tal cual.
+   MODO OSCURO (Ramiro, 11/11 05:08 → 13/11 05:30 "quita el modo claro" → 13/11 06:55 "quiero
+   solo 2 modos, dark and light, el automático era el que sobraba")
+   2 modos: claro (variables de :root arriba) y oscuro (override de aquí abajo). Sin tercer
+   modo "automático": el usuario elige explícitamente con el botón ☀️/🌙 de la cabecera
+   (src/utils/theme.js, App.jsx), se guarda en localStorage de ese dispositivo y se fija en
+   <html data-theme> desde el primer pintado (index.html / la plantilla PHP del shell), para
+   que no haya parpadeo. Quien nunca ha elegido se queda en oscuro por defecto.
+   La regla `@media (prefers-color-scheme: dark)` de aquí abajo es solo un colchón para el
+   primerísimo instante de carga en quien tenga JS desactivado o antes de que el script del
+   <head> corra — en la práctica siempre gana `[data-theme]`, puesto explícitamente por encima
+   según lo guardado. Los --state-* vuelven aquí a los tonos claros originales — son justo los
+   "pensados para fondo oscuro" que NOTAS_PARA_CODE_contraste.md tuvo que oscurecer para el modo
+   claro; aquí sobre fondo oscuro ya cumplen contraste tal cual.
    La tele (/compe/directo) se queda oscura igual que siempre, pintada entera con estilos en
    línea propios, sin depender de estas variables.
    ============================================ */
@@ -104,6 +129,22 @@
     --state-purple:  #a78bfa;
     --state-bad:     #f87171;
     --state-orange:  #fb923c;
+    --chip-azules-bg: rgba(59, 130, 246, 0.16);           --chip-azules-text: #93c5fd;
+    --chip-blancas-bg: rgba(255, 255, 255, 0.08);         --chip-blancas-text: #e5e7eb;
+    --chip-negras-bg: rgba(255, 255, 255, 0.06);          --chip-negras-text: #d1d5db;
+    --chip-rojas-bg: rgba(239, 68, 68, 0.18);             --chip-rojas-text: #fca5a5;
+    --chip-amarillas-bg: rgba(217, 119, 6, 0.2);          --chip-amarillas-text: #fbbf24;
+    --chip-verdes-bg: rgba(34, 197, 94, 0.18);            --chip-verdes-text: #86efac;
+    --chip-moradas-bg: rgba(124, 58, 237, 0.2);           --chip-moradas-text: #c4b5fd;
+    --chip-rosas-bg: rgba(219, 39, 119, 0.2);             --chip-rosas-text: #f9a8d4;
+    --chip-grises-bg: rgba(156, 163, 175, 0.18);          --chip-grises-text: #d1d5db;
+    --chip-turquesa-bg: rgba(13, 148, 136, 0.2);          --chip-turquesa-text: #5eead4;
+    --chip-amarillo-fluor-bg: rgba(101, 163, 13, 0.2);    --chip-amarillo-fluor-text: #bef264;
+    --chip-naranja-bg: rgba(234, 88, 12, 0.2);            --chip-naranja-text: #fdba74;
+    --chip-color-raro-bg: rgba(156, 163, 175, 0.14);      --chip-color-raro-text: #9ca3af;
+    --sala-entrada-bg: rgba(59, 130, 246, 0.18);          --sala-entrada-text: #93c5fd;
+    --sala-grande-bg: rgba(217, 119, 6, 0.2);             --sala-grande-text: #fbbf24;
+    --sala-cueva-bg: rgba(124, 58, 237, 0.2);             --sala-cueva-text: #c4b5fd;
     --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--color-border);
     --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 0 1px #5a543d;
   }
@@ -124,6 +165,22 @@
   --state-purple:  #a78bfa;
   --state-bad:     #f87171;
   --state-orange:  #fb923c;
+  --chip-azules-bg: rgba(59, 130, 246, 0.16);           --chip-azules-text: #93c5fd;
+  --chip-blancas-bg: rgba(255, 255, 255, 0.08);         --chip-blancas-text: #e5e7eb;
+  --chip-negras-bg: rgba(255, 255, 255, 0.06);          --chip-negras-text: #d1d5db;
+  --chip-rojas-bg: rgba(239, 68, 68, 0.18);             --chip-rojas-text: #fca5a5;
+  --chip-amarillas-bg: rgba(217, 119, 6, 0.2);          --chip-amarillas-text: #fbbf24;
+  --chip-verdes-bg: rgba(34, 197, 94, 0.18);            --chip-verdes-text: #86efac;
+  --chip-moradas-bg: rgba(124, 58, 237, 0.2);           --chip-moradas-text: #c4b5fd;
+  --chip-rosas-bg: rgba(219, 39, 119, 0.2);             --chip-rosas-text: #f9a8d4;
+  --chip-grises-bg: rgba(156, 163, 175, 0.18);          --chip-grises-text: #d1d5db;
+  --chip-turquesa-bg: rgba(13, 148, 136, 0.2);          --chip-turquesa-text: #5eead4;
+  --chip-amarillo-fluor-bg: rgba(101, 163, 13, 0.2);    --chip-amarillo-fluor-text: #bef264;
+  --chip-naranja-bg: rgba(234, 88, 12, 0.2);            --chip-naranja-text: #fdba74;
+  --chip-color-raro-bg: rgba(156, 163, 175, 0.14);      --chip-color-raro-text: #9ca3af;
+  --sala-entrada-bg: rgba(59, 130, 246, 0.18);          --sala-entrada-text: #93c5fd;
+  --sala-grande-bg: rgba(217, 119, 6, 0.2);             --sala-grande-text: #fbbf24;
+  --sala-cueva-bg: rgba(124, 58, 237, 0.2);             --sala-cueva-text: #c4b5fd;
   --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--color-border);
   --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 0 1px #5a543d;
 }
