@@ -90,7 +90,7 @@
 .sv-filter-btn {
   padding: 5px 14px;
   background: none;
-  border: 1px solid #3a3020;
+  border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
@@ -100,7 +100,7 @@
   letter-spacing: 0.03em;
   transition: background 0.15s, color 0.15s;
 }
-.sv-filter-btn:hover { color: #ccc; }
+.sv-filter-btn:hover { color: var(--color-text-primary); }
 .sv-filter-btn--active { background: #1a2e1a; color: #34d399; border-color: #34d399; }
 
 /* ── Period selector ── */
@@ -108,7 +108,7 @@
 .sv-period__btn {
   padding: 4px 12px;
   background: none;
-  border: 1px solid #3a3020;
+  border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
   font-size: 0.72rem;
   font-weight: 600;
@@ -117,7 +117,7 @@
   font-family: inherit;
   transition: background 0.15s, color 0.15s;
 }
-.sv-period__btn:hover { color: #ccc; border-color: #555; }
+.sv-period__btn:hover { color: var(--color-text-primary); border-color: var(--color-text-secondary); }
 .sv-period__btn--active { background: #2a2015; color: #f5c842; border-color: #f5c842; }
 
 /* Estos 3 controles se reutilizan tanto en fondo claro (Grupos, Campañas, ExcelMuerte — la
@@ -139,10 +139,14 @@
 .sv-tab-panel:not(.sv-to-root) .sv-tab-mini.is-active {
   background: var(--color-accent-hover);
   border-color: var(--color-accent-hover);
-  color: #fff;
+  /* var(--color-bg), no blanco fijo: --color-accent-hover es marrón oscuro en claro (blanco
+     encima iba bien) pero dorado brillante en oscuro, donde el blanco se volvía casi invisible
+     (1,6:1) — var(--color-bg) es claro en claro y oscuro en oscuro, justo lo que hace falta
+     encima de un fondo que también cambia de oscuro a claro entre los dos modos. */
+  color: var(--color-bg);
 }
 .sv-tab-mini__count { color: var(--color-text-secondary); font-weight: 400; }
-.sv-tab-mini.is-active .sv-tab-mini__count { color: rgba(255,255,255,0.9); }
+.sv-tab-mini.is-active .sv-tab-mini__count { color: var(--color-bg); opacity: 0.85; }
 .sv-tab-panel:not(.sv-to-root) .sv-filter-btn    { color: var(--color-text-secondary); }
 .sv-tab-panel:not(.sv-to-root) .sv-filter-btn:hover { color: var(--color-text-primary); }
 .sv-tab-panel:not(.sv-to-root) .sv-period__btn   { color: var(--color-text-secondary); }
@@ -568,7 +572,7 @@
 }
 .sv-tests-cancel {
   background: none;
-  border: 1px solid #444;
+  border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
   border-radius: 4px;
   font-size: 0.78rem;
@@ -576,7 +580,7 @@
   cursor: pointer;
   font-family: inherit;
 }
-.sv-tests-cancel:hover { border-color: #666; color: #aaa; }
+.sv-tests-cancel:hover { border-color: var(--color-text-secondary); color: var(--color-text-primary); }
 
 /* ── Fichaje embed ── */
 .sv-embed-wrap {
@@ -813,7 +817,7 @@
   text-align: center;
   font-size: 0.9rem;
   font-weight: 700;
-  color: #f0ece0;
+  color: var(--color-text-primary);
 }
 
 .sv-ot-form__fields {
@@ -837,10 +841,10 @@
 .sv-ot-input--reason { width: 100%; box-sizing: border-box; }
 .sv-tests-save:disabled { opacity: 0.5; cursor: default; }
 
-.sv-ot-table td { color: #ccc; }
+.sv-ot-table td { color: var(--color-text-primary); }
 .sv-ot-num    { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sv-ot-nowrap { white-space: nowrap; }
-.sv-ot-reason { min-width: 180px; color: #aaa !important; }
+.sv-ot-reason { min-width: 180px; color: var(--color-text-secondary) !important; }
 .sv-ot-row--editing td { background: rgba(52,211,153,0.07); }
 
 .sv-ot-dot {
@@ -867,8 +871,8 @@
 
 .sv-ot-action {
   background: none;
-  border: 1px solid #333;
-  color: #999;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
   border-radius: 4px;
   font-size: 0.72rem;
   padding: 3px 9px;
@@ -877,13 +881,13 @@
   font-family: inherit;
   white-space: nowrap;
 }
-.sv-ot-action:hover:not(:disabled) { border-color: #34d399; color: #34d399; }
+.sv-ot-action:hover:not(:disabled) { border-color: var(--state-ok); color: var(--state-ok); }
 .sv-ot-action:disabled { opacity: 0.4; cursor: default; }
 
 .sv-ot-total td {
-  border-top: 2px solid #2a2015;
+  border-top: 2px solid var(--color-border);
   font-weight: 700;
-  color: #f0ece0;
+  color: var(--color-text-primary);
   padding-top: 8px;
 }
 .sv-ot-footnote { margin: 10px 0 0; }
@@ -914,16 +918,16 @@
   gap: 4px;
   padding: 4px 6px;
   font-size: 0.8rem;
-  color: #ccc;
+  color: var(--color-text-primary);
   border-radius: 3px;
 }
-.sv-ot-person:hover { background: rgba(255,255,255,0.02); }
+.sv-ot-person:hover { background: var(--color-border); }
 .sv-ot-person__name { flex: 1; min-width: 100px; }
 .sv-ot-person--inactive .sv-ot-person__name { color: var(--color-text-secondary); text-decoration: line-through; }
 .sv-ot-person__tag {
   font-size: 0.65rem;
   color: var(--color-text-secondary);
-  border: 1px solid #333;
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   padding: 1px 7px;
 }

@@ -133,6 +133,45 @@
     font-size: 0.95rem;
 }
 
+/* "Subir imágenes a WordPress" / "Limpiar todo" — no tenían ninguna regla propia (fallback al
+   botón nativo del navegador: fondo claro fijo con texto casi negro, invisible en oscuro). */
+.image-uploader__actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.image-uploader__upload-btn,
+.image-uploader__clear-btn {
+    flex: 1;
+    padding: 12px 16px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.image-uploader__upload-btn {
+    background-color: #667eea;
+    border: none;
+    color: white;
+}
+.image-uploader__upload-btn:hover:not(:disabled) { background-color: #5a67d8; }
+
+.image-uploader__clear-btn {
+    background-color: var(--color-bg);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-primary);
+}
+.image-uploader__clear-btn:hover:not(:disabled) { background-color: var(--color-border); }
+
+.image-uploader__upload-btn:disabled,
+.image-uploader__clear-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 .image-uploader__info {
     font-size: 0.85rem;
     color: var(--color-text-secondary);

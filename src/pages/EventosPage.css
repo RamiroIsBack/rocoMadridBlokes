@@ -1,7 +1,7 @@
 /* ── Eventos ── */
 .ev-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: -12px 0 20px; }
 .ev-cap { text-transform: capitalize; }
-.ev-warn { color: #f97316 !important; font-weight: 700; }
+.ev-warn { color: var(--state-orange) !important; font-weight: 700; }
 
 /* Formulario */
 .ev-form { margin: 0 0 24px; --card-color: #a78bfa; }
@@ -16,17 +16,17 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #666;
+  color: var(--color-text-secondary);
 }
 .ev-field--wide { grid-column: 1 / -1; }
-.ev-input { width: 100%; background: #111; border: 1px solid #333; border-radius: 4px; color: #ddd; padding: 5px 7px; font-size: 0.8rem; font-family: inherit; box-sizing: border-box; }
-.ev-input:focus { outline: none; border-color: #f5c842; }
+.ev-input { width: 100%; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 4px; color: var(--color-text-primary); padding: 5px 7px; font-size: 0.8rem; font-family: inherit; box-sizing: border-box; }
+.ev-input:focus { outline: none; border-color: var(--color-accent-hover); }
 .ev-input:disabled { opacity: 0.4; }
-.ev-inline { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: #777; }
+.ev-inline { display: flex; align-items: center; gap: 6px; font-size: 0.75rem; color: var(--color-text-secondary); }
 .ev-inline .ev-input { min-width: 0; }
-.ev-field input[type="checkbox"] { width: 18px; height: 18px; accent-color: #34d399; }
-.ev-form__sum { margin: 14px 0 0; font-size: 0.8rem; color: #aaa; }
-.ev-form__sum strong { color: #f0ece0; font-variant-numeric: tabular-nums; }
+.ev-field input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--state-ok); }
+.ev-form__sum { margin: 14px 0 0; font-size: 0.8rem; color: var(--color-text-secondary); }
+.ev-form__sum strong { color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
 
 /* Badges */
 .ev-badge {
@@ -41,17 +41,17 @@
 }
 .ev-badge--btn { cursor: pointer; }
 .ev-badge--btn:hover { filter: brightness(1.25); }
-.ev-badge--ok   { background: #14301f; color: #34d399; border-color: #1f4d33; }
-.ev-badge--warn { background: #2e1a0d; color: #f97316; border-color: #5a3015; }
-.ev-status--solicitud  { background: #2a2015; color: #f5c842; border-color: #4a3a15; }
-.ev-status--confirmada { background: #221a35; color: #a78bfa; border-color: #3a2d5c; }
-.ev-status--celebrada  { background: #14301f; color: #34d399; border-color: #1f4d33; }
-.ev-status--cancelada  { background: #1a1a1a; color: #777;    border-color: #333; }
+.ev-badge--ok   { background: color-mix(in srgb, var(--state-ok) 16%, transparent); color: var(--state-ok); border-color: color-mix(in srgb, var(--state-ok) 40%, transparent); }
+.ev-badge--warn { background: color-mix(in srgb, var(--state-orange) 16%, transparent); color: var(--state-orange); border-color: color-mix(in srgb, var(--state-orange) 40%, transparent); }
+.ev-status--solicitud  { background: color-mix(in srgb, var(--state-warn) 16%, transparent); color: var(--state-warn); border-color: color-mix(in srgb, var(--state-warn) 40%, transparent); }
+.ev-status--confirmada { background: color-mix(in srgb, var(--state-purple) 16%, transparent); color: var(--state-purple); border-color: color-mix(in srgb, var(--state-purple) 40%, transparent); }
+.ev-status--celebrada  { background: color-mix(in srgb, var(--state-ok) 16%, transparent); color: var(--state-ok); border-color: color-mix(in srgb, var(--state-ok) 40%, transparent); }
+.ev-status--cancelada  { background: var(--color-bg); color: var(--color-text-secondary); border-color: var(--color-border); }
 
 .ev-row--cancel td { opacity: 0.45; }
-.ev-name { font-weight: 600; color: #f0ece0; }
-.ev-phone { display: block; font-size: 0.72rem; color: #60a5fa; text-decoration: none; }
-.ev-search { width: 150px; border-color: #333; background: #111; }
+.ev-name { font-weight: 600; color: var(--color-text-primary); }
+.ev-phone { display: block; font-size: 0.72rem; color: var(--state-info); text-decoration: none; }
+.ev-search { width: 150px; border-color: var(--color-border); background: var(--color-surface); }
 
 /* Chips de reserva */
 .ev-chip {
@@ -62,39 +62,39 @@
   margin-top: 4px;
   padding: 3px 6px;
   border: none;
-  border-left: 3px solid var(--type-color, #999);
+  border-left: 3px solid var(--type-color, var(--color-text-secondary));
   border-radius: 2px;
-  background: rgba(255,255,255,0.05);
-  color: #ddd;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
   font-size: 0.72rem;
   font-family: inherit;
   text-align: left;
   cursor: pointer;
 }
-.ev-chip:hover { background: rgba(255,255,255,0.1); }
+.ev-chip:hover { background: var(--color-border); }
 .ev-chip--tentative { border-left-style: dashed; opacity: 0.8; }
-.ev-chip__time { color: #888; font-variant-numeric: tabular-nums; }
+.ev-chip__time { color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .ev-chip__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ev-chip__warn { color: #f97316; font-weight: 800; }
+.ev-chip__warn { color: var(--state-orange); font-weight: 800; }
 
 .ev-free {
   display: block;
   width: 100%;
   margin-top: 4px;
   padding: 2px 6px;
-  border: 1px dashed #2f4d3a;
+  border: 1px dashed color-mix(in srgb, var(--state-ok) 40%, transparent);
   border-radius: 2px;
   background: none;
-  color: #4d8a64;
+  color: var(--state-ok);
   font-size: 0.68rem;
   font-family: inherit;
   text-align: left;
   cursor: pointer;
 }
-.ev-free:hover { color: #34d399; border-color: #34d399; }
+.ev-free:hover { color: var(--state-ok); border-color: var(--state-ok); }
 
 /* Semana */
-.ev-week__meta { margin: -8px 0 12px; font-size: 0.78rem; color: #888; }
+.ev-week__meta { margin: -8px 0 12px; font-size: 0.78rem; color: var(--color-text-secondary); }
 .ev-week {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -103,12 +103,12 @@
 .ev-week__day {
   min-height: 90px;
   padding: 6px;
-  border: 1px solid #1f1b12;
-  background: rgba(255,255,255,0.015);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
 }
-.ev-week__day--weekend { background: rgba(167,139,250,0.04); }
-.ev-week__day--today { border-color: #a78bfa; }
-.ev-week__date { font-size: 0.68rem; font-weight: 700; color: #888; text-transform: capitalize; }
+.ev-week__day--weekend { background: color-mix(in srgb, var(--state-purple) 6%, var(--color-surface)); }
+.ev-week__day--today { border-color: var(--state-purple); }
+.ev-week__date { font-size: 0.68rem; font-weight: 700; color: var(--color-text-secondary); text-transform: capitalize; }
 @media (max-width: 720px) {
   /* En móvil la semana ya es 1 columna (como una agenda) — aquí sí es seguro subir la etiqueta
      del día sin romper nada (Ramiro, 09/11 08:30: 10.9 px). Los chips del MES se dejan para el
@@ -127,24 +127,24 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #666;
+  color: var(--color-text-secondary);
   text-align: center;
   padding-bottom: 4px;
 }
 .ev-month__cell {
   min-height: 84px;
   padding: 4px;
-  border: 1px solid #1f1b12;
-  background: rgba(255,255,255,0.015);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
 }
-.ev-month__cell--weekend { background: rgba(167,139,250,0.04); }
+.ev-month__cell--weekend { background: color-mix(in srgb, var(--state-purple) 6%, var(--color-surface)); }
 .ev-month__cell--out { opacity: 0.35; }
-.ev-month__cell--today { border-color: #a78bfa; }
-.ev-month__num { font-size: 0.72rem; font-weight: 700; color: #aaa; }
+.ev-month__cell--today { border-color: var(--state-purple); }
+.ev-month__num { font-size: 0.72rem; font-weight: 700; color: var(--color-text-secondary); }
 
-.ev-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 0.7rem; color: #888; }
+.ev-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 0.7rem; color: var(--color-text-secondary); }
 .ev-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
-.ev-legend__tentative { border: 1px dashed #888; background: none !important; }
+.ev-legend__tentative { border: 1px dashed var(--color-text-secondary); background: none !important; }
 
 @media (max-width: 720px) {
   .ev-week { grid-template-columns: 1fr; }
@@ -162,6 +162,6 @@
 
 
 /* Bloquear huecos en la web (SSA) */
-.ev-ssa-switch { display: inline-flex; align-items: center; gap: 8px; margin: 4px 0 8px; font-size: 0.85rem; font-weight: 600; color: #ddd; cursor: pointer; }
-.ev-ssa-switch input { width: 18px; height: 18px; accent-color: #34d399; }
-.ev-ssa-sub { margin: 16px 0 4px; font-size: 0.8rem; font-weight: 700; color: #f0ece0; }
+.ev-ssa-switch { display: inline-flex; align-items: center; gap: 8px; margin: 4px 0 8px; font-size: 0.85rem; font-weight: 600; color: var(--color-text-primary); cursor: pointer; }
+.ev-ssa-switch input { width: 18px; height: 18px; accent-color: var(--state-ok); }
+.ev-ssa-sub { margin: 16px 0 4px; font-size: 0.8rem; font-weight: 700; color: var(--color-text-primary); }

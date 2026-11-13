@@ -12,9 +12,9 @@ export default function TimeOffPage() {
 
   if (!url) {
     return (
-      <div style={{ maxWidth: 480, margin: '80px auto', textAlign: 'center', color: '#555' }}>
+      <div style={{ maxWidth: 480, margin: '80px auto', textAlign: 'center', color: 'var(--color-text-secondary)' }}>
         <div style={{ fontSize: '2rem', marginBottom: 12 }}>🌴</div>
-        <p style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f0ece0', marginBottom: 8 }}>Time Off</p>
+        <p style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-text-primary)', marginBottom: 8 }}>Time Off</p>
         <p style={{ fontSize: '0.82rem' }}>Próximamente</p>
       </div>
     )

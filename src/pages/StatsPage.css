@@ -91,11 +91,11 @@
     gap: 1rem;
     margin-top: 0.5rem;
     font-size: 0.85rem;
-    color: #666;
+    color: var(--color-text-secondary);
 }
 
 .stats-summary__intro {
-    color: #10b981;
+    color: var(--state-ok);
     font-weight: 600;
 }
 
@@ -136,7 +136,7 @@
 .stats-summary__bar-value {
     font-size: 0.75rem;
     font-weight: 600;
-    color: #333;
+    color: var(--color-text-primary);
     margin-bottom: 0.25rem;
 }
 
@@ -154,7 +154,7 @@
 
 .stats-summary__bar-label {
     font-size: 0.7rem;
-    color: #666;
+    color: var(--color-text-secondary);
     margin-top: 0.25rem;
     font-weight: 600;
 }
@@ -465,6 +465,7 @@
     .stats-table__delete-btn {
         background: none;
         border: none;
+        color: var(--color-text-primary);
         cursor: pointer;
         font-size: 1.2rem;
         padding: 4px 8px;
@@ -480,6 +481,7 @@
     .stats-table__edit-btn {
         background: none;
         border: none;
+        color: var(--color-text-primary);
         cursor: pointer;
         font-size: 1.2rem;
         padding: 4px 8px;
@@ -743,7 +745,7 @@
 }
 
 .stats-table__preview-btn:hover {
-    color: #f5c842;
+    color: var(--color-accent-hover);
 }
 
 .stats-table__date {

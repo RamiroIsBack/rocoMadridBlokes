@@ -100,13 +100,17 @@
     opacity: 1;
 }
 
+/* Flotan sobre la foto (no sobre el fondo de la página) — círculo oscuro traslúcido + icono
+   claro, igual que .lightbox__nav/.lightbox__close de aquí mismo. Antes había una SEGUNDA
+   definición distinta (clara, con icono #333) duplicada en App.css: cuál ganaba dependía del
+   orden de import, por eso se veía distinto según la pantalla — unificado en una sola, aquí. */
 .gallery__btn {
     width: 36px;
     height: 36px;
     border: none;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.9);
-    color: #333;
+    background: rgba(0, 0, 0, 0.5);
+    color: #fff;
     font-size: 20px;
     cursor: pointer;
     display: flex;
@@ -116,12 +120,12 @@
 }
 
 .gallery__btn:hover {
-    background: white;
+    background: rgba(0, 0, 0, 0.8);
     transform: scale(1.1);
 }
 
 .gallery__counter {
-    color: white;
+    color: #fff;
     font-size: 14px;
     background: rgba(0, 0, 0, 0.6);
     padding: 4px 12px;

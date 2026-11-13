@@ -100,7 +100,9 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #666;
+  /* #666 era casi ilegible sobre el fondo oscuro fijo de esta caja (.cal-detail, #100e09) —
+     independiente del tema de la página, esta caja siempre es oscura. */
+  color: #9a9488;
 }
 .cal-detail__row > p { margin: 3px 0 0; font-size: 0.82rem; color: #ddd; white-space: pre-line; }
 

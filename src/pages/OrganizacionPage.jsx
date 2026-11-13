@@ -193,7 +193,7 @@ export default function OrganizacionPage() {
           ) : (
             <>
               <span className="org__hint">¿Quién eres? (solo para firmar lo que añadas o cambies)</span>
-              <select value="" onChange={e => { if (e.target.value) chooseWorker(Number(e.target.value)) }}>
+              <select className="org__whoami-select" value="" onChange={e => { if (e.target.value) chooseWorker(Number(e.target.value)) }}>
                 <option value="">— elige —</option>
                 {workers.map(w => <option key={w.id} value={w.id}>{w.name}{w.eventual ? ' (solo compe)' : ''}</option>)}
               </select>

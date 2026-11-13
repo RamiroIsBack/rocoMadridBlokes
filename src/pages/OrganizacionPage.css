@@ -59,6 +59,17 @@
   margin-bottom: 16px;
 }
 .org__who-name { font-weight: 700; font-size: 1.1rem; color: var(--color-text-primary); }
+/* "¿Quién eres? — elige —" no tenía clase ni regla propia: fallback al <select> nativo del
+   navegador (fondo blanco fijo), invisible/feo en oscuro. */
+.org__whoami-select {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
 .org__link-btn {
   background: none;
   border: none;

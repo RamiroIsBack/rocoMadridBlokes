@@ -36,6 +36,7 @@ const KPI_COLOR_CLARO = {
   '#f97316': '#c2410c',
   '#a78bfa': '#6d28d9',
   '#888':    '#5e5650',
+  '#fb7185': '#be123c',
 }
 function kpiColorTema(hex, oscuro) {
   return oscuro ? hex : (KPI_COLOR_CLARO[hex] || hex)
@@ -645,7 +646,7 @@ function ClassProfitabilitySection() {
                 return [
                   <tr key={`r${i}`} className={benefit < 0 ? 'sa-profit-row--loss' : ''}>
                     <td className="sa-profit__label">{label}</td>
-                    <td className="sa-profit__prof" style={{ color: PROF_COLOR[prof] }}>{prof}</td>
+                    <td className="sa-profit__prof" style={{ color: kpiColorTema(PROF_COLOR[prof], oscuro) }}>{prof}</td>
                     <td className="sa-profit__num">{ea}</td>
                     <td className="sa-profit__num">{fmtEur(revCls)}</td>
                     <td className="sa-profit__num">{fmtEur(costCls)}</td>

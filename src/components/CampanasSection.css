@@ -1,14 +1,13 @@
 .cmp-section { margin-top: 10px; }
-.cmp-divider { height: 1px; background: #2a2015; margin: 16px 0; }
+.cmp-divider { height: 1px; background: var(--color-border); margin: 16px 0; }
 
-/* Campañas vive en el fondo claro de la página: los colores de abajo estaban pensados para
-   fondo oscuro (1,05 a 2,46:1 medidos, NOTAS_PARA_CODE_contraste.md). Recoloreado con los
-   tokens de :root (index.css) — igual aspecto, contraste real. */
+/* Campañas vive en el fondo de la página (sigue el tema, claro u oscuro) — todo con las
+   variables de abajo, nunca un color fijo (NOTAS_PARA_CODE_contraste.md). */
 .cmp-tabs { display: flex; gap: 4px; margin-bottom: 14px; }
 .cmp-tab {
   padding: 6px 14px;
   background: none;
-  border: 1px solid #3a3020;
+  border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
@@ -16,7 +15,7 @@
   letter-spacing: 0.04em;
   font-family: inherit;
 }
-.cmp-tab--active { border-color: #f5c842; color: var(--state-warn); }
+.cmp-tab--active { border-color: var(--state-warn); color: var(--state-warn); }
 
 .cmp-upload { margin-bottom: 8px; }
 .cmp-file-btn {
@@ -25,7 +24,7 @@
   gap: 6px;
   padding: 6px 14px;
   background: none;
-  border: 1px solid #3a3020;
+  border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
@@ -35,13 +34,13 @@
   user-select: none;
   margin-bottom: 8px;
 }
-.cmp-file-btn:hover { border-color: #f5c842; color: var(--state-warn); }
+.cmp-file-btn:hover { border-color: var(--state-warn); color: var(--state-warn); }
 
-.cmp-hint  { font-size: 0.7rem; color: #555; margin: 0 0 8px; }
+.cmp-hint  { font-size: 0.7rem; color: var(--color-text-secondary); margin: 0 0 8px; }
 .cmp-error { color: var(--state-bad); font-size: 0.78rem; margin: 4px 0 8px; }
-.cmp-warn  { color: var(--state-warn); font-size: 0.8rem; margin: 4px 0 10px; background: rgba(245,200,66,0.08); padding: 8px 12px; border-left: 3px solid #f5c842; }
-.cmp-empty { color: #555; font-size: 0.82rem; font-style: italic; }
-.cmp-muted { color: #666; font-size: 0.78rem; }
+.cmp-warn  { color: var(--state-warn); font-size: 0.8rem; margin: 4px 0 10px; background: rgba(245,200,66,0.08); padding: 8px 12px; border-left: 3px solid var(--state-warn); }
+.cmp-empty { color: var(--color-text-secondary); font-size: 0.82rem; font-style: italic; }
+.cmp-muted { color: var(--color-text-secondary); font-size: 0.78rem; }
 .cmp-title { font-size: 0.95rem; color: var(--state-warn); margin: 10px 0; }
 
 .cmp-kpis { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -51,13 +50,13 @@
   align-items: flex-start;
   min-width: 110px;
   padding: 8px 14px;
-  background: rgba(255,255,255,0.02);
-  border: 1px solid #3a3020;
-  border-left: 3px solid #666;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-text-secondary);
   cursor: pointer;
   font-family: inherit;
 }
-.cmp-kpi-btn--active { border-color: #f5c842; background: rgba(245,200,66,0.06); }
+.cmp-kpi-btn--active { border-color: var(--state-warn); background: color-mix(in srgb, var(--state-warn) 10%, var(--color-surface)); }
 .cmp-kpi-btn__val { font-size: 1.1rem; font-weight: 700; color: var(--color-text-primary); }
 .cmp-kpi-btn__lbl { font-size: 0.68rem; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
 
@@ -67,19 +66,19 @@
   max-width: 320px;
   padding: 6px 10px;
   margin-bottom: 10px;
-  background: #0e0c08;
-  border: 1px solid #3a3020;
-  color: #ccc;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
   font-size: 0.78rem;
   font-family: inherit;
 }
-.cmp-buscar:focus { outline: none; border-color: #f5c842; }
+.cmp-buscar:focus { outline: none; border-color: var(--state-warn); }
 
 .cmp-filters { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
 .cmp-filtro-btn {
   padding: 5px 10px;
   background: none;
-  border: 1px solid #3a3020;
+  border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
   font-size: 0.7rem;
   font-weight: 600;
@@ -87,21 +86,21 @@
   font-family: inherit;
   white-space: nowrap;
 }
-.cmp-filtro-btn:hover { border-color: #f5c842; color: var(--state-warn); }
-.cmp-filtro-btn--active { border-color: #f5c842; color: var(--state-warn); background: rgba(245,200,66,0.08); }
+.cmp-filtro-btn:hover { border-color: var(--state-warn); color: var(--state-warn); }
+.cmp-filtro-btn--active { border-color: var(--state-warn); color: var(--state-warn); background: rgba(245,200,66,0.08); }
 
 .cmp-quien { font-size: 0.65rem; color: var(--color-text-secondary); margin-top: 2px; }
 
 .cmp-select, .cmp-input, .cmp-textarea {
   padding: 5px 8px;
-  background: #0e0c08;
-  border: 1px solid #3a3020;
-  color: #ccc;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
   font-size: 0.78rem;
   font-family: inherit;
 }
 .cmp-textarea { width: 100%; max-width: 560px; resize: vertical; }
-.cmp-select:focus, .cmp-input:focus, .cmp-textarea:focus { outline: none; border-color: #f5c842; }
+.cmp-select:focus, .cmp-input:focus, .cmp-textarea:focus { outline: none; border-color: var(--state-warn); }
 
 .cmp-table-wrap { overflow-x: auto; }
 .cmp-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
@@ -109,12 +108,12 @@
   text-align: left;
   padding: 6px 8px;
   color: var(--color-text-secondary);
-  border-bottom: 1px solid #3a3020;
+  border-bottom: 1px solid var(--color-border);
   font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.cmp-table td { padding: 6px 8px; border-bottom: 1px solid #1e1a12; vertical-align: top; }
+.cmp-table td { padding: 6px 8px; border-bottom: 1px solid var(--color-border); vertical-align: top; }
 .cmp-mensaje { max-width: 360px; white-space: pre-wrap; color: var(--color-text-secondary); font-size: 0.74rem; }
 
 .cmp-badge {
@@ -139,7 +138,7 @@
 .cmp-wa--sin { color: var(--color-text-secondary); }
 
 .cmp-preview {
-  border: 1px solid #3a3020;
+  border: 1px solid var(--color-border);
   background: rgba(245,200,66,0.04);
   padding: 10px 12px;
   margin: 8px 0;
@@ -147,25 +146,25 @@
 .cmp-campana-row--archivada { opacity: 0.55; }
 
 .cmp-crear { display: flex; flex-direction: column; gap: 10px; max-width: 560px; margin-bottom: 10px; }
-.cmp-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #666; }
+.cmp-field { display: flex; flex-direction: column; gap: 4px; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-secondary); }
 .cmp-checks { display: flex; gap: 14px; flex-wrap: wrap; }
 .cmp-check { display: flex; align-items: center; gap: 5px; font-size: 0.78rem; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--color-text-primary); }
 
 .cmp-btn {
   padding: 6px 14px;
   background: none;
-  border: 1px solid #3a3020;
+  border: 1px solid var(--color-border);
   color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
   font-family: inherit;
 }
-.cmp-btn:hover { border-color: #f5c842; color: var(--state-warn); }
+.cmp-btn:hover { border-color: var(--state-warn); color: var(--state-warn); }
 .cmp-btn--sm { padding: 4px 8px; font-size: 0.68rem; }
-.cmp-btn--primary { background: #2a2015; border-color: #f5c842; color: #f5c842; }
-.cmp-btn--primary:hover { background: #3a3020; }
-.cmp-btn--danger { border-color: #ef4444; color: var(--state-bad); }
+.cmp-btn--primary { background: color-mix(in srgb, var(--state-warn) 16%, transparent); border-color: var(--state-warn); color: var(--state-warn); }
+.cmp-btn--primary:hover { background: color-mix(in srgb, var(--state-warn) 28%, transparent); }
+.cmp-btn--danger { border-color: var(--state-bad); color: var(--state-bad); }
 .cmp-btn--danger:hover { background: rgba(239,68,68,0.1); }
 .cmp-btn:disabled { opacity: 0.5; cursor: default; }
 
@@ -178,7 +177,7 @@
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 12px;
-  border: 1px solid #2a2015;
+  border: 1px solid var(--color-border);
   margin-bottom: 8px;
 }
 .cmp-campana-stats { display: flex; gap: 12px; font-size: 0.72rem; color: var(--color-text-secondary); }
