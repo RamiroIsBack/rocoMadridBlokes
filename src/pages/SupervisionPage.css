@@ -135,7 +135,7 @@
   border-color: var(--color-border);
   color: var(--color-text-primary);
 }
-.sv-tab-panel:not(.sv-to-root) .sv-tab-mini:hover { background: #efe9d8; }
+.sv-tab-panel:not(.sv-to-root) .sv-tab-mini:hover { background: var(--color-border); }
 .sv-tab-panel:not(.sv-to-root) .sv-tab-mini.is-active {
   background: var(--color-accent-hover);
   border-color: var(--color-accent-hover);

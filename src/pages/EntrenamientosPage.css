@@ -38,11 +38,11 @@
 .entrena__search-input {
   width: 100%;
   box-sizing: border-box;
-  border: 2px solid #2a2015;
-  background: #fff;
+  border: 2px solid var(--color-text-primary);
+  background: var(--color-surface);
   padding: 12px 14px;
   font-size: 1rem;
-  color: #2a2015;
+  color: var(--color-text-primary);
   font-family: inherit;
 }
 .entrena__search-input:focus {
@@ -63,9 +63,9 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #166534;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  color: #34d399;
+  background: rgba(34, 197, 94, 0.16);
+  border: 1px solid rgba(34, 197, 94, 0.35);
   border-radius: 3px;
   padding: 1px 6px;
   vertical-align: middle;
@@ -78,9 +78,9 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #9a5b13;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
+  color: #fbbf24;
+  background: rgba(217, 119, 6, 0.18);
+  border: 1px solid rgba(217, 119, 6, 0.4);
   border-radius: 3px;
   padding: 1px 6px;
   vertical-align: middle;
@@ -93,9 +93,9 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: hsl(calc(var(--missing-hue, 0)), 70%, 32%);
-  background: hsl(calc(var(--missing-hue, 0)), 90%, 95%);
-  border: 1px solid hsl(calc(var(--missing-hue, 0)), 80%, 75%);
+  color: hsl(calc(var(--missing-hue, 0)), 80%, 70%);
+  background: hsl(calc(var(--missing-hue, 0)), 70%, 18%);
+  border: 1px solid hsl(calc(var(--missing-hue, 0)), 60%, 35%);
   border-radius: 3px;
   padding: 1px 6px;
   vertical-align: middle;
@@ -123,8 +123,8 @@
 }
 
 .entrena__modal {
-  background: #fdf7e6;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   padding: 24px;
   max-width: 400px;
   width: 100%;
@@ -138,7 +138,7 @@
   font-family: var(--font-serif);
   font-size: 1.3rem;
   margin: 0 0 4px;
-  color: #2a2015;
+  color: var(--color-text-primary);
 }
 .entrena__modal-hint {
   font-size: 0.78rem;
@@ -154,11 +154,11 @@
 }
 .entrena__modal input,
 .entrena__modal select {
-  border: 1.5px solid #c8bc9a;
-  background: #fff;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
   padding: 8px;
   font-size: 0.9rem;
-  color: #2a2015;
+  color: var(--color-text-primary);
   font-family: inherit;
 }
 .entrena__modal-actions {
@@ -172,7 +172,7 @@
   font-family: var(--font-serif);
   font-size: 2rem;
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
   margin: 0 0 4px;
   letter-spacing: -0.02em;
 }
@@ -185,8 +185,8 @@
 
 /* Filters */
 .entrena__filters {
-  background: #fdf7e6;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   padding: 16px;
   margin-bottom: 24px;
 }
@@ -216,17 +216,17 @@
 
 .entrena__filter-field input,
 .entrena__filter-field select {
-  border: 1.5px solid #c8bc9a;
-  background: #fff;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
   padding: 6px 8px;
   font-size: 0.82rem;
-  color: #2a2015;
+  color: var(--color-text-primary);
   font-family: inherit;
 }
 
 .entrena__filter-field input:focus,
 .entrena__filter-field select:focus {
-  outline: 2px solid #2a2015;
+  outline: 2px solid var(--color-accent-hover);
   outline-offset: 1px;
 }
 
@@ -244,7 +244,7 @@
 }
 
 .entrena__reset:hover {
-  color: #2a2015;
+  color: var(--color-text-primary);
 }
 
 /* States */
@@ -260,8 +260,8 @@
 .entrena__spinner {
   width: 28px;
   height: 28px;
-  border: 3px solid #c8bc9a;
-  border-top-color: #2a2015;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-accent-hover);
   border-radius: 50%;
   animation: entrena-spin 0.7s linear infinite;
 }
@@ -281,14 +281,14 @@
 .entrena__empty {
   text-align: center;
   padding: 60px 24px;
-  border: 2px dashed #c8bc9a;
+  border: 2px dashed var(--color-border);
 }
 
 .entrena__empty-title {
   font-family: var(--font-serif);
   font-size: 1.2rem;
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
   margin: 0 0 8px;
 }
 
@@ -319,14 +319,14 @@
   color: var(--color-text-secondary);
   padding: 8px 10px;
   text-align: left;
-  border-bottom: 2px solid #c8bc9a;
+  border-bottom: 2px solid var(--color-border);
   white-space: nowrap;
 }
 
 .entrena__table td {
   padding: 10px 10px;
-  border-bottom: 1px solid #f0ece0;
-  color: #2a2015;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
   vertical-align: middle;
 }
 
@@ -338,10 +338,10 @@
   cursor: pointer;
 }
 .entrena__row:hover td {
-  background: #fdf7e6;
+  background: var(--color-bg);
 }
 .entrena__row--active td {
-  background: #fef3c7;
+  background: rgba(245, 200, 66, 0.16);
 }
 .entrena__panel-row td {
   padding: 0 !important;
@@ -368,8 +368,8 @@
 
 .entrena__badge--inactive,
 .entrena__badge--cancelled {
-  background: #e5e7eb;
-  color: #6b7280;
+  background: var(--color-border);
+  color: var(--color-text-secondary);
 }
 
 .entrena__badge--pending {
@@ -405,12 +405,12 @@
     display: block;
     margin-bottom: 10px;
     padding: 10px 12px;
-    border: 1px solid #e3dcc5;
+    border: 1px solid var(--color-border);
     border-radius: 8px;
     background: var(--color-surface);
   }
   .entrena__table tr:last-child { margin-bottom: 0; }
-  .entrena__table tr.entrena__inline-panel { padding: 0; border-color: #c8bc9a; }
+  .entrena__table tr.entrena__inline-panel { padding: 0; border-color: var(--color-border); }
 
   .entrena__table td {
     display: block;
@@ -437,8 +437,8 @@
   /* El resaltado de fila activa/hover se pone en la tarjeta entera, no celda a celda. */
   .entrena__row:hover td,
   .entrena__row--active td { background: none; }
-  .entrena__row:hover { background: #fdf7e6; }
-  .entrena__row--active { background: #fef3c7; }
+  .entrena__row:hover { background: var(--color-bg); }
+  .entrena__row--active { background: rgba(245, 200, 66, 0.16); }
 
   /* Igual con el aviso de "le faltan tests": antes solo el borde de la primera celda, aquí
      toda la tarjeta. */
@@ -459,7 +459,7 @@
 .entrena__mode-btn {
   padding: 6px 18px;
   background: none;
-  border: 1.5px solid #c8bc9a;
+  border: 1.5px solid var(--color-border);
   color: var(--color-text-secondary);
   font-size: 0.8rem;
   font-weight: 600;
@@ -512,8 +512,8 @@
 }
 
 .entrena__test-desc {
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 8px 12px;
   margin: 0 0 16px;
@@ -521,7 +521,7 @@
   line-height: 1.45;
   color: var(--color-text-secondary);
 }
-.entrena__test-desc strong { color: #2a2015; }
+.entrena__test-desc strong { color: var(--color-text-primary); }
 
 /* ── Definiciones ── */
 .entrena__defs-zone { margin-bottom: 28px; }
@@ -542,14 +542,14 @@
   gap: 14px;
 }
 .entrena__defs-item {
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   padding: 12px 14px;
 }
 .entrena__defs-item--hidden {
-  background: #f4f2eb;
-  border-color: #e5ddc8;
+  background: var(--color-bg);
+  border-color: var(--color-border);
   filter: grayscale(0.6);
   opacity: 0.65;
 }
@@ -563,7 +563,7 @@
 }
 .entrena__defs-item__name {
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
   font-size: 0.92rem;
 }
 .entrena__defs-item__unit {
@@ -579,7 +579,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #9a5b13;
+  color: var(--state-warn);
 }
 .entrena__defs-item__desc {
   margin: 0;
@@ -615,23 +615,23 @@
 /* ── Inline panel row (alumno mode) ── */
 .entrena__inline-panel td {
   padding: 0 !important;
-  background: #f9f7f0;
+  background: var(--color-bg);
 }
 .entrena__inline-panel .training-panel {
   border: none;
   box-shadow: none;
   border-radius: 0;
-  border-top: 2px solid #c8bc9a;
-  border-bottom: 2px solid #c8bc9a;
+  border-top: 2px solid var(--color-border);
+  border-bottom: 2px solid var(--color-border);
 }
 
 /* ── Test mode rows ── */
 .entrena__test-row td { vertical-align: middle; }
-.entrena__test-row__name { font-weight: 600; color: #2a2015; }
-.entrena__test-row__meta { font-size: 0.78rem; color: #9ca3af; }
-.entrena__test-row__last { font-size: 0.82rem; color: #374151; min-width: 80px; }
-.entrena__test-empty     { color: #9ca3af; font-style: italic; }
-.entrena__test-loading   { color: #c8bc9a; }
+.entrena__test-row__name { font-weight: 600; color: var(--color-text-primary); }
+.entrena__test-row__meta { font-size: 0.78rem; color: var(--color-text-secondary); }
+.entrena__test-row__last { font-size: 0.82rem; color: var(--color-text-secondary); min-width: 80px; }
+.entrena__test-empty     { color: var(--color-text-secondary); font-style: italic; }
+.entrena__test-loading   { color: var(--color-text-secondary); }
 
 .entrena__test-input-wrap {
   display: flex;
@@ -641,13 +641,13 @@
 .entrena__test-input {
   width: 72px;
   padding: 5px 8px;
-  border: 1.5px solid #c8bc9a;
-  background: #fff;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
   font-size: 0.82rem;
   font-family: inherit;
-  color: #2a2015;
+  color: var(--color-text-primary);
 }
-.entrena__test-input:focus { outline: none; border-color: #2a2015; }
+.entrena__test-input:focus { outline: none; border-color: var(--color-accent-hover); }
 .entrena__test-save {
   padding: 5px 10px;
   background: #2a2015;
@@ -667,7 +667,7 @@
 .entrena__suggest {
   margin: 8px 0 12px;
   padding: 10px 12px;
-  background: #fdf7e6;
+  background: var(--color-bg);
   border: 1px dashed #c8961e;
 }
 .entrena__suggest-title {
@@ -675,7 +675,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #7a5a10;
+  color: var(--state-warn);
   margin: 0 0 6px;
 }
 .entrena__suggest-row {
@@ -685,7 +685,7 @@
   gap: 8px;
   padding: 4px 0;
   font-size: 0.9rem;
-  color: #2a2015;
+  color: var(--color-text-primary);
 }
 .entrena__suggest-row small {
   display: block;
@@ -694,112 +694,22 @@
 }
 .entrena__suggest-btn {
   background: none;
-  border: 1px solid #2a2015;
+  border: 1px solid var(--color-text-primary);
   padding: 4px 10px;
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #2a2015;
+  color: var(--color-text-primary);
   cursor: pointer;
   white-space: nowrap;
 }
-.entrena__suggest-btn:hover { background: #2a2015; color: #fdf7e6; }
+.entrena__suggest-btn:hover { background: var(--color-text-primary); color: var(--color-bg); }
 
 /* ── Nota por test (vista por test) ── */
-.entrena__test-note { font-size: 0.72rem; font-style: italic; color: #7a5a10; margin-top: 2px; }
-.entrena__test-note-input { width: 100%; margin-top: 4px; padding: 4px 6px; font-size: 0.8rem; border: 1px solid #cfc9b8; background: #fff; box-sizing: border-box; }
+.entrena__test-note { font-size: 0.72rem; font-style: italic; color: var(--state-warn); margin-top: 2px; }
+.entrena__test-note-input { width: 100%; margin-top: 4px; padding: 4px 6px; font-size: 0.8rem; border: 1px solid var(--color-border); background: var(--color-surface); box-sizing: border-box; }
 
-/* ══════════════════════════════════════════════════════════════════════════════════════
-   MODO OSCURO — Entrenamientos (auditoría de Cowork, 11/11 10:05: "toda la tabla de alumnos
-   (td) a 1.1: no se lee ningún nombre" — 686 fallos, la peor pantalla). Casi toda la página
-   usaba fondos cream/blancos fijos con texto oscuro fijo, sin variables, así que con el
-   sistema en oscuro el texto se quedaba oscuro sobre el fondo oscuro de la página (que sí
-   sigue la variable). Mismo patrón que Organización: solo añade overrides en oscuro, no toca
-   el aspecto en claro. ── */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .entrena__header h1,
-  :root:not([data-theme="light"]) .entrena__modal h2,
-  :root:not([data-theme="light"]) .entrena__empty-title,
-  :root:not([data-theme="light"]) .entrena__table td,
-  :root:not([data-theme="light"]) .entrena__search-input,
-  :root:not([data-theme="light"]) .entrena__filter-field input,
-  :root:not([data-theme="light"]) .entrena__filter-field select,
-  :root:not([data-theme="light"]) .entrena__modal input,
-  :root:not([data-theme="light"]) .entrena__modal select,
-  :root:not([data-theme="light"]) .entrena__defs-item__name,
-  :root:not([data-theme="light"]) .entrena__test-row__name,
-  :root:not([data-theme="light"]) .entrena__suggest-row,
-  :root:not([data-theme="light"]) .entrena__suggest-btn,
-  :root:not([data-theme="light"]) .entrena__test-desc strong,
-  :root:not([data-theme="light"]) .entrena__test-input {
-    color: var(--color-text-primary);
-  }
-  :root:not([data-theme="light"]) .entrena__reset:hover { color: var(--color-text-primary); }
-  :root:not([data-theme="light"]) .entrena__filters,
-  :root:not([data-theme="light"]) .entrena__modal,
-  :root:not([data-theme="light"]) .entrena__search-input,
-  :root:not([data-theme="light"]) .entrena__filter-field input,
-  :root:not([data-theme="light"]) .entrena__filter-field select,
-  :root:not([data-theme="light"]) .entrena__modal input,
-  :root:not([data-theme="light"]) .entrena__modal select,
-  :root:not([data-theme="light"]) .entrena__test-desc,
-  :root:not([data-theme="light"]) .entrena__defs-item,
-  :root:not([data-theme="light"]) .entrena__test-input,
-  :root:not([data-theme="light"]) .entrena__test-note-input {
-    background: var(--color-surface);
-    border-color: var(--color-border);
-  }
-  :root:not([data-theme="light"]) .entrena__row:hover td { background: var(--color-bg); }
-  :root:not([data-theme="light"]) .entrena__row--active td { background: rgba(245, 200, 66, 0.16); }
-  /* Tarjetas en móvil (los profes lo usan en clase con el móvil): el resaltado va en la
-     tarjeta entera, no celda a celda — mismo arreglo, selector distinto. */
-  :root:not([data-theme="light"]) .entrena__row:hover { background: var(--color-bg); }
-  :root:not([data-theme="light"]) .entrena__row--active { background: rgba(245, 200, 66, 0.16); }
-  :root:not([data-theme="light"]) .entrena__inline-panel td { background: var(--color-bg); }
-  :root:not([data-theme="light"]) .entrena__suggest { background: var(--color-bg); }
-  :root:not([data-theme="light"]) .entrena__defs-item--hidden { background: var(--color-bg); }
-  :root:not([data-theme="light"]) .entrena__search-input,
-  :root:not([data-theme="light"]) .entrena__suggest-btn { border-color: var(--color-text-primary); }
-}
-:root[data-theme="dark"] .entrena__header h1,
-:root[data-theme="dark"] .entrena__modal h2,
-:root[data-theme="dark"] .entrena__empty-title,
-:root[data-theme="dark"] .entrena__table td,
-:root[data-theme="dark"] .entrena__search-input,
-:root[data-theme="dark"] .entrena__filter-field input,
-:root[data-theme="dark"] .entrena__filter-field select,
-:root[data-theme="dark"] .entrena__modal input,
-:root[data-theme="dark"] .entrena__modal select,
-:root[data-theme="dark"] .entrena__defs-item__name,
-:root[data-theme="dark"] .entrena__test-row__name,
-:root[data-theme="dark"] .entrena__suggest-row,
-:root[data-theme="dark"] .entrena__suggest-btn,
-:root[data-theme="dark"] .entrena__test-desc strong,
-:root[data-theme="dark"] .entrena__test-input {
-  color: var(--color-text-primary);
-}
-:root[data-theme="dark"] .entrena__reset:hover { color: var(--color-text-primary); }
-:root[data-theme="dark"] .entrena__filters,
-:root[data-theme="dark"] .entrena__modal,
-:root[data-theme="dark"] .entrena__search-input,
-:root[data-theme="dark"] .entrena__filter-field input,
-:root[data-theme="dark"] .entrena__filter-field select,
-:root[data-theme="dark"] .entrena__modal input,
-:root[data-theme="dark"] .entrena__modal select,
-:root[data-theme="dark"] .entrena__test-desc,
-:root[data-theme="dark"] .entrena__defs-item,
-:root[data-theme="dark"] .entrena__test-input,
-:root[data-theme="dark"] .entrena__test-note-input {
-  background: var(--color-surface);
-  border-color: var(--color-border);
-}
-:root[data-theme="dark"] .entrena__row:hover td { background: var(--color-bg); }
-:root[data-theme="dark"] .entrena__row--active td { background: rgba(245, 200, 66, 0.16); }
-:root[data-theme="dark"] .entrena__row:hover { background: var(--color-bg); }
-:root[data-theme="dark"] .entrena__row--active { background: rgba(245, 200, 66, 0.16); }
-:root[data-theme="dark"] .entrena__inline-panel td { background: var(--color-bg); }
-:root[data-theme="dark"] .entrena__suggest { background: var(--color-bg); }
-:root[data-theme="dark"] .entrena__defs-item--hidden { background: var(--color-bg); }
-:root[data-theme="dark"] .entrena__search-input,
-:root[data-theme="dark"] .entrena__suggest-btn { border-color: var(--color-text-primary); }
+/* Ramiro, 13/11 05:30: Blokes ya no tiene modo claro — las reglas de arriba usan las
+   variables del tema directamente, así que el bloque de overrides "modo oscuro" que vivía
+   aquí (duplicado @media + [data-theme=dark]) ya no hace falta y se ha quitado. */

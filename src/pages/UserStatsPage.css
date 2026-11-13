@@ -12,7 +12,7 @@
     font-family: var(--font-serif);
     font-size: 2rem;
     font-weight: 700;
-    color: #2a2015;
+    color: var(--color-text-primary);
     margin: 0 0 24px;
     letter-spacing: -0.02em;
 }
@@ -104,7 +104,7 @@
     color: var(--color-text-secondary);
     margin: 0 0 14px;
     padding-bottom: 8px;
-    border-bottom: 2px dotted #c8bc9a;
+    border-bottom: 2px dotted var(--color-border);
 }
 
 /* Colors */
@@ -131,7 +131,7 @@
 .user-stats__color-count {
     font-weight: 700;
     font-size: 1.1rem;
-    color: #2a2015;
+    color: var(--color-text-primary);
     line-height: 1;
 }
 
@@ -152,8 +152,8 @@
     flex-direction: column;
     align-items: center;
     padding: 14px 20px;
-    border: 1.5px solid #c8bc9a;
-    background: #fdf7e6;
+    border: 1.5px solid var(--color-border);
+    background: var(--color-surface);
     min-width: 90px;
 }
 
@@ -161,7 +161,7 @@
     font-family: var(--font-serif);
     font-size: 2rem;
     font-weight: 700;
-    color: #2a2015;
+    color: var(--color-text-primary);
     line-height: 1;
 }
 
@@ -200,12 +200,12 @@
 .user-stats__month-bar-wrap {
     flex: 1;
     height: 16px;
-    background: #f0ece0;
+    background: var(--color-border);
 }
 
 .user-stats__month-bar {
     height: 100%;
-    background: #2a2015;
+    background: var(--color-accent-hover);
     min-width: 4px;
     transition: width 0.5s ease;
 }
@@ -213,7 +213,7 @@
 .user-stats__month-count {
     font-size: 0.85rem;
     font-weight: 700;
-    color: #2a2015;
+    color: var(--color-text-primary);
     width: 20px;
     text-align: right;
     flex-shrink: 0;
@@ -242,7 +242,7 @@
     font-family: var(--font-serif);
     font-size: 1.4rem;
     font-weight: 700;
-    color: #2a2015;
+    color: var(--color-text-primary);
     line-height: 1;
 }
 
@@ -258,8 +258,8 @@
 .user-stats__training-locked {
     text-align: center;
     padding: 32px 16px;
-    background: #f9f7f0;
-    border: 1.5px dashed #c8bc9a;
+    background: var(--color-bg);
+    border: 1.5px dashed var(--color-border);
 }
 
 .user-stats__training-locked-icon {
@@ -271,7 +271,7 @@
 .user-stats__training-locked-title {
     font-weight: 700;
     font-size: 1rem;
-    color: #2a2015;
+    color: var(--color-text-primary);
     margin: 0 0 6px;
 }
 
@@ -313,7 +313,7 @@
     align-items: center;
     gap: 10px;
     padding: 10px 14px;
-    background: #fdf7e6;
+    background: var(--color-surface);
     border-left: 3px solid #f5c842;
     animation: notif-slide-in 0.4s ease both;
 }
@@ -330,7 +330,7 @@
 
 .user-stats__notif-text {
     font-size: 0.85rem;
-    color: #2a2015;
+    color: var(--color-text-primary);
     line-height: 1.4;
 }
 
@@ -341,7 +341,7 @@
 .user-stats__notif-text em {
     font-style: normal;
     font-weight: 600;
-    color: #4b3a1e;
+    color: var(--color-accent-hover);
 }
 
 /* Class comparison */
@@ -387,13 +387,13 @@
 
 .user-stats__class-row--me .user-stats__class-name {
     font-weight: 700;
-    color: #2a2015;
+    color: var(--color-accent-hover);
 }
 
 .user-stats__class-bar-wrap {
     flex: 1;
     height: 12px;
-    background: #f0ece0;
+    background: var(--color-border);
     min-width: 0;
 }
 
@@ -405,13 +405,13 @@
 }
 
 .user-stats__class-row--me .user-stats__class-bar {
-    background: #2a2015;
+    background: var(--color-accent-hover);
 }
 
 .user-stats__class-count {
     font-size: 0.82rem;
     font-weight: 700;
-    color: #2a2015;
+    color: var(--color-text-primary);
     width: 24px;
     text-align: right;
     flex-shrink: 0;
@@ -420,11 +420,11 @@
 .user-stats__class-rank-label {
     margin-top: 12px;
     padding: 6px 12px;
-    background: #f9f7f0;
+    background: var(--color-bg);
     border-left: 3px solid #f5c842;
     font-size: 0.82rem;
     font-weight: 600;
-    color: #2a2015;
+    color: var(--color-text-primary);
 }
 
 /* Week highlight */
@@ -454,7 +454,7 @@
     align-items: center;
     gap: 10px;
     padding: 7px 12px;
-    background: #fdf7e6;
+    background: var(--color-surface);
     border-radius: 6px;
 }
 
@@ -470,7 +470,7 @@
     flex: 1;
     font-size: 0.85rem;
     font-weight: 600;
-    color: #2a2015;
+    color: var(--color-text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -580,39 +580,7 @@
 
 .usl-link:hover { opacity: 1; }
 
-/* Auditoría de contraste (cowork, 11/11 10:05): título y contadores con color fijo oscuro, sin
-   fondo propio — en modo oscuro quedaban negros sobre el fondo oscuro de la página (1.1:1).
-   Solo override en oscuro, el claro no cambia. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .user-stats__title,
-  :root:not([data-theme="light"]) .user-stats__color-count,
-  :root:not([data-theme="light"]) .user-stats__month-count,
-  :root:not([data-theme="light"]) .user-stats__rating-count,
-  :root:not([data-theme="light"]) .user-stats__sala-count,
-  :root:not([data-theme="light"]) .user-stats__training-locked-title {
-    color: var(--color-text-primary);
-  }
-  /* Cowork 11/11 13:20: .user-stats__sala-name y .user-stats__training-locked-text ya usaban
-     la variable de texto correcta, pero su caja (.user-stats__sala-badge,
-     .user-stats__training-locked) tenía fondo claro fijo que no seguía el tema — en oscuro el
-     texto "para fondo oscuro" quedaba sobre una caja que seguía siendo clara (2.1:1). */
-  :root:not([data-theme="light"]) .user-stats__sala-badge,
-  :root:not([data-theme="light"]) .user-stats__training-locked {
-    background: var(--color-surface);
-    border-color: var(--color-border);
-  }
-}
-:root[data-theme="dark"] .user-stats__title,
-:root[data-theme="dark"] .user-stats__color-count,
-:root[data-theme="dark"] .user-stats__month-count,
-:root[data-theme="dark"] .user-stats__rating-count,
-:root[data-theme="dark"] .user-stats__sala-count,
-:root[data-theme="dark"] .user-stats__training-locked-title {
-  color: var(--color-text-primary);
-}
-:root[data-theme="dark"] .user-stats__sala-badge,
-:root[data-theme="dark"] .user-stats__training-locked {
-  background: var(--color-surface);
-  border-color: var(--color-border);
-}
+/* Ramiro, 13/11 05:30: Blokes ya no tiene modo claro — las reglas de arriba ya usan las
+   variables del tema directamente, así que el override "modo oscuro" que vivía aquí ya no
+   hace falta y se ha quitado. */
 

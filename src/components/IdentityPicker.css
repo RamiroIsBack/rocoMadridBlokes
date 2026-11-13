@@ -10,8 +10,8 @@
 }
 
 .idpicker {
-  background: #fdf7e6;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   padding: 24px;
   max-width: 480px;
   width: 100%;
@@ -32,23 +32,23 @@
   font-family: var(--font-serif);
   font-size: 1.4rem;
   margin: 0;
-  color: #2a2015;
+  color: var(--color-text-primary);
 }
 .idpicker__close {
   background: none;
   border: none;
   font-size: 1.2rem;
-  color: #2a2015;
+  color: var(--color-text-primary);
   cursor: pointer;
   padding: 6px 10px;
 }
 
 .idpicker__input {
-  border: 1.5px solid #c8bc9a;
-  background: #fff;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-bg);
   padding: 14px 12px;
   font-size: 1.1rem;
-  color: #2a2015;
+  color: var(--color-text-primary);
   font-family: inherit;
   box-sizing: border-box;
 }
@@ -72,8 +72,8 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 2px;
-  background: #fff;
-  border: 1.5px solid #e5ddc8;
+  background: var(--color-bg);
+  border: 1.5px solid var(--color-border);
   padding: 12px 14px;
   text-align: left;
   cursor: pointer;
@@ -82,12 +82,12 @@
 .idpicker__row:hover,
 .idpicker__row:active {
   border-color: #c8961e;
-  background: #fff8e8;
+  background: rgba(245, 200, 66, 0.1);
 }
 .idpicker__row-name {
   font-size: 1.05rem;
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
 }
 .idpicker__row-meta {
   font-size: 0.82rem;
@@ -97,7 +97,7 @@
 .idpicker__create-link {
   background: none;
   border: none;
-  color: #8a6416;
+  color: var(--color-accent-hover);
   font-size: 0.9rem;
   text-decoration: underline;
   cursor: pointer;
@@ -109,12 +109,12 @@
 .idpicker__dupes {
   margin: 4px 0 8px;
   padding: 10px 12px;
-  background: #fdf0d8;
+  background: rgba(245, 200, 66, 0.12);
   border: 1px dashed #c8961e;
 }
 
 .idpicker__error {
-  color: #b42318;
+  color: #fca5a5;
   font-size: 0.85rem;
   margin: 4px 0;
 }
@@ -139,6 +139,6 @@
 .idpicker__btn:disabled { opacity: 0.6; cursor: default; }
 .idpicker__btn--ghost {
   background: none;
-  color: #2a2015;
-  border: 1.5px solid #2a2015;
+  color: var(--color-text-primary);
+  border: 1.5px solid var(--color-border);
 }

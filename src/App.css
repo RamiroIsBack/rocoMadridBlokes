@@ -160,20 +160,6 @@
   cursor: pointer;
 }
 
-/* Modo claro/oscuro (Ramiro, 11/11 05:08) — misma cabecera siempre oscura que el resto de
-   estos controles, independientemente del tema elegido para el resto de la app. */
-.app-header__tema { display: inline-flex; gap: 2px; margin-top: 4px; }
-.app-header__tema-btn {
-  background: #2a2015;
-  border: 1px solid #5a5244;
-  color: #ccc;
-  font-size: 0.8rem;
-  line-height: 1;
-  padding: 3px 6px;
-  cursor: pointer;
-}
-.app-header__tema-btn--activo { border-color: #f5c842; background: #3a2d12; }
-
 .app-ver-como-banner {
   background: #7c2d12;
   color: #fff;
@@ -805,7 +791,10 @@
 
 .filter-bar__sort-btn--active {
   border-color: var(--color-accent);
-  background: #fffbe6;
+  /* Ramiro, 13/11 05:30: fondo crema fijo (#fffbe6) con el texto ya en var(--color-text-primary)
+     (claro en oscuro) — contraste 1,1, invisible. Dorado traslúcido sobre el fondo oscuro de
+     siempre, en vez de otro color fijo. */
+  background: rgba(245, 200, 66, 0.18);
   color: var(--color-text-primary);
   filter: grayscale(0);
 }
@@ -851,7 +840,9 @@
   background-color: var(--color-surface);
   border-radius: 8px;
   border: 1px solid var(--color-border);
-  box-shadow: 3px 4px 0 #c4b99a;
+  /* Ramiro, 13/11 05:30: era una sombra beige fija (#c4b99a), pensada para el modo claro que ya
+     no existe — invisible/rara sobre el fondo oscuro de la card. */
+  box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.4);
   overflow: visible;
   display: flex;
   flex-direction: column;
@@ -864,7 +855,7 @@
   content: '';
   position: absolute;
   inset: 3px;
-  border: 1px solid #e0d8c0;
+  border: 1px solid var(--color-border);
   border-radius: 5px;
   pointer-events: none;
   z-index: 0;
@@ -948,7 +939,7 @@
 
 .gallery {
   position: relative;
-  background-color: #e8e8e8;
+  background-color: var(--color-surface);
   width: 100%;
   aspect-ratio: 4 / 3;
   overflow: hidden;
@@ -1074,11 +1065,11 @@
    ============================================ */
 
 .error-message {
-  background-color: #fdecea;
-  border: 1px solid #f5c6c2;
+  background-color: rgba(239, 68, 68, 0.16);
+  border: 1px solid rgba(239, 68, 68, 0.4);
   border-radius: var(--radius-md);
   padding: var(--spacing-md);
-  color: #922b21;
+  color: #fca5a5;
   text-align: center;
   margin: var(--spacing-lg) 0;
 }

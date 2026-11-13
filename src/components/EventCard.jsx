@@ -21,20 +21,23 @@ const SALA_MAP = {
   cueva: { name: 'Cueva', class: 'event-card__sala--cueva' },
 }
 
+// Ramiro, 13/11 05:30: fondos muy pálidos + texto saturado medio — pensados para el modo claro
+// que ya no existe. "Presas Verdes" llegaba a 3,1 incluso consigo mismo (verde sobre verde
+// clarito). Ahora fondo oscuro traslúcido del mismo tono + texto claro del mismo tono.
 const COLOR_PRESA_MAP = {
-  presas_azules:        { name: 'Presas Azules',         bg: '#eff6ff', text: '#3b82f6' },
-  presas_blancas:       { name: 'Presas Blancas',        bg: '#f9f9f9', text: '#6b7280' },
-  presas_negras:        { name: 'Presas Negras',         bg: '#f3f4f6', text: '#374151' },
-  presas_rojas:         { name: 'Presas Rojas',          bg: '#fff5f5', text: '#ef4444' },
-  presas_amarillas:     { name: 'Presas Amarillas',      bg: '#fffde7', text: '#b45309' },
-  presas_verdes:        { name: 'Presas Verdes',         bg: '#f0fdf4', text: '#16a34a' },
-  presas_moradas:       { name: 'Presas Moradas',        bg: '#faf5ff', text: '#7c3aed' },
-  presas_rosas:         { name: 'Presas Rosas',          bg: '#fdf2f8', text: '#be185d' },
-  presas_grises:        { name: 'Presas Grises',         bg: '#f4f4f5', text: '#52525b' },
-  presas_turquesa:      { name: 'Presas Turquesa',       bg: '#f0fdfa', text: '#0d9488' },
-  presas_amarillo_fluor:{ name: 'Presas Amarillo Fluor', bg: '#fefce8', text: '#65a30d' },
-  presas_naranja:       { name: 'Presas Naranja',        bg: '#fff7ed', text: '#ea580c' },
-  presas_color_raro:    { name: 'Presas Color Raro',     bg: '#f5f5f5', text: '#6b7280' },
+  presas_azules:        { name: 'Presas Azules',         bg: 'rgba(59, 130, 246, 0.16)',  text: '#93c5fd' },
+  presas_blancas:       { name: 'Presas Blancas',        bg: 'rgba(255, 255, 255, 0.08)', text: '#e5e7eb' },
+  presas_negras:        { name: 'Presas Negras',         bg: 'rgba(255, 255, 255, 0.06)', text: '#d1d5db' },
+  presas_rojas:         { name: 'Presas Rojas',          bg: 'rgba(239, 68, 68, 0.18)',   text: '#fca5a5' },
+  presas_amarillas:     { name: 'Presas Amarillas',      bg: 'rgba(217, 119, 6, 0.2)',    text: '#fbbf24' },
+  presas_verdes:        { name: 'Presas Verdes',         bg: 'rgba(34, 197, 94, 0.18)',   text: '#86efac' },
+  presas_moradas:       { name: 'Presas Moradas',        bg: 'rgba(124, 58, 237, 0.2)',   text: '#c4b5fd' },
+  presas_rosas:         { name: 'Presas Rosas',          bg: 'rgba(219, 39, 119, 0.2)',   text: '#f9a8d4' },
+  presas_grises:        { name: 'Presas Grises',         bg: 'rgba(156, 163, 175, 0.18)', text: '#d1d5db' },
+  presas_turquesa:      { name: 'Presas Turquesa',       bg: 'rgba(13, 148, 136, 0.2)',   text: '#5eead4' },
+  presas_amarillo_fluor:{ name: 'Presas Amarillo Fluor', bg: 'rgba(101, 163, 13, 0.2)',   text: '#bef264' },
+  presas_naranja:       { name: 'Presas Naranja',        bg: 'rgba(234, 88, 12, 0.2)',    text: '#fdba74' },
+  presas_color_raro:    { name: 'Presas Color Raro',     bg: 'rgba(156, 163, 175, 0.14)', text: '#9ca3af' },
 }
 
 function HoldIcon() {

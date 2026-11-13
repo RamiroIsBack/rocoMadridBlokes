@@ -53,7 +53,7 @@
 
 .progreso-league__more {
   font-size: 0.68rem;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 .progreso-league__link {
@@ -84,7 +84,7 @@
   font-family: var(--font-serif);
   font-size: 2rem;
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
   margin: 0 0 24px;
   letter-spacing: -0.02em;
 }
@@ -109,7 +109,7 @@
   color: var(--color-text-secondary);
   margin: 0 0 6px;
   padding-bottom: 8px;
-  border-bottom: 2px dotted #c8bc9a;
+  border-bottom: 2px dotted var(--color-border);
 }
 
 .progreso__section-hint {
@@ -162,13 +162,13 @@
 .progreso__legend-name {
   flex: 1;
   font-size: 0.82rem;
-  color: #2a2015;
+  color: var(--color-text-primary);
 }
 
 .progreso__legend-count {
   font-size: 0.82rem;
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
   width: 24px;
   text-align: right;
 }
@@ -193,7 +193,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #2a2015;
+  color: var(--color-text-primary);
   margin: 0 0 10px;
 }
 
@@ -236,7 +236,7 @@
 
 .progreso__rank-name {
   font-size: 0.82rem;
-  color: #2a2015;
+  color: var(--color-text-primary);
   width: 70px;
   flex-shrink: 0;
 }
@@ -244,7 +244,7 @@
 .progreso__rank-bar-wrap {
   flex: 1;
   height: 14px;
-  background: #f0ece0;
+  background: var(--color-surface);
 }
 
 .progreso__rank-bar {
@@ -257,7 +257,7 @@
 .progreso__rank-value {
   font-size: 0.85rem;
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
   width: 36px;
   text-align: right;
   flex-shrink: 0;
@@ -272,7 +272,7 @@
 
 .progreso__color-tab {
   padding: 6px 14px;
-  border: 2px solid #c8bc9a;
+  border: 2px solid var(--color-border);
   border-radius: 20px;
   background: transparent;
   color: var(--color-text-secondary);
@@ -333,26 +333,6 @@
   }
 }
 
-/* Auditoría de contraste (cowork, 11/11 10:05): título y textos de la lista/ranking con color
-   fijo oscuro, sin fondo propio — en modo oscuro quedaban negros sobre el fondo oscuro de la
-   página (1.1:1). Solo override en oscuro, el claro no cambia. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .progreso__title,
-  :root:not([data-theme="light"]) .progreso__legend-name,
-  :root:not([data-theme="light"]) .progreso__legend-count,
-  :root:not([data-theme="light"]) .progreso__rank-name,
-  :root:not([data-theme="light"]) .progreso__rank-value,
-  :root:not([data-theme="light"]) .progreso__benefits-title {
-    color: var(--color-text-primary);
-  }
-  :root:not([data-theme="light"]) .progreso__rank-bar-wrap { background: var(--color-surface); }
-}
-:root[data-theme="dark"] .progreso__title,
-:root[data-theme="dark"] .progreso__legend-name,
-:root[data-theme="dark"] .progreso__legend-count,
-:root[data-theme="dark"] .progreso__rank-name,
-:root[data-theme="dark"] .progreso__rank-value,
-:root[data-theme="dark"] .progreso__benefits-title {
-  color: var(--color-text-primary);
-}
-:root[data-theme="dark"] .progreso__rank-bar-wrap { background: var(--color-surface); }
+/* Ramiro, 13/11 05:30: Blokes ya no tiene modo claro — las reglas de arriba ya usan las
+   variables del tema directamente, así que el override "modo oscuro" que vivía aquí ya no
+   hace falta y se ha quitado. */

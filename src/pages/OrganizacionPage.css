@@ -21,13 +21,13 @@
 .org__switch-btn {
   flex: 1;
   padding: 10px;
-  background: #fff;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   font-size: 0.8rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #2a2015;
+  color: var(--color-text-primary);
   cursor: pointer;
 }
 .org__switch-btn--active {
@@ -43,14 +43,14 @@
 }
 .org__whoami-btn {
   padding: 14px 20px;
-  background: #fff;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   font-size: 1rem;
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
   cursor: pointer;
 }
-.org__whoami-btn:hover { border-color: #2a2015; }
+.org__whoami-btn:hover { border-color: var(--color-accent-hover); }
 
 .org__who-row {
   display: flex;
@@ -58,11 +58,11 @@
   align-items: center;
   margin-bottom: 16px;
 }
-.org__who-name { font-weight: 700; font-size: 1.1rem; color: #2a2015; }
+.org__who-name { font-weight: 700; font-size: 1.1rem; color: var(--color-text-primary); }
 .org__link-btn {
   background: none;
   border: none;
-  color: #8a6416;
+  color: var(--color-accent-hover);
   text-decoration: underline;
   cursor: pointer;
   font-size: 0.85rem;
@@ -72,7 +72,7 @@
 .org__section-title {
   font-family: var(--font-serif);
   font-size: 1.1rem;
-  color: #2a2015;
+  color: var(--color-text-primary);
   margin: 0 0 10px;
 }
 
@@ -82,21 +82,24 @@
   display: flex; flex-direction: column; gap: 6px;
 }
 .org__task {
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  /* Ramiro, 13/11 05:30: fondo blanco + borde claro fijos — Blokes ya no tiene modo claro. El
+     override de [data-theme="dark"] de más abajo quedaba por detrás de esta regla en
+     especificidad/orden y no siempre ganaba; ahora el valor "bueno" está aquí directamente. */
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 10px 12px;
 }
 .org__task--done { opacity: 0.55; }
 .org__task label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-.org__task-name { font-weight: 600; color: #2a2015; flex: 1; }
+.org__task-name { font-weight: 600; color: var(--color-text-primary); flex: 1; }
 .org__task-params { font-size: 0.78rem; color: var(--color-text-secondary); }
 
 .org__block-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 8px 10px;
   flex-wrap: wrap;
 }
@@ -107,12 +110,12 @@
   color: #fff;
   border-radius: 3px;
 }
-.org__block-info { font-size: 0.85rem; color: #2a2015; flex: 1; }
+.org__block-info { font-size: 0.85rem; color: var(--color-text-primary); flex: 1; }
 .org__block-upload { font-size: 0.75rem; color: var(--color-text-secondary); display: flex; align-items: center; gap: 4px; }
 
 /* Bloques planificados (Ramiro, 11/11 04:27): decididos de antemano, pero sin poner todavía —
    más apagados que uno ya puesto, para que se distingan de un vistazo en la columna. */
-.org__block-row--planificado { background: #faf7ee; border-style: dashed; opacity: 0.85; }
+.org__block-row--planificado { background: var(--color-bg); border-style: dashed; opacity: 0.85; }
 .org__block-planificado-tag {
   display: inline-block;
   margin-left: 6px;
@@ -120,9 +123,9 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #92400e;
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
+  color: #fbbf24;
+  background: rgba(217, 119, 6, 0.2);
+  border: 1px solid rgba(217, 119, 6, 0.4);
   border-radius: 3px;
   padding: 1px 6px;
 }
@@ -143,8 +146,8 @@
 }
 
 .org__add-form {
-  background: #fdf7e6;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   padding: 16px;
   margin-top: 10px;
   display: flex;
@@ -156,21 +159,22 @@
 .org__add-row--check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
 .org__add-row--check span { font-size: 0.82rem; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--color-text-primary); }
 .org__add-row select, .org__add-row input[type="date"] {
-  padding: 8px; border: 1.5px solid #c8bc9a; background: #fff; font-size: 0.9rem;
+  padding: 8px; border: 1.5px solid var(--color-border); background: var(--color-surface);
+  color: var(--color-text-primary); font-size: 0.9rem;
 }
 .org__holdset-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .org__holdset-chip {
   padding: 6px 10px;
-  background: #fff;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   font-size: 0.78rem;
   cursor: pointer;
-  color: #2a2015;
+  color: var(--color-text-primary);
 }
 .org__holdset-chip--on { background: #2a2015; color: #f5c842; border-color: #2a2015; }
 
-.org__warning { color: #9a5b13; font-size: 0.82rem; }
-.org__error { color: #b42318; font-size: 0.82rem; }
+.org__warning { color: var(--state-warn); font-size: 0.82rem; }
+.org__error { color: var(--state-bad); font-size: 0.82rem; }
 
 .org__add-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .org__btn {
@@ -178,13 +182,15 @@
   font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer;
 }
 .org__btn:disabled { opacity: 0.6; }
-.org__btn--ghost { background: none; color: #2a2015; border: 1.5px solid #2a2015; }
+/* Ramiro, 13/11 05:30: botón "ghost" con texto #2a2015 (marrón oscuro) sobre fondo
+   transparente — invisible encima del fondo oscuro de la página. */
+.org__btn--ghost { background: none; color: var(--color-text-primary); border: 1.5px solid var(--color-border); }
 
 .org__week-row {
   display: flex;
   justify-content: space-between;
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 10px 12px;
   cursor: pointer;
 }
@@ -199,8 +205,8 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  background: #fff;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   border-radius: 6px;
   padding: 14px 16px;
   cursor: pointer;
@@ -208,7 +214,7 @@
 }
 .org__compe-card:hover, .org__compe-card:active { border-color: #c8961e; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
 .org__compe-card-main { display: flex; flex-direction: column; gap: 3px; }
-.org__compe-card-nombre { font-weight: 700; color: #2a2015; font-size: 1rem; }
+.org__compe-card-nombre { font-weight: 700; color: var(--color-text-primary); font-size: 1rem; }
 .org__compe-card-fechas { font-size: 0.85rem; color: var(--color-text-secondary); }
 .org__compe-card-estado { font-size: 0.8rem; color: var(--color-accent-hover); font-weight: 600; }
 .org__compe-card-flecha { font-weight: 700; color: var(--color-accent-hover); white-space: nowrap; }
@@ -220,21 +226,21 @@
   align-items: flex-start;
   gap: 2px;
   width: 100%;
-  background: #fdf0d8;
-  border: 1.5px solid #c8961e;
+  background: var(--color-bg);
+  border: 1.5px solid var(--state-warn);
   border-radius: 6px;
   padding: 12px 16px;
   margin-bottom: 20px;
   cursor: pointer;
   text-align: left;
 }
-.org__compe-resumen-nombre { font-weight: 700; color: #2a2015; font-size: 1rem; }
+.org__compe-resumen-nombre { font-weight: 700; color: var(--color-text-primary); font-size: 1rem; }
 .org__compe-resumen-datos { font-size: 0.82rem; color: var(--color-accent-hover); }
 .org__compe-resumen-flecha { align-self: flex-end; font-weight: 700; color: var(--color-accent-hover); margin-top: -4px; }
 
 .org__mi-parte-semana { font-size: 0.78rem; font-weight: 700; color: var(--color-accent-hover); text-transform: uppercase; letter-spacing: 0.03em; margin: 10px 0 4px; }
 
-.org__danger-zone { margin-top: 24px; padding-top: 12px; border-top: 1px solid #e5ddc8; text-align: right; }
+.org__danger-zone { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--color-border); text-align: right; }
 .org__link-btn--danger { color: var(--state-bad); }
 
 /* Aviso visible de error (Ramiro, 4/11 05:48: las llamadas fallidas no decían nada en pantalla). */
@@ -256,21 +262,21 @@
 .org__toast-close { opacity: 0.6; margin-left: 6px; }
 
 .org__assignment-card {
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 12px;
   margin-bottom: 8px;
 }
-.org__assignment-name { font-weight: 700; color: #2a2015; margin: 0 0 4px; font-size: 0.9rem; }
+.org__assignment-name { font-weight: 700; color: var(--color-text-primary); margin: 0 0 4px; font-size: 0.9rem; }
 .org__assignment-tasks { font-size: 0.8rem; color: var(--color-text-secondary); margin: 0; }
 
 .org__grade-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.org__grade-table th, .org__grade-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5ddc8; }
+.org__grade-table th, .org__grade-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--color-border); color: var(--color-text-primary); }
 
-.org__rule { padding: 8px 10px; font-size: 0.85rem; }
-.org__rule--info { background: #fff; border: 1px solid #e5ddc8; }
-.org__rule--warning { background: #fdf0d8; border: 1px solid #c8961e; color: #7a5a10; }
-.org__rule--validation { background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; }
+.org__rule { padding: 8px 10px; font-size: 0.85rem; color: var(--color-text-primary); }
+.org__rule--info { background: var(--color-surface); border: 1px solid var(--color-border); }
+.org__rule--warning { background: rgba(200, 150, 30, 0.16); border: 1px solid #c8961e; color: #fbbf24; }
+.org__rule--validation { background: rgba(239, 68, 68, 0.16); border: 1px solid #ef4444; color: #fca5a5; }
 
 /* ── Semana: acciones + gestor de personas ── */
 .org__semana-actions {
@@ -284,8 +290,8 @@
 .org__semana-actions .org__add-btn { width: auto; flex: 1; margin-top: 0; }
 
 .org__workers-admin {
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 12px;
   margin-bottom: 16px;
 }
@@ -295,29 +301,29 @@
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  background: #fdf7e6;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
 }
-.org__worker-name { font-weight: 700; color: #2a2015; flex: 1; }
+.org__worker-name { font-weight: 700; color: var(--color-text-primary); flex: 1; }
 .org__worker-meta { font-size: 0.78rem; color: var(--color-text-secondary); }
 .org__blocks-range { display: flex; align-items: center; gap: 8px; }
-.org__blocks-range input { width: 60px; padding: 8px; border: 1.5px solid #c8bc9a; background: #fff; }
+.org__blocks-range input { width: 60px; padding: 8px; border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary); }
 
 /* ── Compe: bandeja de números + mapa con burbujas ── */
 .org__comp-tray {
   margin-bottom: 12px;
   padding: 10px 12px;
-  background: #fdf0d8;
+  background: rgba(200, 150, 30, 0.14);
   border: 1px dashed #c8961e;
 }
 .org__comp-tray-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .org__comp-chip {
   width: 36px; height: 36px;
   border-radius: 50%;
-  background: #fff;
-  border: 2px solid #2a2015;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
   cursor: pointer;
   touch-action: none;
 }
@@ -328,7 +334,7 @@
   width: 100%;
   touch-action: none;
   user-select: none;
-  border: 2px solid #2a2015;
+  border: 2px solid var(--color-border);
 }
 .org__comp-map-img {
   width: 100%;
@@ -373,7 +379,7 @@
   border: 1.5px solid #052e16;
   pointer-events: none;
 }
-.org__comp-block-photo { max-width: 160px; display: block; margin-bottom: 6px; border: 1px solid #c8bc9a; }
+.org__comp-block-photo { max-width: 160px; display: block; margin-bottom: 6px; border: 1px solid var(--color-border); }
 
 /* Botón de encender/apagar el modo compe, bien visible (Ramiro, 11/11 05:01: "tiene que
    quedar claro para el socio"). */
@@ -386,11 +392,12 @@
   padding: 14px 18px;
   margin-bottom: 20px;
   border-radius: 8px;
-  background: #f3f0e4;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  color: var(--color-text-primary);
 }
-.org__modo-compe--activo { background: #e8f7ec; border-color: #22c55e; }
-.org__modo-compe__estado { font-weight: 800; margin: 0 0 4px; }
+.org__modo-compe--activo { background: rgba(34, 197, 94, 0.14); border-color: #22c55e; }
+.org__modo-compe__estado { font-weight: 800; margin: 0 0 4px; color: var(--color-text-primary); }
 /* "Bloque #3" se leía mal en la ficha (Ramiro, 11/11 05:01) — más grande y en negrita, el
    número sobre todo. No se toca .org__section-title (compartido con cabeceras de otras
    secciones) para no afectar a nada más. */
@@ -424,8 +431,8 @@
 }
 .org__task-move select, .org__task-move input[type="date"] {
   padding: 4px 6px;
-  border: 1.5px solid #c8bc9a;
-  background: #fff;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
   font-size: 0.75rem;
 }
 .org__task label { gap: 0; }
@@ -441,8 +448,8 @@
 .org__periodicity-edit input {
   width: 48px;
   padding: 4px 6px;
-  border: 1.5px solid #c8bc9a;
-  background: #fff;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
 }
 
 /* ── Semana: tablero de columnas por persona con tiles arrastrables ── */
@@ -458,15 +465,15 @@
   touch-action: none;
 }
 .org__board-col {
-  background: #fdf7e6;
-  border: 1.5px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   padding: 10px;
 }
 .org__board-col--over {
   border-color: #c8961e;
-  background: #fdf0d8;
+  background: rgba(200, 150, 30, 0.16);
 }
-.org__board-col-title { font-weight: 700; color: #2a2015; margin: 0 0 2px; font-size: 0.95rem; }
+.org__board-col-title { font-weight: 700; color: var(--color-text-primary); margin: 0 0 2px; font-size: 0.95rem; }
 .org__board-col-meta { font-size: 0.72rem; color: var(--color-text-secondary); margin: 0 0 10px; }
 .org__board-day { margin-bottom: 10px; }
 .org__board-day-label {
@@ -483,8 +490,8 @@
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px;
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 8px;
   margin-bottom: 6px;
   cursor: grab;
@@ -497,7 +504,7 @@
 .org__tile--dragging { opacity: 0.3; }
 .org__tile-check { display: flex; align-items: center; padding-top: 1px; cursor: pointer; }
 .org__tile-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.org__tile-name { font-weight: 600; color: #2a2015; font-size: 0.85rem; }
+.org__tile-name { font-weight: 600; color: var(--color-text-primary); font-size: 0.85rem; }
 .org__tile-params { font-size: 0.72rem; color: var(--color-text-secondary); }
 .org__tile-badge {
   align-self: flex-start;
@@ -520,7 +527,7 @@
 .org__tile-postpone {
   flex: 0 0 100%;
   background: none;
-  border: 1px dashed #c8bc9a;
+  border: 1px dashed var(--color-border);
   color: #8a6416;
   font-size: 0.68rem;
   font-weight: 700;
@@ -542,7 +549,7 @@
 .org__tile-edit {
   flex: 0 0 100%;
   background: none;
-  border: 1px dashed #c8bc9a;
+  border: 1px dashed var(--color-border);
   color: #5a4a2a;
   font-size: 0.68rem;
   font-weight: 700;
@@ -563,11 +570,11 @@
   margin-bottom: 14px;
 }
 .org__historico-row {
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 8px 12px;
 }
-.org__historico-title { font-weight: 700; color: #2a2015; margin: 0 0 2px; font-size: 0.88rem; }
+.org__historico-title { font-weight: 700; color: var(--color-text-primary); margin: 0 0 2px; font-size: 0.88rem; }
 .org__historico-meta { font-size: 0.78rem; color: var(--color-text-secondary); margin: 0; }
 
 .org__drag-ghost {
@@ -705,8 +712,6 @@
   :root:not([data-theme="light"]) .org__modo-compe--activo { background: rgba(34, 197, 94, 0.14); }
   :root:not([data-theme="light"]) .org__warning { color: var(--state-warn); }
   :root:not([data-theme="light"]) .org__error { color: var(--state-bad); }
-  :root:not([data-theme="light"]) .org__add-row select,
-  :root:not([data-theme="light"]) .org__add-row input[type="date"] { color: #2a2015; }
   :root:not([data-theme="light"]) .org__compe-resumen { background: var(--color-bg); border-color: var(--state-warn); }
   :root:not([data-theme="light"]) .org__block-row--planificado { background: var(--color-bg); }
   :root:not([data-theme="light"]) .org__tile--missed { background: rgba(248, 113, 113, 0.14); }
@@ -757,8 +762,6 @@
 :root[data-theme="dark"] .org__modo-compe--activo { background: rgba(34, 197, 94, 0.14); }
 :root[data-theme="dark"] .org__warning { color: var(--state-warn); }
 :root[data-theme="dark"] .org__error { color: var(--state-bad); }
-:root[data-theme="dark"] .org__add-row select,
-:root[data-theme="dark"] .org__add-row input[type="date"] { color: #2a2015; }
 :root[data-theme="dark"] .org__compe-resumen { background: var(--color-bg); border-color: var(--state-warn); }
 :root[data-theme="dark"] .org__block-row--planificado { background: var(--color-bg); }
 :root[data-theme="dark"] .org__tile--missed { background: rgba(248, 113, 113, 0.14); }

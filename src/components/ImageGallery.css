@@ -5,8 +5,11 @@
     width: 100%;
     overflow: hidden;
     border-radius: 7px 7px 0 0;
-    background-color: #fdfaf0;
-    padding: 6px 6px 0 6px; /* white photo-print border on 3 sides */
+    /* Ramiro, 13/11 05:30: fondo crema fijo ("borde de foto de polaroid" pensado para el modo
+       claro que ya no existe) — gris/crema claro suelto detrás de la foto, con las flechas y
+       el contador encima perdiendo contraste. */
+    background-color: var(--color-surface);
+    padding: 6px 6px 0 6px;
 }
 
 .gallery--empty {
@@ -17,7 +20,7 @@
 }
 
 .gallery__placeholder {
-    color: #666;
+    color: var(--color-text-secondary);
     font-size: 14px;
 }
 

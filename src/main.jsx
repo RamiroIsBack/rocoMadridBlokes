@@ -4,14 +4,13 @@ import './index.css'
 import App from './App'
 import { applyVerComo, installVerComoFetch } from './utils/verComo'
 import { installVisibilityRefresh } from './utils/visibilityRefresh'
-import { instalarTemaAuto } from './utils/theme'
 
 // eslint-disable-next-line no-undef
 console.log('Blokes build', __BUILD_TIME__)
 
-// Modo claro/oscuro (Ramiro, 11/11 05:08): lo antes posible, antes de que React pinte nada,
-// para no enseñar un parpadeo del tema por defecto y cambiar justo después.
-instalarTemaAuto()
+// Ramiro, 13/11 05:30: "quita también el modo claro/oscuro" — Blokes siempre en oscuro.
+// data-theme="dark" ya viene fijo desde index.html (sin esperar a JS, para que no haya
+// parpadeo claro al cargar); aquí no queda nada que instalar.
 
 if (window.blokesSiteData) {
   const r = window.blokesSiteData.userRole

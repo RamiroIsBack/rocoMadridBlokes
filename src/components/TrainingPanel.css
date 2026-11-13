@@ -1,6 +1,6 @@
 .training-panel {
-  background: #f9fafb;
-  border-top: 3px solid #e5e7eb;
+  background: var(--color-bg);
+  border-top: 3px solid var(--color-border);
   padding: 16px;
   min-width: 0;
   overflow: hidden;
@@ -19,7 +19,7 @@
 }
 .training-panel__meta {
   font-size: 0.8rem;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   margin: 0;
 }
 .training-panel__close {
@@ -27,28 +27,28 @@
   border: none;
   font-size: 1.1rem;
   cursor: pointer;
-  color: #9ca3af;
+  color: var(--color-text-secondary);
   padding: 4px 8px;
   line-height: 1;
 }
-.training-panel__close:hover { color: #374151; }
+.training-panel__close:hover { color: var(--color-text-primary); }
 
 .training-panel__link-box {
-  background: #fff7ed;
-  border: 1px solid #fed7aa;
+  background: rgba(217, 119, 6, 0.16);
+  border: 1px solid rgba(217, 119, 6, 0.4);
   border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 16px;
 }
 .training-panel__link-hint {
   font-size: 0.8rem;
-  color: #9a5b13;
+  color: #fbbf24;
   margin: 0 0 8px;
 }
 .training-panel__delete-btn {
   background: none;
   border: none;
-  color: #b91c1c;
+  color: #f87171;
   font-size: 0.75rem;
   font-weight: 700;
   text-decoration: underline;
@@ -58,7 +58,7 @@
 .training-panel__delete-btn:disabled { opacity: 0.6; cursor: default; }
 
 .training-panel__loading {
-  color: #9ca3af;
+  color: var(--color-text-secondary);
   font-size: 0.9rem;
   text-align: center;
   padding: 16px 0;
@@ -71,8 +71,8 @@
 }
 
 .training-panel__test {
-  background: #fff;
-  border: 1.5px solid color-mix(in srgb, var(--zone-color) 30%, #e5e7eb);
+  background: var(--color-surface);
+  border: 1.5px solid color-mix(in srgb, var(--zone-color) 30%, var(--color-border));
   border-radius: 10px;
   padding: 12px;
   min-width: 0;
@@ -92,14 +92,14 @@
 }
 .training-panel__test-zone {
   font-size: 0.7rem;
-  color: #9ca3af;
+  color: var(--color-text-secondary);
   margin-left: auto;
 }
 
 .training-panel__info-btn {
   background: none;
   border: none;
-  color: #9ca3af;
+  color: var(--color-text-secondary);
   cursor: pointer;
   font-size: 0.85rem;
   padding: 0;
@@ -110,7 +110,7 @@
 .training-panel__desc {
   font-size: 0.72rem;
   line-height: 1.4;
-  color: #9ca3af;
+  color: var(--color-text-secondary);
   margin: 0 0 8px;
   padding: 6px 8px;
   background: rgba(255, 255, 255, 0.04);
@@ -139,15 +139,15 @@
 
 .training-panel__last {
   font-size: 0.78rem;
-  color: #6b7280;
+  color: var(--color-text-secondary);
   margin: 0;
   flex: 1;
 }
-.training-panel__last strong { color: #111827; }
+.training-panel__last strong { color: var(--color-text-primary); }
 .training-panel__last-date {
   display: block;
   font-size: 0.7rem;
-  color: #9ca3af;
+  color: var(--color-text-secondary);
 }
 .training-panel__last-date--this-month { color: #16a34a; }
 
@@ -159,10 +159,12 @@
   flex: 1;
   min-width: 0;
   padding: 10px 8px;
-  border: 1.5px solid #d1d5db;
+  border: 1.5px solid var(--color-border);
   border-radius: 8px;
   font-size: 1rem;
   text-align: center;
+  background: var(--color-surface);
+  color: var(--color-text-primary);
   -moz-appearance: textfield;
 }
 .training-panel__input::-webkit-inner-spin-button,
@@ -190,15 +192,15 @@
 .training-panel__cancel-btn {
   padding: 10px 10px;
   border-radius: 8px;
-  border: 1.5px solid #d1d5db;
-  background: #fff;
-  color: #6b7280;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
   font-size: 0.82rem;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
   white-space: nowrap;
 }
-.training-panel__cancel-btn:hover { border-color: #9ca3af; color: #374151; }
+.training-panel__cancel-btn:hover { border-color: var(--color-text-secondary); color: var(--color-text-primary); }
 
 .training-panel__err {
   font-size: 0.72rem;
@@ -218,5 +220,5 @@
 }
 
 /* ── Notas para profesores ── */
-.training-panel__note { margin: 4px 0 0; font-size: 0.78rem; font-style: italic; color: #7a5a10; }
-.training-panel__note-input { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 6px 8px; font-size: 0.85rem; border: 1px solid #cfc9b8; background: #fff; }
+.training-panel__note { margin: 4px 0 0; font-size: 0.78rem; font-style: italic; color: var(--state-warn); }
+.training-panel__note-input { width: 100%; box-sizing: border-box; margin-top: 6px; padding: 6px 8px; font-size: 0.85rem; border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary); }

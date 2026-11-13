@@ -6,8 +6,10 @@
 
 .progreso-idx__tabs {
   display: flex;
-  border-bottom: 2px solid #e5e7eb;
-  background: #fff;
+  /* Ramiro, 13/11 05:30: barra blanca + borde gris claro fijos, pensados para el modo claro
+     que ya no existe. */
+  border-bottom: 2px solid var(--color-border);
+  background: var(--color-surface);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -24,7 +26,7 @@
   min-height: 48px;
   text-align: center;
   text-decoration: none;
-  color: #6b7280; /* antes #9ca3af, 2,54:1 sobre blanco — NOTAS_PARA_CODE_contraste.md */
+  color: var(--color-text-secondary);
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -47,11 +49,11 @@
   }
 }
 
-.progreso-idx__tab:hover { color: #4b5563; }
+.progreso-idx__tab:hover { color: var(--color-text-primary); }
 
 .progreso-idx__tab.active {
-  color: #2a2015;
-  border-bottom-color: #2a2015;
+  color: var(--color-accent-hover);
+  border-bottom-color: var(--color-accent-hover);
 }
 
 .progreso-idx__tab--locked {

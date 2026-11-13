@@ -396,19 +396,22 @@
     opacity: 0.85;
 }
 
+/* Ramiro, 13/11 05:30: fondos claros fijos (pensados para el modo claro que ya no existe) —
+   parches claros sueltos dentro de la card oscura. Mismo color de cada sala, en tonos para
+   fondo oscuro (traslúcido + texto claro) en vez de otro color fijo. */
 .event-card__sala--entrada {
-    background-color: #ddeeff;
-    color: #1d4ed8;
+    background-color: rgba(59, 130, 246, 0.18);
+    color: #93c5fd;
 }
 
 .event-card__sala--grande {
-    background-color: #fff0cc;
-    color: #92400e;
+    background-color: rgba(217, 119, 6, 0.2);
+    color: #fbbf24;
 }
 
 .event-card__sala--cueva {
-    background-color: #ece6ff;
-    color: #4338ca;
+    background-color: rgba(124, 58, 237, 0.2);
+    color: #c4b5fd;
 }
 
 /* Rating icons - left side of photo bottom */

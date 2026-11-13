@@ -16,12 +16,12 @@
 .tele-row { display: flex; gap: 12px; flex-wrap: wrap; }
 .tele-input, .tele-textarea {
   font: inherit; font-size: 0.9rem; font-weight: 400; color: var(--color-text-primary);
-  background: #fff; border: 1px solid var(--color-border); border-radius: 6px; padding: 7px 10px; box-sizing: border-box;
+  background: var(--color-bg); border: 1px solid var(--color-border); border-radius: 6px; padding: 7px 10px; box-sizing: border-box;
 }
 .tele-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 6px; }
 .tele-btn {
   padding: 7px 14px; border-radius: 6px; border: 1px solid var(--color-border);
-  background: #fff; color: var(--color-text-primary); font-size: 0.82rem; font-weight: 600; cursor: pointer;
+  background: var(--color-bg); color: var(--color-text-primary); font-size: 0.82rem; font-weight: 600; cursor: pointer;
 }
 .tele-btn--primary { background: var(--color-accent); border-color: var(--color-accent); color: #1f1f1f; }
 .tele-btn--danger { color: var(--state-bad); border-color: var(--state-bad); }

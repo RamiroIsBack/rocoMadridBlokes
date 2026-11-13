@@ -15,12 +15,12 @@
 
 .stats-page__header h1 {
     font-size: 2rem;
-    color: #1f2937;
+    color: var(--color-text-primary);
     margin: 0 0 8px 0;
 }
 
 .stats-page__subtitle {
-    color: #6b7280;
+    color: var(--color-text-secondary);
     font-size: 1rem;
 }
 
@@ -37,7 +37,7 @@
 .stats-page__loading-spinner {
     width: 40px;
     height: 40px;
-    border: 3px solid #e5e7eb;
+    border: 3px solid var(--color-border);
     border-top-color: #3b82f6;
     border-radius: 50%;
     animation: spin 1s linear infinite;
@@ -51,9 +51,9 @@
 }
 
 .stats-page__error {
-    color: #dc2626;
+    color: #fca5a5;
     padding: 20px;
-    background: #fef2f2;
+    background: rgba(239, 68, 68, 0.16);
     border-radius: 8px;
 }
 
@@ -66,7 +66,7 @@
 }
 
 .stats-summary__card {
-    background: white;
+    background: var(--color-surface);
     border-radius: 12px;
     padding: 20px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -75,7 +75,7 @@
 .stats-summary__card h3 {
     margin: 0 0 16px 0;
     font-size: 0.875rem;
-    color: #6b7280;
+    color: var(--color-text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
@@ -83,7 +83,7 @@
 .stats-summary__value {
     font-size: 2.5rem;
     font-weight: 700;
-    color: #1f2937;
+    color: var(--color-text-primary);
 }
 
 .stats-summary__intro-trave {
@@ -100,7 +100,7 @@
 }
 
 .stats-summary__trave {
-    color: #6b7280;
+    color: var(--color-text-secondary);
     font-weight: 600;
 }
 
@@ -222,13 +222,13 @@
         width: 70px;
         font-size: 0.875rem;
         font-weight: 500;
-        color: #4b5563;
+        color: var(--color-text-secondary);
     }
 
     .stats-summary__color-bar-track {
         flex: 1;
         height: 24px;
-        background: #f3f4f6;
+        background: var(--color-bg);
         border-radius: 12px;
         overflow: hidden;
     }
@@ -270,11 +270,11 @@
         text-align: right;
         font-weight: 600;
         font-size: 0.875rem;
-        color: #1f2937;
+        color: var(--color-text-primary);
 }
 
 .stats-summary__color-label {
-    color: #4b5563;
+    color: var(--color-text-secondary);
     font-size: 0.875rem;
 }
 
@@ -288,7 +288,7 @@
     display: flex;
     justify-content: space-between;
     padding: 8px 0;
-    border-bottom: 1px solid #f3f4f6;
+    border-bottom: 1px solid var(--color-border);
     }
 
     .stats-summary__interaction:last-child {
@@ -297,7 +297,7 @@
 
 /* Filters */
 .stats-page__filters {
-    background: white;
+    background: var(--color-surface);
     border-radius: 12px;
     padding: 20px;
     margin-bottom: 30px;
@@ -307,7 +307,7 @@
 .stats-page__filters h2 {
     margin: 0 0 16px 0;
     font-size: 1.25rem;
-    color: #1f2937;
+    color: var(--color-text-primary);
 }
 
 .stats-filters__row {
@@ -336,17 +336,17 @@
 
 .stats-filters__field label {
     font-size: 0.875rem;
-    color: #6b7280;
+    color: var(--color-text-secondary);
     font-weight: 500;
 }
 
 .stats-filters__field select {
     padding: 8px 12px;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--color-border);
     border-radius: 6px;
     font-size: 0.875rem;
-    background: white;
-    color: #1f2937;
+    background: var(--color-surface);
+    color: var(--color-text-primary);
 }
 
 .stats-filters__actions {
@@ -387,22 +387,22 @@
 
 .stats-filters__reset {
     padding: 8px 16px;
-    background: #f3f4f6;
-    border: 1px solid #d1d5db;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
     border-radius: 6px;
     cursor: pointer;
     font-size: 0.875rem;
-    color: #4b5563;
+    color: var(--color-text-secondary);
     transition: background 0.2s;
 }
 
 .stats-filters__reset:hover {
-    background: #e5e7eb;
+    background: var(--color-border);
 }
 
 /* Table */
 .stats-page__table {
-    background: white;
+    background: var(--color-surface);
     border-radius: 12px;
     padding: 20px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -417,7 +417,7 @@
     .stats-page__table h2 {
         margin: 0 0 16px 0;
         font-size: 1.25rem;
-        color: #1f2937;
+        color: var(--color-text-primary);
     }
 
     .stats-table {
@@ -429,36 +429,36 @@
     .stats-table td {
         padding: 12px;
         text-align: left;
-        border-bottom: 1px solid #f3f4f6;
+        border-bottom: 1px solid var(--color-border);
     }
 
     .stats-table th {
         font-size: 0.75rem;
-        color: #6b7280;
+        color: var(--color-text-secondary);
         text-transform: uppercase;
         letter-spacing: 0.5px;
         font-weight: 600;
         position: sticky;
         top: 0;
         z-index: 5;
-        background: #ffffff;
-        border-bottom: 2px solid #e5e7eb;
+        background: var(--color-surface);
+        border-bottom: 2px solid var(--color-border);
     }
 
     .stats-table td {
         font-size: 0.875rem;
-        color: #1f2937;
+        color: var(--color-text-primary);
     }
 
     .stats-table tr:hover {
-        background: #f9fafb;
+        background: var(--color-border);
     }
 
     /* Old bloke row (>3 months) */
     .stats-table__row--old {
         outline: 2px solid #ef4444;
         outline-offset: -2px;
-        background-color: #fff5f5;
+        background-color: rgba(239, 68, 68, 0.14);
     }
 
     /* Delete button in table */
@@ -473,7 +473,7 @@
     }
 
     .stats-table__delete-btn:hover {
-        background-color: #fee2e2;
+        background-color: rgba(239, 68, 68, 0.18);
     }
 
     /* Edit button in table */
@@ -489,7 +489,7 @@
     }
 
     .stats-table__edit-btn:hover {
-        background-color: #e0e7ff;
+        background-color: rgba(99, 102, 241, 0.18);
     }
 
     /* Modal Overlay */
@@ -508,7 +508,7 @@
 
     /* Modal */
     .stats-modal {
-        background: white;
+        background: var(--color-surface);
         border-radius: 12px;
         padding: 24px;
         max-width: 400px;
@@ -518,19 +518,19 @@
 
     .stats-modal h3 {
         margin: 0 0 16px 0;
-        color: #1f2937;
+        color: var(--color-text-primary);
         font-size: 1.25rem;
     }
 
     .stats-modal p {
         margin: 0 0 12px 0;
-        color: #4b5563;
+        color: var(--color-text-secondary);
     }
 
     .stats-modal__warning {
-        color: #dc2626;
+        color: #fca5a5;
         font-size: 0.875rem;
-        background-color: #fef2f2;
+        background-color: rgba(239, 68, 68, 0.16);
         padding: 8px 12px;
         border-radius: 6px;
         margin-bottom: 16px;
@@ -545,17 +545,17 @@
 
     .stats-modal__cancel {
         padding: 8px 16px;
-        border: 1px solid #d1d5db;
-        background: white;
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
         border-radius: 6px;
         cursor: pointer;
         font-size: 0.875rem;
-        color: #4b5563;
+        color: var(--color-text-secondary);
         transition: background-color 0.2s;
     }
 
     .stats-modal__cancel:hover {
-        background-color: #f3f4f6;
+        background-color: var(--color-border);
     }
 
     .stats-modal__confirm {
@@ -596,7 +596,7 @@
 .stats-edit-field label {
     font-size: 0.8rem;
     font-weight: 600;
-    color: #6b7280;
+    color: var(--color-text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
@@ -605,12 +605,12 @@
 .stats-edit-field textarea,
 .stats-edit-field select {
     padding: 8px 10px;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--color-border);
     border-radius: 4px;
     font-size: 0.9rem;
     font-family: inherit;
-    color: #1f2937;
-    background: white;
+    color: var(--color-text-primary);
+    background: var(--color-surface);
 }
 
 .stats-edit-field textarea {
@@ -638,7 +638,7 @@
     height: 80px;
     border-radius: 4px;
     overflow: hidden;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--color-border);
 }
 
 .stats-edit-image-item img {
@@ -706,7 +706,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 14px 16px;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid var(--color-border);
 }
 
 .stats-modal__preview-header h3 {
@@ -719,7 +719,7 @@
     border: none;
     font-size: 1.4rem;
     cursor: pointer;
-    color: #6b7280;
+    color: var(--color-text-secondary);
     line-height: 1;
     padding: 0 4px;
 }
@@ -743,12 +743,12 @@
 }
 
 .stats-table__preview-btn:hover {
-    color: #846400;
+    color: #f5c842;
 }
 
 .stats-table__date {
     font-size: 10px;
-    color: #9ca3af;
+    color: var(--color-text-secondary);
     margin-top: 2px;
 }
 
@@ -848,7 +848,7 @@
 
 .stats-hof__date {
     font-size: 10px;
-    color: #6b7280;
+    color: var(--color-text-secondary);
     margin-top: 1px;
 }
 
@@ -896,7 +896,7 @@
    BLOKES POR MES
    ============================================ */
 .stats-monthly {
-    background: white;
+    background: var(--color-surface);
     border-radius: 10px;
     padding: 20px 24px;
     margin-bottom: 24px;
@@ -914,13 +914,13 @@
 .stats-monthly h2 {
     margin: 0;
     font-size: 1.1rem;
-    color: #1f2937;
+    color: var(--color-text-primary);
 }
 
 .stats-monthly__avg {
     margin: 12px 0 16px 0;
     font-size: 0.875rem;
-    color: #6b7280;
+    color: var(--color-text-secondary);
 }
 
 .stats-monthly__scroll {
@@ -937,7 +937,7 @@
 .stats-monthly__table td {
     padding: 8px 12px;
     text-align: center;
-    border-bottom: 1px solid #f3f4f6;
+    border-bottom: 1px solid var(--color-border);
     font-size: 0.85rem;
 }
 
@@ -946,21 +946,21 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #6b7280;
-    background: #f9fafb;
+    color: var(--color-text-secondary);
+    background: var(--color-bg);
 }
 
 .stats-monthly__table td:first-child {
     text-align: left;
     font-weight: 600;
-    color: #374151;
+    color: var(--color-text-primary);
 }
 
 /* ============================================
    COLORES MÁS VALORADOS
    ============================================ */
 .stats-color-rating {
-    background: white;
+    background: var(--color-surface);
     border-radius: 10px;
     padding: 20px 24px;
     margin-bottom: 24px;
@@ -978,7 +978,7 @@
 .stats-color-rating h2 {
     margin: 0;
     font-size: 1.1rem;
-    color: #1f2937;
+    color: var(--color-text-primary);
 }
 
 .stats-color-rating__list {
@@ -997,7 +997,7 @@
 .stats-color-rating__rank {
     font-size: 0.8rem;
     font-weight: 800;
-    color: #9ca3af;
+    color: var(--color-text-secondary);
     min-width: 26px;
 }
 
@@ -1011,12 +1011,12 @@
     min-width: 70px;
     font-size: 0.875rem;
     font-weight: 600;
-    color: #374151;
+    color: var(--color-text-primary);
 }
 
 .stats-color-rating__bar-wrap {
     flex: 1;
-    background: #f3f4f6;
+    background: var(--color-bg);
     border-radius: 3px;
     height: 10px;
     overflow: hidden;
@@ -1032,7 +1032,7 @@
 .stats-color-rating__avg {
     font-size: 0.8rem;
     font-weight: 700;
-    color: #1f2937;
+    color: var(--color-text-primary);
     white-space: nowrap;
     min-width: 90px;
     text-align: right;
@@ -1040,6 +1040,6 @@
 
 .stats-color-rating__count {
     font-size: 0.75rem;
-    color: #9ca3af;
+    color: var(--color-text-secondary);
     white-space: nowrap;
 }
