@@ -2516,7 +2516,7 @@ function blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel
 function superadmin_alumnos_onhold_diagnostico($request) {
     $todas = blokes_get_all_subscription_data();
     $on_hold = array_values(array_filter($todas, function($s) { return ($s['status'] ?? '') === 'on-hold'; }));
-    $vacio = array('duplicados' => array(), 'revisar' => array(), 'pagaronNoviembre' => array(), 'pagaronSoloOctubre' => array(), 'sinPago' => array(), 'pruebas' => array(), 'total' => 0);
+    $vacio = array('duplicados' => array(), 'revisar' => array(), 'duplicadosEnEspera' => array(), 'pagaronNoviembre' => array(), 'pagaronSoloOctubre' => array(), 'sinPago' => array(), 'pruebas' => array(), 'total' => 0);
     if (!$on_hold) return rest_ensure_response(array('success' => true, 'data' => $vacio));
 
     // Cruce con el Excel, por MES (no "oct o nov" mezclados) — primero de todo, antes de cargar
@@ -2554,7 +2554,15 @@ function superadmin_alumnos_onhold_diagnostico($request) {
     // (hermanos en el mismo grupo) sin confundirlo con un duplicado de verdad.
     $por_tel = blokes_sync_grupos_subs_por_telefono();
 
-    $duplicados = array(); $revisar = array(); $pagaron_nov = array(); $pagaron_solo_oct = array(); $sin_pago = array(); $pruebas = array();
+    // Precálculo de cada on-hold (una vez) + agrupación entre ELLAS MISMAS por cliente/teléfono
+    // + clase — cowork, 14/11 17:55: las 3 Cendejas salían dos veces cada una en
+    // pagaronNoviembre (una suscripción con nombre de facturación, otra solo con el usuario) —
+    // como ninguna de las dos está activa, el duplicado por activa no las pillaba, y "Marcar
+    // cobrado" en las dos habría cobrado dos veces a la misma persona. Aquí se agrupan primero,
+    // antes de clasificar por Excel, y solo SIGUE a la clasificación normal una de cada grupo.
+    $pruebas = array();
+    $info_por_sub = array(); // sub_id => info ya calculada (para no repetir el trabajo)
+    $grupos_en_espera = array(); // clave cliente/teléfono+clase => [sub_id, ...]
     foreach ($on_hold as $s) {
         $sub_id = intval($s['id'] ?? 0);
         // Suscripción de pruebas de Ramiro — fuera de cualquier lista que proponga baja o cobro,
@@ -2565,6 +2573,47 @@ function superadmin_alumnos_onhold_diagnostico($request) {
         $tel = blokes_alumno_telefono_de_sub($s, $uid, $sub_obj);
         $nombre = blokes_alumno_nombre_de_sub($s, $uid, $sub_obj);
         $dia = $s['dia'] ?? ''; $horario = $s['horario'] ?? ''; $edad = $s['edad'] ?? 'Adultos';
+        $tiene_nombre_facturacion = $sub_obj && trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) !== '';
+
+        $info_por_sub[$sub_id] = array(
+            'subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad,
+            'uid' => $uid, 'tieneNombreFacturacion' => $tiene_nombre_facturacion,
+        );
+        $clave_persona = $uid ? 'u' . $uid : ($tel ? 't' . $tel : null);
+        $clave = $clave_persona !== null ? $clave_persona . '|' . $dia . '|' . $horario . '|' . $edad : ('s' . $sub_id);
+        $grupos_en_espera[$clave][] = $sub_id;
+    }
+
+    $duplicados_en_espera = array();
+    $en_grupo_resuelto = array(); // sub_id => true, para saltárselas en la clasificación normal
+    foreach ($grupos_en_espera as $grupo) {
+        if (count($grupo) < 2) continue;
+        // De cada grupo se cobra UNA (la que tenga nombre de facturación real; si ninguna o las
+        // dos, la de id más alto = más reciente) y se cancelan las demás — nunca "Marcar
+        // cobrado" en más de una suscripción en espera de la misma persona y clase.
+        usort($grupo, function($a, $b) use ($info_por_sub) {
+            $na = $info_por_sub[$a]['tieneNombreFacturacion'] ? 1 : 0;
+            $nb = $info_por_sub[$b]['tieneNombreFacturacion'] ? 1 : 0;
+            if ($na !== $nb) return $nb - $na;
+            return $b - $a;
+        });
+        $cobrar = $grupo[0];
+        $cancelar = array_slice($grupo, 1);
+        $duplicados_en_espera[] = array(
+            'cobrar' => $info_por_sub[$cobrar],
+            'cancelar' => array_map(function($id) use ($info_por_sub) { return $info_por_sub[$id]; }, $cancelar),
+            'motivo' => 'Dos (o más) suscripciones en espera de la misma persona y clase — ninguna está activa, así que no salían como duplicado. Cobrar una sola, cancelar el resto.',
+        );
+        foreach ($grupo as $id) $en_grupo_resuelto[$id] = true;
+    }
+
+    $duplicados = array(); $revisar = array(); $pagaron_nov = array(); $pagaron_solo_oct = array(); $sin_pago = array();
+    foreach ($on_hold as $s) {
+        $sub_id = intval($s['id'] ?? 0);
+        if ($sub_id === 7092 || isset($en_grupo_resuelto[$sub_id])) continue;
+        $datos = $info_por_sub[$sub_id];
+        $uid = $datos['uid']; $tel = $datos['telefono']; $nombre = $datos['nombre'];
+        $dia = $datos['dia']; $horario = $datos['horario']; $edad = $datos['edad'];
 
         $info = array('subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad);
 
@@ -2622,6 +2671,7 @@ function superadmin_alumnos_onhold_diagnostico($request) {
 
     return rest_ensure_response(array('success' => true, 'data' => array(
         'duplicados' => $duplicados, 'revisar' => $revisar,
+        'duplicadosEnEspera' => $duplicados_en_espera,
         'pagaronNoviembre' => $pagaron_nov, 'pagaronSoloOctubre' => $pagaron_solo_oct,
         'sinPago' => $sin_pago, 'pruebas' => $pruebas, 'total' => count($on_hold),
         // Si no es null, la Hoja no se pudo leer y "sinPago" está inflado de más — no significa
