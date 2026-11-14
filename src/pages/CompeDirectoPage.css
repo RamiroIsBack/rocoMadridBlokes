@@ -1,0 +1,217 @@
+/* Tele del Roco — NOTAS_PARA_CODE_tele_roco.md, 14/11 17:25: en la tele real (TCL, viewport
+   bajo tipo 960×540/1280×720) todo iba en tamaños fijos en px calculados para 1080p+, y sin
+   scroll (overflow:hidden) se cortaba por abajo — el cartel+QR a medias, la lista de "han
+   subido" solo con la primera fila, el QR de Instala Blokes sin aparecer. Todo aquí en vh/vw/
+   clamp() para que siempre quepa en 100dvh×100vw, sea cual sea la resolución real de la tele. */
+
+.td-page {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  width: 100vw;
+  height: 100dvh;
+  background: #0b1120;
+  color: #fff;
+  font-family: system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  /* ?escala=0.8 en la URL de la tele (Ramiro, 14/11 17:25) — para ajustar desde la propia tele
+     sin tocar código. `zoom` (no transform:scale) porque reajusta el flujo del layout solo,
+     sin tener que compensar ancho/alto a mano; los navegadores de Smart TV son Chromium. */
+  zoom: var(--td-escala, 1);
+}
+
+/* Cabecera: una sola franja arriba, como mucho ~15% del alto — logo pequeño + título + cuenta
+   atrás en una línea. Antes esto no era una franja fija: era parte del bloque centrado con
+   margin:auto, así que podía crecer tanto como el contenido y empujar todo por debajo del
+   viewport. */
+.td-header {
+  flex: 0 0 auto;
+  max-height: 15vh;
+  display: flex;
+  align-items: center;
+  gap: 1.6vh;
+  padding: 1.6vh 3vw 0.8vh;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.td-logo {
+  height: min(8vh, 64px);
+  width: min(8vh, 64px);
+  min-width: min(8vh, 64px);
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: contain;
+  background: #fff;
+}
+.td-header-text {
+  display: flex;
+  align-items: baseline;
+  gap: 1.4vw;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1;
+}
+.td-title {
+  font-size: clamp(1rem, 3.2vh, 2.2rem);
+  font-weight: 800;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.td-countdown {
+  font-size: clamp(0.8rem, 2.1vh, 1.3rem);
+  font-weight: 800;
+  color: #f5c842;
+  margin: 0;
+  white-space: nowrap;
+  animation: tdCuentaMov 2.2s ease-in-out infinite;
+}
+@keyframes tdCuentaMov { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+
+/* Cuerpo: ocupa TODO lo que deja la cabecera (flex:1, min-height:0 es lo que de verdad evita
+   que el contenido empuje el alto por encima de 100dvh), y centra lo que haya dentro. */
+.td-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1vh 3vw 2vh;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.td-content-inner {
+  max-width: 94vw;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 1.6vh;
+  overflow: hidden;
+}
+.td-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4vw;
+  flex-wrap: wrap;
+  max-width: 100%;
+  max-height: 100%;
+}
+.td-slide-title { font-size: clamp(1.2rem, 4.6vh, 2.8rem); font-weight: 800; margin: 0; }
+.td-slide-text { font-size: clamp(0.85rem, 2.4vh, 1.5rem); color: #d1d5db; margin: 0; }
+
+/* Cartel / imagen de diapositiva: por alto, nunca por ancho fijo — así nunca empuja el resto
+   fuera de la pantalla en una tele baja y ancha. */
+.td-img {
+  max-height: 46vh;
+  max-width: 68vw;
+  width: auto;
+  height: auto;
+  display: block;
+  object-fit: contain;
+  border-radius: 1vh;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+/* QR: entero y grande siempre — min(vh,vw) para que en una tele más alta que ancha (si la
+   hubiera) tampoco se salga por los lados. ≥35% del alto, como pide la nota. */
+.td-qr-box {
+  background: #fff;
+  padding: min(1.6vh, 1.6vw);
+  border-radius: 1vh;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.td-qr-img {
+  height: min(42vh, 42vw);
+  width: min(42vh, 42vw);
+  display: block;
+}
+.td-qr-caption-title { font-size: clamp(0.9rem, 2.6vh, 1.5rem); font-weight: 700; margin: 1.4vh 0 0.4vh; }
+.td-qr-caption-sub { font-size: clamp(0.75rem, 1.9vh, 1.1rem); color: #d1d5db; margin: 0; }
+
+/* "Esta semana han subido": lista limitada en alto, nunca cortada — si no caben todas, se
+   reparten en varias páginas (ver CompeDirectoPage.jsx) en vez de desbordar por abajo. */
+.td-liga-title { font-size: clamp(1rem, 3.6vh, 2rem); font-weight: 800; margin: 0 0 1vh; }
+.td-liga-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: clamp(0.8rem, 2.2vh, 1.4rem);
+  text-align: left;
+  display: inline-block;
+  max-height: 58vh;
+  max-width: 90vw;
+  overflow: hidden;
+}
+.td-liga-item {
+  padding: 0.9vh 0;
+  border-bottom: 1px solid #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.td-liga-item span { color: #9ca3af; }
+
+.td-sin-conexion { font-size: clamp(1rem, 3vh, 2rem); color: #9ca3af; margin: 0; }
+
+/* Vista "compe en marcha": mismo tratamiento — cabecera fija + cuerpo flexible, nada en px. */
+.td-live-header {
+  flex: 0 0 auto;
+  max-height: 15vh;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 2vw;
+  padding: 1.6vh 3vw 0.8vh;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.td-live-header-left { display: flex; align-items: center; gap: 2vw; min-width: 0; }
+.td-live-title { font-size: clamp(1.1rem, 3.6vh, 2.4rem); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.td-live-header-right { text-align: right; flex-shrink: 0; }
+.td-live-header-right .td-muted { font-size: clamp(0.7rem, 1.8vh, 1.1rem); color: #9ca3af; }
+.td-live-header-right .td-cuenta { font-size: clamp(0.8rem, 2vh, 1.3rem); font-weight: 700; color: #fbbf24; }
+
+.td-live-body { display: flex; gap: 3vw; flex: 1; min-height: 0; padding: 0 3vw; box-sizing: border-box; }
+.td-live-col { min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
+.td-live-col--clasif { flex: 2; }
+.td-live-col--ultimos { flex: 1; border-left: 1px solid #1f2937; padding-left: 3vw; }
+.td-live-col h2 { font-size: clamp(0.8rem, 2vh, 1.4rem); color: #9ca3af; margin: 0 0 1.6vh; flex: 0 0 auto; }
+.td-live-list { list-style: none; margin: 0; padding: 0; font-size: clamp(0.9rem, 2.6vh, 1.8rem); overflow: hidden; flex: 1; min-height: 0; }
+.td-live-list li { display: flex; justify-content: space-between; padding: 1vh 0; border-bottom: 1px solid #1f2937; }
+.td-live-list--ultimos { font-size: clamp(0.7rem, 1.6vh, 1.1rem); }
+.td-live-list--ultimos li { display: flex; align-items: center; gap: 1vw; padding: 0.8vh 0; }
+.td-dot { width: 1.4vh; height: 1.4vh; min-width: 10px; min-height: 10px; border-radius: 50%; flex: 0 0 auto; }
+
+.td-footer {
+  flex: 0 0 auto;
+  text-align: center;
+  padding: 1.2vh 0;
+  font-size: clamp(0.6rem, 1.5vh, 1rem);
+  color: #9ca3af;
+  border-top: 1px solid #1f2937;
+}
+
+.td-mapa-wrap { position: relative; max-width: 100%; max-height: 52vh; margin: 0 auto; }
+.td-mapa-wrap img { width: auto; height: 100%; max-height: 52vh; display: block; border-radius: 1vh; margin: 0 auto; }
+.td-mapa-bloque {
+  position: absolute; transform: translate(-50%, -50%);
+  width: min(5vh, 5vw); height: min(5vh, 5vw); min-width: 28px; min-height: 28px;
+  border-radius: 50%; color: #1f2937; display: flex; align-items: center; justify-content: center;
+  font-size: clamp(0.7rem, 1.8vh, 1.1rem); font-weight: 800; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
+}
+.td-mapa-caption { font-size: clamp(0.75rem, 1.9vh, 1.1rem); color: #d1d5db; margin-top: 1.6vh; }
+
+.td-fullscreen-btn {
+  position: fixed; bottom: 2vh; right: 2vh; z-index: 10000;
+  background: rgba(0, 0, 0, 0.6); color: #fff; border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px; padding: 1vh 1.6vw; font-size: clamp(0.75rem, 1.8vh, 1rem); cursor: pointer;
+  font-family: system-ui, sans-serif; transition: opacity 0.4s ease;
+}

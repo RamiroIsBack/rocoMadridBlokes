@@ -2,12 +2,17 @@ import { useState, useEffect } from 'react'
 import { colorPorNumeroBloque } from '../utils/compeColorScale'
 import mapaEquipacion from '../assets/mapa-equipacion.jpg'
 import cartelCompe from '../assets/cartel-compe-1fase-26-27.jpg'
+import './CompeDirectoPage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
 const REFRESCO_MS = 30000 // Ramiro: "sondeo cada 30 s, nada pesado" — ver el problema de pestañas colgadas
 const ROTACION_MS = 22000 // "Precompe" rota entre cuenta atrás+cartel y el mapa cada 20-30 s
 const LOGO_URL = 'https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png'
+// "Esta semana han subido": cuántas filas caben por página antes de pasar a repartir en varias
+// (NOTAS_PARA_CODE_tele_roco.md, 14/11 17:25 — antes se cortaba por abajo sin más).
+const LIGA_POR_PAGINA = 6
+const LIGA_PAGINA_MS = 6000
 
 // Recorte en círculo (cowork, 11/11 05:15: el PNG tiene las esquinas blancas, no transparentes
 // — sobre el fondo oscuro de la tele se ve como un cuadrado blanco feo). `flexShrink: 0` es
@@ -16,47 +21,49 @@ const LOGO_URL = 'https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-
 // en vez de cuadrada — con `object-fit: cover` eso recorta el círculo de forma asimétrica.
 // `contain` de más por si el recorte viniera de otro sitio: así nunca se corta el logo entero,
 // a lo sumo se ve un pelín más pequeño dentro del círculo.
-const logoEstilo = size => ({
-  height: size, width: size, minWidth: size, minHeight: size, flexShrink: 0,
-  borderRadius: '50%', objectFit: 'contain', background: '#fff',
-})
+function Logo({ className, style }) {
+  return <img src={LOGO_URL} alt="Rocoteca Madrid" className={className} style={{ objectFit: 'contain', background: '#fff', ...style }} />
+}
 
 // Contenido de una diapositiva de la Tele del Roco — se usa tanto sin compe como programada
 // (rotando con la cuenta atrás y el mapa).
 function renderSlide(slide) {
   return (
-    <>
-      {slide.imagenUrl && (
-        <img src={slide.imagenUrl} alt={slide.titulo} style={{ maxHeight: 420, maxWidth: '100%', borderRadius: 14, marginBottom: 28, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }} />
-      )}
-      <p style={{ fontSize: '3rem', fontWeight: 800, margin: '0 0 14px' }}>{slide.titulo}</p>
-      {slide.texto && <p style={{ fontSize: '1.6rem', color: '#d1d5db', margin: '0 0 24px' }}>{slide.texto}</p>}
+    <div className="td-content-inner">
+      {slide.imagenUrl && <img src={slide.imagenUrl} alt={slide.titulo} className="td-img" />}
+      <p className="td-slide-title">{slide.titulo}</p>
+      {slide.texto && <p className="td-slide-text">{slide.texto}</p>}
       {slide.qrUrl && (
-        <div style={{ background: '#fff', padding: 14, borderRadius: 14, display: 'inline-block' }}>
+        <div className="td-qr-box">
           <img
-            src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(slide.qrUrl)}`}
-            alt="Código QR" width={200} height={200}
+            className="td-qr-img"
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(slide.qrUrl)}`}
+            alt="Código QR"
           />
         </div>
       )}
-    </>
+    </div>
   )
 }
 
 // "Esta semana han subido: …" — opción 4 de NOTAS_PARA_CODE_ligas_incentivo.md. Mismo hueco de
-// la rotación que una diapositiva normal.
-function renderLigaSemana(ligaSemana) {
+// la rotación que una diapositiva normal. Repartida en páginas de LIGA_POR_PAGINA filas, para
+// no cortarla por abajo si hay más gente de la que cabe (cowork, 14/11 17:25: con 960×540 solo
+// se veía la primera fila).
+function renderLigaSemana(pagina, totalPaginas, paginaIdx) {
   return (
-    <>
-      <p style={{ fontSize: '2.6rem', fontWeight: 800, margin: '0 0 28px' }}>🏆 Esta semana han subido</p>
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '1.8rem', textAlign: 'left', display: 'inline-block' }}>
-        {ligaSemana.map((p, i) => (
-          <li key={i} style={{ padding: '10px 0', borderBottom: '1px solid #1f2937' }}>
-            <strong>{p.nombreMostrar}</strong> <span style={{ color: '#9ca3af' }}>→ {p.liga}</span>
+    <div className="td-content-inner">
+      <p className="td-liga-title">
+        🏆 Esta semana han subido{totalPaginas > 1 ? ` (${paginaIdx + 1}/${totalPaginas})` : ''}
+      </p>
+      <ul className="td-liga-list">
+        {pagina.map((p, i) => (
+          <li key={i} className="td-liga-item">
+            <strong>{p.nombreMostrar}</strong> <span>→ {p.liga}</span>
           </li>
         ))}
       </ul>
-    </>
+    </div>
   )
 }
 
@@ -126,14 +133,8 @@ function BotonPantallaCompleta() {
   }
   return (
     <button
-      type="button" onClick={alternar}
-      style={{
-        position: 'fixed', bottom: 20, right: 20, zIndex: 10000,
-        background: 'rgba(0,0,0,0.6)', color: '#fff', border: '1px solid rgba(255,255,255,0.35)',
-        borderRadius: 8, padding: '10px 16px', fontSize: '1rem', cursor: 'pointer',
-        fontFamily: 'system-ui, sans-serif', opacity: visible ? 1 : 0,
-        pointerEvents: visible ? 'auto' : 'none', transition: 'opacity 0.4s ease',
-      }}
+      type="button" onClick={alternar} className="td-fullscreen-btn"
+      style={{ opacity: visible ? 1 : 0, pointerEvents: visible ? 'auto' : 'none' }}
     >
       {completa ? '⤡ Salir de pantalla completa' : '⛶ Pantalla completa'}
     </button>
@@ -141,9 +142,9 @@ function BotonPantallaCompleta() {
 }
 
 // Pantalla de la tele del Roco (NOTAS_PARA_CODE_compe_en_blokes.md, punto 5) — pública, sin
-// login, pensada para 1080p en la tele que ya tenía el canal de YouTube. Letra grande, se
-// refresca sola. "Solo nombre y nickname entre paréntesis, nunca apellidos" ya lo hace el
-// backend — aquí solo se pinta lo que llega.
+// login, pensada para la tele física (TCL en recepción). Letra grande, se refresca sola.
+// "Solo nombre y nickname entre paréntesis, nunca apellidos" ya lo hace el backend — aquí solo
+// se pinta lo que llega.
 // Categorías/puntos de verdad llegan cuando Ramiro confirme el formato; de momento solo
 // "General". Cuando llegue la Liga (temporada), esto rota entre "Esta compe" ↔ "Liga
 // (temporada)" cada X s — de momento solo hay "Esta compe", así que no hace falta rotar nada.
@@ -162,6 +163,13 @@ export default function CompeDirectoPage() {
   // subido: …" — quién ha ascendido de liga en los últimos 7 días, como una fase más de la
   // misma rotación que las diapositivas.
   const [ligaSemana, setLigaSemana] = useState([])
+  const [ligaPageIdx, setLigaPageIdx] = useState(0)
+  // ?escala=0.8 en la URL de la tele (Ramiro, 14/11 17:25) — para ajustar desde la propia tele
+  // sin tocar código, sin tener que esperar a un redeploy cada vez que cambia la TV.
+  const [escala] = useState(() => {
+    const v = parseFloat(new URLSearchParams(window.location.search).get('escala'))
+    return v > 0 && v <= 3 ? v : 1
+  })
 
   // 🐞 Cowork 11/11 09:40: con una compe programada, la tele no enseñaba nunca las diapositivas
   // de Superadmin → Tele (solo rotaba cuenta atrás ↔ mapa). Ahora, si hay diapositivas, "slide"
@@ -212,6 +220,16 @@ export default function CompeDirectoPage() {
     return () => clearTimeout(id)
   }, [slides, slideIndex])
 
+  // Si "han subido" no cabe entera (más de LIGA_POR_PAGINA), se reparte en varias páginas que
+  // van rotando solas mientras la fase "liga" esté en pantalla — nunca se corta por abajo.
+  const ligaPaginas = []
+  for (let i = 0; i < ligaSemana.length; i += LIGA_POR_PAGINA) ligaPaginas.push(ligaSemana.slice(i, i + LIGA_POR_PAGINA))
+  useEffect(() => {
+    if (ligaPaginas.length < 2) return
+    const id = setInterval(() => setLigaPageIdx(i => (i + 1) % ligaPaginas.length), LIGA_PAGINA_MS)
+    return () => clearInterval(id)
+  }, [ligaPaginas.length])
+
   // La tele está encendida todo el día — recarga sola cada 2,5 h para no acumular memoria ni
   // quedarse colgada con una pestaña vieja (el problema de siempre de Chrome).
   useEffect(() => {
@@ -250,13 +268,7 @@ export default function CompeDirectoPage() {
     return () => { activo = false; clearInterval(id) }
   }, [])
 
-  const estilos = {
-    pagina: {
-      position: 'fixed', inset: 0, zIndex: 9999, background: '#0b1120', color: '#fff',
-      fontFamily: 'system-ui, sans-serif', display: 'flex', flexDirection: 'column',
-      padding: '40px 64px 0', overflow: 'hidden', boxSizing: 'border-box',
-    },
-  }
+  const pageStyle = { '--td-escala': escala }
 
   if (!estado?.activo) {
     const cuentaProxima = proxima ? cuentaAtras(proxima.compDate, proxima.compEndDate) : null
@@ -265,14 +277,17 @@ export default function CompeDirectoPage() {
     const mostrarSlide = vistaPrecompe === 'slide' && slides.length > 0
     const slideActual = slides[slideIndex] || null
     const mostrarLiga = vistaPrecompe === 'liga' && ligaSemana.length > 0
+    const ligaPaginaActual = ligaPaginas[ligaPageIdx % ligaPaginas.length] || []
 
     if (err && !proxima) {
       return (
-        <div style={estilos.pagina}>
+        <div className="td-page" style={pageStyle}>
           <BotonPantallaCompleta />
-          <div style={{ margin: 'auto', textAlign: 'center' }}>
-            <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(160), marginBottom: 24 }} />
-            <p style={{ fontSize: '2rem', color: '#9ca3af' }}>Sin conexión — reintentando…</p>
+          <div className="td-content">
+            <div className="td-content-inner">
+              <Logo className="td-logo" style={{ height: 'min(16vh,160px)', width: 'min(16vh,160px)' }} />
+              <p className="td-sin-conexion">Sin conexión — reintentando…</p>
+            </div>
           </div>
         </div>
       )
@@ -283,12 +298,14 @@ export default function CompeDirectoPage() {
       // mensaje muerto.
       const slide = slides[slideIndex] || null
       return (
-        <div style={estilos.pagina}>
+        <div className="td-page" style={pageStyle}>
           <BotonPantallaCompleta />
-          <div style={{ margin: 'auto', textAlign: 'center', maxWidth: 1200 }}>
-            <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(110), marginBottom: 20 }} />
-            {mostrarLiga ? renderLigaSemana(ligaSemana) : slide ? renderSlide(slide) : (
-              <p style={{ fontSize: '2rem', color: '#9ca3af' }}>No hay compe activa ahora mismo.</p>
+          <div className="td-content">
+            {mostrarLiga ? renderLigaSemana(ligaPaginaActual, ligaPaginas.length, ligaPageIdx % ligaPaginas.length) : slide ? renderSlide(slide) : (
+              <div className="td-content-inner">
+                <Logo className="td-logo" style={{ height: 'min(12vh,110px)', width: 'min(12vh,110px)' }} />
+                <p className="td-sin-conexion">No hay compe activa ahora mismo.</p>
+              </div>
             )}
           </div>
         </div>
@@ -296,51 +313,48 @@ export default function CompeDirectoPage() {
     }
 
     return (
-      <div style={estilos.pagina}>
+      <div className="td-page" style={pageStyle}>
         <BotonPantallaCompleta />
-        <style>{'@keyframes compeDirectoCuentaMov{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}'}</style>
-        <div style={{ margin: 'auto', textAlign: 'center', width: '100%', maxWidth: 1400 }}>
-          <img src={LOGO_URL} alt="Rocoteca Madrid" style={{ ...logoEstilo(110), marginBottom: 20 }} />
-          <p style={{ fontSize: '3.4rem', fontWeight: 800, margin: '0 0 10px' }}>{proxima.nombre}</p>
-          {cuentaProxima && (
-            <p style={{ fontSize: '3rem', color: '#f5c842', fontWeight: 800, margin: '0 0 40px', display: 'inline-block', animation: 'compeDirectoCuentaMov 2.2s ease-in-out infinite' }}>
-              {cuentaProxima}
-            </p>
-          )}
-
+        <header className="td-header">
+          <Logo className="td-logo" />
+          <div className="td-header-text">
+            <p className="td-title">{proxima.nombre}</p>
+            {cuentaProxima && <p className="td-countdown">{cuentaProxima}</p>}
+          </div>
+        </header>
+        <div className="td-content">
           {mostrarLiga ? (
-            <div style={{ maxWidth: 1000, margin: '0 auto' }}>{renderLigaSemana(ligaSemana)}</div>
+            renderLigaSemana(ligaPaginaActual, ligaPaginas.length, ligaPageIdx % ligaPaginas.length)
           ) : mostrarSlide && slideActual ? (
-            <div style={{ maxWidth: 1000, margin: '0 auto' }}>{renderSlide(slideActual)}</div>
+            renderSlide(slideActual)
           ) : !mostrarMapa ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 56, flexWrap: 'wrap' }}>
-              <img src={cartelCompe} alt={proxima.nombre} style={{ maxHeight: 440, borderRadius: 14, boxShadow: '0 10px 40px rgba(0,0,0,0.5)' }} />
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ background: '#fff', padding: 16, borderRadius: 14, display: 'inline-block' }}>
+            <div className="td-row">
+              <img src={cartelCompe} alt={proxima.nombre} className="td-img" />
+              <div>
+                <div className="td-qr-box">
                   <img
-                    src="https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=https%3A%2F%2Frocomadrid.com%2Fapp"
-                    alt="QR para instalar Blokes" width={260} height={260}
+                    className="td-qr-img"
+                    src="https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=https%3A%2F%2Frocomadrid.com%2Fapp"
+                    alt="QR para instalar Blokes"
                   />
                 </div>
-                <p style={{ fontSize: '1.8rem', fontWeight: 700, margin: '20px 0 6px' }}>rocomadrid.com/app</p>
-                <p style={{ fontSize: '1.3rem', color: '#d1d5db', margin: 0 }}>Instala Blokes y apúntate</p>
+                <p className="td-qr-caption-title">rocomadrid.com/app</p>
+                <p className="td-qr-caption-sub">Instala Blokes y apúntate</p>
               </div>
             </div>
           ) : (
-            <div>
-              <div style={{ position: 'relative', maxWidth: 1100, margin: '0 auto' }}>
-                <img src={mapaEquipacion} alt="Mapa del rocódromo" style={{ width: '100%', display: 'block', borderRadius: 10 }} />
+            <div className="td-content-inner">
+              <div className="td-mapa-wrap">
+                <img src={mapaEquipacion} alt="Mapa del rocódromo" />
                 {bloquesColocados.map(b => (
-                  <div key={b.numero} style={{
-                    position: 'absolute', left: `${b.xPct}%`, top: `${b.yPct}%`, transform: 'translate(-50%,-50%)',
-                    width: 56, height: 56, borderRadius: '50%', background: colorPorNumeroBloque(b.numero, proxima.bloques.length).bg,
-                    color: '#1f2937', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: '1.6rem', fontWeight: 800, border: b.tested ? '3px solid #22c55e' : '3px solid #1f1f1f',
-                    boxShadow: '0 3px 8px rgba(0,0,0,0.5)',
+                  <div key={b.numero} className="td-mapa-bloque" style={{
+                    left: `${b.xPct}%`, top: `${b.yPct}%`,
+                    background: colorPorNumeroBloque(b.numero, proxima.bloques.length).bg,
+                    border: b.tested ? '3px solid #22c55e' : '3px solid #1f1f1f',
                   }}>{b.numero}</div>
                 ))}
               </div>
-              <p style={{ fontSize: '1.4rem', color: '#d1d5db', marginTop: 24 }}>
+              <p className="td-mapa-caption">
                 Los {bloquesColocados.length} bloques ya colocados — apunta tus tops desde el móvil, o pide ayuda en recepción.
               </p>
             </div>
@@ -351,48 +365,44 @@ export default function CompeDirectoPage() {
   }
 
   const general = clasif?.categorias?.[0]?.clasificacion || []
-  const ultimos = clasif?.ultimosValidados || []
+  const ultimos = (clasif?.ultimosValidados || []).slice(0, 8)
   const cuenta = cuentaAtras(estado.compDate, estado.compEndDate)
 
   return (
-    <div style={estilos.pagina}>
+    <div className="td-page" style={pageStyle}>
       <BotonPantallaCompleta />
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-          <img src={LOGO_URL} alt="Rocoteca Madrid" style={logoEstilo(80)} />
-          <h1 style={{ fontSize: '3rem', margin: 0 }}>{estado.nombre}</h1>
+      <header className="td-live-header">
+        <div className="td-live-header-left">
+          <Logo className="td-logo" />
+          <h1 className="td-live-title">{estado.nombre}</h1>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '1.3rem', color: '#9ca3af' }}>Clasificación provisional — General</div>
-          {cuenta && <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#fbbf24' }}>{cuenta}</div>}
+        <div className="td-live-header-right">
+          <div className="td-muted">Clasificación provisional — General</div>
+          {cuenta && <div className="td-cuenta">{cuenta}</div>}
         </div>
       </header>
-      <div style={{ display: 'flex', gap: 64, flex: 1, minHeight: 0 }}>
-        <section style={{ flex: 2, minWidth: 0 }}>
-          <h2 style={{ fontSize: '1.8rem', color: '#9ca3af', marginBottom: 16 }}>Clasificación</h2>
-          <ol style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '2.8rem' }}>
+      <div className="td-live-body">
+        <section className="td-live-col td-live-col--clasif">
+          <h2>Clasificación</h2>
+          <ol className="td-live-list">
             {general.slice(0, 10).map((p, i) => (
               <li key={i} style={{
-                display: 'flex', justifyContent: 'space-between', padding: '14px 0',
-                borderBottom: '1px solid #1f2937', fontWeight: i < 3 ? 800 : 500,
+                fontWeight: i < 3 ? 800 : 500,
                 color: i === 0 ? '#fbbf24' : i === 1 ? '#d1d5db' : i === 2 ? '#fb923c' : '#fff',
               }}>
                 <span>{i + 1}. {p.nombreMostrar}</span>
                 <span>{p.tops} top{p.tops === 1 ? '' : 's'}</span>
               </li>
             ))}
-            {general.length === 0 && <li style={{ color: '#6b7280', fontSize: '1.8rem' }}>Todavía no hay tops.</li>}
+            {general.length === 0 && <li style={{ color: '#6b7280' }}>Todavía no hay tops.</li>}
           </ol>
         </section>
-        <section style={{ flex: 1, minWidth: 0, borderLeft: '1px solid #1f2937', paddingLeft: 48 }}>
-          <h2 style={{ fontSize: '1.8rem', color: '#9ca3af', marginBottom: 16 }}>Últimos tops</h2>
-          <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '1.4rem' }}>
+        <section className="td-live-col td-live-col--ultimos">
+          <h2>Últimos tops</h2>
+          <ul className="td-live-list td-live-list--ultimos">
             {ultimos.map((u, i) => (
-              <li key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #1f2937' }}>
-                <span style={{
-                  width: 18, height: 18, borderRadius: '50%', flex: '0 0 auto',
-                  background: colorPorNumeroBloque(u.numero, estado.bloques?.length).bg,
-                }} />
+              <li key={i}>
+                <span className="td-dot" style={{ background: colorPorNumeroBloque(u.numero, estado.bloques?.length).bg }} />
                 <span><strong>{u.nombreMostrar}</strong> · bloque {u.numero} · hace {u.hace}</span>
               </li>
             ))}
@@ -400,10 +410,7 @@ export default function CompeDirectoPage() {
           </ul>
         </section>
       </div>
-      <footer style={{
-        textAlign: 'center', padding: '20px 0', fontSize: '1.1rem', color: '#9ca3af',
-        borderTop: '1px solid #1f2937', marginTop: 24,
-      }}>
+      <footer className="td-footer">
         Apunta tus tops en la app Blokes o en recepción · Norma de honor
       </footer>
     </div>

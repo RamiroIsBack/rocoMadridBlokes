@@ -2516,7 +2516,7 @@ function blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel
 function superadmin_alumnos_onhold_diagnostico($request) {
     $todas = blokes_get_all_subscription_data();
     $on_hold = array_values(array_filter($todas, function($s) { return ($s['status'] ?? '') === 'on-hold'; }));
-    $vacio = array('duplicados' => array(), 'revisar' => array(), 'pagaronNoviembre' => array(), 'pagaronSoloOctubre' => array(), 'sinPago' => array(), 'total' => 0);
+    $vacio = array('duplicados' => array(), 'revisar' => array(), 'pagaronNoviembre' => array(), 'pagaronSoloOctubre' => array(), 'sinPago' => array(), 'pruebas' => array(), 'total' => 0);
     if (!$on_hold) return rest_ensure_response(array('success' => true, 'data' => $vacio));
 
     // Cruce con el Excel, por MES (no "oct o nov" mezclados) — primero de todo, antes de cargar
@@ -2527,8 +2527,14 @@ function superadmin_alumnos_onhold_diagnostico($request) {
     $excel_por_tel = array(); $excel_por_nombre = array();
     foreach (blokes_sync_grupos_todas_las_filas($excel_error) as $f) {
         $meses = array();
+        // Cowork, 14/11 17:25: "10" y "11" como claves de array literal se castean a INT en PHP
+        // (claves numéricas canónicas) mientras que "09" se queda como string (el cero a la
+        // izquierda no es canónico) — $meses salía mixto (['09', 10, 11]) y los in_array(...,
+        // true) de abajo, en modo estricto, nunca encontraban '10'/'11' (string) contra 10/11
+        // (int). De ahí el 0 en pagaronNoviembre/pagaronSoloOctubre aunque el Excel sí tuviera
+        // el pago. Forzamos (string) para que $meses sea siempre ['09','10','11'], nunca mixto.
         foreach (array('09' => '2026-09', '10' => '2026-10', '11' => '2026-11') as $mm => $ym) {
-            if (!empty($f['pagos'][$ym]) || in_array($ym, $f['exentoMeses'], true)) $meses[] = $mm;
+            if (!empty($f['pagos'][$ym]) || in_array($ym, $f['exentoMeses'], true)) $meses[] = (string) $mm;
         }
         if (!$meses) continue;
         $valor = array('meses' => $meses, 'pestana' => $f['_pestana']);
@@ -2548,9 +2554,12 @@ function superadmin_alumnos_onhold_diagnostico($request) {
     // (hermanos en el mismo grupo) sin confundirlo con un duplicado de verdad.
     $por_tel = blokes_sync_grupos_subs_por_telefono();
 
-    $duplicados = array(); $revisar = array(); $pagaron_nov = array(); $pagaron_solo_oct = array(); $sin_pago = array();
+    $duplicados = array(); $revisar = array(); $pagaron_nov = array(); $pagaron_solo_oct = array(); $sin_pago = array(); $pruebas = array();
     foreach ($on_hold as $s) {
         $sub_id = intval($s['id'] ?? 0);
+        // Suscripción de pruebas de Ramiro — fuera de cualquier lista que proponga baja o cobro,
+        // en su propia lista aparte (cowork, 14/11 17:25: seguía entrando en sinPago).
+        if ($sub_id === 7092) { $pruebas[] = array('subId' => $sub_id); continue; }
         $sub_obj = blokes_alumno_sub_obj($s);
         $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
         $tel = blokes_alumno_telefono_de_sub($s, $uid, $sub_obj);
@@ -2608,14 +2617,13 @@ function superadmin_alumnos_onhold_diagnostico($request) {
             continue;
         }
 
-        if ($sub_id === 7092) $info['esPrueba'] = true; // suscripción de pruebas de Ramiro
         $sin_pago[] = $info;
     }
 
     return rest_ensure_response(array('success' => true, 'data' => array(
         'duplicados' => $duplicados, 'revisar' => $revisar,
         'pagaronNoviembre' => $pagaron_nov, 'pagaronSoloOctubre' => $pagaron_solo_oct,
-        'sinPago' => $sin_pago, 'total' => count($on_hold),
+        'sinPago' => $sin_pago, 'pruebas' => $pruebas, 'total' => count($on_hold),
         // Si no es null, la Hoja no se pudo leer y "sinPago" está inflado de más — no significa
         // que de verdad nadie pagó (cowork, 13/11 11:15).
         'avisoExcel' => $excel_error,
