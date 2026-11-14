@@ -2934,7 +2934,16 @@ function superadmin_alumnos_pendientes_cobro($request) {
             $vistos_grupo[$gi] = true;
             $grupo = $diag['duplicadosEnEspera'][$gi];
             $cobrar_info = $grupo['cobrarInfo'] ?? $grupo['cobrar'];
-            $cobrar_situacion = $grupo['cobrarEtiqueta'] ? array('etiqueta' => $grupo['cobrarEtiqueta']) : null;
+            // $grupo['cobrarEtiqueta'] trae el nombre crudo del bucket del diagnóstico
+            // (pagaronNoviembre/pagaronSoloOctubre/sinPago/duplicado/revisar) — hay que
+            // traducirlo a la etiqueta que entiende el frontend (igual que $indice arriba),
+            // si no los botones de la fila "cobrar" no aparecen (cowork, 14/11 20:10).
+            $bucket_a_etiqueta_frontend = array(
+                'pagaronNoviembre' => 'pago_excel', 'pagaronSoloOctubre' => 'pago_parcial', 'sinPago' => 'sin_pago',
+                'duplicado' => 'duplicado', 'revisar' => 'revisar',
+            );
+            $cobrar_etiqueta_frontend = $bucket_a_etiqueta_frontend[$grupo['cobrarEtiqueta']] ?? $grupo['cobrarEtiqueta'];
+            $cobrar_situacion = $grupo['cobrarEtiqueta'] ? array('etiqueta' => $cobrar_etiqueta_frontend) : null;
             $filas[] = blokes_pendiente_cobro_fila($cobrar_info, 'duplicado_en_espera', $pedido, $estados, $grupo['cancelar'], $cobrar_situacion);
             continue;
         }
