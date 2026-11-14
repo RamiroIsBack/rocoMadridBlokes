@@ -88,6 +88,15 @@ export const gestionExternosImportar = body         => gestionPost('/gestion/ext
 export const gestionFacturasPendientesGet = () => gestionCall('GET', '/gestion/facturas-pendientes')
 export const gestionFacturaCompletar = orderId => gestionPost(`/gestion/facturas-pendientes/${orderId}/completar`)
 
+// "Pendientes de cobro" (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 14/11 18:05).
+export function usePendientesCobro() {
+  return useEndpoint('/alumnos/pendientes-cobro')
+}
+export const gestionPendienteCobroViene     = body => gestionPost('/alumnos/pendientes-cobro/viene', body)
+export const gestionPendienteCobroRecordado = body => gestionPost('/alumnos/pendientes-cobro/recordado', body)
+export const gestionProfesTelefonosGet = () => gestionCall('GET', '/gestion/profes-telefonos')
+export const gestionProfesTelefonoSet  = body => gestionPost('/gestion/profes-telefonos', body)
+
 // Lista de espera por grupo (8.5: interesados que aún no son alumnos).
 export const gestionListaEsperaGet         = ()          => gestionCall('GET', '/gestion/lista-espera')
 export const gestionListaEsperaCrear       = body        => gestionPost('/gestion/lista-espera', body)

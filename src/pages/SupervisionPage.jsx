@@ -29,6 +29,8 @@ import {
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
   gestionFacturasPendientesGet, gestionFacturaCompletar,
+  usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
+  gestionProfesTelefonosGet, gestionProfesTelefonoSet,
 } from '../hooks/useSuperAdmin'
 import { useClases } from '../hooks/useClases'
 import OvertimeTab from './OvertimeTab'
@@ -2739,6 +2741,263 @@ function HistoricoTab() {
   )
 }
 
+// ─── Pendientes de cobro (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 14/11 18:05/
+// 18:10/18:12): una fila por pedido de renovación "Pendiente de pago" real, con la etiqueta y
+// la acción ya sugeridas — Eva no tiene que cruzar el Excel ni WooCommerce a mano. Reutiliza
+// AccionModal (abajo, en Grupos) para cobrar/cancelar/dar de baja: mismo flujo probado, mismo
+// modal con botón de verdad en vez de un confirm() nativo. ──────────────────────────────────
+const PC_ETIQUETA = {
+  duplicado:            { txt: 'Duplicado → cancelar',                 cls: 'sv-pc-chip--bad'  },
+  duplicado_en_espera:  { txt: 'Duplicado en espera → cancelar',       cls: 'sv-pc-chip--bad'  },
+  pago_excel:           { txt: 'Pagó según el Excel → marcar cobrado', cls: 'sv-pc-chip--ok'   },
+  pago_parcial:         { txt: 'Pagó octubre, falta noviembre',        cls: 'sv-pc-chip--warn' },
+  sin_pago:             { txt: 'Sin pago → preguntar o dar de baja',   cls: 'sv-pc-chip--bad'  },
+  revisar:              { txt: 'Revisar',                              cls: 'sv-pc-chip--warn' },
+}
+const PC_VIENE = [
+  ['viene', '✅', 'Viene'], ['no_viene', '❌', 'No viene'], ['sin_confirmar', '❓', 'Sin confirmar'],
+]
+// "Dudosos" = a quien tiene sentido preguntarle al profe si sigue viniendo (no a quien ya pagó
+// o ya está marcado "Viene"/"No viene", ni a los duplicados, que se resuelven solos).
+const PC_DUDOSO = new Set(['sin_pago', 'pago_parcial', 'revisar'])
+
+function pcWhatsappUrl(telefono, texto) {
+  return `https://web.whatsapp.com/send?phone=34${telefono}&text=${encodeURIComponent(texto)}`
+}
+
+function PendientesCobroTab() {
+  const { data, loading, error, refetch } = usePendientesCobro()
+  const [profesTel, setProfesTel] = useState({})
+  const [editandoTel, setEditandoTel] = useState(null) // nombre del profe cuyo teléfono se está editando
+  const [telEnEdicion, setTelEnEdicion] = useState('')
+  const [filtroEtiqueta, setFiltroEtiqueta] = useState('')
+  const [filtroProfe, setFiltroProfe] = useState('')
+  const [filtroViene, setFiltroViene] = useState('')
+  const [accion, setAccion] = useState(null)
+  const [aviso, setAviso] = useState('')
+  const esSocio = window.blokesSiteData?.userRole === 'socio'
+
+  useEffect(() => { gestionProfesTelefonosGet().then(setProfesTel).catch(() => {}) }, [])
+
+  const filas = useMemo(() => (data?.filas || []).map(f => ({
+    ...f,
+    profes: profesoresDeGrupo(f.dia, f.horario).flatMap(d => d.profs),
+  })), [data])
+
+  const profesDisponibles = useMemo(() => Array.from(new Set(filas.flatMap(f => f.profes))).sort(), [filas])
+
+  const filtradas = filas.filter(f =>
+    (!filtroEtiqueta || f.etiqueta === filtroEtiqueta) &&
+    (!filtroProfe || f.profes.includes(filtroProfe)) &&
+    (!filtroViene || (f.vieneEstado || 'sin_confirmar') === filtroViene)
+  )
+
+  const resumen = useMemo(() => {
+    const porMes = {}; const porEtiqueta = {}
+    for (const f of filas) {
+      porMes[f.mesPedido] = (porMes[f.mesPedido] || 0) + f.importe
+      porEtiqueta[f.etiqueta] = (porEtiqueta[f.etiqueta] || 0) + f.importe
+    }
+    return { porMes, porEtiqueta, total: filas.reduce((s, f) => s + f.importe, 0) }
+  }, [filas])
+
+  async function marcarViene(subId, estado) {
+    try { await gestionPendienteCobroViene({ sub_id: subId, estado }); refetch() }
+    catch (e) { setAviso(e.message) }
+  }
+
+  async function recordar(fila) {
+    if (!fila.telefono) { setAviso(`${fila.nombre} no tiene teléfono guardado.`); return }
+    const texto = `Hola ${fila.nombre.split(' ')[0]}, te escribimos de RocoMadrid: tenemos pendiente el cobro de tu clase de ${fila.dia} ${fila.horario}${fila.importe ? ` (${fmtEur(fila.importe)})` : ''}. ¿Nos confirmas si sigues viniendo o prefieres que lo gestionemos? ¡Gracias!`
+    window.open(pcWhatsappUrl(fila.telefono, texto), 'blokes_whatsapp')
+    try { await gestionPendienteCobroRecordado({ sub_id: fila.subId }); refetch() }
+    catch (e) { setAviso(e.message) }
+  }
+
+  function preguntarAProfe(profe) {
+    const tel = profesTel[profe]
+    const dudosos = filtradas.filter(f => PC_DUDOSO.has(f.etiqueta) && f.vieneEstado !== 'viene' && f.profes.includes(profe))
+    if (!dudosos.length) return
+    if (!tel) { setEditandoTel(profe); setTelEnEdicion(''); setAviso(`Añade el teléfono de ${profe} para poder escribirle.`); return }
+    const lista = dudosos.map(f => `${f.nombre} (${f.dia} ${f.horario})`).join(', ')
+    const texto = `Hola ${profe}, ¿siguen viniendo estos alumnos a tus clases? ${lista}. Gracias, un saludo de RocoMadrid.`
+    window.open(pcWhatsappUrl(tel, texto), 'blokes_whatsapp')
+  }
+
+  async function guardarTelProfe(nombre, telefono) {
+    try {
+      const data = await gestionProfesTelefonoSet({ nombre, telefono })
+      setProfesTel(data); setEditandoTel(null)
+    } catch (e) { setAviso(e.message) }
+  }
+
+  if (loading) return <p className="sv-empty">Cargando…</p>
+  if (error) return <p className="sv-to-bad">Error: {error}</p>
+
+  const dudososPorProfe = profesDisponibles.filter(p =>
+    filtradas.some(f => PC_DUDOSO.has(f.etiqueta) && f.vieneEstado !== 'viene' && f.profes.includes(p))
+  )
+
+  return (
+    <div className="sv-pc">
+      <p className="sv-note">
+        Una fila por pedido de renovación «Pendiente de pago» real en WooCommerce, cruzado con el diagnóstico de suscripciones en espera y el Excel de Eva — nada se cambia solo, cada botón es una acción de Eva.
+        {data?.sinMatch > 0 && ` ${data.sinMatch} pedido(s) pendiente(s) no se han podido emparejar con ninguna suscripción en espera reconocible — revísalos a mano en WooCommerce.`}
+      </p>
+      {data?.avisoExcel && <p className="sv-to-warn-txt">⚠ {data.avisoExcel} — los que dependen del Excel pueden no ser de fiar ahora mismo.</p>}
+      {aviso && <p className="sv-to-warn-txt">{aviso} <button className="sv-tests-remove" onClick={() => setAviso('')}>✕</button></p>}
+
+      <div className="sv-kpis">
+        <div className="sv-kpi" style={{ '--kpi-color': '#f87171' }}>
+          <span className="sv-kpi__value">{filas.length}{esSocio ? ` · ${fmtEur(resumen.total)}` : ''}</span>
+          <span className="sv-kpi__label">Pendientes de cobro</span>
+        </div>
+        {esSocio && Object.keys(resumen.porMes).sort().map(m => (
+          <div className="sv-kpi" key={m} style={{ '--kpi-color': '#60a5fa' }}>
+            <span className="sv-kpi__value">{fmtEur(resumen.porMes[m])}</span>
+            <span className="sv-kpi__label">{fmtMonth(m)}</span>
+          </div>
+        ))}
+      </div>
+
+      {dudososPorProfe.length > 0 && (
+        <div className="sv-pc-profes">
+          <span className="sv-pc-profes__lbl">Preguntar al profe:</span>
+          {dudososPorProfe.map(p => (
+            <span key={p} className="sv-pc-profe-btn">
+              <button className="sv-tests-select" onClick={() => preguntarAProfe(p)}>
+                {p} ({filtradas.filter(f => PC_DUDOSO.has(f.etiqueta) && f.vieneEstado !== 'viene' && f.profes.includes(p)).length})
+              </button>
+              <button
+                className="sv-tests-remove" title={profesTel[p] ? `Teléfono: ${profesTel[p]}` : 'Sin teléfono guardado'}
+                onClick={() => { setEditandoTel(p); setTelEnEdicion(profesTel[p] || '') }}
+              >✏️</button>
+            </span>
+          ))}
+          {editandoTel && (
+            <span className="sv-pc-tel-edit">
+              Teléfono de {editandoTel}:
+              <input
+                className="sv-tests-select" type="text" placeholder="6XXXXXXXX" autoFocus
+                value={telEnEdicion} onChange={e => setTelEnEdicion(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') guardarTelProfe(editandoTel, telEnEdicion) }}
+              />
+              <button className="sv-tests-select" onClick={() => guardarTelProfe(editandoTel, telEnEdicion)}>Guardar</button>
+              <button className="sv-tests-remove" onClick={() => setEditandoTel(null)}>✕</button>
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="sv-pc-filtros">
+        <select className="sv-tests-select" value={filtroEtiqueta} onChange={e => setFiltroEtiqueta(e.target.value)}>
+          <option value="">Todas las etiquetas</option>
+          {Object.entries(PC_ETIQUETA).map(([id, e]) => <option key={id} value={id}>{e.txt}</option>)}
+        </select>
+        <select className="sv-tests-select" value={filtroProfe} onChange={e => setFiltroProfe(e.target.value)}>
+          <option value="">Todos los profes</option>
+          {profesDisponibles.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <select className="sv-tests-select" value={filtroViene} onChange={e => setFiltroViene(e.target.value)}>
+          <option value="">¿Viene? (todos)</option>
+          {PC_VIENE.map(([id, ic, txt]) => <option key={id} value={id}>{ic} {txt}</option>)}
+        </select>
+      </div>
+
+      <div className="sv-tests-scroll">
+        <table className="sv-tests-table">
+          <thead>
+            <tr>
+              <th>Alumno</th><th>Teléfono</th><th>Clase</th><th>Profe</th><th>Importe</th>
+              <th>Meses pagados (Excel)</th><th>Etiqueta</th><th>¿Viene?</th><th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtradas.map(f => {
+              const et = PC_ETIQUETA[f.etiqueta] || { txt: f.etiqueta, cls: '' }
+              return (
+                <tr key={f.subId}>
+                  <td>
+                    {f.nombre || <span className="sv-ot-muted">—</span>}
+                    {f.activoApp && <div className="sv-ot-muted" title="Ha apuntado algún top en la app en las últimas 2 semanas">🧗 activo en la app ({f.activoApp})</div>}
+                  </td>
+                  <td className="sv-ot-muted">{f.telefono || '—'}</td>
+                  <td>{f.dia} {f.horario}{f.edad !== 'Adultos' ? ` · ${f.edad}` : ''}</td>
+                  <td className="sv-ot-muted">{f.profes.join(', ') || '—'}</td>
+                  <td>{esSocio ? fmtEur(f.importe) : '—'}{f.mesPedido ? <div className="sv-ot-muted">{fmtMonth(f.mesPedido)}</div> : null}</td>
+                  <td className="sv-ot-muted">{f.mesesPagadosExcel ? f.mesesPagadosExcel.join(', ') : '—'}</td>
+                  <td>
+                    <span className={`sv-pc-chip ${et.cls}`}>{et.txt}</span>
+                    {f.etiqueta === 'duplicado_en_espera' && f.cancelar?.length > 0 && (
+                      <div className="sv-ot-muted">se queda #{f.subId}; cancelar: {f.cancelar.map(c => `#${c.subId} ${c.nombre}`).join(', ')}</div>
+                    )}
+                  </td>
+                  <td>
+                    <div className="sv-pc-viene">
+                      {PC_VIENE.map(([id, ic]) => (
+                        <button
+                          key={id} title={id}
+                          className={`sv-pc-viene__btn${(f.vieneEstado || 'sin_confirmar') === id ? ' sv-pc-viene__btn--on' : ''}`}
+                          onClick={() => marcarViene(f.subId, id)}
+                        >{ic}</button>
+                      ))}
+                    </div>
+                    {f.vienePor && <div className="sv-ot-muted">{f.vienePor} · {(f.vieneFecha || '').slice(0, 16).replace('T', ' ')}</div>}
+                  </td>
+                  <td className="sv-pc-acciones">
+                    {f.etiqueta === 'duplicado' && (
+                      <button className="sv-tests-select" onClick={() => setAccion({
+                        tipo: 'fusionar', targetId: f.subId,
+                        alumno: { subId: f.activaId || f.subId, alumno: f.nombre, telefono: f.telefono, notas: '' },
+                      })}>Cancelar duplicado</button>
+                    )}
+                    {f.etiqueta === 'duplicado_en_espera' && f.cancelar?.map(c => (
+                      <button key={c.subId} className="sv-tests-select" title="Dar de baja → elige «Inmediata» y motivo «Otro»" onClick={() => setAccion({
+                        tipo: 'dar_de_baja', targetId: c.subId,
+                        alumno: { subId: c.subId, alumno: c.nombre, telefono: c.telefono, notas: `Duplicado en espera — se cobra la #${f.subId}.` },
+                      })}>Cancelar #{c.subId}</button>
+                    ))}
+                    {f.etiqueta === 'pago_excel' && (
+                      <button className="sv-tests-select" onClick={() => setAccion({
+                        tipo: 'marcar_cobrado', targetId: f.subId,
+                        alumno: { subId: f.subId, alumno: f.nombre, telefono: f.telefono, notas: '', importeCatalogo: f.importe },
+                      })}>Marcar cobrado</button>
+                    )}
+                    {['pago_parcial', 'sin_pago', 'revisar'].includes(f.etiqueta) && (<>
+                      <button className="sv-tests-select" onClick={() => setAccion({
+                        tipo: 'marcar_cobrado', targetId: f.subId,
+                        alumno: { subId: f.subId, alumno: f.nombre, telefono: f.telefono, notas: '', importeCatalogo: f.importe },
+                      })}>Marcar cobrado</button>{' '}
+                      <button
+                        className="sv-tests-select" disabled={!f.telefono}
+                        title={f.recordadoFecha ? `Último recordatorio: ${f.recordadoPor} · ${f.recordadoFecha.slice(0, 10)}` : ''}
+                        onClick={() => recordar(f)}
+                      >Recordar por WhatsApp</button>{' '}
+                      <button className="sv-tests-select" onClick={() => setAccion({
+                        tipo: 'dar_de_baja', targetId: f.subId,
+                        alumno: { subId: f.subId, alumno: f.nombre, telefono: f.telefono, notas: '' },
+                      })}>Dar de baja</button>
+                    </>)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {filtradas.length === 0 && <p className="sv-empty">Nada pendiente con estos filtros.</p>}
+      </div>
+
+      {accion && (
+        <AccionModal
+          alumno={accion.alumno} tipo={accion.tipo} targetId={accion.targetId}
+          onClose={() => setAccion(null)}
+          onDone={() => { setAccion(null); refetch() }}
+        />
+      )}
+    </div>
+  )
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SupervisionPage() {
   const role          = window.blokesSiteData?.userRole
@@ -2747,6 +3006,10 @@ export default function SupervisionPage() {
   const TABS = [
     { id: 'excelmuerte', label: 'ExcelMuerte'   },
     { id: 'grupos',      label: 'Grupos'        },
+    // Ramiro, 14/11 18:05: "eso debería aparecer en Blokes" — pedidos de renovación pendientes
+    // de pago que Eva no veía en ningún sitio, con la etiqueta ya puesta (duplicado/pagó según
+    // el Excel/sin pago/revisar).
+    { id: 'pendientes_cobro', label: 'Pendientes de cobro' },
     { id: 'campanas',    label: 'Campañas'      },
     { id: 'horasextra',  label: 'Horas extra'    },
     // Ramiro, 13/11 07:06: "el control de la tele tiene que estar en supervisión para que lo
@@ -2784,6 +3047,7 @@ export default function SupervisionPage() {
 
       {tab === 'excelmuerte' && <ClasesTab />}
       {tab === 'grupos'      && <GruposTab />}
+      {tab === 'pendientes_cobro' && <PendientesCobroTab />}
       {tab === 'campanas'    && <CampanasSection />}
       {tab === 'horasextra'  && <OvertimeTab />}
       {tab === 'tele'        && <TeleSection />}

@@ -1378,3 +1378,28 @@
   display: flex; flex-direction: column; gap: 6px; min-width: 170px;
   background: #15120c; border: 1px solid #3a3020; border-radius: 3px;
 }
+
+/* ── Pendientes de cobro (14/11 18:05) — pestaña nueva, sigue el tema normal de la página (no
+   es la zona "siempre clara" de Grupos), así que todo en variables, nada fijo. ── */
+.sv-pc-profes { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; }
+.sv-pc-profes__lbl { font-size: 0.8rem; color: var(--color-text-secondary); font-weight: 700; }
+.sv-pc-profe-btn { display: inline-flex; align-items: center; gap: 2px; }
+.sv-pc-tel-edit { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--color-text-secondary); }
+.sv-pc-tel-edit input { width: 110px; }
+
+.sv-pc-filtros { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+
+.sv-pc-chip {
+  display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 3px 9px; border-radius: 10px;
+}
+.sv-pc-chip--ok   { background: color-mix(in srgb, var(--state-ok) 18%, transparent);   color: var(--state-ok); }
+.sv-pc-chip--warn { background: color-mix(in srgb, var(--state-warn) 18%, transparent); color: var(--state-warn); }
+.sv-pc-chip--bad  { background: color-mix(in srgb, var(--state-bad) 18%, transparent);  color: var(--state-bad); }
+
+.sv-pc-viene { display: flex; gap: 4px; }
+.sv-pc-viene__btn {
+  font-size: 0.95rem; line-height: 1; padding: 4px 6px; border-radius: 4px;
+  border: 1px solid var(--color-border); background: none; cursor: pointer; opacity: 0.5;
+}
+.sv-pc-viene__btn--on { opacity: 1; border-color: var(--color-accent-hover); background: color-mix(in srgb, var(--color-accent-hover) 16%, transparent); }
+.sv-pc-acciones { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; }

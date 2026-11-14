@@ -1433,6 +1433,25 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/alumnos/sin-telefono-diagnostico', array(
         'methods' => 'GET', 'callback' => 'superadmin_alumnos_sin_telefono_diagnostico', 'permission_callback' => $sa_perm,
     ));
+
+    // «Pendientes de cobro» (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 14/11 18:05/
+    // 18:10/18:12) — una fila por pedido de renovación "Pendiente de pago" de verdad, para que
+    // Eva lo gestione desde Supervisión → Grupos sin mirar el Excel ni WooCommerce a mano.
+    register_rest_route('superadmin/v1', '/alumnos/pendientes-cobro', array(
+        'methods' => 'GET', 'callback' => 'superadmin_alumnos_pendientes_cobro', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/alumnos/pendientes-cobro/viene', array(
+        'methods' => 'POST', 'callback' => 'superadmin_pendientes_cobro_viene', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/alumnos/pendientes-cobro/recordado', array(
+        'methods' => 'POST', 'callback' => 'superadmin_pendientes_cobro_recordado', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/profes-telefonos', array(
+        'methods' => 'GET', 'callback' => 'superadmin_profes_telefonos_get', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/profes-telefonos', array(
+        'methods' => 'POST', 'callback' => 'superadmin_profes_telefono_set', 'permission_callback' => $sa_perm,
+    ));
 });
 
 // ============================================================
@@ -2514,10 +2533,17 @@ function blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel
 // - "sinPago" = nada de lo anterior → candidata a baja (la 7092, de pruebas de Ramiro, sale
 //   marcada `esPrueba` y no debe entrar en ninguna baja real).
 function superadmin_alumnos_onhold_diagnostico($request) {
+    return rest_ensure_response(array('success' => true, 'data' => blokes_onhold_diagnostico_calcular()));
+}
+
+// El cálculo de verdad, separado de la respuesta REST — lo reutiliza también
+// superadmin_alumnos_pendientes_cobro() (14/11 18:05) para no repetir las mismas ~130 líneas de
+// clasificación. Devuelve el array "data" tal cual, nunca una WP_REST_Response.
+function blokes_onhold_diagnostico_calcular() {
     $todas = blokes_get_all_subscription_data();
     $on_hold = array_values(array_filter($todas, function($s) { return ($s['status'] ?? '') === 'on-hold'; }));
-    $vacio = array('duplicados' => array(), 'revisar' => array(), 'duplicadosEnEspera' => array(), 'pagaronNoviembre' => array(), 'pagaronSoloOctubre' => array(), 'sinPago' => array(), 'pruebas' => array(), 'total' => 0);
-    if (!$on_hold) return rest_ensure_response(array('success' => true, 'data' => $vacio));
+    $vacio = array('duplicados' => array(), 'revisar' => array(), 'duplicadosEnEspera' => array(), 'pagaronNoviembre' => array(), 'pagaronSoloOctubre' => array(), 'sinPago' => array(), 'pruebas' => array(), 'total' => 0, 'avisoExcel' => null);
+    if (!$on_hold) return $vacio;
 
     // Cruce con el Excel, por MES (no "oct o nov" mezclados) — primero de todo, antes de cargar
     // objetos de suscripción de Woo para las activas (cowork, 13/11 11:15: el cruce se fue a 0
@@ -2615,7 +2641,7 @@ function superadmin_alumnos_onhold_diagnostico($request) {
         $uid = $datos['uid']; $tel = $datos['telefono']; $nombre = $datos['nombre'];
         $dia = $datos['dia']; $horario = $datos['horario']; $edad = $datos['edad'];
 
-        $info = array('subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad);
+        $info = array('subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad, 'uid' => $uid);
 
         $activa_misma_clase = null; $activa_otra_clase = null;
         if ($uid && !empty($activas_por_customer[$uid])) {
@@ -2669,7 +2695,7 @@ function superadmin_alumnos_onhold_diagnostico($request) {
         $sin_pago[] = $info;
     }
 
-    return rest_ensure_response(array('success' => true, 'data' => array(
+    return array(
         'duplicados' => $duplicados, 'revisar' => $revisar,
         'duplicadosEnEspera' => $duplicados_en_espera,
         'pagaronNoviembre' => $pagaron_nov, 'pagaronSoloOctubre' => $pagaron_solo_oct,
@@ -2677,6 +2703,215 @@ function superadmin_alumnos_onhold_diagnostico($request) {
         // Si no es null, la Hoja no se pudo leer y "sinPago" está inflado de más — no significa
         // que de verdad nadie pagó (cowork, 13/11 11:15).
         'avisoExcel' => $excel_error,
+    );
+}
+
+// ============================================================
+//  «Pendientes de cobro» (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 14/11 18:05)
+// ============================================================
+
+function blokes_pendientes_cobro_estado_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_pendientes_cobro_estado';
+}
+// Una fila por suscripción: estado de "¿Viene a clase?" (puesto a mano por Eva tras preguntar
+// al profe por WhatsApp — opción 2, la caja del profe en Blokes, NO se hace por ahora, Ramiro
+// 14/11 18:12) y la última vez que se le recordó el pago por WhatsApp (para el "no two veces en
+// menos de 3 días" de la nota de las 18:10).
+function blokes_ensure_pendientes_cobro_estado_table() {
+    global $wpdb;
+    $table = blokes_pendientes_cobro_estado_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        sub_id          bigint(20) UNSIGNED NOT NULL,
+        viene_estado    varchar(20)         NOT NULL DEFAULT '',
+        viene_por       varchar(100)        NOT NULL DEFAULT '',
+        viene_fecha     datetime            NULL,
+        recordado_por   varchar(100)        NOT NULL DEFAULT '',
+        recordado_fecha datetime            NULL,
+        PRIMARY KEY (sub_id)
+    ) {$charset};";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+function blokes_pendientes_cobro_estado_get_todos() {
+    global $wpdb;
+    blokes_ensure_pendientes_cobro_estado_table();
+    $rows = $wpdb->get_results('SELECT * FROM ' . blokes_pendientes_cobro_estado_table(), ARRAY_A);
+    $out = array();
+    foreach ($rows as $r) $out[intval($r['sub_id'])] = $r;
+    return $out;
+}
+function blokes_pendientes_cobro_estado_upsert($sub_id, $campos) {
+    global $wpdb;
+    blokes_ensure_pendientes_cobro_estado_table();
+    $table = blokes_pendientes_cobro_estado_table();
+    $existe = $wpdb->get_var($wpdb->prepare("SELECT sub_id FROM {$table} WHERE sub_id = %d", $sub_id));
+    if ($existe !== null) $wpdb->update($table, $campos, array('sub_id' => intval($sub_id)));
+    else $wpdb->insert($table, array_merge(array('sub_id' => intval($sub_id)), $campos));
+}
+
+// POST /superadmin/v1/alumnos/pendientes-cobro/viene — Eva pone a mano ✅/❌/❓ tras preguntar
+// al profe por WhatsApp (la opción 1 de la nota; la 2, que el profe lo confirme él mismo en
+// Blokes, queda para más adelante — Ramiro, 14/11 18:12). Guarda quién y cuándo.
+function superadmin_pendientes_cobro_viene($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    $estado = sanitize_text_field((string) $request->get_param('estado'));
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    if (!in_array($estado, array('viene', 'no_viene', 'sin_confirmar'), true)) {
+        return new WP_Error('bad_request', 'estado tiene que ser viene, no_viene o sin_confirmar.', array('status' => 400));
+    }
+    $user = wp_get_current_user();
+    blokes_pendientes_cobro_estado_upsert($sub_id, array(
+        'viene_estado' => $estado, 'viene_por' => $user ? $user->user_login : '', 'viene_fecha' => current_time('mysql'),
+    ));
+    blokes_gestion_log($sub_id, 'pendiente_cobro_viene', null, array('estado' => $estado));
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /superadmin/v1/alumnos/pendientes-cobro/recordado — se llama justo después de abrir
+// WhatsApp Web (igual que "✓ Enviado" en Campañas: abrir no marca nada solo, hace falta mandarlo
+// de verdad). 409 si ya se recordó a esta suscripción en los últimos 3 días (nota 18:10: "que no
+// deje recordar a la misma persona dos veces en menos de 3 días").
+function superadmin_pendientes_cobro_recordado($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    $estados = blokes_pendientes_cobro_estado_get_todos();
+    $anterior = $estados[$sub_id]['recordado_fecha'] ?? null;
+    if ($anterior && (current_time('timestamp') - strtotime($anterior)) < 3 * DAY_IN_SECONDS) {
+        return new WP_Error('recordado_reciente', 'Ya se le recordó hace menos de 3 días (' . substr($anterior, 0, 10) . ').', array('status' => 409));
+    }
+    $user = wp_get_current_user();
+    blokes_pendientes_cobro_estado_upsert($sub_id, array(
+        'recordado_por' => $user ? $user->user_login : '', 'recordado_fecha' => current_time('mysql'),
+    ));
+    return rest_ensure_response(array('success' => true));
+}
+
+// Teléfonos de los profes para "Preguntar a [profe]" por WhatsApp — NO van en ningún fichero
+// del bundle público (son datos personales), se guardan en wp_options y solo los lee/escribe
+// quien tenga sesión de gestión/socio, igual que el resto de "Pendientes de cobro".
+function blokes_profes_telefonos_get() {
+    $v = get_option('blokes_profes_telefonos', array());
+    return is_array($v) ? $v : array();
+}
+function superadmin_profes_telefonos_get($request) {
+    return rest_ensure_response(array('success' => true, 'data' => blokes_profes_telefonos_get()));
+}
+function superadmin_profes_telefono_set($request) {
+    $nombre = sanitize_text_field((string) $request->get_param('nombre'));
+    $telefono = blokes_externos_normaliza_telefono((string) $request->get_param('telefono'));
+    if (!$nombre) return new WP_Error('bad_request', 'Falta nombre.', array('status' => 400));
+    $telefonos = blokes_profes_telefonos_get();
+    if ($telefono) $telefonos[$nombre] = $telefono; else unset($telefonos[$nombre]);
+    update_option('blokes_profes_telefonos', $telefonos, false);
+    return rest_ensure_response(array('success' => true, 'data' => $telefonos));
+}
+
+// "🧗 activo en la app (fecha)" — pista automática (opción 3, Ramiro 14/11 18:12): si el alumno
+// ha apuntado algún top en las últimas 2 semanas, es que sigue viniendo aunque no haya pagado
+// todavía. No cambia ningún estado solo, es solo información para que Eva decida.
+function blokes_alumno_activo_en_app($uid) {
+    if (!$uid) return null;
+    $log = get_user_meta($uid, '_blokes_completion_log', true);
+    if (!is_array($log) || !$log) return null;
+    $ultimo = null;
+    foreach ($log as $entrada) {
+        $t = isset($entrada['timestamp']) ? strtotime($entrada['timestamp']) : null;
+        if ($t && (!$ultimo || $t > $ultimo)) $ultimo = $t;
+    }
+    if (!$ultimo || (current_time('timestamp') - $ultimo) > 14 * DAY_IN_SECONDS) return null;
+    return date('Y-m-d', $ultimo);
+}
+
+// Pedidos de renovación en estado "Pendiente de pago" (wc-pending) de verdad ligados a una
+// suscripción — los "74 pedidos, 5.102€" que Ramiro veía en WooCommerce pero Eva no en ningún
+// sitio de Blokes. Un pedido pendiente que NO es de ninguna suscripción (alta nueva sin pagar,
+// por ejemplo) se descarta aquí: esta vista es solo de renovaciones.
+function blokes_pedidos_renovacion_pendientes() {
+    if (!function_exists('wc_get_orders') || !function_exists('wcs_get_subscriptions_for_order')) return array();
+    $orders = wc_get_orders(array('status' => 'pending', 'limit' => -1, 'return' => 'objects'));
+    $out = array();
+    foreach ($orders as $order) {
+        $subs = wcs_get_subscriptions_for_order($order, array('order_type' => 'any'));
+        if (!$subs) continue;
+        $sub = reset($subs);
+        $out[] = array(
+            'orderId' => $order->get_id(), 'subId' => $sub->get_id(),
+            'importe' => floatval($order->get_total()),
+            'mesPedido' => $order->get_date_created() ? $order->get_date_created()->date('Y-m') : '',
+        );
+    }
+    return $out;
+}
+
+// Construye una fila de "Pendientes de cobro" a partir de la info ya calculada por
+// blokes_onhold_diagnostico_calcular() (duplicados/revisar/pagaron*/sinPago) + el pedido
+// pendiente real que la originó + el estado guardado de "¿Viene?"/recordatorio.
+function blokes_pendiente_cobro_fila($info, $etiqueta, $pedido, $estados, $cancelar = null) {
+    $sub_id = intval($info['subId']);
+    $estado = $estados[$sub_id] ?? null;
+    $fila = array(
+        'subId' => $sub_id, 'orderId' => intval($pedido['orderId']),
+        'nombre' => $info['nombre'], 'telefono' => $info['telefono'],
+        'dia' => $info['dia'], 'horario' => $info['horario'], 'edad' => $info['edad'],
+        'etiqueta' => $etiqueta, 'motivo' => $info['motivo'] ?? null,
+        'activaId' => $info['activaId'] ?? null,
+        'importe' => $pedido['importe'], 'mesPedido' => $pedido['mesPedido'],
+        'mesesPagadosExcel' => $info['mesesPagados'] ?? null, 'pestanaExcel' => $info['pestanaExcel'] ?? null,
+        'vieneEstado' => $estado['viene_estado'] ?? '', 'vienePor' => $estado['viene_por'] ?? null, 'vieneFecha' => $estado['viene_fecha'] ?? null,
+        'recordadoPor' => $estado['recordado_por'] ?? null, 'recordadoFecha' => $estado['recordado_fecha'] ?? null,
+        'activoApp' => blokes_alumno_activo_en_app($info['uid'] ?? null),
+    );
+    if ($cancelar) $fila['cancelar'] = $cancelar;
+    return $fila;
+}
+
+// GET /superadmin/v1/alumnos/pendientes-cobro — ver notas 18:05/18:10/18:12. Cruza los pedidos
+// de renovación pendientes de verdad con el diagnóstico de on-hold ya existente, para que cada
+// fila lleve ya puesta la etiqueta y la acción sugerida — Eva no tiene que interpretar nada.
+function superadmin_alumnos_pendientes_cobro($request) {
+    $diag = blokes_onhold_diagnostico_calcular();
+    $indice = array(); // subId => ['bucket' => ..., 'info' => ...]
+    foreach ($diag['duplicados'] as $f) $indice[$f['subId']] = array('bucket' => 'duplicado', 'info' => $f);
+    foreach ($diag['revisar'] as $f) $indice[$f['subId']] = array('bucket' => 'revisar', 'info' => $f);
+    foreach ($diag['pagaronNoviembre'] as $f) $indice[$f['subId']] = array('bucket' => 'pago_excel', 'info' => $f);
+    foreach ($diag['pagaronSoloOctubre'] as $f) $indice[$f['subId']] = array('bucket' => 'pago_parcial', 'info' => $f);
+    foreach ($diag['sinPago'] as $f) $indice[$f['subId']] = array('bucket' => 'sin_pago', 'info' => $f);
+    foreach ($diag['pruebas'] as $f) $indice[$f['subId']] = array('bucket' => 'prueba', 'info' => $f);
+
+    // Que se agrupen los duplicados en espera de la misma persona en una sola fila (nota 18:05).
+    $grupo_de_sub = array();
+    foreach ($diag['duplicadosEnEspera'] as $gi => $grupo) {
+        $grupo_de_sub[$grupo['cobrar']['subId']] = $gi;
+        foreach ($grupo['cancelar'] as $c) $grupo_de_sub[$c['subId']] = $gi;
+    }
+
+    $estados = blokes_pendientes_cobro_estado_get_todos();
+
+    $filas = array(); $vistos_grupo = array(); $sin_match = 0;
+    foreach (blokes_pedidos_renovacion_pendientes() as $pedido) {
+        $sub_id = $pedido['subId'];
+        if (isset($grupo_de_sub[$sub_id])) {
+            $gi = $grupo_de_sub[$sub_id];
+            if (isset($vistos_grupo[$gi])) continue; // ya se metió la fila agrupada de este grupo
+            $vistos_grupo[$gi] = true;
+            $grupo = $diag['duplicadosEnEspera'][$gi];
+            $filas[] = blokes_pendiente_cobro_fila($grupo['cobrar'], 'duplicado_en_espera', $pedido, $estados, $grupo['cancelar']);
+            continue;
+        }
+        if (!isset($indice[$sub_id])) { $sin_match++; continue; } // pedido pendiente sin suscripción on-hold reconocible — revisar a mano
+        $entrada = $indice[$sub_id];
+        if ($entrada['bucket'] === 'prueba') continue; // la 7092 no es un caso real de cobro
+        $filas[] = blokes_pendiente_cobro_fila($entrada['info'], $entrada['bucket'], $pedido, $estados);
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'filas' => $filas, 'sinMatch' => $sin_match,
+        // Si no es null, el cruce con el Excel de esta tanda no es de fiar (mismo aviso que
+        // onhold-diagnostico).
+        'avisoExcel' => $diag['avisoExcel'],
     )));
 }
 
