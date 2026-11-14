@@ -2611,7 +2611,8 @@ function blokes_onhold_diagnostico_calcular() {
     }
 
     $duplicados_en_espera = array();
-    $en_grupo_resuelto = array(); // sub_id => true, para saltárselas en la clasificación normal
+    $en_grupo_resuelto = array(); // sub_id (de las que se CANCELAN) => true, se saltan de la clasificación normal
+    $grupo_de_cobrar = array(); // sub_id (la que se COBRA) => índice en $duplicados_en_espera
     foreach ($grupos_en_espera as $grupo) {
         if (count($grupo) < 2) continue;
         // De cada grupo se cobra UNA (la que tenga nombre de facturación real; si ninguna o las
@@ -2625,15 +2626,40 @@ function blokes_onhold_diagnostico_calcular() {
         });
         $cobrar = $grupo[0];
         $cancelar = array_slice($grupo, 1);
+        $grupo_de_cobrar[$cobrar] = count($duplicados_en_espera);
         $duplicados_en_espera[] = array(
             'cobrar' => $info_por_sub[$cobrar],
+            // Cowork, 14/11 19:00 punto 1: la que se queda sigue con su propia situación (pagó
+            // según el Excel, le falta noviembre, sin pago…) — se rellena más abajo, cuando esa
+            // suscripción pase por la clasificación normal, en vez de perderla aquí.
+            'cobrarEtiqueta' => null, 'cobrarInfo' => null,
             'cancelar' => array_map(function($id) use ($info_por_sub) { return $info_por_sub[$id]; }, $cancelar),
             'motivo' => 'Dos (o más) suscripciones en espera de la misma persona y clase — ninguna está activa, así que no salían como duplicado. Cobrar una sola, cancelar el resto.',
         );
-        foreach ($grupo as $id) $en_grupo_resuelto[$id] = true;
+        foreach ($cancelar as $id) $en_grupo_resuelto[$id] = true;
     }
 
     $duplicados = array(); $revisar = array(); $pagaron_nov = array(); $pagaron_solo_oct = array(); $sin_pago = array();
+    // Cowork, 14/11 19:00 punto 1: la suscripción que se COBRA de un grupo en espera sigue
+    // teniendo su propia situación (pagó según el Excel, sin pago…) — en vez de perderla al
+    // sacarla de la clasificación normal, se guarda en el grupo (cobrarEtiqueta/cobrarInfo) y
+    // NO se duplica además como fila suelta en duplicados/revisar/pagaron*/sinPago.
+    $asignar = function($bucket, $info) use (&$duplicados, &$revisar, &$pagaron_nov, &$pagaron_solo_oct, &$sin_pago, &$duplicados_en_espera, $grupo_de_cobrar) {
+        $sub_id = $info['subId'];
+        if (isset($grupo_de_cobrar[$sub_id])) {
+            $gi = $grupo_de_cobrar[$sub_id];
+            $duplicados_en_espera[$gi]['cobrarEtiqueta'] = $bucket;
+            $duplicados_en_espera[$gi]['cobrarInfo'] = $info;
+            return;
+        }
+        switch ($bucket) {
+            case 'duplicado': $duplicados[] = $info; break;
+            case 'revisar': $revisar[] = $info; break;
+            case 'pagaronNoviembre': $pagaron_nov[] = $info; break;
+            case 'pagaronSoloOctubre': $pagaron_solo_oct[] = $info; break;
+            default: $sin_pago[] = $info;
+        }
+    };
     foreach ($on_hold as $s) {
         $sub_id = intval($s['id'] ?? 0);
         if ($sub_id === 7092 || isset($en_grupo_resuelto[$sub_id])) continue;
@@ -2654,7 +2680,7 @@ function blokes_onhold_diagnostico_calcular() {
         if ($activa_misma_clase) {
             $info['activaId'] = intval($activa_misma_clase['id'] ?? 0);
             $info['motivo'] = 'Mismo cliente y misma clase con otra suscripción activa.';
-            $duplicados[] = $info;
+            $asignar('duplicado', $info);
             continue;
         }
 
@@ -2670,29 +2696,29 @@ function blokes_onhold_diagnostico_calcular() {
         if ($activa_mismo_tel_otro_cliente) {
             $info['activaId'] = intval($activa_mismo_tel_otro_cliente['id'] ?? 0);
             $info['motivo'] = 'Mismo teléfono y misma clase, pero cliente distinto — probablemente hermanos en el mismo grupo, no cancelar sin mirarlo.';
-            $revisar[] = $info;
+            $asignar('revisar', $info);
             continue;
         }
         if ($activa_otra_clase) {
             $info['activaId'] = intval($activa_otra_clase['id'] ?? 0);
             $info['motivo'] = 'El mismo cliente tiene otra activa, pero en otra clase — puede ir a dos clases, o ser el teléfono de un familiar. No es duplicado.';
-            $revisar[] = $info;
+            $asignar('revisar', $info);
             continue;
         }
 
         $excel = blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel, $nombre);
         if ($excel && in_array('11', $excel['meses'], true)) {
             $info['mesesPagados'] = $excel['meses']; $info['pestanaExcel'] = $excel['pestana'];
-            $pagaron_nov[] = $info;
+            $asignar('pagaronNoviembre', $info);
             continue;
         }
         if ($excel && in_array('10', $excel['meses'], true)) {
             $info['mesesPagados'] = $excel['meses']; $info['pestanaExcel'] = $excel['pestana'];
-            $pagaron_solo_oct[] = $info;
+            $asignar('pagaronSoloOctubre', $info);
             continue;
         }
 
-        $sin_pago[] = $info;
+        $asignar('sinPago', $info);
     }
 
     return array(
@@ -2841,6 +2867,9 @@ function blokes_pedidos_renovacion_pendientes() {
             'orderId' => $order->get_id(), 'subId' => $sub->get_id(),
             'importe' => floatval($order->get_total()),
             'mesPedido' => $order->get_date_created() ? $order->get_date_created()->date('Y-m') : '',
+            // Cowork, 14/11 19:00 punto 2: el recordatorio por WhatsApp tiene que llevar un
+            // enlace de pago de verdad, no solo pedirlo de palabra.
+            'pagoUrl' => $order->needs_payment() ? $order->get_checkout_payment_url() : '',
         );
     }
     return $out;
@@ -2849,7 +2878,7 @@ function blokes_pedidos_renovacion_pendientes() {
 // Construye una fila de "Pendientes de cobro" a partir de la info ya calculada por
 // blokes_onhold_diagnostico_calcular() (duplicados/revisar/pagaron*/sinPago) + el pedido
 // pendiente real que la originó + el estado guardado de "¿Viene?"/recordatorio.
-function blokes_pendiente_cobro_fila($info, $etiqueta, $pedido, $estados, $cancelar = null) {
+function blokes_pendiente_cobro_fila($info, $etiqueta, $pedido, $estados, $cancelar = null, $cobrar_situacion = null) {
     $sub_id = intval($info['subId']);
     $estado = $estados[$sub_id] ?? null;
     $fila = array(
@@ -2858,13 +2887,19 @@ function blokes_pendiente_cobro_fila($info, $etiqueta, $pedido, $estados, $cance
         'dia' => $info['dia'], 'horario' => $info['horario'], 'edad' => $info['edad'],
         'etiqueta' => $etiqueta, 'motivo' => $info['motivo'] ?? null,
         'activaId' => $info['activaId'] ?? null,
-        'importe' => $pedido['importe'], 'mesPedido' => $pedido['mesPedido'],
+        'importe' => $pedido['importe'], 'mesPedido' => $pedido['mesPedido'], 'pagoUrl' => $pedido['pagoUrl'] ?? '',
         'mesesPagadosExcel' => $info['mesesPagados'] ?? null, 'pestanaExcel' => $info['pestanaExcel'] ?? null,
         'vieneEstado' => $estado['viene_estado'] ?? '', 'vienePor' => $estado['viene_por'] ?? null, 'vieneFecha' => $estado['viene_fecha'] ?? null,
         'recordadoPor' => $estado['recordado_por'] ?? null, 'recordadoFecha' => $estado['recordado_fecha'] ?? null,
         'activoApp' => blokes_alumno_activo_en_app($info['uid'] ?? null),
     );
     if ($cancelar) $fila['cancelar'] = $cancelar;
+    // Cowork, 14/11 19:00 punto 1: en "duplicado en espera", $info YA es la de la suscripción
+    // que se QUEDA (con su mesesPagadosExcel/activaId/motivo normales, de arriba) — lo único
+    // que falta es SABER qué botones de acción le tocan (pago_excel/pago_parcial/sin_pago/
+    // revisar/duplicado), porque la "etiqueta" visible de la fila sigue siendo "duplicado en
+    // espera" para no confundir a Eva sobre qué es lo urgente (cancelar la vieja).
+    if ($cobrar_situacion) $fila['cobrarEtiqueta'] = $cobrar_situacion['etiqueta'];
     return $fila;
 }
 
@@ -2898,7 +2933,9 @@ function superadmin_alumnos_pendientes_cobro($request) {
             if (isset($vistos_grupo[$gi])) continue; // ya se metió la fila agrupada de este grupo
             $vistos_grupo[$gi] = true;
             $grupo = $diag['duplicadosEnEspera'][$gi];
-            $filas[] = blokes_pendiente_cobro_fila($grupo['cobrar'], 'duplicado_en_espera', $pedido, $estados, $grupo['cancelar']);
+            $cobrar_info = $grupo['cobrarInfo'] ?? $grupo['cobrar'];
+            $cobrar_situacion = $grupo['cobrarEtiqueta'] ? array('etiqueta' => $grupo['cobrarEtiqueta']) : null;
+            $filas[] = blokes_pendiente_cobro_fila($cobrar_info, 'duplicado_en_espera', $pedido, $estados, $grupo['cancelar'], $cobrar_situacion);
             continue;
         }
         if (!isset($indice[$sub_id])) { $sin_match++; continue; } // pedido pendiente sin suscripción on-hold reconocible — revisar a mano
@@ -4899,6 +4936,11 @@ function superadmin_gestion_grupos($request) {
         if (!isset($adelantados_por_sub[$sid])) $adelantados_por_sub[$sid] = $ad;
     }
 
+    // Cowork, 14/11 18:40 punto 4: para saber si la suscripción en espera de alguien tiene otra
+    // activa EN OTRA CLASE (no solo en la misma, que ya lo resuelve la fusión de más abajo) —
+    // mismo cliente, cualquier clase, usado al construir "Revisar datos" en el frontend.
+    $uid_por_sub = array(); $activas_por_uid = array();
+
     foreach ($all as $sub) {
         if (empty($sub['id'])) continue;
         $status = $sub['status'] ?? '';
@@ -5073,8 +5115,11 @@ function superadmin_gestion_grupos($request) {
             }
         }
 
-        $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
+        // Fiable con HPOS (ver blokes_alumno_customer_id_de_sub): antes solo leía el meta directo.
+        $uid = blokes_alumno_customer_id_de_sub($sub, $sub_obj);
         $persona_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : ('n' . strtolower(trim($sub['cliente'] ?? ''))));
+        $uid_por_sub[intval($sub['id'])] = $uid;
+        if ($en_vigor && $uid) $activas_por_uid[$uid][] = array('subId' => intval($sub['id']), 'dia' => $pareja, 'horario' => $horario_agrupa, 'edad' => $edad);
 
         // El teléfono/nombre de la propia suscripción (su copia de la dirección de
         // facturación) es más de fiar que el del plugin de terceros o el de la cuenta: para
@@ -5202,6 +5247,16 @@ function superadmin_gestion_grupos($request) {
             if ($otras) {
                 $principal['otrasSubs'] = array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $otras);
                 $duplicados[] = array('alumno' => $principal['alumno'], 'subs' => array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $subs));
+            } elseif (!$principal['enVigor']) {
+                // Sin duplicado EN ESTE grupo, pero puede tener otra activa en OTRO (se cambió de
+                // clase y la vieja se quedó en espera, cowork 14/11 18:40 punto 4) — para la
+                // "Revisar datos" del frontend, que ya no tiene que adivinarlo ella sola.
+                $uid_principal = $uid_por_sub[$principal['subId']] ?? 0;
+                foreach (($uid_principal ? ($activas_por_uid[$uid_principal] ?? array()) : array()) as $otra_activa) {
+                    if ($otra_activa['dia'] === $g['dia'] && $otra_activa['horario'] === $g['horario'] && $otra_activa['edad'] === $g['edad']) continue;
+                    $principal['otraActivaFuera'] = $otra_activa;
+                    break;
+                }
             }
             $alumnos[] = $principal;
         }
@@ -9633,35 +9688,44 @@ function superadmin_gestion_dar_de_baja($request) {
 // Busca si existe otra suscripción del mismo cliente, misma clase (día+horario+edad) y más
 // reciente, en vigor (activa o de baja a fin de mes) — la "nueva" de la que $sub_id_viejo sería
 // el duplicado colgando. Devuelve su fila de blokes_get_all_subscription_data() o null.
+// Cowork, 14/11 18:40 punto 4: antes solo miraba la MISMA clase (horario/edad/día) — la
+// suscripción vieja en espera de quien se cambió de clase (Luis Corregidor, Aurelio Gualo,
+// Tomás Gasca…) se quedaba sin match porque su activa está en OTRA clase. Ahora, si no hay
+// ninguna en la misma clase, acepta cualquier activa del mismo cliente en otra clase — sigue
+// siendo "mismo cliente de verdad" (customer_id fiable con HPOS, ver blokes_alumno_customer_id_de_sub),
+// nunca "cualquier activa a secas".
 function blokes_buscar_sub_mas_nueva($sub_id_viejo) {
     $all = blokes_get_all_subscription_data();
     $viejo = null;
     foreach ($all as $s) { if (intval($s['id']) === $sub_id_viejo) { $viejo = $s; break; } }
     if (!$viejo) return null;
 
-    $uid_viejo = intval(get_post_meta($sub_id_viejo, '_customer_user', true));
+    $uid_viejo = blokes_alumno_customer_id_de_sub($viejo);
+    $misma_clase = null; $otra_clase = null;
     foreach ($all as $s) {
         if (intval($s['id']) === $sub_id_viejo) continue;
         $en_vigor = ($s['status'] ?? '') === 'active'; // ya incluye pending-cancel con status forzado a 'active'
         if (!$en_vigor) continue;
-        $mismo_cliente = $uid_viejo && intval(get_post_meta(intval($s['id']), '_customer_user', true)) === $uid_viejo;
+        $mismo_cliente = $uid_viejo && blokes_alumno_customer_id_de_sub($s) === $uid_viejo;
         if (!$mismo_cliente) $mismo_cliente = !empty($viejo['email']) && !empty($s['email']) && strcasecmp($s['email'], $viejo['email']) === 0;
         if (!$mismo_cliente) continue;
-        if (($s['horario'] ?? '') !== ($viejo['horario'] ?? '')) continue;
-        if (($s['edad'] ?? 'Adultos') !== ($viejo['edad'] ?? 'Adultos')) continue;
-        if (blokes_dia_a_pareja($s['dia'] ?? '') !== blokes_dia_a_pareja($viejo['dia'] ?? '')) continue;
-        return $s;
+        $misma_horario_edad_dia = ($s['horario'] ?? '') === ($viejo['horario'] ?? '')
+            && ($s['edad'] ?? 'Adultos') === ($viejo['edad'] ?? 'Adultos')
+            && blokes_dia_a_pareja($s['dia'] ?? '') === blokes_dia_a_pareja($viejo['dia'] ?? '');
+        if ($misma_horario_edad_dia) { $misma_clase = $s; break; }
+        if (!$otra_clase) $otra_clase = $s;
     }
-    return null;
+    return $misma_clase ?: $otra_clase;
 }
 
 /**
  * Fusionar duplicados: cancela la suscripción vieja que se quedó colgando en espera/pendiente
- * cuando el alumno se volvió a apuntar con una nueva (los 19 casos de octubre) — pero solo si
- * de verdad hay una suscripción más nueva en vigor del mismo cliente y la misma clase; si no,
- * 409 (para no poder cancelar por error a alguien que solo debe un mes, no es un duplicado). No
- * toca la suscripción nueva, ni genera pedido, factura o email, y cancela también los pedidos
- * sin pagar de la vieja.
+ * cuando el alumno se volvió a apuntar con una nueva (los 19 casos de octubre) o se cambió de
+ * clase y le quedó la vieja en espera (cowork, 14/11 18:40 punto 4) — pero solo si de verdad hay
+ * una suscripción más nueva en vigor del mismo cliente (misma clase o, si no la hay, cualquier
+ * otra); si no, 409 (para no poder cancelar por error a alguien que solo debe un mes, no es un
+ * duplicado). No toca la suscripción nueva, ni genera pedido, factura o email, y cancela
+ * también los pedidos sin pagar de la vieja.
  */
 function superadmin_gestion_fusionar($request) {
     if (!function_exists('wcs_get_subscription')) {
@@ -9679,7 +9743,7 @@ function superadmin_gestion_fusionar($request) {
 
     $nueva = blokes_buscar_sub_mas_nueva($sub_id_viejo);
     if (!$nueva) {
-        return new WP_Error('no_es_duplicado', 'No se ha encontrado ninguna suscripción más nueva en vigor del mismo alumno y la misma clase — esta puede ser la única suya. Revísalo antes de cancelarla a mano (usa "Dar de baja" si es lo que quieres).', array('status' => 409));
+        return new WP_Error('no_es_duplicado', 'No se ha encontrado ninguna suscripción más nueva en vigor del mismo alumno (ni en esta clase ni en otra) — esta puede ser la única suya. Revísalo antes de cancelarla a mano (usa "Dar de baja" si es lo que quieres).', array('status' => 409));
     }
 
     $pedidos_a_cancelar = blokes_cancelar_pedidos_impagados($sub, true);

@@ -341,6 +341,13 @@
   margin-top: 5px;
 }
 
+/* KPI como botón (p. ej. "Pendiente del mes" → lleva a Pendientes de cobro, cowork 14/11
+   18:40 punto 1) — mismo aspecto que un .sv-kpi normal, sin el estilo por defecto de <button>. */
+.sv-kpi--link {
+  font-family: inherit; cursor: pointer; text-align: left; border-top: none; border-right: none; border-bottom: none;
+}
+.sv-kpi--link:hover { background: rgba(255,255,255,0.06); }
+
 /* ── Bar chart ── */
 .sv-barchart { margin-bottom: 16px; }
 
