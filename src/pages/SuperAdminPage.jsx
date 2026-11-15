@@ -341,11 +341,14 @@ function classDurationH(horario) {
 function profesorClaseConIsa(c) {
   // Isa/Eva en niños-adolescentes (igual que profesoresDeGrupo() en SupervisionPage.jsx — NO se
   // ha metido a Isa en PROF_CLASS_SLOTS/PROF_META porque esa fuente también alimenta Nóminas y
-  // ella es voluntaria, Ramiro 15/11 07:25).
+  // ella es voluntaria, Ramiro 15/11 07:25). Ramiro, 15/11 16:20 (tabla de franjas real): Isa
+  // da las 3 franjas de Martes-Jueves (17:30-18:30, 18:30-19:30, 19:30-21:00 adolescentes); Eva
+  // da Lunes-Miércoles Y Viernes — antes esto último asignaba Viernes a Isa por error (solo
+  // miraba L-X, no Viernes).
   if (c.edad && c.edad !== 'Adultos') {
     const dias = normForProf(c.dia || '').split(/[\s\-·,|]+/).filter(Boolean)
-    const esLX = dias.length > 0 && dias.every(d => d === 'lunes' || d === 'miercoles')
-    return esLX ? 'Eva' : 'Isa'
+    const esMartesJueves = dias.length > 0 && dias.every(d => d === 'martes' || d === 'jueves')
+    return esMartesJueves ? 'Isa' : 'Eva'
   }
   return getProfForClass(c)
 }
@@ -357,6 +360,14 @@ function ClasesRetencionSection() {
   const [mesSel, setMesSel] = useState('')
   const { data, loading, error } = useClasesRetencion(months, mesSel)
 
+  // Isa (Ramiro, 15/11 16:00/16:20): voluntaria con nómina real, 12 €/hora confirmado y
+  // "profe visible" en Clases/Grupos/Horarios — pero a propósito NO entra en PROF_META (esa
+  // ficha también alimenta Playground/TimeOff/campamento, herramientas de personal pagado; no
+  // hay horasSem suya confirmada para equipar/gestión, solo para sus 3 franjas de clase: M-J
+  // 17:30-18:30 + 18:30-19:30 + 19:30-21:00 = 3,5 h/día × 2 días = 7 h/semana — ningún otro
+  // número suyo se inventa aquí). Objeto aparte, solo para el coste de SUS clases.
+  const ISA_META = { costoHClase: 12, horasSem: 7 }
+
   // Ramiro, 15/11 10:25 punto A: coste de empresa REAL del mes elegido — nómina bruta (+
   // efectivo) real + Seguridad Social real, nada de ×1,43 (eso era useCostes/FACTOR_COSTE) ni
   // de usar siempre la nómina del mes actual en vez de la del mes que se está mirando. El
@@ -364,12 +375,7 @@ function ClasesRetencionSection() {
   // equipar + gestión — PROF_META.horasSem ya es esa cifra semanal, no solo horas de clase).
   function costeHoraReal(prof) {
     if (!prof) return 0
-    const meta = PROF_META[prof]
-    // Ramiro, 15/11 14:25: Isa SÍ va en Nóminas (voluntaria con compensación por horas, como
-    // Ana y Edu) — ya no es "gratis por definición". Sigue sin ficha en PROF_META a propósito
-    // (ese objeto también alimenta Playground/TimeOff, de personal real, no de voluntarios) y
-    // sin €/hora porque Ramiro pidió explícitamente no inventarlo — así que de momento sigue
-    // saliendo 0€ por falta de dato, no porque sea voluntaria.
+    const meta = prof === 'Isa' ? ISA_META : PROF_META[prof]
     if (!meta || !meta.horasSem) return 0
     const real = data?.costeRealProfe?.[normForProf(prof)]
     // Si no hay dato real para ese mes (p. ej. Nóminas sin nada cargado para ese mes concreto),
@@ -384,11 +390,11 @@ function ClasesRetencionSection() {
   // si no, cae al plan B de la ficha (costoHClase), visible en vivo sin acceso al servidor.
   function fuenteProfe(prof) {
     if (!prof) return ''
-    if (prof === 'Isa') return 'voluntaria con compensación por horas — pendiente del €/hora (Ramiro, 15/11 14:25)'
-    const meta = PROF_META[prof]
+    const meta = prof === 'Isa' ? ISA_META : PROF_META[prof]
     if (!meta || !meta.horasSem) return ''
     const mes = fmtMonth(data?.mesIngreso)
     const tieneNomina = !!data?.costeRealProfeFuente?.[normForProf(prof)]
+    if (prof === 'Isa' && !tieneNomina) return `ficha (12 €/h confirmado, Ramiro 15/11 16:00), sin nómina de ${mes}`
     return tieneNomina ? `nómina ${mes} + SS banco (prorrateada)` : `ficha, sin nómina de ${mes}`
   }
   // Sesiones por semana de esta clase: "Martes-Jueves"/"Lunes-Miércoles" = 2, un día suelto

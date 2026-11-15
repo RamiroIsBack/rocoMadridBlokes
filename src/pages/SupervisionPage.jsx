@@ -51,8 +51,11 @@ const DIA_A_STAFFKEY = { Lunes: 'Lunes', Martes: 'Martes', Miercoles: 'Miercoles
 // Nóminas/Rentabilidad (useCostes, Playground) y Ramiro pidió explícitamente no tocar
 // Nóminas, así que esto es solo la pista de "Profesor" en Grupos/Pendientes de cobro.
 function profesorDeNinosAdolescentes(dias) {
-  const esLX = dias.every(d => d === 'Lunes' || d === 'Miercoles')
-  return esLX ? 'Eva' : 'Isa'
+  // Ramiro, 15/11 16:20 (tabla de franjas real): Isa da las 3 franjas de Martes-Jueves
+  // (niños/medianos/adolescentes); Eva da Lunes-Miércoles Y Viernes — antes solo se miraba
+  // L-X, así que Viernes se asignaba a Isa por error.
+  const esMartesJueves = dias.every(d => d === 'Martes' || d === 'Jueves')
+  return esMartesJueves ? 'Isa' : 'Eva'
 }
 function profesoresDeGrupo(diaPareja, horario, edad) {
   if (!diaPareja || !horario) return []

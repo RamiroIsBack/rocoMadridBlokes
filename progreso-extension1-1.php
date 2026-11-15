@@ -3868,7 +3868,31 @@ function blokes_get_abono_subscripciones() {
  */
 function blokes_get_all_subscription_data() {
     $base = class_exists('RocoMadrid_SF_Stats') ? RocoMadrid_SF_Stats::get_all_subscription_data() : array();
+    $base = array_map('blokes_corrige_edad_por_franja', $base);
     return array_merge($base, blokes_get_pending_cancel_alumnos(), blokes_get_abono_subscripciones());
+}
+
+// Ramiro, 15/11 16:20 (Fase 0 edad, "sube de prioridad"): el producto "Clases de escalada un
+// día" (#4516, día suelto) no tiene atributo Edad -- un niño que va un solo día sale "Adultos"
+// en la variación de WooCommerce (RocoMadrid_SF_Stats ya mira primero la variación, luego el
+// age_addon/pa_edad del formulario) y se le asigna el profe de adultos de esa franja (Sigurd,
+// Eva…), inflando filas falsas en Superadmin › Clases y metiendo niños en el aforo de adultos
+// de Grupos. Regla pedida: si DESPUÉS de esos dos intentos sigue saliendo "Adultos", mirar la
+// franja (día ya emparejado + horario) -- estas 4 no tienen ninguna clase de adultos a esa hora,
+// así que SIEMPRE son niños. Nunca pisa una edad que ya viniera bien puesta (Woo o el formulario).
+// M-J 19:30-21:00 (adolescentes) NO entra aquí a propósito: esa franja sí puede tener adultos,
+// ahí hay que fiarse del age_addon tal cual venga.
+function blokes_corrige_edad_por_franja($sub) {
+    if (($sub['edad'] ?? 'Adultos') !== 'Adultos') return $sub;
+    $franjas_sin_adultos = array(
+        'Martes-Jueves|17:30-18:30'   => 'Menores (6-12 años)',
+        'Martes-Jueves|18:30-19:30'   => 'Menores (6-12 años)',
+        'Lunes-Miércoles|17:30-18:30' => 'Menores (6-12 años)',
+        'Viernes|18:00-19:00'         => 'Menores (6-12 años)',
+    );
+    $clave = blokes_dia_a_pareja($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '');
+    if (isset($franjas_sin_adultos[$clave])) $sub['edad'] = $franjas_sin_adultos[$clave];
+    return $sub;
 }
 
 function progreso_get_alumnos($request) {
