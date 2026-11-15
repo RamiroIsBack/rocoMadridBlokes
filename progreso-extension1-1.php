@@ -1452,6 +1452,21 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/profes-telefonos', array(
         'methods' => 'POST', 'callback' => 'superadmin_profes_telefono_set', 'permission_callback' => $sa_perm,
     ));
+    // Pestaña "Bajas" de Grupos (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 15/11 08:45).
+    register_rest_route('superadmin/v1', '/gestion/bajas', array(
+        'methods' => 'GET', 'callback' => 'superadmin_gestion_bajas', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/bajas/motivo', array(
+        'methods' => 'POST', 'callback' => 'superadmin_gestion_bajas_motivo_set', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/bajas/contacto', array(
+        'methods' => 'POST', 'callback' => 'superadmin_gestion_bajas_contacto', 'permission_callback' => $sa_perm,
+    ));
+    // Pestaña Superadmin › Clases: retención por clase/profe (15/11 08:45 punto D) — solo
+    // socios, como el resto de dinero/estadísticas agregadas del club.
+    register_rest_route('superadmin/v1', '/clases-retencion', array(
+        'methods' => 'GET', 'callback' => 'superadmin_clases_retencion', 'permission_callback' => $socio_perm,
+    ));
 });
 
 // ============================================================
@@ -2816,6 +2831,143 @@ function blokes_pendientes_cobro_estado_upsert($sub_id, $campos) {
     $existe = $wpdb->get_var($wpdb->prepare("SELECT sub_id FROM {$table} WHERE sub_id = %d", $sub_id));
     if ($existe !== null) $wpdb->update($table, $campos, array('sub_id' => intval($sub_id)));
     else $wpdb->insert($table, array_merge(array('sub_id' => intval($sub_id)), $campos));
+}
+
+// ─── 08:45 punto B: flujo de baja — registro de cada contacto (WhatsApp) con quien se va ──────
+function blokes_bajas_contactos_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_bajas_contactos';
+}
+// Una fila por CADA vez que se contacta a alguien que se va (puede ser más de una) — a
+// diferencia de _rm_baja_categoria/_rm_baja_motivo (el motivo en sí, uno solo, en postmeta,
+// reutilizado tal cual), esto es una lista y necesita tabla propia.
+function blokes_ensure_bajas_contactos_table() {
+    global $wpdb;
+    $table = blokes_bajas_contactos_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        id             bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        sub_id         bigint(20) UNSIGNED NOT NULL,
+        fecha          datetime             NOT NULL,
+        user_login     varchar(100)         NOT NULL DEFAULT '',
+        respuesta      text                 NULL,
+        acepta_promos  tinyint(1)           NULL,
+        PRIMARY KEY (id),
+        KEY sub_id (sub_id)
+    ) {$charset};";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+function blokes_bajas_contactos_de($sub_id) {
+    global $wpdb;
+    blokes_ensure_bajas_contactos_table();
+    return $wpdb->get_results($wpdb->prepare(
+        'SELECT fecha, user_login, respuesta, acepta_promos FROM ' . blokes_bajas_contactos_table() . ' WHERE sub_id = %d ORDER BY fecha DESC',
+        intval($sub_id)
+    ), ARRAY_A);
+}
+function blokes_bajas_contactos_de_varios($sub_ids) {
+    global $wpdb;
+    if (empty($sub_ids)) return array();
+    blokes_ensure_bajas_contactos_table();
+    $placeholders = implode(',', array_fill(0, count($sub_ids), '%d'));
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT sub_id, fecha, user_login, respuesta, acepta_promos FROM " . blokes_bajas_contactos_table() . " WHERE sub_id IN ({$placeholders}) ORDER BY fecha DESC",
+        $sub_ids
+    ), ARRAY_A);
+    $out = array();
+    foreach ($rows as $r) $out[intval($r['sub_id'])][] = $r;
+    return $out;
+}
+
+// POST /gestion/bajas/contacto — registra un intento de contacto (normalmente tras abrir el
+// WhatsApp de "¿por qué lo has dejado?") con la respuesta y si acepta promos, para campañas.
+function superadmin_gestion_bajas_contacto($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    $respuesta = sanitize_textarea_field((string) $request->get_param('respuesta'));
+    $acepta_promos_raw = $request->get_param('aceptaPromos');
+    $acepta_promos = $acepta_promos_raw === null ? null : ((bool) $acepta_promos_raw ? 1 : 0);
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    blokes_ensure_bajas_contactos_table();
+    global $wpdb;
+    $user = wp_get_current_user();
+    $wpdb->insert(blokes_bajas_contactos_table(), array(
+        'sub_id' => $sub_id, 'fecha' => current_time('mysql'),
+        'user_login' => $user ? $user->user_login : '', 'respuesta' => $respuesta, 'acepta_promos' => $acepta_promos,
+    ));
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /gestion/bajas/motivo — categoría + texto del motivo de baja. A diferencia de
+// dar_de_baja (que lo escribe solo cuando se ejecuta la baja de verdad), esto vale también para
+// quien se marcó "No viene" sin cancelar aún la suscripción en WooCommerce (08:45 punto B.1) —
+// mismo postmeta, para que /gestion/bajas-motivo siga funcionando igual.
+function superadmin_gestion_bajas_motivo_set($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    $categoria = sanitize_key((string) $request->get_param('categoria'));
+    $texto = sanitize_textarea_field((string) $request->get_param('texto'));
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    if ($categoria !== '' && !in_array($categoria, BLOKES_BAJA_MOTIVOS, true)) {
+        return new WP_Error('bad_request', 'Categoría no reconocida.', array('status' => 400));
+    }
+    if ($categoria !== '') update_post_meta($sub_id, '_rm_baja_categoria', $categoria);
+    update_post_meta($sub_id, '_rm_baja_motivo', $texto);
+    blokes_gestion_log($sub_id, 'bajas_motivo', null, array('categoria' => $categoria, 'texto' => $texto));
+    return rest_ensure_response(array('success' => true));
+}
+
+// GET /gestion/bajas — pestaña "Bajas" de Grupos (08:45): junta las bajas REALES (ya canceladas
+// en WooCommerce, de blokes_altas_bajas_calcular()) con quien Eva marcó "No viene" en Pendientes
+// de cobro pero todavía no se ha cancelado en WooCommerce — para que no haya que esperar a que
+// WooCommerce lo refleje para empezar a hacerle seguimiento (motivo, WhatsApp...).
+function superadmin_gestion_bajas($request) {
+    $calculo = blokes_altas_bajas_calcular(2);
+    $filas = array();
+    $vistos = array(); // subId => true, para no repetir si por lo que sea aparece en los dos sitios
+    foreach ($calculo['data'] as $c) {
+        foreach ($c['members_lost'] as $m) {
+            if (isset($vistos[$m['subId']])) continue;
+            $vistos[$m['subId']] = true;
+            $filas[] = array(
+                'subId' => $m['subId'], 'nombre' => $m['name'], 'telefono' => $m['phone'],
+                'dia' => $c['dia'], 'horario' => $c['horario'], 'edad' => $c['edad'],
+                'fecha' => $m['fecha'], 'origen' => $m['motivoCategoria'] ? 'cancelo' : 'impago',
+                'motivoCategoria' => $m['motivoCategoria'], 'motivoTexto' => $m['motivoTexto'],
+            );
+        }
+    }
+    // "No viene" sin cancelar aún: cualquier sub_id con viene_estado=no_viene que no esté ya listado.
+    $estados = blokes_pendientes_cobro_estado_get_todos();
+    $no_viene_ids = array();
+    foreach ($estados as $sub_id => $e) {
+        if (($e['viene_estado'] ?? '') === 'no_viene' && !isset($vistos[$sub_id])) $no_viene_ids[] = $sub_id;
+    }
+    if ($no_viene_ids && function_exists('wcs_get_subscription')) {
+        foreach (blokes_get_all_subscription_data() as $s) {
+            $sid = intval($s['id'] ?? 0);
+            if (!$sid || !in_array($sid, $no_viene_ids, true) || isset($vistos[$sid])) continue;
+            $vistos[$sid] = true;
+            $filas[] = array(
+                'subId' => $sid, 'nombre' => $s['cliente'] ?? '', 'telefono' => $s['telefono'] ?? '',
+                'dia' => blokes_dia_a_pareja($s['dia'] ?? ''), 'horario' => $s['horario'] ?? '', 'edad' => $s['edad'] ?: 'Adultos',
+                'fecha' => isset($estados[$sid]['viene_fecha']) ? substr($estados[$sid]['viene_fecha'], 0, 7) : null,
+                'origen' => 'no_viene',
+                'motivoCategoria' => get_post_meta($sid, '_rm_baja_categoria', true) ?: null,
+                'motivoTexto' => get_post_meta($sid, '_rm_baja_motivo', true) ?: null,
+            );
+        }
+    }
+    // El profe se calcula en el frontend (profesoresDeGrupo(), staffSchedule.js + la regla de
+    // Isa/Eva en niños/adolescentes) — no hay un equivalente en PHP, igual que en Pendientes de
+    // cobro: aquí solo se manda dia/horario/edad.
+    $sub_ids = array_map(function($f) { return $f['subId']; }, $filas);
+    $contactos = blokes_bajas_contactos_de_varios($sub_ids);
+    foreach ($filas as &$f) {
+        $f['contactos'] = $contactos[$f['subId']] ?? array();
+    }
+    usort($filas, function($a, $b) { return strcmp($b['fecha'] ?? '', $a['fecha'] ?? ''); });
+    return rest_ensure_response(array('success' => true, 'data' => $filas));
 }
 
 // POST /superadmin/v1/alumnos/pendientes-cobro/viene — Eva pone a mano ✅/❌/❓ tras preguntar
@@ -9698,9 +9850,16 @@ function superadmin_gestion_reanudar($request) {
 // 'duplicado' (cowork/Ramiro, 15/11 08:15): no es una baja real — la persona sigue viniendo,
 // solo se cancela la suscripción vieja que quedó colgando. Excluida de members_lost en
 // superadmin_classes() y de cualquier campaña de "ya no viene" (31/10).
-const BLOKES_BAJA_MOTIVOS = array('precio', 'horario', 'lesion', 'mudanza', 'duplicado', 'otro');
+// Ampliado 15/11 08:45 punto B.2 (Ramiro): lista más fina para el motivo de baja de verdad
+// (antes solo tenía las 4 + duplicado/otro de "Dar de baja"). 'duplicado' sigue existiendo y
+// excluida de members_lost (15/11 08:15) — no es una baja real.
+const BLOKES_BAJA_MOTIVOS = array('precio', 'horario', 'falta_tiempo', 'mudanza', 'otro_rocodromo', 'clase_profe', 'lesion', 'temporal_vuelve', 'duplicado', 'otro');
 function blokes_baja_motivo_label($cat) {
-    $map = array('precio' => 'Precio', 'horario' => 'Horario', 'lesion' => 'Lesión', 'mudanza' => 'Mudanza', 'duplicado' => 'Duplicado (no es baja real)', 'otro' => 'Otro');
+    $map = array(
+        'precio' => 'Precio', 'horario' => 'Horario', 'falta_tiempo' => 'Falta de tiempo', 'mudanza' => 'Mudanza',
+        'otro_rocodromo' => 'Se va a otro rocódromo', 'clase_profe' => 'La clase o el profe', 'lesion' => 'Lesión',
+        'temporal_vuelve' => 'Temporal, dice que vuelve', 'duplicado' => 'Duplicado (no es baja real)', 'otro' => 'Otro',
+    );
     return $map[$cat] ?? '';
 }
 
@@ -10679,8 +10838,18 @@ function superadmin_gestion_alta_cliente($request) {
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
+// GET /superadmin/v1/classes — envoltorio fino de blokes_altas_bajas_calcular().
 function superadmin_classes($request) {
-    $months   = max(1, min(60, intval($request->get_param('months'))));
+    $months = max(1, min(60, intval($request->get_param('months'))));
+    $r = blokes_altas_bajas_calcular($months);
+    return rest_ensure_response(array('data' => $r['data'], 'duplicadosMismaClase' => $r['duplicadosMismaClase']));
+}
+
+// Nuevo/Cambio de clase/Baja/Pendiente por persona (no por suscripción), agrupado por clase.
+// Única fuente de verdad para "Altas y Bajas" de Grupos, Superadmin › Clases (retención) y
+// ExcelMuerte (Ramiro, 15/11 07:50 punto B + 08:45: "mismo cálculo, una sola función").
+function blokes_altas_bajas_calcular($months) {
+    $months   = max(1, min(60, intval($months)));
     $start_dt = new DateTime("first day of this month -{$months} months");
     $start_ym = $start_dt->format('Y-m');
     $now_ym   = date('Y-m');
@@ -10752,12 +10921,16 @@ function superadmin_classes($request) {
     // ---- Mapas globales por persona, a partir de TODAS sus suscripciones.
     $persona_activo_en  = array(); // personaKey => [classKey => true] — sigue viniendo de verdad AHORA (pending-cancel incluido)
     $persona_min_start  = array(); // personaKey => Y-m más antiguo entre TODAS sus suscripciones
+    $persona_max_end    = array(); // personaKey => Y-m más reciente con cobertura (para permanencia, Superadmin Clases)
     $persona_historial  = array(); // personaKey => [ ['classKey','startYm','dia','horario','edad'], ... ]
+    $persona_intervalos = array(); // personaKey => [ ['start'=>Y-m,'end'=>Y-m], ... ] — para la retención por cohorte
     foreach ($enriquecidos as $e) {
         $pk = $e['personaKey'];
         if (!isset($persona_min_start[$pk]) || $e['startYm'] < $persona_min_start[$pk]) $persona_min_start[$pk] = $e['startYm'];
+        if (!isset($persona_max_end[$pk]) || $e['endYm'] > $persona_max_end[$pk]) $persona_max_end[$pk] = $e['endYm'];
         if ($e['status'] === 'active') $persona_activo_en[$pk][$e['classKey']] = true;
         $persona_historial[$pk][] = array('classKey' => $e['classKey'], 'startYm' => $e['startYm'], 'dia' => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad']);
+        $persona_intervalos[$pk][] = array('start' => $e['startYm'], 'end' => $e['endYm']);
     }
 
     // ---- PASADA 2: construir $classes ya con la clasificación correcta por persona.
@@ -10816,16 +10989,19 @@ function superadmin_classes($request) {
                         $movido_desde = trim($p0['dia'] . ' ' . $p0['horario'] . ($p0['edad'] !== 'Adultos' ? ' · ' . $p0['edad'] : ''));
                     }
                 }
-                $classes[$class_key]['members_active'][] = array('name' => $e['nombre'], 'phone' => $e['telefono'], 'new' => $es_nuevo, 'movedFrom' => $movido_desde);
+                $classes[$class_key]['members_active'][] = array(
+                    'subId' => $e['subId'], 'name' => $e['nombre'], 'phone' => $e['telefono'],
+                    'new' => $es_nuevo, 'movedFrom' => $movido_desde, 'altaMes' => $es_nuevo ? $e['startYm'] : null,
+                );
             }
         } elseif ($e['esPendingCancel']) {
             $classes[$class_key]['ending']++;
-            $classes[$class_key]['members_ending'][] = array('name' => $e['nombre'], 'phone' => $e['telefono']);
+            $classes[$class_key]['members_ending'][] = array('subId' => $e['subId'], 'name' => $e['nombre'], 'phone' => $e['telefono']);
         } elseif (in_array($e['status'], array('on-hold', 'pending'))) {
             // Si ya está activa en cualquier otra parte, es una "en espera" duplicada vieja —
             // ya sale en Duplicados/Pendientes de cobro, no hace falta repetirla aquí.
             if (!isset($persona_activo_en[$pk])) {
-                $classes[$class_key]['members_pending'][] = array('name' => $e['nombre'], 'phone' => $e['telefono']);
+                $classes[$class_key]['members_pending'][] = array('subId' => $e['subId'], 'name' => $e['nombre'], 'phone' => $e['telefono']);
             }
         } elseif (!in_array($e['status'], array('on-hold', 'pending')) && $e['endYm'] >= $two_months_ago) {
             // Baja real = la persona ya no tiene NINGUNA suscripción activa en ninguna clase.
@@ -10833,9 +11009,13 @@ function superadmin_classes($request) {
             // de clase — no está de baja. Tampoco cuenta si se canceló como "duplicado" (motivo
             // _rm_baja_categoria === 'duplicado', cowork/Ramiro 15/11 08:15): no es una baja
             // real, la persona sigue viniendo con la otra suscripción.
-            $es_baja_duplicado = get_post_meta($e['subId'], '_rm_baja_categoria', true) === 'duplicado';
-            if (!isset($persona_activo_en[$pk]) && !$es_baja_duplicado) {
-                $classes[$class_key]['members_lost'][] = array('name' => $e['nombre'], 'phone' => $e['telefono']);
+            $baja_categoria = get_post_meta($e['subId'], '_rm_baja_categoria', true);
+            if (!isset($persona_activo_en[$pk]) && $baja_categoria !== 'duplicado') {
+                $classes[$class_key]['members_lost'][] = array(
+                    'subId' => $e['subId'], 'name' => $e['nombre'], 'phone' => $e['telefono'],
+                    'fecha' => $e['endYm'], 'motivoCategoria' => $baja_categoria ?: null,
+                    'motivoTexto' => get_post_meta($e['subId'], '_rm_baja_motivo', true) ?: null,
+                );
             }
         }
 
@@ -10870,7 +11050,169 @@ function superadmin_classes($request) {
     }
     usort($data, function($a, $b) { return $b['active'] <=> $a['active']; });
 
-    return rest_ensure_response(array('data' => $data, 'duplicadosMismaClase' => $duplicados_misma_clase));
+    return array(
+        'data' => $data, 'duplicadosMismaClase' => $duplicados_misma_clase,
+        'monthsRange' => $months_range, 'startYm' => $start_ym, 'nowYm' => $now_ym,
+        // Para Superadmin › Clases (retención/cohortes, 08:45 punto D) — reutiliza este mismo
+        // cálculo por persona en vez de recorrer las suscripciones otra vez.
+        'personaMinStart' => $persona_min_start, 'personaMaxEnd' => $persona_max_end,
+        'personaActivoEn' => $persona_activo_en, 'personaIntervalos' => $persona_intervalos,
+        'personaHistorial' => $persona_historial,
+    );
+}
+
+// Dinero de verdad cobrado por una suscripción en un mes concreto (pedido completed/processing,
+// por fecha de creación — mismo criterio que Grupos/ExcelMuerte — y sin las facturas anuladas
+// en VeriFactu). Para Superadmin › Clases (15/11 09:10): rentabilidad con ingreso real, no tarifa fija.
+function blokes_sub_importe_cobrado_mes($sub_id, $ym) {
+    if (!function_exists('wcs_get_subscription')) return 0.0;
+    $sub = wcs_get_subscription(intval($sub_id));
+    if (!$sub) return 0.0;
+    $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
+    $total = 0.0;
+    foreach ($order_ids as $oid) {
+        $order = wc_get_order($oid);
+        if (!$order || !in_array($order->get_status(), array('completed', 'processing'), true)) continue;
+        if (blokes_pedido_factura_anulada($order)) continue;
+        $fecha = $order->get_date_created();
+        if ($fecha && $fecha->format('Y-m') === $ym) $total += floatval($order->get_total());
+    }
+    return $total;
+}
+
+function blokes_mes_mas($ym, $n) {
+    $dt = DateTime::createFromFormat('Y-m-d', $ym . '-01');
+    $dt->modify("+{$n} months");
+    return $dt->format('Y-m');
+}
+function blokes_meses_entre($ym_desde, $ym_hasta) {
+    $a = DateTime::createFromFormat('Y-m-d', $ym_desde . '-01');
+    $b = DateTime::createFromFormat('Y-m-d', $ym_hasta . '-01');
+    return ($b->format('Y') - $a->format('Y')) * 12 + ($b->format('n') - $a->format('n'));
+}
+function blokes_persona_cubre_mes($intervalos, $ym) {
+    foreach ($intervalos as $iv) {
+        if ($ym >= $iv['start'] && $ym <= $iv['end']) return true;
+    }
+    return false;
+}
+
+// GET /superadmin/v1/clases-retencion — Superadmin › Clases (15/11 08:45 punto D, solo
+// socios): altas/bajas por mes, retención por cohorte (1/3/6 meses), permanencia media y
+// desglose por clase (el desglose por PROFE lo hace el frontend con profesoresDeGrupo(), que es
+// donde vive de verdad esa lógica — aquí solo se manda dia/horario/edad de cada clase).
+// Fuente: solo suscripciones de WooCommerce en vigor — todavía NO cruza con hist-pagos (gente de
+// antes de la migración) ni con los externos del Excel de Grupos, lo digo explícito en la
+// respuesta para no dar un número que parezca más completo de lo que es.
+function superadmin_clases_retencion($request) {
+    $months = max(3, min(24, intval($request->get_param('months') ?: 12)));
+    $calculo = blokes_altas_bajas_calcular($months);
+    $months_range = $calculo['monthsRange'];
+    $now_ym = $calculo['nowYm'];
+    $persona_min_start  = $calculo['personaMinStart'];
+    $persona_activo_en  = $calculo['personaActivoEn'];
+    $persona_intervalos = $calculo['personaIntervalos'];
+    $persona_historial  = $calculo['personaHistorial'];
+    $tres_meses_atras = blokes_mes_mas($now_ym, -3);
+
+    // Quién ha estado alguna vez en cada clase (classKey => [personaKey => true]) y desde
+    // cuándo — para la retención «a 3 meses» por clase (09:10): de quien ya estaba en esta
+    // clase hace 3 meses o más, % que sigue activo ahora (en cualquier clase).
+    $personas_por_clase_historico = array();
+    foreach ($persona_historial as $pk => $entradas) {
+        foreach ($entradas as $en) {
+            if ($en['startYm'] > $tres_meses_atras) continue; // tiene que llevar ya 3 meses
+            $personas_por_clase_historico[$en['classKey']][$pk] = true;
+        }
+    }
+
+    // ---- Por mes (global, todo el club) ----
+    $por_mes = array();
+    foreach ($months_range as $ym) {
+        $mes_anterior = blokes_mes_mas($ym, -1);
+        $inicio = 0; $fin = 0; $altas = 0;
+        foreach ($persona_intervalos as $pk => $ivs) {
+            $activo_antes = blokes_persona_cubre_mes($ivs, $mes_anterior);
+            $activo_ahora = blokes_persona_cubre_mes($ivs, $ym);
+            if ($activo_antes) $inicio++;
+            if ($activo_ahora) $fin++;
+            if (($persona_min_start[$pk] ?? '') === $ym) $altas++;
+        }
+        $bajas = max(0, $inicio + $altas - $fin);
+        $por_mes[] = array(
+            'mes' => $ym, 'personasInicio' => $inicio, 'altas' => $altas, 'bajas' => $bajas,
+            'personasFin' => $fin, 'pctBajas' => $inicio ? round($bajas / $inicio * 100, 1) : null,
+        );
+    }
+
+    // ---- Cohortes: de quien se dio de alta en el mes X, % que sigue a 1/3/6 meses ----
+    $cohortes = array();
+    foreach ($months_range as $ym) {
+        $personas_cohorte = array_keys(array_filter($persona_min_start, function($v) use ($ym) { return $v === $ym; }));
+        if (!$personas_cohorte) continue;
+        $fila = array('mes' => $ym, 'total' => count($personas_cohorte));
+        foreach (array(1, 3, 6) as $offset) {
+            $mes_objetivo = blokes_mes_mas($ym, $offset);
+            if ($mes_objetivo > $now_ym) { $fila['m' . $offset] = null; continue; }
+            $sigue = 0;
+            foreach ($personas_cohorte as $pk) {
+                if (blokes_persona_cubre_mes($persona_intervalos[$pk] ?? array(), $mes_objetivo)) $sigue++;
+            }
+            $fila['m' . $offset] = round($sigue / count($personas_cohorte) * 100, 1);
+        }
+        $cohortes[] = $fila;
+    }
+
+    // ---- Permanencia media (meses), activos vs. ya se han ido ----
+    $permanencia_activos = array(); $permanencia_idos = array();
+    foreach ($persona_min_start as $pk => $min_ym) {
+        $sigue_activo = !empty($persona_activo_en[$pk]);
+        $hasta = $sigue_activo ? $now_ym : ($calculo['personaMaxEnd'][$pk] ?? $min_ym);
+        $meses = blokes_meses_entre($min_ym, $hasta) + 1;
+        if ($sigue_activo) $permanencia_activos[] = $meses; else $permanencia_idos[] = $meses;
+    }
+    $media = function($arr) { return $arr ? round(array_sum($arr) / count($arr), 1) : null; };
+
+    // ---- Por clase: activos ahora, altas de este mes, bajas recientes, motivos de baja,
+    // ingreso real de este mes y retención a 3 meses (09:10 — rentabilidad real, movida aquí
+    // desde Superadmin › Ingresos; el coste del profe y el margen se calculan en el frontend,
+    // que es donde vive la lista de quién da cada clase).
+    $por_clase = array_map(function($c) use ($now_ym, $personas_por_clase_historico, $persona_activo_en) {
+        $altas_mes = array_values(array_filter($c['members_active'], function($m) { return $m['new']; }));
+        $motivos = array();
+        foreach ($c['members_lost'] as $m) {
+            $cat = $m['motivoCategoria'] ?: 'sin_categoria';
+            $motivos[$cat] = ($motivos[$cat] ?? 0) + 1;
+        }
+        $ingreso_mes_real = 0.0;
+        foreach ($c['members_active'] as $m) {
+            $ingreso_mes_real += blokes_sub_importe_cobrado_mes($m['subId'], $now_ym);
+        }
+        $class_key = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
+        $personas_hace_3m = array_keys($personas_por_clase_historico[$class_key] ?? array());
+        $retencion_3m = null;
+        if ($personas_hace_3m) {
+            $siguen = 0;
+            foreach ($personas_hace_3m as $pk) {
+                if (!empty($persona_activo_en[$pk])) $siguen++;
+            }
+            $retencion_3m = round($siguen / count($personas_hace_3m) * 100, 1);
+        }
+        return array(
+            'dia' => $c['dia'], 'horario' => $c['horario'], 'edad' => $c['edad'], 'label' => $c['label'],
+            'activos' => $c['active'], 'altasMes' => count($altas_mes), 'bajasRecientes' => count($c['members_lost']),
+            'motivosBaja' => $motivos, 'ingresoMesReal' => round($ingreso_mes_real, 2),
+            'retencion3m' => $retencion_3m, 'nPersonasHace3m' => count($personas_hace_3m),
+        );
+    }, $calculo['data']);
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'porMes' => $por_mes, 'cohortes' => $cohortes,
+        'permanenciaMediaActivos' => $media($permanencia_activos), 'permanenciaMediaIdos' => $media($permanencia_idos),
+        'nActivos' => count($permanencia_activos), 'nIdos' => count($permanencia_idos),
+        'porClase' => $por_clase,
+        'avisoFuente' => 'Solo suscripciones de WooCommerce en vigor desde la migración — todavía no cruza con hist-pagos (alumnos de antes) ni con los externos del Excel de Grupos.',
+    )));
 }
 
 // ============================================================

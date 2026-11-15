@@ -31,6 +31,7 @@ import {
   gestionFacturasPendientesGet, gestionFacturaCompletar,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
+  useBajas, gestionBajaMotivoSet, gestionBajaContacto,
 } from '../hooks/useSuperAdmin'
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
@@ -901,6 +902,13 @@ const METODO_OPCIONES = [
   ['transferencia', 'Transferencia'], ['tarjeta', 'Tarjeta (TPV roco)'],
   ['bizum', 'Bizum'], ['efectivo', 'Efectivo'], ['wellhub', 'Wellhub'],
 ]
+// Motivo de baja (Ramiro, 15/11 08:45 punto B.2: ampliado más fino que antes) — compartido entre
+// "Dar de baja" y el editor de motivo de la pestaña Bajas (mismo BLOKES_BAJA_MOTIVOS del backend).
+const BAJA_MOTIVO_OPCIONES = [
+  ['precio', 'Precio'], ['horario', 'Horario'], ['falta_tiempo', 'Falta de tiempo'], ['mudanza', 'Mudanza'],
+  ['otro_rocodromo', 'Se va a otro rocódromo'], ['clase_profe', 'La clase o el profe'], ['lesion', 'Lesión'],
+  ['temporal_vuelve', 'Temporal, dice que vuelve'], ['duplicado', 'Duplicado (no es baja real)'], ['otro', 'Otro'],
+]
 // Efectivo: sin WooCommerce y sin factura, solo queda apuntado en Grupos (decisión de Ramiro,
 // 29/10). Los demás van por WooCommerce y SÍ generan factura real (Verifactu/AEAT). Bizum entra
 // por el banco, así que se trata igual que transferencia (decisión de Ramiro, 31/10).
@@ -1154,12 +1162,7 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
                 <label className="sv-grp-field">Motivo
                   <select className="sv-tests-select" value={motivoBajaCategoria} onChange={e => setMotivoBajaCategoria(e.target.value)}>
                     <option value="">Elige un motivo…</option>
-                    <option value="precio">Precio</option>
-                    <option value="horario">Horario</option>
-                    <option value="lesion">Lesión</option>
-                    <option value="mudanza">Mudanza</option>
-                    <option value="duplicado">Duplicado (no es baja real)</option>
-                    <option value="otro">Otro</option>
+                    {BAJA_MOTIVO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
                   </select>
                 </label>
                 <label className="sv-grp-field">Detalle (opcional)
@@ -2107,14 +2110,90 @@ function ReintentarCobroExcel() {
   )
 }
 
-function GruposTab({ onIrAPendientes }) {
+const BAJA_ORIGEN_LABEL = { cancelo: 'Canceló en la web', impago: 'Impago (se canceló sola)', no_viene: 'No viene (sin cancelar aún)', duplicado: 'Duplicado' }
+
+// Fila de la pestaña Bajas (Ramiro, 15/11 08:45 punto B.2): WhatsApp "¿por qué lo has dejado?",
+// categoría + texto del motivo, y el historial de contactos ya hechos.
+function BajaRow({ f, onContactado }) {
+  const [categoria, setCategoria] = useState(f.motivoCategoria || '')
+  const [texto, setTexto] = useState(f.motivoTexto || '')
+  const [respuesta, setRespuesta] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [abierto, setAbierto] = useState(false)
+  const esMenor = f.edad && f.edad !== 'Adultos'
+
+  async function guardarMotivo() {
+    setGuardando(true)
+    try { await gestionBajaMotivoSet({ sub_id: f.subId, categoria, texto }) } finally { setGuardando(false) }
+  }
+  function whatsapp() {
+    const texto = esMenor
+      ? `Hola, somos de RocoMadrid. Vimos que ${f.nombre} ha dejado la clase de ${f.dia} ${f.horario} — si os apetece contarnos por qué, nos ayuda mucho a mejorar. ¡Gracias y hasta pronto!`
+      : `Hola ${f.nombre?.split(' ')[0] || ''}, somos de RocoMadrid. Vimos que has dejado la clase de ${f.dia} ${f.horario} — si te apetece contarnos por qué, nos ayuda mucho a mejorar. ¡Gracias y hasta pronto!`
+    window.open(pcWhatsappUrl(f.telefono, texto), 'blokes_whatsapp')
+    setAbierto(true)
+  }
+  async function guardarContacto() {
+    setGuardando(true)
+    try {
+      await gestionBajaContacto({ sub_id: f.subId, respuesta, aceptaPromos: null })
+      setRespuesta(''); setAbierto(false)
+      onContactado?.()
+    } finally { setGuardando(false) }
+  }
+
+  return (
+    <>
+      <tr>
+        <td>{f.nombre || <span className="sv-ot-muted">—</span>}</td>
+        <td className="sv-ot-muted">{f.dia} {f.horario}{f.edad !== 'Adultos' ? ` · ${f.edad}` : ''}</td>
+        <td className="sv-ot-muted">{f.fecha ? mesLabelGrp(f.fecha) : '—'}</td>
+        <td className="sv-ot-muted">{BAJA_ORIGEN_LABEL[f.origen] || f.origen}</td>
+        <td>
+          <select className="sv-tests-select" value={categoria} onChange={e => setCategoria(e.target.value)} onBlur={guardarMotivo} disabled={guardando}>
+            <option value="">Sin motivo todavía…</option>
+            {BAJA_MOTIVO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
+          </select>
+          <input className="sv-tests-input" type="text" value={texto} onChange={e => setTexto(e.target.value)} onBlur={guardarMotivo} placeholder="Detalle (opcional)" disabled={guardando} />
+        </td>
+        <td>
+          {!f.telefono ? <span className="sv-ot-muted">Sin teléfono</span> : (
+            <button className="sv-tests-select" onClick={whatsapp} disabled={guardando}>💬 ¿Por qué lo has dejado?</button>
+          )}
+          {f.contactos?.length > 0 && (
+            <div className="sv-ot-muted" title={f.contactos.map(c => `${c.fecha.slice(0, 10)} · ${c.user_login}: ${c.respuesta || '(sin respuesta)'}`).join('\n')}>
+              {f.contactos.length} contacto{f.contactos.length > 1 ? 's' : ''} ya hecho{f.contactos.length > 1 ? 's' : ''}
+            </div>
+          )}
+        </td>
+      </tr>
+      {abierto && (
+        <tr>
+          <td colSpan={6}>
+            <div className="sv-grp-field">
+              <input className="sv-tests-input" type="text" value={respuesta} onChange={e => setRespuesta(e.target.value)} placeholder="¿Qué respondió? (opcional)" style={{ width: 280 }} />
+              <button className="sv-tests-select" onClick={guardarContacto} disabled={guardando}>Guardar contacto</button>
+              <button className="sv-tests-select" onClick={() => setAbierto(false)} disabled={guardando}>Cerrar</button>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
+function GruposTab() {
   const { data, loading, error, refetch } = useGestionGrupos(4)
   // Cowork, 14/11 18:40 punto 1: "Pendiente del mes" (KPI) y la bandeja vieja "Pendientes de
   // cobrar" daban números distintos entre sí Y distintos de WooCommerce — una sola fuente,
-  // la misma que ya usa Supervisión → Pendientes de cobro (cruza con el Excel, importe real).
+  // la misma que ya usa la sub-pestaña «Pendientes de cobro» (cruza con el Excel, importe real).
   const { data: pendientesCobroData } = usePendientesCobro()
+  // Altas y Bajas (15/11 08:45 punto A/C): mismo cálculo que ExcelMuerte/Superadmin Clases, no
+  // uno aparte — Nuevo/Baja de verdad por persona, no por suscripción (07:50 punto B).
+  const { data: classesData } = useClasses(1)
+  const { data: bajasData, refetch: refetchBajas } = useBajas()
   const [grupoKey, setGrupoKey] = useState('')
-  const [vista, setVista]     = useState('grupos') // 'grupos' | 'duplicados' | 'cobrar' | 'pausados' | 'bajas' | 'sindatos'
+  const [vista, setVista]     = useState('grupos') // 'grupos' | 'altas-bajas' | 'pendientes-cobro' | 'revisar-datos' | 'sindatos'
   const [menuFor, setMenuFor] = useState(null)   // alumno con el menú de acciones abierto
   const [accion, setAccion]   = useState(null)   // { alumno, tipo } con el modal abierto
   const [buscador, setBuscador] = useState(false) // modal de "Añadir alumno" (buscar)
@@ -2188,14 +2267,11 @@ function GruposTab({ onIrAPendientes }) {
   // Bandejas 8.3: las mismas filas de siempre, filtradas y aplanadas de todos los grupos a la
   // vez, para que Eva no tenga que ir grupo por grupo buscando a quién le toca cada cosa.
   const conGrupo = useMemo(() => grupos.flatMap(conGrupoDatos), [grupos])
-  const mesAnterior = meses[meses.length - 2]
-  const noExentoActivo = a => !a.exento && a.estado !== 'pausado' && a.estado !== 'baja_fin_mes'
 
   // Rediseño de pestañas de Grupos (NOTAS_PARA_CODE_pestanas_grupos.md, decidido con Ramiro el
   // 3/11 a partir de las renovaciones reales de esa noche): cada pestaña es una tarea concreta
   // de Eva, no solo un filtro de estado.
   const duplicados  = useMemo(() => conGrupo.filter(a => a.otrasSubs?.length > 0).filter(coincide), [conGrupo, terminoBusq, telBusq])
-  const bajas          = useMemo(() => conGrupo.filter(a => a.estado === 'baja_fin_mes').filter(coincide), [conGrupo, terminoBusq, telBusq])
   const sinDatos        = useMemo(() => conGrupo.filter(a => !a.telefono || a.sinNombre), [conGrupo])
   const pagaFuera        = useMemo(() => conGrupo.filter(a => a.esExterno), [conGrupo])
   // 2. "Pendientes de cobrar" (bandeja de aquí) eliminada (cowork, 14/11 18:40 punto 1/2: tres
@@ -2207,18 +2283,23 @@ function GruposTab({ onIrAPendientes }) {
   const altasManuales = useMemo(() => conGrupo.filter(a => a.altaManual && a.enVigor).filter(coincide), [conGrupo, terminoBusq, telBusq])
   // 5. Tarjeta rechazada: la renovación de este mes en failed.
   const tarjetaRechazada = useMemo(() => conGrupo.filter(a => a.pagos[mesActual]?.estadoPedido === 'failed').filter(coincide), [conGrupo, mesActual, terminoBusq, telBusq])
-  // 6. Sin pagar desde hace 1 mes (antes "Un mes sin venir" — cowork, 14/11 18:40 punto 3: no
-  // mide si vienen, mide si pagan, y el nombre decía lo contrario; además salía gente que SÍ
-  // viene pero se cambió de clase y dejó la suscripción vieja en espera — Luis Corregidor,
-  // Aurelio Gualo… — así que se excluye a quien tenga otra activa en cualquier otra clase).
-  // Ni el mes pasado ni este, pero sí algún mes de antes (si no, es alta nueva, no "dejó de
-  // pagar") — sigue sin ser asistencia, solo si paga.
-  const mesSinVenir = useMemo(() => conGrupo.filter(a => {
-    if (!noExentoActivo(a)) return false
-    if (a.otraActivaFuera) return false
-    if (sgPagoContado(a.pagos[mesAnterior]) || sgPagoContado(a.pagos[mesActual])) return false
-    return meses.slice(0, -2).some(m => sgPagoContado(a.pagos[m]))
-  }).filter(coincide), [conGrupo, meses, mesAnterior, mesActual, terminoBusq, telBusq])
+  // 6. «Altas y Bajas» (antes "Sin pagar desde hace 1 mes" — Ramiro, 15/11 08:45 punto A/C):
+  // mismo cálculo que ExcelMuerte/Superadmin Clases (Nuevo/Baja por persona, no por
+  // suscripción — 07/50 punto B), no uno nuevo. Altas = members_active.new de /classes, de
+  // cualquier grupo; Bajas = /gestion/bajas (ya junta las canceladas de verdad con el "No
+  // viene" marcado en Pendientes de cobro que todavía no se ha cancelado en WooCommerce).
+  const altas = useMemo(() => {
+    const out = []
+    for (const c of (classesData || [])) {
+      for (const m of c.members_active) {
+        if (m.new) out.push({ ...m, dia: c.dia, horario: c.horario, edad: c.edad, grupoLabel: c.label + (c.edad !== 'Adultos' ? ` (${c.edad})` : '') })
+      }
+    }
+    return out.filter(a => coincide({ alumno: a.name, telefono: a.phone }))
+  }, [classesData, terminoBusq, telBusq])
+  const bajasLista = useMemo(() =>
+    (bajasData || []).filter(f => coincide({ alumno: f.nombre, telefono: f.telefono })),
+    [bajasData, terminoBusq, telBusq])
   // 9. Suscripciones viejas en espera de quien se cambió de clase (cowork, 14/11 18:40 punto 4):
   // misma persona, otra activa en OTRA clase — "Cancelar la vieja" (fusionar) en vez de dejarla
   // inflando el "+N en espera" sin que nadie la vea.
@@ -2238,9 +2319,9 @@ function GruposTab({ onIrAPendientes }) {
   // Cuántos coinciden en la vista actual — Ramiro, 2/11 09:40: no sabía "dónde darle a buscar"
   // ni si el filtro seguía puesto al cambiar de pestaña; este número deja claro ambas cosas.
   const resultadosBusqueda = (terminoBusq || telBusq) ? ({
-    grupos: conGrupo.filter(coincide).length, bajas: bajas.length,
+    grupos: conGrupo.filter(coincide).length,
     'altas-manuales': altasManuales.length,
-    'tarjeta-rechazada': tarjetaRechazada.length, 'mes-sin-venir': mesSinVenir.length, 'revisar-datos': revisarDatos.length,
+    'tarjeta-rechazada': tarjetaRechazada.length, 'altas-bajas': altas.length + bajasLista.length, 'revisar-datos': revisarDatos.length,
   }[vista] ?? null) : null
 
   const kpis = useMemo(() => {
@@ -2305,14 +2386,12 @@ function GruposTab({ onIrAPendientes }) {
           <button className={`sv-tab-mini ${vista === 'tarjeta-rechazada' ? 'is-active' : ''}`} onClick={() => setVista('tarjeta-rechazada')}>
             Tarjeta rechazada {tarjetaRechazada.length ? <span className="sv-tab-mini__count">({tarjetaRechazada.length})</span> : ''}
           </button>
-          <button className={`sv-tab-mini ${vista === 'mes-sin-venir' ? 'is-active' : ''}`} onClick={() => setVista('mes-sin-venir')}>
-            Sin pagar desde hace 1 mes {mesSinVenir.length ? <span className="sv-tab-mini__count">({mesSinVenir.length})</span> : ''}
+          <button className={`sv-tab-mini ${vista === 'altas-bajas' ? 'is-active' : ''}`} onClick={() => setVista('altas-bajas')}>
+            Altas y Bajas {(altas.length + bajasLista.length) ? <span className="sv-tab-mini__count">({altas.length}/{bajasLista.length})</span> : ''}
           </button>
-          {bajas.length > 0 && (
-            <button className={`sv-tab-mini ${vista === 'bajas' ? 'is-active' : ''}`} onClick={() => setVista('bajas')}>
-              Bajas a fin de mes <span className="sv-tab-mini__count">({bajas.length})</span>
-            </button>
-          )}
+          <button className={`sv-tab-mini ${vista === 'pendientes-cobro' ? 'is-active' : ''}`} onClick={() => setVista('pendientes-cobro')}>
+            Pendientes de cobro
+          </button>
           <button className={`sv-tab-mini ${vista === 'revisar-datos' ? 'is-active' : ''}`} onClick={() => setVista('revisar-datos')}>
             Revisar datos {revisarDatos.length ? <span className="sv-tab-mini__count">({revisarDatos.length})</span> : ''}
           </button>
@@ -2486,34 +2565,45 @@ function GruposTab({ onIrAPendientes }) {
         </>
       )}
 
-      {vista === 'mes-sin-venir' && (
+      {vista === 'altas-bajas' && (
         <>
-          <p className="sv-note">No tienen ningún pago en los dos últimos meses (pero sí antes) y no tienen otra suscripción activa en otra clase — puede que hayan dejado de venir, o que paguen por un medio que no se ve aquí. Pregúntales antes de dar nada por hecho.</p>
+          <p className="sv-note">
+            Mismo cálculo que ExcelMuerte/Superadmin › Clases: <strong>Alta</strong> = primera suscripción de verdad de esa persona
+            (si venía de otra clase, no es alta, es un cambio de clase). <strong>Baja</strong> = ya no tiene ninguna suscripción
+            activa en ninguna clase, o se marcó «No viene» en Pendientes de cobro aunque todavía no se haya cancelado en WooCommerce.
+          </p>
+          <h3 className="sv-grp-subtitle">Altas ({altas.length})</h3>
           <div className="sv-tests-scroll">
             <table className="sv-tests-table">
-              <thead>
-                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Último mes pagado</th><th></th></tr>
-              </thead>
+              <thead><tr><th>Alumno</th><th>Clase</th><th>Teléfono</th><th>Mes de alta</th></tr></thead>
               <tbody>
-                {mesSinVenir.map(a => {
-                  const ultimo = sgUltimoMesPagado(a, meses)
-                  const mensaje = `Hola ${sgNombreParaMensaje(a)}, te escribimos de RocoMadrid: no nos consta el pago desde hace un tiempo. ¿Sigues viniendo? Dinos si podemos ayudarte en algo.`
-                  return (
-                    <tr key={`${a.subId}-${a.grupoLabel}`}>
-                      <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
-                      <td className="sv-ot-muted">{a.grupoLabel}</td>
-                      <td className="sv-ot-muted">{a.telefono || '—'}</td>
-                      <td className="sv-ot-muted">{ultimo ? mesLabelGrp(ultimo) : '—'}</td>
-                      <td><WhatsAppBtn a={a} mensaje={mensaje} /></td>
-                    </tr>
-                  )
-                })}
+                {altas.map(a => (
+                  <tr key={a.subId}>
+                    <td>{a.name || <span className="sv-ot-muted">—</span>}</td>
+                    <td className="sv-ot-muted">{a.dia} {a.horario}{a.edad !== 'Adultos' ? ` · ${a.edad}` : ''}</td>
+                    <td className="sv-ot-muted">{a.phone || '—'}</td>
+                    <td className="sv-ot-muted">{a.altaMes ? mesLabelGrp(a.altaMes) : '—'}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
-          {mesSinVenir.length === 0 && <p className="sv-empty">Nadie en esta lista ahora mismo.</p>}
+          {altas.length === 0 && <p className="sv-empty">Nadie de alta este mes todavía.</p>}
+
+          <h3 className="sv-grp-subtitle">Bajas ({bajasLista.length})</h3>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead><tr><th>Alumno</th><th>Clase</th><th>Fecha</th><th>Origen</th><th>Motivo de baja</th><th>Contactos</th></tr></thead>
+              <tbody>
+                {bajasLista.map(f => <BajaRow key={f.subId} f={f} onContactado={refetchBajas} />)}
+              </tbody>
+            </table>
+          </div>
+          {bajasLista.length === 0 && <p className="sv-empty">Nadie de baja en los últimos meses.</p>}
         </>
       )}
+
+      {vista === 'pendientes-cobro' && <PendientesCobroTab busquedaExterna={busqueda} />}
 
       {vista === 'revisar-datos' && (
         <>
@@ -2546,31 +2636,6 @@ function GruposTab({ onIrAPendientes }) {
             </table>
           </div>
           {revisarDatos.length === 0 && <p className="sv-empty">Nada que revisar ahora mismo.</p>}
-        </>
-      )}
-
-      {vista === 'bajas' && (
-        <>
-          <p className="sv-note">Quien ha cancelado pero sigue yendo hasta fin de mes. Sirve para saber qué plazas quedan libres.</p>
-          <div className="sv-tests-scroll">
-            <table className="sv-tests-table">
-              <thead>
-                <tr><th>Alumno</th><th>Grupo</th><th>Teléfono</th><th>Notas</th><th></th></tr>
-              </thead>
-              <tbody>
-                {bajas.map(a => (
-                  <tr key={`${a.subId}-${a.grupoLabel}`}>
-                    <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
-                    <td className="sv-ot-muted">{a.grupoLabel}</td>
-                    <td className="sv-ot-muted">{a.telefono || '—'}</td>
-                    <td className="sv-ot-muted">{a.notas || '—'}</td>
-                    <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {bajas.length === 0 && <p className="sv-empty">Nadie de baja a fin de mes ahora.</p>}
         </>
       )}
 
@@ -2663,8 +2728,8 @@ function GruposTab({ onIrAPendientes }) {
         )}
         <button
           type="button" className="sv-kpi sv-kpi--link" style={{ '--kpi-color': '#f87171' }}
-          title="Mismo número que Supervisión → Pendientes de cobro (filtrado a este grupo) — pulsa para ir allí. Pedidos de renovación pendientes de pago de verdad, cruzados con el Excel."
-          onClick={onIrAPendientes}
+          title="Mismo número que la sub-pestaña «Pendientes de cobro» (filtrado a este grupo) — pulsa para ir allí. Pedidos de renovación pendientes de pago de verdad, cruzados con el Excel."
+          onClick={() => setVista('pendientes-cobro')}
         >
           <span className="sv-kpi__value">{kpis.pendienteMes}{window.blokesSiteData?.userRole === 'socio' ? ` · ${fmtEur(kpis.pendienteImporte)}` : ''}</span>
           <span className="sv-kpi__label">Pendiente del mes ⓘ</span>
@@ -2845,7 +2910,7 @@ function pcEsUsuario(nombre) {
   return !!nombre && !nombre.includes(' ') && nombre === nombre.toLowerCase()
 }
 
-function PendientesCobroTab() {
+function PendientesCobroTab({ busquedaExterna = '' } = {}) {
   const { data, loading, error, refetch } = usePendientesCobro()
   const [profesTel, setProfesTel] = useState({})
   const [editandoTel, setEditandoTel] = useState(null) // nombre del profe cuyo teléfono se está editando
@@ -2855,6 +2920,10 @@ function PendientesCobroTab() {
   const [filtroViene, setFiltroViene] = useState('')
   const [accion, setAccion] = useState(null)
   const [aviso, setAviso] = useState('')
+  // Ramiro, 15/11 08:45 punto B.1: al marcar ❌ (No viene), preguntar si también se cancela la
+  // suscripción en WooCommerce — nunca lo uno sin preguntar lo otro.
+  const [confirmBaja, setConfirmBaja] = useState(null) // la fila que se está marcando "no_viene"
+  const [bajaBusy, setBajaBusy] = useState(false)
   const esSocio = window.blokesSiteData?.userRole === 'socio'
 
   useEffect(() => { gestionProfesTelefonosGet().then(setProfesTel).catch(() => {}) }, [])
@@ -2868,10 +2937,14 @@ function PendientesCobroTab() {
 
   const profesDisponibles = useMemo(() => Array.from(new Set(filas.flatMap(f => f.profes))).sort(), [filas])
 
+  // Buscador compartido con Grupos (nombre/teléfono/usuario, sin tildes — 15/11 08:45 punto A).
+  const busquedaNorm = sgNormalizarTexto(busquedaExterna.trim())
+  const telBusquedaNorm = sgNormalizarTelefono(busquedaExterna.trim())
   const filtradas = filas.filter(f =>
     (!filtroEtiqueta || f.etiqueta === filtroEtiqueta) &&
     (!filtroProfe || f.profes.includes(filtroProfe)) &&
-    (!filtroViene || (f.vieneEstado || 'sin_confirmar') === filtroViene)
+    (!filtroViene || (f.vieneEstado || 'sin_confirmar') === filtroViene) &&
+    (!busquedaNorm || sgNormalizarTexto(f.nombre || '').includes(busquedaNorm) || (telBusquedaNorm && sgNormalizarTelefono(f.telefono || '').includes(telBusquedaNorm)))
   )
 
   const resumen = useMemo(() => {
@@ -2886,6 +2959,20 @@ function PendientesCobroTab() {
   async function marcarViene(subId, estado) {
     try { await gestionPendienteCobroViene({ sub_id: subId, estado }); refetch() }
     catch (e) { setAviso(e.message) }
+  }
+
+  // Ramiro, 15/11 08:45 punto B.1: «¿Damos de baja también la suscripción en WooCommerce para
+  // que no le salga pendiente de pago el mes que viene?» — con simulación previa, como siempre.
+  async function confirmarBajaDesdeNoViene(fila, tambienEnWeb) {
+    setBajaBusy(true)
+    try {
+      if (tambienEnWeb) {
+        await gestionDarDeBaja({ sub_id: fila.subId, modo: 'inmediata', motivoCategoria: 'otro', motivo: 'No viene (marcado desde Pendientes de cobro)', simular: false })
+      }
+      await gestionPendienteCobroViene({ sub_id: fila.subId, estado: 'no_viene' })
+      setConfirmBaja(null)
+      refetch()
+    } catch (e) { setAviso(e.message) } finally { setBajaBusy(false) }
   }
 
   // Cowork, 14/11 19:00 punto 2: nombre real (nunca el usuario tipo "pacocanillas"), cómo
@@ -3047,7 +3134,7 @@ function PendientesCobroTab() {
                         <button
                           key={id} title={id}
                           className={`sv-pc-viene__btn${(f.vieneEstado || 'sin_confirmar') === id ? ' sv-pc-viene__btn--on' : ''}`}
-                          onClick={() => marcarViene(f.subId, id)}
+                          onClick={() => id === 'no_viene' ? setConfirmBaja(f) : marcarViene(f.subId, id)}
                         >{ic}</button>
                       ))}
                     </div>
@@ -3112,6 +3199,22 @@ function PendientesCobroTab() {
           onDone={() => { setAccion(null); refetch() }}
         />
       )}
+
+      {confirmBaja && (
+        <div className="sv-grp-overlay" onClick={() => !bajaBusy && setConfirmBaja(null)}>
+          <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
+            <h3>¿{confirmBaja.nombre} ya no viene?</h3>
+            <p>¿Damos de baja también la suscripción en WooCommerce para que no le salga pendiente de pago el mes que viene?</p>
+            <div className="sv-grp-modal__actions">
+              <button className="sv-tests-select" disabled={bajaBusy} onClick={() => setConfirmBaja(null)}>Cancelar</button>
+              <button className="sv-tests-select" disabled={bajaBusy} onClick={() => confirmarBajaDesdeNoViene(confirmBaja, false)}>No, solo pasar a Bajas</button>
+              <button className="sv-tests-danger sv-tests-danger--confirm" disabled={bajaBusy} onClick={() => confirmarBajaDesdeNoViene(confirmBaja, true)}>
+                {bajaBusy ? 'Guardando…' : 'Sí, dar de baja en la web'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -3123,11 +3226,9 @@ export default function SupervisionPage() {
 
   const TABS = [
     { id: 'excelmuerte', label: 'ExcelMuerte'   },
+    // "Pendientes de cobro" vivía aquí (14/11 18:05) — pasó a ser sub-pestaña de Grupos
+    // (Ramiro, 15/11 08:45 punto A), con buscador compartido.
     { id: 'grupos',      label: 'Grupos'        },
-    // Ramiro, 14/11 18:05: "eso debería aparecer en Blokes" — pedidos de renovación pendientes
-    // de pago que Eva no veía en ningún sitio, con la etiqueta ya puesta (duplicado/pagó según
-    // el Excel/sin pago/revisar).
-    { id: 'pendientes_cobro', label: 'Pendientes de cobro' },
     { id: 'campanas',    label: 'Campañas'      },
     { id: 'horasextra',  label: 'Horas extra'    },
     // Ramiro, 13/11 07:06: "el control de la tele tiene que estar en supervisión para que lo
@@ -3164,8 +3265,7 @@ export default function SupervisionPage() {
       </div>
 
       {tab === 'excelmuerte' && <ClasesTab />}
-      {tab === 'grupos'      && <GruposTab onIrAPendientes={() => setTab('pendientes_cobro')} />}
-      {tab === 'pendientes_cobro' && <PendientesCobroTab />}
+      {tab === 'grupos'      && <GruposTab />}
       {tab === 'campanas'    && <CampanasSection />}
       {tab === 'horasextra'  && <OvertimeTab />}
       {tab === 'tele'        && <TeleSection />}

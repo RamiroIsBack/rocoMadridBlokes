@@ -3,7 +3,9 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useRevenue, useProducts, useExpenses, useClasses } from '../hooks/useSuperAdmin'
+import { useRevenue, useProducts, useExpenses, useClasesRetencion } from '../hooks/useSuperAdmin'
+import { useCostes } from '../hooks/useCostes'
+import { PROF_META } from '../data/staffSchedule'
 import useTemaOscuro from '../hooks/useTemaOscuro'
 import ExpensesSection from '../components/ExpensesSection'
 import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
@@ -518,157 +520,122 @@ function classDurationH(horario) {
   return (toMin(parts[1]) - toMin(parts[0])) / 60
 }
 
-function classRevPerStudent(c) {
-  const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
-  const hourStr = (c.horario || '').split(':')[0]
-  const hour    = parseInt(hourStr, 10)
-  const isMorn  = hour < 16
-  const diaLow  = normForProf(c.dia || '')
-  const is2Day  = (diaLow.includes('lunes') && diaLow.includes('miercoles')) ||
-                  (diaLow.includes('martes') && diaLow.includes('jueves'))
-  const isFri   = diaLow === 'viernes'
-
-  if (isKid) return is2Day ? 57 / 8 : 47 / 4
-  if (isFri) return 78 / 4
-  if (is2Day) return isMorn ? 77 / 8 : 86 / 8
-  return isMorn ? 68 / 4 : 74 / 4
+// Ramiro, 15/11 09:10: "Rentabilidad de las clases" se mueve aquí (antes en Ingresos) y se
+// rehace con dinero de verdad en vez de tarifas fijas, junto a la retención de la 08:45 punto D
+// — una sola pestaña "Clases" para todo lo que no es dinero agregado del club.
+function profesorClaseConIsa(c) {
+  // Isa/Eva en niños-adolescentes (igual que profesoresDeGrupo() en SupervisionPage.jsx — NO se
+  // ha metido a Isa en PROF_CLASS_SLOTS/PROF_META porque esa fuente también alimenta Nóminas y
+  // ella es voluntaria, Ramiro 15/11 07:25).
+  if (c.edad && c.edad !== 'Adultos') {
+    const dias = normForProf(c.dia || '').split(/[\s\-·,|]+/).filter(Boolean)
+    const esLX = dias.length > 0 && dias.every(d => d === 'lunes' || d === 'miercoles')
+    return esLX ? 'Eva' : 'Isa'
+  }
+  return getProfForClass(c)
 }
 
-function ClassProfitabilitySection() {
-  const oscuro = useTemaOscuro()
-  const [months, setMonths] = useState(6)
-  const { data, loading, error } = useClasses(months)
+function ClasesRetencionSection() {
+  const [months, setMonths] = useState(12)
+  const { data, loading, error } = useClasesRetencion(months)
+  const costes = useCostes()
 
-  const rows = useMemo(() => {
-    if (!data) return []
+  function costeHoraReal(prof) {
+    if (!prof || prof === 'Isa') return 0
+    const meta = PROF_META[prof]
+    if (!meta) return 0
+    const mensual = costes.mes[prof] ?? meta.costoMes
+    const horasMes = (meta.horasSem || 0) * 4.33
+    return horasMes ? mensual / horasMes : 0
+  }
 
-    const profed  = data.filter(c => getProfForClass(c))
-    const combos  = profed.filter(c => (c.dia || '').includes('-'))
-    const singles = profed.filter(c => !(c.dia || '').includes('-'))
-
-    // Index: "singleDia|horario" → combo classes that include that day
-    // (without edad: horario already disambiguates overlapping same-time classes)
-    const comboForSingle = {}
-    combos.forEach(combo => {
-      combo.dia.split('-').forEach(day => {
-        const key = `${day.trim()}|${combo.horario}`
-        ;(comboForSingle[key] = comboForSingle[key] || []).push(combo)
-      })
-    })
-
-    const covered = new Set()
-    const result  = []
-
-    combos.forEach(combo => {
-      const prof      = getProfForClass(combo)
-      const durationH = classDurationH(combo.horario)
-      // Combo = 2 sessions/week → cost and revenue are weekly totals
-      const costCls   = (PROF_EUR_H[prof] || 0) * durationH * 2
-      const comboActive = combo.active || 0
-
-      // Related singles (same horario, one of the combo's days)
-      const related = singles.filter(s => {
-        const key = `${s.dia.trim()}|${s.horario}`
-        return comboForSingle[key]?.includes(combo)
-      })
-
-      if (comboActive === 0) return // combo empty → singles will show standalone
-
-      related.forEach(s => covered.add(`${s.dia.trim()}|${s.horario}`))
-
-      const activeSubs    = related.filter(s => (s.active || 0) > 0)
-      const singlesActive = activeSubs.reduce((t, s) => t + (s.active || 0), 0)
-      const singlesRev    = activeSubs.reduce((t, s) => t + (s.active || 0) * classRevPerStudent(s), 0)
-      const totalActive   = comboActive + singlesActive
-      // combo students contribute 2 sessions/week at their per-session tariff
-      const totalRev      = comboActive * classRevPerStudent(combo) * 2 + singlesRev
-      const benefit       = totalRev - costCls
-
-      const costDay = (PROF_EUR_H[prof] || 0) * durationH  // 1 session, for sub-rows
-      const subs = activeSubs.map(s => ({
-        c: s,
-        active: s.active || 0,
-        revPerSt: classRevPerStudent(s),
-        revCls: (s.active || 0) * classRevPerStudent(s),
-        costDay,
-        benefit: (s.active || 0) * classRevPerStudent(s) - costDay,
-      }))
-
-      result.push({ type: 'combo', c: combo, prof, costCls, revCls: totalRev, benefit, ea: totalActive, subs })
-    })
-
-    // Standalone singles (not covered by any active combo)
-    singles.forEach(s => {
-      if (covered.has(`${s.dia.trim()}|${s.horario}`)) return
-      const prof      = getProfForClass(s)
-      const durationH = classDurationH(s.horario)
-      const costCls   = (PROF_EUR_H[prof] || 0) * durationH
-      const ea        = s.active || 0
-      const revCls    = ea * classRevPerStudent(s)
-      result.push({ type: 'single', c: s, prof, costCls, revCls, benefit: revCls - costCls, ea, subs: [] })
-    })
-
-    result.sort((a, b) => (b.benefit ?? -Infinity) - (a.benefit ?? -Infinity))
-    return result
-  }, [data])
+  const filasRentabilidad = useMemo(() => {
+    if (!data?.porClase) return []
+    return data.porClase.map(c => {
+      const prof = profesorClaseConIsa(c)
+      const costeProfe = costeHoraReal(prof) * classDurationH(c.horario)
+      const ocupacion = c.activos / 15
+      const margen = c.ingresoMesReal - costeProfe
+      const semaforo = margen < 0 ? 'bad' : (ocupacion < 0.5 ? 'warn' : 'ok')
+      return { ...c, prof, costeProfe, ocupacion, margen, semaforo }
+    }).sort((a, b) => b.margen - a.margen)
+  }, [data, costes])
 
   return (
     <section className="sa-section">
       <div className="sa-section__header">
-        <SectionTitle>Rentabilidad de las clases</SectionTitle>
+        <SectionTitle>Clases — retención y rentabilidad</SectionTitle>
         <PeriodSelector value={months} onChange={setMonths} />
       </div>
-
       {loading && <LoadingBlock />}
       {error && <ErrorBlock msg={error} />}
+      {!loading && !error && data && (
+        <>
+          <p className="sa-legend">{data.avisoFuente}</p>
 
-      <p className="sa-legend">
-        Cifras semanales. Clases de 2 días: ingresos = alumnos × tarifa/sesión × 2; coste = €/h × duración × 2 (el profe da 2 sesiones). Clases de 1 día: ingresos y coste por sesión. Tarifas: 2d tarde €10.75/ses, 2d mañana €9.63/ses; 1d tarde €18.50, 1d mañana €17; viernes €19.50; niños 2d €7.13, 1d €11.75. Sub-filas: aportación de alumnos de día suelto (se les descuenta 1 sesión del profe).
-      </p>
+          <h3 className="sa-subtitle">Por mes (todo el club, no por clase)</h3>
+          <div className="sa-profit-wrap">
+            <table className="sa-profit-table">
+              <thead><tr><th>Mes</th><th>Al inicio</th><th>Altas</th><th>Bajas</th><th>Al final</th><th>% bajas</th></tr></thead>
+              <tbody>
+                {data.porMes.map(m => (
+                  <tr key={m.mes}>
+                    <td>{fmtMonth(m.mes)}</td><td>{m.personasInicio}</td><td>{m.altas}</td><td>{m.bajas}</td><td>{m.personasFin}</td>
+                    <td className={m.pctBajas > 10 ? 'sa-profit__ben--neg' : ''}>{m.pctBajas != null ? `${m.pctBajas}%` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-      {!loading && !error && rows.length > 0 && (
-        <div className="sa-profit-wrap">
-          <table className="sa-profit-table">
-            <thead>
-              <tr>
-                <th>Clase</th>
-                <th>Profe</th>
-                <th>Al.</th>
-                <th>Rev/clase</th>
-                <th>Coste/clase</th>
-                <th>Beneficio</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.flatMap(({ c, prof, costCls, revCls, benefit, ea, subs }, i) => {
-                const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
-                const label = isKid ? `${c.label} (${c.edad})` : c.label
-                return [
-                  <tr key={`r${i}`} className={benefit < 0 ? 'sa-profit-row--loss' : ''}>
-                    <td className="sa-profit__label">{label}</td>
-                    <td className="sa-profit__prof" style={{ color: kpiColorTema(PROF_COLOR[prof], oscuro) }}>{prof}</td>
-                    <td className="sa-profit__num">{ea}</td>
-                    <td className="sa-profit__num">{fmtEur(revCls)}</td>
-                    <td className="sa-profit__num">{fmtEur(costCls)}</td>
-                    <td className={`sa-profit__ben${benefit >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>
-                      {fmtEur(benefit)}
-                    </td>
-                  </tr>,
-                  ...subs.map((sub, j) => (
-                    <tr key={`s${i}-${j}`} className="sa-profit-row--sub">
-                      <td className="sa-profit__sub-label">↳ {sub.c.label} solo · {sub.revPerSt.toFixed(2)}€/sesión</td>
-                      <td></td>
-                      <td className="sa-profit__num sa-profit__num--dim">{sub.active}</td>
-                      <td className="sa-profit__num sa-profit__num--dim">{fmtEur(sub.revCls)}</td>
-                      <td className="sa-profit__num sa-profit__num--dim">{fmtEur(sub.costDay)}</td>
-                      <td className={`sa-profit__num sa-profit__num--dim${sub.benefit >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>{fmtEur(sub.benefit)}</td>
-                    </tr>
-                  )),
-                ]
-              })}
-            </tbody>
-          </table>
-        </div>
+          <h3 className="sa-subtitle">Retención por cohorte (de quien se dio de alta ese mes, % que sigue a 1/3/6 meses)</h3>
+          <div className="sa-profit-wrap">
+            <table className="sa-profit-table">
+              <thead><tr><th>Mes de alta</th><th>Total</th><th>+1 mes</th><th>+3 meses</th><th>+6 meses</th></tr></thead>
+              <tbody>
+                {data.cohortes.map(c => (
+                  <tr key={c.mes}>
+                    <td>{fmtMonth(c.mes)}</td><td>{c.total}</td>
+                    <td>{c.m1 != null ? `${c.m1}%` : '—'}</td><td>{c.m3 != null ? `${c.m3}%` : '—'}</td><td>{c.m6 != null ? `${c.m6}%` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="sa-legend">
+            Permanencia media de quien sigue activo: <strong>{data.permanenciaMediaActivos ?? '—'} meses</strong> ({data.nActivos}).
+            Permanencia media de quien ya se fue: <strong>{data.permanenciaMediaIdos ?? '—'} meses</strong> ({data.nIdos}).
+          </p>
+
+          <h3 className="sa-subtitle">Rentabilidad por clase (ingreso de verdad cobrado este mes, no tarifa fija)</h3>
+          <p className="sa-legend">
+            Coste del profe: misma fuente que Nóminas (nómina real del mes si existe, si no la ficha), por hora según sus horas semanales. Isa es voluntaria → 0 €.
+            Semáforo: 🔴 margen negativo · 🟡 margen positivo pero ocupación por debajo del 50% (7-8 de 15) · 🟢 margen positivo y ocupación ≥ 50%.
+          </p>
+          <div className="sa-profit-wrap">
+            <table className="sa-profit-table">
+              <thead>
+                <tr><th></th><th>Clase</th><th>Profe</th><th>Activos</th><th>Ocupación/15</th><th>Ingreso real</th><th>Coste profe</th><th>Margen</th><th>Retención 3m</th></tr>
+              </thead>
+              <tbody>
+                {filasRentabilidad.map((c, i) => (
+                  <tr key={i}>
+                    <td><span className={`sa-semaforo sa-semaforo--${c.semaforo}`} title={c.semaforo} /></td>
+                    <td className="sa-profit__label">{c.label}{c.edad !== 'Adultos' ? ` (${c.edad})` : ''}</td>
+                    <td className="sa-profit__prof" style={{ color: PROF_COLOR[c.prof] }}>{c.prof || '—'}</td>
+                    <td className="sa-profit__num">{c.activos}</td>
+                    <td className="sa-profit__num">{Math.round(c.ocupacion * 100)}%</td>
+                    <td className="sa-profit__num">{fmtEur(c.ingresoMesReal)}</td>
+                    <td className="sa-profit__num">{fmtEur(c.costeProfe)}</td>
+                    <td className={`sa-profit__ben${c.margen >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>{fmtEur(c.margen)}</td>
+                    <td className="sa-profit__num">{c.retencion3m != null ? `${c.retencion3m}%` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </section>
   )
@@ -1126,6 +1093,7 @@ export default function SuperAdminPage() {
 
   const TABS = [
     { key: 'ingresos', label: 'Ingresos' },
+    { key: 'clases',   label: 'Clases' },
     { key: 'gastos',   label: 'Gastos banco' },
     { key: 'pl',       label: 'P&L' },
     { key: 'nominas',  label: 'Nóminas' },
@@ -1150,9 +1118,9 @@ export default function SuperAdminPage() {
         <>
           <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
           <ProductsSection excludeTransfer={excludeTransfer} />
-          <ClassProfitabilitySection />
         </>
       )}
+      {saTab === 'clases'   && <ClasesRetencionSection />}
       {saTab === 'gastos'   && <ExpensesSection />}
       {saTab === 'pl'       && <PLTab />}
       {saTab === 'nominas'  && <PayrollSection />}

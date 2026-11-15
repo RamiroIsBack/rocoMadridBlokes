@@ -101,6 +101,18 @@ export const gestionPendienteCobroRecordado = body => gestionPost('/alumnos/pend
 export const gestionProfesTelefonosGet = () => gestionCall('GET', '/gestion/profes-telefonos')
 export const gestionProfesTelefonoSet  = body => gestionPost('/gestion/profes-telefonos', body)
 
+// Pestaña "Bajas" de Grupos (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 15/11 08:45).
+export function useBajas() {
+  return useEndpoint('/gestion/bajas')
+}
+export const gestionBajaMotivoSet   = body => gestionPost('/gestion/bajas/motivo', body)
+export const gestionBajaContacto    = body => gestionPost('/gestion/bajas/contacto', body)
+
+// Superadmin › Clases: retención + rentabilidad real (15/11 08:45 punto D + 09:10).
+export function useClasesRetencion(months = 12) {
+  return useEndpoint('/clases-retencion', { months })
+}
+
 // Lista de espera por grupo (8.5: interesados que aún no son alumnos).
 export const gestionListaEsperaGet         = ()          => gestionCall('GET', '/gestion/lista-espera')
 export const gestionListaEsperaCrear       = body        => gestionPost('/gestion/lista-espera', body)
