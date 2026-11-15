@@ -1473,6 +1473,13 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/alumnos/edad-diagnostico', array(
         'methods' => 'GET', 'callback' => 'superadmin_alumnos_edad_diagnostico', 'permission_callback' => $sa_perm,
     ));
+    // Corrige la edad SIN tocar producto/precio (alumnos_clases 07:50/09:00, 14:00 punto 5) --
+    // solo socio, nunca automático: hay que confirmar antes cada franja/caso con el diagnóstico
+    // de arriba (Júlia Onetti #7721 queda fuera a propósito, necesita que Ramiro decida primero
+    // entre corregir solo la edad o crear la variación "niños 1 día", PENDIENTES_MAESTRO 18).
+    register_rest_route('superadmin/v1', '/alumnos/edad-corregir', array(
+        'methods' => 'POST', 'callback' => 'superadmin_alumnos_edad_corregir', 'permission_callback' => $socio_perm,
+    ));
     register_rest_route('superadmin/v1', '/alumnos/sin-telefono-diagnostico', array(
         'methods' => 'GET', 'callback' => 'superadmin_alumnos_sin_telefono_diagnostico', 'permission_callback' => $sa_perm,
     ));
@@ -3461,6 +3468,52 @@ function superadmin_alumnos_edad_diagnostico($request) {
         );
     }, $candidatas);
     return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// POST /superadmin/v1/alumnos/edad-corregir — corrige la edad guardada de verdad para
+// RocoMadrid_SF_Stats::get_all_subscription_data() (la que lee este plugin, no la variación de
+// WooCommerce): `_step_form_selections['pa_edad']` (clases normales) o ['edad_addon'] (día
+// suelto), en el ITEM de la suscripción, SIN tocar producto_id/variation_id/precio — exactamente
+// lo que pide la nota ("corregir edad sin cambiar producto/precio o crear variación"). Nunca se
+// llama en automático: alguien con acceso socio tiene que pasar los subIds confirmados a mano
+// contra el diagnóstico de arriba.
+function superadmin_alumnos_edad_corregir($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('not_available', 'WooCommerce Subscriptions no disponible.', array('status' => 503));
+    }
+    $sub_ids = $request->get_param('subIds');
+    $edad    = sanitize_text_field((string) $request->get_param('edad'));
+    // Mismas 3 etiquetas que reconoce RocoMadrid_SF_Stats::normalizar_edad() -- nunca un valor
+    // libre, para no dejar una edad que esa función no sepa interpretar (volvería a "Adultos").
+    $permitidas = array('Menores (6-12 años)', 'Adolescentes (12-18 años)', 'Adultos');
+    if (!in_array($edad, $permitidas, true)) {
+        return new WP_Error('edad_invalida', 'Edad no reconocida. Usa: ' . implode(', ', $permitidas), array('status' => 400));
+    }
+    if (!is_array($sub_ids) || !$sub_ids) {
+        return new WP_Error('bad_request', 'Falta subIds (lista de IDs de suscripción).', array('status' => 400));
+    }
+    $resultados = array();
+    foreach ($sub_ids as $sub_id) {
+        $sub_id = intval($sub_id);
+        $sub = wcs_get_subscription($sub_id);
+        if (!$sub) { $resultados[] = array('subId' => $sub_id, 'ok' => false, 'motivo' => 'suscripción no encontrada'); continue; }
+        $corregido = false;
+        foreach ($sub->get_items() as $item) {
+            $sel = $item->get_meta('_step_form_selections', true);
+            if (!is_array($sel)) continue;
+            if (array_key_exists('pa_edad', $sel)) { $sel['pa_edad'] = $edad; }
+            elseif (array_key_exists('edad_addon', $sel)) { $sel['edad_addon'] = $edad; }
+            else continue;
+            $item->update_meta_data('_step_form_selections', $sel);
+            $item->save();
+            $corregido = true;
+        }
+        if ($corregido) {
+            blokes_gestion_log($sub_id, 'edad_corregida', null, array('edad' => $edad), 'Edad corregida a mano (Fase 0) -- sin cambiar producto ni precio.');
+        }
+        $resultados[] = array('subId' => $sub_id, 'ok' => $corregido, 'motivo' => $corregido ? null : 'sin _step_form_selections con edad en ningún item');
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $resultados));
 }
 
 // GET /superadmin/v1/alumnos/sin-telefono-diagnostico — Fase 0 punto 3. Cowork, 13/11 10:15:
