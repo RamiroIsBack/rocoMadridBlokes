@@ -353,6 +353,15 @@ function profesorClaseConIsa(c) {
   return getProfForClass(c)
 }
 
+// Cowork, 15/11 17:50 punto 6: "Medianos M-J 18:30-19:30" en vez de la etiqueta genérica
+// "Martes-Jueves · 18:30-19:30 (Adolescentes)" — es el nombre que usa Eva/el Excel para esta
+// clase concreta (donde se fusiona también la variación huérfana 18:30-20:00, commits
+// 13795fe/50a089c).
+function claseLabel(c) {
+  if (c.dia === 'Martes-Jueves' && c.horario === '18:30-19:30') return 'Medianos M-J 18:30-19:30'
+  return c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label
+}
+
 // "Alumnos con pago en curso" (Ramiro, 15/11 16:30) — sustituye a la tabla "Por mes" (cabeceras
 // desplazadas, inicio/altas/bajas/final confuso). Una línea por año, como el P&L: personas
 // distintas con el mes pagado o cubierto, del Excel de Grupos fusionado con WooCommerce.
@@ -629,7 +638,7 @@ function ClasesRetencionSection() {
                   return (
                   <tr key={i} className={pocos ? 'sa-ret-row--pocos' : ''}>
                     <td><span className={`sa-semaforo sa-semaforo--${c.semaforo}`} title={c.semaforo} /></td>
-                    <td className="sa-profit__label">{c.label}{c.edad !== 'Adultos' ? ` (${c.edad})` : ''}</td>
+                    <td className="sa-profit__label">{claseLabel(c)}</td>
                     <td className="sa-profit__prof" style={{ color: PROF_COLOR[c.prof] }}>{c.prof || '—'}</td>
                     <td className="sa-profit__num">{c.activos}</td>
                     <td className="sa-profit__num">{Math.round(c.ocupacion * 100)}%</td>
@@ -665,7 +674,7 @@ function ClasesRetencionSection() {
                   const pocos = (c.siguen3N ?? 0) < RETENCION_N_MINIMO
                   return (
                     <tr key={i} className={pocos ? 'sa-ret-row--pocos' : ''}>
-                      <td className="sa-profit__label">{c.label}{c.edad !== 'Adultos' ? ` (${c.edad})` : ''}</td>
+                      <td className="sa-profit__label">{claseLabel(c)}</td>
                       <td className="sa-profit__prof" style={{ color: PROF_COLOR[c.prof] }}>{c.prof || '—'}</td>
                       <td className="sa-profit__num">{c.activos}</td>
                       <td className="sa-profit__num">{c.estanciasEmpezaron12m}</td>
