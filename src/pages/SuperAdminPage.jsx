@@ -722,10 +722,16 @@ function fmtPLVal(v) {
 function PLTab() {
   const oscuro = useTemaOscuro()
   const tickFill = oscuro ? '#b3ab9a' : '#5e5650'
-  // "Ventas sin IVA" de 2026 viene de WooCommerce (misma cifra que Superadmin › Ingresos, no la
-  // del banco con IVA de todas las cuentas); "Costes" sigue siendo el banco consolidado sin
-  // internos ni préstamos (Ramiro, 15/11 11:10). `cuadre` (Club, año en curso) viene del mismo
-  // /expenses -- siempre calculado server-side, independiente de `entity`/`from` aquí.
+  // Ramiro, 15/11 11:25 (GRAVE, corrige 11:10): "Ingresos" y "Gastos" de 2026 tienen que venir
+  // de la MISMA fuente y periodo. WooCommerce solo tiene ventas desde la migración (may-26) —
+  // ene-abr se cobraba por TPV/transferencia/Excel y no está en Woo — así que compararlo con los
+  // gastos del banco de TODO el año daba un resultado negativo falso (−59.568 €). "Ingresos" pasa
+  // a ser el banco consolidado (Club+Rocoteca) sin internos/préstamos, sin IVA estimado por
+  // categoría (mismo campo iva_repercutido que ya usa /expenses -- ojo, hoy ese estimado trata
+  // TPV/transferencia como 21% uniforme, no "clases exentas + bar 10% + resto 21%" como pide
+  // Ramiro; day para afinarlo por familia necesita blendear con el reparto real de WooCommerce,
+  // que solo existe desde mayo -- lo dejo aparte, ver nota). WooCommerce queda como una cifra de
+  // comparación aparte, no como el total.
   const { data: expData, cuadre, loading: loadingExp } = useExpenses('', 'all', true)
   const monthsSinceJan = new Date().getMonth() + 1
   const { data: wcData, loading: loadingWc } = useRevenue(monthsSinceJan, true)
@@ -741,15 +747,10 @@ function PLTab() {
       const [y, m] = r.month.split('-').map(Number)
       if (y !== 2026) return
       if (!acc[m]) acc[m] = { ventas: 0, costes: 0, iva_r: 0, iva_s: 0 }
+      acc[m].ventas += Math.abs(r.total_ingresos || 0) - Math.abs(r.iva_repercutido || 0)
       acc[m].costes += Math.abs(r.total_costes    || 0)
       acc[m].iva_r  += Math.abs(r.iva_repercutido || 0)
       acc[m].iva_s  += Math.abs(r.iva_soportado   || 0)
-    })
-    ;(wcData || []).forEach(r => {
-      const [y, m] = r.month.split('-').map(Number)
-      if (y !== 2026) return
-      if (!acc[m]) acc[m] = { ventas: 0, costes: 0, iva_r: 0, iva_s: 0 }
-      acc[m].ventas = r.total || 0
     })
     const res = {}
     for (let m = 1; m <= 12; m++) {
@@ -758,14 +759,18 @@ function PLTab() {
       res[m] = { ventas: d.ventas, costes: -d.costes, resultado }
     }
     return res
-  }, [expData, wcData])
+  }, [expData])
 
   const resumenAnual = useMemo(() => {
     const vals = Object.values(live2026)
     const ingresos = vals.reduce((s, d) => s + d.ventas, 0)
     const gastos   = vals.reduce((s, d) => s - d.costes, 0)
-    return { ingresos, gastos, resultado: ingresos - gastos, meses: vals.length }
-  }, [live2026])
+    const ventasWoo = (wcData || []).reduce((s, r) => {
+      const [y] = r.month.split('-').map(Number)
+      return y === 2026 ? s + (r.total || 0) : s
+    }, 0)
+    return { ingresos, gastos, resultado: ingresos - gastos, meses: vals.length, ventasWoo }
+  }, [live2026, wcData])
 
   const lastMonth = useMemo(() => {
     for (let m = 12; m >= 1; m--) if (live2026[m]) return m
@@ -831,7 +836,7 @@ function PLTab() {
       <div className="sa-kpis">
         <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#60a5fa', oscuro) }}>
           <span className="sa-kpi__value">{fmtPLVal(resumenAnual.ingresos)}</span>
-          <span className="sa-kpi__label">Ingresos (WooCommerce, sin IVA)</span>
+          <span className="sa-kpi__label">Ingresos (banco, consolidado, sin IVA estimado)</span>
         </div>
         <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#ef4444', oscuro) }}>
           <span className="sa-kpi__value">{fmtPLVal(resumenAnual.gastos)}</span>
@@ -840,6 +845,10 @@ function PLTab() {
         <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema(resumenAnual.resultado >= 0 ? '#34d399' : '#ef4444', oscuro) }}>
           <span className="sa-kpi__value">{fmtPLVal(resumenAnual.resultado)}</span>
           <span className="sa-kpi__label">Resultado</span>
+        </div>
+        <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#a78bfa', oscuro) }}>
+          <span className="sa-kpi__value">{fmtPLVal(resumenAnual.ventasWoo)}</span>
+          <span className="sa-kpi__label">Ventas en WooCommerce (desde may-26, no el total del año)</span>
         </div>
       </div>
       {cuadre && cuadre.apertura != null && (
