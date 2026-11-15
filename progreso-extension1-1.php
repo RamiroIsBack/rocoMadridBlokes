@@ -5653,8 +5653,10 @@ function superadmin_products($request) {
 // alumnos (p. ej. hermanos) cuenta aquí como 1. "En vigor" incluye pending-cancel (todavía
 // viene, aunque no se renueve), igual que el resto de ExcelMuerte. 15/11 16:55: adultos/niños
 // usa la edad del formulario (más de fiar que la variación de WooCommerce), Pilates/Yoga cuenta
-// como mínimo 1 día, y se añaden cuentasFuera/cuentasConFuera (externos del Excel que pagan
-// fuera de la web, fusionados por teléfono/nombre) para el "163 web + N fuera = total".
+// como mínimo 1 día. 15/11 17:50: "cuentasConFuera" (el total de "163 web + N fuera = total")
+// es ahora la MISMA cifra que la gráfica "Alumnos con pago en curso" (blokes_clases_personas_por_mes),
+// para que las dos pantallas no descuadren entre sí — "cuentasFuera" es solo la diferencia con
+// cuentas_total, no un recuento propio.
 function superadmin_people_summary($request) {
     if (!class_exists('RocoMadrid_SF_Stats')) {
         return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats not available. Call this endpoint on the club subsite.', array('status' => 503));
@@ -5732,32 +5734,24 @@ function superadmin_people_summary($request) {
         $por_dias[$c['bucket']][$clave]++;
     }
 
-    // Externos del Excel de Grupos con el mes en curso pagado, que NO tengan ya cuenta web en
-    // vigor (fusionados por teléfono o, si no hay, nombre compacto) — "163 web + N fuera = total"
-    // (Ramiro, 15/11 16:55: "mismo criterio que «Personas» de Grupos y que la gráfica de 16:30").
-    // Solo cuenta a quien de verdad paga por fuera, nunca a alguien ya contado en cuentas_total.
-    $mes_actual = date('Y-m');
-    $claves_web = array();
-    foreach ($vigentes as $sub) {
-        $tel = blokes_externos_normaliza_telefono($sub['telefono'] ?? '');
-        if ($tel) $claves_web['t' . $tel] = true;
-        $nomc = blokes_externos_normaliza_nombre_compacto($sub['cliente'] ?? '');
-        if ($nomc) $claves_web['n' . $nomc] = true;
-    }
-    $externos_fuera = array();
-    foreach (blokes_grupos_excel_filas_crudas() as $f) {
-        if (!in_array($mes_actual, $f['pagos'], true)) continue;
-        $tel = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
-        $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
-        $key = $tel ? ('t' . $tel) : ($nomc ? ('n' . $nomc) : null);
-        if (!$key || isset($claves_web[$key])) continue;
-        $externos_fuera[$key] = true;
-    }
+    // Cowork, 15/11 17:50 punto 2/11: esto daba "164 web + 131 fuera = 295", muy por encima de
+    // la gráfica "Alumnos con pago en curso" (203/193) y de Grupos (167) — las tres preguntan
+    // "cuántas personas tienen clase en vigor ahora" y tenían que dar la misma cifra. La causa:
+    // el teléfono de cada cuenta web se leía de $sub['telefono'] a secas, sin el resto de la
+    // cadena de respaldo (campo propio → email → meta de usuario) que sí usa
+    // blokes_altas_bajas_calcular() — muchas cuentas con teléfono vacío aquí (pero resuelto
+    // allí) se contaban como "fuera" aunque YA estuvieran en la web.
+    // Solución: el total es la MISMA función que ya usa la gráfica (misma identidad por
+    // teléfono/nombre, un solo cálculo) — "cuentasFuera" es solo la diferencia con cuentas_total
+    // para seguir mostrando "163 web + N fuera", pero el total ya no puede descuadrar con la
+    // gráfica porque es literalmente el mismo número.
+    $total_fusionado = blokes_clases_personas_por_mes('todos')[date('Y-m')] ?? count($cuentas);
+    $cuentas_fuera = max(0, $total_fusionado - count($cuentas));
 
     $data = array(
         'cuentas_total'      => count($cuentas),
-        'cuentasFuera'       => count($externos_fuera),
-        'cuentasConFuera'    => count($cuentas) + count($externos_fuera),
+        'cuentasFuera'       => $cuentas_fuera,
+        'cuentasConFuera'    => $total_fusionado,
         'por_dias'           => $por_dias,
         'sesiones_semana'    => $sesiones_semana,
     );
@@ -11802,6 +11796,11 @@ function blokes_grupos_excel_categoria_pestana($pestana) {
 // se re-identifican por su nombre, más flojo que el teléfono.
 function blokes_clases_personas_por_mes($categoria = 'todos') {
     $personas = array(); // ym => [personaKey => true]
+    // Cowork, 15/11 17:50 punto 1: diciembre caía a casi 0 porque algunas suscripciones
+    // trimestrales/anuales tienen su intervalo "pagado" extendido hasta un mes que todavía no
+    // ha llegado — nunca pintar meses posteriores al actual (ese dato simplemente no existe
+    // todavía, no es que la clase esté vacía).
+    $hoy_ym = date('Y-m');
     $clave_de = function($telefono, $nombre) {
         $tel = blokes_externos_normaliza_telefono((string) $telefono);
         if ($tel) return 't' . $tel;
@@ -11813,7 +11812,10 @@ function blokes_clases_personas_por_mes($categoria = 'todos') {
         if ($categoria !== 'todos' && blokes_grupos_excel_categoria_pestana($f['pestana']) !== $categoria) continue;
         $key = $clave_de($f['telefono'] ?? '', $f['nombre'] ?? '');
         if (!$key) continue;
-        foreach ($f['pagos'] as $ym) $personas[$ym][$key] = true;
+        foreach ($f['pagos'] as $ym) {
+            if ($ym > $hoy_ym) continue;
+            $personas[$ym][$key] = true;
+        }
     }
 
     if (function_exists('wcs_get_subscription')) {
@@ -11829,7 +11831,8 @@ function blokes_clases_personas_por_mes($categoria = 'todos') {
                 if (!$key) continue;
                 foreach ($ivs as $iv) {
                     $mes = $iv['start'];
-                    while ($mes <= $iv['end']) {
+                    $fin = min($iv['end'], $hoy_ym);
+                    while ($mes <= $fin) {
                         $personas[$mes][$key] = true;
                         $mes = blokes_mes_mas($mes, 1);
                     }
@@ -12247,14 +12250,28 @@ function blokes_altas_bajas_calcular($months) {
     foreach ($enriquecidos as $e) {
         $class_key = $e['classKey'];
         $pk        = $e['personaKey'];
-        // Franjas que "ya no existen" (Ramiro, 18:00): no entran en el catálogo de clases
-        // (Superadmin › Clases, Horario por día) — pero sí siguen contando en los mapas por
-        // persona de más arriba (ya calculados), para no tocar dinero/Personas por esto.
-        if (blokes_franja_clase_descontinuada($e['dia'], $e['horario'])) continue;
+        // Cowork, 15/11 17:50 punto 12: fe7a3e6 hacía "continue" aquí para las franjas
+        // descontinuadas, y eso también se llevó por delante las altas/bajas REALES de esas
+        // franjas (9 en vez de 19 en noviembre) — "altas y bajas" es gente, no catálogo de
+        // clases, y Ramiro solo pedía que no se muestren como clase, no que se pierdan como
+        // persona. Ahora NO se salta la fila: se marca "descontinuada" y cada pantalla de
+        // CATÁLOGO (Horario por día, Rentabilidad/Retención) la filtra ella misma; Altas y
+        // Bajas, que lee members_active/members_lost sin mirar esta marca, las sigue contando.
+        $es_descontinuada = blokes_franja_clase_descontinuada($e['dia'], $e['horario']);
+        // Cowork, 15/11 17:50 punto 4 ("clases fantasma"): los abonos (bono mensual/anual de
+        // acceso, blokes_get_abono_subscripciones()) no son una clase con profe — su "horario"
+        // es una franja genérica ("Mañana"/"Todo el día"), nunca un rango HH:MM-HH:MM real, y su
+        // "dia" siempre viene vacío. Antes se colaban como una fila fantasma "· Mañana — 0, profe
+        // —" en Clases/Retención. Se detecta por el FORMATO del horario (no por "dia" vacío a
+        // secas, para no perder el aviso de "revisar datos" de una clase real con el día sin
+        // guardar, que sí tiene un horario HH:MM-HH:MM válido). Estos SÍ se saltan del todo:
+        // nunca fueron una clase, ni siquiera para altas/bajas.
+        if (!preg_match('/^\d{1,2}:\d{2}-\d{1,2}:\d{2}$/', $e['horario'] ?? '')) continue;
         if (!isset($classes[$class_key])) {
             $classes[$class_key] = array(
                 'label'           => $e['dia'] . ' · ' . $e['horario'],
                 'dia'             => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad'],
+                'descontinuada'   => $es_descontinuada,
                 'active'          => 0,
                 'ending'          => 0,
                 'all'             => 0,
@@ -12515,6 +12532,10 @@ function superadmin_clases_retencion($request) {
     // Hasta 12 meses atrás DESDE $mes_ingreso (no desde el mes actual a medias) para las medias
     // de 3/6/12 meses.
     $meses_media = array_slice(array_values(array_filter($months_range, function($ym) use ($mes_ingreso) { return $ym <= $mes_ingreso; })), -12);
+    // Franjas descontinuadas (Ramiro, 18:00): no salen en el catálogo de Rentabilidad/Retención
+    // — pero sí se dejaron contar en Altas y Bajas (15/11 17:50 punto 12), que lee $calculo['data']
+    // directamente, sin pasar por aquí.
+    $clases_catalogo = array_values(array_filter($calculo['data'], function($c) { return empty($c['descontinuada']); }));
     $por_clase = array_map(function($c) use ($mes_ingreso, $estancias_por_clase, $meses_media, $class_sub_ids, $class_min_start) {
         $altas_mes = array_values(array_filter($c['members_active'], function($m) { return $m['new']; }));
         $motivos = array();
@@ -12569,7 +12590,7 @@ function superadmin_clases_retencion($request) {
             // para no romper el nombre que ya usa el frontend de Rentabilidad.
             'retencion3m' => $est['siguen3'] ?? null,
         );
-    }, $calculo['data']);
+    }, $clases_catalogo);
 
     $coste_profe_mes = blokes_coste_real_profe_mes($mes_ingreso);
 

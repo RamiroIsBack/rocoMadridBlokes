@@ -723,7 +723,7 @@ function PeopleSummaryKpis() {
   return (
     <div className="sv-kpis">
       <div className="sv-kpi" style={{ '--kpi-color': kpiColorTema('#60a5fa', oscuro) }}
-        title="Cuentas de facturación con suscripción en vigor, más los que pagan por fuera (Excel de Grupos, mes en curso, fusionados por teléfono/nombre — mismo criterio que «Personas» de Grupos). Una cuenta con varios hermanos cuenta como 1 (lo resolverá el campo «Alumno» de la sección 8).">
+        title="El TOTAL es la misma cifra que el mes en curso de «Alumnos con pago en curso» (Superadmin › Clases) — personas distintas (por teléfono/nombre) con el mes pagado o cubierto, Excel de Grupos fusionado con WooCommerce. «N fuera» es la diferencia con las cuentas de facturación en vigor, no un recuento propio. Puede ser algo menor que «Personas» de Grupos, que cuenta por grupo (dos grupos distintos = 2).">
         <span className="sv-kpi__value">
           {data.cuentasFuera > 0 ? `${data.cuentas_total} web + ${data.cuentasFuera} fuera = ${data.cuentasConFuera}` : data.cuentas_total}
         </span>
@@ -758,7 +758,11 @@ function ClasesTab() {
   const [months, setMonths]           = useState(6)
   const [filter, setFilter]           = useState('todos')
   const [selectedClassKey, setSelectedClassKey] = useState('')
-  const { data, loading, error, duplicadosMismaClase } = useClasses(months)
+  const { data: dataConDescontinuadas, loading, error, duplicadosMismaClase } = useClasses(months)
+  // Ramiro, 18:00 + cowork 17:50 punto 12: las franjas "ya no existen" (mañanas L-X/M-J,
+  // Viernes 19-21 adultos) se quitan de aquí (catálogo/pantallas) pero NO del dato crudo que
+  // usa Grupos para Altas y Bajas — esa pantalla lee /classes por su cuenta, sin pasar por aquí.
+  const data = useMemo(() => (dataConDescontinuadas || []).filter(c => !c.descontinuada), [dataConDescontinuadas])
 
   const filtered = useMemo(() => {
     if (!data) return []

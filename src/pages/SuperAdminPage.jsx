@@ -436,6 +436,7 @@ function AlumnosPagoEnCursoChart() {
       <p className="sa-legend">
         Personas distintas con el mes pagado o cubierto (mensual, trimestral/anual que cubre ese mes, exentos) — del Excel de Grupos fusionado con WooCommerce; una persona cuenta una vez aunque vaya a 2 clases o a una de 2 días.
         {data?.mesEnCurso && <> <strong>{fmtMonth(data.mesEnCurso)} va a medias</strong> (mes en curso).</>}
+        {' '}Los meses de antes de septiembre de 2024 pueden estar incompletos en el Excel de Grupos.
       </p>
       {loading && <LoadingBlock />}
       {error && <ErrorBlock msg={error} />}
@@ -613,7 +614,7 @@ function ClasesRetencionSection() {
             </select>
           </div>
           <p className="sa-legend">
-            Coste del profe: coste de empresa real del mes elegido (nómina bruta + efectivo + Seguridad Social real + gastos de voluntarios, de Nóminas y Gastos banco — nada de factores inventados), dividido entre sus horas del mes (clases + equipar + gestión). Isa es voluntaria → 0 €.
+            Coste del profe: coste de empresa real del mes elegido (nómina bruta + efectivo + Seguridad Social real + gastos de voluntarios, de Nóminas y Gastos banco — nada de factores inventados), dividido entre sus horas del mes (clases + equipar + gestión). Isa: 12 €/h confirmado, o su nómina real del mes si ya hay (ⓘ de cada fila dice la fuente).
             Semáforo: 🔴 margen negativo · 🟡 margen positivo pero ocupación por debajo del 50% (7-8 de 15) · 🟢 margen positivo y ocupación ≥ 50%.
             El margen se calcula sobre el ingreso del mes elegido; las medias de 3/6/12 meses son solo para ver la tendencia.
           </p>
@@ -623,8 +624,10 @@ function ClasesRetencionSection() {
                 <tr><th></th><th>Clase</th><th>Profe</th><th>Activos</th><th>Ocupación/15</th><th>Ingreso del mes</th><th>Media 3m</th><th>Media 6m</th><th>Media 12m</th><th>Coste profe</th><th>Margen</th><th>Retención 3m</th><th>Recomendación</th></tr>
               </thead>
               <tbody>
-                {filasRentabilidad.map((c, i) => (
-                  <tr key={i}>
+                {filasRentabilidad.map((c, i) => {
+                  const pocos = (c.siguen3N ?? 0) < RETENCION_N_MINIMO
+                  return (
+                  <tr key={i} className={pocos ? 'sa-ret-row--pocos' : ''}>
                     <td><span className={`sa-semaforo sa-semaforo--${c.semaforo}`} title={c.semaforo} /></td>
                     <td className="sa-profit__label">{c.label}{c.edad !== 'Adultos' ? ` (${c.edad})` : ''}</td>
                     <td className="sa-profit__prof" style={{ color: PROF_COLOR[c.prof] }}>{c.prof || '—'}</td>
@@ -636,10 +639,13 @@ function ClasesRetencionSection() {
                     <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia12m != null ? fmtEur(c.ingresoMedia12m) : '—'}</td>
                     <td className="sa-profit__num" title={`Fuente: ${c.fuenteProfe}`}>{fmtEur(c.costeProfe)} ⓘ</td>
                     <td className={`sa-profit__ben${c.margen >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>{fmtEur(c.margen)}</td>
-                    <td className={`sa-profit__num ${retencionCelda(c.siguen3, c.siguen3N).cls}`} title={`${c.siguen3Abs ?? 0} de ${c.siguen3N ?? 0}`}>{retencionCelda(c.siguen3, c.siguen3N).texto}</td>
+                    <td className={`sa-profit__num ${retencionCelda(c.siguen3, c.siguen3N).cls}`} title={`${c.siguen3Abs ?? 0} de ${c.siguen3N ?? 0}`}>
+                      {c.siguen3N ? `${c.siguen3Abs} de ${c.siguen3N}` : '—'}
+                    </td>
                     <td className="sa-profit__num" style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{c.recomendacion}</td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
