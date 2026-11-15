@@ -221,9 +221,14 @@ class RocoMadrid_SF_Ajax {
 			return;
 		}
 
-		// Para el paso de horarios, incluir info de stock por opción
+		// Para el paso de horarios, incluir info de stock por opción (Ramiro, 15/11 17:25,
+		// punto B: franjas sin plazas en gris "Completa" + sugerencia de 1-2 alternativas de la
+		// MISMA edad con plazas, sin lista de espera — sustituye el WhatsApp/formulario de
+		// contacto que había antes).
 		$values_stock = array();
 		if ( $is_schedule ) {
+			$dia_attr = ( $frequency === '1_day' ) ? 'pa_dia-suelto' : 'pa_dias';
+			$age_key  = ( $frequency === '1_day' ) ? 'age_addon' : 'age_addon_2days';
 			$dia = isset( $selections['pa_dia-suelto'] ) ? $selections['pa_dia-suelto']
 				: ( isset( $selections['pa_dias'] ) ? $selections['pa_dias'] : '' );
 			$edad = isset( $selections['age_addon'] ) ? $selections['age_addon']
@@ -233,30 +238,20 @@ class RocoMadrid_SF_Ajax {
 				$test_sel = array_merge( $selections, array( 'pa_horario' => $horario_val ) );
 				$var_res = self::find_matching_variation( $product_id, $test_sel );
 				$in_stock = true;
-				$wa_url = '';
-				$form_url = '';
+				$alternativas = array();
 
 				if ( $var_res ) {
 					$var_product = wc_get_product( $var_res['variation_id'] );
 					if ( $var_product && ! $var_product->is_in_stock() ) {
 						$in_stock = false;
-						$msg_text = sprintf(
-							__( 'Hello, I\'m interested in the %1$s schedule on %2$s (%3$s) — it shows as full. Can I join the waiting list?', 'neve-child' ),
-							$horario_val, $dia, $edad
-						);
-						$wa_url = 'https://wa.me/34692503272?text=' . rawurlencode( $msg_text );
-						$form_url = add_query_arg( array(
-							'subject' => rawurlencode( __( 'Availability enquiry', 'neve-child' ) ),
-							'mensaje' => rawurlencode( $msg_text ),
-						), home_url( '/contacto' ) );
+						$alternativas = self::get_alternative_schedules( $product_id, $frequency, $edad, $dia, $horario_val, $age_key, $dia_attr );
 					}
 				}
 
 				$values_stock[] = array(
 					'value' => $horario_val,
 					'in_stock' => $in_stock,
-					'wa_url' => esc_url( $wa_url ),
-					'form_url' => esc_url( $form_url ),
+					'alternativas' => $alternativas,
 				);
 			}
 		}
@@ -691,6 +686,85 @@ class RocoMadrid_SF_Ajax {
 		}
 
 		return false;
+	}
+
+	// ============================================
+	// ALTERNATIVAS CUANDO UNA FRANJA ESTÁ COMPLETA
+	// (Ramiro, 15/11 17:25, punto B)
+	// ============================================
+
+	/**
+	 * Horarios disponibles para un valor de día concreto (pa_dia-suelto o pa_dias), ya
+	 * filtrados por edad — mismo criterio que el filtro de "días sin horarios" de get_next_step
+	 * (para 2 días, intersección de los horarios de los dos días de la pareja).
+	 */
+	private static function horarios_disponibles_para_dia( $product_id, $frequency, $dia_value, $age ) {
+		if ( $frequency === '1_day' ) {
+			$horarios = self::get_variation_attribute_values( $product_id, 'pa_horario', array( 'pa_dia-suelto' => $dia_value ) );
+			return RocoMadrid_SF_Pricing::filter_schedules_by_age( $horarios, $age, $dia_value );
+		}
+
+		$horarios = self::get_variation_attribute_values( $product_id, 'pa_horario', array( 'pa_dias' => $dia_value ) );
+		$days_to_check = array();
+		if ( stripos( $dia_value, 'Lunes' ) !== false || stripos( $dia_value, 'L-X' ) !== false ) {
+			$days_to_check = array( 'Lunes', 'Miércoles' );
+		} elseif ( stripos( $dia_value, 'Martes' ) !== false || stripos( $dia_value, 'M-J' ) !== false ) {
+			$days_to_check = array( 'Martes', 'Jueves' );
+		} else {
+			return $horarios;
+		}
+
+		return array_values( array_unique( array_intersect(
+			RocoMadrid_SF_Pricing::filter_schedules_by_age( $horarios, $age, $days_to_check[0] ),
+			RocoMadrid_SF_Pricing::filter_schedules_by_age( $horarios, $age, $days_to_check[1] )
+		) ) );
+	}
+
+	/**
+	 * 1-2 franjas alternativas de la MISMA edad con plazas libres, para sugerir cuando la
+	 * elegida está completa — ordenadas por más plazas libres primero. Busca en TODOS los días
+	 * del producto (no solo el día ya elegido): el ejemplo de la nota es justo ese caso (viernes
+	 * niños completo → sugerir lunes y miércoles). Sin lista de espera ni WhatsApp.
+	 */
+	private static function get_alternative_schedules( $product_id, $frequency, $age, $exclude_dia, $exclude_horario, $age_key, $dia_attr ) {
+		$dias = self::get_variation_attribute_values( $product_id, $dia_attr, array() );
+		$candidatas = array();
+
+		foreach ( $dias as $dia_val ) {
+			$horarios = self::horarios_disponibles_para_dia( $product_id, $frequency, $dia_val, $age );
+			foreach ( $horarios as $horario_val ) {
+				if ( $dia_val === $exclude_dia && $horario_val === $exclude_horario ) {
+					continue;
+				}
+				$test_sel = array( $dia_attr => $dia_val, 'pa_horario' => $horario_val, $age_key => $age );
+				$var_res = self::find_matching_variation( $product_id, $test_sel );
+				if ( ! $var_res ) {
+					continue;
+				}
+				$var_product = wc_get_product( $var_res['variation_id'] );
+				if ( ! $var_product || ! $var_product->is_in_stock() ) {
+					continue;
+				}
+				$qty = $var_product->get_stock_quantity();
+				// Sin gestión de stock por unidades (backorder/ilimitado) pero in_stock=true: hay
+				// plazas, aunque no sepamos cuántas — no se descarta, solo no se puede ordenar con
+				// precisión frente a otra con cantidad conocida (se trata como 1 a efectos de orden).
+				if ( $qty !== null && $qty <= 0 ) {
+					continue;
+				}
+				$candidatas[] = array(
+					'dia' => $dia_val,
+					'horario' => $horario_val,
+					'stock' => ( $qty !== null ) ? intval( $qty ) : 1,
+				);
+			}
+		}
+
+		usort( $candidatas, function( $a, $b ) {
+			return $b['stock'] - $a['stock'];
+		} );
+
+		return array_slice( $candidatas, 0, 2 );
 	}
 
 	// ============================================
