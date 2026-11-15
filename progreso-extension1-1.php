@@ -5656,7 +5656,10 @@ function superadmin_products($request) {
 // como mínimo 1 día. 15/11 17:50: "cuentasConFuera" (el total de "163 web + N fuera = total")
 // es ahora la MISMA cifra que la gráfica "Alumnos con pago en curso" (blokes_clases_personas_por_mes),
 // para que las dos pantallas no descuadren entre sí — "cuentasFuera" es solo la diferencia con
-// cuentas_total, no un recuento propio.
+// cuentas_total, no un recuento propio. 15/11 19:25 (Ramiro, con el caso real de Marta Melcón,
+// #6682 Yoga + #6681 clases): una cuenta mixta (clase normal + Pilates/Yoga) cuenta en LOS DOS
+// grupos ("va a dos actividades distintas"), ya no solo en el que no es pilates_yoga — y se
+// suman los externos del Excel de Pilates/Yoga (18+14 filas) que no tienen cuenta web.
 function superadmin_people_summary($request) {
     if (!class_exists('RocoMadrid_SF_Stats')) {
         return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats not available. Call this endpoint on the club subsite.', array('status' => 503));
@@ -5665,11 +5668,14 @@ function superadmin_people_summary($request) {
     $all = blokes_get_all_subscription_data();
     $vigentes = array_values(array_filter($all, function($s) { return ($s['status'] ?? '') === 'active'; }));
 
-    $cuentas = array();
+    $cuentas = array(); // cuenta_key => { porBucket: { bucket => [dia=>true,...] }, nombre, ingresoMes }
     // Sesiones/semana = plazas por sesión sumadas (una Martes-Jueves cuenta en los dos días),
     // igual criterio que la columna Total de "Horario por día".
     $sesiones_semana = 0;
     $ingreso_mes_total = 0;
+    // Identidad (teléfono/nombre compacto) de cada cuenta web, para no duplicar un externo de
+    // Pilates/Yoga que en realidad ya tiene cuenta (aunque sea de otra clase).
+    $claves_web = array();
 
     foreach ($vigentes as $sub) {
         if (empty($sub['id'])) continue;
@@ -5696,16 +5702,18 @@ function superadmin_people_summary($request) {
         if ($es_pilates_yoga && !$dias_sub) $dias_sub = array('pilates_yoga_sin_dia_' . $sub['id']);
 
         if (!isset($cuentas[$cuenta_key])) {
-            $cuentas[$cuenta_key] = array('dias' => array(), 'bucket' => $bucket, 'nombre' => $sub['cliente'] ?? '', 'ingresoMes' => 0);
+            $cuentas[$cuenta_key] = array('porBucket' => array(), 'nombre' => $sub['cliente'] ?? '', 'ingresoMes' => 0);
         }
+        if (!isset($cuentas[$cuenta_key]['porBucket'][$bucket])) $cuentas[$cuenta_key]['porBucket'][$bucket] = array();
         foreach ($dias_sub as $d) {
-            $cuentas[$cuenta_key]['dias'][$d] = true;
+            $cuentas[$cuenta_key]['porBucket'][$bucket][$d] = true;
             $sesiones_semana++;
         }
-        // Si una cuenta mezcla Pilates/Yoga con un grupo normal, que cuente como el grupo normal
-        if ($cuentas[$cuenta_key]['bucket'] === 'pilates_yoga' && $bucket !== 'pilates_yoga') {
-            $cuentas[$cuenta_key]['bucket'] = $bucket;
-        }
+
+        $tel_cuenta = blokes_externos_normaliza_telefono($sub['telefono'] ?? '');
+        if ($tel_cuenta) $claves_web['t' . $tel_cuenta] = true;
+        $nomc_cuenta = blokes_externos_normaliza_nombre_compacto($sub['cliente'] ?? '');
+        if ($nomc_cuenta) $claves_web['n' . $nomc_cuenta] = true;
 
         if (function_exists('wcs_get_subscription')) {
             $sub_obj = wcs_get_subscription(intval($sub['id']));
@@ -5729,10 +5737,28 @@ function superadmin_people_summary($request) {
         'pilates_yoga'       => array('1' => 0, '2' => 0, '3+' => 0),
     );
     foreach ($cuentas as $c) {
-        $n = count($c['dias']);
-        $clave = $n >= 3 ? '3+' : (string) $n;
-        $por_dias[$c['bucket']][$clave]++;
+        foreach ($c['porBucket'] as $bucket => $dias) {
+            $n = count($dias);
+            $clave = $n >= 3 ? '3+' : (string) $n;
+            $por_dias[$bucket][$clave]++;
+        }
     }
+
+    // Externos de Pilates/Yoga (Ramiro, 15/11 19:25: "hay 18 filas en Pilates y 14 en Yoga del
+    // Excel que no cuentan" — mismo criterio que "cuentasFuera": mes en curso pagado, sin cuenta
+    // web ya contada arriba (por teléfono o nombre compacto).
+    $mes_actual_py = date('Y-m');
+    $externos_pilates_yoga = array();
+    foreach (blokes_grupos_excel_filas_crudas() as $f) {
+        if (blokes_grupos_excel_categoria_pestana($f['pestana']) !== 'pilates_yoga') continue;
+        if (!in_array($mes_actual_py, $f['pagos'], true)) continue;
+        $tel = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
+        $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
+        $key = $tel ? ('t' . $tel) : ($nomc ? ('n' . $nomc) : null);
+        if (!$key || isset($claves_web[$key])) continue;
+        $externos_pilates_yoga[$key] = true;
+    }
+    if ($externos_pilates_yoga) $por_dias['pilates_yoga']['1'] += count($externos_pilates_yoga);
 
     // Cowork, 15/11 17:50 punto 2/11: esto daba "164 web + 131 fuera = 295", muy por encima de
     // la gráfica "Alumnos con pago en curso" (203/193) y de Grupos (167) — las tres preguntan
@@ -5753,6 +5779,7 @@ function superadmin_people_summary($request) {
         'cuentasFuera'       => $cuentas_fuera,
         'cuentasConFuera'    => $total_fusionado,
         'por_dias'           => $por_dias,
+        'pilatesYogaFuera'   => count($externos_pilates_yoga),
         'sesiones_semana'    => $sesiones_semana,
     );
     // Dinero agregado del club: solo socio (31/10, regla de Ramiro).
@@ -7045,6 +7072,35 @@ function blokes_sync_grupos_pestana_de_grupo($pestanas_reales, $dia, $horario) {
         foreach ($pestanas_reales as $p) {
             $pn = blokes_sync_grupos_normalizar_nombre($p);
             if ($pn === $buscado || strpos($pn, $buscado) === 0 || strpos($buscado, $pn) === 0) $candidatas[] = $p;
+        }
+        if (count($candidatas) === 1) return $candidatas[0];
+    }
+    return null;
+}
+
+// Empareja una clase real (día+horario) con su pestaña del Excel SOLO por la hora de INICIO
+// (Eva no guarda la hora de fin en el nombre: "M-J 19.30 ADOL", "M-J 18.30 MEDIANOS", "L-X
+// 17.30 KIDS" — nunca "19:30-21:00"). Ramiro, 15/11 19:25/19:30 ("en Activos de cada clase solo
+// cuentan los que pagan por la web... puedes empezar por la función que proponías al revés").
+// Función APARTE de blokes_sync_grupos_pestana_de_grupo() (que usa el rango completo y ya
+// escribe cobros reales en producción — no se toca para no arriesgarla). Solo compara que la
+// pestaña EMPIECE por "día hora-inicio" (nunca al revés): la pestaña real casi siempre lleva
+// algo más detrás (KIDS/ADOL/MEDIANOS…), nunca algo delante. Si hay 0 o más de 1 candidata, no
+// se reparte — mejor no contar que contar en la clase equivocada.
+function blokes_grupos_excel_pestana_para_clase($pestanas_reales, $dia, $horario) {
+    $inicio = trim((string) explode('-', (string) $horario)[0]);
+    if ($inicio === '') return null;
+    $inicio_punto = str_replace(':', '.', $inicio); // la Hoja usa "19.30", no "19:30"
+    $formas = array_unique(array_filter(array(
+        $dia . ' ' . $inicio_punto,
+        blokes_sync_grupos_dia_abrev($dia) . ' ' . $inicio_punto,
+    )));
+    foreach ($formas as $forma) {
+        $buscado = blokes_sync_grupos_normalizar_nombre($forma);
+        if ($buscado === '') continue;
+        $candidatas = array();
+        foreach ($pestanas_reales as $p) {
+            if (strpos(blokes_sync_grupos_normalizar_nombre($p), $buscado) === 0) $candidatas[] = $p;
         }
         if (count($candidatas) === 1) return $candidatas[0];
     }
@@ -12536,7 +12592,50 @@ function superadmin_clases_retencion($request) {
     // — pero sí se dejaron contar en Altas y Bajas (15/11 17:50 punto 12), que lee $calculo['data']
     // directamente, sin pasar por aquí.
     $clases_catalogo = array_values(array_filter($calculo['data'], function($c) { return empty($c['descontinuada']); }));
-    $por_clase = array_map(function($c) use ($mes_ingreso, $estancias_por_clase, $meses_media, $class_sub_ids, $class_min_start) {
+
+    // Externos del Excel de Grupos sumados a "Activos" por clase (Ramiro, 15/11 19:25/19:30):
+    // antes "Activos" solo contaba suscripciones de WooCommerce — los que pagan por fuera
+    // (transferencia, efectivo) no salían en NINGUNA clase, ni la suya ni otra (ejemplo real:
+    // 5 adolescentes de M-J 19:30-21:00 en la pestaña "M-J 19.30 ADOL"). Se empareja cada clase
+    // con su pestaña por blokes_grupos_excel_pestana_para_clase() y se cuentan los externos de
+    // ESE mes que no tengan ya una suscripción web activa en esa misma clase (sin duplicar).
+    $pestanas_excel_reales = array_values(array_unique(array_column(blokes_grupos_excel_filas_crudas(), 'pestana')));
+    $filas_excel_mes_actual_por_pestana = array();
+    foreach (blokes_grupos_excel_filas_crudas() as $f) {
+        if (!in_array($now_ym, $f['pagos'], true)) continue;
+        $filas_excel_mes_actual_por_pestana[$f['pestana']][] = $f;
+    }
+    $externos_activos_por_clase = array(); // classKey => nº de externos distintos
+    $pestanas_emparejadas = array();
+    foreach ($clases_catalogo as $c) {
+        $pestana = blokes_grupos_excel_pestana_para_clase($pestanas_excel_reales, $c['dia'], $c['horario']);
+        if (!$pestana || empty($filas_excel_mes_actual_por_pestana[$pestana])) continue;
+        $pestanas_emparejadas[$pestana] = true;
+        $identidades_web = array();
+        foreach ($c['members_active'] as $m) {
+            $tel = blokes_externos_normaliza_telefono($m['phone'] ?? '');
+            if ($tel) $identidades_web['t' . $tel] = true;
+            $nomc = blokes_externos_normaliza_nombre_compacto($m['name'] ?? '');
+            if ($nomc) $identidades_web['n' . $nomc] = true;
+        }
+        $externos_unicos = array();
+        foreach ($filas_excel_mes_actual_por_pestana[$pestana] as $f) {
+            $tel = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
+            $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
+            $key = $tel ? ('t' . $tel) : ($nomc ? ('n' . $nomc) : null);
+            if (!$key || isset($identidades_web[$key])) continue;
+            $externos_unicos[$key] = true;
+        }
+        if ($externos_unicos) {
+            $class_key = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
+            $externos_activos_por_clase[$class_key] = count($externos_unicos);
+        }
+    }
+    // Diagnóstico (nunca se adivina a qué clase pertenecen): pestañas con pago este mes que no
+    // casaron con ninguna clase conocida — "sin repartir".
+    $pestanas_sin_repartir = count(array_diff(array_keys($filas_excel_mes_actual_por_pestana), array_keys($pestanas_emparejadas)));
+
+    $por_clase = array_map(function($c) use ($mes_ingreso, $estancias_por_clase, $meses_media, $class_sub_ids, $class_min_start, $externos_activos_por_clase) {
         $altas_mes = array_values(array_filter($c['members_active'], function($m) { return $m['new']; }));
         $motivos = array();
         foreach ($c['members_lost'] as $m) {
@@ -12572,9 +12671,12 @@ function superadmin_clases_retencion($request) {
         $est = $estancias_por_clase[$class_key] ?? null;
         $motivo_principal = null;
         if ($motivos) { arsort($motivos); $motivo_principal = array_key_first($motivos); }
+        // Externos sumados a "activos" (Ramiro, 15/11 19:25/19:30) — ver más arriba.
+        $activos_fuera = $externos_activos_por_clase[$class_key] ?? 0;
         return array(
             'dia' => $c['dia'], 'horario' => $c['horario'], 'edad' => $c['edad'], 'label' => $c['label'],
-            'activos' => $c['active'], 'altasMes' => count($altas_mes), 'bajasRecientes' => count($c['members_lost']),
+            'activos' => $c['active'] + $activos_fuera, 'activosWeb' => $c['active'], 'activosFuera' => $activos_fuera,
+            'altasMes' => count($altas_mes), 'bajasRecientes' => count($c['members_lost']),
             'motivosBaja' => $motivos, 'motivoPrincipal' => $motivo_principal, 'ingresoMesReal' => round($ingreso_mes_real, 2),
             'ingresoMedia3m' => $media_n(3), 'ingresoMedia6m' => $media_n(6), 'ingresoMedia12m' => $media_n(12),
             // Retención 1/3/6 meses con "n de N", permanencia media (meses) y bajas/cambios de
@@ -12602,7 +12704,11 @@ function superadmin_clases_retencion($request) {
         // ausente = cae al plan B (ficha), para que el ⓘ del frontend lo diga sin mirar logs.
         'costeRealProfe' => $coste_profe_mes['costes'],
         'costeRealProfeFuente' => $coste_profe_mes['fuentes'],
-        'avisoFuente' => 'Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado. Retención por clase (16/11 16:40): fusiona Excel de Grupos + WooCommerce + hist-pagos con 1 mes de margen, pero los meses de antes de la migración solo se atribuyen a una clase cuando la persona no ha tenido más que una clase distinta en WooCommerce — con varias clases esos meses de antes no entran en la retención por clase (no se puede saber a cuál pertenecen sin adivinar).',
+        // Pestañas del Excel con pago este mes que no casaron con ninguna clase conocida —
+        // nunca se reparten a ciegas (Ramiro, 15/11 19:30: "sin repartir"). Solo un contador de
+        // momento; si hace falta verlas una por una, se puede sacar un endpoint de diagnóstico.
+        'pestanasSinRepartir' => $pestanas_sin_repartir,
+        'avisoFuente' => 'Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado. Retención por clase (16/11 16:40): fusiona Excel de Grupos + WooCommerce + hist-pagos con 1 mes de margen, pero los meses de antes de la migración solo se atribuyen a una clase cuando la persona no ha tenido más que una clase distinta en WooCommerce — con varias clases esos meses de antes no entran en la retención por clase (no se puede saber a cuál pertenecen sin adivinar). "Activos" por clase (15/11 19:25/19:30) ya suma los externos del Excel de Grupos que pagan por fuera, emparejados por día+hora de inicio con blokes_grupos_excel_pestana_para_clase() — lo que no case con ninguna clase se cuenta en "pestanasSinRepartir", nunca se adivina.',
     )));
 }
 

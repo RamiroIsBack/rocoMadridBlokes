@@ -560,6 +560,7 @@ function ClasesRetencionSection() {
       const relacionadas = singles.filter(s => comboPorSuelto[`${s.dia.trim()}|${s.horario}|${s.edad}`]?.includes(combo))
       relacionadas.forEach(s => cubiertos.add(`${s.dia.trim()}|${s.horario}|${s.edad}`))
       const activos = combo.activos + relacionadas.reduce((t, s) => t + s.activos, 0)
+      const activosFuera = (combo.activosFuera || 0) + relacionadas.reduce((t, s) => t + (s.activosFuera || 0), 0)
       const ingresoMesReal = combo.ingresoMesReal + relacionadas.reduce((t, s) => t + s.ingresoMesReal, 0)
       const ingresoMedia3m = sumaMedia(combo, { ingresoMedia3m: relacionadas.reduce((t, s) => t + (s.ingresoMedia3m || 0), 0) }, 'ingresoMedia3m')
       const ingresoMedia6m = sumaMedia(combo, { ingresoMedia6m: relacionadas.reduce((t, s) => t + (s.ingresoMedia6m || 0), 0) }, 'ingresoMedia6m')
@@ -567,7 +568,7 @@ function ClasesRetencionSection() {
       const ocupacion = activos / 15
       const margen = ingresoMesReal - costeProfe
       const retencion = mergeRetencion([combo, ...relacionadas])
-      filas.push({ ...combo, ...retencion, prof, costeProfe, fuenteProfe: fuenteProfe(prof), ocupacion, margen, activos, ingresoMesReal, ingresoMedia3m, ingresoMedia6m, ingresoMedia12m, ...semaforoYrecomendacion(margen, ocupacion) })
+      filas.push({ ...combo, ...retencion, prof, costeProfe, fuenteProfe: fuenteProfe(prof), ocupacion, margen, activos, activosFuera, ingresoMesReal, ingresoMedia3m, ingresoMedia6m, ingresoMedia12m, ...semaforoYrecomendacion(margen, ocupacion) })
     })
 
     singles.forEach(s => {
@@ -640,7 +641,9 @@ function ClasesRetencionSection() {
                     <td><span className={`sa-semaforo sa-semaforo--${c.semaforo}`} title={c.semaforo} /></td>
                     <td className="sa-profit__label">{claseLabel(c)}</td>
                     <td className="sa-profit__prof" style={{ color: PROF_COLOR[c.prof] }}>{c.prof || '—'}</td>
-                    <td className="sa-profit__num">{c.activos}</td>
+                    <td className="sa-profit__num" title={c.activosFuera ? `${c.activosWeb ?? (c.activos - c.activosFuera)} web + ${c.activosFuera} que pagan por fuera` : 'Todos con suscripción en la web'}>
+                      {c.activos}{c.activosFuera ? ' ⓘ' : ''}
+                    </td>
                     <td className="sa-profit__num">{Math.round(c.ocupacion * 100)}%</td>
                     <td className="sa-profit__num">{fmtEur(c.ingresoMesReal)}</td>
                     <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia3m != null ? fmtEur(c.ingresoMedia3m) : '—'}</td>
@@ -676,7 +679,9 @@ function ClasesRetencionSection() {
                     <tr key={i} className={pocos ? 'sa-ret-row--pocos' : ''}>
                       <td className="sa-profit__label">{claseLabel(c)}</td>
                       <td className="sa-profit__prof" style={{ color: PROF_COLOR[c.prof] }}>{c.prof || '—'}</td>
-                      <td className="sa-profit__num">{c.activos}</td>
+                      <td className="sa-profit__num" title={c.activosFuera ? `${c.activosWeb ?? (c.activos - c.activosFuera)} web + ${c.activosFuera} que pagan por fuera` : 'Todos con suscripción en la web'}>
+                        {c.activos}{c.activosFuera ? ' ⓘ' : ''}
+                      </td>
                       <td className="sa-profit__num">{c.estanciasEmpezaron12m}</td>
                       <td className={`sa-profit__num ${retencionCelda(c.siguen1, c.siguen1N).cls}`} title={`${c.siguen1Abs} de ${c.siguen1N}`}>{c.siguen1N ? `${c.siguen1Abs} de ${c.siguen1N}` : '—'}</td>
                       <td className={`sa-profit__num ${retencionCelda(c.siguen3, c.siguen3N).cls}`} title={`${c.siguen3Abs} de ${c.siguen3N}`}>{c.siguen3N ? `${c.siguen3Abs} de ${c.siguen3N} (${c.siguen3}%)` : '—'}</td>
