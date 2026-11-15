@@ -1304,6 +1304,22 @@ add_action('rest_api_init', function() {
         ),
     ));
 
+    // Saldo de apertura del Club a 1/1 de un año, editable (NOTAS_PARA_CODE_gastos_banco.md,
+    // 15/11 11:15 punto 4): el cuadre de saldo lo necesita como punto de partida fijo.
+    register_rest_route('superadmin/v1', '/expenses/apertura', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'superadmin_expenses_apertura_get',
+            'permission_callback' => $socio_perm,
+            'args'                => array('year' => array('type' => 'integer')),
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'superadmin_expenses_apertura_set',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+
     // Remitentes de transferencias ya clasificados a mano (Clases/Eventos/...), compartido
     // entre Eva y Ramiro (antes vivía solo en el navegador de quien lo clasificó).
     register_rest_route('superadmin/v1', '/expenses/senders', array(
@@ -1510,9 +1526,13 @@ function blokes_gastos_banco_items_categoria_mes($month, $entity, $categoria) {
         return ($it['category'] ?? '') === $categoria;
     }));
 }
+// Devuelve ('costes' => nombre => coste total del mes, 'fuentes' => nombre => true si hay fila
+// de nómina real de ESE mes, false si no (p. ej. no se ha cargado Nóminas de ese mes todavía) —
+// el frontend lo enseña en el ⓘ («nómina <mes> + SS banco» / «ficha, sin nómina de <mes>») para
+// ver en vivo si cae al plan B sin depender del error_log del servidor (cowork, 15/11 11:15).
 function blokes_coste_real_profe_mes($month) {
-    $out = array(); // nombre normalizado => coste total del mes
-    if (!function_exists('overtime_get_people') || !function_exists('payroll_compute_month')) return $out;
+    $out = array(); $fuentes = array();
+    if (!function_exists('overtime_get_people') || !function_exists('payroll_compute_month')) return array('costes' => $out, 'fuentes' => $fuentes);
     try {
         $people  = overtime_get_people();
         $entries = overtime_get_entries();
@@ -1525,6 +1545,7 @@ function blokes_coste_real_profe_mes($month) {
             if (!$nombre) continue;
             $bruto = floatval($row['total'] ?? 0);
             $out[$nombre] = ($out[$nombre] ?? 0) + $bruto;
+            $fuentes[$nombre] = true; // tiene fila de nómina de este mes, aunque sea 0
             $total_bruto += $bruto;
         }
         $ss_total = 0.0;
@@ -1546,7 +1567,7 @@ function blokes_coste_real_profe_mes($month) {
     } catch (\Throwable $e) {
         error_log('Blokes blokes_coste_real_profe_mes: fallo en gastos de voluntarios de ' . $month . ': ' . $e->getMessage());
     }
-    return $out;
+    return array('costes' => $out, 'fuentes' => $fuentes);
 }
 
 // Clave de un movimiento para no duplicarlo: fecha de operación (no fecha valor — esa falta en
@@ -1624,55 +1645,86 @@ function superadmin_save_expenses($request) {
 // compara como texto (los meses se guardan como 'YYYY-MM', que ordena igual como string que
 // como fecha) en vez de restar meses a una fecha, que con createFromFormat('Y-m', …) arrastra
 // el día de hoy y se desborda de mes en los días 29-31 de meses cortos.
-// Cuadre saldo↔resultado del Club (NOTAS_PARA_CODE_gastos_banco.md, 15/11 10:55): saldo inicial
-// (primer "Saldo Posterior" del CSV del Club) + resultado real de TODO el histórico (misma
-// regla que superadmin_get_expenses en vista Club: "Uso de Rocódromo" SÍ es gasto real, solo
-// "Transferencia entre cuentas" y lo marcado a mano quedan fuera) debe dar el saldo de hoy.
-// Siempre sobre el histórico completo, no el periodo del selector del frontend — si no, nunca
-// cuadra matemáticamente (comprobado a mano por cowork el 15/11 10:55: 36.600 € de diferencia
-// eran justo los pagos a la Rocoteca de ene→jul-26 que antes se excluían como "internos").
-function blokes_expenses_cuadre_club() {
+// Saldo de apertura del Club a 1/1 de un año — editable por socio (NOTAS_PARA_CODE_gastos_banco.md,
+// 15/11 11:15): no se puede "adivinar" del primer movimiento CON saldo guardado (eso dio un
+// ancla equivocada, un movimiento de octubre, porque los CSV más antiguos no siempre traen
+// saldo). Semilla conocida para 2026: CSV "movimientosCuenta (club 1-4 2026).csv", primer
+// movimiento 05/01 TOTAL TARJETAS +475,60 con saldo posterior 515,28 → apertura 515,28 − 475,60 = 39,68 €.
+function blokes_expenses_apertura_club_get($year) {
+    $saved = get_option('blokes_apertura_club_' . intval($year), '');
+    if ($saved !== '') {
+        $d = json_decode($saved, true);
+        if (is_array($d) && isset($d['saldo'])) return $d;
+    }
+    if (intval($year) === 2026) return array('saldo' => 39.68, 'fecha' => '2026-01-01', 'semilla' => true);
+    return array('saldo' => null, 'fecha' => $year . '-01-01', 'semilla' => false);
+}
+function blokes_expenses_apertura_club_set($year, $saldo) {
+    update_option('blokes_apertura_club_' . intval($year), wp_json_encode(array(
+        'saldo' => floatval($saldo), 'fecha' => intval($year) . '-01-01', 'semilla' => false,
+    )), false);
+}
+function superadmin_expenses_apertura_get($request) {
+    $year = intval($request->get_param('year') ?: (new DateTime())->format('Y'));
+    return rest_ensure_response(blokes_expenses_apertura_club_get($year));
+}
+function superadmin_expenses_apertura_set($request) {
+    $year  = intval($request->get_param('year'));
+    $saldo = $request->get_param('saldo');
+    if (!$year || $saldo === null || $saldo === '') {
+        return new WP_Error('bad_request', 'Falta year o saldo.', array('status' => 400));
+    }
+    blokes_expenses_apertura_club_set($year, $saldo);
+    return rest_ensure_response(blokes_expenses_apertura_club_get($year));
+}
+
+// Cuadre saldo↔resultado del Club, por AÑO (NOTAS_PARA_CODE_gastos_banco.md, 15/11 11:00/11:15,
+// corrige el 10:55 que Ramiro anuló): apertura del año + ingresos − gastos (SIN "Uso de
+// Rocódromo", que no es gasto real — los gastos de la Rocoteca ya se contabilizan ahí) −
+// traspasos internos a la Rocoteca (línea aparte, tampoco es gasto, pero SÍ sale de la cuenta
+// del Club) = saldo de hoy. Solo sobre el año en curso (no todo el histórico — usar todo el
+// histórico fue el bug del 10:55/11:15: ancla mal el saldo inicial).
+function blokes_expenses_cuadre_club($year = null) {
+    $year = $year ?: intval((new DateTime())->format('Y'));
     global $wpdb;
-    $rows = $wpdb->get_results(
-        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE 'blokes_exp_%_club'",
-        ARRAY_A
-    );
-    $primer_ts = null; $saldo_inicial = null; $fecha_inicial = '';
-    $resultado = 0.0;
+    $like = $wpdb->esc_like('blokes_exp_' . $year . '_') . '%_club';
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s", $like
+    ), ARRAY_A);
+    $resultado = 0.0; $traspasos = 0.0;
     foreach ($rows as $row) {
         $saved = json_decode($row['option_value'], true);
         if (!$saved || !is_array($saved['items'] ?? null)) continue;
         foreach ($saved['items'] as $item) {
-            $saldo_raw = (string) ($item['saldo'] ?? '');
-            $fecha = $item['fechaValor'] ?? $item['fecha'] ?? '';
-            if ($saldo_raw !== '' && preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) {
-                $ts = mktime(0, 0, 0, intval($m[2]), intval($m[1]), intval($m[3]));
-                if ($primer_ts === null || $ts < $primer_ts) {
-                    $primer_ts     = $ts;
-                    $saldo_inicial = floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', $saldo_raw)));
-                    $fecha_inicial = date('Y-m-d', $ts);
-                }
-            }
             $concepto_norm = function_exists('iconv')
                 ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
                 : strtolower($item['concepto'] ?? '');
-            $es_rocodromo = strpos($concepto_norm, 'rocodromo') !== false;
-            $es_interno = strpos($concepto_norm, 'transferencia entre cuentas') !== false
-                || (!$es_rocodromo && $item['excluded']);
-            if ($es_interno) continue;
             $amt = abs(floatval($item['importe'] ?? 0));
+            // "Uso de Rocódromo" (Club → Rocoteca): sale de la cuenta pero NO es un gasto del
+            // Club (Ramiro, 15/11 11:00: los gastos de la Rocoteca ya se contabilizan con ese
+            // dinero) — se aparta en su propia línea para el cuadre, nunca en "gastos".
+            if (strpos($concepto_norm, 'rocodromo') !== false) {
+                if (($item['section'] ?? 'costes') === 'costes') $traspasos += $amt;
+                continue;
+            }
+            $es_interno = strpos($concepto_norm, 'transferencia entre cuentas') !== false || $item['excluded'];
+            if ($es_interno) continue;
             if (($item['section'] ?? 'costes') === 'costes') $resultado -= $amt; else $resultado += $amt;
         }
     }
+    $apertura       = blokes_expenses_apertura_club_get($year);
     $saldo_hoy_data = blokes_expenses_saldo_real('club');
     $saldo_hoy      = $saldo_hoy_data['saldo'];
-    $diferencia     = ($saldo_inicial !== null && $saldo_hoy !== null)
-        ? round($saldo_inicial + $resultado - $saldo_hoy, 2) : null;
+    $saldo_esperado = ($apertura['saldo'] !== null) ? round($apertura['saldo'] + $resultado - $traspasos, 2) : null;
+    $diferencia     = ($saldo_esperado !== null && $saldo_hoy !== null) ? round($saldo_esperado - $saldo_hoy, 2) : null;
     return array(
-        'saldoInicial'   => $saldo_inicial, 'fechaInicial' => $fecha_inicial,
-        'resultadoTotal' => round($resultado, 2),
-        'saldoHoy'       => $saldo_hoy, 'fechaHoy' => $saldo_hoy_data['fecha'],
-        'diferencia'     => $diferencia,
+        'year' => $year,
+        'apertura' => $apertura['saldo'], 'fechaApertura' => $apertura['fecha'], 'aperturaEsSemilla' => !empty($apertura['semilla']),
+        'resultado' => round($resultado, 2),
+        'traspasosRocodromo' => round($traspasos, 2),
+        'saldoEsperado' => $saldo_esperado,
+        'saldoHoy' => $saldo_hoy, 'fechaHoy' => $saldo_hoy_data['fecha'],
+        'diferencia' => $diferencia,
     );
 }
 
@@ -1732,16 +1784,14 @@ function superadmin_get_expenses($request) {
             $concepto_norm = function_exists('iconv')
                 ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
                 : strtolower($item['concepto'] ?? '');
-            // "Uso de Rocódromo" (Club → Rocoteca) solo es de verdad "interno" en la vista
-            // COMBINADA (ahí se cancela con el ingreso especular de la otra entidad); visto
-            // desde una sola entidad es dinero real que sale del Club (o entra en la Rocoteca) —
-            // por eso nunca lo tapa el flag `excluded` guardado al subir el CSV, solo la vista
-            // "Todas" (Ramiro, NOTAS_PARA_CODE_gastos_banco.md 15/11 10:55: el acumulado de la
-            // vista Club no cuadraba con el saldo real sin contarlo como gasto).
-            $es_rocodromo = strpos($concepto_norm, 'rocodromo') !== false;
-            $is_internal = strpos($concepto_norm, 'transferencia entre cuentas') !== false
-                || ($es_rocodromo && $entity_filter === 'all')
-                || (!$es_rocodromo && $item['excluded']);
+            // "Uso de Rocódromo" (Club → Rocoteca) NUNCA es gasto/ingreso real, en ninguna vista
+            // (Ramiro, 15/11 11:00, anula el 10:55: los gastos de la Rocoteca de ese dinero YA
+            // se contabilizan en la Rocoteca — contarlo también como gasto del Club sería
+            // contarlo dos veces). Solo se ve aparte, como traspaso, en el cuadre de saldo del
+            // Club (blokes_expenses_cuadre_club), nunca aquí en "gastos".
+            $is_internal = $item['excluded']
+                || strpos($concepto_norm, 'rocodromo') !== false
+                || strpos($concepto_norm, 'transferencia entre cuentas') !== false;
             if ($exclude_internal && $is_internal) continue;
             $amt  = abs(floatval($item['importe']));
             // 15/11 09:18 punto 3: antes el Club siempre daba IVA 0 pasara lo que pasara — desde
@@ -11713,6 +11763,8 @@ function superadmin_clases_retencion($request) {
         );
     }, $calculo['data']);
 
+    $coste_profe_mes = blokes_coste_real_profe_mes($mes_ingreso);
+
     return rest_ensure_response(array('success' => true, 'data' => array(
         'porMes' => $por_mes, 'cohortes' => $cohortes,
         'permanenciaMediaActivos' => $media($permanencia_activos), 'permanenciaMediaIdos' => $media($permanencia_idos),
@@ -11720,8 +11772,10 @@ function superadmin_clases_retencion($request) {
         'porClase' => $por_clase, 'mesIngreso' => $mes_ingreso, 'mesesDisponibles' => array_slice($months_range, 0, -1),
         // Coste real de empresa por profe DEL MES ELEGIDO (15/11 10:25 punto A) — nómina
         // bruta+efectivo real de Nóminas + SS real del banco, nada de ×1,43 ni de usar siempre
-        // el mes actual.
-        'costeRealProfe' => blokes_coste_real_profe_mes($mes_ingreso),
+        // el mes actual. 'costeRealProfeFuente': true = hay fila de nómina de ese mes; false/
+        // ausente = cae al plan B (ficha), para que el ⓘ del frontend lo diga sin mirar logs.
+        'costeRealProfe' => $coste_profe_mes['costes'],
+        'costeRealProfeFuente' => $coste_profe_mes['fuentes'],
         'avisoFuente' => 'Altas/bajas/retención: solo suscripciones de WooCommerce en vigor desde la migración — todavía no cruza con hist-pagos (alumnos de antes) ni con los externos del Excel de Grupos. Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado.',
     )));
 }

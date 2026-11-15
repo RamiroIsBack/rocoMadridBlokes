@@ -634,7 +634,7 @@ function HistoryView({ period, onDeleted }) {
     return next
   })
   const effectiveExclude = excludeInternal
-  const { data, breakdown, saldoReal, cuadre, loading, error } = useExpenses(from, entity, effectiveExclude)
+  const { data, breakdown, saldoReal, loading, error } = useExpenses(from, entity, effectiveExclude)
 
   const handleDelete = async (month, ent) => {
     const key = `${month}·${ent}`
@@ -721,17 +721,6 @@ function HistoryView({ period, onDeleted }) {
     }))
   , [byMonth])
 
-  const totals = useMemo(() => ({
-    gastos:   byMonth.reduce((s, r) => s + r.costes,             0),
-    ingresos: byMonth.reduce((s, r) => s + r.ingresos,           0),
-    iva_net:  byMonth.reduce((s, r) => s + r.iva_r - r.iva_s,   0),
-  }), [byMonth])
-  // "Resultado" (ingresos − gastos operativos) es un rendimiento del periodo, nunca el saldo
-  // del banco — eso es saldoReal, el "Saldo Posterior" real del último movimiento (Ramiro,
-  // 15/11 09:18/09:25: el acumulado de antes daba 16.714€/49.568€ cuando el banco tenía
-  // 13.764,30€, porque sumaba desde el primer mes sin saldo de apertura y nunca iba a cuadrar).
-  const resultado = totals.ingresos - totals.gastos
-
   const incomeBreakdown = useMemo(() => {
     // Per-month categorised income for chart
     const chartRows = byMonth.map(r => {
@@ -782,43 +771,20 @@ function HistoryView({ period, onDeleted }) {
         <button
           className={`sa-transfer-toggle${excludeInternal ? ' sa-transfer-toggle--on' : ''}`}
           onClick={() => setExcludeInternal(v => !v)}
-          title="Transferencias entre cuentas propias y cobros TPV/WooCommerce ya contabilizados en Ingresos. «Uso de Rocódromo» ya NO se trata como interno aquí (en vista Club es un gasto real; solo se anula al ver «Todas» las entidades)."
+          title="Movimientos internos: transferencias entre cuentas propias, USO DE ROCODROMO (el Club ya lo paga, pero la Rocoteca contabiliza aparte ese gasto — contarlo aquí lo duplicaría), cobros TPV/WooCommerce ya contabilizados en Ingresos"
         >
           {excludeInternal ? '🚫' : '👁️'} Movimientos internos
         </button>
       </div>
 
-      <div className="exp-kpis">
-        <div className="exp-kpi" style={{ '--c': '#60a5fa' }}>
-          <span className="exp-kpi__val">{fmtEur(totals.ingresos)}</span>
-          <span className="exp-kpi__lbl" title="Suma de ingresos del banco en el periodo, sin los movimientos internos (transferencias entre cuentas, uso de rocódromo, préstamos).">Ingresos ({label}) ⓘ</span>
-        </div>
-        <div className="exp-kpi" style={{ '--c': '#ef4444' }}>
-          <span className="exp-kpi__val">{fmtEur(totals.gastos)}</span>
-          <span className="exp-kpi__lbl" title="Suma de gastos del banco en el periodo, sin movimientos internos.">Gastos ({label}) ⓘ</span>
-        </div>
-        <div className="exp-kpi" style={{ '--c': resultado >= 0 ? '#34d399' : '#ef4444' }}>
-          <span className="exp-kpi__val">{fmtEur(resultado)}</span>
-          <span className="exp-kpi__lbl" title="Ingresos − gastos operativos del periodo. NO es el saldo del banco (eso es la siguiente tarjeta) — es cuánto se ha ganado o perdido en este periodo.">Resultado ({label}) ⓘ</span>
-        </div>
-        <div className="exp-kpi" style={{ '--c': '#f5c842' }}>
-          <span className="exp-kpi__val">{saldoReal?.saldo != null ? fmtEur(saldoReal.saldo) : '—'}</span>
-          <span className="exp-kpi__lbl" title="Saldo Posterior del último movimiento subido de la cuenta del Club (la única que importa — Rocoteca tiene ~800€ residuales aparte). Si el CSV no es de hoy, la fecha te dice hasta cuándo hay datos.">
-            Saldo en banco (Club{saldoReal?.fecha ? ` hasta ${saldoReal.fecha.slice(8,10)}/${saldoReal.fecha.slice(5,7)}` : ''}) ⓘ
-          </span>
-        </div>
-        <div className="exp-kpi" style={{ '--c': '#f97316' }}>
-          <span className="exp-kpi__val">{fmtEur(Math.abs(totals.iva_net))}</span>
-          <span className="exp-kpi__lbl">IVA neto {totals.iva_net >= 0 ? 'a pagar' : 'a favor'} ({label}) · estimado del banco</span>
-        </div>
-      </div>
-
-      {entity === 'club' && cuadre && cuadre.saldoInicial != null && cuadre.saldoHoy != null && (
-        <p className={Math.abs(cuadre.diferencia) > 50 ? 'exp-error' : 'exp-hint'} style={{ fontSize: '0.8rem' }}>
-          {Math.abs(cuadre.diferencia) > 50 ? '⚠ ' : 'ⓘ '}
-          <strong>Cuadre (todo el histórico del Club):</strong> saldo inicial {fmtEur(cuadre.saldoInicial)} ({cuadre.fechaInicial?.slice(8,10)}/{cuadre.fechaInicial?.slice(5,7)}/{cuadre.fechaInicial?.slice(0,4)}) + resultado {fmtEur(cuadre.resultadoTotal)} = {fmtEur(cuadre.saldoInicial + cuadre.resultadoTotal)}, saldo real hoy {fmtEur(cuadre.saldoHoy)}
-          {Math.abs(cuadre.diferencia) > 50 ? ` — diferencia de ${fmtEur(cuadre.diferencia)} sin explicar` : ' — cuadra ✓'}.
-          {' '}«Uso de Rocódromo» ya cuenta como gasto del Club (se dejó de pagar en jul-26).
+      {/* Ramiro, 15/11 11:05: "quita esas fichas de arriba del todo, no dicen nada" -- las 5
+          tarjetas (Ingresos/Gastos/Resultado/Saldo/IVA) se quitan de aquí. El resumen anual +
+          el cuadre con el banco se mueven al P&L (11:10); aquí solo queda el saldo del Club
+          como una línea de texto pequeña, no como ficha. */}
+      {saldoReal?.saldo != null && (
+        <p className="exp-hint" style={{ fontSize: '0.8rem' }}>
+          Saldo Club{saldoReal.fecha ? ` a ${saldoReal.fecha.slice(8,10)}/${saldoReal.fecha.slice(5,7)}/${saldoReal.fecha.slice(0,4)}` : ''}: <strong>{fmtEur(saldoReal.saldo)}</strong>
+          {' '}· el resumen del año (ingresos, gastos, resultado) y el cuadre con este saldo están en <strong>P&L</strong>.
         </p>
       )}
 

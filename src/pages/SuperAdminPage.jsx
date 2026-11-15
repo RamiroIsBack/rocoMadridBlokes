@@ -374,6 +374,17 @@ function ClasesRetencionSection() {
     if (real == null || real <= 0) return meta.costoHClase || 0
     return real / (meta.horasSem * 4.33)
   }
+  // Cowork, 15/11 11:15: en vez de mirar error_log, enseñar en el ⓘ qué fuente se usó de
+  // verdad — si tiene fila de nómina de ESE mes (costeRealProfeFuente) usa nómina+SS banco,
+  // si no, cae al plan B de la ficha (costoHClase), visible en vivo sin acceso al servidor.
+  function fuenteProfe(prof) {
+    if (!prof || prof === 'Isa') return 'voluntaria, sin coste'
+    const meta = PROF_META[prof]
+    if (!meta || !meta.horasSem) return ''
+    const mes = fmtMonth(data?.mesIngreso)
+    const tieneNomina = !!data?.costeRealProfeFuente?.[normForProf(prof)]
+    return tieneNomina ? `nómina ${mes} + SS banco (prorrateada)` : `ficha, sin nómina de ${mes}`
+  }
   // Sesiones por semana de esta clase: "Martes-Jueves"/"Lunes-Miércoles" = 2, un día suelto
   // (p. ej. "Viernes") = 1 — faltaba este factor, por eso el coste salía de 1 sola sesión en
   // vez del mes completo (× ~4,33 semanas/mes).
@@ -423,7 +434,7 @@ function ClasesRetencionSection() {
       const ingresoMedia12m = sumaMedia(combo, { ingresoMedia12m: relacionadas.reduce((t, s) => t + (s.ingresoMedia12m || 0), 0) }, 'ingresoMedia12m')
       const ocupacion = activos / 15
       const margen = ingresoMesReal - costeProfe
-      filas.push({ ...combo, prof, costeProfe, ocupacion, margen, activos, ingresoMesReal, ingresoMedia3m, ingresoMedia6m, ingresoMedia12m, ...semaforoYrecomendacion(margen, ocupacion) })
+      filas.push({ ...combo, prof, costeProfe, fuenteProfe: fuenteProfe(prof), ocupacion, margen, activos, ingresoMesReal, ingresoMedia3m, ingresoMedia6m, ingresoMedia12m, ...semaforoYrecomendacion(margen, ocupacion) })
     })
 
     singles.forEach(s => {
@@ -432,7 +443,7 @@ function ClasesRetencionSection() {
       const costeProfe = costeHoraReal(prof) * classDurationH(s.horario) * 1 * 4.33
       const ocupacion = s.activos / 15
       const margen = s.ingresoMesReal - costeProfe
-      filas.push({ ...s, prof, costeProfe, ocupacion, margen, ...semaforoYrecomendacion(margen, ocupacion) })
+      filas.push({ ...s, prof, costeProfe, fuenteProfe: fuenteProfe(prof), ocupacion, margen, ...semaforoYrecomendacion(margen, ocupacion) })
     })
 
     return filas.sort((a, b) => b.margen - a.margen)
@@ -515,7 +526,7 @@ function ClasesRetencionSection() {
                     <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia3m != null ? fmtEur(c.ingresoMedia3m) : '—'}</td>
                     <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia6m != null ? fmtEur(c.ingresoMedia6m) : '—'}</td>
                     <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia12m != null ? fmtEur(c.ingresoMedia12m) : '—'}</td>
-                    <td className="sa-profit__num">{fmtEur(c.costeProfe)}</td>
+                    <td className="sa-profit__num" title={`Fuente: ${c.fuenteProfe}`}>{fmtEur(c.costeProfe)} ⓘ</td>
                     <td className={`sa-profit__ben${c.margen >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>{fmtEur(c.margen)}</td>
                     <td className="sa-profit__num">{c.retencion3m != null ? `${c.retencion3m}%` : '—'}</td>
                     <td className="sa-profit__num" style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{c.recomendacion}</td>
@@ -711,7 +722,14 @@ function fmtPLVal(v) {
 function PLTab() {
   const oscuro = useTemaOscuro()
   const tickFill = oscuro ? '#b3ab9a' : '#5e5650'
-  const { data: expData, loading } = useExpenses('', 'all', true)
+  // "Ventas sin IVA" de 2026 viene de WooCommerce (misma cifra que Superadmin › Ingresos, no la
+  // del banco con IVA de todas las cuentas); "Costes" sigue siendo el banco consolidado sin
+  // internos ni préstamos (Ramiro, 15/11 11:10). `cuadre` (Club, año en curso) viene del mismo
+  // /expenses -- siempre calculado server-side, independiente de `entity`/`from` aquí.
+  const { data: expData, cuadre, loading: loadingExp } = useExpenses('', 'all', true)
+  const monthsSinceJan = new Date().getMonth() + 1
+  const { data: wcData, loading: loadingWc } = useRevenue(monthsSinceJan, true)
+  const loading = loadingExp || loadingWc
   const [metric,  setMetric ] = useState('ventas')
   const [view,    setView   ] = useState('comparativa')
   const [showIva, setShowIva] = useState(true)
@@ -722,27 +740,32 @@ function PLTab() {
     expData.forEach(r => {
       const [y, m] = r.month.split('-').map(Number)
       if (y !== 2026) return
-      if (!acc[m]) acc[m] = { ingresos: 0, costes: 0, iva_r: 0, iva_s: 0 }
-      acc[m].ingresos += Math.abs(r.total_ingresos  || 0)
-      acc[m].costes   += Math.abs(r.total_costes    || 0)
-      acc[m].iva_r    += Math.abs(r.iva_repercutido || 0)
-      acc[m].iva_s    += Math.abs(r.iva_soportado   || 0)
+      if (!acc[m]) acc[m] = { ventas: 0, costes: 0, iva_r: 0, iva_s: 0 }
+      acc[m].costes += Math.abs(r.total_costes    || 0)
+      acc[m].iva_r  += Math.abs(r.iva_repercutido || 0)
+      acc[m].iva_s  += Math.abs(r.iva_soportado   || 0)
     })
-    // Quarterly IVA payment months: Q1(Jan-Mar)→Apr, Q2→Jul, Q3→Oct
-    const ivaPayments = {}
-    for (let m = 1; m <= 12; m++) {
-      if (!acc[m]) continue
-      const payM = Math.ceil(m / 3) * 3 + 1
-      if (payM <= 12) ivaPayments[payM] = (ivaPayments[payM] || 0) + (acc[m].iva_r - acc[m].iva_s)
-    }
+    ;(wcData || []).forEach(r => {
+      const [y, m] = r.month.split('-').map(Number)
+      if (y !== 2026) return
+      if (!acc[m]) acc[m] = { ventas: 0, costes: 0, iva_r: 0, iva_s: 0 }
+      acc[m].ventas = r.total || 0
+    })
     const res = {}
     for (let m = 1; m <= 12; m++) {
       if (!acc[m]) continue
-      const d = acc[m], resultado = d.ingresos - d.costes
-      res[m] = { ventas: d.ingresos, costes: -d.costes, resultado }
+      const d = acc[m], resultado = d.ventas - d.costes
+      res[m] = { ventas: d.ventas, costes: -d.costes, resultado }
     }
     return res
-  }, [expData])
+  }, [expData, wcData])
+
+  const resumenAnual = useMemo(() => {
+    const vals = Object.values(live2026)
+    const ingresos = vals.reduce((s, d) => s + d.ventas, 0)
+    const gastos   = vals.reduce((s, d) => s - d.costes, 0)
+    return { ingresos, gastos, resultado: ingresos - gastos, meses: vals.length }
+  }, [live2026])
 
   const lastMonth = useMemo(() => {
     for (let m = 12; m >= 1; m--) if (live2026[m]) return m
@@ -801,6 +824,32 @@ function PLTab() {
 
   return (
     <section className="sa-section">
+      {/* Resumen del año en curso + cuadre con el banco (Ramiro, 15/11 11:10): esto vivía como
+          "fichas" en Gastos banco, pero ahí "no decían nada" (11:05) -- el sitio donde importan
+          es el P&L, por año natural, no por los 12 meses móviles de abajo. */}
+      <SectionTitle>2026 (año en curso, hasta {!loading ? PL_MONTHS_FULL[lastMonth - 1] : '…'})</SectionTitle>
+      <div className="sa-kpis">
+        <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#60a5fa', oscuro) }}>
+          <span className="sa-kpi__value">{fmtPLVal(resumenAnual.ingresos)}</span>
+          <span className="sa-kpi__label">Ingresos (WooCommerce, sin IVA)</span>
+        </div>
+        <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#ef4444', oscuro) }}>
+          <span className="sa-kpi__value">{fmtPLVal(resumenAnual.gastos)}</span>
+          <span className="sa-kpi__label">Gastos (banco, consolidado, sin internos)</span>
+        </div>
+        <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema(resumenAnual.resultado >= 0 ? '#34d399' : '#ef4444', oscuro) }}>
+          <span className="sa-kpi__value">{fmtPLVal(resumenAnual.resultado)}</span>
+          <span className="sa-kpi__label">Resultado</span>
+        </div>
+      </div>
+      {cuadre && cuadre.apertura != null && (
+        <p className={Math.abs(cuadre.diferencia ?? 0) > 50 ? 'sa-error' : 'sa-legend'}>
+          <strong>Cuadre con el banco (Club):</strong> apertura 1/1 {fmtPLVal(cuadre.apertura)}{cuadre.aperturaEsSemilla ? ' (estimada del CSV, editable)' : ''} + resultado Club {fmtPLVal(cuadre.resultado)} − traspasos a la Rocoteca {fmtPLVal(cuadre.traspasosRocodromo)} = {fmtPLVal((cuadre.apertura || 0) + cuadre.resultado - cuadre.traspasosRocodromo)}, saldo real {cuadre.fechaHoy ? `a ${cuadre.fechaHoy.slice(8,10)}/${cuadre.fechaHoy.slice(5,7)}` : 'hoy'} {fmtPLVal(cuadre.saldoHoy)}
+          {Math.abs(cuadre.diferencia ?? 0) > 50 ? ` — diferencia de ${fmtPLVal(cuadre.diferencia)} sin explicar.` : ' — cuadra ✓.'}
+          {' '}Los traspasos a la Rocoteca (ene-jul 26, antes de dejar de hacerse) no son gasto del Club: ese dinero paga gastos que la Rocoteca ya contabiliza aparte — por eso ene-jul el resultado real es el consolidado Club+Rocoteca, no solo el Club.
+        </p>
+      )}
+
       <div className="sa-pl-tabs">
         {PL_METRICS_LIST.map(m => (
           <button key={m.key} className={`sa-pl-tab${metric === m.key ? ' sa-pl-tab--active' : ''}`} onClick={() => setMetric(m.key)}>
