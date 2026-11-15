@@ -933,10 +933,7 @@ function PLTab() {
   // Ramiro; day para afinarlo por familia necesita blendear con el reparto real de WooCommerce,
   // que solo existe desde mayo -- lo dejo aparte, ver nota). WooCommerce queda como una cifra de
   // comparación aparte, no como el total.
-  const { data: expData, cuadre, cuadreRocoteca, loading: loadingExp, refetch: refetchExp } = useExpenses('', 'all', true)
-  const monthsSinceJan = new Date().getMonth() + 1
-  const { data: wcData, loading: loadingWc } = useRevenue(monthsSinceJan, true)
-  const loading = loadingExp || loadingWc
+  const { data: expData, cuadre, cuadreRocoteca, loading, refetch: refetchExp } = useExpenses('', 'all', true)
   const [metric,  setMetric ] = useState('ventas')
   const [view,    setView   ] = useState('comparativa')
   const [showIva, setShowIva] = useState(true)
@@ -955,23 +952,42 @@ function PLTab() {
     } catch (e) { alert(e.message) } finally { setGuardandoApertura(false); setEditandoApertura(null) }
   }
 
+  // Ramiro, 15/11 20:00 (bug visto en oct/sep): "ingresos sin IVA" dividía TODO entre 1,21
+  // (iva_repercutido, estimado del banco por categoría con un 21% genérico para transferencia/
+  // TPV) — pero casi todo lo que entra son clases, exentas de IVA, así que oct salía 13.309 €
+  // en vez de ≈16.000 €. Ahora se usa iva_repercutido_real (de las facturas reales de
+  // WooCommerce, que ya refleja el 0% de las clases). En los meses de antes de la migración
+  // (sin facturas reales) se estima con el % medio real de los meses que SÍ las tienen — nunca
+  // con un 21% fijo. Gastos se dejan CON IVA a propósito (20:10 punto 2): casi todo lo que
+  // vendemos va exento, así que el IVA de las compras no se recupera y es coste real.
   const live2026 = useMemo(() => {
     if (!expData) return {}
     const acc = {}
     expData.forEach(r => {
       const [y, m] = r.month.split('-').map(Number)
       if (y !== 2026) return
-      if (!acc[m]) acc[m] = { ventas: 0, costes: 0, iva_r: 0, iva_s: 0 }
-      acc[m].ventas += Math.abs(r.total_ingresos || 0) - Math.abs(r.iva_repercutido || 0)
-      acc[m].costes += Math.abs(r.total_costes    || 0)
-      acc[m].iva_r  += Math.abs(r.iva_repercutido || 0)
-      acc[m].iva_s  += Math.abs(r.iva_soportado   || 0)
+      if (!acc[m]) acc[m] = { ingresoBanco: 0, costes: 0, ivaReal: 0 }
+      acc[m].ingresoBanco += Math.abs(r.total_ingresos || 0)
+      acc[m].costes        += Math.abs(r.total_costes  || 0)
+      acc[m].ivaReal        += Math.abs(r.iva_repercutido_real || 0)
     })
+    let sumaIvaConFactura = 0, sumaIngresoConFactura = 0
+    Object.values(acc).forEach(d => {
+      if (d.ivaReal > 0) { sumaIvaConFactura += d.ivaReal; sumaIngresoConFactura += d.ingresoBanco }
+    })
+    const pctMedioReal = sumaIngresoConFactura > 0 ? sumaIvaConFactura / sumaIngresoConFactura : 0
     const res = {}
     for (let m = 1; m <= 12; m++) {
       if (!acc[m]) continue
-      const d = acc[m], resultado = d.ventas - d.costes
-      res[m] = { ventas: d.ventas, costes: -d.costes, resultado }
+      const d = acc[m]
+      const tieneFactura = d.ivaReal > 0
+      const ivaUsado = tieneFactura ? d.ivaReal : d.ingresoBanco * pctMedioReal
+      const ventas = d.ingresoBanco - ivaUsado
+      const resultado = ventas - d.costes
+      res[m] = {
+        ventas, costes: -d.costes, resultado,
+        ivaFuente: tieneFactura ? 'IVA real de facturas' : `IVA estimado (${(pctMedioReal * 100).toFixed(1)}%, media de los meses con facturas)`,
+      }
     }
     return res
   }, [expData])
@@ -980,12 +996,8 @@ function PLTab() {
     const vals = Object.values(live2026)
     const ingresos = vals.reduce((s, d) => s + d.ventas, 0)
     const gastos   = vals.reduce((s, d) => s - d.costes, 0)
-    const ventasWoo = (wcData || []).reduce((s, r) => {
-      const [y] = r.month.split('-').map(Number)
-      return y === 2026 ? s + (r.total || 0) : s
-    }, 0)
-    return { ingresos, gastos, resultado: ingresos - gastos, meses: vals.length, ventasWoo }
-  }, [live2026, wcData])
+    return { ingresos, gastos, resultado: ingresos - gastos, meses: vals.length }
+  }, [live2026])
 
   const lastMonth = useMemo(() => {
     for (let m = 12; m >= 1; m--) if (live2026[m]) return m
@@ -1042,34 +1054,37 @@ function PLTab() {
       : [fmtPLVal(v), name.replace('y', '')],
   }
 
-  return (
-    <section className="sa-section">
-      {/* Resumen del año en curso + cuadre con el banco (Ramiro, 15/11 11:10): esto vivía como
-          "fichas" en Gastos banco, pero ahí "no decían nada" (11:05) -- el sitio donde importan
-          es el P&L, por año natural, no por los 12 meses móviles de abajo. */}
+  // Ramiro, 15/11 20:10: el resumen del año en curso + cuadre con el banco se mueve al FINAL de
+  // la pestaña ("¿qué es esto que sale lo primero?") — arriba se queda la gráfica y el detalle
+  // mensual. Quitada la ficha "Ventas en WooCommerce (desde may-26)": confunde (no es el total
+  // del año) y ya está en Superadmin › Ingresos.
+  const resumenAnualYCuadre = (
+    <>
       <SectionTitle>2026 (año en curso, hasta {!loading ? PL_MONTHS_FULL[lastMonth - 1] : '…'})</SectionTitle>
       <div className="sa-kpis">
         <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#60a5fa', oscuro) }}>
           <span className="sa-kpi__value">{fmtPLVal(resumenAnual.ingresos)}</span>
-          <span className="sa-kpi__label">Ingresos (banco, consolidado, sin IVA estimado)</span>
+          <span className="sa-kpi__label">Ingresos (banco, consolidado, sin IVA real/estimado)</span>
         </div>
         <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#ef4444', oscuro) }}>
           <span className="sa-kpi__value">{fmtPLVal(resumenAnual.gastos)}</span>
-          <span className="sa-kpi__label">Gastos (banco, consolidado, sin internos)</span>
+          <span className="sa-kpi__label">Gastos (banco, consolidado, con IVA — casi todo lo que vendemos va exento, no se recupera)</span>
         </div>
         <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema(resumenAnual.resultado >= 0 ? '#34d399' : '#ef4444', oscuro) }}>
           <span className="sa-kpi__value">{fmtPLVal(resumenAnual.resultado)}</span>
           <span className="sa-kpi__label">Resultado</span>
         </div>
-        <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#a78bfa', oscuro) }}>
-          <span className="sa-kpi__value">{fmtPLVal(resumenAnual.ventasWoo)}</span>
-          <span className="sa-kpi__label">Ventas en WooCommerce (desde may-26, no el total del año)</span>
-        </div>
       </div>
+      {/* Cowork, 15/11 20:10 punto 4: línea gris siempre (nunca naranja), con el detalle largo
+          de los traspasos en el ⓘ en vez de como texto suelto debajo. */}
       {[['club', 'Club', cuadre], ['rocoteca', 'Rocoteca', cuadreRocoteca]].map(([entity, label, c]) => (
         c && (
-          <p key={entity} className={Math.abs(c.diferencia ?? 0) > 50 ? 'sa-error' : 'sa-legend'}>
-            <strong>Cuadre con el banco ({label}):</strong>{' '}
+          <p
+            key={entity}
+            className="sa-legend"
+            title={entity === 'club' ? 'Los traspasos con la Rocoteca («Uso de Rocódromo», ene-jul 26, ya no se hace) no son gasto del Club: ese dinero paga gastos que la Rocoteca ya contabiliza aparte — por eso ene-jul el resultado real es el consolidado Club+Rocoteca, no solo el Club.' : undefined}
+          >
+            <strong>Cuadre con el banco ({label}){entity === 'club' ? ' ⓘ' : ''}:</strong>{' '}
             apertura 1/1{' '}
             {editandoApertura === entity ? (
               <>
@@ -1092,18 +1107,19 @@ function PLTab() {
             {c.apertura != null && (
               <>
                 {' '}+ resultado {fmtPLVal(c.resultado)}
-                {c.traspasosRocodromo !== 0 && <> {c.traspasosRocodromo >= 0 ? '+' : '−'} traspasos con la Rocoteca {fmtPLVal(Math.abs(c.traspasosRocodromo))}</>}
-                {' '}= {fmtPLVal(c.apertura + c.resultado + c.traspasosRocodromo)}, saldo real {c.fechaHoy ? `a ${c.fechaHoy.slice(8,10)}/${c.fechaHoy.slice(5,7)}` : 'hoy'} {fmtPLVal(c.saldoHoy)}
-                {Math.abs(c.diferencia ?? 0) > 50 ? ` — diferencia de ${fmtPLVal(c.diferencia)} sin explicar.` : ' — cuadra ✓.'}
+                {c.traspasosRocodromo !== 0 && <> {c.traspasosRocodromo >= 0 ? '+' : '−'} traspasos {fmtPLVal(Math.abs(c.traspasosRocodromo))}</>}
+                {' '}= esperado {fmtPLVal(c.apertura + c.resultado + c.traspasosRocodromo)} · real {c.fechaHoy ? `a ${c.fechaHoy.slice(8,10)}/${c.fechaHoy.slice(5,7)}` : 'hoy'} {fmtPLVal(c.saldoHoy)}
+                {Math.abs(c.diferencia ?? 0) > 50 ? ` · diferencia ${fmtPLVal(c.diferencia)} sin explicar` : ' · cuadra ✓'}
               </>
-            )}
-            {entity === 'club' && c.apertura != null && (
-              <> Los traspasos con la Rocoteca («Uso de Rocódromo», ene-jul 26, ya no se hace) no son gasto del Club: ese dinero paga gastos que la Rocoteca ya contabiliza aparte — por eso ene-jul el resultado real es el consolidado Club+Rocoteca, no solo el Club.</>
             )}
           </p>
         )
       ))}
+    </>
+  )
 
+  return (
+    <section className="sa-section">
       <div className="sa-pl-tabs">
         {PL_METRICS_LIST.map(m => (
           <button key={m.key} className={`sa-pl-tab${metric === m.key ? ' sa-pl-tab--active' : ''}`} onClick={() => setMetric(m.key)}>
@@ -1185,6 +1201,8 @@ function PLTab() {
       )}
 
       <PLAccordion live2026={live2026} lastMonth={lastMonth} />
+
+      {resumenAnualYCuadre}
     </section>
   )
 }
@@ -1220,7 +1238,7 @@ function PLAccordion({ live2026, lastMonth }) {
                     <span className="sa-pl-pill sa-pl-pill--25">2025: {Math.abs(v25ventas).toLocaleString('es-ES')}€</span>
                   )}
                   {v26?.ventas != null && (
-                    <span className="sa-pl-pill sa-pl-pill--26">2026: {Math.abs(v26.ventas).toLocaleString('es-ES')}€ banco</span>
+                    <span className="sa-pl-pill sa-pl-pill--26" title={`Ingresos sin IVA = ingresos del banco (Club+Rocoteca, sin internos) − ${v26.ivaFuente}.`}>2026: {Math.abs(v26.ventas).toLocaleString('es-ES')}€ banco ⓘ</span>
                   )}
                 </div>
               </div>
@@ -1250,7 +1268,9 @@ function PLAccordion({ live2026, lastMonth }) {
                           <td className="sa-pl-table__metric">{label}</td>
                           <td className="sa-pl-table__val">{v24 != null ? Math.abs(v24).toLocaleString('es-ES') + '€' : '—'}</td>
                           <td className="sa-pl-table__val">{v25 != null ? Math.abs(v25).toLocaleString('es-ES') + '€' : '—'}</td>
-                          <td className="sa-pl-table__val sa-pl-table__val--26">{v2026 != null ? Math.abs(v2026).toLocaleString('es-ES') + '€' : '—'}</td>
+                          <td className="sa-pl-table__val sa-pl-table__val--26" title={key === 'ventas' && v26 ? v26.ivaFuente : (key === 'costes' ? 'Con IVA: casi todo lo que vendemos va exento, el IVA de las compras no se recupera y es coste.' : undefined)}>
+                            {v2026 != null ? Math.abs(v2026).toLocaleString('es-ES') + '€' : '—'}{key === 'ventas' && v2026 != null ? ' ⓘ' : ''}
+                          </td>
                           <td className={`sa-pl-table__delta${delta == null ? '' : delta >= 0 ? ' sa-pl-table__delta--pos' : ' sa-pl-table__delta--neg'}`}>
                             {delta != null ? `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%` : '—'}
                           </td>
