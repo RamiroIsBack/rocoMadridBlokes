@@ -3904,17 +3904,28 @@ function blokes_get_all_subscription_data() {
 // age_addon/pa_edad del formulario) y se le asigna el profe de adultos de esa franja (Sigurd,
 // Eva…), inflando filas falsas en Superadmin › Clases y metiendo niños en el aforo de adultos
 // de Grupos. Regla pedida: si DESPUÉS de esos dos intentos sigue saliendo "Adultos", mirar la
-// franja (día ya emparejado + horario) -- estas 4 no tienen ninguna clase de adultos a esa hora,
-// así que SIEMPRE son niños. Nunca pisa una edad que ya viniera bien puesta (Woo o el formulario).
-// M-J 19:30-21:00 (adolescentes) NO entra aquí a propósito: esa franja sí puede tener adultos,
-// ahí hay que fiarse del age_addon tal cual venga.
+// franja (día ya emparejado + horario) -- estas franjas no tienen ninguna clase de adultos a esa
+// hora, así que SIEMPRE son niños/adolescentes. Nunca pisa una edad que ya viniera bien puesta
+// (Woo o el formulario). M-J 19:30-21:00 NO entra aquí a propósito: el selector del formulario
+// («RocoMadrid steps») ya tiene un slot propio de adolescentes ahí y el age_addon es de fiar.
+// 15/11 17:30 (cowork, "zanjar esto bien" — cruce del selector de RocoMadrid steps + variaciones
+// de Woo + Excel de Grupos, sustituye la tabla de las 16:20): el selector oficial de "medianos"
+// M-J es 18:30-19:30 (como ya estaba) — PERO sigue publicada una variación de Woo vieja y huérfana
+// fuera del selector a las 18:30-**20:00** ("Martes-Jueves · Adultos · 18:30-20:00", stock 21),
+// con 13 suscripciones activas ahí mismo (11 niños según el formulario, "M-J 18.30 MEDIANOS" en
+// el Excel). Hasta que Ramiro decida si esas suscripciones se pasan al slot oficial (cambio de
+// producto/precio, NO tocar sin su OK), Blokes trata TAMBIÉN 18:30-20:00 M-J como medianos, para
+// no perderlas ni contarlas como adultos. También se añade Viernes 19:00-20:00 (adolescentes,
+// "V. Inf. 19.00" en el Excel), que antes no estaba cubierta.
 function blokes_corrige_edad_por_franja($sub) {
     if (($sub['edad'] ?? 'Adultos') !== 'Adultos') return $sub;
     $franjas_sin_adultos = array(
         'Martes-Jueves|17:30-18:30'   => 'Menores (6-12 años)',
-        'Martes-Jueves|18:30-19:30'   => 'Menores (6-12 años)',
+        'Martes-Jueves|18:30-19:30'   => 'Menores (6-12 años)', // "medianos", slot oficial del selector
+        'Martes-Jueves|18:30-20:00'   => 'Menores (6-12 años)', // "medianos" — variación vieja huérfana, 15/11 17:30
         'Lunes-Miércoles|17:30-18:30' => 'Menores (6-12 años)',
         'Viernes|18:00-19:00'         => 'Menores (6-12 años)',
+        'Viernes|19:00-20:00'         => 'Adolescentes (12-18 años)',
     );
     $clave = blokes_dia_a_pareja($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '');
     if (isset($franjas_sin_adultos[$clave])) $sub['edad'] = $franjas_sin_adultos[$clave];
