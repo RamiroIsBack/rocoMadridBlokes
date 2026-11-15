@@ -367,7 +367,11 @@ function ClasesRetencionSection() {
     const meta = PROF_META[prof]
     if (!meta || !meta.horasSem) return 0
     const real = data?.costeRealProfe?.[normForProf(prof)]
-    if (real == null) return 0
+    // Si no hay dato real para ese mes (p. ej. Nóminas sin nada cargado para ese mes concreto),
+    // usar la ficha en vez de 0€ — 0 es la peor respuesta posible para una rentabilidad (cowork,
+    // 15/11 10:40: "deja el coste a 0€ en todas"). Investigando por qué sale vacío — mientras
+    // tanto, mejor una estimación que un 0 que hace parecer gratis a todos los profes.
+    if (real == null || real <= 0) return meta.costoHClase || 0
     return real / (meta.horasSem * 4.33)
   }
   // Sesiones por semana de esta clase: "Martes-Jueves"/"Lunes-Miércoles" = 2, un día suelto
