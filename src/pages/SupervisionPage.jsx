@@ -1915,6 +1915,7 @@ const CAMBIO_TIPO_LABEL = {
   pago_nuevo: 'Pago nuevo', nota: 'Nota cambiada', telefono: 'Teléfono cambiado',
   alumno_nuevo: 'Alumno nuevo', fila_borrada: 'Fila borrada del Excel',
   web_sin_fila: 'Cobro web sin fila en el Excel',
+  fila_duplicada_excel: 'Fila repetida en el Excel',
 }
 
 // Descripción de cada cambio según su tipo — "datos" viene en camelCase desde el servidor
@@ -1934,6 +1935,8 @@ function CambioDetalle({ c }) {
       return <span>Ya no está en el Excel — no se da de baja sola, solo aviso.</span>
     case 'web_sin_fila':
       return <span>Se cobró en la web ({fmtEur(d.importe)}, {d.metodo}) pero no se encontró su fila en el Excel — añádela y pulsa Aplicar para escribirlo solo.</span>
+    case 'fila_duplicada_excel':
+      return <span>Misma persona en {d.claves?.length || 2} filas de esta pestaña del Excel{d.telefonos?.length > 1 ? ` (teléfonos: ${d.telefonos.filter(Boolean).join(', ') || 'alguna sin teléfono'})` : ''} — Blokes no escribe en el Excel, bórrala a mano cuando puedas y luego marca esto como visto.</span>
     default:
       return <span className="sv-ot-muted">{JSON.stringify(d)}</span>
   }

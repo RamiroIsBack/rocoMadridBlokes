@@ -7745,9 +7745,16 @@ function blokes_sync_grupos_sincronizar() {
 
         $claves_vistas = array();
         $cambios_pestana = 0;
+        // Fila repetida en la MISMA pestaña del Excel (cowork, 15/11 13:20: "Olga González
+        // Arribas en 3 filas" — el Excel de Eva la tenía dos veces, una sin teléfono) — distinto
+        // de "alumno_nuevo"/"fila_borrada" (eso compara con la foto de la sincronización
+        // anterior; esto compara filas ENTRE SÍ dentro de la misma pestaña, ahora mismo).
+        $nombres_vistos = array(); // nombreCompacto => [clave, ...]
         foreach ($r['filas'] as $fila) {
             $clave = blokes_sync_grupos_clave($fila['nombre'], $fila['telefono']);
             $claves_vistas[$clave] = true;
+            $nombre_compacto_fila = blokes_externos_normaliza_nombre_compacto($fila['nombre'] ?? '');
+            if ($nombre_compacto_fila) $nombres_vistos[$nombre_compacto_fila][] = array('clave' => $clave, 'nombre' => $fila['nombre'], 'telefono' => $fila['telefono']);
             $anterior = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla_snap} WHERE pestana = %s AND clave = %s", $tab, $clave), ARRAY_A);
             $pagos_anteriores = $anterior ? (json_decode($anterior['pagos_json'], true) ?: array()) : array();
 
@@ -7796,6 +7803,19 @@ function blokes_sync_grupos_sincronizar() {
                 $tab, $clave, $fila['nombre'], $fila['telefono'], $fila['notas'], $fila['exento'] ? 1 : 0, wp_json_encode($fila['pagos']), current_time('mysql'),
                 $fila['nombre'], $fila['telefono'], $fila['notas'], $fila['exento'] ? 1 : 0, wp_json_encode($fila['pagos']), current_time('mysql')
             ));
+        }
+
+        // Dos o más filas con el mismo nombre (sin espacios) en la misma pestaña: aviso aparte,
+        // nunca se autoaplica ni se borra nada — es Eva quien tiene que quitar la fila de más en
+        // el Excel real (Blokes no escribe ahí). Se guarda bajo la PRIMERA clave vista, para no
+        // duplicar el aviso en cada sincronización mientras nadie lo resuelve.
+        foreach ($nombres_vistos as $nombre_compacto_dup => $vistas_dup) {
+            $claves_dup = array_values(array_unique(array_column($vistas_dup, 'clave')));
+            if (count($claves_dup) < 2) continue;
+            blokes_sync_grupos_upsert_cambio($tab, $claves_dup[0], $vistas_dup[0]['nombre'], $vistas_dup[0]['telefono'] ?: '', 'fila_duplicada_excel', null, array(
+                'claves' => $claves_dup, 'telefonos' => array_values(array_unique(array_column($vistas_dup, 'telefono'))),
+            ), null);
+            $cambios_pestana++;
         }
 
         // Filas que estaban en la instantánea y ya no aparecen en el Excel: se avisa, nunca se
