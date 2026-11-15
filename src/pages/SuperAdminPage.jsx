@@ -475,6 +475,11 @@ function ClasesRetencionSection() {
               </tbody>
             </table>
           </div>
+          {data.finDesgloseActual && (
+            <p className="sa-legend">
+              «Al final» del mes en curso ({data.finDesgloseActual.conCuentaWeb + data.finDesgloseActual.sinCuentaWeb}): {data.finDesgloseActual.conCuentaWeb} con cuenta web real (login) + {data.finDesgloseActual.sinCuentaWeb} identificadas solo por teléfono/nombre (pedido de invitado, sin cuenta) — estas últimas son las que más probablemente duplican a alguien ya contado con cuenta web. Si no coincide con «Personas» de Grupos, la diferencia está sobre todo ahí.
+            </p>
+          )}
 
           <h3 className="sa-subtitle">Retención por cohorte (de quien se dio de alta ese mes, % que sigue a 1/3/6 meses)</h3>
           <div className="sa-profit-wrap">

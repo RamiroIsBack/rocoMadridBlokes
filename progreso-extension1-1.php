@@ -5852,7 +5852,13 @@ function superadmin_gestion_grupos($request) {
     // grupo, con el mismo aspecto que las de WooCommerce para que las bandejas y bandejas de la
     // 8.3 los traten igual. Sin pedido real, así que nunca tienen "pendiente" calculado (se ve
     // en la columna del mes si falta el pago, no en la bandeja "Cobrar este mes").
-    foreach (blokes_externos_todos() as $ext) {
+    // Cowork, 15/11 13:20: el Excel de Eva a veces tiene a la MISMA persona en dos filas (una
+    // sin teléfono, otra con) — se procesan primero los externos CON teléfono para que sean
+    // ellos quienes queden como "canónicos" si hay que fusionar por nombre con otro externo sin
+    // teléfono de la misma pestaña/grupo.
+    $externos_todos = blokes_externos_todos();
+    usort($externos_todos, function($a, $b) { return (empty($a['telefono']) ? 1 : 0) <=> (empty($b['telefono']) ? 1 : 0); });
+    foreach ($externos_todos as $ext) {
         $dia_ext = $ext['dia']; $horario_ext = $ext['horario']; $edad_ext = $ext['edad'] ?: 'Adultos';
         $es_py_ext = in_array($dia_ext, array('Pilates', 'Yoga'), true);
         $pareja_ext = $es_py_ext ? $dia_ext : blokes_dia_a_pareja($dia_ext);
@@ -5874,6 +5880,10 @@ function superadmin_gestion_grupos($request) {
             : (($nombre_ext_compacto && isset($nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto]))
                 ? $nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto]
                 : 'ext' . $ext['id']);
+        // Este externo también cuenta para fusionar al SIGUIENTE (otro externo duplicado de la
+        // misma persona en el Excel, p. ej. una fila sin teléfono y otra con — 15/11 13:20).
+        if ($tel_ext_norm && !isset($telefono_a_pk_por_grupo[$gkey_ext][$tel_ext_norm])) $telefono_a_pk_por_grupo[$gkey_ext][$tel_ext_norm] = $persona_key_ext;
+        if ($nombre_ext_compacto && !isset($nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto])) $nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto] = $persona_key_ext;
         $grupos[$gkey_ext]['personas'][$persona_key_ext][] = array(
             'subId' => 'ext-' . $ext['id'], 'alumno' => $ext['nombre'], 'telefono' => $ext['telefono'],
             'optinWhatsapp' => $ext['telefono'] ? ($optin_por_tel[blokes_externos_normaliza_telefono($ext['telefono'])] ?? null) : null,
@@ -11391,122 +11401,172 @@ function blokes_externos_normaliza_nombre_compacto($n) {
     return str_replace(' ', '', blokes_externos_normaliza_nombre($n));
 }
 
-function blokes_hist_pagos_primeros_pagos() {
+// TODOS los meses pagados por persona en hist-pagos (import de hv_control_clientes) — no solo
+// el primero: hace falta para saber también CUÁNDO deja de pagar (cowork, 15/11 13:15: "baja =
+// persona que deja de pagar en el Excel/hist-pagos, con 1 mes de margen por pagos tardíos" —
+// antes solo se guardaba el primer mes, que bastaba para "Nuevo" pero no para "Baja").
+function blokes_hist_pagos_pagos() {
     global $wpdb;
     blokes_ensure_hist_pagos_table();
     $rows = $wpdb->get_results(
-        "SELECT telefono, nombre, email, MIN(fecha) AS primera FROM " . blokes_hist_pagos_table() . "
-         WHERE fecha IS NOT NULL AND fecha != '' GROUP BY telefono, nombre, email",
+        "SELECT telefono, nombre, email, fecha FROM " . blokes_hist_pagos_table() . " WHERE fecha IS NOT NULL AND fecha != ''",
         ARRAY_A
     );
-    $por_telefono = array(); $por_nombre = array(); $por_nombre_compacto = array(); $por_email = array();
+    $por_telefono_tmp = array(); $por_nombre = array(); $por_nombre_compacto = array(); $por_email = array();
     foreach ($rows as $r) {
-        $ym = substr((string) $r['primera'], 0, 7);
+        $ym = substr((string) $r['fecha'], 0, 7);
         if (!preg_match('/^\d{4}-\d{2}$/', $ym)) continue;
         $tel   = blokes_externos_normaliza_telefono((string) ($r['telefono'] ?? ''));
         $nom   = blokes_externos_normaliza_nombre((string) ($r['nombre'] ?? ''));
         $nomc  = blokes_externos_normaliza_nombre_compacto((string) ($r['nombre'] ?? ''));
         $email = strtolower(trim((string) ($r['email'] ?? '')));
-        if ($tel) $por_telefono[$tel][] = array('nombreNorm' => $nom, 'minYm' => $ym);
-        if ($nom && (!isset($por_nombre[$nom]) || $ym < $por_nombre[$nom])) $por_nombre[$nom] = $ym;
-        if ($nomc && (!isset($por_nombre_compacto[$nomc]) || $ym < $por_nombre_compacto[$nomc])) $por_nombre_compacto[$nomc] = $ym;
-        if ($email && (!isset($por_email[$email]) || $ym < $por_email[$email])) $por_email[$email] = $ym;
+        if ($tel) $por_telefono_tmp[$tel][$nom][$ym] = true;
+        if ($nom) $por_nombre[$nom][$ym] = true;
+        if ($nomc) $por_nombre_compacto[$nomc][$ym] = true;
+        if ($email) $por_email[$email][$ym] = true;
     }
-    return array('porTelefono' => $por_telefono, 'porNombre' => $por_nombre, 'porNombreCompacto' => $por_nombre_compacto, 'porEmail' => $por_email);
+    return blokes_externo_pagos_empaquetar($por_telefono_tmp, $por_nombre, $por_nombre_compacto, $por_email);
 }
 
-// Primer mes pagado por persona en el Excel de Grupos EN VIVO (la hoja de Eva, no hist-pagos —
-// cowork, 15/11 11:45: "el histórico de 2026 está en el Excel, no en hist-pagos, que es de
-// antes"). Mismo formato que blokes_hist_pagos_primeros_pagos() para que blokes_externo_primer_pago()
-// trate las dos fuentes igual.
+// Mismo empaquetado que usan blokes_hist_pagos_pagos() y blokes_grupos_excel_pagos(): de
+// "teléfono => nombreNorm => Set(ym)" a "porTelefono[tel] = [{nombreNorm, meses}, ...]", y los
+// demás mapas de Set(ym) a lista de ym.
+function blokes_externo_pagos_empaquetar($por_telefono_tmp, $por_nombre, $por_nombre_compacto, $por_email) {
+    $por_telefono = array();
+    foreach ($por_telefono_tmp as $tel => $por_nombre_tel) {
+        foreach ($por_nombre_tel as $nom => $meses_set) {
+            $por_telefono[$tel][] = array('nombreNorm' => $nom, 'meses' => array_keys($meses_set));
+        }
+    }
+    $aplanar = function($mapa) { return array_map('array_keys', $mapa); };
+    return array(
+        'porTelefono' => $por_telefono, 'porNombre' => $aplanar($por_nombre),
+        'porNombreCompacto' => $aplanar($por_nombre_compacto), 'porEmail' => $aplanar($por_email),
+    );
+}
+
+// TODOS los meses pagados por persona en el Excel de Grupos EN VIVO (la hoja de Eva, no
+// hist-pagos — cowork, 15/11 11:45: "el histórico de 2026 está en el Excel, no en hist-pagos,
+// que es de antes"). Mismo formato que blokes_hist_pagos_pagos().
 // CACHEADO 1 hora (transient): leer las ~150 pestañas de la hoja entera desde Google Sheets
 // dentro de /classes —una ruta que se pide en cada carga de Grupos, Pendientes de cobro y
 // Superadmin Clases— sin caché repetiría el fallo de rendimiento que tiró /revenue con los
 // reembolsos de WooCommerce (d267515). La primera carga tras cada hora puede tardar unos
 // segundos (igual que ya tarda "Sincronizar ahora" de Grupos); las demás salen del caché.
 // Nunca puede tirar /classes si Sheets falla o no está configurado: devuelve vacío y listo.
-function blokes_grupos_excel_primeros_pagos() {
-    $cache = get_transient('blokes_grupos_excel_primeros_pagos_v1');
+function blokes_grupos_excel_pagos() {
+    $cache = get_transient('blokes_grupos_excel_pagos_v2');
     if (is_array($cache)) return $cache;
     $vacio = array('porTelefono' => array(), 'porNombre' => array(), 'porNombreCompacto' => array(), 'porEmail' => array());
     try {
         $activa = blokes_sync_grupos_sheet_activa();
         $sheet_id = $activa['id'] ?? null;
-        if (!$sheet_id) { set_transient('blokes_grupos_excel_primeros_pagos_v1', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
+        if (!$sheet_id) { set_transient('blokes_grupos_excel_pagos_v2', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
 
         $meta = blokes_sync_grupos_get($sheet_id, '?fields=sheets.properties.title');
-        if (is_wp_error($meta)) { set_transient('blokes_grupos_excel_primeros_pagos_v1', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
+        if (is_wp_error($meta)) { set_transient('blokes_grupos_excel_pagos_v2', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
         $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
         $no_son_grupo = array('balance');
 
         $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($sheet_id, $pestanas);
-        if (is_wp_error($valores_por_pestana)) { set_transient('blokes_grupos_excel_primeros_pagos_v1', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
+        if (is_wp_error($valores_por_pestana)) { set_transient('blokes_grupos_excel_pagos_v2', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
 
-        $por_telefono = array(); $por_nombre = array(); $por_nombre_compacto = array();
+        $por_telefono_tmp = array(); $por_nombre = array(); $por_nombre_compacto = array();
         foreach ($pestanas as $tab) {
             if (in_array(mb_strtolower(trim($tab)), $no_son_grupo, true)) continue;
             $r = blokes_sync_grupos_leer_pestana_filas($valores_por_pestana[$tab] ?? array());
             if (empty($r['bloques'])) continue;
             foreach ($r['filas'] as $f) {
                 if (empty($f['pagos'])) continue;
-                $ym_min = min(array_keys($f['pagos']));
-                if (!preg_match('/^\d{4}-\d{2}$/', $ym_min)) continue;
                 $tel  = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
                 $nom  = blokes_externos_normaliza_nombre($f['nombre'] ?? '');
                 $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
-                if ($tel) $por_telefono[$tel][] = array('nombreNorm' => $nom, 'minYm' => $ym_min);
-                if ($nom && (!isset($por_nombre[$nom]) || $ym_min < $por_nombre[$nom])) $por_nombre[$nom] = $ym_min;
-                if ($nomc && (!isset($por_nombre_compacto[$nomc]) || $ym_min < $por_nombre_compacto[$nomc])) $por_nombre_compacto[$nomc] = $ym_min;
+                foreach (array_keys($f['pagos']) as $ym) {
+                    if (!preg_match('/^\d{4}-\d{2}$/', $ym)) continue;
+                    if ($tel) $por_telefono_tmp[$tel][$nom][$ym] = true;
+                    if ($nom) $por_nombre[$nom][$ym] = true;
+                    if ($nomc) $por_nombre_compacto[$nomc][$ym] = true;
+                }
             }
         }
-        $resultado = array('porTelefono' => $por_telefono, 'porNombre' => $por_nombre, 'porNombreCompacto' => $por_nombre_compacto, 'porEmail' => array());
-        set_transient('blokes_grupos_excel_primeros_pagos_v1', $resultado, HOUR_IN_SECONDS);
+        $resultado = blokes_externo_pagos_empaquetar($por_telefono_tmp, $por_nombre, $por_nombre_compacto, array());
+        set_transient('blokes_grupos_excel_pagos_v2', $resultado, HOUR_IN_SECONDS);
         return $resultado;
     } catch (\Throwable $e) {
-        error_log('Blokes blokes_grupos_excel_primeros_pagos: fallo: ' . $e->getMessage());
-        set_transient('blokes_grupos_excel_primeros_pagos_v1', $vacio, 10 * MINUTE_IN_SECONDS);
+        error_log('Blokes blokes_grupos_excel_pagos: fallo: ' . $e->getMessage());
+        set_transient('blokes_grupos_excel_pagos_v2', $vacio, 10 * MINUTE_IN_SECONDS);
         return $vacio;
     }
 }
 
-// Primer pago de una persona en una fuente externa (hist-pagos y, desde 15/11 11:45, el Excel de
-// Grupos cacheado — blokes_grupos_excel_primeros_pagos()). Teléfono normalizado → email → nombre
-// compacto (sin espacios, para cuentas web creadas con el usuario en vez del nombre real) →
-// email de la cuenta contra el nombre compacto de la fuente (cowork: "blancaarregui@... contra
-// Blanca Arregui") → nombre normalizado con espacios. Con teléfono compartido por más de una
-// persona (varios nombres distintos bajo el mismo teléfono) exige ADEMÁS que el nombre case.
-function blokes_externo_primer_pago($telefono, $nombre, $email, $fuente) {
+// TODOS los meses pagados por una persona en una fuente externa (hist-pagos o el Excel de
+// Grupos cacheado). Teléfono normalizado → email → nombre compacto (sin espacios, para cuentas
+// web creadas con el usuario en vez del nombre real) → email de la cuenta contra el nombre
+// compacto de la fuente (cowork: "blancaarregui@... contra Blanca Arregui") → nombre normalizado
+// con espacios. Con teléfono compartido por más de una persona (varios nombres distintos bajo
+// el mismo teléfono) exige ADEMÁS que el nombre case — si no, no se suman sus meses.
+function blokes_externo_meses_pagados($telefono, $nombre, $email, $fuente) {
     $tel  = blokes_externos_normaliza_telefono((string) $telefono);
     $nom  = blokes_externos_normaliza_nombre((string) $nombre);
     $nomc = blokes_externos_normaliza_nombre_compacto((string) $nombre);
     $eml  = strtolower(trim((string) $email));
     $eml_local = $eml ? blokes_externos_normaliza_nombre_compacto(explode('@', $eml)[0]) : '';
+    $meses = array();
     if ($tel && isset($fuente['porTelefono'][$tel])) {
         $candidatos = $fuente['porTelefono'][$tel];
         $nombres_distintos = array_unique(array_filter(array_column($candidatos, 'nombreNorm')));
-        $mejor = null;
         foreach ($candidatos as $c) {
             if (count($nombres_distintos) > 1 && $nom && $c['nombreNorm'] && !blokes_externos_nombres_parecidos($nom, $c['nombreNorm'])) continue;
-            if ($mejor === null || $c['minYm'] < $mejor) $mejor = $c['minYm'];
+            $meses = array_merge($meses, $c['meses']);
         }
-        if ($mejor !== null) return $mejor;
     }
-    if ($eml && isset($fuente['porEmail'][$eml])) return $fuente['porEmail'][$eml];
-    if ($nomc && isset($fuente['porNombreCompacto'][$nomc])) return $fuente['porNombreCompacto'][$nomc];
-    if ($eml_local && strlen($eml_local) >= 6 && isset($fuente['porNombreCompacto'][$eml_local])) return $fuente['porNombreCompacto'][$eml_local];
-    if ($nom && isset($fuente['porNombre'][$nom])) return $fuente['porNombre'][$nom];
-    return null;
+    if ($eml && isset($fuente['porEmail'][$eml])) $meses = array_merge($meses, $fuente['porEmail'][$eml]);
+    if ($nomc && isset($fuente['porNombreCompacto'][$nomc])) $meses = array_merge($meses, $fuente['porNombreCompacto'][$nomc]);
+    if ($eml_local && strlen($eml_local) >= 6 && isset($fuente['porNombreCompacto'][$eml_local])) $meses = array_merge($meses, $fuente['porNombreCompacto'][$eml_local]);
+    if ($nom && isset($fuente['porNombre'][$nom])) $meses = array_merge($meses, $fuente['porNombre'][$nom]);
+    return array_values(array_unique($meses));
+}
+function blokes_externo_primer_pago($telefono, $nombre, $email, $fuente) {
+    $meses = blokes_externo_meses_pagados($telefono, $nombre, $email, $fuente);
+    return $meses ? min($meses) : null;
 }
 
-// Primer pago en VARIAS fuentes externas a la vez (hist-pagos + Excel de Grupos) — el mínimo de
-// las dos, cada una con su propia regla de teléfono-compartido.
+// Mismo cálculo en VARIAS fuentes externas a la vez (hist-pagos + Excel de Grupos) — unión de
+// meses / mínimo de las dos, cada una con su propia regla de teléfono-compartido.
+function blokes_externo_meses_pagados_fuentes($telefono, $nombre, $email, $fuentes) {
+    $meses = array();
+    foreach ($fuentes as $fuente) $meses = array_merge($meses, blokes_externo_meses_pagados($telefono, $nombre, $email, $fuente));
+    return array_values(array_unique($meses));
+}
 function blokes_externo_primer_pago_fuentes($telefono, $nombre, $email, $fuentes) {
-    $mejor = null;
-    foreach ($fuentes as $fuente) {
-        $ym = blokes_externo_primer_pago($telefono, $nombre, $email, $fuente);
-        if ($ym !== null && ($mejor === null || $ym < $mejor)) $mejor = $ym;
+    $meses = blokes_externo_meses_pagados_fuentes($telefono, $nombre, $email, $fuentes);
+    return $meses ? min($meses) : null;
+}
+
+// Convierte la lista de meses pagados (hist-pagos/Excel) en intervalos [start,end], tratando
+// como cubierto cada mes pagado MÁS un margen de 2 meses tras el último pago antes de un hueco
+// real (cowork, 15/11 13:15: "baja = último mes pagado + 1, con 1 mes de margen" — mismo
+// criterio de 2 meses sin actividad que ya usa esta función para la baja real de WooCommerce,
+// ver $two_months_ago). $hasta_excluir_ym corta la lista en el mes en que empieza el primer
+// intervalo real de WooCommerce: a partir de ahí manda WooCommerce, no el Excel/hist-pagos.
+function blokes_externo_intervalos_desde_meses($meses_pagados, $hasta_excluir_ym) {
+    $meses = array_values(array_unique(array_filter($meses_pagados, function($m) use ($hasta_excluir_ym) {
+        return $hasta_excluir_ym === null || $m < $hasta_excluir_ym;
+    })));
+    sort($meses);
+    if (!$meses) return array();
+    $intervalos = array();
+    $start = $meses[0]; $prev = $meses[0];
+    foreach (array_slice($meses, 1) as $m) {
+        if (blokes_meses_entre($prev, $m) > 2) {
+            $intervalos[] = array('start' => $start, 'end' => blokes_mes_mas($prev, 2));
+            $start = $m;
+        }
+        $prev = $m;
     }
-    return $mejor;
+    $fin = blokes_mes_mas($prev, 2);
+    $intervalos[] = array('start' => $start, 'end' => ($hasta_excluir_ym !== null && $fin >= $hasta_excluir_ym) ? blokes_mes_mas($hasta_excluir_ym, -1) : $fin);
+    return $intervalos;
 }
 
 // Nuevo/Cambio de clase/Baja/Pendiente por persona (no por suscripción), agrupado por clase.
@@ -11631,10 +11691,11 @@ function blokes_altas_bajas_calcular($months) {
     // falta (ni es seguro) tocarlo aquí sin repetir esa prueba.
     // Dos fuentes externas (cowork, 15/11 11:45): hist-pagos (hv_control_clientes, de antes) Y
     // el Excel de Grupos en vivo (cacheado 1h — el histórico de 2026 vive ahí, no en hist-pagos).
-    $hist_pagos_map = blokes_hist_pagos_primeros_pagos();
-    $excel_map      = blokes_grupos_excel_primeros_pagos();
+    $hist_pagos_map = blokes_hist_pagos_pagos();
+    $excel_map      = blokes_grupos_excel_pagos();
     $fuentes_externas = array($hist_pagos_map, $excel_map);
     $persona_min_start_real = array();
+    $persona_externo_meses = array(); // personaKey => [ym, ...] (todos los meses pagados fuera de WooCommerce)
     $wc_telefonos = array(); $wc_emails = array(); $wc_nombres = array(); $wc_nombres_compactos = array();
     foreach ($enriquecidos as $e) {
         $pk = $e['personaKey'];
@@ -11646,7 +11707,13 @@ function blokes_altas_bajas_calcular($months) {
         $class_sub_ids[$e['classKey']][$e['subId']] = true;
         if (!isset($class_min_start[$e['classKey']]) || $e['startYm'] < $class_min_start[$e['classKey']]) $class_min_start[$e['classKey']] = $e['startYm'];
 
-        $externo_ym = blokes_externo_primer_pago_fuentes($e['telefono'], $e['nombre'], $e['email'] ?? '', $fuentes_externas);
+        $meses_externos_e = blokes_externo_meses_pagados_fuentes($e['telefono'], $e['nombre'], $e['email'] ?? '', $fuentes_externas);
+        if ($meses_externos_e) {
+            $persona_externo_meses[$pk] = array_values(array_unique(array_merge($persona_externo_meses[$pk] ?? array(), $meses_externos_e)));
+            $externo_ym = min($meses_externos_e);
+        } else {
+            $externo_ym = null;
+        }
         if (!isset($persona_min_start_real[$pk]) || $e['startYm'] < $persona_min_start_real[$pk]) $persona_min_start_real[$pk] = $e['startYm'];
         if ($externo_ym !== null && $externo_ym < $persona_min_start_real[$pk]) $persona_min_start_real[$pk] = $externo_ym;
         if ($e['telefono']) $wc_telefonos[blokes_externos_normaliza_telefono($e['telefono'])] = true;
@@ -11807,21 +11874,20 @@ function blokes_altas_bajas_calcular($months) {
     }
     usort($data, function($a, $b) { return $b['active'] <=> $a['active']; });
 
-    // Intervalos "reales" (cowork, 15/11 12:30: "Por mes incoherente... al final no se
-    // recalcula... retención por cohorte sigue con los totales viejos" — todo tiene que salir
-    // de la MISMA fuente cruzada con hist-pagos/Excel, no solo "altas"). Por persona, si su
-    // alta real (externa) es anterior a su alta de WooCommerce, se extiende el intervalo MÁS
-    // ANTIGUO hacia atrás hasta esa fecha real — nunca se crea un intervalo nuevo aparte, para
-    // no abrir un hueco falso entre el histórico externo y el primer intervalo real de Woo.
+    // Intervalos "reales" (cowork, 15/11 12:30/13:15: "Por mes incoherente... al final no se
+    // recalcula... retención por cohorte sigue con los totales viejos" Y "bajas = 0 de nov-25 a
+    // may-26 porque antes de la migración se trataba como cobertura continua" — todo tiene que
+    // salir de la MISMA fuente cruzada con hist-pagos/Excel, no solo "altas"). Por persona: si
+    // tiene historial externo anterior a su alta de WooCommerce, ese periodo externo se convierte
+    // en sus propios intervalos (con huecos de más de 2 meses sin pago = baja real, igual que el
+    // criterio de WooCommerce) y se antepone a los intervalos reales de Woo — NUNCA se asume
+    // cobertura continua solo porque hay un alta real más antigua.
     $persona_intervalos_real = array();
     foreach ($persona_intervalos as $pk => $ivs) {
-        $extendidos = $ivs;
-        $real_min = $persona_min_start_real[$pk] ?? null;
-        if ($real_min !== null && isset($persona_min_start[$pk]) && $real_min < $persona_min_start[$pk]) {
-            usort($extendidos, function($a, $b) { return strcmp($a['start'], $b['start']); });
-            $extendidos[0]['start'] = $real_min;
-        }
-        $persona_intervalos_real[$pk] = $extendidos;
+        $wc_min = $persona_min_start[$pk] ?? null;
+        $meses_externos = $persona_externo_meses[$pk] ?? array();
+        $externos_ivs = ($meses_externos && $wc_min !== null) ? blokes_externo_intervalos_desde_meses($meses_externos, $wc_min) : array();
+        $persona_intervalos_real[$pk] = $externos_ivs ? array_merge($externos_ivs, $ivs) : $ivs;
     }
 
     return array(
@@ -11975,6 +12041,20 @@ function superadmin_clases_retencion($request) {
         );
     }
 
+    // Desglose del mes en curso por tipo de personaKey (cowork, 15/11 13:15: "nov «al final»
+    // 202 vs 164 activos de Grupos — explicar en un ⓘ el desglose"). 'u' = cuenta con login real
+    // (customer_id resuelto, el mismo criterio que usa «Personas» de Grupos); 't'/'n' = sin
+    // customer_id, identificado solo por teléfono o nombre (pedidos de invitado) — son las
+    // candidatas más probables a estar infladas/duplicadas, ya que un mismo humano con dos
+    // pedidos de invitado con datos ligeramente distintos puede caer en dos personaKey "t"/"n"
+    // en vez de fundirse en una (la consolidación de cdd95ea solo funde cuando hay un uid real
+    // de por medio).
+    $fin_desglose_actual = array('conCuentaWeb' => 0, 'sinCuentaWeb' => 0);
+    foreach ($persona_intervalos_real as $pk => $ivs) {
+        if (!blokes_persona_cubre_mes($ivs, $now_ym)) continue;
+        if ($pk[0] === 'u') $fin_desglose_actual['conCuentaWeb']++; else $fin_desglose_actual['sinCuentaWeb']++;
+    }
+
     // ---- Cohortes: de quien se dio de alta en el mes X, % que sigue a 1/3/6 meses ----
     $cohortes = array();
     foreach ($months_range as $ym) {
@@ -12060,7 +12140,7 @@ function superadmin_clases_retencion($request) {
     $coste_profe_mes = blokes_coste_real_profe_mes($mes_ingreso);
 
     return rest_ensure_response(array('success' => true, 'data' => array(
-        'porMes' => $por_mes, 'cohortes' => $cohortes,
+        'porMes' => $por_mes, 'cohortes' => $cohortes, 'finDesgloseActual' => $fin_desglose_actual,
         'permanenciaMediaActivos' => $media($permanencia_activos), 'permanenciaMediaIdos' => $media($permanencia_idos),
         'nActivos' => count($permanencia_activos), 'nIdos' => count($permanencia_idos),
         'porClase' => $por_clase, 'mesIngreso' => $mes_ingreso, 'mesesDisponibles' => array_slice($months_range, 0, -1),
