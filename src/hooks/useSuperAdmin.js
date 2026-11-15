@@ -5,6 +5,7 @@ const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.
 
 function useEndpoint(path, params = {}) {
   const [data, setData]       = useState(null)
+  const [raw, setRaw]         = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -22,11 +23,11 @@ function useEndpoint(path, params = {}) {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
       })
-      .then(json => { setData(json.data ?? json); setLoading(false) })
+      .then(json => { setData(json.data ?? json); setRaw(json); setLoading(false) })
       .catch(e  => { setError(e.message); setLoading(false) })
   }, [url, reloadKey])
 
-  return { data, loading, error, refetch: () => setReloadKey(k => k + 1) }
+  return { data, raw, loading, error, refetch: () => setReloadKey(k => k + 1) }
 }
 
 export function useRevenue(months, excludeTransfer = false) {
@@ -38,7 +39,10 @@ export function useProducts(months) {
 }
 
 export function useClasses(months) {
-  return useEndpoint('/classes', { months })
+  const { data, raw, loading, error, refetch } = useEndpoint('/classes', { months })
+  // "Dos suscripciones activas de la misma clase" (cowork/Ramiro, 15/11 07:50 punto A): no se
+  // cancela nada solo, solo se avisa para que Ramiro decida.
+  return { data, loading, error, refetch, duplicadosMismaClase: raw?.duplicadosMismaClase || [] }
 }
 
 export function usePeopleSummary() {

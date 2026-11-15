@@ -1396,6 +1396,17 @@
 
 .sv-pc-filtros { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 
+.sv-aviso {
+  border-radius: 8px; padding: 10px 14px; margin: 10px 0; font-size: 0.85rem;
+}
+.sv-aviso--warn {
+  background: color-mix(in srgb, var(--state-warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-warn) 40%, transparent);
+  color: var(--state-warn);
+}
+.sv-aviso__lista { margin: 6px 0 0; padding-left: 20px; }
+.sv-aviso__lista li { margin: 2px 0; }
+
 .sv-pc-chip {
   display: inline-block; font-size: 0.7rem; font-weight: 700; padding: 3px 9px; border-radius: 10px;
 }

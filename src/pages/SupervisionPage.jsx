@@ -44,11 +44,24 @@ import './SupervisionPage.css'
 // día + hora de clase, no un dato garantizado (sustituciones, cambios de horario no reflejados
 // aquí, etc. no se ven).
 const DIA_A_STAFFKEY = { Lunes: 'Lunes', Martes: 'Martes', Miercoles: 'Miercoles', 'Miércoles': 'Miercoles', Jueves: 'Jueves', Viernes: 'Viernes' }
-function profesoresDeGrupo(diaPareja, horario) {
+// Niños/adolescentes (Ramiro 14/11 20:08 + 15/11 07:25): todas esas clases las da Isa,
+// menos lunes/miércoles que las da Eva (dentro de su horario de gestión, no aparte). Isa
+// es voluntaria y NO está en staffSchedule.js a propósito — esa fuente también alimenta
+// Nóminas/Rentabilidad (useCostes, Playground) y Ramiro pidió explícitamente no tocar
+// Nóminas, así que esto es solo la pista de "Profesor" en Grupos/Pendientes de cobro.
+function profesorDeNinosAdolescentes(dias) {
+  const esLX = dias.every(d => d === 'Lunes' || d === 'Miercoles')
+  return esLX ? 'Eva' : 'Isa'
+}
+function profesoresDeGrupo(diaPareja, horario, edad) {
   if (!diaPareja || !horario) return []
-  const horaNorm = horario.trim().slice(0, 5)
   const dias = diaPareja.split(/[-–]/).map(d => DIA_A_STAFFKEY[d.trim()]).filter(Boolean)
   if (!dias.length) return []
+  if (edad && edad !== 'Adultos') {
+    const prof = profesorDeNinosAdolescentes(dias)
+    return dias.map(dia => ({ dia, profs: [prof] }))
+  }
+  const horaNorm = horario.trim().slice(0, 5)
   const porDia = dias.map(dia => {
     const profs = PROF_ORDER.filter(prof => (STAFF_BASE[prof]?.[dia] || []).some(s => s.tipo === 'clase' && s.start === horaNorm))
     return { dia, profs }
@@ -556,8 +569,9 @@ function TrendCharts({ data, months, selectedKey, onSelectKey }) {
                 </span>
               ))}
               {(selectedClass.members_active || []).filter(m => !m.new).map((m, i) => (
-                <span key={`a-${i}`} className="sv-member sv-member--active">
-                  <span className="sv-member__name">{m.name}</span>
+                <span key={`a-${i}`} className="sv-member sv-member--active"
+                  data-tooltip={m.movedFrom ? `Cambio de clase — antes: ${m.movedFrom}` : undefined}>
+                  <span className="sv-member__name">{m.name}{m.movedFrom && <span className="sv-ot-muted"> (antes: {m.movedFrom})</span>}</span>
                   {m.phone && <span className="sv-member__phone">{m.phone}</span>}
                 </span>
               ))}
@@ -709,7 +723,7 @@ function ClasesTab() {
   const [months, setMonths]           = useState(6)
   const [filter, setFilter]           = useState('todos')
   const [selectedClassKey, setSelectedClassKey] = useState('')
-  const { data, loading, error } = useClasses(months)
+  const { data, loading, error, duplicadosMismaClase } = useClasses(months)
 
   const filtered = useMemo(() => {
     if (!data) return []
@@ -764,6 +778,16 @@ function ClasesTab() {
           <section className="sv-section">
             <h2 className="sv-section-title">Horario por día</h2>
             <p className="sv-note">Snapshot actual de alumnos activos por franja horaria. Verde intenso = mucha gente; rosa = clase programada pero sin activos; — = sin clase en ese horario.</p>
+            {duplicadosMismaClase.length > 0 && (
+              <div className="sv-aviso sv-aviso--warn">
+                <strong>⚠ Dos suscripciones activas de la misma clase ({duplicadosMismaClase.length}):</strong> cada persona solo cuenta una plaza aquí, pero tiene dos suscripciones pagando a la vez — decide tú si cobrar una y cancelar la otra (no se cancela ni reembolsa nada en automático).
+                <ul className="sv-aviso__lista">
+                  {duplicadosMismaClase.map((d, i) => (
+                    <li key={i}>{d.nombre || d.telefono || '—'} — {d.dia} {d.horario}{d.edad !== 'Adultos' ? ` · ${d.edad}` : ''} (subs #{d.subIds.join(', #')})</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <ScheduleGrid classes={data} filter={filter} />
             {totalEnding > 0 && (
               <p className="sv-note sv-to-small">
@@ -1382,8 +1406,8 @@ function WaMark({ alumno, onClick }) {
   )
 }
 
-function ProfesorLine({ dia, horario }) {
-  const profesores = profesoresDeGrupo(dia, horario)
+function ProfesorLine({ dia, horario, edad }) {
+  const profesores = profesoresDeGrupo(dia, horario, edad)
   if (!profesores.length) return null
   const mismo = profesores.every(d => d.profs.length === 1 && d.profs[0] === profesores[0].profs[0])
   const texto = mismo
@@ -2557,7 +2581,7 @@ function GruposTab({ onIrAPendientes }) {
       {vista === 'excel' && <SyncGruposCambiosPanel />}
 
       {vista === 'grupos' && (<>
-      {grupo && <ProfesorLine dia={grupo.dia} horario={grupo.horario} />}
+      {grupo && <ProfesorLine dia={grupo.dia} horario={grupo.horario} edad={grupo.edad} />}
       {/* Dinero AGREGADO (cobrado del mes, importe pendiente total) es solo para socio — ver
           NOTAS_PARA_CODE_privacidad_dinero.md. Lo de cada alumno (quién debe y cuánto) sí lo ve
           gestion, en la tabla de abajo. */}
@@ -2608,7 +2632,7 @@ function GruposTab({ onIrAPendientes }) {
           return (
             <div key={`${g.dia}|${g.horario}|${g.edad}`} className="sv-grp-bloque">
               <h4 className="sv-grp-bloque__titulo">{g.label}</h4>
-              <ProfesorLine dia={g.dia} horario={g.horario} />
+              <ProfesorLine dia={g.dia} horario={g.horario} edad={g.edad} />
               <TablaAlumnos
                 alumnos={gAlumnos} meses={meses}
                 onWa={a => setAccion({ alumno: a, tipo: 'optin_whatsapp' })} onMenu={a => setMenuFor(a)}
@@ -2780,7 +2804,9 @@ function PendientesCobroTab() {
 
   const filas = useMemo(() => (data?.filas || []).map(f => ({
     ...f,
-    profes: profesoresDeGrupo(f.dia, f.horario).flatMap(d => d.profs),
+    // Array.from(new Set(...)): una clase Martes-Jueves con el mismo profe los dos días
+    // salía repetida ("Alvaro, Alvaro") — cowork, 15/11 07:50 punto C.
+    profes: Array.from(new Set(profesoresDeGrupo(f.dia, f.horario, f.edad).flatMap(d => d.profs))),
   })), [data])
 
   const profesDisponibles = useMemo(() => Array.from(new Set(filas.flatMap(f => f.profes))).sort(), [filas])
@@ -2830,8 +2856,9 @@ function PendientesCobroTab() {
     const dudosos = filtradas.filter(f => PC_DUDOSO.has(f.etiqueta) && f.vieneEstado !== 'viene' && f.profes.includes(profe))
     if (!dudosos.length) return
     if (!tel) { setEditandoTel(profe); setTelEnEdicion(''); setAviso(`Añade el teléfono de ${profe} para poder escribirle.`); return }
-    const lista = dudosos.map(f => `${f.nombre} (${f.dia} ${f.horario})`).join(', ')
-    const texto = `Hola ${profe}, ¿siguen viniendo estos alumnos a tus clases? ${lista}. Gracias, un saludo de RocoMadrid.`
+    // Un alumno por línea: con 11 en la misma línea era difícil de leer (cowork, 15/11 07:50 punto C).
+    const lista = dudosos.map(f => `- ${f.nombre} (${f.dia} ${f.horario})`).join('\n')
+    const texto = `Hola ${profe}, ¿siguen viniendo estos alumnos a tus clases?\n${lista}\nGracias, un saludo de RocoMadrid.`
     window.open(pcWhatsappUrl(tel, texto), 'blokes_whatsapp')
   }
 

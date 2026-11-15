@@ -10570,103 +10570,165 @@ function superadmin_classes($request) {
 
     switch_to_blog(3);
 
-    $classes = array();
+    $two_months_ago = date('Y-m', strtotime('first day of this month -2 months'));
 
-    if (class_exists('RocoMadrid_SF_Stats')) {
+    // ---- PASADA 1: enriquecer cada suscripción (sin tocar $classes todavía) — cowork/Ramiro
+    // 15/11 07:50, punto B: para saber si alguien es de verdad "Nuevo", "Baja" o "Pendiente"
+    // hace falta ver TODAS sus suscripciones (cualquier clase, cualquier estado), no solo la
+    // de la fila que se está mirando.
+    $enriquecidos = array();
+    if (class_exists('RocoMadrid_SF_Stats') && function_exists('wcs_get_subscription')) {
         $all = blokes_get_all_subscription_data();
         foreach ($all as $sub) {
-            $edad      = sanitize_text_field($sub['edad'] ?? '') ?: 'Adultos';
-            $class_key = ($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '') . '|' . $edad;
             if (!$sub['dia'] && !$sub['horario']) continue;
-            if (!isset($classes[$class_key])) {
-                $classes[$class_key] = array(
-                    'label'           => ($sub['dia'] ?? '') . ' · ' . ($sub['horario'] ?? ''),
-                    'dia'             => $sub['dia'] ?? '',
-                    'horario'         => $sub['horario'] ?? '',
-                    'edad'            => $edad,
-                    'active'          => 0,
-                    'ending'          => 0,
-                    'all'             => 0,
-                    'history'         => array(),
-                    'members_active'  => array(),
-                    'members_ending'  => array(),
-                    'members_pending' => array(),
-                    'members_lost'    => array(),
-                );
-            }
-            $classes[$class_key]['all']++;
+            if (empty($sub['id'])) continue;
+            $sub_obj = wcs_get_subscription(intval($sub['id']));
+            if (!$sub_obj) continue;
+
+            $edad         = sanitize_text_field($sub['edad'] ?? '') ?: 'Adultos';
+            $class_key    = ($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '') . '|' . $edad;
             $member_name  = $sub['cliente']  ?? '';
-            $member_phone = $sub['telefono'] ?? '';
+            $member_phone = $sub['telefono'] ?: ($sub_obj->get_billing_phone() ?: '');
             // pending-cancel: el cliente ya canceló pero sigue con acceso hasta que acabe el
             // periodo pagado. blokes_get_pending_cancel_alumnos() los marca 'status' => 'active'
             // para que no desaparezcan de ningún sitio, pero no son activos de verdad: no se
             // renuevan. Van aparte («se van este mes»), no al recuento de activos.
             $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
+            $uid = blokes_alumno_customer_id_de_sub($sub, $sub_obj);
+            $persona_key = $uid ? 'u' . $uid : ($member_phone ? 't' . $member_phone : 'n' . blokes_sync_grupos_normalizar_nombre($member_name));
 
-            // Per-month active snapshot using subscription start/end dates
-            if (function_exists('wcs_get_subscription') && !empty($sub['id'])) {
-                $sub_obj = wcs_get_subscription(intval($sub['id']));
-                if (!$sub_obj) continue;
-                if (empty($member_phone)) {
-                    $member_phone = $sub_obj->get_billing_phone() ?: '';
-                }
+            $dt_created = $sub_obj->get_date_created();
+            if (!$dt_created) continue;
+            $sub_start_ym = $dt_created->format('Y-m');
 
-                if ($sub['status'] === 'active' && !$es_pending_cancel) {
-                    $classes[$class_key]['active']++;
-                    $classes[$class_key]['members_active'][] = array('name' => $member_name, 'phone' => $member_phone, 'new' => false);
-                } elseif ($es_pending_cancel) {
-                    $classes[$class_key]['ending']++;
-                    $classes[$class_key]['members_ending'][] = array('name' => $member_name, 'phone' => $member_phone);
-                } elseif (in_array($sub['status'], array('on-hold', 'pending'))) {
-                    $classes[$class_key]['members_pending'][] = array('name' => $member_name, 'phone' => $member_phone);
-                }
+            if ($sub['status'] === 'active') {
+                // Hasta que no acabe el periodo pagado sigue contando como activa mes a mes en
+                // el histórico (aunque ya esté "pending-cancel"): de verdad lo estuvo hasta ahora.
+                $sub_end_ym = $now_ym;
+            } else {
+                $end_ts = $sub_obj->get_time('cancelled') ?: $sub_obj->get_time('end');
+                // "En espera" (on-hold) no tiene fecha de cancelación ni de fin: sin esto, se le
+                // daba por acabada el mismo mes que empezó y desaparecía del histórico de los
+                // meses siguientes aunque siguiera en espera. Usamos el último pago.
+                if (!$end_ts && $sub['status'] === 'on-hold') $end_ts = $sub_obj->get_time('last_payment');
+                $sub_end_ym = $end_ts ? date('Y-m', $end_ts) : $sub_start_ym;
+            }
 
-                $dt_created = $sub_obj->get_date_created();
-                if (!$dt_created) continue;
+            $enriquecidos[] = array(
+                'subId' => intval($sub['id']), 'classKey' => $class_key,
+                'dia' => $sub['dia'] ?? '', 'horario' => $sub['horario'] ?? '', 'edad' => $edad,
+                'nombre' => $member_name, 'telefono' => $member_phone,
+                'status' => $sub['status'], 'esPendingCancel' => $es_pending_cancel,
+                'personaKey' => $persona_key, 'startYm' => $sub_start_ym, 'endYm' => $sub_end_ym,
+            );
+        }
+    }
 
-                $sub_start_ym = $dt_created->format('Y-m');
+    // ---- Mapas globales por persona, a partir de TODAS sus suscripciones.
+    $persona_activo_en  = array(); // personaKey => [classKey => true] — sigue viniendo de verdad AHORA (pending-cancel incluido)
+    $persona_min_start  = array(); // personaKey => Y-m más antiguo entre TODAS sus suscripciones
+    $persona_historial  = array(); // personaKey => [ ['classKey','startYm','dia','horario','edad'], ... ]
+    foreach ($enriquecidos as $e) {
+        $pk = $e['personaKey'];
+        if (!isset($persona_min_start[$pk]) || $e['startYm'] < $persona_min_start[$pk]) $persona_min_start[$pk] = $e['startYm'];
+        if ($e['status'] === 'active') $persona_activo_en[$pk][$e['classKey']] = true;
+        $persona_historial[$pk][] = array('classKey' => $e['classKey'], 'startYm' => $e['startYm'], 'dia' => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad']);
+    }
 
-                if ($sub['status'] === 'active') {
-                    // Hasta que no acabe el periodo pagado sigue contando como activa mes a mes
-                    // en el histórico (aunque ya esté "pending-cancel" y no entre en el snapshot
-                    // de arriba): de verdad lo estuvo hasta ahora.
-                    $sub_end_ym = $now_ym;
-                    // Mark as new if subscription started this month
-                    if (!$es_pending_cancel && $sub_start_ym >= $now_ym) {
-                        $idx = count($classes[$class_key]['members_active']) - 1;
-                        if ($idx >= 0) $classes[$class_key]['members_active'][$idx]['new'] = true;
+    // ---- PASADA 2: construir $classes ya con la clasificación correcta por persona.
+    $classes = array();
+    // 1 persona = 1 plaza por clase (punto A): si ya tiene otra suscripción activa en la MISMA
+    // clase, no sumar una plaza más — solo avisar, nunca cancelar ni reembolsar nada en
+    // automático, es dinero real y lo decide Ramiro.
+    $activos_por_clase = array(); // classKey => [personaKey => subId]
+    $duplicados_misma_clase = array();
+
+    foreach ($enriquecidos as $e) {
+        $class_key = $e['classKey'];
+        $pk        = $e['personaKey'];
+        if (!isset($classes[$class_key])) {
+            $classes[$class_key] = array(
+                'label'           => $e['dia'] . ' · ' . $e['horario'],
+                'dia'             => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad'],
+                'active'          => 0,
+                'ending'          => 0,
+                'all'             => 0,
+                'history'         => array(),
+                'members_active'  => array(),
+                'members_ending'  => array(),
+                'members_pending' => array(),
+                'members_lost'    => array(),
+            );
+        }
+        $classes[$class_key]['all']++;
+
+        $es_duplicado = false;
+        if ($e['status'] === 'active' && !$e['esPendingCancel']) {
+            $previo_sub_id = $activos_por_clase[$class_key][$pk] ?? null;
+            if ($previo_sub_id && $previo_sub_id !== $e['subId']) {
+                $es_duplicado = true;
+                $duplicados_misma_clase[] = array(
+                    'dia' => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad'],
+                    'nombre' => $e['nombre'], 'telefono' => $e['telefono'],
+                    'subIds' => array($previo_sub_id, $e['subId']),
+                );
+            } else {
+                $activos_por_clase[$class_key][$pk] = $e['subId'];
+                $classes[$class_key]['active']++;
+                // Nuevo de verdad = esta suscripción empezó este mes Y es la actividad más
+                // antigua de la persona en TODO el sistema (no tenía ninguna suscripción antes,
+                // en ninguna clase). Si tenía otra antes pero en otra clase, es un cambio de
+                // clase, no un alumno nuevo.
+                $es_nuevo = $e['startYm'] >= $now_ym && $persona_min_start[$pk] >= $now_ym;
+                $movido_desde = null;
+                if ($e['startYm'] >= $now_ym && !$es_nuevo) {
+                    $previas = array_values(array_filter($persona_historial[$pk] ?? array(), function($p) use ($class_key, $e) {
+                        return $p['classKey'] !== $class_key && $p['startYm'] < $e['startYm'];
+                    }));
+                    if ($previas) {
+                        usort($previas, function($a, $b) { return strcmp($b['startYm'], $a['startYm']); });
+                        $p0 = $previas[0];
+                        $movido_desde = trim($p0['dia'] . ' ' . $p0['horario'] . ($p0['edad'] !== 'Adultos' ? ' · ' . $p0['edad'] : ''));
                     }
-                } else {
-                    $end_ts = $sub_obj->get_time('cancelled') ?: $sub_obj->get_time('end');
-                    // "En espera" (on-hold) no tiene fecha de cancelación ni de fin: sin esto,
-                    // se le daba por acabada el mismo mes que empezó y desaparecía del histórico
-                    // de los meses siguientes aunque siguiera en espera. Usamos el último pago.
-                    if (!$end_ts && $sub['status'] === 'on-hold') $end_ts = $sub_obj->get_time('last_payment');
-                    $sub_end_ym = $end_ts ? date('Y-m', $end_ts) : $sub_start_ym;
-                    // Track recently lost: cancelled within last 2 months
-                    $two_months_ago = date('Y-m', strtotime('first day of this month -2 months'));
-                    if ($sub_end_ym >= $two_months_ago && !in_array($sub['status'], array('on-hold', 'pending'))) {
-                        $classes[$class_key]['members_lost'][] = array('name' => $member_name, 'phone' => $member_phone);
-                    }
                 }
+                $classes[$class_key]['members_active'][] = array('name' => $e['nombre'], 'phone' => $e['telefono'], 'new' => $es_nuevo, 'movedFrom' => $movido_desde);
+            }
+        } elseif ($e['esPendingCancel']) {
+            $classes[$class_key]['ending']++;
+            $classes[$class_key]['members_ending'][] = array('name' => $e['nombre'], 'phone' => $e['telefono']);
+        } elseif (in_array($e['status'], array('on-hold', 'pending'))) {
+            // Si ya está activa en cualquier otra parte, es una "en espera" duplicada vieja —
+            // ya sale en Duplicados/Pendientes de cobro, no hace falta repetirla aquí.
+            if (!isset($persona_activo_en[$pk])) {
+                $classes[$class_key]['members_pending'][] = array('name' => $e['nombre'], 'phone' => $e['telefono']);
+            }
+        } elseif (!in_array($e['status'], array('on-hold', 'pending')) && $e['endYm'] >= $two_months_ago) {
+            // Baja real = la persona ya no tiene NINGUNA suscripción activa en ninguna clase.
+            // Si sigue activa (en esta clase o en otra), es que canceló un duplicado o cambió
+            // de clase — no está de baja.
+            if (!isset($persona_activo_en[$pk])) {
+                $classes[$class_key]['members_lost'][] = array('name' => $e['nombre'], 'phone' => $e['telefono']);
+            }
+        }
 
-                // New enrollment (if start falls in requested range)
-                if ($sub_start_ym >= $start_ym) {
-                    if (!isset($classes[$class_key]['history'][$sub_start_ym])) {
-                        $classes[$class_key]['history'][$sub_start_ym] = array('month' => $sub_start_ym, 'new' => 0, 'active' => 0);
-                    }
-                    $classes[$class_key]['history'][$sub_start_ym]['new']++;
-                }
+        // Histórico de "nuevos" por mes: solo cuenta si ese mes es la primera actividad de la
+        // persona en todo el sistema (no una suscripción más de alguien que ya estaba).
+        if ($e['startYm'] >= $start_ym) {
+            if (!isset($classes[$class_key]['history'][$e['startYm']])) {
+                $classes[$class_key]['history'][$e['startYm']] = array('month' => $e['startYm'], 'new' => 0, 'active' => 0);
+            }
+            if ($persona_min_start[$pk] === $e['startYm']) {
+                $classes[$class_key]['history'][$e['startYm']]['new']++;
+            }
+        }
 
-                // Active count for every month the subscription overlaps with the range
-                foreach ($months_range as $ym) {
-                    if ($ym >= $sub_start_ym && $ym <= $sub_end_ym) {
-                        if (!isset($classes[$class_key]['history'][$ym])) {
-                            $classes[$class_key]['history'][$ym] = array('month' => $ym, 'new' => 0, 'active' => 0);
-                        }
-                        $classes[$class_key]['history'][$ym]['active']++;
-                    }
+        // Active count for every month the subscription overlaps with the range
+        foreach ($months_range as $ym) {
+            if ($ym >= $e['startYm'] && $ym <= $e['endYm']) {
+                if (!isset($classes[$class_key]['history'][$ym])) {
+                    $classes[$class_key]['history'][$ym] = array('month' => $ym, 'new' => 0, 'active' => 0);
                 }
+                $classes[$class_key]['history'][$ym]['active']++;
             }
         }
     }
@@ -10680,7 +10742,7 @@ function superadmin_classes($request) {
     }
     usort($data, function($a, $b) { return $b['active'] <=> $a['active']; });
 
-    return rest_ensure_response(array('data' => $data));
+    return rest_ensure_response(array('data' => $data, 'duplicadosMismaClase' => $duplicados_misma_clase));
 }
 
 // ============================================================
