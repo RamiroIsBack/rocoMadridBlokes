@@ -2264,6 +2264,9 @@ function GruposTab() {
   const [buscador, setBuscador] = useState(false) // modal de "Añadir alumno" (buscar)
   const [busqueda, setBusqueda] = useState('') // buscador de arriba: filtra todas las tablas de Grupos a la vez
   const [espera, setEspera] = useState(null) // lista de espera (8.5), cargada al entrar en esa vista
+  // Ramiro, 15/11 19:40: avisar a Eva de las altas nuevas desde el selector público (origen no
+  // vacío) que todavía no ha atendido — contador en la propia pestaña, no hay que entrar a verlo.
+  const esperaNuevasWeb = useMemo(() => (espera || []).filter(p => !p.atendido && p.origen).length, [espera])
   const [esperaForm, setEsperaForm] = useState({ dia: '', horario: '', edad: 'Adultos', nombre: '', telefono: '', notas: '' })
   const [esperaBusy, setEsperaBusy] = useState(false)
   // "Mandar factura" ya no es una tarea manual (Ramiro, 15/11 10:25 punto B): los pedidos que
@@ -2449,7 +2452,7 @@ function GruposTab() {
             Revisar datos {revisarDatos.length ? <span className="sv-tab-mini__count">({revisarDatos.length})</span> : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'espera' ? 'is-active' : ''}`} onClick={abrirEspera}>
-            Lista de espera
+            Lista de espera {esperaNuevasWeb > 0 ? <span className="sv-tab-mini__count">({esperaNuevasWeb})</span> : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'excel' ? 'is-active' : ''}`} onClick={() => setVista('excel')}>
             Cambios del Excel
@@ -2662,6 +2665,19 @@ function GruposTab() {
             <p className="sv-loading">Cargando…</p>
           ) : (
             <div className="sv-tests-scroll">
+              {/* Ramiro, 15/11 19:40: aviso cuando queda plaza libre en la clase de alguien que
+                  espera — nunca se avisa solo al cliente, solo aquí para que Eva decida. */}
+              {Object.entries(
+                espera.filter(p => !p.atendido && p.plazaLibre).reduce((acc, p) => {
+                  const k = [p.dia, p.horario, p.edad].filter(Boolean).join(' · ') || 'Grupo sin datos'
+                  ;(acc[k] = acc[k] || []).push(p)
+                  return acc
+                }, {})
+              ).map(([grupo, filas]) => (
+                <div key={grupo} className="sv-aviso sv-aviso--warn">
+                  🎉 <strong>Hay plaza en {grupo}:</strong> {filas.length} persona{filas.length === 1 ? '' : 's'} esperando ({filas.map(f => f.nombre).join(', ')}).
+                </div>
+              ))}
               <table className="sv-tests-table">
                 <thead>
                   <tr><th>Nombre</th><th>Teléfono</th><th>Grupo</th><th>Notas</th><th>Desde</th><th></th></tr>
@@ -2669,8 +2685,12 @@ function GruposTab() {
                 <tbody>
                   {espera.map(p => (
                     <tr key={p.id} style={p.atendido ? { opacity: 0.5 } : undefined}>
-                      <td>{p.nombre}</td>
-                      <td className="sv-ot-muted">{p.telefono || '—'}</td>
+                      <td>
+                        {p.nombre}
+                        {p.origen && <span className="sv-chip-web" title={`Alta desde la web (${p.origen})`}> 🌐 desde la web</span>}
+                        {p.plazaLibre && !p.atendido && <span className="sv-chip-web" title="Ya hay plaza en esta clase" style={{ color: '#34d399' }}> · plaza libre</span>}
+                      </td>
+                      <td className="sv-ot-muted">{p.telefono || p.email || '—'}</td>
                       <td className="sv-ot-muted">{[p.dia, p.horario, p.edad !== 'Adultos' ? p.edad : ''].filter(Boolean).join(' · ') || '—'}</td>
                       <td className="sv-ot-muted">{p.notas || '—'}</td>
                       <td className="sv-ot-muted">{p.created_at ? p.created_at.slice(0, 10) : '—'}</td>

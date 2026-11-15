@@ -147,6 +147,9 @@
 }
 .sv-tab-mini__count { color: var(--color-text-secondary); font-weight: 400; }
 .sv-tab-mini.is-active .sv-tab-mini__count { color: var(--color-bg); opacity: 0.85; }
+
+/* Lista de espera: altas públicas desde el selector de Dixitalmedia (Ramiro, 15/11 19:40) */
+.sv-chip-web { font-size: 0.72rem; font-weight: 600; color: var(--color-text-secondary); margin-left: 4px; }
 .sv-tab-panel:not(.sv-to-root) .sv-filter-btn    { color: var(--color-text-secondary); }
 .sv-tab-panel:not(.sv-to-root) .sv-filter-btn:hover { color: var(--color-text-primary); }
 .sv-tab-panel:not(.sv-to-root) .sv-period__btn   { color: var(--color-text-secondary); }

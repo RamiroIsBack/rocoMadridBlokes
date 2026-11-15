@@ -1198,6 +1198,13 @@ add_action('rest_api_init', function() {
         array('methods' => 'DELETE', 'callback' => 'superadmin_gestion_lista_espera_borrar',      'permission_callback' => $sa_perm),
     ));
 
+    // POST público (sin login) para el selector de Dixitalmedia — Ramiro, 15/11 19:40. Contrato
+    // en media_para_code/contrato_lista_espera_dixitalmedia.md. Antispam dentro de la propia
+    // función (honeypot + límite por IP), no en el permission_callback.
+    register_rest_route('blokes/v1', '/lista-espera', array(
+        'methods' => 'POST', 'callback' => 'blokes_lista_espera_publica_crear', 'permission_callback' => '__return_true',
+    ));
+
     // Sincronización Grupos ⇄ Google Sheets (NOTAS_PARA_CODE_sync_grupos.md) — de momento solo
     // configuración y una prueba de conexión de solo lectura contra la Hoja de PRUEBA.
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/config', array(
@@ -6855,18 +6862,26 @@ function blokes_ensure_lista_espera_table() {
     global $wpdb;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    // 15/11 19:40 (Ramiro, contrato con Dixitalmedia): columnas nuevas para las altas públicas
+    // desde el selector — dbDelta es aditivo (compara contra lo que ya exista y solo añade lo
+    // que falte), nunca borra filas ni columnas ya creadas.
     dbDelta("CREATE TABLE " . blokes_lista_espera_table() . " (
-        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-        dia         varchar(60)         NOT NULL DEFAULT '',
-        horario     varchar(60)         NOT NULL DEFAULT '',
-        edad        varchar(60)         NOT NULL DEFAULT 'Adultos',
-        nombre      varchar(190)        NOT NULL DEFAULT '',
-        telefono    varchar(30)         NOT NULL DEFAULT '',
-        notas       varchar(500)        NOT NULL DEFAULT '',
-        atendido    tinyint(1)          NOT NULL DEFAULT 0,
-        user_login  varchar(100)        NOT NULL DEFAULT '',
-        created_at  datetime            NOT NULL,
-        updated_at  datetime            NOT NULL,
+        id           bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        dia          varchar(60)         NOT NULL DEFAULT '',
+        horario      varchar(60)         NOT NULL DEFAULT '',
+        edad         varchar(60)         NOT NULL DEFAULT 'Adultos',
+        nombre       varchar(190)        NOT NULL DEFAULT '',
+        telefono     varchar(30)         NOT NULL DEFAULT '',
+        email        varchar(190)        NOT NULL DEFAULT '',
+        whatsapp_ok  tinyint(1)          NOT NULL DEFAULT 0,
+        edad_alumno  smallint            NULL,
+        variacion_id bigint(20) UNSIGNED NULL,
+        origen       varchar(30)         NOT NULL DEFAULT '',
+        notas        varchar(500)        NOT NULL DEFAULT '',
+        atendido     tinyint(1)          NOT NULL DEFAULT 0,
+        user_login   varchar(100)        NOT NULL DEFAULT '',
+        created_at   datetime            NOT NULL,
+        updated_at   datetime            NOT NULL,
         PRIMARY KEY (id)
     ) {$charset};");
 }
@@ -6875,6 +6890,20 @@ function superadmin_gestion_lista_espera_get() {
     blokes_ensure_lista_espera_table();
     global $wpdb;
     $filas = $wpdb->get_results("SELECT * FROM " . blokes_lista_espera_table() . " ORDER BY atendido ASC, created_at ASC", ARRAY_A);
+    // Ramiro, 15/11 19:40 punto final: "cuando quede una plaza libre en esa clase, aviso en
+    // Lista de espera" — se calcula aquí (no se manda nada automático al cliente, solo el aviso
+    // para que Eva lo vea y decida). Solo las filas con variacion_id (de momento, las que vienen
+    // del selector público de Dixitalmedia la llevan; las de alta manual, no).
+    if (function_exists('wc_get_product')) {
+        foreach ($filas as &$f) {
+            $f['plazaLibre'] = false;
+            if (!empty($f['variacion_id'])) {
+                $var = wc_get_product(intval($f['variacion_id']));
+                if ($var && $var->is_in_stock()) $f['plazaLibre'] = true;
+            }
+        }
+        unset($f);
+    }
     return rest_ensure_response(array('success' => true, 'data' => $filas));
 }
 
@@ -6887,6 +6916,74 @@ function blokes_lista_espera_limpia($body, $defaults = array()) {
         'telefono' => blokes_externos_normaliza_telefono($body['telefono'] ?? ''),
         'notas'    => mb_substr(sanitize_text_field((string) ($body['notas'] ?? '')), 0, 500),
     );
+}
+
+// ─── Alta pública en lista de espera (Ramiro, 15/11 19:40 — contrato con Dixitalmedia) ────
+// El selector público de Dixitalmedia (tema, fuera de este plugin) llama a esto cuando una
+// franja está completa y alguien se apunta a la lista de espera — mismo WordPress, dos formas
+// de llamarlo: la función directa (si su PHP puede ver funciones globales de este plugin) o el
+// hook `do_action('blokes_lista_espera_agregar', $datos)` (más desacoplado, pero una action no
+// devuelve nada — si necesitan el id de vuelta, tienen que usar el endpoint REST).
+// $datos: dia, horario, edad, nombre, telefono, email, whatsapp_ok, edad_alumno, variacion_id,
+// origen. Documentado en media_para_code/contrato_lista_espera_dixitalmedia.md.
+function blokes_lista_espera_agregar($datos) {
+    blokes_ensure_lista_espera_table();
+    global $wpdb;
+    $telefono = blokes_externos_normaliza_telefono((string) ($datos['telefono'] ?? ''));
+    $email    = sanitize_email((string) ($datos['email'] ?? ''));
+    if (!$telefono && !$email) {
+        return new WP_Error('falta_contacto', 'Falta un teléfono o un email de contacto.', array('status' => 400));
+    }
+    $nombre = mb_substr(sanitize_text_field((string) ($datos['nombre'] ?? '')), 0, 190);
+    if ($nombre === '') {
+        return new WP_Error('falta_nombre', 'Falta el nombre.', array('status' => 400));
+    }
+    $edad_alumno_raw = $datos['edad_alumno'] ?? null;
+    $fila = array(
+        'dia'          => mb_substr(sanitize_text_field((string) ($datos['dia'] ?? '')), 0, 60),
+        'horario'      => mb_substr(sanitize_text_field((string) ($datos['horario'] ?? '')), 0, 60),
+        'edad'         => blokes_normalizar_edad(sanitize_text_field((string) ($datos['edad'] ?? 'Adultos'))) ?: 'Adultos',
+        'nombre'       => $nombre,
+        'telefono'     => $telefono,
+        'email'        => $email,
+        'whatsapp_ok'  => !empty($datos['whatsapp_ok']) ? 1 : 0,
+        'edad_alumno'  => ($edad_alumno_raw !== null && $edad_alumno_raw !== '') ? intval($edad_alumno_raw) : null,
+        'variacion_id' => !empty($datos['variacion_id']) ? intval($datos['variacion_id']) : null,
+        'origen'       => mb_substr(sanitize_text_field((string) ($datos['origen'] ?? '')), 0, 30),
+        'notas'        => '',
+        'atendido'     => 0,
+        'user_login'   => '',
+        'created_at'   => current_time('mysql'),
+        'updated_at'   => current_time('mysql'),
+    );
+    $ok = $wpdb->insert(blokes_lista_espera_table(), $fila);
+    if (!$ok) {
+        return new WP_Error('db_error', 'No se pudo guardar en la lista de espera.', array('status' => 500));
+    }
+    $id = $wpdb->insert_id;
+    blokes_gestion_log($id, 'lista_espera_agregar_publica', null, $fila, 'Alta pública en lista de espera (' . ($fila['origen'] ?: 'origen desconocido') . ')');
+    return $id;
+}
+add_action('blokes_lista_espera_agregar', 'blokes_lista_espera_agregar');
+
+// POST /blokes/v1/lista-espera — público, sin login (lo llama el selector de Dixitalmedia).
+// Antispam: honeypot "web" (si llega relleno, se finge éxito sin guardar nada — no le decimos a
+// un bot que ha fallado) y límite de 5 envíos por IP y hora.
+function blokes_lista_espera_publica_crear($request) {
+    $body = $request->get_json_params();
+    if (!empty($body['web'])) {
+        return rest_ensure_response(array('success' => true, 'data' => array('id' => 0)));
+    }
+    $ip = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : 'sin-ip';
+    $clave_limite = 'blokes_le_rate_' . md5($ip);
+    $envios = (int) get_transient($clave_limite);
+    if ($envios >= 5) {
+        return new WP_Error('demasiados_envios', 'Demasiados envíos desde esta conexión — inténtalo más tarde.', array('status' => 429));
+    }
+    set_transient($clave_limite, $envios + 1, HOUR_IN_SECONDS);
+    $resultado = blokes_lista_espera_agregar($body);
+    if (is_wp_error($resultado)) return $resultado;
+    return rest_ensure_response(array('success' => true, 'data' => array('id' => $resultado)));
 }
 
 function superadmin_gestion_lista_espera_crear($request) {
