@@ -464,11 +464,11 @@ function ClasesRetencionSection() {
           <h3 className="sa-subtitle">Por mes (todo el club, no por clase)</h3>
           <div className="sa-profit-wrap">
             <table className="sa-profit-table">
-              <thead><tr><th>Mes</th><th>Al inicio</th><th>Altas</th><th>Bajas</th><th>Al final</th><th>% bajas</th></tr></thead>
+              <thead><tr><th>Mes</th><th>Al inicio</th><th>Altas</th><th>Bajas</th><th>Al final</th><th title="Suscripción abierta ese mes pero sin pago real (en espera/impago) — ni activo ni baja">Pendientes ⓘ</th><th>% bajas</th></tr></thead>
               <tbody>
                 {data.porMes.map(m => (
                   <tr key={m.mes}>
-                    <td>{fmtMonth(m.mes)}</td><td>{m.personasInicio}</td><td>{m.altas}</td><td>{m.bajas}</td><td>{m.personasFin}</td>
+                    <td>{fmtMonth(m.mes)}</td><td>{m.personasInicio}</td><td>{m.altas}</td><td>{m.bajas}</td><td>{m.personasFin}</td><td>{m.pendientes}</td>
                     <td className={m.pctBajas > 10 ? 'sa-profit__ben--neg' : ''}>{m.pctBajas != null ? `${m.pctBajas}%` : '—'}</td>
                   </tr>
                 ))}
@@ -477,7 +477,7 @@ function ClasesRetencionSection() {
           </div>
           {data.finDesgloseActual && (
             <p className="sa-legend">
-              «Al final» del mes en curso ({data.finDesgloseActual.conCuentaWeb + data.finDesgloseActual.sinCuentaWeb}): {data.finDesgloseActual.conCuentaWeb} con cuenta web real (login) + {data.finDesgloseActual.sinCuentaWeb} identificadas solo por teléfono/nombre (pedido de invitado, sin cuenta) — estas últimas son las que más probablemente duplican a alguien ya contado con cuenta web. Si no coincide con «Personas» de Grupos, la diferencia está sobre todo ahí.
+              «Al final» del mes en curso ({data.finDesgloseActual.conCuentaWeb + data.finDesgloseActual.sinCuentaWeb}, ya solo con el mes pagado/cubierto — en espera/impago cuenta aparte como «Pendientes»): {data.finDesgloseActual.conCuentaWeb} con cuenta web real (login) + {data.finDesgloseActual.sinCuentaWeb} identificadas solo por teléfono/nombre (pedido de invitado, sin cuenta) — estas últimas son las que más probablemente duplican a alguien ya contado con cuenta web. Si no coincide con «Personas» de Grupos, la diferencia está sobre todo ahí.
             </p>
           )}
 

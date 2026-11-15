@@ -5435,7 +5435,11 @@ function superadmin_ingresos_desglose($request) {
 // tienda, un producto = una línea aunque se venda en las dos).
 function superadmin_products($request) {
     $months = max(1, min(60, intval($request->get_param('months'))));
-    return rest_ensure_response(array('data' => blokes_productos_calcular($months)));
+    // Cowork, 15/11 14:00 punto 8: con exclude_transfer=1 seguía devolviendo "Otros › Uso de
+    // Rocódromo" (la UI lo filtraba a mano) — ahora lo quita el propio endpoint, igual que ya
+    // hace /ingresos/desglose.
+    $exclude_transfer = (bool) $request->get_param('exclude_transfer');
+    return rest_ensure_response(array('data' => blokes_productos_calcular($months, $exclude_transfer)));
 }
 
 // Cuenta PERSONAS (cuentas de facturación), no suscripciones: una suscripción Martes-Jueves
@@ -11674,6 +11678,7 @@ function blokes_altas_bajas_calcular($months) {
     $persona_max_end    = array(); // personaKey => Y-m más reciente con cobertura (para permanencia, Superadmin Clases)
     $persona_historial  = array(); // personaKey => [ ['classKey','startYm','dia','horario','edad'], ... ]
     $persona_intervalos = array(); // personaKey => [ ['start'=>Y-m,'end'=>Y-m], ... ] — para la retención por cohorte
+    $persona_intervalos_pagados = array(); // igual, pero solo con suscripciones 'active' (cobertura real de pago, no on-hold/pending)
     // Por clase (no por persona): TODAS las suscripciones que ha tenido alguna vez esa clase
     // (no solo las activas ahora) y desde cuándo hay datos — para el ingreso real por mes de
     // Superadmin › Clases, que si no se calcula solo sobre el reparto de HOY (cowork, 15/11
@@ -11704,6 +11709,12 @@ function blokes_altas_bajas_calcular($months) {
         if ($e['status'] === 'active') $persona_activo_en[$pk][$e['classKey']] = true;
         $persona_historial[$pk][] = array('classKey' => $e['classKey'], 'startYm' => $e['startYm'], 'dia' => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad']);
         $persona_intervalos[$pk][] = array('start' => $e['startYm'], 'end' => $e['endYm']);
+        // Cobertura REAL de pago (cowork, 15/11 14:00 punto 1: "al final = solo personas con el
+        // mes pagado/cubierto; en espera/impago = pendiente") — un pending nunca ha pagado nada
+        // (su intervalo WooCommerce hoy es [alta, alta] porque no tiene fecha de cancelación,
+        // así que "cubre" igual su propio mes de alta aunque nunca se cobrara) y un on-hold solo
+        // cubre hasta su ÚLTIMO pago real, nunca más allá — por eso solo 'active' aporta aquí.
+        if ($e['status'] === 'active') $persona_intervalos_pagados[$pk][] = array('start' => $e['startYm'], 'end' => $e['endYm']);
         $class_sub_ids[$e['classKey']][$e['subId']] = true;
         if (!isset($class_min_start[$e['classKey']]) || $e['startYm'] < $class_min_start[$e['classKey']]) $class_min_start[$e['classKey']] = $e['startYm'];
 
@@ -11889,6 +11900,17 @@ function blokes_altas_bajas_calcular($months) {
         $externos_ivs = ($meses_externos && $wc_min !== null) ? blokes_externo_intervalos_desde_meses($meses_externos, $wc_min) : array();
         $persona_intervalos_real[$pk] = $externos_ivs ? array_merge($externos_ivs, $ivs) : $ivs;
     }
+    // Mismo cruce, pero solo con cobertura REAL de pago del lado WooCommerce (cowork, 15/11
+    // 14:00 punto 1) — los intervalos externos (hist-pagos/Excel) ya son "pagados" por
+    // construcción (vienen de filas de pago), así que se reutilizan tal cual.
+    $persona_intervalos_pagados_real = array();
+    foreach ($persona_intervalos as $pk => $ivs) {
+        $wc_min = $persona_min_start[$pk] ?? null;
+        $meses_externos = $persona_externo_meses[$pk] ?? array();
+        $externos_ivs = ($meses_externos && $wc_min !== null) ? blokes_externo_intervalos_desde_meses($meses_externos, $wc_min) : array();
+        $pagados_ivs = $persona_intervalos_pagados[$pk] ?? array();
+        $persona_intervalos_pagados_real[$pk] = array_merge($externos_ivs, $pagados_ivs);
+    }
 
     return array(
         'data' => $data, 'duplicadosMismaClase' => $duplicados_misma_clase,
@@ -11905,6 +11927,9 @@ function blokes_altas_bajas_calcular($months) {
         // sin extender) se dejan intactos para quien los necesite tal cual.
         'personaMinStartReal' => $persona_min_start_real,
         'personaIntervalosReal' => $persona_intervalos_real,
+        // Solo cobertura real de pago (sin on-hold/pending) — cowork, 15/11 14:00 punto 1: "al
+        // final = solo personas con el mes pagado/cubierto; en espera/impago = pendiente".
+        'personaIntervalosPagadosReal' => $persona_intervalos_pagados_real,
         'externosSinEmparejar' => $externos_sin_emparejar,
     );
 }
@@ -11995,6 +12020,12 @@ function superadmin_clases_retencion($request) {
     // más antiguo de cada persona hasta su alta real cuando es anterior a la de WooCommerce.
     $persona_min_start_real  = $calculo['personaMinStartReal'];
     $persona_intervalos_real = $calculo['personaIntervalosReal'];
+    // Solo cobertura REAL de pago (cowork, 15/11 14:00 punto 1: "al final = solo personas con
+    // el mes pagado/cubierto; en espera/impago = pendiente") — personaIntervalosReal de arriba
+    // también cuenta on-hold/pending (para no perder el hueco de baja si vuelven), pero "al
+    // final" tiene que ser gente que de verdad pagó ese mes, no cualquiera con una suscripción
+    // abierta sin cobrar.
+    $persona_intervalos_pagados_real = $calculo['personaIntervalosPagadosReal'];
     $persona_activo_en  = $calculo['personaActivoEn'];
     $persona_historial  = $calculo['personaHistorial'];
     $class_sub_ids      = $calculo['classSubIds'];
@@ -12023,13 +12054,21 @@ function superadmin_clases_retencion($request) {
     $por_mes = array();
     foreach ($months_range as $ym) {
         $mes_anterior = blokes_mes_mas($ym, -1);
-        $inicio = 0; $fin = 0; $bajas = 0;
-        foreach ($persona_intervalos_real as $pk => $ivs) {
+        $inicio = 0; $fin = 0; $bajas = 0; $pendientes = 0;
+        foreach ($persona_intervalos_pagados_real as $pk => $ivs) {
             $activo_antes = blokes_persona_cubre_mes($ivs, $mes_anterior);
             $activo_ahora = blokes_persona_cubre_mes($ivs, $ym);
             if ($activo_antes) $inicio++;
             if ($activo_ahora) $fin++;
             if ($activo_antes && !$activo_ahora) $bajas++;
+        }
+        // "Pendiente" = tiene alguna suscripción abierta este mes (persona_intervalos_real,
+        // incluye on-hold/pending) pero NO pagó de verdad (no está en persona_intervalos_pagados_real)
+        // — ni cuenta como activo ni como baja, es su propio estado.
+        foreach ($persona_intervalos_real as $pk => $ivs) {
+            if (!blokes_persona_cubre_mes($ivs, $ym)) continue;
+            $ivs_pagados = $persona_intervalos_pagados_real[$pk] ?? array();
+            if (!blokes_persona_cubre_mes($ivs_pagados, $ym)) $pendientes++;
         }
         $altas = 0;
         foreach ($persona_min_start_real as $pk => $min_ym) {
@@ -12037,7 +12076,7 @@ function superadmin_clases_retencion($request) {
         }
         $por_mes[] = array(
             'mes' => $ym, 'personasInicio' => $inicio, 'altas' => $altas, 'bajas' => $bajas,
-            'personasFin' => $fin, 'pctBajas' => $inicio ? round($bajas / $inicio * 100, 1) : null,
+            'personasFin' => $fin, 'pendientes' => $pendientes, 'pctBajas' => $inicio ? round($bajas / $inicio * 100, 1) : null,
         );
     }
 
@@ -12048,9 +12087,9 @@ function superadmin_clases_retencion($request) {
     // candidatas más probables a estar infladas/duplicadas, ya que un mismo humano con dos
     // pedidos de invitado con datos ligeramente distintos puede caer en dos personaKey "t"/"n"
     // en vez de fundirse en una (la consolidación de cdd95ea solo funde cuando hay un uid real
-    // de por medio).
+    // de por medio). Sobre personaIntervalosPagadosReal (ya sin on-hold/pending) — 15/11 14:00.
     $fin_desglose_actual = array('conCuentaWeb' => 0, 'sinCuentaWeb' => 0);
-    foreach ($persona_intervalos_real as $pk => $ivs) {
+    foreach ($persona_intervalos_pagados_real as $pk => $ivs) {
         if (!blokes_persona_cubre_mes($ivs, $now_ym)) continue;
         if ($pk[0] === 'u') $fin_desglose_actual['conCuentaWeb']++; else $fin_desglose_actual['sinCuentaWeb']++;
     }
