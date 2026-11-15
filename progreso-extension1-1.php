@@ -1586,17 +1586,25 @@ function superadmin_get_expenses($request) {
     $iva_real_map = blokes_expenses_iva_repercutido_real($from);
     $nominas_real_cache = array(); // month => $totals['bank'] de payroll_compute_month
     $nominas_people = null; $nominas_entries = null; $nominas_base = null; $nominas_rates = null;
+    // Nunca puede tirar /expenses entero si algo de Nóminas falla — es un cruce informativo,
+    // no el dato principal (mismo cuidado que con los reembolsos de WooCommerce, que sí
+    // tiraron /revenue en producción el 15/11).
     $nominas_real_de_mes = function($month) use (&$nominas_real_cache, &$nominas_people, &$nominas_entries, &$nominas_base, &$nominas_rates) {
         if (isset($nominas_real_cache[$month])) return $nominas_real_cache[$month];
-        if (!function_exists('overtime_get_people')) return null;
-        if ($nominas_people === null) {
-            $nominas_people  = overtime_get_people();
-            $nominas_entries = overtime_get_entries();
-            $nominas_base    = payroll_get_base();
-            $nominas_rates   = overtime_get_rates();
+        if (!function_exists('overtime_get_people') || !function_exists('payroll_compute_month')) return null;
+        try {
+            if ($nominas_people === null) {
+                $nominas_people  = overtime_get_people();
+                $nominas_entries = overtime_get_entries();
+                $nominas_base    = payroll_get_base();
+                $nominas_rates   = overtime_get_rates();
+            }
+            $r = payroll_compute_month($month, $nominas_people, $nominas_entries, $nominas_base, $nominas_rates);
+            return $nominas_real_cache[$month] = floatval($r['totals']['bank'] ?? 0);
+        } catch (\Throwable $e) {
+            error_log('Blokes superadmin_get_expenses: cruce de nominas fallo para ' . $month . ': ' . $e->getMessage());
+            return $nominas_real_cache[$month] = null;
         }
-        $r = payroll_compute_month($month, $nominas_people, $nominas_entries, $nominas_base, $nominas_rates);
-        return $nominas_real_cache[$month] = floatval($r['totals']['bank'] ?? 0);
     };
 
     $data = array();
