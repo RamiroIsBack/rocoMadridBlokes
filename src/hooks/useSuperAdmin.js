@@ -54,6 +54,11 @@ export function useClasses(months) {
     // Gente de hist-pagos sin ninguna suscripción de WooCommerce emparejada (15/11 11:15):
     // informativo, nunca cuenta como alta.
     externosSinEmparejar: raw?.externosSinEmparejar || 0,
+    // Pestañas del Excel de Grupos con pago este mes que no casaron con ninguna clase conocida
+    // (15/11 §17:50 punto 9, mismo reparto que ya usa Superadmin › Clases) — cada clase ya trae
+    // su `activosFuera` sumado en `data`, esto es solo el detalle de lo que quedó sin repartir.
+    pestanasSinRepartir: raw?.pestanasSinRepartir || 0,
+    pestanasSinRepartirDetalle: raw?.pestanasSinRepartirDetalle || [],
   }
 }
 

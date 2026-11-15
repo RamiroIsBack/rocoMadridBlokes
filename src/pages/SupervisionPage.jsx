@@ -168,7 +168,7 @@ const KNOWN_SLOTS = [
 ]
 
 // ─── Schedule grid ────────────────────────────────────────────────────────────
-function ScheduleGrid({ classes, filter }) {
+function ScheduleGrid({ classes, filter, pestanasSinRepartir = 0, pestanasSinRepartirDetalle = [] }) {
   const conMeta = useMemo(() => classes.map(c => ({ ...c, meta: parseClassMeta(c.label) })), [classes])
 
   const parsed = useMemo(() => (
@@ -206,10 +206,14 @@ function ScheduleGrid({ classes, filter }) {
     parsed.forEach(c => {
       const { time, days } = c.meta
       const esNinos = c.edad && c.edad !== 'Adultos'
+      // Cowork, 15/11 §17:50 punto 9: los que pagan por fuera (Excel de Grupos) ya se reparten
+      // aquí con el mismo emparejamiento pestaña→clase que usa Superadmin › Clases (activos
+      // = web + fuera), en vez de quedarse fuera de la rejilla por completo.
+      const totalActivos = c.active + (c.activosFuera || 0)
       days.forEach(day => {
         if (day < 5 && g[time] !== undefined) {
-          g[time][day].total += c.active
-          if (esNinos) g[time][day].ninos += c.active
+          g[time][day].total += totalActivos
+          if (esNinos) g[time][day].ninos += totalActivos
         }
       })
     })
@@ -260,6 +264,14 @@ function ScheduleGrid({ classes, filter }) {
             ))}
           </ul>
         </div>
+      )}
+      {pestanasSinRepartir > 0 && (
+        <p className="sv-note sv-to-small">
+          <span title={pestanasSinRepartirDetalle.map(p => `${p.pestana}: ${p.motivo}`).join('\n')} style={{ cursor: 'help', textDecoration: 'underline dotted' }}>
+            {pestanasSinRepartir} pestaña{pestanasSinRepartir === 1 ? '' : 's'} del Excel con pago este mes sin repartir ⓘ
+          </span>
+          {' '}(pasa el ratón para ver cuáles y por qué) — no se reparten a ciegas.
+        </p>
       )}
       <div className="sv-legend">
         <span className="sv-legend__label">Inscritos:</span>
@@ -406,6 +418,67 @@ function classMatchesTeacher(c, teacher) {
 
 function classLabel(c) {
   return c.edad && c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label
+}
+
+// Cowork, 15/11 §17:50 punto 10: "Alumnos activos por clase"/"Evolución por clase" sacaban 49
+// "clases" porque cada día suelto de una combinada (Martes-Jueves) salía aparte — mismo criterio
+// que ya usa filasRentabilidad en Superadmin › Clases (SuperAdminPage.jsx): el día suelto es la
+// MISMA sesión real que la combinada (variantes de producto distintas de la misma clase), así
+// que se funde en ella en vez de listarse como clase propia. Al fundir dos piezas con la misma
+// persona en las dos (p. ej. alguien con una suscripción de "Martes" Y otra de "Martes-Jueves"),
+// los chips también se deduplican por teléfono/nombre — esto es lo que arregla de paso los
+// nombres repetidos del aviso (sofiacendejas/jorgecendejas/santicendejas, Martina Teixeira).
+function dedupMiembros(lista) {
+  const vistos = new Set()
+  const out = []
+  lista.forEach(m => {
+    const clave = m.phone ? `t${m.phone}` : `n${(m.name || '').toLowerCase().replace(/\s+/g, '')}`
+    if (vistos.has(clave)) return
+    vistos.add(clave)
+    out.push(m)
+  })
+  return out
+}
+function agruparClasesPorComboReal(data) {
+  const combos  = data.filter(c => (c.dia || '').includes('-'))
+  const singles = data.filter(c => !(c.dia || '').includes('-'))
+  const comboPorSuelto = {}
+  combos.forEach(combo => {
+    combo.dia.split('-').forEach(dia => {
+      const key = `${dia.trim()}|${combo.horario}|${combo.edad}`
+      ;(comboPorSuelto[key] = comboPorSuelto[key] || []).push(combo)
+    })
+  })
+  const cubiertos = new Set()
+  const filas = []
+
+  combos.forEach(combo => {
+    const relacionadas = singles.filter(s => comboPorSuelto[`${s.dia.trim()}|${s.horario}|${s.edad}`]?.includes(combo))
+    relacionadas.forEach(s => cubiertos.add(`${s.dia.trim()}|${s.horario}|${s.edad}`))
+    const piezas = [combo, ...relacionadas]
+    const meses = [...new Set(piezas.flatMap(p => (p.history || []).map(h => h.month)))].sort()
+    const history = meses.map(month => ({
+      month,
+      active: piezas.reduce((t, p) => t + ((p.history || []).find(h => h.month === month)?.active || 0), 0),
+      new: piezas.reduce((t, p) => t + ((p.history || []).find(h => h.month === month)?.new || 0), 0),
+    }))
+    filas.push({
+      ...combo,
+      active: piezas.reduce((t, p) => t + (p.active || 0), 0),
+      history,
+      members_active:  dedupMiembros(piezas.flatMap(p => p.members_active || [])),
+      members_ending:  dedupMiembros(piezas.flatMap(p => p.members_ending || [])),
+      members_pending: dedupMiembros(piezas.flatMap(p => p.members_pending || [])),
+      members_lost:    dedupMiembros(piezas.flatMap(p => p.members_lost || [])),
+    })
+  })
+
+  singles.forEach(s => {
+    if (cubiertos.has(`${s.dia.trim()}|${s.horario}|${s.edad}`)) return // ya fundida en su combo
+    filas.push(s)
+  })
+
+  return filas.sort((a, b) => b.active - a.active)
 }
 
 function TrendCharts({ data, months, selectedKey, onSelectKey }) {
@@ -758,11 +831,15 @@ function ClasesTab() {
   const [months, setMonths]           = useState(6)
   const [filter, setFilter]           = useState('todos')
   const [selectedClassKey, setSelectedClassKey] = useState('')
-  const { data: dataConDescontinuadas, loading, error, duplicadosMismaClase } = useClasses(months)
+  const { data: dataConDescontinuadas, loading, error, duplicadosMismaClase, pestanasSinRepartir, pestanasSinRepartirDetalle } = useClasses(months)
   // Ramiro, 18:00 + cowork 17:50 punto 12: las franjas "ya no existen" (mañanas L-X/M-J,
   // Viernes 19-21 adultos) se quitan de aquí (catálogo/pantallas) pero NO del dato crudo que
   // usa Grupos para Altas y Bajas — esa pantalla lee /classes por su cuenta, sin pasar por aquí.
   const data = useMemo(() => (dataConDescontinuadas || []).filter(c => !c.descontinuada), [dataConDescontinuadas])
+  // Punto 10 de §17:50: ScheduleGrid necesita cada día suelto por separado (una columna por día
+  // de la semana), pero TrendCharts ("Alumnos activos por clase"/"Evolución por clase") tiene
+  // que agrupar por clase real — ver agruparClasesPorComboReal().
+  const dataAgrupada = useMemo(() => agruparClasesPorComboReal(data), [data])
 
   const filtered = useMemo(() => {
     if (!data) return []
@@ -816,7 +893,7 @@ function ClasesTab() {
 
           <section className="sv-section">
             <h2 className="sv-section-title">Horario por día</h2>
-            <p className="sv-note">Snapshot actual de alumnos activos por franja horaria. Verde intenso = mucha gente; rosa = clase programada pero sin activos; — = sin clase en ese horario. Niños/adolescentes aparte en morado, dentro de la misma celda. Solo suscripciones de la web — los que pagan por fuera (Excel de Grupos) no se reparten aquí: su horario de pestaña no trae la hora de fin, así que no hay forma fiable de encajarlos en una celda sin adivinar; el total fusionado (web + fuera) está en «Personas», arriba.</p>
+            <p className="sv-note">Snapshot actual de alumnos activos por franja horaria. Verde intenso = mucha gente; rosa = clase programada pero sin activos; — = sin clase en ese horario. Niños/adolescentes aparte en morado, dentro de la misma celda. Incluye también a los que pagan por fuera (Excel de Grupos), repartidos por pestaña a su clase real con el mismo emparejamiento que ya usa Superadmin › Clases (15/11 §17:50 punto 9) — lo que no case con ninguna clase sale en el aviso de abajo, nunca se reparte a ciegas.</p>
             {duplicadosMismaClase.length > 0 && (
               <div className="sv-aviso sv-aviso--warn">
                 <strong>⚠ Dos suscripciones activas de la misma clase ({duplicadosMismaClase.length}):</strong> cada persona solo cuenta una plaza aquí, pero tiene dos suscripciones pagando a la vez — decide tú si cobrar una y cancelar la otra (no se cancela ni reembolsa nada en automático).
@@ -827,7 +904,7 @@ function ClasesTab() {
                 </ul>
               </div>
             )}
-            <ScheduleGrid classes={data} filter={filter} />
+            <ScheduleGrid classes={data} filter={filter} pestanasSinRepartir={pestanasSinRepartir} pestanasSinRepartirDetalle={pestanasSinRepartirDetalle} />
             {totalEnding > 0 && (
               <p className="sv-note sv-to-small">
                 + <strong>{totalEnding}</strong> {totalEnding === 1 ? 'que ya canceló' : 'que ya cancelaron'} y se {totalEnding === 1 ? 'va' : 'van'} este mes (tienen acceso hasta que acabe el periodo pagado, no cuentan arriba como activos).
@@ -844,7 +921,7 @@ function ClasesTab() {
             </div>
           )}
 
-          <TrendCharts data={data} months={months} selectedKey={selectedClassKey} onSelectKey={setSelectedClassKey} />
+          <TrendCharts data={dataAgrupada} months={months} selectedKey={selectedClassKey} onSelectKey={setSelectedClassKey} />
         </>
       )}
 

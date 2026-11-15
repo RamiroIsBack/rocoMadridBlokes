@@ -11801,12 +11801,29 @@ function superadmin_gestion_alta_cliente($request) {
 function superadmin_classes($request) {
     $months = max(1, min(60, intval($request->get_param('months'))));
     $r = blokes_altas_bajas_calcular($months);
+    // Cowork, 15/11 §17:50 punto 9: "Horario por día" (ScheduleGrid) solo contaba suscripciones
+    // de WooCommerce — igual que le pasaba a "Activos" de Rentabilidad/Retención antes de
+    // 19:25/19:50. Reutiliza el mismo reparto pestaña→clase ya probado en vivo
+    // (blokes_grupos_excel_externos_activos_por_clase()), sobre el catálogo sin franjas
+    // descontinuadas (mismo filtro que usa superadmin_clases_retencion()).
+    $clases_catalogo = array_values(array_filter($r['data'], function($c) { return empty($c['descontinuada']); }));
+    $res_externos = blokes_grupos_excel_externos_activos_por_clase($clases_catalogo, $r['nowYm']);
+    $data = $r['data'];
+    foreach ($data as &$c) {
+        $key = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
+        $c['activosFuera'] = $res_externos['porClase'][$key] ?? 0;
+    }
+    unset($c);
     return rest_ensure_response(array(
-        'data' => $r['data'], 'duplicadosMismaClase' => $r['duplicadosMismaClase'],
+        'data' => $data, 'duplicadosMismaClase' => $r['duplicadosMismaClase'],
         // Gente de hist-pagos que pagó alguna vez pero no empareja con ninguna suscripción de
         // WooCommerce actual (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 11:15: "nunca
         // como alta", solo un contador informativo).
         'externosSinEmparejar' => $r['externosSinEmparejar'],
+        // Pestañas del Excel con pago este mes que no casaron con ninguna clase conocida — nunca
+        // se reparten a ciegas (15/11 19:30: "sin repartir").
+        'pestanasSinRepartir' => count($res_externos['sinRepartirDetalle']),
+        'pestanasSinRepartirDetalle' => $res_externos['sinRepartirDetalle'],
     ));
 }
 
@@ -12228,7 +12245,15 @@ function blokes_altas_bajas_calcular($months) {
 
             $edad         = sanitize_text_field($sub['edad'] ?? '') ?: 'Adultos';
             $class_key    = ($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '') . '|' . $edad;
-            $member_name  = $sub['cliente']  ?? '';
+            // Cowork, 15/11 17:50 punto 10: en los chips de "Evolución por clase" salían
+            // teléfonos (+34609571550...) en vez de nombres — $sub['cliente'] es el display_name
+            // de la cuenta de WordPress, que para cuentas autorregistradas en el checkout puede
+            // ser literalmente el username (a veces el teléfono, a veces el nombre sin espacios).
+            // El nombre de facturación de la suscripción (lo que la persona escribió de verdad en
+            // el formulario de pago) es más fiable — se usa primero, y solo se cae al display_name
+            // si la suscripción no tiene nombre de facturación guardado.
+            $billing_nombre = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name());
+            $member_name  = $billing_nombre !== '' ? $billing_nombre : ($sub['cliente'] ?? '');
             $member_phone = $sub['telefono'] ?: ($sub_obj->get_billing_phone() ?: '');
             $member_email = $sub['email'] ?: ($sub_obj->get_billing_email() ?: '');
             // pending-cancel: el cliente ya canceló pero sigue con acceso hasta que acabe el
@@ -12665,6 +12690,75 @@ function blokes_persona_retenida_continua($intervalos, $desde_ym, $hasta_ym) {
     return true;
 }
 
+// Externos del Excel de Grupos (pagan por fuera de WooCommerce) atribuidos a su clase real del
+// mes $ym, dado un catálogo de clases ya conocidas (dia/horario/edad/active/members_active).
+// Ramiro, 15/11 19:25/19:30 (algoritmo final probado en vivo 19:50, dos rondas): "activos" solo
+// contaba suscripciones de WooCommerce — los que pagan por fuera (transferencia, efectivo) no
+// salían en NINGUNA clase. blokes_grupos_excel_clases_candidatas_para_pestana() busca por
+// PESTAÑA (no por clase): cada pestaña con pago ese mes elige UNA sola clase ganadora entre sus
+// candidatas — primero la del grupo de edad que sugiere el propio nombre de la pestaña
+// (blokes_grupos_excel_categoria_pestana: "ADOL"/"KIDS"/"MEDIANOS" → no-adultos), y entre las que
+// empaten, la combinada (2 días) sobre la suelta y, si sigue habiendo más de una, la que ya
+// tenga más alumnos web (la variante "principal"). Las pestañas que de verdad no casen con
+// ninguna clase se devuelven en "sin repartir" con el motivo — nunca se reparten a ciegas ni se
+// duplican. Compartida entre superadmin_clases_retencion() (Rentabilidad/Retención) y
+// superadmin_classes() (Horario por día, 15/11 §17:50 punto 9) para no desincronizar el mismo
+// reparto en dos sitios.
+function blokes_grupos_excel_externos_activos_por_clase($clases_catalogo, $ym) {
+    $filas_mes_por_pestana = array();
+    foreach (blokes_grupos_excel_filas_crudas() as $f) {
+        if (!in_array($ym, $f['pagos'], true)) continue;
+        $filas_mes_por_pestana[$f['pestana']][] = $f;
+    }
+    $clase_por_key = array();
+    foreach ($clases_catalogo as $c) { $clase_por_key[$c['dia'] . '|' . $c['horario'] . '|' . $c['edad']] = $c; }
+
+    $externos_por_clase = array(); // classKey => nº de externos distintos
+    $sin_repartir_detalle = array(); // [{pestana, motivo}]
+    foreach ($filas_mes_por_pestana as $pestana => $filas) {
+        $candidatos = blokes_grupos_excel_clases_candidatas_para_pestana($pestana, $clases_catalogo);
+        if (!$candidatos) {
+            $sin_repartir_detalle[] = array('pestana' => $pestana, 'motivo' => 'no casa con ninguna clase conocida');
+            continue;
+        }
+        if (count($candidatos) > 1) {
+            $categoria_pestana = blokes_grupos_excel_categoria_pestana($pestana);
+            if ($categoria_pestana === 'ninos') {
+                $filtrados = array_values(array_filter($candidatos, function($k) use ($clase_por_key) { return ($clase_por_key[$k]['edad'] ?? 'Adultos') !== 'Adultos'; }));
+                if ($filtrados) $candidatos = $filtrados;
+            }
+            usort($candidatos, function($a, $b) use ($clase_por_key) {
+                $ca = $clase_por_key[$a]; $cb = $clase_por_key[$b];
+                $comboA = strpos($ca['dia'], '-') !== false ? 1 : 0;
+                $comboB = strpos($cb['dia'], '-') !== false ? 1 : 0;
+                if ($comboA !== $comboB) return $comboB - $comboA; // combinada primero
+                return $cb['active'] - $ca['active']; // más alumnos web primero
+            });
+        }
+        $ganador = $candidatos[0];
+        $c = $clase_por_key[$ganador];
+        $identidades_web = array();
+        foreach ($c['members_active'] as $m) {
+            $tel = blokes_externos_normaliza_telefono($m['phone'] ?? '');
+            if ($tel) $identidades_web['t' . $tel] = true;
+            $nomc = blokes_externos_normaliza_nombre_compacto($m['name'] ?? '');
+            if ($nomc) $identidades_web['n' . $nomc] = true;
+        }
+        $externos_unicos = array();
+        foreach ($filas as $f) {
+            $tel = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
+            $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
+            $key = $tel ? ('t' . $tel) : ($nomc ? ('n' . $nomc) : null);
+            if (!$key || isset($identidades_web[$key])) continue;
+            $externos_unicos[$key] = true;
+        }
+        if ($externos_unicos) {
+            $externos_por_clase[$ganador] = ($externos_por_clase[$ganador] ?? 0) + count($externos_unicos);
+        }
+    }
+    return array('porClase' => $externos_por_clase, 'sinRepartirDetalle' => $sin_repartir_detalle);
+}
+
 // GET /superadmin/v1/clases-retencion — Superadmin › Clases (15/11 16:40, solo socios):
 // rentabilidad e ingreso real por clase, con retención fiable por clase (1/3/6 meses, estancias
 // con 1 mes de margen, cambios de clase aparte de bajas de verdad) — ver
@@ -12701,76 +12795,13 @@ function superadmin_clases_retencion($request) {
     // directamente, sin pasar por aquí.
     $clases_catalogo = array_values(array_filter($calculo['data'], function($c) { return empty($c['descontinuada']); }));
 
-    // Externos del Excel de Grupos sumados a "Activos" por clase (Ramiro, 15/11 19:25/19:30):
-    // antes "Activos" solo contaba suscripciones de WooCommerce — los que pagan por fuera
-    // (transferencia, efectivo) no salían en NINGUNA clase, ni la suya ni otra (ejemplo real:
-    // 5 adolescentes de M-J 19:30-21:00 en la pestaña "M-J 19.30 ADOL"). Se cuentan los externos
-    // de ESE mes que no tengan ya una suscripción web activa en esa misma clase (sin duplicar).
-    //
-    // 15/11 19:50 (Ramiro, probado en vivo, dos rondas): varias clases distintas pueden casar
-    // con la MISMA pestaña (medianos salía en 2 filas, Adolescentes/Menores; "fuera" sumaba 49
-    // por clases contra 29 personas reales) — y, al revés, DOS pestañas reales con el mismo
-    // "día hora-inicio" pero distinto sufijo ("M-J 19.30" adultos y "M-J 19.30 ADOL"
-    // adolescentes) hacían que exigir una única pestaña por clase no casara ninguna de las dos.
-    // blokes_grupos_excel_clases_candidatas_para_pestana() busca ahora por PESTAÑA (no por
-    // clase): cada pestaña con pago este mes elige UNA sola clase ganadora entre sus candidatas
-    // — primero la del grupo de edad que sugiere el propio nombre de la pestaña
-    // (blokes_grupos_excel_categoria_pestana: "ADOL"/"KIDS"/"MEDIANOS" → no-adultos), y entre
-    // las que empaten, la combinada (2 días) sobre la suelta y, si sigue habiendo más de una,
-    // la que ya tenga más alumnos web (la variante "principal"). Las pestañas que de verdad no
-    // casen con ninguna clase se cuentan en "sin repartir" con el motivo — nunca se reparten a
-    // ciegas ni se duplican.
-    $filas_excel_mes_actual_por_pestana = array();
-    foreach (blokes_grupos_excel_filas_crudas() as $f) {
-        if (!in_array($now_ym, $f['pagos'], true)) continue;
-        $filas_excel_mes_actual_por_pestana[$f['pestana']][] = $f;
-    }
-    $clase_por_key = array();
-    foreach ($clases_catalogo as $c) { $clase_por_key[$c['dia'] . '|' . $c['horario'] . '|' . $c['edad']] = $c; }
-
-    $externos_activos_por_clase = array(); // classKey => nº de externos distintos
-    $pestanas_sin_repartir_detalle = array(); // [{pestana, motivo}]
-    foreach ($filas_excel_mes_actual_por_pestana as $pestana => $filas) {
-        $candidatos = blokes_grupos_excel_clases_candidatas_para_pestana($pestana, $clases_catalogo);
-        if (!$candidatos) {
-            $pestanas_sin_repartir_detalle[] = array('pestana' => $pestana, 'motivo' => 'no casa con ninguna clase conocida');
-            continue;
-        }
-        if (count($candidatos) > 1) {
-            $categoria_pestana = blokes_grupos_excel_categoria_pestana($pestana);
-            if ($categoria_pestana === 'ninos') {
-                $filtrados = array_values(array_filter($candidatos, function($k) use ($clase_por_key) { return ($clase_por_key[$k]['edad'] ?? 'Adultos') !== 'Adultos'; }));
-                if ($filtrados) $candidatos = $filtrados;
-            }
-            usort($candidatos, function($a, $b) use ($clase_por_key) {
-                $ca = $clase_por_key[$a]; $cb = $clase_por_key[$b];
-                $comboA = strpos($ca['dia'], '-') !== false ? 1 : 0;
-                $comboB = strpos($cb['dia'], '-') !== false ? 1 : 0;
-                if ($comboA !== $comboB) return $comboB - $comboA; // combinada primero
-                return $cb['active'] - $ca['active']; // más alumnos web primero
-            });
-        }
-        $ganador = $candidatos[0];
-        $c = $clase_por_key[$ganador];
-        $identidades_web = array();
-        foreach ($c['members_active'] as $m) {
-            $tel = blokes_externos_normaliza_telefono($m['phone'] ?? '');
-            if ($tel) $identidades_web['t' . $tel] = true;
-            $nomc = blokes_externos_normaliza_nombre_compacto($m['name'] ?? '');
-            if ($nomc) $identidades_web['n' . $nomc] = true;
-        }
-        $externos_unicos = array();
-        foreach ($filas as $f) {
-            $tel = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
-            $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
-            $key = $tel ? ('t' . $tel) : ($nomc ? ('n' . $nomc) : null);
-            if (!$key || isset($identidades_web[$key])) continue;
-            $externos_unicos[$key] = true;
-        }
-        if ($externos_unicos) {
-            $externos_activos_por_clase[$ganador] = ($externos_activos_por_clase[$ganador] ?? 0) + count($externos_unicos);
-        }
-    }
+    // Externos del Excel de Grupos sumados a "Activos" por clase (Ramiro, 15/11 19:25/19:30,
+    // algoritmo final probado en vivo 19:50) — ver blokes_grupos_excel_externos_activos_por_clase().
+    // Compartida con superadmin_classes()/Horario por día (15/11 §17:50 punto 9), que necesita
+    // el mismo reparto para el mes en curso.
+    $res_externos = blokes_grupos_excel_externos_activos_por_clase($clases_catalogo, $now_ym);
+    $externos_activos_por_clase = $res_externos['porClase'];
+    $pestanas_sin_repartir_detalle = $res_externos['sinRepartirDetalle'];
     $pestanas_sin_repartir = count($pestanas_sin_repartir_detalle);
 
     $por_clase = array_map(function($c) use ($mes_ingreso, $estancias_por_clase, $meses_media, $class_sub_ids, $class_min_start, $externos_activos_por_clase) {
