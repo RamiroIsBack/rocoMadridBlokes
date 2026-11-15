@@ -11327,7 +11327,66 @@ function superadmin_gestion_alta_cliente($request) {
 function superadmin_classes($request) {
     $months = max(1, min(60, intval($request->get_param('months'))));
     $r = blokes_altas_bajas_calcular($months);
-    return rest_ensure_response(array('data' => $r['data'], 'duplicadosMismaClase' => $r['duplicadosMismaClase']));
+    return rest_ensure_response(array(
+        'data' => $r['data'], 'duplicadosMismaClase' => $r['duplicadosMismaClase'],
+        // Gente de hist-pagos que pagó alguna vez pero no empareja con ninguna suscripción de
+        // WooCommerce actual (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 11:15: "nunca
+        // como alta", solo un contador informativo).
+        'externosSinEmparejar' => $r['externosSinEmparejar'],
+    ));
+}
+
+// Primer mes pagado por persona en hist-pagos (import de hv_control_clientes), agrupado por
+// teléfono normalizado (últimos 9 dígitos), email y nombre normalizado — las mismas claves que
+// ya usan hist-pagos/estadísticas y el sync de Grupos (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md,
+// cowork 15/11 11:15). Bajo cada teléfono se guardan TODOS los nombres distintos vistos (no solo
+// el primero) para poder exigir coincidencia de nombre cuando el teléfono está compartido
+// (hermanos/padre-hijo) — blokes_externo_primer_pago() es quien aplica esa regla.
+function blokes_hist_pagos_primeros_pagos() {
+    global $wpdb;
+    blokes_ensure_hist_pagos_table();
+    $rows = $wpdb->get_results(
+        "SELECT telefono, nombre, email, MIN(fecha) AS primera FROM " . blokes_hist_pagos_table() . "
+         WHERE fecha IS NOT NULL AND fecha != '' GROUP BY telefono, nombre, email",
+        ARRAY_A
+    );
+    $por_telefono = array(); $por_nombre = array(); $por_email = array();
+    foreach ($rows as $r) {
+        $ym = substr((string) $r['primera'], 0, 7);
+        if (!preg_match('/^\d{4}-\d{2}$/', $ym)) continue;
+        $tel   = blokes_externos_normaliza_telefono((string) ($r['telefono'] ?? ''));
+        $nom   = blokes_externos_normaliza_nombre((string) ($r['nombre'] ?? ''));
+        $email = strtolower(trim((string) ($r['email'] ?? '')));
+        if ($tel) $por_telefono[$tel][] = array('nombreNorm' => $nom, 'minYm' => $ym);
+        if ($nom && (!isset($por_nombre[$nom]) || $ym < $por_nombre[$nom])) $por_nombre[$nom] = $ym;
+        if ($email && (!isset($por_email[$email]) || $ym < $por_email[$email])) $por_email[$email] = $ym;
+    }
+    return array('porTelefono' => $por_telefono, 'porNombre' => $por_nombre, 'porEmail' => $por_email);
+}
+
+// Primer pago de una persona en una fuente externa (hist-pagos hoy — el Excel de Grupos queda
+// pendiente de una versión CACHEADA: llamar a Google Sheets en vivo dentro de /classes, que se
+// pide en cada carga de Grupos/Pendientes de cobro/Superadmin Clases, repetiría el fallo de
+// rendimiento de d267515 con WooCommerce). Teléfono normalizado → email → nombre normalizado
+// (misma prioridad que pide la nota). Con teléfono compartido por más de una persona (varios
+// nombres distintos bajo el mismo teléfono) exige ADEMÁS que el nombre case de verdad.
+function blokes_externo_primer_pago($telefono, $nombre, $email, $fuente) {
+    $tel = blokes_externos_normaliza_telefono((string) $telefono);
+    $nom = blokes_externos_normaliza_nombre((string) $nombre);
+    $eml = strtolower(trim((string) $email));
+    if ($tel && isset($fuente['porTelefono'][$tel])) {
+        $candidatos = $fuente['porTelefono'][$tel];
+        $nombres_distintos = array_unique(array_filter(array_column($candidatos, 'nombreNorm')));
+        $mejor = null;
+        foreach ($candidatos as $c) {
+            if (count($nombres_distintos) > 1 && $nom && $c['nombreNorm'] && !blokes_externos_nombres_parecidos($nom, $c['nombreNorm'])) continue;
+            if ($mejor === null || $c['minYm'] < $mejor) $mejor = $c['minYm'];
+        }
+        if ($mejor !== null) return $mejor;
+    }
+    if ($eml && isset($fuente['porEmail'][$eml])) return $fuente['porEmail'][$eml];
+    if ($nom && isset($fuente['porNombre'][$nom])) return $fuente['porNombre'][$nom];
+    return null;
 }
 
 // Nuevo/Cambio de clase/Baja/Pendiente por persona (no por suscripción), agrupado por clase.
@@ -11368,6 +11427,7 @@ function blokes_altas_bajas_calcular($months) {
             $class_key    = ($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '') . '|' . $edad;
             $member_name  = $sub['cliente']  ?? '';
             $member_phone = $sub['telefono'] ?: ($sub_obj->get_billing_phone() ?: '');
+            $member_email = $sub['email'] ?: ($sub_obj->get_billing_email() ?: '');
             // pending-cancel: el cliente ya canceló pero sigue con acceso hasta que acabe el
             // periodo pagado. blokes_get_pending_cancel_alumnos() los marca 'status' => 'active'
             // para que no desaparezcan de ningún sitio, pero no son activos de verdad: no se
@@ -11396,7 +11456,7 @@ function blokes_altas_bajas_calcular($months) {
             $enriquecidos[] = array(
                 'subId' => intval($sub['id']), 'classKey' => $class_key, 'uid' => $uid,
                 'dia' => $sub['dia'] ?? '', 'horario' => $sub['horario'] ?? '', 'edad' => $edad,
-                'nombre' => $member_name, 'telefono' => $member_phone,
+                'nombre' => $member_name, 'telefono' => $member_phone, 'email' => $member_email,
                 'status' => $sub['status'], 'esPendingCancel' => $es_pending_cancel,
                 'personaKey' => $persona_key, 'startYm' => $sub_start_ym, 'endYm' => $sub_end_ym,
             );
@@ -11417,6 +11477,16 @@ function blokes_altas_bajas_calcular($months) {
     // meses de antes de que la clase existiera (la migración es de mayo-26).
     $class_sub_ids  = array(); // classKey => [subId => true]
     $class_min_start = array(); // classKey => Y-m más antiguo con actividad real en esa clase
+    // "Nuevo de verdad" (cowork, 15/11 09:45: "las altas de jun/sept son en gran parte gente que
+    // ya venía, pagaba por Excel") necesita el primer mes pagado en CUALQUIER fuente, no solo
+    // WooCommerce. $persona_min_start_real es una copia aparte de $persona_min_start SOLO para
+    // la clasificación de "Nuevo"/histórico de altas — nunca sustituye a $persona_min_start en
+    // los mapas exportados (personaMinStart/personaIntervalos), que siguen siendo 100%
+    // WooCommerce: la retención por cohorte ya se arregló en 750ffeb con ese dato y no hace
+    // falta (ni es seguro) tocarlo aquí sin repetir esa prueba.
+    $hist_pagos_map = blokes_hist_pagos_primeros_pagos();
+    $persona_min_start_real = array();
+    $wc_telefonos = array(); $wc_emails = array(); $wc_nombres = array();
     foreach ($enriquecidos as $e) {
         $pk = $e['personaKey'];
         if (!isset($persona_min_start[$pk]) || $e['startYm'] < $persona_min_start[$pk]) $persona_min_start[$pk] = $e['startYm'];
@@ -11426,6 +11496,29 @@ function blokes_altas_bajas_calcular($months) {
         $persona_intervalos[$pk][] = array('start' => $e['startYm'], 'end' => $e['endYm']);
         $class_sub_ids[$e['classKey']][$e['subId']] = true;
         if (!isset($class_min_start[$e['classKey']]) || $e['startYm'] < $class_min_start[$e['classKey']]) $class_min_start[$e['classKey']] = $e['startYm'];
+
+        $externo_ym = blokes_externo_primer_pago($e['telefono'], $e['nombre'], $e['email'] ?? '', $hist_pagos_map);
+        if (!isset($persona_min_start_real[$pk]) || $e['startYm'] < $persona_min_start_real[$pk]) $persona_min_start_real[$pk] = $e['startYm'];
+        if ($externo_ym !== null && $externo_ym < $persona_min_start_real[$pk]) $persona_min_start_real[$pk] = $externo_ym;
+        if ($e['telefono']) $wc_telefonos[blokes_externos_normaliza_telefono($e['telefono'])] = true;
+        if (!empty($e['email'])) $wc_emails[strtolower(trim($e['email']))] = true;
+        if ($e['nombre']) $wc_nombres[blokes_externos_normaliza_nombre($e['nombre'])] = true;
+    }
+    // Diagnóstico (nunca cuenta como alta): gente de hist-pagos que no tiene NINGUNA suscripción
+    // de WooCommerce con ese teléfono/email/nombre — pagó alguna vez pero no está (o no se ha
+    // podido emparejar) en el sistema actual.
+    $externos_sin_emparejar = 0;
+    foreach ($hist_pagos_map['porTelefono'] as $tel => $candidatos) {
+        if (isset($wc_telefonos[$tel])) continue;
+        $externos_sin_emparejar += count(array_unique(array_column($candidatos, 'nombreNorm')));
+    }
+    foreach ($hist_pagos_map['porNombre'] as $nom => $ym) {
+        if (isset($wc_nombres[$nom])) continue;
+        $en_telefono = false;
+        foreach ($hist_pagos_map['porTelefono'] as $candidatos) {
+            if (in_array($nom, array_column($candidatos, 'nombreNorm'), true)) { $en_telefono = true; break; }
+        }
+        if (!$en_telefono) $externos_sin_emparejar++;
     }
 
     // ---- PASADA 2: construir $classes ya con la clasificación correcta por persona.
@@ -11477,9 +11570,11 @@ function blokes_altas_bajas_calcular($months) {
                 $classes[$class_key]['active']++;
                 // Nuevo de verdad = esta suscripción empezó este mes Y es la actividad más
                 // antigua de la persona en TODO el sistema (no tenía ninguna suscripción antes,
-                // en ninguna clase). Si tenía otra antes pero en otra clase, es un cambio de
-                // clase, no un alumno nuevo.
-                $es_nuevo = $e['startYm'] >= $now_ym && $persona_min_start[$pk] >= $now_ym;
+                // en ninguna clase) NI en hist-pagos (cowork, 15/11 09:45/11:15: "las altas de
+                // jun/sept son en gran parte gente que ya venía, pagaba por Excel"). Si tenía
+                // otra antes pero en otra clase, es un cambio de clase, no un alumno nuevo.
+                $es_nuevo = $e['startYm'] >= $now_ym && $persona_min_start[$pk] >= $now_ym
+                    && ($persona_min_start_real[$pk] ?? $persona_min_start[$pk]) >= $now_ym;
                 $movido_desde = null;
                 if ($e['startYm'] >= $now_ym && !$es_nuevo) {
                     $previas = array_values(array_filter($persona_historial[$pk] ?? array(), function($p) use ($class_key, $e) {
@@ -11522,12 +11617,14 @@ function blokes_altas_bajas_calcular($months) {
         }
 
         // Histórico de "nuevos" por mes: solo cuenta si ese mes es la primera actividad de la
-        // persona en todo el sistema (no una suscripción más de alguien que ya estaba).
+        // persona en todo el sistema (no una suscripción más de alguien que ya estaba) NI en
+        // hist-pagos — si no, alguien que ya pagaba por Excel/hv_control_clientes antes de
+        // migrar a WooCommerce sale como "nuevo" el mes que migra.
         if ($e['startYm'] >= $start_ym) {
             if (!isset($classes[$class_key]['history'][$e['startYm']])) {
                 $classes[$class_key]['history'][$e['startYm']] = array('month' => $e['startYm'], 'new' => 0, 'active' => 0);
             }
-            if ($persona_min_start[$pk] === $e['startYm']) {
+            if ($persona_min_start[$pk] === $e['startYm'] && ($persona_min_start_real[$pk] ?? $e['startYm']) === $e['startYm']) {
                 $classes[$class_key]['history'][$e['startYm']]['new']++;
             }
         }
@@ -11561,6 +11658,10 @@ function blokes_altas_bajas_calcular($months) {
         'personaActivoEn' => $persona_activo_en, 'personaIntervalos' => $persona_intervalos,
         'personaHistorial' => $persona_historial,
         'classSubIds' => $class_sub_ids, 'classMinStart' => $class_min_start,
+        // 'Nuevo' real cruzado con hist-pagos (11:15) — solo para members_active.new/history.new,
+        // nunca para cohortes/retención (personaMinStart de arriba sigue siendo 100% WooCommerce).
+        'personaMinStartReal' => $persona_min_start_real,
+        'externosSinEmparejar' => $externos_sin_emparejar,
     );
 }
 

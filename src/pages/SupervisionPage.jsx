@@ -2190,7 +2190,7 @@ function GruposTab() {
   const { data: pendientesCobroData } = usePendientesCobro()
   // Altas y Bajas (15/11 08:45 punto A/C): mismo cálculo que ExcelMuerte/Superadmin Clases, no
   // uno aparte — Nuevo/Baja de verdad por persona, no por suscripción (07:50 punto B).
-  const { data: classesData, duplicadosMismaClase } = useClasses(1)
+  const { data: classesData, duplicadosMismaClase, externosSinEmparejar } = useClasses(1)
   const { data: bajasData, refetch: refetchBajas } = useBajas()
   const [grupoKey, setGrupoKey] = useState('')
   const [vista, setVista]     = useState('grupos') // 'grupos' | 'altas-bajas' | 'pendientes-cobro' | 'revisar-datos' | 'sindatos'
@@ -2492,8 +2492,10 @@ function GruposTab() {
         <>
           <p className="sv-note">
             Mismo cálculo que ExcelMuerte/Superadmin › Clases: <strong>Alta</strong> = primera suscripción de verdad de esa persona
-            (si venía de otra clase, no es alta, es un cambio de clase). <strong>Baja</strong> = ya no tiene ninguna suscripción
+            (si venía de otra clase, no es alta, es un cambio de clase) Y primer mes pagado también en hist-pagos (quien ya venía
+            pagando antes de migrar a WooCommerce no sale como alta el mes que migra). <strong>Baja</strong> = ya no tiene ninguna suscripción
             activa en ninguna clase, o se marcó «No viene» en Pendientes de cobro aunque todavía no se haya cancelado en WooCommerce.
+            {externosSinEmparejar > 0 && <> {externosSinEmparejar} persona{externosSinEmparejar === 1 ? '' : 's'} de hist-pagos no tiene{externosSinEmparejar === 1 ? '' : 'n'} ninguna suscripción actual emparejada (nunca cuenta como alta).</>}
           </p>
           <h3 className="sv-grp-subtitle">Altas ({altas.length})</h3>
           <div className="sv-tests-scroll">

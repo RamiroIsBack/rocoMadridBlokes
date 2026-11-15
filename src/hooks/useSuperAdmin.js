@@ -48,7 +48,13 @@ export function useClasses(months) {
   const { data, raw, loading, error, refetch } = useEndpoint('/classes', { months })
   // "Dos suscripciones activas de la misma clase" (cowork/Ramiro, 15/11 07:50 punto A): no se
   // cancela nada solo, solo se avisa para que Ramiro decida.
-  return { data, loading, error, refetch, duplicadosMismaClase: raw?.duplicadosMismaClase || [] }
+  return {
+    data, loading, error, refetch,
+    duplicadosMismaClase: raw?.duplicadosMismaClase || [],
+    // Gente de hist-pagos sin ninguna suscripción de WooCommerce emparejada (15/11 11:15):
+    // informativo, nunca cuenta como alta.
+    externosSinEmparejar: raw?.externosSinEmparejar || 0,
+  }
 }
 
 export function usePeopleSummary() {
