@@ -189,6 +189,7 @@ export const syncGruposReintentarCobro = body       => gestionPost('/gestion/syn
 export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)
   const [breakdown, setBreakdown] = useState(null)
+  const [saldoReal, setSaldoReal] = useState(null)
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
 
@@ -199,9 +200,9 @@ export function useExpenses(from, entity = 'all', excludeInternal = true) {
     setError(null)
     fetchWithNonceRetry(() => fetch(url, { headers: { 'X-WP-Nonce': window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || '' } }))
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then(json => { setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setLoading(false) })
+      .then(json => { setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setSaldoReal(json.saldoReal ?? null); setLoading(false) })
       .catch(e  => { setError(e.message); setLoading(false) })
   }, [url])
 
-  return { data, breakdown, loading, error }
+  return { data, breakdown, saldoReal, loading, error }
 }

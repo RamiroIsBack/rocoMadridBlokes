@@ -603,7 +603,9 @@ function categorizeIncomeItem(concepto, amount, entity, overrides = {}) {
 function HistoryView({ period, onDeleted }) {
   const from  = useMemo(() => periodFrom(period), [period])
   const label = periodLabel(period)
-  const [entity, setEntity]                   = useState('all')
+  // Por defecto solo Club (Ramiro, 15/11 09:25: es la única cuenta que importa — recibe todos
+  // los ingresos; Rocoteca tiene ~800€ residuales entre sus dos bancos, que se dejan de colchón).
+  const [entity, setEntity]                   = useState('club')
   const [excludeInternal, setExcludeInternal] = useState(true)
   const [showManager, setShowManager]         = useState(false)
   const [deletingKey, setDeletingKey]         = useState(null)
@@ -632,7 +634,7 @@ function HistoryView({ period, onDeleted }) {
     return next
   })
   const effectiveExclude = excludeInternal
-  const { data, breakdown, loading, error } = useExpenses(from, entity, effectiveExclude)
+  const { data, breakdown, saldoReal, loading, error } = useExpenses(from, entity, effectiveExclude)
 
   const handleDelete = async (month, ent) => {
     const key = `${month}·${ent}`
@@ -658,12 +660,17 @@ function HistoryView({ period, onDeleted }) {
     if (!data) return []
     const acc = {}
     data.forEach(r => {
-      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, nominas: 0, ss: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {}, ingresos_items: [] }
+      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, iva_r_real: 0, nominas: 0, nominas_real: null, nominas_descuadre: false, ss: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {}, ingresos_items: [] }
       acc[r.month].costes   += Math.abs(r.total_costes    || 0)
       acc[r.month].ingresos += Math.abs(r.total_ingresos  || 0)
       acc[r.month].iva_s    += Math.abs(r.iva_soportado   || 0)
       acc[r.month].iva_r    += Math.abs(r.iva_repercutido || 0)
+      acc[r.month].iva_r_real += Math.abs(r.iva_repercutido_real || 0)
       acc[r.month].nominas  += Math.abs(r.nominas         || 0)
+      // Nóminas reales (de Superadmin › Nóminas) solo vienen en la fila del Club (15/11 09:18
+      // punto 5) — si hay descuadre con lo que dice el banco, avisar.
+      if (r.nominas_real != null) acc[r.month].nominas_real = (acc[r.month].nominas_real || 0) + Math.abs(r.nominas_real)
+      if (r.nominas_descuadre) acc[r.month].nominas_descuadre = true
       const ent = r.entity || 'rocoteca'
       if ((r.nominas || 0) > 0) {
         acc[r.month].nominas_by_entity[ent] = (acc[r.month].nominas_by_entity[ent] || 0) + Math.abs(r.nominas)
@@ -719,6 +726,11 @@ function HistoryView({ period, onDeleted }) {
     ingresos: byMonth.reduce((s, r) => s + r.ingresos,           0),
     iva_net:  byMonth.reduce((s, r) => s + r.iva_r - r.iva_s,   0),
   }), [byMonth])
+  // "Resultado" (ingresos − gastos operativos) es un rendimiento del periodo, nunca el saldo
+  // del banco — eso es saldoReal, el "Saldo Posterior" real del último movimiento (Ramiro,
+  // 15/11 09:18/09:25: el acumulado de antes daba 16.714€/49.568€ cuando el banco tenía
+  // 13.764,30€, porque sumaba desde el primer mes sin saldo de apertura y nunca iba a cuadrar).
+  const resultado = totals.ingresos - totals.gastos
 
   const incomeBreakdown = useMemo(() => {
     // Per-month categorised income for chart
@@ -777,17 +789,27 @@ function HistoryView({ period, onDeleted }) {
       </div>
 
       <div className="exp-kpis">
-        <div className="exp-kpi" style={{ '--c': '#ef4444' }}>
-          <span className="exp-kpi__val">{fmtEur(totals.gastos)}</span>
-          <span className="exp-kpi__lbl">Gastos ({label})</span>
-        </div>
         <div className="exp-kpi" style={{ '--c': '#60a5fa' }}>
           <span className="exp-kpi__val">{fmtEur(totals.ingresos)}</span>
-          <span className="exp-kpi__lbl">Ingresos banco ({label})</span>
+          <span className="exp-kpi__lbl" title="Suma de ingresos del banco en el periodo, sin los movimientos internos (transferencias entre cuentas, uso de rocódromo, préstamos).">Ingresos ({label}) ⓘ</span>
+        </div>
+        <div className="exp-kpi" style={{ '--c': '#ef4444' }}>
+          <span className="exp-kpi__val">{fmtEur(totals.gastos)}</span>
+          <span className="exp-kpi__lbl" title="Suma de gastos del banco en el periodo, sin movimientos internos.">Gastos ({label}) ⓘ</span>
+        </div>
+        <div className="exp-kpi" style={{ '--c': resultado >= 0 ? '#34d399' : '#ef4444' }}>
+          <span className="exp-kpi__val">{fmtEur(resultado)}</span>
+          <span className="exp-kpi__lbl" title="Ingresos − gastos operativos del periodo. NO es el saldo del banco (eso es la siguiente tarjeta) — es cuánto se ha ganado o perdido en este periodo.">Resultado ({label}) ⓘ</span>
+        </div>
+        <div className="exp-kpi" style={{ '--c': '#f5c842' }}>
+          <span className="exp-kpi__val">{saldoReal?.saldo != null ? fmtEur(saldoReal.saldo) : '—'}</span>
+          <span className="exp-kpi__lbl" title="Saldo Posterior del último movimiento subido de la cuenta del Club (la única que importa — Rocoteca tiene ~800€ residuales aparte). Si el CSV no es de hoy, la fecha te dice hasta cuándo hay datos.">
+            Saldo en banco (Club{saldoReal?.fecha ? ` hasta ${saldoReal.fecha.slice(8,10)}/${saldoReal.fecha.slice(5,7)}` : ''}) ⓘ
+          </span>
         </div>
         <div className="exp-kpi" style={{ '--c': '#f97316' }}>
           <span className="exp-kpi__val">{fmtEur(Math.abs(totals.iva_net))}</span>
-          <span className="exp-kpi__lbl">IVA neto {totals.iva_net >= 0 ? 'a pagar' : 'a favor'} ({label})</span>
+          <span className="exp-kpi__lbl">IVA neto {totals.iva_net >= 0 ? 'a pagar' : 'a favor'} ({label}) · estimado del banco</span>
         </div>
       </div>
 
@@ -870,6 +892,12 @@ function HistoryView({ period, onDeleted }) {
       {nominasData.some(r => r.nominas > 0 || r.ss > 0 || r.retiradas_rocoteca > 0 || r.retiradas_club > 0) && (
         <>
           <p className="exp-chart-title" style={{ marginTop: 16 }}>Nóminas por mes</p>
+          {byMonth.some(r => r.nominas_descuadre) && (
+            <p className="exp-error" style={{ fontSize: '0.75rem' }}>
+              ⚠ La remesa del banco no cuadra con el neto real de Superadmin › Nóminas en: {byMonth.filter(r => r.nominas_descuadre).map(r => fmtMonth(r.month)).join(', ')}.
+              Revisa si falta algún pago parcial/efectivo o si la remesa incluye algo más que nóminas.
+            </p>
+          )}
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={nominasData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />

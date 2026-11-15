@@ -5,6 +5,9 @@
 const EXCLUDE_CONCEPTS = [
   'transferencia entre cuentas',
   'rocodromo',  // catches: "Uso rocódromo", "Servicios rocódromo", "USO DE ROCODROMO", etc.
+  // Préstamos: nunca son ingreso ni gasto (NOTAS_PARA_CODE_gastos_banco.md, 15/11 09:18 punto 1
+  // — el préstamo de 400€ de septiembre se contaba como ingreso).
+  'prestamo',
 ]
 
 function normStr(s) {
@@ -49,6 +52,12 @@ export const CATEGORIES = {
   bizum:             'Bizum',
   wellhub:           'Wellhub',
   transferencia:     'Transferencia cliente',
+  // Ramiro, 15/11 09:25 (NOTAS_PARA_CODE_gastos_banco.md): pagos a voluntarios y a Sigurd por
+  // sus gastos/transporte — es gasto de PERSONAL (va con Nóminas), no material.
+  gastos_voluntarios:'Personal · Gastos de voluntarios/colaboradores',
+  // Nunca es ingreso ni gasto (NOTAS_PARA_CODE_gastos_banco.md, 15/11 09:18 punto 1): se resta
+  // de los KPIs igual que "Transferencia entre cuentas"/"Uso de Rocódromo".
+  prestamos:         'Préstamos (fuera de ingresos/gastos)',
   otros:             'Otros',
 }
 
@@ -89,6 +98,8 @@ export const CATEGORY_IVA = {
   bizum:             21,
   wellhub:           21,
   transferencia:     21,
+  gastos_voluntarios:0,
+  prestamos:         0,
   otros:             21,
 }
 
@@ -101,6 +112,10 @@ const EXPENSE_RULES = [
   { test: c => /ALQUILER/i.test(c),                                      cat: 'alquiler' },
   { test: c => /COMUNIDAD/i.test(c),                                      cat: 'comunidad' },
   { test: c => /REMESA DE TRANSFERENCIAS|REMESA DE NOMINAS|NOMINA|NÓMINA|FINIQUITO/i.test(c), cat: 'nominas' },
+  // Ramiro, 15/11 09:25: pagos a voluntarios/Sigurd por gastos y transporte — antes de
+  // "material" (si no, "CAROLINA MATERIALES..." se queda en material por el patrón genérico).
+  { test: c => /^(CAROLINA|ANA|ISA|RAFA)\s+(MATERIALES|VARIOS)|^TRABAJOS\s+SIGURD/i.test(c), cat: 'gastos_voluntarios' },
+  { test: c => /\bPRESTAMO\b|\bPRÉSTAMO\b/i.test(c),                                   cat: 'prestamos' },
   { test: c => /IBERDROLA|OCTOPUS ENERGY/i.test(c),                        cat: 'electricidad' },
   { test: c => /COMERCIALIZADORA REGULADA|GAS POWER/i.test(c),           cat: 'gas' },
   { test: c => /\bAGUA\b/i.test(c),                                       cat: 'agua' },

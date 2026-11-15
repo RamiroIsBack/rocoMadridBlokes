@@ -1581,6 +1581,24 @@ function superadmin_get_expenses($request) {
         ARRAY_A
     );
 
+    // IVA repercutido real (de WooCommerce, no estimado del banco) y nóminas reales (de
+    // Superadmin › Nóminas, no re-adivinadas del concepto del banco) — 15/11 09:18 puntos 3 y 5.
+    $iva_real_map = blokes_expenses_iva_repercutido_real($from);
+    $nominas_real_cache = array(); // month => $totals['bank'] de payroll_compute_month
+    $nominas_people = null; $nominas_entries = null; $nominas_base = null; $nominas_rates = null;
+    $nominas_real_de_mes = function($month) use (&$nominas_real_cache, &$nominas_people, &$nominas_entries, &$nominas_base, &$nominas_rates) {
+        if (isset($nominas_real_cache[$month])) return $nominas_real_cache[$month];
+        if (!function_exists('overtime_get_people')) return null;
+        if ($nominas_people === null) {
+            $nominas_people  = overtime_get_people();
+            $nominas_entries = overtime_get_entries();
+            $nominas_base    = payroll_get_base();
+            $nominas_rates   = overtime_get_rates();
+        }
+        $r = payroll_compute_month($month, $nominas_people, $nominas_entries, $nominas_base, $nominas_rates);
+        return $nominas_real_cache[$month] = floatval($r['totals']['bank'] ?? 0);
+    };
+
     $data = array();
 
     foreach ($rows as $row) {
@@ -1605,9 +1623,16 @@ function superadmin_get_expenses($request) {
                 || strpos($concepto_norm, 'transferencia entre cuentas') !== false;
             if ($exclude_internal && $is_internal) continue;
             $amt  = abs(floatval($item['importe']));
-            $rate = ($row_entity !== 'club') ? floatval($item['iva']) / 100 : 0;
+            // 15/11 09:18 punto 3: antes el Club siempre daba IVA 0 pasara lo que pasara — desde
+            // julio casi toda la actividad está en el Club, así que el soportado salía ~0 y el
+            // "a devolver" real del trimestre no se veía. El tipo guardado por categoría
+            // (CATEGORY_IVA) vale igual en las dos entidades.
+            $rate = floatval($item['iva']) / 100;
             $iva  = $rate > 0 ? $amt * $rate / (1 + $rate) : 0;
-            $is_nomina = strpos($concepto_norm, 'nomina') !== false;
+            // 15/11 09:18 punto 5: desde agosto se paga por "REMESA DE TRANSFERENCIAS", no
+            // "NOMINA…" — el strpos de antes daba 0€ de nóminas desde agosto. La categoría ya
+            // lo clasifica bien (expensesParser.js), hay que usarla en vez de re-adivinarlo aquí.
+            $is_nomina = ($item['category'] ?? '') === 'nominas';
 
             if ($item['section'] === 'costes') {
                 $tc    += $amt;
@@ -1628,6 +1653,7 @@ function superadmin_get_expenses($request) {
             }
         }
         arsort($row_concepto);
+        $nominas_real = $row_entity === 'club' ? $nominas_real_de_mes($saved['month']) : null;
         $data[] = array(
             'month'           => $saved['month'],
             'entity'          => $row_entity,
@@ -1635,14 +1661,22 @@ function superadmin_get_expenses($request) {
             'total_ingresos'  => round($ti,    2),
             'iva_soportado'   => round($iva_s, 2),
             'iva_repercutido' => round($iva_r, 2),
+            // Real, de WooCommerce/FactuPress — el "iva_repercutido" de arriba (estimado del
+            // banco) se mantiene para no romper lo que ya lo usaba, pero ya no hace falta.
+            'iva_repercutido_real' => round($iva_real_map[$saved['month'] . '|' . $row_entity] ?? 0, 2),
             'nominas'         => round($nom,   2),
+            'nominas_real'    => $nominas_real !== null ? round($nominas_real, 2) : null,
+            'nominas_descuadre' => ($nominas_real !== null && $nom > 0) ? (abs($nom - $nominas_real) > max(50, $nom * 0.05)) : false,
             'by_concepto'     => $row_concepto,
             'ingresos_items'  => $row_ingresos,
         );
     }
 
     usort($data, function($a, $b) { return strcmp($a['month'], $b['month']); });
-    return rest_ensure_response(array('data' => $data));
+    // Saldo en banco real (solo Club, Ramiro 15/11 09:25) — el "acumulado" del frontend es un
+    // resultado operativo, NUNCA el saldo del banco: no se puede reconstruir sin un saldo de
+    // apertura, así que se manda aparte, directo del "Saldo Posterior" del CSV.
+    return rest_ensure_response(array('data' => $data, 'saldoReal' => blokes_expenses_saldo_real('club')));
 }
 
 function superadmin_delete_expenses($request) {
@@ -4928,6 +4962,54 @@ function _superadmin_orders_for_blog($start_date) {
         }
     }
     return $rows;
+}
+
+// IVA repercutido REAL por mes y entidad (NOTAS_PARA_CODE_gastos_banco.md, 15/11 09:18 punto 3):
+// de las facturas de verdad (get_total_tax() de pedidos completed/processing, sin anuladas —
+// ya lo hace _superadmin_orders_for_blog()), no estimado desde el banco. blog_id 1 = Rocoteca
+// (Principal), 3 = Club — mismo mapeo que superadmin_revenue()/superadmin_products().
+function blokes_expenses_iva_repercutido_real($from) {
+    $start_date = $from ? ($from . '-01') : (new DateTime('-12 months'))->format('Y-m-d');
+    $out = array(); // 'YYYY-MM|entity' => iva
+    foreach (array(1 => 'rocoteca', 3 => 'club') as $blog_id => $entity) {
+        switch_to_blog($blog_id);
+        $orders = _superadmin_orders_for_blog($start_date);
+        restore_current_blog();
+        foreach ($orders as $row) {
+            $key = $row['month'] . '|' . $entity;
+            $out[$key] = ($out[$key] ?? 0) + $row['tax'];
+        }
+    }
+    return $out;
+}
+
+// Saldo en banco real (NOTAS_PARA_CODE_gastos_banco.md, 15/11 09:18 punto 4 + respuesta de
+// Ramiro 09:25): el "Saldo Posterior" del movimiento más reciente de la entidad — no un
+// acumulado de ingresos−gastos reconstruido desde el primer mes (eso nunca va a cuadrar con el
+// banco de verdad). Solo tiene sentido para el Club (la única cuenta que importa, según Ramiro).
+function blokes_expenses_saldo_real($entity) {
+    global $wpdb;
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
+        'blokes_exp_%_' . $entity
+    ), ARRAY_A);
+    $mejor_ts = -1; $saldo = null; $fecha_txt = '';
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!$saved || !is_array($saved['items'] ?? null)) continue;
+        foreach ($saved['items'] as $item) {
+            $saldo_raw = (string) ($item['saldo'] ?? '');
+            if ($saldo_raw === '') continue;
+            $fecha = $item['fechaValor'] ?? $item['fecha'] ?? '';
+            if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
+            $ts = mktime(0, 0, 0, intval($m[2]), intval($m[1]), intval($m[3]));
+            if ($ts < $mejor_ts) continue; // a igual fecha, el último del CSV (orden del banco) gana
+            $mejor_ts = $ts;
+            $saldo = floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', $saldo_raw)));
+            $fecha_txt = date('Y-m-d', $ts);
+        }
+    }
+    return array('saldo' => $saldo, 'fecha' => $fecha_txt);
 }
 
 function superadmin_revenue($request) {
