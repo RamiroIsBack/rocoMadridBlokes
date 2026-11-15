@@ -4,7 +4,6 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import { useRevenue, useExpenses, useClasesRetencion, useIngresosDesglose, ingresosFamiliaSet } from '../hooks/useSuperAdmin'
-import { useCostes } from '../hooks/useCostes'
 import { PROF_META } from '../data/staffSchedule'
 import useTemaOscuro from '../hooks/useTemaOscuro'
 import ExpensesSection from '../components/ExpensesSection'
@@ -357,20 +356,19 @@ function ClasesRetencionSection() {
   // el backend (mesIngreso) — el usuario puede elegir otro con el selector.
   const [mesSel, setMesSel] = useState('')
   const { data, loading, error } = useClasesRetencion(months, mesSel)
-  const costes = useCostes()
 
-  // Cowork, 15/11 09:45: salía ~8 veces corto. €/hora de clase: la ficha (PROF_META.costoHClase)
-  // ya es el €/hora de CLASE directo — no recalcularlo desde costoMes/horasSem, que incluye
-  // horas de equipar y no coincide con costoHClase (p. ej. Sigurd: 903€/mes ÷ (9h×4,33) ≈
-  // 23,17€/h, pero su ficha dice 18,40€/h de clase). Si hay nómina real de este mes, se escala
-  // la ficha por la proporción nómina real/ficha (mismo €/h relativo, con el dato real del mes).
+  // Ramiro, 15/11 10:25 punto A: coste de empresa REAL del mes elegido — nómina bruta (+
+  // efectivo) real + Seguridad Social real, nada de ×1,43 (eso era useCostes/FACTOR_COSTE) ni
+  // de usar siempre la nómina del mes actual en vez de la del mes que se está mirando. El
+  // backend ya lo calcula para $mesIngreso; aquí solo se divide por las horas del mes (clases +
+  // equipar + gestión — PROF_META.horasSem ya es esa cifra semanal, no solo horas de clase).
   function costeHoraReal(prof) {
     if (!prof || prof === 'Isa') return 0
     const meta = PROF_META[prof]
-    if (!meta || !meta.costoHClase) return 0
-    const real = costes.mes[prof]
-    if (real != null && meta.costoMes) return meta.costoHClase * (real / meta.costoMes)
-    return meta.costoHClase
+    if (!meta || !meta.horasSem) return 0
+    const real = data?.costeRealProfe?.[normForProf(prof)]
+    if (real == null) return 0
+    return real / (meta.horasSem * 4.33)
   }
   // Sesiones por semana de esta clase: "Martes-Jueves"/"Lunes-Miércoles" = 2, un día suelto
   // (p. ej. "Viernes") = 1 — faltaba este factor, por eso el coste salía de 1 sola sesión en
@@ -434,7 +432,7 @@ function ClasesRetencionSection() {
     })
 
     return filas.sort((a, b) => b.margen - a.margen)
-  }, [data, costes])
+  }, [data])
 
   return (
     <section className="sa-section">
@@ -492,7 +490,7 @@ function ClasesRetencionSection() {
             </select>
           </div>
           <p className="sa-legend">
-            Coste del profe: misma fuente que Nóminas (nómina real del mes si existe, si no la ficha), por hora según sus horas semanales. Isa es voluntaria → 0 €.
+            Coste del profe: coste de empresa real del mes elegido (nómina bruta + efectivo + Seguridad Social real + gastos de voluntarios, de Nóminas y Gastos banco — nada de factores inventados), dividido entre sus horas del mes (clases + equipar + gestión). Isa es voluntaria → 0 €.
             Semáforo: 🔴 margen negativo · 🟡 margen positivo pero ocupación por debajo del 50% (7-8 de 15) · 🟢 margen positivo y ocupación ≥ 50%.
             El margen se calcula sobre el ingreso del mes elegido; las medias de 3/6/12 meses son solo para ver la tendencia.
           </p>

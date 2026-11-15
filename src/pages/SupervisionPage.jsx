@@ -28,7 +28,7 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
-  gestionFacturasPendientesGet, gestionFacturaCompletar,
+  gestionFacturasPendientesGet,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
   useBajas, gestionBajaMotivoSet, gestionBajaContacto,
@@ -2190,7 +2190,7 @@ function GruposTab() {
   const { data: pendientesCobroData } = usePendientesCobro()
   // Altas y Bajas (15/11 08:45 punto A/C): mismo cálculo que ExcelMuerte/Superadmin Clases, no
   // uno aparte — Nuevo/Baja de verdad por persona, no por suscripción (07:50 punto B).
-  const { data: classesData } = useClasses(1)
+  const { data: classesData, duplicadosMismaClase } = useClasses(1)
   const { data: bajasData, refetch: refetchBajas } = useBajas()
   const [grupoKey, setGrupoKey] = useState('')
   const [vista, setVista]     = useState('grupos') // 'grupos' | 'altas-bajas' | 'pendientes-cobro' | 'revisar-datos' | 'sindatos'
@@ -2201,38 +2201,14 @@ function GruposTab() {
   const [espera, setEspera] = useState(null) // lista de espera (8.5), cargada al entrar en esa vista
   const [esperaForm, setEsperaForm] = useState({ dia: '', horario: '', edad: 'Adultos', nombre: '', telefono: '', notas: '' })
   const [esperaBusy, setEsperaBusy] = useState(false)
-  const [facturas, setFacturas] = useState(null) // "Mandar factura" (NOTAS_PARA_CODE_pestanas_grupos.md)
-  const [facturasErr, setFacturasErr] = useState(null)
-  const [facturaBusyId, setFacturaBusyId] = useState(null)
-  const [mandandoTodas, setMandandoTodas] = useState(false)
-  const [confirmarTodas, setConfirmarTodas] = useState(false)
-  const [resultadoTodas, setResultadoTodas] = useState(null)
-
+  // "Mandar factura" ya no es una tarea manual (Ramiro, 15/11 10:25 punto B): los pedidos que
+  // cumplen el criterio seguro se completan solos por cron (blokes_auto_factura_ejecutar). Esto
+  // es solo el aviso de los que NO lo cumplen y de verdad hay que mirar en WooCommerce.
+  const [facturas, setFacturas] = useState(null)
   async function cargarFacturas() {
-    setFacturasErr(null)
-    try { setFacturas(await gestionFacturasPendientesGet()) } catch (e) { setFacturasErr(e.message) }
+    try { setFacturas(await gestionFacturasPendientesGet()) } catch (e) { /* aviso silencioso, no bloquea Grupos */ }
   }
-  // Cargada ya al entrar en Grupos (no solo al pulsar la pestaña) para que el número entre
-  // paréntesis salga desde el principio, igual que en el resto de pestañas (cowork, 3/11 11:50).
   useEffect(() => { cargarFacturas() }, [])
-  function abrirMandarFactura() { setVista('mandar-factura') }
-  async function completarFactura(orderId) {
-    setFacturaBusyId(orderId)
-    try { await gestionFacturaCompletar(orderId); await cargarFacturas() }
-    catch (e) { alert(e.message) } finally { setFacturaBusyId(null) }
-  }
-  async function mandarTodas() {
-    setConfirmarTodas(false); setMandandoTodas(true); setResultadoTodas(null)
-    const lista = facturas || []
-    let enviadas = 0; const errores = []
-    for (const f of lista) {
-      try { await gestionFacturaCompletar(f.orderId); enviadas++ }
-      catch (e) { errores.push({ alumno: f.alumno, error: e.message }) }
-    }
-    setResultadoTodas({ enviadas, errores })
-    setMandandoTodas(false)
-    await cargarFacturas()
-  }
 
   async function cargarEspera() { try { setEspera(await gestionListaEsperaGet()) } catch (e) { setEspera([]) } }
   function abrirEspera() { setVista('espera'); if (espera === null) cargarEspera() }
@@ -2367,19 +2343,31 @@ function GruposTab() {
         no se envían correos al alumno, y todo queda registrado (quién, cuándo, antes → después).
       </p>
 
-      {duplicados.length > 0 && (
+      {/* Cowork, 15/11 10:30: este aviso decía "51" usando `duplicados` (otrasSubs de
+          superadmin_gestion_grupos — CUALQUIER sub extra en el grupo, activa o no, pensada
+          para el botón Fusionar de Revisar datos) como si fueran "activas de verdad". El
+          recuento real de dos ACTIVAS a la vez es duplicadosMismaClase (de /classes, el mismo
+          que ya usa ExcelMuerte) — con ese mismo bug de fondo arreglado (uid real, no
+          teléfono/nombre, para no confundir hermanos con el mismo teléfono con un duplicado). */}
+      {duplicadosMismaClase.length > 0 && (
         <div className="sv-aviso sv-aviso--bad">
-          <strong>⚠ {duplicados.length} {duplicados.length === 1 ? 'alumno' : 'alumnos'} con 2 suscripciones activas de la misma clase.</strong>{' '}
+          <strong>⚠ {duplicadosMismaClase.length} {duplicadosMismaClase.length === 1 ? 'alumno' : 'alumnos'} con 2 suscripciones activas de la misma clase.</strong>{' '}
           <button className="sv-tests-select" onClick={() => setVista('revisar-datos')}>Ver en «Revisar datos»</button>
+        </div>
+      )}
+
+      {/* "Mandar factura" ya es automático (15/11 10:25 punto B) — esto es solo el aviso de los
+          pedidos "processing" que NO cumplen el criterio seguro y hay que mirar en WooCommerce. */}
+      {facturas?.length > 0 && (
+        <div className="sv-aviso sv-aviso--warn">
+          <strong>⚠ {facturas.length} pedido{facturas.length === 1 ? '' : 's'} sin confirmar por la pasarela de pago.</strong>{' '}
+          Revísalos directamente en WooCommerce ({facturas.map(f => `#${f.orderId} ${f.alumno}`).join(', ')}) — los demás ya se completan solos.
         </div>
       )}
 
       <div className="sv-controls">
         <div className="sv-controls-left">
           <button className={`sv-tab-mini ${vista === 'grupos' ? 'is-active' : ''}`} onClick={() => setVista('grupos')}>Grupos</button>
-          <button className={`sv-tab-mini ${vista === 'mandar-factura' ? 'is-active' : ''}`} onClick={abrirMandarFactura}>
-            Mandar factura {facturas?.length ? <span className="sv-tab-mini__count">({facturas.length})</span> : ''}
-          </button>
           <button className={`sv-tab-mini ${vista === 'altas-manuales' ? 'is-active' : ''}`} onClick={() => setVista('altas-manuales')}>
             Altas manuales {altasManuales.length ? <span className="sv-tab-mini__count">({altasManuales.length})</span> : ''}
           </button>
@@ -2444,71 +2432,6 @@ function GruposTab() {
       )}
 
       {buscador && <BuscarAlumnoModal onClose={() => setBuscador(false)} grupos={grupos} />}
-
-      {vista === 'mandar-factura' && (
-        <>
-          <p className="sv-note">
-            Esto pone a completado el pedido del cliente en WooCommerce: factura a Verifactu y al cliente. Solo salen
-            los seguros: tarjeta ya cobrada de verdad por el banco (nunca pendiente, en espera o rechazada).
-            Al mandar la factura también se apunta el pago en el Excel de Eva, sola, sin que haga falta nada más.
-          </p>
-          {facturasErr && <p className="sv-error">Error: {facturasErr}</p>}
-          {facturas === null ? (
-            <p className="sv-loading">Cargando…</p>
-          ) : (
-            <>
-              {facturas.length > 0 && (
-                <div style={{ marginBottom: 10 }}>
-                  <button className="sv-tests-danger sv-tests-danger--confirm" onClick={() => setConfirmarTodas(true)} disabled={mandandoTodas}>
-                    {mandandoTodas ? 'Mandando…' : `Mandar todas (${facturas.length})`}
-                  </button>
-                </div>
-              )}
-              {resultadoTodas && (
-                <p className={resultadoTodas.errores.length ? 'sv-to-warn-txt' : 'sv-to-good'}>
-                  {resultadoTodas.enviadas} enviada{resultadoTodas.enviadas === 1 ? '' : 's'}
-                  {resultadoTodas.errores.length > 0 && `, ${resultadoTodas.errores.length} con error: ${resultadoTodas.errores.map(e => `${e.alumno} (${e.error})`).join('; ')}`}
-                </p>
-              )}
-              <div className="sv-tests-scroll">
-                <table className="sv-tests-table">
-                  <thead>
-                    <tr><th>Alumno</th><th>Importe</th><th>Método</th><th>Fecha de cobro</th><th></th></tr>
-                  </thead>
-                  <tbody>
-                    {facturas.map(f => (
-                      <tr key={f.orderId}>
-                        <td>{f.alumno || <span className="sv-ot-muted">—</span>}</td>
-                        <td>{fmtEur(f.importe)}</td>
-                        <td className="sv-ot-muted">{f.metodo}</td>
-                        <td className="sv-ot-muted">{f.fecha}</td>
-                        <td>
-                          <button className="sv-tests-save" disabled={facturaBusyId === f.orderId || mandandoTodas} onClick={() => completarFactura(f.orderId)}>
-                            {facturaBusyId === f.orderId ? 'Mandando…' : 'Mandar factura'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {facturas.length === 0 && <p className="sv-empty">Nada pendiente de facturar ahora mismo.</p>}
-            </>
-          )}
-          {confirmarTodas && (
-            <div className="sv-grp-overlay" onClick={() => setConfirmarTodas(false)}>
-              <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
-                <h3>¿Mandar {facturas?.length} factura{facturas?.length === 1 ? '' : 's'}?</h3>
-                <p>Se completarán {facturas?.length} pedido{facturas?.length === 1 ? '' : 's'} en WooCommerce, se enviarán a Verifactu y cada cliente recibirá su factura por email.</p>
-                <div className="sv-grp-modal__actions">
-                  <button className="sv-tests-select" onClick={() => setConfirmarTodas(false)}>Cancelar</button>
-                  <button className="sv-tests-danger sv-tests-danger--confirm" onClick={mandarTodas}>Mandar {facturas?.length} factura{facturas?.length === 1 ? '' : 's'}</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </>
-      )}
 
       {vista === 'altas-manuales' && (
         <>

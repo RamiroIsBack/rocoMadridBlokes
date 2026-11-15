@@ -1494,6 +1494,61 @@ function blokes_exp_load_month($month, $entity) {
     return (is_array($saved) && is_array($saved['items'] ?? null)) ? $saved['items'] : array();
 }
 
+// Coste real de empresa por profe, de un mes concreto — Ramiro, 15/11 10:25 punto A: "nada de
+// ×1,43 ni de usar la nómina de noviembre". Nómina bruta real (ya incluye efectivo cuando el
+// pago es mixto, payroll_compute_month lo calcula así) + Seguridad Social real (prorrateada
+// según la nómina bruta de cada uno: el cargo del banco es un único pago para todos, no viene
+// desglosado por persona) + gastos de voluntarios/colaboradores del banco, atribuidos por
+// nombre. Para que cuadre con el "gasto de personal" de Gastos banco, usa las MISMAS fuentes
+// (Nóminas + categoría 'ss'/'gastos_voluntarios' del banco del Club), nunca una estimación.
+function blokes_normaliza_nombre_profe($nombre) {
+    $n = function_exists('iconv') ? iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', (string) $nombre) : (string) $nombre;
+    return strtolower(trim($n));
+}
+function blokes_gastos_banco_items_categoria_mes($month, $entity, $categoria) {
+    return array_values(array_filter(blokes_exp_load_month($month, $entity), function($it) use ($categoria) {
+        return ($it['category'] ?? '') === $categoria;
+    }));
+}
+function blokes_coste_real_profe_mes($month) {
+    $out = array(); // nombre normalizado => coste total del mes
+    if (!function_exists('overtime_get_people') || !function_exists('payroll_compute_month')) return $out;
+    try {
+        $people  = overtime_get_people();
+        $entries = overtime_get_entries();
+        $base    = payroll_get_base();
+        $rates   = overtime_get_rates();
+        $r = payroll_compute_month($month, $people, $entries, $base, $rates);
+        $total_bruto = 0.0;
+        foreach (($r['rows'] ?? array()) as $row) {
+            $nombre = blokes_normaliza_nombre_profe($row['name'] ?? '');
+            if (!$nombre) continue;
+            $bruto = floatval($row['total'] ?? 0);
+            $out[$nombre] = ($out[$nombre] ?? 0) + $bruto;
+            $total_bruto += $bruto;
+        }
+        $ss_total = 0.0;
+        foreach (blokes_gastos_banco_items_categoria_mes($month, 'club', 'ss') as $it) $ss_total += abs(floatval($it['importe'] ?? 0));
+        if ($ss_total > 0 && $total_bruto > 0) {
+            foreach ($out as $nombre => $bruto) $out[$nombre] += $ss_total * ($bruto / $total_bruto);
+        }
+    } catch (\Throwable $e) {
+        error_log('Blokes blokes_coste_real_profe_mes: fallo en nóminas/SS de ' . $month . ': ' . $e->getMessage());
+    }
+    try {
+        $candidatos = array('sigurd', 'carolina', 'ana', 'isa', 'rafa', 'alvaro', 'eva', 'lucia', 'sara', 'edu');
+        foreach (blokes_gastos_banco_items_categoria_mes($month, 'club', 'gastos_voluntarios') as $item) {
+            $c = blokes_normaliza_nombre_profe($item['concepto'] ?? '');
+            foreach ($candidatos as $nombre) {
+                if (strpos($c, $nombre) !== false) { $out[$nombre] = ($out[$nombre] ?? 0) + abs(floatval($item['importe'] ?? 0)); break; }
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('Blokes blokes_coste_real_profe_mes: fallo en gastos de voluntarios de ' . $month . ': ' . $e->getMessage());
+    }
+    return $out;
+}
+
 // Clave de un movimiento para no duplicarlo: fecha de operación (no fecha valor — esa falta en
 // lo guardado antes de tenerla, así que no casaría con lo viejo), concepto, importe y saldo
 // posterior. El saldo es necesario porque fecha+concepto+importe no basta: dos transferencias
@@ -9943,6 +9998,55 @@ function blokes_gestion_pedido_cobro_confirmado($order) {
     return false;
 }
 
+// Ramiro, 15/11 10:25 punto B (OK dado): "Mandar factura" deja de ser una tarea manual de
+// Eva — los pedidos que cumplen el criterio seguro de arriba se completan solos (factura,
+// correo al cliente y Excel, como si WooCommerce los hubiera dejado bien desde el principio).
+// A diferencia del resto de acciones de ExcelMuerte, aquí SÍ se deja el email normal de
+// WooCommerce (no se envuelve en blokes_gestion_sin_emails): es justo lo que habría pasado
+// solo si el pedido no se hubiera quedado atascado en "processing".
+function blokes_auto_factura_candidatos() {
+    if (!function_exists('wcs_get_subscription')) return array();
+    $out = array();
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (empty($sub['id'])) continue;
+        $sub_obj = wcs_get_subscription(intval($sub['id']));
+        if (!$sub_obj) continue;
+        $order_ids = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
+        foreach ($order_ids as $oid) {
+            $order = wc_get_order($oid);
+            if (!$order || $order->get_status() !== 'processing') continue;
+            $out[] = array('orderId' => intval($oid), 'subId' => intval($sub['id']), 'confirmado' => blokes_gestion_pedido_cobro_confirmado($order));
+        }
+    }
+    return $out;
+}
+
+function blokes_auto_factura_ejecutar() {
+    $completados = array();
+    foreach (blokes_auto_factura_candidatos() as $c) {
+        if (!$c['confirmado']) continue;
+        $order = wc_get_order($c['orderId']);
+        if (!$order || $order->get_status() !== 'processing') continue;
+        if (!blokes_gestion_pedido_cobro_confirmado($order)) continue; // doble check, por si cambió entre listar y completar
+        $order->update_status('completed', 'ExcelMuerte: auto-factura (pago de tarjeta confirmado por la pasarela, completado automáticamente — Ramiro, 15/11 10:25).');
+        blokes_gestion_log(0, 'auto_factura', array('status' => 'processing'), array('status' => 'completed', 'orderId' => $c['orderId']));
+        if (function_exists('wcs_get_subscriptions_for_order')) {
+            foreach (wcs_get_subscriptions_for_order($order, array('order_type' => 'any')) as $sub) {
+                blokes_sync_grupos_auto_escribir_cobro($sub, $order);
+            }
+        }
+        $completados[] = $c['orderId'];
+    }
+    return $completados;
+}
+add_action('blokes_auto_factura_cron', 'blokes_auto_factura_ejecutar');
+add_action('plugins_loaded', function() {
+    if (!wp_next_scheduled('blokes_auto_factura_cron')) wp_schedule_event(time(), 'hourly', 'blokes_auto_factura_cron');
+});
+
+// GET /gestion/facturas-pendientes — ya NO es la lista a procesar a mano (eso es automático,
+// arriba): es solo el aviso amarillo de los pedidos "processing" que NO cumplen el criterio
+// seguro y de verdad necesitan que alguien los mire en WooCommerce.
 function superadmin_gestion_facturas_pendientes($request) {
     if (!function_exists('wcs_get_subscription')) {
         return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
@@ -9956,7 +10060,7 @@ function superadmin_gestion_facturas_pendientes($request) {
         foreach ($order_ids as $oid) {
             $order = wc_get_order($oid);
             if (!$order || $order->get_status() !== 'processing') continue;
-            if (!blokes_gestion_pedido_cobro_confirmado($order)) continue;
+            if (blokes_gestion_pedido_cobro_confirmado($order)) continue; // este se autocompleta solo
             $nombre_fact = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
             $out[] = array(
                 'orderId' => intval($oid), 'subId' => intval($sub['id']),
@@ -11163,7 +11267,7 @@ function blokes_altas_bajas_calcular($months) {
             }
 
             $enriquecidos[] = array(
-                'subId' => intval($sub['id']), 'classKey' => $class_key,
+                'subId' => intval($sub['id']), 'classKey' => $class_key, 'uid' => $uid,
                 'dia' => $sub['dia'] ?? '', 'horario' => $sub['horario'] ?? '', 'edad' => $edad,
                 'nombre' => $member_name, 'telefono' => $member_phone,
                 'status' => $sub['status'], 'esPendingCancel' => $es_pending_cancel,
@@ -11202,7 +11306,7 @@ function blokes_altas_bajas_calcular($months) {
     // 1 persona = 1 plaza por clase (punto A): si ya tiene otra suscripción activa en la MISMA
     // clase, no sumar una plaza más — solo avisar, nunca cancelar ni reembolsar nada en
     // automático, es dinero real y lo decide Ramiro.
-    $activos_por_clase = array(); // classKey => [personaKey => subId]
+    $activos_por_clase = array(); // classKey => [personaKey => ['subId'=>.., 'uid'=>..]]
     $duplicados_misma_clase = array();
 
     foreach ($enriquecidos as $e) {
@@ -11226,16 +11330,23 @@ function blokes_altas_bajas_calcular($months) {
 
         $es_duplicado = false;
         if ($e['status'] === 'active' && !$e['esPendingCancel']) {
-            $previo_sub_id = $activos_por_clase[$class_key][$pk] ?? null;
-            if ($previo_sub_id && $previo_sub_id !== $e['subId']) {
+            $previo = $activos_por_clase[$class_key][$pk] ?? null;
+            // Cowork, 15/11 10:30: el aviso rojo decía "51 duplicados" cuando de verdad
+            // activa+activa = 0. personaKey puede venir del TELÉFONO cuando no hay customer_id
+            // real — y dos hermanos que van a la misma clase con el teléfono de un padre/madre
+            // comparten ese personaKey sin ser la misma persona (ya hay precedente en
+            // onhold-diagnóstico: "mismo teléfono, misma clase, cliente distinto" se trata como
+            // "revisar", nunca como duplicado automático). Solo cuenta como duplicado de
+            // verdad si las dos suscripciones tienen el MISMO customer_id real.
+            if ($previo && $previo['subId'] !== $e['subId'] && $e['uid'] && $previo['uid'] && $e['uid'] === $previo['uid']) {
                 $es_duplicado = true;
                 $duplicados_misma_clase[] = array(
                     'dia' => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad'],
                     'nombre' => $e['nombre'], 'telefono' => $e['telefono'],
-                    'subIds' => array($previo_sub_id, $e['subId']),
+                    'subIds' => array($previo['subId'], $e['subId']),
                 );
             } else {
-                $activos_por_clase[$class_key][$pk] = $e['subId'];
+                $activos_por_clase[$class_key][$pk] = array('subId' => $e['subId'], 'uid' => $e['uid']);
                 $classes[$class_key]['active']++;
                 // Nuevo de verdad = esta suscripción empezó este mes Y es la actividad más
                 // antigua de la persona en TODO el sistema (no tenía ninguna suscripción antes,
@@ -11530,6 +11641,10 @@ function superadmin_clases_retencion($request) {
         'permanenciaMediaActivos' => $media($permanencia_activos), 'permanenciaMediaIdos' => $media($permanencia_idos),
         'nActivos' => count($permanencia_activos), 'nIdos' => count($permanencia_idos),
         'porClase' => $por_clase, 'mesIngreso' => $mes_ingreso, 'mesesDisponibles' => array_slice($months_range, 0, -1),
+        // Coste real de empresa por profe DEL MES ELEGIDO (15/11 10:25 punto A) — nómina
+        // bruta+efectivo real de Nóminas + SS real del banco, nada de ×1,43 ni de usar siempre
+        // el mes actual.
+        'costeRealProfe' => blokes_coste_real_profe_mes($mes_ingreso),
         'avisoFuente' => 'Altas/bajas/retención: solo suscripciones de WooCommerce en vigor desde la migración — todavía no cruza con hist-pagos (alumnos de antes) ni con los externos del Excel de Grupos. Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado.',
     )));
 }
