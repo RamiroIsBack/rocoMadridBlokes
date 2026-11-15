@@ -184,9 +184,9 @@ function ProductoFila({ p, onReclasificar }) {
   )
 }
 
-function IngresosDesgloseSection() {
+function IngresosDesgloseSection({ excludeTransfer }) {
   const [months, setMonths] = useState(12)
-  const { data, loading, error, refetch } = useIngresosDesglose(months)
+  const { data, loading, error, refetch } = useIngresosDesglose(months, excludeTransfer)
   const [openFam, setOpenFam] = useState(() => new Set())
   const [openSub, setOpenSub] = useState(() => new Set())
   const [reclasificando, setReclasificando] = useState(null)
@@ -218,7 +218,7 @@ function IngresosDesgloseSection() {
         <PeriodSelector value={months} onChange={setMonths} />
       </div>
       <p className="sa-legend">
-        Familias propias de Blokes (no las categorías de WooCommerce — mezclaban clases, eventos y uso del rocódromo). Mismo cálculo que la gráfica de Ingresos (anuladas fuera, reembolsos restados, mes de pago) — la suma debería cuadrar con el total de arriba.
+        Familias propias de Blokes (no las categorías de WooCommerce — mezclaban clases, eventos y uso del rocódromo). Mismo cálculo que la gráfica de Ingresos (anuladas fuera, reembolsos restados, mes de pago, después de descuentos, y el mismo botón «Con/Sin uso Rocódromo» de arriba) — la suma debería cuadrar con el total de arriba.
         No incluye lo cobrado fuera de la web (efectivo/transferencia que solo está en el Excel de Eva) ni el módulo Eventos todavía.
       </p>
 
@@ -1008,7 +1008,7 @@ export default function SuperAdminPage() {
       {saTab === 'ingresos' && (
         <>
           <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
-          <IngresosDesgloseSection />
+          <IngresosDesgloseSection excludeTransfer={excludeTransfer} />
           <p className="sa-legend">
             La rentabilidad por clase se movió a <button type="button" className="sa-link" onClick={() => setSaTab('clases')}>Clases</button> (09:10: con ingreso real cobrado, no tarifa fija).
           </p>

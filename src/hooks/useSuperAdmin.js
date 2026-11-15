@@ -39,8 +39,8 @@ export function useProducts(months) {
 }
 
 // "Desglose de ingresos" (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02).
-export function useIngresosDesglose(months) {
-  return useEndpoint('/ingresos/desglose', { months })
+export function useIngresosDesglose(months, excludeTransfer = false) {
+  return useEndpoint('/ingresos/desglose', { months, exclude_transfer: excludeTransfer ? 1 : 0 })
 }
 export const ingresosFamiliaSet = body => gestionPost('/ingresos/familia', body)
 
@@ -190,6 +190,7 @@ export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [data,      setData]      = useState(null)
   const [breakdown, setBreakdown] = useState(null)
   const [saldoReal, setSaldoReal] = useState(null)
+  const [cuadre,    setCuadre]    = useState(null)
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
 
@@ -200,9 +201,9 @@ export function useExpenses(from, entity = 'all', excludeInternal = true) {
     setError(null)
     fetchWithNonceRetry(() => fetch(url, { headers: { 'X-WP-Nonce': window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || '' } }))
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then(json => { setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setSaldoReal(json.saldoReal ?? null); setLoading(false) })
+      .then(json => { setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setSaldoReal(json.saldoReal ?? null); setCuadre(json.cuadre ?? null); setLoading(false) })
       .catch(e  => { setError(e.message); setLoading(false) })
   }, [url])
 
-  return { data, breakdown, saldoReal, loading, error }
+  return { data, breakdown, saldoReal, cuadre, loading, error }
 }

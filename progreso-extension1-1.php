@@ -1624,6 +1624,58 @@ function superadmin_save_expenses($request) {
 // compara como texto (los meses se guardan como 'YYYY-MM', que ordena igual como string que
 // como fecha) en vez de restar meses a una fecha, que con createFromFormat('Y-m', …) arrastra
 // el día de hoy y se desborda de mes en los días 29-31 de meses cortos.
+// Cuadre saldo↔resultado del Club (NOTAS_PARA_CODE_gastos_banco.md, 15/11 10:55): saldo inicial
+// (primer "Saldo Posterior" del CSV del Club) + resultado real de TODO el histórico (misma
+// regla que superadmin_get_expenses en vista Club: "Uso de Rocódromo" SÍ es gasto real, solo
+// "Transferencia entre cuentas" y lo marcado a mano quedan fuera) debe dar el saldo de hoy.
+// Siempre sobre el histórico completo, no el periodo del selector del frontend — si no, nunca
+// cuadra matemáticamente (comprobado a mano por cowork el 15/11 10:55: 36.600 € de diferencia
+// eran justo los pagos a la Rocoteca de ene→jul-26 que antes se excluían como "internos").
+function blokes_expenses_cuadre_club() {
+    global $wpdb;
+    $rows = $wpdb->get_results(
+        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE 'blokes_exp_%_club'",
+        ARRAY_A
+    );
+    $primer_ts = null; $saldo_inicial = null; $fecha_inicial = '';
+    $resultado = 0.0;
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!$saved || !is_array($saved['items'] ?? null)) continue;
+        foreach ($saved['items'] as $item) {
+            $saldo_raw = (string) ($item['saldo'] ?? '');
+            $fecha = $item['fechaValor'] ?? $item['fecha'] ?? '';
+            if ($saldo_raw !== '' && preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) {
+                $ts = mktime(0, 0, 0, intval($m[2]), intval($m[1]), intval($m[3]));
+                if ($primer_ts === null || $ts < $primer_ts) {
+                    $primer_ts     = $ts;
+                    $saldo_inicial = floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', $saldo_raw)));
+                    $fecha_inicial = date('Y-m-d', $ts);
+                }
+            }
+            $concepto_norm = function_exists('iconv')
+                ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
+                : strtolower($item['concepto'] ?? '');
+            $es_rocodromo = strpos($concepto_norm, 'rocodromo') !== false;
+            $es_interno = strpos($concepto_norm, 'transferencia entre cuentas') !== false
+                || (!$es_rocodromo && $item['excluded']);
+            if ($es_interno) continue;
+            $amt = abs(floatval($item['importe'] ?? 0));
+            if (($item['section'] ?? 'costes') === 'costes') $resultado -= $amt; else $resultado += $amt;
+        }
+    }
+    $saldo_hoy_data = blokes_expenses_saldo_real('club');
+    $saldo_hoy      = $saldo_hoy_data['saldo'];
+    $diferencia     = ($saldo_inicial !== null && $saldo_hoy !== null)
+        ? round($saldo_inicial + $resultado - $saldo_hoy, 2) : null;
+    return array(
+        'saldoInicial'   => $saldo_inicial, 'fechaInicial' => $fecha_inicial,
+        'resultadoTotal' => round($resultado, 2),
+        'saldoHoy'       => $saldo_hoy, 'fechaHoy' => $saldo_hoy_data['fecha'],
+        'diferencia'     => $diferencia,
+    );
+}
+
 function superadmin_get_expenses($request) {
     $from             = sanitize_text_field($request->get_param('from') ?: '');
     $entity_filter    = sanitize_text_field($request->get_param('entity') ?: 'all');
@@ -1680,10 +1732,16 @@ function superadmin_get_expenses($request) {
             $concepto_norm = function_exists('iconv')
                 ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
                 : strtolower($item['concepto'] ?? '');
-            // Internal: flagged at upload time OR matches key patterns (catches accent variants)
-            $is_internal = $item['excluded']
-                || strpos($concepto_norm, 'rocodromo') !== false
-                || strpos($concepto_norm, 'transferencia entre cuentas') !== false;
+            // "Uso de Rocódromo" (Club → Rocoteca) solo es de verdad "interno" en la vista
+            // COMBINADA (ahí se cancela con el ingreso especular de la otra entidad); visto
+            // desde una sola entidad es dinero real que sale del Club (o entra en la Rocoteca) —
+            // por eso nunca lo tapa el flag `excluded` guardado al subir el CSV, solo la vista
+            // "Todas" (Ramiro, NOTAS_PARA_CODE_gastos_banco.md 15/11 10:55: el acumulado de la
+            // vista Club no cuadraba con el saldo real sin contarlo como gasto).
+            $es_rocodromo = strpos($concepto_norm, 'rocodromo') !== false;
+            $is_internal = strpos($concepto_norm, 'transferencia entre cuentas') !== false
+                || ($es_rocodromo && $entity_filter === 'all')
+                || (!$es_rocodromo && $item['excluded']);
             if ($exclude_internal && $is_internal) continue;
             $amt  = abs(floatval($item['importe']));
             // 15/11 09:18 punto 3: antes el Club siempre daba IVA 0 pasara lo que pasara — desde
@@ -1739,7 +1797,11 @@ function superadmin_get_expenses($request) {
     // Saldo en banco real (solo Club, Ramiro 15/11 09:25) — el "acumulado" del frontend es un
     // resultado operativo, NUNCA el saldo del banco: no se puede reconstruir sin un saldo de
     // apertura, así que se manda aparte, directo del "Saldo Posterior" del CSV.
-    return rest_ensure_response(array('data' => $data, 'saldoReal' => blokes_expenses_saldo_real('club')));
+    return rest_ensure_response(array(
+        'data' => $data,
+        'saldoReal' => blokes_expenses_saldo_real('club'),
+        'cuadre' => blokes_expenses_cuadre_club(),
+    ));
 }
 
 function superadmin_delete_expenses($request) {
@@ -4989,8 +5051,7 @@ function _superadmin_orders_for_blog($start_date) {
             // b) Reembolsos: se restan del total y de cada línea (antes no se veían las devoluciones).
             $reembolsado_total = floatval($order->get_total_refunded());
             $row   = array(
-                'month' => $month, 'total' => floatval($order->get_total()) - $reembolsado_total,
-                'tax' => floatval($order->get_total_tax()), 'items' => array(),
+                'month' => $month, 'tax' => floatval($order->get_total_tax()), 'items' => array(),
             );
             // Solo mirar el reembolso POR LÍNEA si de verdad hay algún reembolso en este pedido
             // — get_total_refunded_for_item() hace una consulta aparte por cada línea, y la
@@ -5011,13 +5072,20 @@ function _superadmin_orders_for_blog($start_date) {
                 }
                 $reembolsado_item = ($tiene_reembolso && method_exists($order, 'get_total_refunded_for_item'))
                     ? floatval($order->get_total_refunded_for_item($item_id)) : 0.0;
+                // get_total() (después de descuentos/cupones), no get_subtotal() (antes) — si no,
+                // la suma de líneas (Desglose) sale por encima de la gráfica (cowork, 15/11 10:15).
+                // Las dos ya son netas de IVA en WooCommerce (el IVA se trata aparte, 'tax').
                 $row['items'][] = array(
                     'name'     => $item->get_name(),
                     'qty'      => intval($item->get_quantity()),
-                    'revenue'  => floatval($item->get_subtotal()) - $reembolsado_item,
+                    'revenue'  => floatval($item->get_total()) - $reembolsado_item,
                     'category' => $cat,
                 );
             }
+            // El total del pedido es la suma de SUS LÍNEAS, no $order->get_total() (que incluye
+            // IVA y envío/gastos aparte) — así la gráfica (superadmin_revenue) y el Desglose
+            // (blokes_productos_calcular) cuadran por construcción, al salir del mismo dato.
+            $row['total'] = array_sum(array_column($row['items'], 'revenue'));
             $rows[] = $row;
         } catch (\Throwable $e) {
             error_log('Blokes _superadmin_orders_for_blog: pedido ' . $oid . ' fallo: ' . $e->getMessage());
@@ -5158,13 +5226,13 @@ function blokes_ingresos_clasificar($nombre) {
         return false;
     };
 
-    if ($contiene(array('clases rocomadrid', 'clases de escalada', 'clases yoga', 'clase de yoga', 'clase semanal', 'dia suelto'))) {
+    if ($contiene(array('clases rocomadrid', 'clases de escalada', 'clases yoga', 'clase de yoga', 'clase semanal', 'dia suelto', 'dias sueltos'))) {
         return array('familia' => 'Clases', 'sub' => null);
     }
-    if ($contiene(array('cumpleanos', 'entrada para grupos', 'taller', 'actividad con peques', ' ies ', 'compe', 'colegio', 'escolar'))) {
+    if ($contiene(array('cumpleanos', 'entrada para grupos', 'taller', 'actividad con peques', ' ies ', 'compe', 'colegio', 'escolar', 'evento'))) {
         return array('familia' => 'Eventos y grupos', 'sub' => null);
     }
-    if ($contiene(array('cerveza', 'hamburguesa', 'refresco', 'agua', 'aquarius', 'monster', 'bodyarmor', 'palestine cola', 'bebida', 'pincho', 'bocadillo', 'cafe'))) {
+    if ($contiene(array('cerveza', 'hamburguesa', 'refresco', 'agua', 'aquarius', 'monster', 'bodyarmor', 'palestine cola', 'bebida', 'pincho', 'bocadillo', 'cafe', 'coca cola'))) {
         return array('familia' => 'Consumibles', 'sub' => 'Bar');
     }
     if ($contiene(array('magnesio', 'mojo stick', 'camiseta', 'sudadera', 'gorra', 'cepillo'))) {
@@ -5173,7 +5241,7 @@ function blokes_ingresos_clasificar($nombre) {
     if ($contiene(array('recauchut', 'vibram', 'noedge', 'puntera'))) {
         return array('familia' => 'Consumibles', 'sub' => 'Recauchutes');
     }
-    if ($contiene(array('entrada de todo el dia', 'entrada de manana', 'pase tarde', 'pase manana', 'entrada y pies de gato', 'bono 10', 'bono mensual', 'pies de gato'))) {
+    if ($contiene(array('entrada de todo el dia', 'entrada de manana', 'pase tarde', 'pase manana', 'entrada y pies de gato', 'bono 10', 'bono de 10', 'bono mensual', 'pies de gato'))) {
         return array('familia' => 'Acceso al rocódromo', 'sub' => null);
     }
     if ($contiene(array('uso de rocodromo', 'cita', 'prueba'))) {
@@ -5185,7 +5253,7 @@ function blokes_ingresos_clasificar($nombre) {
 // Productos reales, fusionando las dos tiendas (Ramiro 15/11 09:02: hoy salen dos líneas del
 // mismo producto — Entrada de todo el día, Magnesio, Cerveza...).  Único sitio que recorre los
 // pedidos de las dos tiendas para esto — tanto /products como /ingresos/desglose lo reutilizan.
-function blokes_productos_calcular($months) {
+function blokes_productos_calcular($months, $exclude_transfer = false) {
     $months     = max(1, min(60, intval($months)));
     $start_date = (new DateTime("first day of this month -{$months} months"))->format('Y-m-d');
 
@@ -5196,6 +5264,14 @@ function blokes_productos_calcular($months) {
         restore_current_blog();
         foreach ($orders as $row) {
             foreach ($row['items'] as $item) {
+                // «Sin uso Rocódromo», mismo botón que la gráfica (cowork, 15/11 10:15): la
+                // factura de arrendamiento inter-empresa Club → Rocoteca no es ingreso real.
+                if ($exclude_transfer) {
+                    $name_ascii = function_exists('iconv')
+                        ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['name']))
+                        : strtolower($item['name']);
+                    if (strpos($name_ascii, 'rocodromo') !== false) continue;
+                }
                 $key = blokes_ingresos_normaliza_nombre($item['name']);
                 if (!isset($products[$key])) {
                     $clasif = blokes_ingresos_clasificar($item['name']);
@@ -5248,7 +5324,8 @@ function superadmin_ingresos_familia_set($request) {
 // un pedido de Woo (para no contar dos veces el mismo dinero) antes de juntarlas aquí.
 function superadmin_ingresos_desglose($request) {
     $months = max(1, min(60, intval($request->get_param('months') ?: 12)));
-    $productos = blokes_productos_calcular($months);
+    $exclude_transfer = (bool) $request->get_param('exclude_transfer');
+    $productos = blokes_productos_calcular($months, $exclude_transfer);
 
     $familias = array();
     foreach ($productos as $p) {
