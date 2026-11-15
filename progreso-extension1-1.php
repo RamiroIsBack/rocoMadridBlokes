@@ -1042,6 +1042,19 @@ add_action('rest_api_init', function() {
         'permission_callback' => $socio_perm,
         'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
     ));
+    // "Desglose de ingresos" (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02) — dinero
+    // agregado del club: solo socio.
+    register_rest_route('superadmin/v1', '/ingresos/desglose', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_ingresos_desglose',
+        'permission_callback' => $socio_perm,
+        'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
+    ));
+    register_rest_route('superadmin/v1', '/ingresos/familia', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_ingresos_familia_set',
+        'permission_callback' => $socio_perm,
+    ));
     register_rest_route('superadmin/v1', '/people-summary', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_people_summary',
@@ -4864,11 +4877,20 @@ function _superadmin_orders_for_blog($start_date) {
     foreach ($ids as $oid) {
         $order = wc_get_order($oid);
         if (!$order) continue;
-        $dt = $order->get_date_created();
+        // a) Facturas anuladas en VeriFactu: no cuentan como cobrado (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02).
+        if (blokes_pedido_factura_anulada($order)) continue;
+        // c) Mes por fecha de pago, no de creación — una renovación de octubre pagada en
+        // noviembre caía en octubre.
+        $dt = $order->get_date_paid() ?: $order->get_date_created();
         if (!$dt) continue;
         $month = $dt->format('Y-m');
-        $row   = array('month' => $month, 'total' => floatval($order->get_total()), 'tax' => floatval($order->get_total_tax()), 'items' => array());
-        foreach ($order->get_items() as $item) {
+        // b) Reembolsos: se restan del total y de cada línea (antes no se veían las devoluciones).
+        $reembolsado_total = floatval($order->get_total_refunded());
+        $row   = array(
+            'month' => $month, 'total' => floatval($order->get_total()) - $reembolsado_total,
+            'tax' => floatval($order->get_total_tax()), 'items' => array(),
+        );
+        foreach ($order->get_items() as $item_id => $item) {
             $cat     = '';
             $product = $item->get_product();
             if ($product) {
@@ -4879,10 +4901,11 @@ function _superadmin_orders_for_blog($start_date) {
                 }
                 $cat = $cat_cache[$pid];
             }
+            $reembolsado_item = method_exists($order, 'get_total_refunded_for_item') ? floatval($order->get_total_refunded_for_item($item_id)) : 0.0;
             $row['items'][] = array(
                 'name'     => $item->get_name(),
                 'qty'      => intval($item->get_quantity()),
-                'revenue'  => floatval($item->get_subtotal()),
+                'revenue'  => floatval($item->get_subtotal()) - $reembolsado_item,
                 'category' => $cat,
             );
         }
@@ -4941,27 +4964,84 @@ function superadmin_revenue($request) {
     return rest_ensure_response(array('data' => $data));
 }
 
-function superadmin_products($request) {
-    $months     = max(1, min(60, intval($request->get_param('months'))));
+// ─── Familias de ingresos (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02) ───────────────
+// Mapa propio de Blokes, no las categorías de WooCommerce (están mezcladas: "Servicios y
+// productos" junta entradas+recauchutes+cumpleaños, "Sin categoría" tiene Uso de Rocódromo y
+// eventos, "Clases" incluye "Entrada para grupos"...). 'overrides' (wp_option) deja que un socio
+// reclasifique un producto sin tocar código — nombre normalizado (sin tildes, minúsculas) => {familia, sub}.
+function blokes_ingresos_normaliza_nombre($s) {
+    $s = function_exists('iconv') ? iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', (string) $s) : (string) $s;
+    return trim(strtolower($s));
+}
+function blokes_ingresos_familia_overrides_get() {
+    return get_option('blokes_ingresos_familias', array());
+}
+function blokes_ingresos_familia_override_set($nombre, $familia, $sub = null) {
+    $overrides = blokes_ingresos_familia_overrides_get();
+    $overrides[blokes_ingresos_normaliza_nombre($nombre)] = array('familia' => $familia, 'sub' => $sub);
+    update_option('blokes_ingresos_familias', $overrides, false);
+}
+const BLOKES_INGRESOS_FAMILIAS = array('Clases', 'Eventos y grupos', 'Consumibles', 'Acceso al rocódromo', 'Otros');
+const BLOKES_INGRESOS_CONSUMIBLES_SUB = array('Bar', 'Tienda', 'Recauchutes');
+
+// Clasificación por palabras clave sobre el nombre de la línea del pedido — vista en los
+// productos reales de jul→nov (ver la nota). Lo que no encaje sale "Sin clasificar" para que
+// alguien lo asigne a mano (se queda guardado, no hay que repetirlo cada vez).
+function blokes_ingresos_clasificar($nombre) {
+    $n = blokes_ingresos_normaliza_nombre($nombre);
+    $overrides = blokes_ingresos_familia_overrides_get();
+    if (isset($overrides[$n])) return $overrides[$n];
+
+    $contiene = function($needles) use ($n) {
+        foreach ($needles as $x) if (strpos($n, $x) !== false) return true;
+        return false;
+    };
+
+    if ($contiene(array('clases rocomadrid', 'clases de escalada', 'clases yoga', 'clase de yoga', 'clase semanal', 'dia suelto'))) {
+        return array('familia' => 'Clases', 'sub' => null);
+    }
+    if ($contiene(array('cumpleanos', 'entrada para grupos', 'taller', 'actividad con peques', ' ies ', 'compe', 'colegio', 'escolar'))) {
+        return array('familia' => 'Eventos y grupos', 'sub' => null);
+    }
+    if ($contiene(array('cerveza', 'hamburguesa', 'refresco', 'agua', 'aquarius', 'monster', 'bodyarmor', 'palestine cola', 'bebida', 'pincho', 'bocadillo', 'cafe'))) {
+        return array('familia' => 'Consumibles', 'sub' => 'Bar');
+    }
+    if ($contiene(array('magnesio', 'mojo stick', 'camiseta', 'sudadera', 'gorra', 'cepillo'))) {
+        return array('familia' => 'Consumibles', 'sub' => 'Tienda');
+    }
+    if ($contiene(array('recauchut', 'vibram', 'noedge', 'puntera'))) {
+        return array('familia' => 'Consumibles', 'sub' => 'Recauchutes');
+    }
+    if ($contiene(array('entrada de todo el dia', 'entrada de manana', 'pase tarde', 'pase manana', 'entrada y pies de gato', 'bono 10', 'bono mensual', 'pies de gato'))) {
+        return array('familia' => 'Acceso al rocódromo', 'sub' => null);
+    }
+    if ($contiene(array('uso de rocodromo', 'cita', 'prueba'))) {
+        return array('familia' => 'Otros', 'sub' => null);
+    }
+    return array('familia' => 'Sin clasificar', 'sub' => null);
+}
+
+// Productos reales, fusionando las dos tiendas (Ramiro 15/11 09:02: hoy salen dos líneas del
+// mismo producto — Entrada de todo el día, Magnesio, Cerveza...).  Único sitio que recorre los
+// pedidos de las dos tiendas para esto — tanto /products como /ingresos/desglose lo reutilizan.
+function blokes_productos_calcular($months) {
+    $months     = max(1, min(60, intval($months)));
     $start_date = (new DateTime("first day of this month -{$months} months"))->format('Y-m-d');
 
-    $products = array(); // "blog_id|name" => [name, store, units, revenue, history]
-
-    foreach (array(1 => 'Principal', 3 => 'Club') as $blog_id => $store_label) {
+    $products = array(); // nombre normalizado => [name, units, revenue, history, familia, sub]
+    foreach (array(1, 3) as $blog_id) {
         switch_to_blog($blog_id);
         $orders = _superadmin_orders_for_blog($start_date);
         restore_current_blog();
         foreach ($orders as $row) {
             foreach ($row['items'] as $item) {
-                $key = $blog_id . '|' . $item['name'];
+                $key = blokes_ingresos_normaliza_nombre($item['name']);
                 if (!isset($products[$key])) {
+                    $clasif = blokes_ingresos_clasificar($item['name']);
                     $products[$key] = array(
-                        'name'     => $item['name'],
-                        'store'    => $store_label,
-                        'category' => $item['category'] ?? '',
-                        'units'    => 0,
-                        'revenue'  => 0.0,
-                        'history'  => array(),
+                        'name' => $item['name'], 'category' => $item['category'] ?? '',
+                        'familia' => $clasif['familia'], 'sub' => $clasif['sub'],
+                        'units' => 0, 'revenue' => 0.0, 'history' => array(),
                     );
                 }
                 $products[$key]['units']   += $item['qty'];
@@ -4983,8 +5063,76 @@ function superadmin_products($request) {
         $p['revenue'] = round($p['revenue'], 2);
     }
     usort($data, function($a, $b) { return $b['revenue'] <=> $a['revenue']; });
+    return $data;
+}
 
-    return rest_ensure_response(array('data' => $data));
+// POST /ingresos/familia — reclasificar un producto a mano (09:02: "editable por socio").
+function superadmin_ingresos_familia_set($request) {
+    $nombre = sanitize_text_field((string) $request->get_param('nombre'));
+    $familia = sanitize_text_field((string) $request->get_param('familia'));
+    $sub = $request->get_param('sub');
+    $sub = $sub ? sanitize_text_field((string) $sub) : null;
+    if (!$nombre || !in_array($familia, BLOKES_INGRESOS_FAMILIAS, true)) {
+        return new WP_Error('bad_request', 'Falta nombre o la familia no es una de las reconocidas.', array('status' => 400));
+    }
+    if ($familia === 'Consumibles' && !in_array($sub, BLOKES_INGRESOS_CONSUMIBLES_SUB, true)) $sub = 'Bar';
+    blokes_ingresos_familia_override_set($nombre, $familia, $sub);
+    return rest_ensure_response(array('success' => true));
+}
+
+// GET /ingresos/desglose — "Desglose de ingresos" (sustituye a "Productos y suscripciones",
+// mezclado y mal categorizado). Por familia (Consumibles con Bar/Tienda/Recauchutes dentro) +
+// serie mensual para la barra apilada. NO incluye el módulo Eventos (reservas aparte de
+// WooCommerce) — pendiente de que Ramiro confirme si una reserva de Eventos puede tener TAMBIÉN
+// un pedido de Woo (para no contar dos veces el mismo dinero) antes de juntarlas aquí.
+function superadmin_ingresos_desglose($request) {
+    $months = max(1, min(60, intval($request->get_param('months') ?: 12)));
+    $productos = blokes_productos_calcular($months);
+
+    $familias = array();
+    foreach ($productos as $p) {
+        $fam = $p['familia'];
+        if (!isset($familias[$fam])) {
+            $familias[$fam] = array('familia' => $fam, 'importe' => 0.0, 'porMes' => array(), 'productos' => array(), 'subs' => array());
+        }
+        $familias[$fam]['importe'] += $p['revenue'];
+        foreach ($p['history'] as $h) {
+            $familias[$fam]['porMes'][$h['month']] = ($familias[$fam]['porMes'][$h['month']] ?? 0) + $h['revenue'];
+        }
+        if ($fam === 'Consumibles') {
+            $sub = $p['sub'] ?: 'Otros';
+            if (!isset($familias[$fam]['subs'][$sub])) $familias[$fam]['subs'][$sub] = array('sub' => $sub, 'importe' => 0.0, 'productos' => array());
+            $familias[$fam]['subs'][$sub]['importe'] += $p['revenue'];
+            $familias[$fam]['subs'][$sub]['productos'][] = $p;
+        } else {
+            $familias[$fam]['productos'][] = $p;
+        }
+    }
+
+    $total = array_sum(array_column($productos, 'revenue'));
+    $out = array();
+    // Orden fijo (09:02), "Sin clasificar" siempre arriba si hay algo sin asignar.
+    $orden = array_merge(isset($familias['Sin clasificar']) ? array('Sin clasificar') : array(), BLOKES_INGRESOS_FAMILIAS);
+    foreach ($orden as $fam) {
+        if (!isset($familias[$fam])) continue;
+        $f = $familias[$fam];
+        ksort($f['porMes']);
+        $f['porMes'] = array_map(function($mes, $imp) { return array('mes' => $mes, 'importe' => round($imp, 2)); }, array_keys($f['porMes']), array_values($f['porMes']));
+        $f['importe'] = round($f['importe'], 2);
+        $f['pct'] = $total > 0 ? round($f['importe'] / $total * 100, 1) : 0;
+        if ($fam === 'Consumibles') $f['subs'] = array_values(array_map(function($s) { $s['importe'] = round($s['importe'], 2); return $s; }, $f['subs']));
+        else unset($f['subs']);
+        $out[] = $f;
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array('familias' => $out, 'total' => round($total, 2))));
+}
+
+// GET /products — envoltorio fino de blokes_productos_calcular() (09:02: ya sin el desglose por
+// tienda, un producto = una línea aunque se venda en las dos).
+function superadmin_products($request) {
+    $months = max(1, min(60, intval($request->get_param('months'))));
+    return rest_ensure_response(array('data' => blokes_productos_calcular($months)));
 }
 
 // Cuenta PERSONAS (cuentas de facturación), no suscripciones: una suscripción Martes-Jueves
@@ -11064,10 +11212,17 @@ function blokes_altas_bajas_calcular($months) {
 // Dinero de verdad cobrado por una suscripción en un mes concreto (pedido completed/processing,
 // por fecha de creación — mismo criterio que Grupos/ExcelMuerte — y sin las facturas anuladas
 // en VeriFactu). Para Superadmin › Clases (15/11 09:10): rentabilidad con ingreso real, no tarifa fija.
+// Dinero de verdad cobrado por una suscripción en un mes concreto, YA PRORRATEADO si el pago es
+// trimestral/anual (Ramiro, 15/11 09:1x: "haz el prorrateo de trimestrales/anuales por mes" —
+// antes un pedido trimestral de 150€ inflaba entero el mes en que se pagó y dejaba los otros dos
+// en 0€). Un pedido cubre $meses_cubre meses empezando el mes en que se creó.
 function blokes_sub_importe_cobrado_mes($sub_id, $ym) {
     if (!function_exists('wcs_get_subscription')) return 0.0;
     $sub = wcs_get_subscription(intval($sub_id));
     if (!$sub) return 0.0;
+    $periodo   = method_exists($sub, 'get_billing_period') ? $sub->get_billing_period() : 'month';
+    $intervalo = method_exists($sub, 'get_billing_interval') ? max(1, intval($sub->get_billing_interval())) : 1;
+    $meses_cubre = ($periodo === 'year') ? 12 * $intervalo : $intervalo; // trimestral = 'month' con intervalo 3
     $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
     $total = 0.0;
     foreach ($order_ids as $oid) {
@@ -11075,7 +11230,12 @@ function blokes_sub_importe_cobrado_mes($sub_id, $ym) {
         if (!$order || !in_array($order->get_status(), array('completed', 'processing'), true)) continue;
         if (blokes_pedido_factura_anulada($order)) continue;
         $fecha = $order->get_date_created();
-        if ($fecha && $fecha->format('Y-m') === $ym) $total += floatval($order->get_total());
+        if (!$fecha) continue;
+        $inicio_ym = $fecha->format('Y-m');
+        $fin_ym = blokes_mes_mas($inicio_ym, $meses_cubre - 1);
+        if ($ym >= $inicio_ym && $ym <= $fin_ym) {
+            $total += floatval($order->get_total()) / $meses_cubre;
+        }
     }
     return $total;
 }
@@ -11177,17 +11337,28 @@ function superadmin_clases_retencion($request) {
     // ingreso real de este mes y retención a 3 meses (09:10 — rentabilidad real, movida aquí
     // desde Superadmin › Ingresos; el coste del profe y el margen se calculan en el frontend,
     // que es donde vive la lista de quién da cada clase).
-    $por_clase = array_map(function($c) use ($now_ym, $personas_por_clase_historico, $persona_activo_en) {
+    // Hasta 12 meses atrás (acotado a lo que se haya pedido) para las medias de 3/6/12 meses.
+    $meses_media = array_slice($months_range, -12);
+    $por_clase = array_map(function($c) use ($now_ym, $personas_por_clase_historico, $persona_activo_en, $meses_media) {
         $altas_mes = array_values(array_filter($c['members_active'], function($m) { return $m['new']; }));
         $motivos = array();
         foreach ($c['members_lost'] as $m) {
             $cat = $m['motivoCategoria'] ?: 'sin_categoria';
             $motivos[$cat] = ($motivos[$cat] ?? 0) + 1;
         }
-        $ingreso_mes_real = 0.0;
-        foreach ($c['members_active'] as $m) {
-            $ingreso_mes_real += blokes_sub_importe_cobrado_mes($m['subId'], $now_ym);
+        // Ingreso real por mes (ya prorrateado si hay trimestrales/anuales) — de este mes y la
+        // serie de los últimos meses, para las medias de 3/6/12 (Ramiro, 15/11 09:1x).
+        $ingreso_por_mes = array();
+        foreach ($meses_media as $ym) {
+            $t = 0.0;
+            foreach ($c['members_active'] as $m) $t += blokes_sub_importe_cobrado_mes($m['subId'], $ym);
+            $ingreso_por_mes[$ym] = $t;
         }
+        $ingreso_mes_real = $ingreso_por_mes[$now_ym] ?? 0.0;
+        $media_n = function($n) use ($ingreso_por_mes) {
+            $ult = array_slice($ingreso_por_mes, -$n);
+            return $ult ? round(array_sum($ult) / count($ult), 2) : null;
+        };
         $class_key = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
         $personas_hace_3m = array_keys($personas_por_clase_historico[$class_key] ?? array());
         $retencion_3m = null;
@@ -11202,6 +11373,7 @@ function superadmin_clases_retencion($request) {
             'dia' => $c['dia'], 'horario' => $c['horario'], 'edad' => $c['edad'], 'label' => $c['label'],
             'activos' => $c['active'], 'altasMes' => count($altas_mes), 'bajasRecientes' => count($c['members_lost']),
             'motivosBaja' => $motivos, 'ingresoMesReal' => round($ingreso_mes_real, 2),
+            'ingresoMedia3m' => $media_n(3), 'ingresoMedia6m' => $media_n(6), 'ingresoMedia12m' => $media_n(12),
             'retencion3m' => $retencion_3m, 'nPersonasHace3m' => count($personas_hace_3m),
         );
     }, $calculo['data']);

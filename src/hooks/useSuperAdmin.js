@@ -38,6 +38,12 @@ export function useProducts(months) {
   return useEndpoint('/products', { months })
 }
 
+// "Desglose de ingresos" (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02).
+export function useIngresosDesglose(months) {
+  return useEndpoint('/ingresos/desglose', { months })
+}
+export const ingresosFamiliaSet = body => gestionPost('/ingresos/familia', body)
+
 export function useClasses(months) {
   const { data, raw, loading, error, refetch } = useEndpoint('/classes', { months })
   // "Dos suscripciones activas de la misma clase" (cowork/Ramiro, 15/11 07:50 punto A): no se

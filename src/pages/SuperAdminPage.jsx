@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useRevenue, useProducts, useExpenses, useClasesRetencion } from '../hooks/useSuperAdmin'
+import { useRevenue, useExpenses, useClasesRetencion, useIngresosDesglose, ingresosFamiliaSet } from '../hooks/useSuperAdmin'
 import { useCostes } from '../hooks/useCostes'
 import { PROF_META } from '../data/staffSchedule'
 import useTemaOscuro from '../hooks/useTemaOscuro'
@@ -72,20 +72,6 @@ function PeriodSelector({ value, onChange }) {
 function LoadingBlock() { return <div className="sa-loading">Cargando…</div> }
 function ErrorBlock({ msg }) { return <div className="sa-error">Error: {msg}</div> }
 
-const IVA_COLOR = '#f97316'
-
-function quarterLabel() {
-  const m = new Date().getMonth() + 1
-  return `Q${Math.ceil(m / 3)} ${new Date().getFullYear()}`
-}
-function currentQuarterMonths() {
-  const now = new Date()
-  const y   = now.getFullYear()
-  const q   = Math.ceil((now.getMonth() + 1) / 3)
-  const s   = (q - 1) * 3 + 1
-  return [0, 1, 2].map(i => `${y}-${String(s + i).padStart(2, '0')}`)
-}
-
 // ─── Revenue section ────────────────────────────────────────────────
 function RevenueSection({ excludeTransfer, onToggleExclude }) {
   // Cowork 11/11 13:55: var(--color-text-secondary) en el fill de Recharts no se repinta solo
@@ -98,25 +84,14 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
   const totals = useMemo(() => {
     if (!data) return {}
     return {
-      store1:     data.reduce((s, r) => s + (r.store1     || 0), 0),
-      store2:     data.reduce((s, r) => s + (r.store2     || 0), 0),
-      total:      data.reduce((s, r) => s + (r.total      || 0), 0),
-      store1_tax: data.reduce((s, r) => s + (r.store1_tax || 0), 0),
+      store1: data.reduce((s, r) => s + (r.store1 || 0), 0),
+      store2: data.reduce((s, r) => s + (r.store2 || 0), 0),
+      total:  data.reduce((s, r) => s + (r.total  || 0), 0),
     }
-  }, [data])
-
-  const quarterIva = useMemo(() => {
-    if (!data) return 0
-    const qm = currentQuarterMonths()
-    return data.filter(r => qm.includes(r.month)).reduce((s, r) => s + (r.store1_tax || 0), 0)
   }, [data])
 
   const chartData = useMemo(() =>
     (data || []).map(r => ({ ...r, month: fmtMonth(r.month) }))
-  , [data])
-
-  const ivaData = useMemo(() =>
-    (data || []).map(r => ({ month: fmtMonth(r.month), iva: r.store1_tax || 0 }))
   , [data])
 
   return (
@@ -135,7 +110,7 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
         </div>
       </div>
       <p className="sa-legend">
-        Ingresos netos de WooCommerce sin IVA (get_subtotal), suma de todos los pedidos completados en el período. «Con/Sin uso Rocódromo» excluye la factura de arrendamiento inter-empresa Club → Rocoteca.
+        Ingresos netos de WooCommerce sin IVA (completados/processing), por fecha de pago (una renovación de octubre pagada en noviembre cuenta en noviembre), sin facturas anuladas en VeriFactu y con los reembolsos ya restados. «Con/Sin uso Rocódromo» excluye la factura de arrendamiento inter-empresa Club → Rocoteca (por defecto sin ella: infla el total y no es ingreso del club).
       </p>
 
       {loading && <LoadingBlock />}
@@ -145,7 +120,9 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
         <>
           <div className="sa-kpis">
             {[
-              { key: 'store1', label: excludeTransfer ? 'Principal (sin Rocódromo)' : 'Tienda Principal' },
+              // Tienda Principal apenas vende desde julio (Ramiro 15/11 09:02): si suma ~0 en
+              // el período, no ocupa sitio.
+              ...(Math.abs(totals.store1 || 0) > 1 ? [{ key: 'store1', label: excludeTransfer ? 'Principal (sin Rocódromo)' : 'Tienda Principal' }] : []),
               { key: 'store2', label: 'Tienda Club' },
               { key: 'total',  label: 'Total combinado' },
             ].map(({ key, label }) => (
@@ -154,10 +131,6 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
                 <span className="sa-kpi__label">{label}</span>
               </div>
             ))}
-            <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema(IVA_COLOR, oscuro) }}>
-              <span className="sa-kpi__value">{fmtEur(quarterIva)}</span>
-              <span className="sa-kpi__label">IVA {quarterLabel()}</span>
-            </div>
           </div>
 
           <ResponsiveContainer width="100%" height={240}>
@@ -179,210 +152,75 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
                 formatter={(v, name) => [fmtEur(v), STORE_LABELS[name] || name]}
               />
               <Legend formatter={k => STORE_LABELS[k] || k} />
-              <Area type="monotone" dataKey="store1" stroke={STORE_COLORS.store1} fill={`url(#grad-store1)`} strokeWidth={2} dot={false} />
+              {Math.abs(totals.store1 || 0) > 1 && (
+                <Area type="monotone" dataKey="store1" stroke={STORE_COLORS.store1} fill={`url(#grad-store1)`} strokeWidth={2} dot={false} />
+              )}
               <Area type="monotone" dataKey="store2" stroke={STORE_COLORS.store2} fill={`url(#grad-store2)`} strokeWidth={2} dot={false} />
               <Area type="monotone" dataKey="total"  stroke={STORE_COLORS.total}  fill={`url(#grad-total)`}  strokeWidth={2} dot={false} strokeDasharray="4 2" />
             </AreaChart>
           </ResponsiveContainer>
-
-          <div className="sa-iva-block">
-            <p className="sa-iva-title">IVA mensual · Tienda Principal</p>
-            <ResponsiveContainer width="100%" height={110}>
-              <BarChart data={ivaData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                <XAxis dataKey="month" tick={{ fill: tickFill, fontSize: 11 }} />
-                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: tickFill, fontSize: 11 }} width={48} />
-                <Tooltip
-                  contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
-                  labelStyle={{ color: IVA_COLOR }}
-                  formatter={v => [fmtEur(v), 'IVA']}
-                />
-                <Bar dataKey="iva" fill={IVA_COLOR} radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
         </>
       )}
     </section>
   )
 }
 
-// Strip accents for matching (mirrors PHP iconv approach)
-function normName(s) {
-  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-}
-const isRocodromo = name => normName(name).includes('rocodromo')
-
-function matchesMarginProd(p) {
-  const n   = normName(p.name)
-  const cat = normName(p.category || '')
-  return (
-    n.includes('recauchut') ||
-    n.includes('magnesio') ||
-    cat.includes('bebida')
-  )
+// ─── Desglose de ingresos (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02) ───────────────
+// Sustituye a "Productos y suscripciones" (mezclaba categorías de WooCommerce con cosas que no
+// pintaban nada ahí) y a la calculadora de margen (ese análisis lo hace cowork aparte).
+const INGRESOS_FAMILIAS = ['Clases', 'Eventos y grupos', 'Consumibles', 'Acceso al rocódromo', 'Otros']
+const FAMILIA_COLOR = {
+  'Sin clasificar': '#9ca3af', Clases: '#f5c842', 'Eventos y grupos': '#a78bfa',
+  Consumibles: '#60a5fa', 'Acceso al rocódromo': '#34d399', Otros: '#f97316',
 }
 
-// ─── Margin calculator ────────────────────────────────────────────────
-function MarginCalculator({ products, months }) {
-  const candidates = useMemo(() => products.filter(matchesMarginProd), [products])
-
-  const [costs, setCosts] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('sa_product_costs') || '{}') } catch { return {} }
-  })
-
-  if (!candidates.length) return null
-
-  const updateCost = (key, val) => {
-    const next = { ...costs, [key]: val }
-    setCosts(next)
-    try { localStorage.setItem('sa_product_costs', JSON.stringify(next)) } catch {}
-  }
-
-  const rows = candidates.map(p => {
-    const key          = `${p.store}|${p.name}`
-    const cost         = parseFloat(costs[key]) || 0
-    const pricePerUnit = p.units > 0 ? p.revenue / p.units : 0
-    const profit       = (pricePerUnit - cost) * p.units
-    const margin       = pricePerUnit > 0 ? ((pricePerUnit - cost) / pricePerUnit) * 100 : null
-    return { p, key, cost, pricePerUnit, profit, margin }
-  })
-
-  const anyHasCost  = rows.some(r => r.cost > 0)
-  const totalProfit = rows.reduce((s, r) => s + r.profit, 0)
-
+function ProductoFila({ p, onReclasificar }) {
   return (
-    <div className="sa-margin-calc">
-      <p className="sa-margin-calc__title">Calculadora de margen · {months}m</p>
-      <div className="sa-margin-table-wrap">
-        <table className="sa-margin-table">
-          <thead>
-            <tr>
-              <th>Producto</th>
-              <th>Uds.</th>
-              <th>Precio/ud</th>
-              <th>Coste/ud</th>
-              <th>Beneficio</th>
-              <th>Margen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ p, key, cost, pricePerUnit, profit, margin }, i) => (
-              <tr key={i}>
-                <td className="sa-mt__name">{p.name}</td>
-                <td className="sa-mt__num">{p.units}</td>
-                <td className="sa-mt__num">{pricePerUnit > 0 ? pricePerUnit.toFixed(2) + '€' : '—'}</td>
-                <td className="sa-mt__cost">
-                  <input
-                    type="number"
-                    className="sa-margin-input"
-                    value={cost || ''}
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    onChange={e => updateCost(key, e.target.value)}
-                  />
-                </td>
-                <td className={`sa-mt__profit${cost > 0 ? profit >= 0 ? ' sa-mt__profit--pos' : ' sa-mt__profit--neg' : ''}`}>
-                  {cost > 0 ? fmtEur(profit) : '—'}
-                </td>
-                <td className={`sa-mt__pct${margin != null && cost > 0 ? margin >= 50 ? ' sa-mt__pct--hi' : margin >= 20 ? ' sa-mt__pct--mid' : ' sa-mt__pct--lo' : ''}`}>
-                  {margin != null && cost > 0 ? `${margin.toFixed(1)}%` : '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          {anyHasCost && (
-            <tfoot>
-              <tr>
-                <td colSpan={4} className="sa-mt__total-lbl">Beneficio total</td>
-                <td className={`sa-mt__total${totalProfit >= 0 ? '' : ' sa-mt__total--neg'}`} colSpan={2}>
-                  {fmtEur(totalProfit)}
-                </td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
+    <div className="sa-product-inner">
+      <span className="sa-product-inner__name">{p.name}</span>
+      <span className="sa-product-inner__units">{p.units} uds</span>
+      <span className="sa-product-inner__rev">{fmtEur(p.revenue)}</span>
+      <button className="sa-link" onClick={onReclasificar}>reclasificar</button>
     </div>
   )
 }
 
-// ─── Products section ────────────────────────────────────────────────
-function ProductsSection({ excludeTransfer }) {
-  const tickFill = useTemaOscuro() ? '#b3ab9a' : '#5e5650'
-  const [months,      setMonths    ] = useState(12)
-  const [storeFilter, setStore     ] = useState('Todas')
-  const [openCats,    setOpenCats  ] = useState(() => new Set())
-  const [chartCat,    setChartCat  ] = useState('__all__')
-  const [chartProd,   setChartProd ] = useState('__all__')
-  const { data, loading, error }     = useProducts(months)
+function IngresosDesgloseSection() {
+  const [months, setMonths] = useState(12)
+  const { data, loading, error, refetch } = useIngresosDesglose(months)
+  const [openFam, setOpenFam] = useState(() => new Set())
+  const [openSub, setOpenSub] = useState(() => new Set())
+  const [reclasificando, setReclasificando] = useState(null)
+  const [busy, setBusy] = useState(false)
 
-  const stores = useMemo(() => {
-    if (!data) return ['Todas']
-    return ['Todas', ...new Set(data.map(p => p.store))]
-  }, [data])
-
-  const filtered = useMemo(() => {
-    if (!data) return []
-    let d = storeFilter === 'Todas' ? data : data.filter(p => p.store === storeFilter)
-    if (excludeTransfer) d = d.filter(p => !isRocodromo(p.name))
-    return d
-  }, [data, storeFilter, excludeTransfer])
-
-  const byCategory = useMemo(() => {
-    const groups = {}
-    filtered.forEach(p => {
-      const cat = p.category || 'Sin categoría'
-      if (!groups[cat]) groups[cat] = { name: cat, revenue: 0, products: [] }
-      groups[cat].revenue += p.revenue
-      groups[cat].products.push(p)
-    })
-    return Object.values(groups).sort((a, b) => b.revenue - a.revenue)
-  }, [filtered])
-
-  const toggleCat = cat => setOpenCats(prev => {
-    const next = new Set(prev)
-    next.has(cat) ? next.delete(cat) : next.add(cat)
-    return next
-  })
-
-  const chartProds = useMemo(() => {
-    if (chartCat === '__all__') return filtered
-    return byCategory.find(g => g.name === chartCat)?.products || []
-  }, [filtered, byCategory, chartCat])
-
-  const selectedProd = useMemo(() =>
-    chartProd === '__all__' ? null : chartProds.find(p => `${p.store}|${p.name}` === chartProd) || null
-  , [chartProds, chartProd])
-
-  const allMonths = useMemo(() => {
-    const s = new Set()
-    filtered.forEach(p => p.history.forEach(h => s.add(h.month)))
-    return [...s].sort()
-  }, [filtered])
+  const toggleFam = f => setOpenFam(prev => { const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n })
+  const toggleSub = k => setOpenSub(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
 
   const chartData = useMemo(() => {
-    const prods = selectedProd ? [selectedProd] : chartProds
-    return allMonths.map(m => {
-      const revenue = prods.reduce((s, p) => {
-        const h = p.history.find(e => e.month === m)
-        return s + (h?.revenue ?? 0)
-      }, 0)
-      return { month: fmtMonth(m), revenue: Math.round(revenue * 100) / 100 }
+    if (!data?.familias) return []
+    const meses = new Set()
+    data.familias.forEach(f => f.porMes.forEach(m => meses.add(m.mes)))
+    return [...meses].sort().map(mes => {
+      const row = { month: fmtMonth(mes) }
+      data.familias.forEach(f => { row[f.familia] = f.porMes.find(m => m.mes === mes)?.importe || 0 })
+      return row
     })
-  }, [allMonths, chartProds, selectedProd])
+  }, [data])
 
-  const handleCatChange = cat => { setChartCat(cat); setChartProd('__all__') }
+  async function reclasificar(nombre, familia, sub) {
+    setBusy(true)
+    try { await ingresosFamiliaSet({ nombre, familia, sub }); await refetch() } finally { setBusy(false); setReclasificando(null) }
+  }
 
   return (
     <section className="sa-section">
       <div className="sa-section__header">
-        <SectionTitle>Productos y suscripciones</SectionTitle>
+        <SectionTitle>Desglose de ingresos</SectionTitle>
         <PeriodSelector value={months} onChange={setMonths} />
       </div>
       <p className="sa-legend">
-        Unidades vendidas e ingresos sin IVA por producto en el período. Gráfico: evolución mensual de la categoría/producto seleccionado. Calculadora de margen: precios y costes siempre sin IVA (bebidas IVA reducido 10%; recauchutes y magnesio IVA general 21%).
+        Familias propias de Blokes (no las categorías de WooCommerce — mezclaban clases, eventos y uso del rocódromo). Mismo cálculo que la gráfica de Ingresos (anuladas fuera, reembolsos restados, mes de pago) — la suma debería cuadrar con el total de arriba.
+        No incluye lo cobrado fuera de la web (efectivo/transferencia que solo está en el Excel de Eva) ni el módulo Eventos todavía.
       </p>
 
       {loading && <LoadingBlock />}
@@ -390,94 +228,73 @@ function ProductsSection({ excludeTransfer }) {
 
       {!loading && !error && data && (
         <>
-          <div className="sa-filters">
-            {stores.map(s => (
-              <button
-                key={s}
-                className={`sa-filter-btn${storeFilter === s ? ' sa-filter-btn--active' : ''}`}
-                onClick={() => setStore(s)}
-              >{s}</button>
+          <div className="sa-kpis">
+            {data.familias.map(f => (
+              <div key={f.familia} className="sa-kpi" style={{ '--kpi-color': FAMILIA_COLOR[f.familia] || '#999' }}>
+                <span className="sa-kpi__value">{fmtEur(f.importe)}</span>
+                <span className="sa-kpi__label">{f.familia} ({f.pct}%)</span>
+              </div>
             ))}
           </div>
 
-          {/* Category accordion */}
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
+              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+              <YAxis tickFormatter={v => `${v}€`} tick={{ fontSize: 11 }} width={56} />
+              <Tooltip formatter={(v, name) => [fmtEur(v), name]} />
+              <Legend />
+              {data.familias.map(f => (
+                <Bar key={f.familia} dataKey={f.familia} stackId="a" fill={FAMILIA_COLOR[f.familia] || '#999'} />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+
           <div className="sa-cat-list">
-            {byCategory.map(cat => {
-              const isOpen = openCats.has(cat.name)
-              const maxRev = cat.products[0]?.revenue || 1
-              return (
-                <div key={cat.name} className="sa-cat-group">
-                  <button
-                    className={`sa-cat-header${isOpen ? ' sa-cat-header--open' : ''}`}
-                    onClick={() => toggleCat(cat.name)}
-                  >
-                    <span className="sa-cat-arrow">{isOpen ? '▼' : '▶'}</span>
-                    <span className="sa-cat-name">{cat.name}</span>
-                    <span className="sa-cat-count">{cat.products.length}</span>
-                    <span className="sa-cat-rev">{fmtEur(cat.revenue)}</span>
-                  </button>
-                  {isOpen && (
-                    <div className="sa-cat-products">
-                      {cat.products.map((p, i) => (
-                        <div key={i} className="sa-product-inner">
-                          <span className="sa-product-inner__pos">#{i + 1}</span>
-                          <span className="sa-product-inner__name">{p.name}</span>
-                          <span className="sa-product-inner__store">{p.store}</span>
-                          <div className="sa-product-inner__bar-wrap">
-                            <div className="sa-product-inner__bar" style={{ width: `${(p.revenue / maxRev) * 100}%` }} />
-                          </div>
-                          <span className="sa-product-inner__units">{p.units} uds</span>
-                          <span className="sa-product-inner__rev">{fmtEur(p.revenue)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+            {data.familias.map(f => (
+              <div key={f.familia} className="sa-cat-group">
+                <button className={`sa-cat-header${openFam.has(f.familia) ? ' sa-cat-header--open' : ''}`} onClick={() => toggleFam(f.familia)}>
+                  <span className="sa-cat-arrow">{openFam.has(f.familia) ? '▼' : '▶'}</span>
+                  <span className="sa-cat-name">{f.familia}</span>
+                  <span className="sa-cat-count">{f.familia === 'Consumibles' ? f.subs.reduce((s, x) => s + x.productos.length, 0) : f.productos.length}</span>
+                  <span className="sa-cat-rev">{fmtEur(f.importe)}</span>
+                </button>
+                {openFam.has(f.familia) && (
+                  <div className="sa-cat-products">
+                    {f.familia === 'Consumibles' ? f.subs.map(s => (
+                      <div key={s.sub} className="sa-cat-group" style={{ marginLeft: 16 }}>
+                        <button className={`sa-cat-header${openSub.has(s.sub) ? ' sa-cat-header--open' : ''}`} onClick={() => toggleSub(s.sub)}>
+                          <span className="sa-cat-arrow">{openSub.has(s.sub) ? '▼' : '▶'}</span>
+                          <span className="sa-cat-name">{s.sub}</span>
+                          <span className="sa-cat-count">{s.productos.length}</span>
+                          <span className="sa-cat-rev">{fmtEur(s.importe)}</span>
+                        </button>
+                        {openSub.has(s.sub) && s.productos.map((p, i) => (
+                          <ProductoFila key={i} p={p} onReclasificar={() => setReclasificando(p)} />
+                        ))}
+                      </div>
+                    )) : f.productos.map((p, i) => (
+                      <ProductoFila key={i} p={p} onReclasificar={() => setReclasificando(p)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {reclasificando && (
+            <div className="sv-grp-overlay" onClick={() => !busy && setReclasificando(null)}>
+              <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
+                <h3>Reclasificar «{reclasificando.name}»</h3>
+                <div className="sv-grp-modal__actions" style={{ flexWrap: 'wrap' }}>
+                  {INGRESOS_FAMILIAS.map(fam => (
+                    <button key={fam} className="sa-filter-btn" disabled={busy} onClick={() => reclasificar(reclasificando.name, fam, fam === 'Consumibles' ? 'Bar' : null)}>{fam}</button>
+                  ))}
                 </div>
-              )
-            })}
-          </div>
-
-          {/* Monthly trend chart */}
-          <div className="sa-prod-chart">
-            <div className="sa-prod-chart__filters">
-              <select
-                value={chartCat}
-                onChange={e => handleCatChange(e.target.value)}
-                className="sa-chart-select"
-              >
-                <option value="__all__">Todas las categorías</option>
-                {byCategory.map(g => (
-                  <option key={g.name} value={g.name}>{g.name}</option>
-                ))}
-              </select>
-              <select
-                value={chartProd}
-                onChange={e => setChartProd(e.target.value)}
-                className="sa-chart-select"
-                disabled={chartCat === '__all__'}
-              >
-                <option value="__all__">Todos los productos</option>
-                {chartProds.map((p, i) => (
-                  <option key={i} value={`${p.store}|${p.name}`}>{p.name}</option>
-                ))}
-              </select>
+                <button className="sv-tests-select" disabled={busy} onClick={() => setReclasificando(null)}>Cancelar</button>
+              </div>
             </div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                <XAxis dataKey="month" tick={{ fill: tickFill, fontSize: 11 }} />
-                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: tickFill, fontSize: 11 }} width={52} />
-                <Tooltip
-                  contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
-                  labelStyle={{ color: '#f5c842' }}
-                  formatter={v => [fmtEur(v), selectedProd ? selectedProd.name : chartCat === '__all__' ? 'Total' : chartCat]}
-                />
-                <Bar dataKey="revenue" fill="#f5c842" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <MarginCalculator products={filtered} months={months} />
+          )}
         </>
       )}
     </section>
@@ -499,7 +316,6 @@ const PROF_CLASS_SLOTS = {
   Eva:     [['martes','17:30','menor'],['martes','18:30'],['jueves','17:30','menor'],['jueves','18:30'],['viernes','18:00'],['viernes','19:00']],
 }
 
-const PROF_EUR_H = { Alvaro: 14.12, Sigurd: 18.40, 'Lucía': 12.09, Sara: 12.08, Ana: 13.20, Eva: 16.45 }
 const PROF_COLOR = { Alvaro: '#f5c842', Sigurd: '#60a5fa', 'Lucía': '#34d399', Sara: '#f97316', Ana: '#a78bfa', Eva: '#fb7185' }
 
 function getProfForClass(c) {
@@ -613,15 +429,16 @@ function ClasesRetencionSection() {
             Permanencia media de quien ya se fue: <strong>{data.permanenciaMediaIdos ?? '—'} meses</strong> ({data.nIdos}).
           </p>
 
-          <h3 className="sa-subtitle">Rentabilidad por clase (ingreso de verdad cobrado este mes, no tarifa fija)</h3>
+          <h3 className="sa-subtitle">Rentabilidad por clase (ingreso de verdad cobrado, trimestrales/anuales ya prorrateados por mes)</h3>
           <p className="sa-legend">
             Coste del profe: misma fuente que Nóminas (nómina real del mes si existe, si no la ficha), por hora según sus horas semanales. Isa es voluntaria → 0 €.
             Semáforo: 🔴 margen negativo · 🟡 margen positivo pero ocupación por debajo del 50% (7-8 de 15) · 🟢 margen positivo y ocupación ≥ 50%.
+            El margen se calcula sobre el ingreso de este mes; las medias de 3/6/12 meses son solo para ver la tendencia.
           </p>
           <div className="sa-profit-wrap">
             <table className="sa-profit-table">
               <thead>
-                <tr><th></th><th>Clase</th><th>Profe</th><th>Activos</th><th>Ocupación/15</th><th>Ingreso real</th><th>Coste profe</th><th>Margen</th><th>Retención 3m</th><th>Recomendación</th></tr>
+                <tr><th></th><th>Clase</th><th>Profe</th><th>Activos</th><th>Ocupación/15</th><th>Ingreso este mes</th><th>Media 3m</th><th>Media 6m</th><th>Media 12m</th><th>Coste profe</th><th>Margen</th><th>Retención 3m</th><th>Recomendación</th></tr>
               </thead>
               <tbody>
                 {filasRentabilidad.map((c, i) => (
@@ -632,6 +449,9 @@ function ClasesRetencionSection() {
                     <td className="sa-profit__num">{c.activos}</td>
                     <td className="sa-profit__num">{Math.round(c.ocupacion * 100)}%</td>
                     <td className="sa-profit__num">{fmtEur(c.ingresoMesReal)}</td>
+                    <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia3m != null ? fmtEur(c.ingresoMedia3m) : '—'}</td>
+                    <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia6m != null ? fmtEur(c.ingresoMedia6m) : '—'}</td>
+                    <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia12m != null ? fmtEur(c.ingresoMedia12m) : '—'}</td>
                     <td className="sa-profit__num">{fmtEur(c.costeProfe)}</td>
                     <td className={`sa-profit__ben${c.margen >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>{fmtEur(c.margen)}</td>
                     <td className="sa-profit__num">{c.retencion3m != null ? `${c.retencion3m}%` : '—'}</td>
@@ -1086,7 +906,9 @@ function PLAccordion({ live2026, lastMonth }) {
 export default function SuperAdminPage() {
   const role = window.blokesSiteData?.userRole
   const [saTab, setSaTab]               = useState('ingresos')
-  const [excludeTransfer, setExclude]   = useState(false)
+  // Por defecto "Sin uso Rocódromo" (Ramiro 15/11 09:02 (d): la factura entre empresas infla el
+  // total combinado — se puede ver con el botón, pero no es lo que sale por defecto).
+  const [excludeTransfer, setExclude]   = useState(true)
 
   if (role !== 'socio') {
     return (
@@ -1123,7 +945,7 @@ export default function SuperAdminPage() {
       {saTab === 'ingresos' && (
         <>
           <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
-          <ProductsSection excludeTransfer={excludeTransfer} />
+          <IngresosDesgloseSection />
           <p className="sa-legend">
             La rentabilidad por clase se movió a <button type="button" className="sa-link" onClick={() => setSaTab('clases')}>Clases</button> (09:10: con ingreso real cobrado, no tarifa fija).
           </p>
