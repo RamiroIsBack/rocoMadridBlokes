@@ -1517,6 +1517,11 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/clases-retencion', array(
         'methods' => 'GET', 'callback' => 'superadmin_clases_retencion', 'permission_callback' => $socio_perm,
     ));
+    // "Alumnos con pago en curso" (Ramiro, 15/11 16:30) — sustituye a la tabla "Por mes".
+    register_rest_route('superadmin/v1', '/clases-pago-en-curso', array(
+        'methods' => 'GET', 'callback' => 'superadmin_clases_pago_en_curso', 'permission_callback' => $socio_perm,
+        'args' => array('categoria' => array('type' => 'string', 'default' => 'todos')),
+    ));
 });
 
 // ============================================================
@@ -11595,49 +11600,139 @@ function blokes_externo_pagos_empaquetar($por_telefono_tmp, $por_nombre, $por_no
 // reembolsos de WooCommerce (d267515). La primera carga tras cada hora puede tardar unos
 // segundos (igual que ya tarda "Sincronizar ahora" de Grupos); las demás salen del caché.
 // Nunca puede tirar /classes si Sheets falla o no está configurado: devuelve vacío y listo.
-function blokes_grupos_excel_pagos() {
-    $cache = get_transient('blokes_grupos_excel_pagos_v2');
+// Filas RAW de TODAS las pestañas del Excel de Grupos (pestaña, nombre, teléfono, meses
+// pagados) — cacheado 1h, lo comparten blokes_grupos_excel_pagos() (emparejado con
+// hist-pagos/WooCommerce) y blokes_clases_personas_por_mes() (gráfica "Alumnos con pago en
+// curso", 15/11 16:30), para no leer Sheets dos veces. Nunca puede tirar lo que lo llame: un
+// fallo (Sheets no configurada, error de la API) devuelve vacío.
+function blokes_grupos_excel_filas_crudas() {
+    $cache = get_transient('blokes_grupos_excel_filas_crudas_v1');
     if (is_array($cache)) return $cache;
-    $vacio = array('porTelefono' => array(), 'porNombre' => array(), 'porNombreCompacto' => array(), 'porEmail' => array());
+    $vacio = array();
     try {
         $activa = blokes_sync_grupos_sheet_activa();
         $sheet_id = $activa['id'] ?? null;
-        if (!$sheet_id) { set_transient('blokes_grupos_excel_pagos_v2', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
+        if (!$sheet_id) { set_transient('blokes_grupos_excel_filas_crudas_v1', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
 
         $meta = blokes_sync_grupos_get($sheet_id, '?fields=sheets.properties.title');
-        if (is_wp_error($meta)) { set_transient('blokes_grupos_excel_pagos_v2', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
+        if (is_wp_error($meta)) { set_transient('blokes_grupos_excel_filas_crudas_v1', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
         $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
         $no_son_grupo = array('balance');
 
         $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($sheet_id, $pestanas);
-        if (is_wp_error($valores_por_pestana)) { set_transient('blokes_grupos_excel_pagos_v2', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
+        if (is_wp_error($valores_por_pestana)) { set_transient('blokes_grupos_excel_filas_crudas_v1', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
 
-        $por_telefono_tmp = array(); $por_nombre = array(); $por_nombre_compacto = array();
+        $filas = array();
         foreach ($pestanas as $tab) {
             if (in_array(mb_strtolower(trim($tab)), $no_son_grupo, true)) continue;
             $r = blokes_sync_grupos_leer_pestana_filas($valores_por_pestana[$tab] ?? array());
             if (empty($r['bloques'])) continue;
             foreach ($r['filas'] as $f) {
                 if (empty($f['pagos'])) continue;
-                $tel  = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
-                $nom  = blokes_externos_normaliza_nombre($f['nombre'] ?? '');
-                $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
-                foreach (array_keys($f['pagos']) as $ym) {
-                    if (!preg_match('/^\d{4}-\d{2}$/', $ym)) continue;
-                    if ($tel) $por_telefono_tmp[$tel][$nom][$ym] = true;
-                    if ($nom) $por_nombre[$nom][$ym] = true;
-                    if ($nomc) $por_nombre_compacto[$nomc][$ym] = true;
-                }
+                $filas[] = array(
+                    'pestana' => $tab, 'nombre' => $f['nombre'] ?? '', 'telefono' => $f['telefono'] ?? '',
+                    'pagos' => array_values(array_filter(array_keys($f['pagos']), function($ym) { return preg_match('/^\d{4}-\d{2}$/', $ym); })),
+                );
             }
         }
-        $resultado = blokes_externo_pagos_empaquetar($por_telefono_tmp, $por_nombre, $por_nombre_compacto, array());
-        set_transient('blokes_grupos_excel_pagos_v2', $resultado, HOUR_IN_SECONDS);
-        return $resultado;
+        set_transient('blokes_grupos_excel_filas_crudas_v1', $filas, HOUR_IN_SECONDS);
+        return $filas;
     } catch (\Throwable $e) {
-        error_log('Blokes blokes_grupos_excel_pagos: fallo: ' . $e->getMessage());
-        set_transient('blokes_grupos_excel_pagos_v2', $vacio, 10 * MINUTE_IN_SECONDS);
+        error_log('Blokes blokes_grupos_excel_filas_crudas: fallo: ' . $e->getMessage());
+        set_transient('blokes_grupos_excel_filas_crudas_v1', $vacio, 10 * MINUTE_IN_SECONDS);
         return $vacio;
     }
+}
+
+function blokes_grupos_excel_pagos() {
+    $por_telefono_tmp = array(); $por_nombre = array(); $por_nombre_compacto = array();
+    foreach (blokes_grupos_excel_filas_crudas() as $f) {
+        $tel  = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
+        $nom  = blokes_externos_normaliza_nombre($f['nombre'] ?? '');
+        $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
+        foreach ($f['pagos'] as $ym) {
+            if ($tel) $por_telefono_tmp[$tel][$nom][$ym] = true;
+            if ($nom) $por_nombre[$nom][$ym] = true;
+            if ($nomc) $por_nombre_compacto[$nomc][$ym] = true;
+        }
+    }
+    return blokes_externo_pagos_empaquetar($por_telefono_tmp, $por_nombre, $por_nombre_compacto, array());
+}
+
+// Categoría de una pestaña del Excel, por su NOMBRE (heurística — estas filas no llevan un
+// campo de edad/producto limpio): Pilates/Yoga por nombre; niños/adolescentes por las palabras
+// que ya usa Eva en sus pestañas (KIDS, INF, ADOL, MEDIANOS...); el resto, adultos.
+function blokes_grupos_excel_categoria_pestana($pestana) {
+    $p = blokes_externos_normaliza_nombre($pestana);
+    if (strpos($p, 'pilates') !== false || strpos($p, 'yoga') !== false) return 'pilates_yoga';
+    if (preg_match('/\b(kids?|infantil|inf|adol|mediano|nino|chiqui)\b/', $p)) return 'ninos';
+    return 'adultos';
+}
+
+// Personas DISTINTAS con el mes pagado/cubierto, por mes — "Alumnos con pago en curso" (Ramiro,
+// 15/11 16:30, sustituye a la tabla "Por mes"). Cruza el Excel de Grupos (toda la temporada que
+// tenga, incluye años anteriores a la migración) con WooCommerce (para los meses recientes que
+// el Excel ya no lleva al día) — una persona cuenta una vez aunque tenga fila en dos pestañas o
+// vaya a una clase de 2 días: se identifica por teléfono normalizado si lo tiene (si no, por
+// nombre compacto), la MISMA clave en las dos fuentes, así alguien con fila en el Excel Y
+// suscripción en WooCommerce con el mismo teléfono no se cuenta dos veces. Aproximado para las
+// personas de WooCommerce sin teléfono propio conocido (identificadas solo por su cuenta/uid):
+// se re-identifican por su nombre, más flojo que el teléfono.
+function blokes_clases_personas_por_mes($categoria = 'todos') {
+    $personas = array(); // ym => [personaKey => true]
+    $clave_de = function($telefono, $nombre) {
+        $tel = blokes_externos_normaliza_telefono((string) $telefono);
+        if ($tel) return 't' . $tel;
+        $nomc = blokes_externos_normaliza_nombre_compacto((string) $nombre);
+        return $nomc ? 'n' . $nomc : null;
+    };
+
+    foreach (blokes_grupos_excel_filas_crudas() as $f) {
+        if ($categoria !== 'todos' && blokes_grupos_excel_categoria_pestana($f['pestana']) !== $categoria) continue;
+        $key = $clave_de($f['telefono'] ?? '', $f['nombre'] ?? '');
+        if (!$key) continue;
+        foreach ($f['pagos'] as $ym) $personas[$ym][$key] = true;
+    }
+
+    if (function_exists('wcs_get_subscription')) {
+        try {
+            $calculo = blokes_altas_bajas_calcular(36); // ~3 años, de sobra para llegar a 2024
+            foreach ($calculo['personaIntervalosPagadosReal'] as $pk => $ivs) {
+                $info = $calculo['personaInfo'][$pk] ?? array('telefono' => '', 'nombre' => '', 'edad' => 'Adultos');
+                if ($categoria !== 'todos') {
+                    $cat_persona = ($info['edad'] ?? 'Adultos') !== 'Adultos' ? 'ninos' : 'adultos'; // Pilates/Yoga no sale de aquí
+                    if ($cat_persona !== $categoria) continue;
+                }
+                $key = $clave_de($info['telefono'], $info['nombre']);
+                if (!$key) continue;
+                foreach ($ivs as $iv) {
+                    $mes = $iv['start'];
+                    while ($mes <= $iv['end']) {
+                        $personas[$mes][$key] = true;
+                        $mes = blokes_mes_mas($mes, 1);
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            error_log('Blokes blokes_clases_personas_por_mes: fallo cruzando WooCommerce: ' . $e->getMessage());
+        }
+    }
+
+    $out = array();
+    foreach ($personas as $ym => $claves) $out[$ym] = count($claves);
+    ksort($out);
+    return $out;
+}
+
+// GET /superadmin/v1/clases-pago-en-curso
+function superadmin_clases_pago_en_curso($request) {
+    $categoria = sanitize_key($request->get_param('categoria') ?: 'todos');
+    if (!in_array($categoria, array('todos', 'adultos', 'ninos', 'pilates_yoga'), true)) $categoria = 'todos';
+    $por_mes = blokes_clases_personas_por_mes($categoria);
+    $hoy_ym = date('Y-m');
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'porMes' => $por_mes, 'mesEnCurso' => $hoy_ym,
+    )));
 }
 
 // TODOS los meses pagados por una persona en una fuente externa (hist-pagos o el Excel de
@@ -11708,6 +11803,104 @@ function blokes_externo_intervalos_desde_meses($meses_pagados, $hasta_excluir_ym
     $fin = blokes_mes_mas($prev, 2);
     $intervalos[] = array('start' => $start, 'end' => ($hasta_excluir_ym !== null && $fin >= $hasta_excluir_ym) ? blokes_mes_mas($hasta_excluir_ym, -1) : $fin);
     return $intervalos;
+}
+
+// Agrupa una lista de meses pagados/cubiertos en tramos continuos [start,end] — UN mes sin pago
+// entre dos pagados NO corta el tramo (Ramiro, 15/11 16:40: "1 mes de margen"); dos o más meses
+// seguidos sin pago sí. A diferencia de blokes_externo_intervalos_desde_meses(), $end es el
+// último mes REALMENTE pagado del tramo (sin margen añadido después) — el hueco tolerado de un
+// mes ya queda "dentro" del tramo [start,end] para blokes_persona_cubre_mes().
+function blokes_meses_a_tramos($meses) {
+    $meses = array_values(array_unique($meses));
+    sort($meses);
+    if (!$meses) return array();
+    $tramos = array();
+    $start = $meses[0]; $prev = $meses[0];
+    foreach (array_slice($meses, 1) as $m) {
+        if (blokes_meses_entre($prev, $m) > 2) {
+            $tramos[] = array('start' => $start, 'end' => $prev);
+            $start = $m;
+        }
+        $prev = $m;
+    }
+    $tramos[] = array('start' => $start, 'end' => $prev);
+    return $tramos;
+}
+
+// Estancias por persona y clase (Ramiro, 15/11 16:40): una estancia es un tramo continuo de una
+// persona en una clase concreta, fusionando Excel de Grupos + WooCommerce + hist-pagos (ya
+// mezclados en personaClaseMesesPagados, ver blokes_altas_bajas_calcular). ÚNICA función para la
+// retención por clase, por profe y para "Retención 3M" de Rentabilidad — antes cada sitio
+// calculaba la retención a su manera (o no la calculaba) y los números no casaban entre sí.
+// Devuelve, por classKey: empezaron12m (estancias que empezaron en los últimos 12 meses),
+// siguenN/siguenNAbs/siguenNN (retención a 1/3/6 meses, con "n de N"), permanenciaMedia (meses),
+// bajas6m (estancias acabadas en los últimos 6 meses que NO fueron un cambio de clase) y
+// cambiosClase6m (acabaron porque la persona siguió en otra clase, no porque se fuera).
+function blokes_clases_estancias_calcular($calculo, $now_ym) {
+    $persona_clase_meses = $calculo['personaClaseMesesPagados'];
+    $doce_meses_atras = blokes_mes_mas($now_ym, -12);
+    $seis_meses_atras  = blokes_mes_mas($now_ym, -6);
+    $mes_anterior      = blokes_mes_mas($now_ym, -1);
+
+    // tramos[classKey][pk] = [ ['start'=>Y-m,'end'=>Y-m], ... ]
+    $tramos = array();
+    foreach ($persona_clase_meses as $pk => $por_clase) {
+        foreach ($por_clase as $class_key => $meses_set) {
+            $tramos[$class_key][$pk] = blokes_meses_a_tramos(array_keys($meses_set));
+        }
+    }
+
+    // Todas las estancias de cada persona (cualquier clase), para saber si una que acaba es un
+    // cambio de clase (empieza otra justo después) o una baja de verdad.
+    $estancias_persona = array(); // pk => [ ['classKey','start','end'], ... ]
+    foreach ($tramos as $class_key => $por_pk) {
+        foreach ($por_pk as $pk => $ivs) {
+            foreach ($ivs as $iv) $estancias_persona[$pk][] = array('classKey' => $class_key, 'start' => $iv['start'], 'end' => $iv['end']);
+        }
+    }
+    $es_cambio_de_clase = function($pk, $class_key, $end_ym) use ($estancias_persona) {
+        $siguiente_mes = blokes_mes_mas($end_ym, 1);
+        foreach ($estancias_persona[$pk] ?? array() as $otra) {
+            if ($otra['classKey'] === $class_key) continue;
+            if ($otra['start'] === $end_ym || $otra['start'] === $siguiente_mes) return true;
+        }
+        return false;
+    };
+
+    $por_clase = array();
+    foreach ($tramos as $class_key => $por_pk) {
+        $empezaron = array(); // [ ['pk'=>.., 'start'=>Y-m], ... ] — estancias que empezaron en los últimos 12 meses
+        $permanencias = array();
+        $bajas_6m = 0; $cambios_6m = 0;
+        foreach ($por_pk as $pk => $ivs) {
+            foreach ($ivs as $iv) {
+                $sigue_ahora = $iv['end'] >= $mes_anterior; // último pago este mes o el anterior (margen de 1 mes)
+                $permanencias[] = blokes_meses_entre($iv['start'], $iv['end']) + 1;
+                if (!$sigue_ahora && $iv['end'] >= $seis_meses_atras) {
+                    if ($es_cambio_de_clase($pk, $class_key, $iv['end'])) $cambios_6m++; else $bajas_6m++;
+                }
+                if ($iv['start'] >= $doce_meses_atras) $empezaron[] = array('pk' => $pk, 'start' => $iv['start']);
+            }
+        }
+        $resultado = array(
+            'empezaron12m' => count($empezaron), 'bajas6m' => $bajas_6m, 'cambiosClase6m' => $cambios_6m,
+            'permanenciaMedia' => $permanencias ? round(array_sum($permanencias) / count($permanencias), 1) : null,
+        );
+        foreach (array(1, 3, 6) as $offset) {
+            $siguen = 0; $medibles = 0;
+            foreach ($empezaron as $est) {
+                $mes_objetivo = blokes_mes_mas($est['start'], $offset);
+                if ($mes_objetivo > $now_ym) continue; // todavía no le toca esta antigüedad
+                $medibles++;
+                if (blokes_persona_retenida_continua($por_pk[$est['pk']] ?? array(), $est['start'], $mes_objetivo)) $siguen++;
+            }
+            $resultado['siguen' . $offset . 'Abs'] = $siguen;
+            $resultado['siguen' . $offset . 'N']   = $medibles;
+            $resultado['siguen' . $offset]         = $medibles ? round($siguen / $medibles * 100, 1) : null;
+        }
+        $por_clase[$class_key] = $resultado;
+    }
+    return $por_clase;
 }
 
 // Nuevo/Cambio de clase/Baja/Pendiente por persona (no por suscripción), agrupado por clase.
@@ -11838,9 +12031,16 @@ function blokes_altas_bajas_calcular($months) {
     $fuentes_externas = array($hist_pagos_map, $excel_map);
     $persona_min_start_real = array();
     $persona_externo_meses = array(); // personaKey => [ym, ...] (todos los meses pagados fuera de WooCommerce)
+    $persona_info = array(); // personaKey => {telefono, nombre, edad} — el primero visto, para re-identificar a esta persona en otras fuentes (Excel) por teléfono/nombre
+    // Cobertura mes a mes POR CLASE (Ramiro, 15/11 16:40 — retención por clase/profe): alguien
+    // puede cambiar de clase y seguir "activo" en general sin seguir en la clase donde empezó,
+    // así que la retención necesita saber en qué clase concreta estuvo pagando cada mes, no solo
+    // si estuvo activo en cualquiera. personaKey => classKey => [Y-m => true].
+    $persona_clase_meses_pagados = array();
     $wc_telefonos = array(); $wc_emails = array(); $wc_nombres = array(); $wc_nombres_compactos = array();
     foreach ($enriquecidos as $e) {
         $pk = $e['personaKey'];
+        if (!isset($persona_info[$pk])) $persona_info[$pk] = array('telefono' => $e['telefono'], 'nombre' => $e['nombre'], 'edad' => $e['edad']);
         if (!isset($persona_min_start[$pk]) || $e['startYm'] < $persona_min_start[$pk]) $persona_min_start[$pk] = $e['startYm'];
         if (!isset($persona_max_end[$pk]) || $e['endYm'] > $persona_max_end[$pk]) $persona_max_end[$pk] = $e['endYm'];
         if ($e['status'] === 'active') $persona_activo_en[$pk][$e['classKey']] = true;
@@ -11851,7 +12051,12 @@ function blokes_altas_bajas_calcular($months) {
         // (su intervalo WooCommerce hoy es [alta, alta] porque no tiene fecha de cancelación,
         // así que "cubre" igual su propio mes de alta aunque nunca se cobrara) y un on-hold solo
         // cubre hasta su ÚLTIMO pago real, nunca más allá — por eso solo 'active' aporta aquí.
-        if ($e['status'] === 'active') $persona_intervalos_pagados[$pk][] = array('start' => $e['startYm'], 'end' => $e['endYm']);
+        if ($e['status'] === 'active') {
+            $persona_intervalos_pagados[$pk][] = array('start' => $e['startYm'], 'end' => $e['endYm']);
+            foreach ($months_range as $ym) {
+                if ($ym >= $e['startYm'] && $ym <= $e['endYm']) $persona_clase_meses_pagados[$pk][$e['classKey']][$ym] = true;
+            }
+        }
         $class_sub_ids[$e['classKey']][$e['subId']] = true;
         if (!isset($class_min_start[$e['classKey']]) || $e['startYm'] < $class_min_start[$e['classKey']]) $class_min_start[$e['classKey']] = $e['startYm'];
 
@@ -11869,6 +12074,21 @@ function blokes_altas_bajas_calcular($months) {
         if ($e['nombre']) {
             $wc_nombres[blokes_externos_normaliza_nombre($e['nombre'])] = true;
             $wc_nombres_compactos[blokes_externos_normaliza_nombre_compacto($e['nombre'])] = true;
+        }
+    }
+    // Meses externos (Excel/hist-pagos, de ANTES de la migración a WooCommerce) atribuidos a una
+    // clase concreta SOLO cuando la persona no ha tenido más que una clase distinta en
+    // WooCommerce — con 2 o más clases no hay forma de saber a cuál pertenecen esos meses de
+    // antes sin adivinar (16:40: "no inventar"), así que esos casos se quedan fuera de la
+    // retención por clase (sí entran en la retención del club en general, vía personaIntervalosReal).
+    foreach ($persona_clase_meses_pagados as $pk => $por_clase_meses) {
+        if (count($por_clase_meses) !== 1) continue;
+        $unica_clase = array_key_first($por_clase_meses);
+        $meses_externos = $persona_externo_meses[$pk] ?? array();
+        if (!$meses_externos) continue;
+        $wc_min_clase = min(array_keys($por_clase_meses[$unica_clase]));
+        foreach ($meses_externos as $ym_ext) {
+            if ($ym_ext < $wc_min_clase) $persona_clase_meses_pagados[$pk][$unica_clase][$ym_ext] = true;
         }
     }
     // Diagnóstico (nunca cuenta como alta): gente de hist-pagos/Excel que no tiene NINGUNA
@@ -12068,6 +12288,12 @@ function blokes_altas_bajas_calcular($months) {
         // final = solo personas con el mes pagado/cubierto; en espera/impago = pendiente".
         'personaIntervalosPagadosReal' => $persona_intervalos_pagados_real,
         'externosSinEmparejar' => $externos_sin_emparejar,
+        // Para re-identificar a cada persona por teléfono/nombre en otra fuente (gráfica
+        // "Alumnos con pago en curso", 15/11 16:30).
+        'personaInfo' => $persona_info,
+        // Cobertura mes a mes por persona Y clase, para las estancias de la retención por clase/
+        // profe (15/11 16:40) — ver blokes_clases_estancias_calcular().
+        'personaClaseMesesPagados' => $persona_clase_meses_pagados,
     );
 }
 
@@ -12132,13 +12358,12 @@ function blokes_persona_retenida_continua($intervalos, $desde_ym, $hasta_ym) {
     return true;
 }
 
-// GET /superadmin/v1/clases-retencion — Superadmin › Clases (15/11 08:45 punto D, solo
-// socios): altas/bajas por mes, retención por cohorte (1/3/6 meses), permanencia media y
-// desglose por clase (el desglose por PROFE lo hace el frontend con profesoresDeGrupo(), que es
-// donde vive de verdad esa lógica — aquí solo se manda dia/horario/edad de cada clase).
-// Fuente: solo suscripciones de WooCommerce en vigor — todavía NO cruza con hist-pagos (gente de
-// antes de la migración) ni con los externos del Excel de Grupos, lo digo explícito en la
-// respuesta para no dar un número que parezca más completo de lo que es.
+// GET /superadmin/v1/clases-retencion — Superadmin › Clases (15/11 16:40, solo socios):
+// rentabilidad e ingreso real por clase, con retención fiable por clase (1/3/6 meses, estancias
+// con 1 mes de margen, cambios de clase aparte de bajas de verdad) — ver
+// blokes_clases_estancias_calcular(). El desglose por PROFE y por «clase combinada» (día suelto
+// + M-J) lo hace el frontend con profesoresDeGrupo()/filasRentabilidad, que es donde vive esa
+// lógica — aquí solo se manda dia/horario/edad de cada clase cruda.
 function superadmin_clases_retencion($request) {
     $months = max(3, min(24, intval($request->get_param('months') ?: 12)));
     $calculo = blokes_altas_bajas_calcular($months);
@@ -12150,123 +12375,21 @@ function superadmin_clases_retencion($request) {
     // pinta de estar vacíos. Admite ?mes=YYYY-MM para elegir otro.
     $mes_ingreso_param = sanitize_text_field((string) $request->get_param('mes'));
     $mes_ingreso = preg_match('/^\d{4}-\d{2}$/', $mes_ingreso_param) ? $mes_ingreso_param : blokes_mes_mas($now_ym, -1);
-    // "Nuevo" real, cruzado con hist-pagos/Excel (cowork, 15/11 11:45/12:30: "Por mes
-    // incoherente... al final no se recalcula... retención por cohorte sigue con los totales
-    // viejos" — TODO (altas, inicio/fin, bajas, cohortes) tiene que salir de la MISMA fuente
-    // cruzada, si no las cuentas no casan entre sí). personaIntervalosReal extiende el intervalo
-    // más antiguo de cada persona hasta su alta real cuando es anterior a la de WooCommerce.
-    $persona_min_start_real  = $calculo['personaMinStartReal'];
-    $persona_intervalos_real = $calculo['personaIntervalosReal'];
-    // Solo cobertura REAL de pago (cowork, 15/11 14:00 punto 1: "al final = solo personas con
-    // el mes pagado/cubierto; en espera/impago = pendiente") — personaIntervalosReal de arriba
-    // también cuenta on-hold/pending (para no perder el hueco de baja si vuelven), pero "al
-    // final" tiene que ser gente que de verdad pagó ese mes, no cualquiera con una suscripción
-    // abierta sin cobrar.
-    $persona_intervalos_pagados_real = $calculo['personaIntervalosPagadosReal'];
-    $persona_activo_en  = $calculo['personaActivoEn'];
-    $persona_historial  = $calculo['personaHistorial'];
     $class_sub_ids      = $calculo['classSubIds'];
     $class_min_start    = $calculo['classMinStart'];
-    $tres_meses_atras = blokes_mes_mas($now_ym, -3);
 
-    // Quién ha estado alguna vez en cada clase (classKey => [personaKey => true]) y desde
-    // cuándo — para la retención «a 3 meses» por clase (09:10): de quien ya estaba en esta
-    // clase hace 3 meses o más, % que sigue activo ahora (en cualquier clase).
-    $personas_por_clase_historico = array();
-    foreach ($persona_historial as $pk => $entradas) {
-        foreach ($entradas as $en) {
-            if ($en['startYm'] > $tres_meses_atras) continue; // tiene que llevar ya 3 meses
-            $personas_por_clase_historico[$en['classKey']][$pk] = true;
-        }
-    }
-
-    // ---- Por mes (global, todo el club) ----
-    // Cowork, 15/11 09:45/11:45: "altas de jun/sept son en gran parte gente que ya venía" y
-    // "usar la misma función que Altas y Bajas" — "altas" ahora cuenta sobre
-    // personaMinStartReal (cruzado con hist-pagos/Excel), no sobre el alta de WooCommerce a
-    // secas. Y "bajas" se cuenta DIRECTAMENTE (activo antes y ya no ahora) en vez de derivarla
-    // de inicio+altas−fin: esa fórmula asumía que "altas" e "inicio/fin" salían de la misma
-    // cobertura — si "altas" mira más atrás que los intervalos de WooCommerce, la resta se
-    // descuadra y falsea las bajas de otra gente ese mes.
-    $por_mes = array();
-    foreach ($months_range as $ym) {
-        $mes_anterior = blokes_mes_mas($ym, -1);
-        $inicio = 0; $fin = 0; $bajas = 0; $pendientes = 0;
-        foreach ($persona_intervalos_pagados_real as $pk => $ivs) {
-            $activo_antes = blokes_persona_cubre_mes($ivs, $mes_anterior);
-            $activo_ahora = blokes_persona_cubre_mes($ivs, $ym);
-            if ($activo_antes) $inicio++;
-            if ($activo_ahora) $fin++;
-            if ($activo_antes && !$activo_ahora) $bajas++;
-        }
-        // "Pendiente" = tiene alguna suscripción abierta este mes (persona_intervalos_real,
-        // incluye on-hold/pending) pero NO pagó de verdad (no está en persona_intervalos_pagados_real)
-        // — ni cuenta como activo ni como baja, es su propio estado.
-        foreach ($persona_intervalos_real as $pk => $ivs) {
-            if (!blokes_persona_cubre_mes($ivs, $ym)) continue;
-            $ivs_pagados = $persona_intervalos_pagados_real[$pk] ?? array();
-            if (!blokes_persona_cubre_mes($ivs_pagados, $ym)) $pendientes++;
-        }
-        $altas = 0;
-        foreach ($persona_min_start_real as $pk => $min_ym) {
-            if ($min_ym === $ym) $altas++;
-        }
-        $por_mes[] = array(
-            'mes' => $ym, 'personasInicio' => $inicio, 'altas' => $altas, 'bajas' => $bajas,
-            'personasFin' => $fin, 'pendientes' => $pendientes, 'pctBajas' => $inicio ? round($bajas / $inicio * 100, 1) : null,
-        );
-    }
-
-    // Desglose del mes en curso por tipo de personaKey (cowork, 15/11 13:15: "nov «al final»
-    // 202 vs 164 activos de Grupos — explicar en un ⓘ el desglose"). 'u' = cuenta con login real
-    // (customer_id resuelto, el mismo criterio que usa «Personas» de Grupos); 't'/'n' = sin
-    // customer_id, identificado solo por teléfono o nombre (pedidos de invitado) — son las
-    // candidatas más probables a estar infladas/duplicadas, ya que un mismo humano con dos
-    // pedidos de invitado con datos ligeramente distintos puede caer en dos personaKey "t"/"n"
-    // en vez de fundirse en una (la consolidación de cdd95ea solo funde cuando hay un uid real
-    // de por medio). Sobre personaIntervalosPagadosReal (ya sin on-hold/pending) — 15/11 14:00.
-    $fin_desglose_actual = array('conCuentaWeb' => 0, 'sinCuentaWeb' => 0);
-    foreach ($persona_intervalos_pagados_real as $pk => $ivs) {
-        if (!blokes_persona_cubre_mes($ivs, $now_ym)) continue;
-        if ($pk[0] === 'u') $fin_desglose_actual['conCuentaWeb']++; else $fin_desglose_actual['sinCuentaWeb']++;
-    }
-
-    // ---- Cohortes: de quien se dio de alta en el mes X, % que sigue a 1/3/6 meses ----
-    $cohortes = array();
-    foreach ($months_range as $ym) {
-        $personas_cohorte = array_keys(array_filter($persona_min_start_real, function($v) use ($ym) { return $v === $ym; }));
-        if (!$personas_cohorte) continue;
-        $fila = array('mes' => $ym, 'total' => count($personas_cohorte));
-        foreach (array(1, 3, 6) as $offset) {
-            $mes_objetivo = blokes_mes_mas($ym, $offset);
-            if ($mes_objetivo > $now_ym) { $fila['m' . $offset] = null; continue; }
-            $sigue = 0;
-            foreach ($personas_cohorte as $pk) {
-                if (blokes_persona_retenida_continua($persona_intervalos_real[$pk] ?? array(), $ym, $mes_objetivo)) $sigue++;
-            }
-            $fila['m' . $offset] = round($sigue / count($personas_cohorte) * 100, 1);
-        }
-        $cohortes[] = $fila;
-    }
-
-    // ---- Permanencia media (meses), activos vs. ya se han ido ----
-    $permanencia_activos = array(); $permanencia_idos = array();
-    foreach ($persona_min_start_real as $pk => $min_ym) {
-        $sigue_activo = !empty($persona_activo_en[$pk]);
-        $hasta = $sigue_activo ? $now_ym : ($calculo['personaMaxEnd'][$pk] ?? $min_ym);
-        $meses = blokes_meses_entre($min_ym, $hasta) + 1;
-        if ($sigue_activo) $permanencia_activos[] = $meses; else $permanencia_idos[] = $meses;
-    }
-    $media = function($arr) { return $arr ? round(array_sum($arr) / count($arr), 1) : null; };
+    // ---- Estancias por clase (Ramiro, 15/11 16:40): retención fiable, por clase, con 1 mes de
+    // margen y cambios de clase aparte de las bajas de verdad — ver blokes_clases_estancias_calcular().
+    $estancias_por_clase = blokes_clases_estancias_calcular($calculo, $now_ym);
 
     // ---- Por clase: activos ahora, altas de este mes, bajas recientes, motivos de baja,
-    // ingreso real de este mes y retención a 3 meses (09:10 — rentabilidad real, movida aquí
-    // desde Superadmin › Ingresos; el coste del profe y el margen se calculan en el frontend,
-    // que es donde vive la lista de quién da cada clase).
+    // ingreso real de este mes y retención (09:10 — rentabilidad real, movida aquí desde
+    // Superadmin › Ingresos; el coste del profe y el margen se calculan en el frontend, que es
+    // donde vive la lista de quién da cada clase).
     // Hasta 12 meses atrás DESDE $mes_ingreso (no desde el mes actual a medias) para las medias
     // de 3/6/12 meses.
     $meses_media = array_slice(array_values(array_filter($months_range, function($ym) use ($mes_ingreso) { return $ym <= $mes_ingreso; })), -12);
-    $por_clase = array_map(function($c) use ($mes_ingreso, $personas_por_clase_historico, $persona_activo_en, $meses_media, $class_sub_ids, $class_min_start) {
+    $por_clase = array_map(function($c) use ($mes_ingreso, $estancias_por_clase, $meses_media, $class_sub_ids, $class_min_start) {
         $altas_mes = array_values(array_filter($c['members_active'], function($m) { return $m['new']; }));
         $motivos = array();
         foreach ($c['members_lost'] as $m) {
@@ -12295,30 +12418,36 @@ function superadmin_clases_retencion($request) {
             $ult = array_slice($ingreso_por_mes, -$n);
             return $ult ? round(array_sum($ult) / count($ult), 2) : null;
         };
-        $personas_hace_3m = array_keys($personas_por_clase_historico[$class_key] ?? array());
-        $retencion_3m = null;
-        if ($personas_hace_3m) {
-            $siguen = 0;
-            foreach ($personas_hace_3m as $pk) {
-                if (!empty($persona_activo_en[$pk])) $siguen++;
-            }
-            $retencion_3m = round($siguen / count($personas_hace_3m) * 100, 1);
-        }
+        // Retención (16/11 16:40): la MISMA función de estancias que la tabla "Retención por
+        // clase" de abajo — antes esto usaba su propio cálculo ("de quien ya estaba hace ≥3
+        // meses, % activo HOY en cualquier clase", sin mínimo de muestra ni separar cambios de
+        // clase de bajas de verdad) y los dos números no casaban.
+        $est = $estancias_por_clase[$class_key] ?? null;
+        $motivo_principal = null;
+        if ($motivos) { arsort($motivos); $motivo_principal = array_key_first($motivos); }
         return array(
             'dia' => $c['dia'], 'horario' => $c['horario'], 'edad' => $c['edad'], 'label' => $c['label'],
             'activos' => $c['active'], 'altasMes' => count($altas_mes), 'bajasRecientes' => count($c['members_lost']),
-            'motivosBaja' => $motivos, 'ingresoMesReal' => round($ingreso_mes_real, 2),
+            'motivosBaja' => $motivos, 'motivoPrincipal' => $motivo_principal, 'ingresoMesReal' => round($ingreso_mes_real, 2),
             'ingresoMedia3m' => $media_n(3), 'ingresoMedia6m' => $media_n(6), 'ingresoMedia12m' => $media_n(12),
-            'retencion3m' => $retencion_3m, 'nPersonasHace3m' => count($personas_hace_3m),
+            // Retención 1/3/6 meses con "n de N", permanencia media (meses) y bajas/cambios de
+            // clase de los últimos 6 meses — todo de blokes_clases_estancias_calcular().
+            'estanciasEmpezaron12m' => $est['empezaron12m'] ?? 0,
+            'siguen1' => $est['siguen1'] ?? null, 'siguen1Abs' => $est['siguen1Abs'] ?? 0, 'siguen1N' => $est['siguen1N'] ?? 0,
+            'siguen3' => $est['siguen3'] ?? null, 'siguen3Abs' => $est['siguen3Abs'] ?? 0, 'siguen3N' => $est['siguen3N'] ?? 0,
+            'siguen6' => $est['siguen6'] ?? null, 'siguen6Abs' => $est['siguen6Abs'] ?? 0, 'siguen6N' => $est['siguen6N'] ?? 0,
+            'permanenciaMediaClase' => $est['permanenciaMedia'] ?? null,
+            'bajas6mClase' => $est['bajas6m'] ?? 0, 'cambiosClase6m' => $est['cambiosClase6m'] ?? 0,
+            // Retención 3M = siguen3, tal cual (Ramiro 16:40: "la columna «Retención 3M» de
+            // Rentabilidad pasa a usar este mismo cálculo") — se deja también como retencion3m
+            // para no romper el nombre que ya usa el frontend de Rentabilidad.
+            'retencion3m' => $est['siguen3'] ?? null,
         );
     }, $calculo['data']);
 
     $coste_profe_mes = blokes_coste_real_profe_mes($mes_ingreso);
 
     return rest_ensure_response(array('success' => true, 'data' => array(
-        'porMes' => $por_mes, 'cohortes' => $cohortes, 'finDesgloseActual' => $fin_desglose_actual,
-        'permanenciaMediaActivos' => $media($permanencia_activos), 'permanenciaMediaIdos' => $media($permanencia_idos),
-        'nActivos' => count($permanencia_activos), 'nIdos' => count($permanencia_idos),
         'porClase' => $por_clase, 'mesIngreso' => $mes_ingreso, 'mesesDisponibles' => array_slice($months_range, 0, -1),
         // Coste real de empresa por profe DEL MES ELEGIDO (15/11 10:25 punto A) — nómina
         // bruta+efectivo real de Nóminas + SS real del banco, nada de ×1,43 ni de usar siempre
@@ -12326,7 +12455,7 @@ function superadmin_clases_retencion($request) {
         // ausente = cae al plan B (ficha), para que el ⓘ del frontend lo diga sin mirar logs.
         'costeRealProfe' => $coste_profe_mes['costes'],
         'costeRealProfeFuente' => $coste_profe_mes['fuentes'],
-        'avisoFuente' => 'Altas/bajas/retención: solo suscripciones de WooCommerce en vigor desde la migración — todavía no cruza con hist-pagos (alumnos de antes) ni con los externos del Excel de Grupos. Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado.',
+        'avisoFuente' => 'Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado. Retención por clase (16/11 16:40): fusiona Excel de Grupos + WooCommerce + hist-pagos con 1 mes de margen, pero los meses de antes de la migración solo se atribuyen a una clase cuando la persona no ha tenido más que una clase distinta en WooCommerce — con varias clases esos meses de antes no entran en la retención por clase (no se puede saber a cuál pertenecen sin adivinar).',
     )));
 }
 

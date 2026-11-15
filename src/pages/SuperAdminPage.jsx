@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useRevenue, useExpenses, useClasesRetencion, useIngresosDesglose, ingresosFamiliaSet, expensesAperturaSet } from '../hooks/useSuperAdmin'
+import { useRevenue, useExpenses, useClasesRetencion, useClasesPagoEnCurso, useIngresosDesglose, ingresosFamiliaSet, expensesAperturaSet } from '../hooks/useSuperAdmin'
 import { PROF_META } from '../data/staffSchedule'
 import useTemaOscuro from '../hooks/useTemaOscuro'
 import ExpensesSection from '../components/ExpensesSection'
@@ -353,6 +353,116 @@ function profesorClaseConIsa(c) {
   return getProfForClass(c)
 }
 
+// "Alumnos con pago en curso" (Ramiro, 15/11 16:30) — sustituye a la tabla "Por mes" (cabeceras
+// desplazadas, inicio/altas/bajas/final confuso). Una línea por año, como el P&L: personas
+// distintas con el mes pagado o cubierto, del Excel de Grupos fusionado con WooCommerce.
+// Umbrales de color de la retención (Ramiro, 15/11 16:40): 🟢 ≥80% a 3 meses, 🟡 60-79%, 🔴
+// <60%; gris si la muestra (N, estancias que ya tienen esa antigüedad) es menor de 5 — "en
+// constantes para poder ajustarlos".
+const RETENCION_UMBRAL_VERDE = 80
+const RETENCION_UMBRAL_AMARILLO = 60
+const RETENCION_N_MINIMO = 5
+function retencionCelda(pct, n) {
+  if (n < RETENCION_N_MINIMO) return { cls: 'sa-ret--pocos', texto: pct != null ? `${pct}%` : '—' }
+  if (pct == null) return { cls: '', texto: '—' }
+  const cls = pct >= RETENCION_UMBRAL_VERDE ? 'sa-ret--verde' : pct >= RETENCION_UMBRAL_AMARILLO ? 'sa-ret--amarillo' : 'sa-ret--rojo'
+  return { cls, texto: `${pct}%` }
+}
+// Funde los campos de retención/estancias de una clase combinada (p. ej. "Martes-Jueves") con
+// sus días sueltos relacionados ("Martes", "Jueves") — mismo criterio que ya usa filasRentabilidad
+// para activos/ingreso: son sesiones reales distintas (alumnos con variantes de producto
+// distintas) que hay que sumar, no una clase aparte. La permanencia media se pondera por
+// estanciasEmpezaron12m de cada lado como aproximación (no hay un recuento total de tramos por
+// clase para ponderar con más precisión).
+function mergeRetencion(rows) {
+  const suma = k => rows.reduce((t, r) => t + (r[k] || 0), 0)
+  const motivos = {}
+  rows.forEach(r => Object.entries(r.motivosBaja || {}).forEach(([k, v]) => { motivos[k] = (motivos[k] || 0) + v }))
+  let motivoPrincipal = null, max = 0
+  Object.entries(motivos).forEach(([k, v]) => { if (v > max) { max = v; motivoPrincipal = k } })
+  const empezaron12m = suma('estanciasEmpezaron12m')
+  const conPermanencia = rows.filter(r => r.permanenciaMediaClase != null)
+  const pesoTotal = conPermanencia.reduce((t, r) => t + (r.estanciasEmpezaron12m || 1), 0)
+  const permanenciaMediaClase = conPermanencia.length
+    ? Math.round((conPermanencia.reduce((t, r) => t + r.permanenciaMediaClase * (r.estanciasEmpezaron12m || 1), 0) / pesoTotal) * 10) / 10
+    : null
+  const out = { estanciasEmpezaron12m: empezaron12m, bajas6mClase: suma('bajas6mClase'), cambiosClase6m: suma('cambiosClase6m'), permanenciaMediaClase, motivoPrincipal }
+  ;[1, 3, 6].forEach(n => {
+    const abs = suma(`siguen${n}Abs`), tot = suma(`siguen${n}N`)
+    out[`siguen${n}Abs`] = abs; out[`siguen${n}N`] = tot
+    out[`siguen${n}`] = tot ? Math.round(abs / tot * 1000) / 10 : null
+  })
+  return out
+}
+// Mismas categorías que BAJA_MOTIVO_OPCIONES (SupervisionPage.jsx) — compartido con
+// BLOKES_BAJA_MOTIVOS del backend. 'sin_categoria' es lo que pone el backend cuando la baja no
+// tiene motivo guardado (impago sin que nadie haya rellenado el desplegable de Bajas).
+const MOTIVO_LABEL = {
+  precio: 'Precio', horario: 'Horario', falta_tiempo: 'Falta de tiempo', mudanza: 'Mudanza',
+  otro_rocodromo: 'Se va a otro rocódromo', clase_profe: 'La clase o el profe', lesion: 'Lesión',
+  temporal_vuelve: 'Temporal, dice que vuelve', duplicado: 'Duplicado (no es baja real)', otro: 'Otro',
+  sin_categoria: 'Sin motivo guardado',
+}
+
+const PAGO_CURSO_CATS = [
+  { v: 'todos', l: 'Todos' }, { v: 'adultos', l: 'Adultos' },
+  { v: 'ninos', l: 'Niños-adolescentes' }, { v: 'pilates_yoga', l: 'Pilates-Yoga' },
+]
+function AlumnosPagoEnCursoChart() {
+  const oscuro = useTemaOscuro()
+  const tickFill = oscuro ? '#b3ab9a' : '#5e5650'
+  const [categoria, setCategoria] = useState('todos')
+  const { data, loading, error } = useClasesPagoEnCurso(categoria)
+
+  const chartData = useMemo(() => {
+    if (!data?.porMes) return []
+    return PL_MONTHS_ABB.map((month, i) => {
+      const row = { month }
+      ;[2024, 2025, 2026].forEach(yr => { row[`y${yr}`] = data.porMes[`${yr}-${String(i + 1).padStart(2, '0')}`] ?? null })
+      return row
+    })
+  }, [data])
+
+  return (
+    <>
+      <div className="sa-section__header">
+        <h3 className="sa-subtitle">Alumnos con pago en curso</h3>
+        <div className="sa-period">
+          {PAGO_CURSO_CATS.map(c => (
+            <button key={c.v} className={`sa-period__btn${categoria === c.v ? ' sa-period__btn--active' : ''}`} onClick={() => setCategoria(c.v)}>{c.l}</button>
+          ))}
+        </div>
+      </div>
+      <p className="sa-legend">
+        Personas distintas con el mes pagado o cubierto (mensual, trimestral/anual que cubre ese mes, exentos) — del Excel de Grupos fusionado con WooCommerce; una persona cuenta una vez aunque vaya a 2 clases o a una de 2 días.
+        {data?.mesEnCurso && <> <strong>{fmtMonth(data.mesEnCurso)} va a medias</strong> (mes en curso).</>}
+      </p>
+      {loading && <LoadingBlock />}
+      {error && <ErrorBlock msg={error} />}
+      {!loading && !error && (
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
+            <XAxis dataKey="month" tick={{ fill: tickFill, fontSize: 11 }} />
+            <YAxis tick={{ fill: tickFill, fontSize: 11 }} width={40} />
+            <Tooltip
+              contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
+              labelStyle={{ color: '#f5c842' }}
+              formatter={(v, name) => [v, name.replace('y', '')]}
+            />
+            <Legend formatter={k => k.replace('y', '')} />
+            {[2024, 2025, 2026].map(yr => (
+              <Line key={yr} type="monotone" dataKey={`y${yr}`} stroke={PL_YEAR_COLORS[yr]} strokeWidth={2}
+                dot={({ cx, cy, value }) => value != null ? <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={3.5} fill={PL_YEAR_COLORS[yr]} /> : null}
+                connectNulls={false} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+    </>
+  )
+}
+
 function ClasesRetencionSection() {
   const [months, setMonths] = useState(12)
   // Mes de "ingreso real" (cowork, 15/11 09:45): por defecto el último mes cerrado que decide
@@ -446,7 +556,8 @@ function ClasesRetencionSection() {
       const ingresoMedia12m = sumaMedia(combo, { ingresoMedia12m: relacionadas.reduce((t, s) => t + (s.ingresoMedia12m || 0), 0) }, 'ingresoMedia12m')
       const ocupacion = activos / 15
       const margen = ingresoMesReal - costeProfe
-      filas.push({ ...combo, prof, costeProfe, fuenteProfe: fuenteProfe(prof), ocupacion, margen, activos, ingresoMesReal, ingresoMedia3m, ingresoMedia6m, ingresoMedia12m, ...semaforoYrecomendacion(margen, ocupacion) })
+      const retencion = mergeRetencion([combo, ...relacionadas])
+      filas.push({ ...combo, ...retencion, prof, costeProfe, fuenteProfe: fuenteProfe(prof), ocupacion, margen, activos, ingresoMesReal, ingresoMedia3m, ingresoMedia6m, ingresoMedia12m, ...semaforoYrecomendacion(margen, ocupacion) })
     })
 
     singles.forEach(s => {
@@ -455,11 +566,31 @@ function ClasesRetencionSection() {
       const costeProfe = costeHoraReal(prof) * classDurationH(s.horario) * 1 * 4.33
       const ocupacion = s.activos / 15
       const margen = s.ingresoMesReal - costeProfe
-      filas.push({ ...s, prof, costeProfe, fuenteProfe: fuenteProfe(prof), ocupacion, margen, ...semaforoYrecomendacion(margen, ocupacion) })
+      filas.push({ ...s, ...mergeRetencion([s]), prof, costeProfe, fuenteProfe: fuenteProfe(prof), ocupacion, margen, ...semaforoYrecomendacion(margen, ocupacion) })
     })
 
     return filas.sort((a, b) => b.margen - a.margen)
   }, [data])
+
+  // Retención por clase (Ramiro, 15/11 16:40) — mismas clases ya combinadas de filasRentabilidad
+  // (día suelto absorbido por su M-J), ordenadas de mejor a peor por retención a 3 meses.
+  const filasRetencionClase = useMemo(() => (
+    filasRentabilidad.slice().sort((a, b) => (b.siguen3 ?? -1) - (a.siguen3 ?? -1))
+  ), [filasRentabilidad])
+
+  // Retención por profe: las mismas estancias, agrupadas por profe (suma de empezaron/siguen,
+  // nunca media de porcentajes — una clase de 20 alumnos no pesa igual que una de 3).
+  const filasRetencionProfe = useMemo(() => {
+    const porProfe = {}
+    filasRentabilidad.forEach(c => {
+      const prof = c.prof || '—'
+      ;(porProfe[prof] = porProfe[prof] || []).push(c)
+    })
+    return Object.entries(porProfe).map(([prof, clases]) => ({
+      prof, nClases: clases.length, activos: clases.reduce((t, c) => t + (c.activos || 0), 0),
+      ...mergeRetencion(clases),
+    })).sort((a, b) => (b.siguen3 ?? -1) - (a.siguen3 ?? -1))
+  }, [filasRentabilidad])
 
   return (
     <section className="sa-section">
@@ -471,47 +602,7 @@ function ClasesRetencionSection() {
       {error && <ErrorBlock msg={error} />}
       {!loading && !error && data && (
         <>
-          <p className="sa-legend">{data.avisoFuente}</p>
-
-          <h3 className="sa-subtitle">Por mes (todo el club, no por clase)</h3>
-          <div className="sa-profit-wrap">
-            <table className="sa-profit-table">
-              <thead><tr><th>Mes</th><th>Al inicio</th><th>Altas</th><th>Bajas</th><th>Al final</th><th title="Suscripción abierta ese mes pero sin pago real (en espera/impago) — ni activo ni baja">Pendientes ⓘ</th><th>% bajas</th></tr></thead>
-              <tbody>
-                {data.porMes.map(m => (
-                  <tr key={m.mes}>
-                    <td>{fmtMonth(m.mes)}</td><td>{m.personasInicio}</td><td>{m.altas}</td><td>{m.bajas}</td><td>{m.personasFin}</td><td>{m.pendientes}</td>
-                    <td className={m.pctBajas > 10 ? 'sa-profit__ben--neg' : ''}>{m.pctBajas != null ? `${m.pctBajas}%` : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {data.finDesgloseActual && (
-            <p className="sa-legend">
-              «Al final» del mes en curso ({data.finDesgloseActual.conCuentaWeb + data.finDesgloseActual.sinCuentaWeb}, ya solo con el mes pagado/cubierto — en espera/impago cuenta aparte como «Pendientes»): {data.finDesgloseActual.conCuentaWeb} con cuenta web real (login) + {data.finDesgloseActual.sinCuentaWeb} identificadas solo por teléfono/nombre (pedido de invitado, sin cuenta) — estas últimas son las que más probablemente duplican a alguien ya contado con cuenta web. Si no coincide con «Personas» de Grupos, la diferencia está sobre todo ahí.
-            </p>
-          )}
-
-          <h3 className="sa-subtitle">Retención por cohorte (de quien se dio de alta ese mes, % que sigue a 1/3/6 meses)</h3>
-          <div className="sa-profit-wrap">
-            <table className="sa-profit-table">
-              <thead><tr><th>Mes de alta</th><th>Total</th><th>+1 mes</th><th>+3 meses</th><th>+6 meses</th></tr></thead>
-              <tbody>
-                {data.cohortes.map(c => (
-                  <tr key={c.mes}>
-                    <td>{fmtMonth(c.mes)}</td><td>{c.total}</td>
-                    <td>{c.m1 != null ? `${c.m1}%` : '—'}</td><td>{c.m3 != null ? `${c.m3}%` : '—'}</td><td>{c.m6 != null ? `${c.m6}%` : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <p className="sa-legend">
-            Permanencia media de quien sigue activo: <strong>{data.permanenciaMediaActivos ?? '—'} meses</strong> ({data.nActivos}).
-            Permanencia media de quien ya se fue: <strong>{data.permanenciaMediaIdos ?? '—'} meses</strong> ({data.nIdos}).
-          </p>
+          <AlumnosPagoEnCursoChart />
 
           <div className="sa-section__header">
             <h3 className="sa-subtitle">Rentabilidad por clase (ingreso de verdad cobrado, trimestrales/anuales ya prorrateados por mes)</h3>
@@ -545,10 +636,71 @@ function ClasesRetencionSection() {
                     <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia12m != null ? fmtEur(c.ingresoMedia12m) : '—'}</td>
                     <td className="sa-profit__num" title={`Fuente: ${c.fuenteProfe}`}>{fmtEur(c.costeProfe)} ⓘ</td>
                     <td className={`sa-profit__ben${c.margen >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>{fmtEur(c.margen)}</td>
-                    <td className="sa-profit__num">{c.retencion3m != null ? `${c.retencion3m}%` : '—'}</td>
+                    <td className={`sa-profit__num ${retencionCelda(c.siguen3, c.siguen3N).cls}`} title={`${c.siguen3Abs ?? 0} de ${c.siguen3N ?? 0}`}>{retencionCelda(c.siguen3, c.siguen3N).texto}</td>
                     <td className="sa-profit__num" style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{c.recomendacion}</td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+
+          <h3 className="sa-subtitle">Retención por clase</h3>
+          <p className="sa-legend">
+            Estancia = tramo continuo de una persona en esa clase (Excel de Grupos + WooCommerce + hist-pagos fusionados, 1 mes de margen). "Empezaron (12m)" = estancias nuevas en esa clase en el último año; "Siguen" muestra cuántas de ESAS ya tienen esa antigüedad y de ellas cuántas seguían en la MISMA clase ("n de N"). Un cambio de clase cierra la estancia vieja pero no cuenta como baja del club — sale aparte en "Cambios".
+            🟢 ≥{RETENCION_UMBRAL_VERDE}% a 3 meses · 🟡 {RETENCION_UMBRAL_AMARILLO}-{RETENCION_UMBRAL_VERDE - 1}% · 🔴 &lt;{RETENCION_UMBRAL_AMARILLO}% · gris si la muestra es menor de {RETENCION_N_MINIMO}.
+          </p>
+          <div className="sa-profit-wrap">
+            <table className="sa-profit-table">
+              <thead>
+                <tr><th>Clase</th><th>Profe</th><th>Alumnos ahora</th><th>Empezaron (12m)</th><th>Siguen 1m</th><th>Siguen 3m</th><th>Siguen 6m</th><th>Permanencia media</th><th>Bajas 6m</th><th>Cambios clase (6m)</th><th>Motivo principal</th></tr>
+              </thead>
+              <tbody>
+                {filasRetencionClase.map((c, i) => {
+                  const pocos = (c.siguen3N ?? 0) < RETENCION_N_MINIMO
+                  return (
+                    <tr key={i} className={pocos ? 'sa-ret-row--pocos' : ''}>
+                      <td className="sa-profit__label">{c.label}{c.edad !== 'Adultos' ? ` (${c.edad})` : ''}</td>
+                      <td className="sa-profit__prof" style={{ color: PROF_COLOR[c.prof] }}>{c.prof || '—'}</td>
+                      <td className="sa-profit__num">{c.activos}</td>
+                      <td className="sa-profit__num">{c.estanciasEmpezaron12m}</td>
+                      <td className={`sa-profit__num ${retencionCelda(c.siguen1, c.siguen1N).cls}`} title={`${c.siguen1Abs} de ${c.siguen1N}`}>{c.siguen1N ? `${c.siguen1Abs} de ${c.siguen1N}` : '—'}</td>
+                      <td className={`sa-profit__num ${retencionCelda(c.siguen3, c.siguen3N).cls}`} title={`${c.siguen3Abs} de ${c.siguen3N}`}>{c.siguen3N ? `${c.siguen3Abs} de ${c.siguen3N} (${c.siguen3}%)` : '—'}</td>
+                      <td className={`sa-profit__num ${retencionCelda(c.siguen6, c.siguen6N).cls}`} title={`${c.siguen6Abs} de ${c.siguen6N}`}>{c.siguen6N ? `${c.siguen6Abs} de ${c.siguen6N}` : '—'}</td>
+                      <td className="sa-profit__num sa-profit__num--dim">{c.permanenciaMediaClase != null ? `${c.permanenciaMediaClase} m` : '—'}</td>
+                      <td className="sa-profit__num">{c.bajas6mClase}</td>
+                      <td className="sa-profit__num sa-profit__num--dim">{c.cambiosClase6m}</td>
+                      <td className="sa-profit__num sa-profit__num--dim" style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{c.motivoPrincipal ? (MOTIVO_LABEL[c.motivoPrincipal] || c.motivoPrincipal) : '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <h3 className="sa-subtitle">Retención por profe</h3>
+          <div className="sa-profit-wrap">
+            <table className="sa-profit-table">
+              <thead>
+                <tr><th>Profe</th><th>Clases</th><th>Alumnos ahora</th><th>Empezaron (12m)</th><th>Siguen 1m</th><th>Siguen 3m</th><th>Siguen 6m</th><th>Permanencia media</th><th>Bajas 6m</th><th>Motivo principal</th></tr>
+              </thead>
+              <tbody>
+                {filasRetencionProfe.map((p, i) => {
+                  const pocos = (p.siguen3N ?? 0) < RETENCION_N_MINIMO
+                  return (
+                    <tr key={i} className={pocos ? 'sa-ret-row--pocos' : ''}>
+                      <td className="sa-profit__prof" style={{ color: PROF_COLOR[p.prof] }}>{p.prof}</td>
+                      <td className="sa-profit__num">{p.nClases}</td>
+                      <td className="sa-profit__num">{p.activos}</td>
+                      <td className="sa-profit__num">{p.estanciasEmpezaron12m}</td>
+                      <td className={`sa-profit__num ${retencionCelda(p.siguen1, p.siguen1N).cls}`} title={`${p.siguen1Abs} de ${p.siguen1N}`}>{p.siguen1N ? `${p.siguen1Abs} de ${p.siguen1N}` : '—'}</td>
+                      <td className={`sa-profit__num ${retencionCelda(p.siguen3, p.siguen3N).cls}`} title={`${p.siguen3Abs} de ${p.siguen3N}`}>{p.siguen3N ? `${p.siguen3Abs} de ${p.siguen3N} (${p.siguen3}%)` : '—'}</td>
+                      <td className={`sa-profit__num ${retencionCelda(p.siguen6, p.siguen6N).cls}`} title={`${p.siguen6Abs} de ${p.siguen6N}`}>{p.siguen6N ? `${p.siguen6Abs} de ${p.siguen6N}` : '—'}</td>
+                      <td className="sa-profit__num sa-profit__num--dim">{p.permanenciaMediaClase != null ? `${p.permanenciaMediaClase} m` : '—'}</td>
+                      <td className="sa-profit__num">{p.bajas6mClase}</td>
+                      <td className="sa-profit__num sa-profit__num--dim" style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{p.motivoPrincipal ? (MOTIVO_LABEL[p.motivoPrincipal] || p.motivoPrincipal) : '—'}</td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>

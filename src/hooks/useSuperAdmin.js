@@ -125,6 +125,11 @@ export function useClasesRetencion(months = 12, mes = '') {
   return useEndpoint('/clases-retencion', { months, ...(mes ? { mes } : {}) })
 }
 
+// "Alumnos con pago en curso" (Ramiro, 15/11 16:30) — sustituye a la tabla "Por mes".
+export function useClasesPagoEnCurso(categoria = 'todos') {
+  return useEndpoint('/clases-pago-en-curso', { categoria })
+}
+
 // Lista de espera por grupo (8.5: interesados que aún no son alumnos).
 export const gestionListaEsperaGet         = ()          => gestionCall('GET', '/gestion/lista-espera')
 export const gestionListaEsperaCrear       = body        => gestionPost('/gestion/lista-espera', body)

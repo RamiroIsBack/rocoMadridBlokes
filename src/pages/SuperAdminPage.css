@@ -648,6 +648,13 @@ details[open] .sa-collapsible__arrow {
 .sa-semaforo--warn { background: var(--state-warn); }
 .sa-semaforo--bad  { background: var(--state-bad); }
 
+/* Retención por clase/profe (15/11 16:40): 🟢 ≥80% a 3 meses, 🟡 60-79%, 🔴 <60%, gris si N<5 */
+.sa-ret--verde    { color: var(--state-ok); font-weight: 700; }
+.sa-ret--amarillo { color: var(--state-warn); font-weight: 700; }
+.sa-ret--rojo     { color: var(--state-bad); font-weight: 700; }
+.sa-ret--pocos    { color: var(--color-text-secondary); font-style: italic; }
+.sa-profit-table tr.sa-ret-row--pocos { opacity: 0.55; }
+
 .sa-profit-note {
   font-size: 0.65rem;
   color: var(--color-text-secondary);
