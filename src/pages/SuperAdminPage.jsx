@@ -627,6 +627,18 @@ function ClasesRetencionSection() {
             Coste del profe: coste de empresa real del mes elegido (nómina bruta + efectivo + Seguridad Social real + gastos de voluntarios, de Nóminas y Gastos banco — nada de factores inventados), dividido entre sus horas del mes (clases + equipar + gestión). Isa: 12 €/h confirmado, o su nómina real del mes si ya hay (ⓘ de cada fila dice la fuente).
             Semáforo: 🔴 margen negativo · 🟡 margen positivo pero ocupación por debajo del 50% (7-8 de 15) · 🟢 margen positivo y ocupación ≥ 50%.
             El margen se calcula sobre el ingreso del mes elegido; las medias de 3/6/12 meses son solo para ver la tendencia.
+            {data.pestanasSinRepartir > 0 && (
+              <>
+                {' '}
+                <span
+                  title={(data.pestanasSinRepartirDetalle || []).map(p => `${p.pestana}: ${p.motivo}`).join('\n')}
+                  style={{ cursor: 'help', textDecoration: 'underline dotted' }}
+                >
+                  {data.pestanasSinRepartir} pestaña{data.pestanasSinRepartir === 1 ? '' : 's'} del Excel con pago este mes sin repartir ⓘ
+                </span>
+                {' '}(pasa el ratón para ver cuáles y por qué).
+              </>
+            )}
           </p>
           <div className="sa-profit-wrap">
             <table className="sa-profit-table">

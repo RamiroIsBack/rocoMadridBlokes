@@ -7188,9 +7188,15 @@ function blokes_grupos_excel_pestana_para_clase($pestanas_reales, $dia, $horario
     $inicio = trim((string) explode('-', (string) $horario)[0]);
     if ($inicio === '') return null;
     $inicio_punto = str_replace(':', '.', $inicio); // la Hoja usa "19.30", no "19:30"
+    // Una suscripción de 1 día (p. ej. "Jueves") va a la misma pestaña de la pareja completa de
+    // Eva ("M-J ...") — blokes_dia_a_pareja() ya hace ese mismo salto para otras cosas (Ramiro,
+    // 15/11 19:50: "tampoco suma «M-J 19.30» de adultos" en Jueves suelto).
+    $pareja = blokes_dia_a_pareja($dia);
     $formas = array_unique(array_filter(array(
         $dia . ' ' . $inicio_punto,
         blokes_sync_grupos_dia_abrev($dia) . ' ' . $inicio_punto,
+        $pareja . ' ' . $inicio_punto,
+        blokes_sync_grupos_dia_abrev($pareja) . ' ' . $inicio_punto,
     )));
     foreach ($formas as $forma) {
         $buscado = blokes_sync_grupos_normalizar_nombre($forma);
@@ -11934,7 +11940,9 @@ function blokes_grupos_excel_pagos() {
 function blokes_grupos_excel_categoria_pestana($pestana) {
     $p = blokes_externos_normaliza_nombre($pestana);
     if (strpos($p, 'pilates') !== false || strpos($p, 'yoga') !== false) return 'pilates_yoga';
-    if (preg_match('/\b(kids?|infantil|inf|adol|mediano|nino|chiqui)\b/', $p)) return 'ninos';
+    // 15/11 19:50: "mediano" sin la "s?" no casaba con "MEDIANOS" (plural, como lo escribe Eva)
+    // — "M-J 18.30 MEDIANOS" salía como "adultos" por defecto en vez de "ninos".
+    if (preg_match('/\b(kids?|infantil|inf|adol|medianos?|nino|chiqui)\b/', $p)) return 'ninos';
     return 'adultos';
 }
 
@@ -12696,18 +12704,55 @@ function superadmin_clases_retencion($request) {
     // 5 adolescentes de M-J 19:30-21:00 en la pestaña "M-J 19.30 ADOL"). Se empareja cada clase
     // con su pestaña por blokes_grupos_excel_pestana_para_clase() y se cuentan los externos de
     // ESE mes que no tengan ya una suscripción web activa en esa misma clase (sin duplicar).
+    //
+    // 15/11 19:50 (Ramiro, probado en vivo): varias clases distintas pueden casar con la MISMA
+    // pestaña (medianos salía en 2 filas, Adolescentes/Menores; "fuera" sumaba 49 por clases
+    // contra 29 personas reales porque una misma pestaña se repartía dos veces). Ahora se
+    // resuelve por PESTAÑA, no por clase: cada pestaña elige UNA sola clase ganadora —
+    // primero la del grupo de edad que sugiere el propio nombre de la pestaña
+    // (blokes_grupos_excel_categoria_pestana: "ADOL"/"KIDS"/"MEDIANOS" → no-adultos), y entre
+    // las que empaten, la combinada (2 días) sobre la suelta y, si sigue habiendo más de una,
+    // la que ya tenga más alumnos web (la variante "principal"). Las pestañas que de verdad
+    // casen con 2+ clases de edades distintas sin un desempate claro, o con ninguna, se cuentan
+    // en "sin repartir" con el motivo — nunca se reparten a ciegas ni se duplican.
     $pestanas_excel_reales = array_values(array_unique(array_column(blokes_grupos_excel_filas_crudas(), 'pestana')));
     $filas_excel_mes_actual_por_pestana = array();
     foreach (blokes_grupos_excel_filas_crudas() as $f) {
         if (!in_array($now_ym, $f['pagos'], true)) continue;
         $filas_excel_mes_actual_por_pestana[$f['pestana']][] = $f;
     }
-    $externos_activos_por_clase = array(); // classKey => nº de externos distintos
-    $pestanas_emparejadas = array();
+    $clase_por_key = array();
+    foreach ($clases_catalogo as $c) { $clase_por_key[$c['dia'] . '|' . $c['horario'] . '|' . $c['edad']] = $c; }
+    $clases_por_pestana = array(); // pestana => [classKey, ...]
     foreach ($clases_catalogo as $c) {
         $pestana = blokes_grupos_excel_pestana_para_clase($pestanas_excel_reales, $c['dia'], $c['horario']);
-        if (!$pestana || empty($filas_excel_mes_actual_por_pestana[$pestana])) continue;
-        $pestanas_emparejadas[$pestana] = true;
+        if ($pestana) $clases_por_pestana[$pestana][] = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
+    }
+
+    $externos_activos_por_clase = array(); // classKey => nº de externos distintos
+    $pestanas_sin_repartir_detalle = array(); // [{pestana, motivo}]
+    foreach ($filas_excel_mes_actual_por_pestana as $pestana => $filas) {
+        $candidatos = array_values(array_unique($clases_por_pestana[$pestana] ?? array()));
+        if (!$candidatos) {
+            $pestanas_sin_repartir_detalle[] = array('pestana' => $pestana, 'motivo' => 'no casa con ninguna clase conocida');
+            continue;
+        }
+        if (count($candidatos) > 1) {
+            $categoria_pestana = blokes_grupos_excel_categoria_pestana($pestana);
+            if ($categoria_pestana === 'ninos') {
+                $filtrados = array_values(array_filter($candidatos, function($k) use ($clase_por_key) { return ($clase_por_key[$k]['edad'] ?? 'Adultos') !== 'Adultos'; }));
+                if ($filtrados) $candidatos = $filtrados;
+            }
+            usort($candidatos, function($a, $b) use ($clase_por_key) {
+                $ca = $clase_por_key[$a]; $cb = $clase_por_key[$b];
+                $comboA = strpos($ca['dia'], '-') !== false ? 1 : 0;
+                $comboB = strpos($cb['dia'], '-') !== false ? 1 : 0;
+                if ($comboA !== $comboB) return $comboB - $comboA; // combinada primero
+                return $cb['active'] - $ca['active']; // más alumnos web primero
+            });
+        }
+        $ganador = $candidatos[0];
+        $c = $clase_por_key[$ganador];
         $identidades_web = array();
         foreach ($c['members_active'] as $m) {
             $tel = blokes_externos_normaliza_telefono($m['phone'] ?? '');
@@ -12716,7 +12761,7 @@ function superadmin_clases_retencion($request) {
             if ($nomc) $identidades_web['n' . $nomc] = true;
         }
         $externos_unicos = array();
-        foreach ($filas_excel_mes_actual_por_pestana[$pestana] as $f) {
+        foreach ($filas as $f) {
             $tel = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
             $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
             $key = $tel ? ('t' . $tel) : ($nomc ? ('n' . $nomc) : null);
@@ -12724,13 +12769,10 @@ function superadmin_clases_retencion($request) {
             $externos_unicos[$key] = true;
         }
         if ($externos_unicos) {
-            $class_key = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
-            $externos_activos_por_clase[$class_key] = count($externos_unicos);
+            $externos_activos_por_clase[$ganador] = ($externos_activos_por_clase[$ganador] ?? 0) + count($externos_unicos);
         }
     }
-    // Diagnóstico (nunca se adivina a qué clase pertenecen): pestañas con pago este mes que no
-    // casaron con ninguna clase conocida — "sin repartir".
-    $pestanas_sin_repartir = count(array_diff(array_keys($filas_excel_mes_actual_por_pestana), array_keys($pestanas_emparejadas)));
+    $pestanas_sin_repartir = count($pestanas_sin_repartir_detalle);
 
     $por_clase = array_map(function($c) use ($mes_ingreso, $estancias_por_clase, $meses_media, $class_sub_ids, $class_min_start, $externos_activos_por_clase) {
         $altas_mes = array_values(array_filter($c['members_active'], function($m) { return $m['new']; }));
@@ -12805,6 +12847,7 @@ function superadmin_clases_retencion($request) {
         // nunca se reparten a ciegas (Ramiro, 15/11 19:30: "sin repartir"). Solo un contador de
         // momento; si hace falta verlas una por una, se puede sacar un endpoint de diagnóstico.
         'pestanasSinRepartir' => $pestanas_sin_repartir,
+        'pestanasSinRepartirDetalle' => $pestanas_sin_repartir_detalle,
         'avisoFuente' => 'Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado. Retención por clase (16/11 16:40): fusiona Excel de Grupos + WooCommerce + hist-pagos con 1 mes de margen, pero los meses de antes de la migración solo se atribuyen a una clase cuando la persona no ha tenido más que una clase distinta en WooCommerce — con varias clases esos meses de antes no entran en la retención por clase (no se puede saber a cuál pertenecen sin adivinar). "Activos" por clase (15/11 19:25/19:30) ya suma los externos del Excel de Grupos que pagan por fuera, emparejados por día+hora de inicio con blokes_grupos_excel_pestana_para_clase() — lo que no case con ninguna clase se cuenta en "pestanasSinRepartir", nunca se adivina.',
     )));
 }
