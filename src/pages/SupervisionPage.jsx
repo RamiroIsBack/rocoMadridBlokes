@@ -694,9 +694,11 @@ function PeopleSummaryKpis() {
   return (
     <div className="sv-kpis">
       <div className="sv-kpi" style={{ '--kpi-color': kpiColorTema('#60a5fa', oscuro) }}
-        title="Cuentas de facturación con una suscripción en vigor (activa o ya cancelada pero con acceso hasta fin de periodo). No es el nº exacto de alumnos: una cuenta puede tener varios hijos/hermanos — eso lo resolverá el campo «Alumno» de la migración (sección 8).">
-        <span className="sv-kpi__value">{data.cuentas_total}</span>
-        <span className="sv-kpi__label">Cuentas en vigor ⓘ</span>
+        title="Cuentas de facturación con suscripción en vigor, más los que pagan por fuera (Excel de Grupos, mes en curso, fusionados por teléfono/nombre — mismo criterio que «Personas» de Grupos). Una cuenta con varios hermanos cuenta como 1 (lo resolverá el campo «Alumno» de la sección 8).">
+        <span className="sv-kpi__value">
+          {data.cuentasFuera > 0 ? `${data.cuentas_total} web + ${data.cuentasFuera} fuera = ${data.cuentasConFuera}` : data.cuentas_total}
+        </span>
+        <span className="sv-kpi__label">Alumnos (cuentas) con clase en vigor ⓘ</span>
       </div>
       {Object.keys(BUCKET_LABEL).map(b => (
         <div key={b} className="sv-kpi" style={{ '--kpi-color': kpiColorTema('#a78bfa', oscuro) }}
@@ -2642,7 +2644,7 @@ function GruposTab() {
           NOTAS_PARA_CODE_privacidad_dinero.md. Lo de cada alumno (quién debe y cuánto) sí lo ve
           gestion, en la tabla de abajo. */}
       <div className="sv-kpis">
-        <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }} title="Personas en vigor (activas o de baja a fin de mes) en este grupo — mismo criterio que «Cuentas en vigor» de ExcelMuerte. Las en espera/pausadas/pendientes de alta se cuentan aparte. En «Todos los grupos» cuenta por grupo: quien está en dos grupos distintos (p. ej. un grupo normal y Pilates/Yoga) suma 2, por eso puede ser algo más que las cuentas únicas de ExcelMuerte.">
+        <div className="sv-kpi" style={{ '--kpi-color': '#60a5fa' }} title="Personas en vigor (activas o de baja a fin de mes) en este grupo — mismo criterio que «Alumnos (cuentas) con clase en vigor» de ExcelMuerte. Las en espera/pausadas/pendientes de alta se cuentan aparte. En «Todos los grupos» cuenta por grupo: quien está en dos grupos distintos (p. ej. un grupo normal y Pilates/Yoga) suma 2, por eso puede ser algo más que las cuentas únicas de ExcelMuerte.">
           <span className="sv-kpi__value">{kpis.personas}{kpis.enEspera ? <span className="sv-ot-muted"> (+{kpis.enEspera} en espera)</span> : ''}</span>
           <span className="sv-kpi__label">Personas ⓘ</span>
         </div>

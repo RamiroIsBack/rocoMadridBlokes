@@ -3701,6 +3701,27 @@ function blokes_normalizar_edad($edad) {
     return isset($map[$edad_lower]) ? $map[$edad_lower] : ucfirst($edad);
 }
 
+// Edad TAL CUAL la metió la familia en el formulario (_step_form_selections['pa_edad'] o
+// ['edad_addon'], según el producto) — SIN pasar por la variación de WooCommerce ni por la
+// corrección de franja de blokes_corrige_edad_por_franja(). Ramiro, 15/11 16:55 (repaso
+// ExcelMuerte › Personas con cowork): para el reparto adultos/niños de esa pantalla, el dato
+// del formulario es más de fiar que la variación — con él salen 49 niños en vez de 38 (los ~11
+// que faltan son clases de un día sin atributo Edad en WooCommerce, mismo fallo que la Fase 0 de
+// las 16:20, pero esta vez el formulario SÍ tiene el dato bien). Devuelve null si no hay ningún
+// _step_form_selections con edad en ningún item (para que el que llama caiga a su propio valor).
+function blokes_edad_formulario_de_sub($sub_id) {
+    if (!function_exists('wcs_get_subscription')) return null;
+    $sub = wcs_get_subscription(intval($sub_id));
+    if (!$sub) return null;
+    foreach ($sub->get_items() as $item) {
+        $sel = $item->get_meta('_step_form_selections', true);
+        if (!is_array($sel)) continue;
+        $edad = $sel['pa_edad'] ?? ($sel['edad_addon'] ?? '');
+        if ($edad !== '') return blokes_normalizar_edad($edad);
+    }
+    return null;
+}
+
 function blokes_get_pending_cancel_alumnos() {
     if (!function_exists('wcs_get_subscriptions') || !class_exists('RocoMadrid_Step_Form')) return array();
 
@@ -5569,7 +5590,10 @@ function superadmin_products($request) {
 // Aviso: hoy la cuenta es la unidad real (no hay un campo "alumno" en la suscripción, distinto
 // del pagador — lo añadirá la migración de la sección 8), así que una cuenta con varios
 // alumnos (p. ej. hermanos) cuenta aquí como 1. "En vigor" incluye pending-cancel (todavía
-// viene, aunque no se renueve), igual que el resto de ExcelMuerte.
+// viene, aunque no se renueve), igual que el resto de ExcelMuerte. 15/11 16:55: adultos/niños
+// usa la edad del formulario (más de fiar que la variación de WooCommerce), Pilates/Yoga cuenta
+// como mínimo 1 día, y se añaden cuentasFuera/cuentasConFuera (externos del Excel que pagan
+// fuera de la web, fusionados por teléfono/nombre) para el "163 web + N fuera = total".
 function superadmin_people_summary($request) {
     if (!class_exists('RocoMadrid_SF_Stats')) {
         return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats not available. Call this endpoint on the club subsite.', array('status' => 503));
@@ -5594,13 +5618,19 @@ function superadmin_people_summary($request) {
         $cuenta_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : "s{$sub['id']}");
 
         $producto        = $sub['producto'] ?? '';
-        $edad            = $sub['edad'] ?? 'Adultos';
+        // Edad del FORMULARIO antes que la que ya trae $sub (16:55: "usa la edad del
+        // formulario" — con la variación de WooCommerce salían 38 niños, con el formulario 49).
+        $edad            = blokes_edad_formulario_de_sub($sub['id']) ?? ($sub['edad'] ?? 'Adultos');
         $es_pilates_yoga = in_array($producto, array('Pilates', 'Yoga'), true);
         $es_menor        = $edad !== 'Adultos';
         $bucket          = $es_pilates_yoga ? 'pilates_yoga' : ($es_menor ? 'ninos_adolescentes' : 'adultos_grupo');
 
         $dia      = $sub['dia'] ?? '';
         $dias_sub = $dia ? explode('-', $dia) : array();
+        // Pilates/Yoga no tiene atributo "Días" (pa_dias) como las clases normales — sin esto
+        // contaba 0 días y desaparecía de la tabla como "sin datos" (16:55: Marta Melcon, Yoga
+        // activa, debía salir "1 × 1 día"). Una suscripción de Pilates/Yoga es, como mínimo, 1 día.
+        if ($es_pilates_yoga && !$dias_sub) $dias_sub = array('pilates_yoga_sin_dia_' . $sub['id']);
 
         if (!isset($cuentas[$cuenta_key])) {
             $cuentas[$cuenta_key] = array('dias' => array(), 'bucket' => $bucket, 'nombre' => $sub['cliente'] ?? '', 'ingresoMes' => 0);
@@ -5641,8 +5671,32 @@ function superadmin_people_summary($request) {
         $por_dias[$c['bucket']][$clave]++;
     }
 
+    // Externos del Excel de Grupos con el mes en curso pagado, que NO tengan ya cuenta web en
+    // vigor (fusionados por teléfono o, si no hay, nombre compacto) — "163 web + N fuera = total"
+    // (Ramiro, 15/11 16:55: "mismo criterio que «Personas» de Grupos y que la gráfica de 16:30").
+    // Solo cuenta a quien de verdad paga por fuera, nunca a alguien ya contado en cuentas_total.
+    $mes_actual = date('Y-m');
+    $claves_web = array();
+    foreach ($vigentes as $sub) {
+        $tel = blokes_externos_normaliza_telefono($sub['telefono'] ?? '');
+        if ($tel) $claves_web['t' . $tel] = true;
+        $nomc = blokes_externos_normaliza_nombre_compacto($sub['cliente'] ?? '');
+        if ($nomc) $claves_web['n' . $nomc] = true;
+    }
+    $externos_fuera = array();
+    foreach (blokes_grupos_excel_filas_crudas() as $f) {
+        if (!in_array($mes_actual, $f['pagos'], true)) continue;
+        $tel = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
+        $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
+        $key = $tel ? ('t' . $tel) : ($nomc ? ('n' . $nomc) : null);
+        if (!$key || isset($claves_web[$key])) continue;
+        $externos_fuera[$key] = true;
+    }
+
     $data = array(
         'cuentas_total'      => count($cuentas),
+        'cuentasFuera'       => count($externos_fuera),
+        'cuentasConFuera'    => count($cuentas) + count($externos_fuera),
         'por_dias'           => $por_dias,
         'sesiones_semana'    => $sesiones_semana,
     );
