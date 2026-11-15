@@ -379,21 +379,61 @@ function ClasesRetencionSection() {
     return (dia || '').includes('-') ? 2 : 1
   }
 
+  function semaforoYrecomendacion(margen, ocupacion) {
+    const semaforo = margen < 0 ? 'bad' : (ocupacion < 0.5 ? 'warn' : 'ok')
+    // Recomendación (Ramiro, 15/11 09:10): una primera lectura automática, no una decisión —
+    // Ramiro/Ramiro-socio sigue siendo quien decide de verdad.
+    const recomendacion = margen >= 0
+      ? (ocupacion < 0.5 ? 'Promocionar (hay hueco)' : 'Va bien')
+      : (ocupacion < 0.3 ? 'Juntar con otra clase o cerrar' : 'Hablar con el profe (coste alto para lo que entra)')
+    return { semaforo, recomendacion }
+  }
+  const sumaMedia = (a, b, k) => (a[k] != null || b[k] != null) ? (a[k] || 0) + (b[k] || 0) : null
+
   const filasRentabilidad = useMemo(() => {
     if (!data?.porClase) return []
-    return data.porClase.map(c => {
-      const prof = profesorClaseConIsa(c)
-      const costeProfe = costeHoraReal(prof) * classDurationH(c.horario) * sesionesSemana(c.dia) * 4.33
-      const ocupacion = c.activos / 15
-      const margen = c.ingresoMesReal - costeProfe
-      const semaforo = margen < 0 ? 'bad' : (ocupacion < 0.5 ? 'warn' : 'ok')
-      // Recomendación (Ramiro, 15/11 09:10): una primera lectura automática, no una decisión —
-      // Ramiro/Ramiro-socio sigue siendo quien decide de verdad.
-      const recomendacion = margen >= 0
-        ? (ocupacion < 0.5 ? 'Promocionar (hay hueco)' : 'Va bien')
-        : (ocupacion < 0.3 ? 'Juntar con otra clase o cerrar' : 'Hablar con el profe (coste alto para lo que entra)')
-      return { ...c, prof, costeProfe, ocupacion, margen, semaforo, recomendacion }
-    }).sort((a, b) => b.margen - a.margen)
+    // Un "día suelto" (p. ej. "Martes" solo) no es una clase aparte: es la MISMA sesión que ya
+    // da la clase de 2 días de ese día+horario ("Martes-Jueves") — el profe cobra 1 vez por esa
+    // sesión, no 2 (cowork, 15/11 09:55: "Martes 17:30 Sigurd 98€" + "Martes-Jueves 17:30
+    // Sigurd 196€" contaba la misma sesión del martes dos veces). El de 2 días absorbe el
+    // coste; los de día suelto solo aportan ingreso/activos, con 0€ de coste propio.
+    const combos  = data.porClase.filter(c => (c.dia || '').includes('-'))
+    const singles = data.porClase.filter(c => !(c.dia || '').includes('-'))
+    const comboPorSuelto = {}
+    combos.forEach(combo => {
+      combo.dia.split('-').forEach(dia => {
+        const key = `${dia.trim()}|${combo.horario}|${combo.edad}`
+        ;(comboPorSuelto[key] = comboPorSuelto[key] || []).push(combo)
+      })
+    })
+    const cubiertos = new Set()
+    const filas = []
+
+    combos.forEach(combo => {
+      const prof = profesorClaseConIsa(combo)
+      const costeProfe = costeHoraReal(prof) * classDurationH(combo.horario) * 2 * 4.33
+      const relacionadas = singles.filter(s => comboPorSuelto[`${s.dia.trim()}|${s.horario}|${s.edad}`]?.includes(combo))
+      relacionadas.forEach(s => cubiertos.add(`${s.dia.trim()}|${s.horario}|${s.edad}`))
+      const activos = combo.activos + relacionadas.reduce((t, s) => t + s.activos, 0)
+      const ingresoMesReal = combo.ingresoMesReal + relacionadas.reduce((t, s) => t + s.ingresoMesReal, 0)
+      const ingresoMedia3m = sumaMedia(combo, { ingresoMedia3m: relacionadas.reduce((t, s) => t + (s.ingresoMedia3m || 0), 0) }, 'ingresoMedia3m')
+      const ingresoMedia6m = sumaMedia(combo, { ingresoMedia6m: relacionadas.reduce((t, s) => t + (s.ingresoMedia6m || 0), 0) }, 'ingresoMedia6m')
+      const ingresoMedia12m = sumaMedia(combo, { ingresoMedia12m: relacionadas.reduce((t, s) => t + (s.ingresoMedia12m || 0), 0) }, 'ingresoMedia12m')
+      const ocupacion = activos / 15
+      const margen = ingresoMesReal - costeProfe
+      filas.push({ ...combo, prof, costeProfe, ocupacion, margen, activos, ingresoMesReal, ingresoMedia3m, ingresoMedia6m, ingresoMedia12m, ...semaforoYrecomendacion(margen, ocupacion) })
+    })
+
+    singles.forEach(s => {
+      if (cubiertos.has(`${s.dia.trim()}|${s.horario}|${s.edad}`)) return // ya absorbida por su combo
+      const prof = profesorClaseConIsa(s)
+      const costeProfe = costeHoraReal(prof) * classDurationH(s.horario) * 1 * 4.33
+      const ocupacion = s.activos / 15
+      const margen = s.ingresoMesReal - costeProfe
+      filas.push({ ...s, prof, costeProfe, ocupacion, margen, ...semaforoYrecomendacion(margen, ocupacion) })
+    })
+
+    return filas.sort((a, b) => b.margen - a.margen)
   }, [data, costes])
 
   return (

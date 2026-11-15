@@ -11088,6 +11088,14 @@ function blokes_altas_bajas_calcular($months) {
     $persona_max_end    = array(); // personaKey => Y-m más reciente con cobertura (para permanencia, Superadmin Clases)
     $persona_historial  = array(); // personaKey => [ ['classKey','startYm','dia','horario','edad'], ... ]
     $persona_intervalos = array(); // personaKey => [ ['start'=>Y-m,'end'=>Y-m], ... ] — para la retención por cohorte
+    // Por clase (no por persona): TODAS las suscripciones que ha tenido alguna vez esa clase
+    // (no solo las activas ahora) y desde cuándo hay datos — para el ingreso real por mes de
+    // Superadmin › Clases, que si no se calcula solo sobre el reparto de HOY (cowork, 15/11
+    // 09:55: octubre salía corto porque alguien que pagó en octubre y luego se dio de baja en
+    // noviembre ya no entraba en el reparto) y para no diluir las medias de 3/6/12 meses con
+    // meses de antes de que la clase existiera (la migración es de mayo-26).
+    $class_sub_ids  = array(); // classKey => [subId => true]
+    $class_min_start = array(); // classKey => Y-m más antiguo con actividad real en esa clase
     foreach ($enriquecidos as $e) {
         $pk = $e['personaKey'];
         if (!isset($persona_min_start[$pk]) || $e['startYm'] < $persona_min_start[$pk]) $persona_min_start[$pk] = $e['startYm'];
@@ -11095,6 +11103,8 @@ function blokes_altas_bajas_calcular($months) {
         if ($e['status'] === 'active') $persona_activo_en[$pk][$e['classKey']] = true;
         $persona_historial[$pk][] = array('classKey' => $e['classKey'], 'startYm' => $e['startYm'], 'dia' => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad']);
         $persona_intervalos[$pk][] = array('start' => $e['startYm'], 'end' => $e['endYm']);
+        $class_sub_ids[$e['classKey']][$e['subId']] = true;
+        if (!isset($class_min_start[$e['classKey']]) || $e['startYm'] < $class_min_start[$e['classKey']]) $class_min_start[$e['classKey']] = $e['startYm'];
     }
 
     // ---- PASADA 2: construir $classes ya con la clasificación correcta por persona.
@@ -11222,6 +11232,7 @@ function blokes_altas_bajas_calcular($months) {
         'personaMinStart' => $persona_min_start, 'personaMaxEnd' => $persona_max_end,
         'personaActivoEn' => $persona_activo_en, 'personaIntervalos' => $persona_intervalos,
         'personaHistorial' => $persona_historial,
+        'classSubIds' => $class_sub_ids, 'classMinStart' => $class_min_start,
     );
 }
 
@@ -11308,6 +11319,8 @@ function superadmin_clases_retencion($request) {
     $persona_activo_en  = $calculo['personaActivoEn'];
     $persona_intervalos = $calculo['personaIntervalos'];
     $persona_historial  = $calculo['personaHistorial'];
+    $class_sub_ids      = $calculo['classSubIds'];
+    $class_min_start    = $calculo['classMinStart'];
     $tres_meses_atras = blokes_mes_mas($now_ym, -3);
 
     // Quién ha estado alguna vez en cada clase (classKey => [personaKey => true]) y desde
@@ -11375,19 +11388,28 @@ function superadmin_clases_retencion($request) {
     // Hasta 12 meses atrás DESDE $mes_ingreso (no desde el mes actual a medias) para las medias
     // de 3/6/12 meses.
     $meses_media = array_slice(array_values(array_filter($months_range, function($ym) use ($mes_ingreso) { return $ym <= $mes_ingreso; })), -12);
-    $por_clase = array_map(function($c) use ($mes_ingreso, $personas_por_clase_historico, $persona_activo_en, $meses_media) {
+    $por_clase = array_map(function($c) use ($mes_ingreso, $personas_por_clase_historico, $persona_activo_en, $meses_media, $class_sub_ids, $class_min_start) {
         $altas_mes = array_values(array_filter($c['members_active'], function($m) { return $m['new']; }));
         $motivos = array();
         foreach ($c['members_lost'] as $m) {
             $cat = $m['motivoCategoria'] ?: 'sin_categoria';
             $motivos[$cat] = ($motivos[$cat] ?? 0) + 1;
         }
-        // Ingreso real por mes (ya prorrateado si hay trimestrales/anuales) — de este mes y la
-        // serie de los últimos meses, para las medias de 3/6/12 (Ramiro, 15/11 09:1x).
+        $class_key = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
+        // Ingreso real por mes (ya prorrateado si hay trimestrales/anuales) — sobre TODAS las
+        // suscripciones que ha tenido esta clase alguna vez, no solo las activas AHORA (cowork,
+        // 15/11 09:55: octubre salía corto porque quien pagó en octubre y se dio de baja en
+        // noviembre ya no entraba en el reparto de "activos de hoy").
+        $sub_ids_clase = array_keys($class_sub_ids[$class_key] ?? array());
+        $min_start_clase = $class_min_start[$class_key] ?? $mes_ingreso;
         $ingreso_por_mes = array();
         foreach ($meses_media as $ym) {
+            // No cuenta un mes de antes de que hubiera ninguna suscripción de esta clase (la
+            // migración es de mayo-26) — si no, esos meses en 0 € diluían las medias de 6/12
+            // meses hacia abajo sin motivo (cowork, 15/11 09:55).
+            if ($ym < $min_start_clase) continue;
             $t = 0.0;
-            foreach ($c['members_active'] as $m) $t += blokes_sub_importe_cobrado_mes($m['subId'], $ym);
+            foreach ($sub_ids_clase as $sub_id) $t += blokes_sub_importe_cobrado_mes($sub_id, $ym);
             $ingreso_por_mes[$ym] = $t;
         }
         $ingreso_mes_real = $ingreso_por_mes[$mes_ingreso] ?? 0.0;
@@ -11395,7 +11417,6 @@ function superadmin_clases_retencion($request) {
             $ult = array_slice($ingreso_por_mes, -$n);
             return $ult ? round(array_sum($ult) / count($ult), 2) : null;
         };
-        $class_key = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
         $personas_hace_3m = array_keys($personas_por_clase_historico[$class_key] ?? array());
         $retencion_3m = null;
         if ($personas_hace_3m) {
