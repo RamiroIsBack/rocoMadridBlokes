@@ -1815,7 +1815,7 @@ function superadmin_get_expenses($request) {
         if (!preg_match('/^\d{4}-\d{2}$/', $saved['month'])) continue;
         if ($from !== '' && $saved['month'] < $from) continue;
 
-        $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0;
+        $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0; $nom_con_voluntarios = 0;
         $row_concepto  = array(); // expense concept totals for this entity-month
         $row_ingresos  = array(); // income items for this entity-month
         foreach ($saved['items'] as $item) {
@@ -1842,10 +1842,18 @@ function superadmin_get_expenses($request) {
             // "NOMINA…" — el strpos de antes daba 0€ de nóminas desde agosto. La categoría ya
             // lo clasifica bien (expensesParser.js), hay que usarla en vez de re-adivinarlo aquí.
             $is_nomina = ($item['category'] ?? '') === 'nominas';
+            // Cowork, 15/11 18:00: el aviso "la remesa no cuadra" salía en 9 de 11 meses porque
+            // $nom solo contaba la categoría "nominas" del banco, sin los pagos a voluntarios y
+            // a Sigurd ("CAROLINA/ANA/ISA/RAFA MATERIALES/VARIOS", "TRABAJOS SIGURD" —
+            // categoría 'gastos_voluntarios' en expensesParser.js) que Ramiro confirmó (09:25)
+            // que SÍ son gasto de personal. Solo se suman aparte para esta comparación — el
+            // total "nominas" que se muestra en Gastos por categoría se deja igual que antes.
+            $es_gasto_personal_voluntario = ($item['category'] ?? '') === 'gastos_voluntarios';
 
             if ($item['section'] === 'costes') {
                 $tc    += $amt;
                 $iva_s += $iva;
+                if ($is_nomina || $es_gasto_personal_voluntario) $nom_con_voluntarios += $amt;
                 if ($is_nomina) {
                     $nom += $amt;
                 } else {
@@ -1875,7 +1883,11 @@ function superadmin_get_expenses($request) {
             'iva_repercutido_real' => round($iva_real_map[$saved['month'] . '|' . $row_entity] ?? 0, 2),
             'nominas'         => round($nom,   2),
             'nominas_real'    => $nominas_real !== null ? round($nominas_real, 2) : null,
-            'nominas_descuadre' => ($nominas_real !== null && $nom > 0) ? (abs($nom - $nominas_real) > max(50, $nom * 0.05)) : false,
+            // Umbral fijo de 50 € (sin el 5% de antes, que con nóminas grandes dejaba pasar
+            // diferencias mayores sin avisar) y comparado contra nóminas + gastos de voluntarios
+            // juntos — ver $nom_con_voluntarios arriba.
+            'nominas_descuadre' => ($nominas_real !== null && $nom_con_voluntarios > 0)
+                ? (abs($nom_con_voluntarios - $nominas_real) > 50) : false,
             'by_concepto'     => $row_concepto,
             'ingresos_items'  => $row_ingresos,
         );

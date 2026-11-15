@@ -856,16 +856,28 @@ function HistoryView({ period, onDeleted }) {
       </ResponsiveContainer>
 
       {ivaTrimestral.length > 0 && (
-        <div className="exp-kpis" style={{ marginTop: 8 }}>
-          {ivaTrimestral.map(tr => (
-            <div key={tr.key} className="exp-kpi" style={{ '--c': tr.resultado <= 0 ? '#34d399' : '#ef4444' }}>
-              <span className="exp-kpi__val">{fmtEur(Math.abs(tr.resultado))}</span>
-              <span className="exp-kpi__lbl" title={`Repercutido real ${fmtEur(tr.repercutido)} − soportado ${fmtEur(tr.soportado)} (soportado por categoría, editable en «Gestionar»)`}>
-                {tr.year} T{tr.t}: {tr.resultado <= 0 ? 'a devolver' : 'a pagar'} ⓘ
-              </span>
-            </div>
-          ))}
-        </div>
+        <>
+          {/* Cowork, 15/11 18:00: los 4 trimestres de 2026 salían "a devolver" — no es creíble
+              con ~100.000 € de TPV al año. El repercutido real solo cuenta las facturas de
+              WooCommerce (desde mayo); falta taquilla/TPV/bar/tienda y los meses de antes de
+              mayo, así que el resultado por trimestre no es de fiar todavía. Se quita el
+              veredicto "a pagar/a devolver" (y el verde/rojo que lo acompañaba) hasta que esto
+              cuadre con el banco — se deja el desglose repercutido/soportado en el ⓘ para quien
+              quiera mirarlo, pero ya no como un resultado. */}
+          <p className="exp-hint" style={{ fontSize: '0.78rem', marginTop: 8 }}>
+            Estimación incompleta de IVA por trimestre: el repercutido solo cuenta facturas de WooCommerce (desde mayo-2026) — falta taquilla/TPV, bar, tienda y los meses de antes de mayo. No es un resultado real todavía.
+          </p>
+          <div className="exp-kpis" style={{ marginTop: 8 }}>
+            {ivaTrimestral.map(tr => (
+              <div key={tr.key} className="exp-kpi" style={{ '--c': 'var(--color-text-secondary)' }}>
+                <span className="exp-kpi__val">{fmtEur(Math.abs(tr.resultado))}</span>
+                <span className="exp-kpi__lbl" title={`Repercutido (solo WooCommerce) ${fmtEur(tr.repercutido)} − soportado ${fmtEur(tr.soportado)} (soportado por categoría, editable en «Gestionar») — estimación incompleta, no es el resultado real del trimestre.`}>
+                  {tr.year} T{tr.t}: estimación incompleta ⓘ
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* ─── Resultado neto mensual ─── */}
