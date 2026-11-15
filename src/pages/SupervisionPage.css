@@ -216,6 +216,7 @@
 .sv-legend__item--med  { background: #713f12; color: #fde68a; }
 .sv-legend__item--high { background: #7c2d12; color: #fdba74; }
 .sv-legend__item--full { background: #7f1d1d; color: #fca5a5; }
+.sv-legend__item--ninos { background: #312e81; color: #a5b4fc; }
 
 /* ── Schedule table ── */
 .sv-grid-wrap { }
@@ -279,6 +280,16 @@
 .sv-cell--med        .sv-cell-num { background: #713f12; color: #fde68a; }
 .sv-cell--high       .sv-cell-num { background: #7c2d12; color: #fdba74; }
 .sv-cell--full       .sv-cell-num { background: #7f1d1d; color: #fca5a5; }
+
+/* Ramiro, 15/11 17:05: la parte de niños/adolescentes dentro de la celda, en otro color */
+.sv-cell-ninos {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: #a5b4fc;
+  white-space: nowrap;
+}
 
 .sv-td-total {
   padding: 7px 12px;

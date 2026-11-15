@@ -169,16 +169,21 @@ const KNOWN_SLOTS = [
 
 // ─── Schedule grid ────────────────────────────────────────────────────────────
 function ScheduleGrid({ classes, filter }) {
-  const parsed = useMemo(() => {
-    return classes
-      .map(c => ({ ...c, meta: parseClassMeta(c.label) }))
-      .filter(c => {
-        if (!c.meta) return false
-        if (filter === 'mañana') return isMañana(c.meta.timeStart)
-        if (filter === 'tarde')  return !isMañana(c.meta.timeStart)
-        return true
-      })
-  }, [classes, filter])
+  const conMeta = useMemo(() => classes.map(c => ({ ...c, meta: parseClassMeta(c.label) })), [classes])
+
+  const parsed = useMemo(() => (
+    conMeta.filter(c => {
+      if (!c.meta) return false
+      if (filter === 'mañana') return isMañana(c.meta.timeStart)
+      if (filter === 'tarde')  return !isMañana(c.meta.timeStart)
+      return true
+    })
+  ), [conMeta, filter])
+
+  // Ramiro, 15/11 17:05 (repaso ExcelMuerte › "Horario por día" con cowork): había 1
+  // suscripción con horario pero SIN día guardado que antes desaparecía sin más — ahora se lista
+  // aparte para revisar, en vez de perderse o repartirse a ciegas en una columna cualquiera.
+  const sinDia = useMemo(() => conMeta.filter(c => !c.meta && (c.horario || c.active > 0)), [conMeta])
 
   const timeSlots = useMemo(() => {
     const set = new Set(parsed.map(c => c.meta.time))
@@ -191,13 +196,21 @@ function ScheduleGrid({ classes, filter }) {
     })
   }, [parsed])
 
+  // Ramiro, 15/11 17:05: la celda mezclaba niños/adolescentes con adultos de la misma franja
+  // (17:30-18:30 L/M/X/J es todo niños; 18:30-20:00 M-J casi todo "medianos"; Viernes 18-19h
+  // niños…) — cada celda ahora suma aparte el total y la parte de niños/adolescentes, para
+  // pintarla en otro color dentro de la misma celda sin montar dos tablas separadas.
   const grid = useMemo(() => {
     const g = {}
-    timeSlots.forEach(slot => { g[slot] = [0, 0, 0, 0, 0] })
+    timeSlots.forEach(slot => { g[slot] = [{ total: 0, ninos: 0 }, { total: 0, ninos: 0 }, { total: 0, ninos: 0 }, { total: 0, ninos: 0 }, { total: 0, ninos: 0 }] })
     parsed.forEach(c => {
       const { time, days } = c.meta
+      const esNinos = c.edad && c.edad !== 'Adultos'
       days.forEach(day => {
-        if (day < 5 && g[time] !== undefined) g[time][day] += c.active
+        if (day < 5 && g[time] !== undefined) {
+          g[time][day].total += c.active
+          if (esNinos) g[time][day].ninos += c.active
+        }
       })
     })
     return g
@@ -212,7 +225,7 @@ function ScheduleGrid({ classes, filter }) {
 
   const dayTotals = useMemo(() => {
     const t = [0, 0, 0, 0, 0]
-    timeSlots.forEach(slot => grid[slot].forEach((n, i) => { t[i] += n }))
+    timeSlots.forEach(slot => grid[slot].forEach((c, i) => { t[i] += c.total }))
     return t
   }, [grid, timeSlots])
 
@@ -221,7 +234,7 @@ function ScheduleGrid({ classes, filter }) {
   // columna). No es "personas distintas" — eso está en la sección "Personas", aparte.
   const rowTotals = useMemo(() => {
     const totals = {}
-    timeSlots.forEach(slot => { totals[slot] = grid[slot].reduce((s, n) => s + n, 0) })
+    timeSlots.forEach(slot => { totals[slot] = grid[slot].reduce((s, c) => s + c.total, 0) })
     return totals
   }, [grid, timeSlots])
 
@@ -238,12 +251,23 @@ function ScheduleGrid({ classes, filter }) {
 
   return (
     <div className="sv-grid-wrap">
+      {sinDia.length > 0 && (
+        <div className="sv-aviso sv-aviso--warn">
+          <strong>⚠ {sinDia.length} {sinDia.length === 1 ? 'clase con horario sin día guardado' : 'clases con horario sin día guardado'}:</strong> no se reparten a ciegas en la tabla, revísalas a mano.
+          <ul className="sv-aviso__lista">
+            {sinDia.map((c, i) => (
+              <li key={i}>{c.horario || '(sin horario)'}{c.edad !== 'Adultos' ? ` · ${c.edad}` : ''} — {c.active} activos</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="sv-legend">
         <span className="sv-legend__label">Inscritos:</span>
         <span className="sv-legend__item sv-legend__item--low">1–3</span>
         <span className="sv-legend__item sv-legend__item--med">4–6</span>
         <span className="sv-legend__item sv-legend__item--high">7–10</span>
         <span className="sv-legend__item sv-legend__item--full">11+</span>
+        <span className="sv-legend__item sv-legend__item--ninos">Niños/adolescentes</span>
       </div>
       <div className="sv-schedule-scroll">
         <table className="sv-schedule">
@@ -260,12 +284,17 @@ function ScheduleGrid({ classes, filter }) {
               return (
                 <tr key={slot} className="sv-tr">
                   <td className="sv-td-time">{slot}</td>
-                  {row.map((n, i) => {
+                  {row.map((c, i) => {
                     const isScheduled = scheduledSlots.has(`${slot}|${i}`)
-                    const isEmpty = isScheduled && n === 0
+                    const isEmpty = isScheduled && c.total === 0
                     return (
-                      <td key={i} className={`sv-td ${isEmpty ? 'sv-cell--sched-empty' : occupancyClass(n)}`}>
-                        <span className="sv-cell-num">{n > 0 ? n : isScheduled ? '0' : '—'}</span>
+                      <td key={i} className={`sv-td ${isEmpty ? 'sv-cell--sched-empty' : occupancyClass(c.total)}`}>
+                        <span className="sv-cell-num">{c.total > 0 ? c.total : isScheduled ? '0' : '—'}</span>
+                        {c.ninos > 0 && (
+                          <span className="sv-cell-ninos" title="De esos, niños/adolescentes">
+                            {c.ninos === c.total ? 'todo niños' : `${c.ninos} niños`}
+                          </span>
+                        )}
                       </td>
                     )
                   })}
@@ -783,7 +812,7 @@ function ClasesTab() {
 
           <section className="sv-section">
             <h2 className="sv-section-title">Horario por día</h2>
-            <p className="sv-note">Snapshot actual de alumnos activos por franja horaria. Verde intenso = mucha gente; rosa = clase programada pero sin activos; — = sin clase en ese horario.</p>
+            <p className="sv-note">Snapshot actual de alumnos activos por franja horaria. Verde intenso = mucha gente; rosa = clase programada pero sin activos; — = sin clase en ese horario. Niños/adolescentes aparte en morado, dentro de la misma celda. Solo suscripciones de la web — los que pagan por fuera (Excel de Grupos) no se reparten aquí: su horario de pestaña no trae la hora de fin, así que no hay forma fiable de encajarlos en una celda sin adivinar; el total fusionado (web + fuera) está en «Personas», arriba.</p>
             {duplicadosMismaClase.length > 0 && (
               <div className="sv-aviso sv-aviso--warn">
                 <strong>⚠ Dos suscripciones activas de la misma clase ({duplicadosMismaClase.length}):</strong> cada persona solo cuenta una plaza aquí, pero tiene dos suscripciones pagando a la vez — decide tú si cobrar una y cancelar la otra (no se cancela ni reembolsa nada en automático).
