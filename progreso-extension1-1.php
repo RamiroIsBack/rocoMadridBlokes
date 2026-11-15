@@ -3899,18 +3899,24 @@ function blokes_get_all_subscription_data() {
     return array_merge($base, blokes_get_pending_cancel_alumnos(), blokes_get_abono_subscripciones());
 }
 
-// CIERRE 15/11 18:05 (Ramiro + selector, corrige lo dicho a las 17:30/17:45 sobre esta misma
-// franja): la variación huérfana "Martes-Jueves 18:30-20:00" (20 suscripciones, 1 y 2 días,
-// compradas con el suplemento "Adolescentes" del formulario porque era la única forma de
-// pagarla) SON la clase de Medianos — da igual lo que diga el formulario, para Blokes esta
-// franja siempre es "Medianos M-J 18:30-19:30, Isa", fusionada con el slot oficial del selector.
-// No toca ninguna suscripción real, su precio ni el día que tenga guardado (1 o 2 días) — solo
-// normaliza cómo Blokes la MUESTRA y la cuenta. Tiene que correr ANTES de
-// blokes_corrige_edad_por_franja() para que esa franja ya no se procese por su cuenta.
+// CIERRE 15/11 18:05 + 17:25 (Ramiro + selector, corrige lo dicho a las 17:30/17:45 sobre esta
+// misma franja): la variación huérfana "Martes-Jueves 18:30-20:00" (20 suscripciones, 1 y 2
+// días, compradas con el suplemento "Adolescentes" del formulario porque era la única forma de
+// pagarla) SON la clase de Medianos — para Blokes esta franja siempre es "Medianos M-J
+// 18:30-19:30, Isa", fusionada con el slot oficial del selector. Edad = Adolescentes (15/11
+// 17:25 punto A: Ramiro confirmó que son adolescentes, no menores de 6-12 — la variación nueva
+// #7837 que ya existe en el catálogo para este slot oficial es justamente para adolescentes;
+// antes, tras el cierre de las 18:05, esto decía por error "Menores (6-12 años)"). No toca
+// ninguna suscripción real, su precio ni el día que tenga guardado (1 o 2 días) — solo
+// normaliza cómo Blokes la MUESTRA y la cuenta, y asegura que sigan contando en la MISMA clase
+// cuando se muevan de verdad a #7837/la variación oficial de #4516 (esa migración ya vendrá con
+// edad=Adolescentes de su propia variación/formulario, así que no hay salto de clase al mover).
+// Tiene que correr ANTES de blokes_corrige_edad_por_franja() para que esa franja ya no se
+// procese por su cuenta.
 function blokes_corrige_medianos_huerfanos($sub) {
     if (blokes_dia_a_pareja($sub['dia'] ?? '') === 'Martes-Jueves' && ($sub['horario'] ?? '') === '18:30-20:00') {
         $sub['horario'] = '18:30-19:30';
-        $sub['edad']    = 'Menores (6-12 años)';
+        $sub['edad']    = 'Adolescentes (12-18 años)';
     }
     return $sub;
 }
