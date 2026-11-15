@@ -642,6 +642,7 @@ details[open] .sa-collapsible__arrow {
 .sa-profit__ben--neg { color: var(--state-bad); }
 
 .sa-subtitle { margin: 20px 0 8px; font-size: 0.95rem; }
+.sa-link { background: none; border: none; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
 .sa-semaforo { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
 .sa-semaforo--ok   { background: var(--state-ok); }
 .sa-semaforo--warn { background: var(--state-warn); }

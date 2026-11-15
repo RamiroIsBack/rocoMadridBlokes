@@ -557,7 +557,12 @@ function ClasesRetencionSection() {
       const ocupacion = c.activos / 15
       const margen = c.ingresoMesReal - costeProfe
       const semaforo = margen < 0 ? 'bad' : (ocupacion < 0.5 ? 'warn' : 'ok')
-      return { ...c, prof, costeProfe, ocupacion, margen, semaforo }
+      // Recomendación (Ramiro, 15/11 09:10): una primera lectura automática, no una decisión —
+      // Ramiro/Ramiro-socio sigue siendo quien decide de verdad.
+      const recomendacion = margen >= 0
+        ? (ocupacion < 0.5 ? 'Promocionar (hay hueco)' : 'Va bien')
+        : (ocupacion < 0.3 ? 'Juntar con otra clase o cerrar' : 'Hablar con el profe (coste alto para lo que entra)')
+      return { ...c, prof, costeProfe, ocupacion, margen, semaforo, recomendacion }
     }).sort((a, b) => b.margen - a.margen)
   }, [data, costes])
 
@@ -616,7 +621,7 @@ function ClasesRetencionSection() {
           <div className="sa-profit-wrap">
             <table className="sa-profit-table">
               <thead>
-                <tr><th></th><th>Clase</th><th>Profe</th><th>Activos</th><th>Ocupación/15</th><th>Ingreso real</th><th>Coste profe</th><th>Margen</th><th>Retención 3m</th></tr>
+                <tr><th></th><th>Clase</th><th>Profe</th><th>Activos</th><th>Ocupación/15</th><th>Ingreso real</th><th>Coste profe</th><th>Margen</th><th>Retención 3m</th><th>Recomendación</th></tr>
               </thead>
               <tbody>
                 {filasRentabilidad.map((c, i) => (
@@ -630,6 +635,7 @@ function ClasesRetencionSection() {
                     <td className="sa-profit__num">{fmtEur(c.costeProfe)}</td>
                     <td className={`sa-profit__ben${c.margen >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>{fmtEur(c.margen)}</td>
                     <td className="sa-profit__num">{c.retencion3m != null ? `${c.retencion3m}%` : '—'}</td>
+                    <td className="sa-profit__num" style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{c.recomendacion}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1118,6 +1124,9 @@ export default function SuperAdminPage() {
         <>
           <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
           <ProductsSection excludeTransfer={excludeTransfer} />
+          <p className="sa-legend">
+            La rentabilidad por clase se movió a <button type="button" className="sa-link" onClick={() => setSaTab('clases')}>Clases</button> (09:10: con ingreso real cobrado, no tarifa fija).
+          </p>
         </>
       )}
       {saTab === 'clases'   && <ClasesRetencionSection />}
