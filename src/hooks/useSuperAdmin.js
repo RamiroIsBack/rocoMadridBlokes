@@ -136,6 +136,11 @@ export const gestionListaEsperaBorrar      = id          => gestionCall('DELETE'
 export const gestionExpenseSendersGet = ()                       => gestionCall('GET', '/expenses/senders')
 export const gestionExpenseSenderSet  = (sender, category)      => gestionPost('/expenses/senders', { sender, category })
 
+// Notas de "Variaciones a revisar" (gastos_banco.md punto 8) -- compartidas en servidor, no en
+// el navegador de quien las escribió.
+export const gestionExpenseVariacionesGet = ()               => gestionCall('GET', '/expenses/variaciones')
+export const gestionExpenseVariacionSet   = (key, nota)      => gestionPost('/expenses/variaciones', { key, nota })
+
 // Campañas de WhatsApp (31/10, fase a: envío manual wa.me).
 export const campanasContactosImportar = body                     => gestionPost('/campanas/contactos/importar', body)
 export const campanasContactosGet      = (lista, tipo)            => gestionCall('GET', `/campanas/contactos?lista=${lista}&tipo=${tipo}`)

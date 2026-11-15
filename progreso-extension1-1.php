@@ -1335,6 +1335,20 @@ add_action('rest_api_init', function() {
         ),
     ));
 
+    // Notas de "Variaciones a revisar", compartidas en servidor (gastos_banco.md punto 8).
+    register_rest_route('superadmin/v1', '/expenses/variaciones', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'superadmin_get_expense_variaciones',
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'superadmin_save_expense_variacion',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+
     // ── Presupuesto anual de pagos vs. bancos (solo socios) ──
     // Reglas aprendidas "concepto del banco → categoría"
     register_rest_route('superadmin/v1', '/expense-rules', array(
@@ -1928,6 +1942,32 @@ function superadmin_save_expense_sender($request) {
     else $map[$sender] = $category;
 
     update_option(BLOKES_EXP_SENDERS_OPTION, wp_json_encode($map), false);
+    return rest_ensure_response(array('success' => true, 'data' => $map));
+}
+
+// Notas de "Variaciones a revisar" — compartidas entre Eva y Ramiro, no solo en el navegador de
+// quien la escribió (NOTAS_PARA_CODE_gastos_banco.md punto 8, "guardadas en servidor"). Misma
+// forma que los remitentes de arriba: mapa clave (categoría+mes) => texto.
+const BLOKES_EXP_VARIACIONES_OPTION = 'blokes_exp_variaciones_notas';
+function superadmin_get_expense_variaciones($request) {
+    $raw = get_option(BLOKES_EXP_VARIACIONES_OPTION);
+    $map = $raw ? json_decode($raw, true) : array();
+    return rest_ensure_response(array('success' => true, 'data' => is_array($map) ? $map : array()));
+}
+function superadmin_save_expense_variacion($request) {
+    $body = $request->get_json_params();
+    $key  = sanitize_text_field((string) ($body['key'] ?? ''));
+    $nota = sanitize_text_field((string) ($body['nota'] ?? ''));
+    if ($key === '') return new WP_Error('bad_request', 'Falta la clave de la variación.', array('status' => 400));
+
+    $raw = get_option(BLOKES_EXP_VARIACIONES_OPTION);
+    $map = $raw ? json_decode($raw, true) : array();
+    if (!is_array($map)) $map = array();
+
+    if ($nota === '') unset($map[$key]);
+    else $map[$key] = $nota;
+
+    update_option(BLOKES_EXP_VARIACIONES_OPTION, wp_json_encode($map), false);
     return rest_ensure_response(array('success' => true, 'data' => $map));
 }
 
