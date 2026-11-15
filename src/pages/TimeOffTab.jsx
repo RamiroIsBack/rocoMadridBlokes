@@ -19,7 +19,7 @@ import {
   mesesCerradosManana, PERSONA_MES_ESTADOS, estadoPersonaMes, paroDesdePersonasMes, personasMesDesdeParo,
   agruparHistoricoRealPorMes,
 } from '../utils/timeoffPlan'
-import { useTimeOffData, savePlan, saveReal, syncNueve, addScenario, addRequests } from '../hooks/useTimeOff'
+import { useTimeOffData, savePlan, saveReal, syncNueve, addScenario, addRequests, deleteRequest } from '../hooks/useTimeOff'
 import { useClases } from '../hooks/useClases'
 import TimeOffRequests, { matchPerson } from './TimeOffRequests'
 import TimeOffIntegration, { personaDeEmpleado } from './TimeOffIntegration'
@@ -1658,7 +1658,7 @@ const CLUB_DAY_DECISION_LABEL = {
 }
 const CLUB_DAY_FORM_INICIAL = { fecha: '', tipo: 'evento', nombre: '', horario: '' }
 
-function FiestasCierres({ clubDays, onReload, onGenerarVacaciones }) {
+function FiestasCierres({ clubDays, onReload, onGenerarVacaciones, onBorrarVacaciones }) {
   const [form, setForm] = useState(CLUB_DAY_FORM_INICIAL)
   const [busy, setBusy] = useState(false)
 
@@ -1669,9 +1669,13 @@ function FiestasCierres({ clubDays, onReload, onGenerarVacaciones }) {
     if (decision === 'cierra_vacaciones' && !window.confirm(
       `¿Marcar ${dia.fecha} (${dia.nombre || CLUB_DAY_TIPO_LABEL[dia.tipo]}) como CIERRE CON VACACIONES? La sala no abre, no contará como "sin cubrir", y se generará una solicitud de vacaciones APROBADA para cada persona que trabajaría ese día de la semana.`
     )) return
+    // calendario.md 08/11 punto 3: si este día YA tenía vacaciones generadas solas y se cambia a
+    // otra cosa, se borran solas también — antes había que hacerlo a mano.
+    const teniaVacaciones = dia.decision === 'cierra_vacaciones' && decision !== 'cierra_vacaciones'
     try {
       await clubDaysEditar(dia.id, { decision })
       if (decision === 'cierra_vacaciones') await onGenerarVacaciones?.(dia)
+      else if (teniaVacaciones) await onBorrarVacaciones?.(dia)
       onReload()
     } catch (e) { alert(e.message) }
   }
@@ -1840,6 +1844,19 @@ export default function TimeOffTab() {
     const res = await addRequests(trabajan.map(person => ({ person, from: dia.fecha, to: dia.fecha, status: 'aprobada', canal: 'otro', nota })))
     setRequests(res.requests)
   }
+  // Compañera de generarVacacionesCierre (calendario.md, 08/11 11:02 punto 3): al cambiar un día
+  // que YA estaba en "Cierra (vacaciones)" a otra decisión, borra solo las solicitudes que esa
+  // decisión generó sola — antes había que borrarlas a mano, una por una (pasó con el 24/31 dic
+  // 2026). Se identifican por la MISMA fecha exacta y la MISMA nota que pone generarVacacionesCierre
+  // (nunca toca ninguna otra solicitud de esas personas, ni una que alguien pidiera a mano con una
+  // nota distinta aunque caiga en el mismo día).
+  const borrarVacacionesCierre = async dia => {
+    const marcador = `Cierre ${dia.nombre || fmtShort(dia.fecha)} — vacaciones para todos`
+    const generadas = requests.filter(r => r.from === dia.fecha && r.to === dia.fecha && r.nota === marcador)
+    if (!generadas.length) return
+    for (const r of generadas) await deleteRequest(r.id)
+    setRequests(requests.filter(r => !generadas.some(g => g.id === r.id)))
+  }
 
   // Lo real del año que se ve (y del siguiente, para el resumen); el simulador, sin solicitudes
   const realAnio = useMemo(() => ({ ...real, year: anio }), [real, anio])
@@ -1947,7 +1964,7 @@ export default function TimeOffTab() {
         </div></FalloSeguro>
       ) : (
         <FalloSeguro que="fiestas y cierres">
-          <FiestasCierres clubDays={clubDays} onReload={cargarClubDays} onGenerarVacaciones={generarVacacionesCierre} />
+          <FiestasCierres clubDays={clubDays} onReload={cargarClubDays} onGenerarVacaciones={generarVacacionesCierre} onBorrarVacaciones={borrarVacacionesCierre} />
         </FalloSeguro>
       )}
     </div>

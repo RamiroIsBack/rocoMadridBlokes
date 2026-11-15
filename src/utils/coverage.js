@@ -156,16 +156,18 @@ export function pairConflict(a, b, opts = {}) {
 
 // ─── Calendario ──────────────────────────────────────────────────────────────
 
-// Festivos nacionales/Madrid en las ventanas que planificamos (no cuentan como vacaciones)
-const FESTIVOS_BASE = [
-  '2026-12-08', '2026-12-25', '2027-01-01', '2027-01-06',
-  '2027-08-15', '2027-12-06', '2027-12-08', '2027-12-25', '2028-01-01', '2028-01-06',
-]
-let festivos = new Set(FESTIVOS_BASE)
+// Festivos nacionales/Madrid en las ventanas que planificamos (no cuentan como vacaciones).
+// Calendario.md 08/11 11:02 punto 1 ("quita FESTIVOS_BASE del código si sigue"): ya no hace
+// falta una lista fija aquí — `club_days` (backend, sembrada con los mismos festivos oficiales
+// hasta 2028 y ampliable a mano) cubre lo mismo o más, y TimeOffTab.jsx ya fusiona sus días
+// "cierra" con los festivos de 9to5 (`nueve.holidays`) antes de llamar a setFestivos(). Mientras
+// esa lista todavía no ha cargado (arranque), `festivos` queda vacío un instante — no hay otro
+// dato fiable que poner ahí mientras tanto, mejor que una lista que se queda vieja sin que nadie
+// lo note.
+let festivos = new Set()
 
-// Festivos de 9to5 (nacionales, de Madrid y locales). Sin ellos, la lista básica de arriba.
 export function setFestivos(dates) {
-  festivos = new Set(dates && dates.length ? dates : FESTIVOS_BASE)
+  festivos = new Set(dates || [])
 }
 
 // Cierres sueltos que SÍ gastan vacaciones (Ramiro, 4/11 06:27: 24 y 31 de diciembre cierran pero

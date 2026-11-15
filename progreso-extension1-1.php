@@ -19286,6 +19286,43 @@ function nueve_sync($full = false) {
                 'workable' => !empty($h['workable']),
             );
         }, $hol));
+        // Cowork, calendario.md 08/11 11:02 puntos 1 y 2: antes los festivos de 9to5 y el
+        // calendario del club (club_days) solo se fusionaban en silencio en el frontend
+        // (festivosKey, TimeOffTab.jsx) — nunca se avisaba si uno de los dos faltaba. Mismo aviso
+        // sirve para el punto 2 (festivo trabajado): si el club decide ABRIR un día que 9to5 tiene
+        // como festivo no laborable, ese es justo el caso de "márcalo en 9to5 como festivo
+        // trabajado" — no hay endpoint de escritura de festivos en la API de 9to5 (solo lectura),
+        // así que se avisa en vez de intentar escribirlo a ciegas.
+        global $wpdb;
+        blokes_ensure_club_days_table();
+        $club_rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT fecha, nombre, decision FROM " . blokes_club_days_table() . " WHERE fecha BETWEEN %s AND %s",
+            $y . '-01-01', ($y + 1) . '-12-31'
+        ), ARRAY_A);
+        $club_por_fecha = array();
+        foreach ($club_rows as $cr) { $club_por_fecha[$cr['fecha']] = $cr; }
+        $festivos_9to5 = array();
+        foreach ($c['holidays'] as $h) { if (!$h['workable'] && $h['date'] !== '') $festivos_9to5[$h['date']] = $h['name']; }
+
+        foreach ($festivos_9to5 as $fecha => $nombre) {
+            $club = $club_por_fecha[$fecha] ?? null;
+            if (!$club) {
+                $warnings[] = "9to5 tiene festivo el $fecha ($nombre) que no está en el calendario del club — añádelo en Fiestas y cierres.";
+            } elseif (in_array($club['decision'], array('abre', 'abre_horario_especial'), true)) {
+                $warnings[] = "9to5 tiene festivo el $fecha ($nombre) pero el club decidió ABRIR ese día (festivo trabajado) — márcalo en 9to5 como festivo trabajado para que las horas/compensaciones cuadren.";
+            } elseif ($club['decision'] === 'pendiente') {
+                $warnings[] = "9to5 tiene festivo el $fecha ($nombre) y el calendario del club todavía no ha decidido qué hacer ese día.";
+            }
+            // 'cierra'/'cierra_vacaciones': cuadra con 9to5, sin aviso.
+        }
+        foreach ($club_por_fecha as $fecha => $cr) {
+            // Solo 'cierra' (festivo oficial) entra en esta dirección — 'cierra_vacaciones' es a
+            // propósito un cierre que NO es festivo oficial (Nochebuena/Nochevieja: cierra pero
+            // SÍ gasta vacaciones), nunca se espera que 9to5 lo tenga como festivo.
+            if ($cr['decision'] === 'cierra' && !isset($festivos_9to5[$fecha])) {
+                $warnings[] = "El calendario del club tiene el $fecha ({$cr['nombre']}) como cierre, pero 9to5 no lo tiene como festivo — revisa la fecha o avísalo en 9to5.";
+            }
+        }
     }
     $balances = array();
     foreach (array($y, $y + 1) as $yr) {
