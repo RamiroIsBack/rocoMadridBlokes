@@ -1763,59 +1763,33 @@
     height: 15px;
 }
 
-/* Sugerencia de alternativa cuando una franja está completa (Ramiro, 15/11 17:25, punto B) —
-   sin lista de espera ni WhatsApp: 1-2 franjas de la misma edad con plazas, con botón para
-   elegirlas directamente. */
-.schedule-suggestion-intro {
+.schedule-full-waiting {
     font-size: 11px;
     color: #6b7280;
     margin: 2px 0 4px;
+    height: 20px;
 }
 
-.schedule-suggestions {
+.schedule-full-links {
     display: flex;
     flex-direction: column;
-    gap: 6px;
-    width: 100%;
+    gap: 4px;
 }
 
-.btn-choose-alternative {
-    pointer-events: all;
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    width: 100%;
-    background: #fff;
-    border: 1px solid #d1d5db;
-    border-radius: 6px;
-    padding: 8px 10px;
-    text-align: left;
-    font-family: inherit;
-}
-
-.btn-choose-alternative:hover {
-    border-color: var(--primary, #374151);
-    background: #f9fafb;
-}
-
-.btn-choose-alternative .alt-label {
+.schedule-full-wa,
+.schedule-full-form {
     font-size: 12px;
-    font-weight: 600;
-    color: #1f2937;
+    color: #374151;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    line-height: 1.3;
 }
 
-.btn-choose-alternative .alt-spots {
-    font-size: 11px;
-    color: #059669;
+.schedule-full-wa:hover {
+    color: #25d366;
 }
 
-.btn-choose-alternative .alt-cta {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--primary, #2563eb);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    margin-top: 2px;
+.schedule-full-form:hover {
+    color: var(--primary);
 }
