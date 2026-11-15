@@ -7175,39 +7175,42 @@ function blokes_sync_grupos_pestana_de_grupo($pestanas_reales, $dia, $horario) {
     return null;
 }
 
-// Empareja una clase real (día+horario) con su pestaña del Excel SOLO por la hora de INICIO
-// (Eva no guarda la hora de fin en el nombre: "M-J 19.30 ADOL", "M-J 18.30 MEDIANOS", "L-X
-// 17.30 KIDS" — nunca "19:30-21:00"). Ramiro, 15/11 19:25/19:30 ("en Activos de cada clase solo
-// cuentan los que pagan por la web... puedes empezar por la función que proponías al revés").
-// Función APARTE de blokes_sync_grupos_pestana_de_grupo() (que usa el rango completo y ya
-// escribe cobros reales en producción — no se toca para no arriesgarla). Solo compara que la
-// pestaña EMPIECE por "día hora-inicio" (nunca al revés): la pestaña real casi siempre lleva
-// algo más detrás (KIDS/ADOL/MEDIANOS…), nunca algo delante. Si hay 0 o más de 1 candidata, no
-// se reparte — mejor no contar que contar en la clase equivocada.
-function blokes_grupos_excel_pestana_para_clase($pestanas_reales, $dia, $horario) {
-    $inicio = trim((string) explode('-', (string) $horario)[0]);
-    if ($inicio === '') return null;
-    $inicio_punto = str_replace(':', '.', $inicio); // la Hoja usa "19.30", no "19:30"
-    // Una suscripción de 1 día (p. ej. "Jueves") va a la misma pestaña de la pareja completa de
-    // Eva ("M-J ...") — blokes_dia_a_pareja() ya hace ese mismo salto para otras cosas (Ramiro,
-    // 15/11 19:50: "tampoco suma «M-J 19.30» de adultos" en Jueves suelto).
-    $pareja = blokes_dia_a_pareja($dia);
-    $formas = array_unique(array_filter(array(
-        $dia . ' ' . $inicio_punto,
-        blokes_sync_grupos_dia_abrev($dia) . ' ' . $inicio_punto,
-        $pareja . ' ' . $inicio_punto,
-        blokes_sync_grupos_dia_abrev($pareja) . ' ' . $inicio_punto,
-    )));
-    foreach ($formas as $forma) {
-        $buscado = blokes_sync_grupos_normalizar_nombre($forma);
-        if ($buscado === '') continue;
-        $candidatas = array();
-        foreach ($pestanas_reales as $p) {
-            if (strpos(blokes_sync_grupos_normalizar_nombre($p), $buscado) === 0) $candidatas[] = $p;
+// Candidatas de clase real (día+horario+edad) para UNA pestaña del Excel, comparando solo por
+// la hora de INICIO (Eva no guarda la hora de fin en el nombre: "M-J 19.30 ADOL", "M-J 18.30
+// MEDIANOS", "L-X 17.30 KIDS" — nunca "19:30-21:00"). Ramiro, 15/11 19:25/19:50: empezó siendo
+// "para cada clase, su única pestaña" (al revés de blokes_sync_grupos_pestana_de_grupo(), que
+// usa el rango completo y ya escribe cobros reales en producción — no se toca), pero eso fallaba
+// cuando DOS pestañas reales comparten el mismo "día hora-inicio" con distinto sufijo ("M-J
+// 19.30" adultos y "M-J 19.30 ADOL" adolescentes a la vez): la exigencia de una única pestaña
+// por clase hacía que ninguna de las dos casara. Ahora se busca al revés, por pestaña: cada
+// pestaña compara su propio nombre contra TODAS las clases conocidas (con la pareja completa de
+// día también, para que un 1 día como "Jueves" case con "M-J") y devuelve las que encajan —
+// puede haber más de una, y quien llama decide cómo desempatar (edad que sugiere el propio
+// nombre de la pestaña, clase combinada sobre suelta, más alumnos web).
+function blokes_grupos_excel_clases_candidatas_para_pestana($pestana, $clases_catalogo) {
+    $pn = blokes_sync_grupos_normalizar_nombre($pestana);
+    if ($pn === '') return array();
+    $candidatas = array();
+    foreach ($clases_catalogo as $c) {
+        $inicio = trim((string) explode('-', (string) $c['horario'])[0]);
+        if ($inicio === '') continue;
+        $inicio_punto = str_replace(':', '.', $inicio); // la Hoja usa "19.30", no "19:30"
+        $pareja = blokes_dia_a_pareja($c['dia']);
+        $formas = array_unique(array_filter(array(
+            $c['dia'] . ' ' . $inicio_punto,
+            blokes_sync_grupos_dia_abrev($c['dia']) . ' ' . $inicio_punto,
+            $pareja . ' ' . $inicio_punto,
+            blokes_sync_grupos_dia_abrev($pareja) . ' ' . $inicio_punto,
+        )));
+        foreach ($formas as $forma) {
+            $buscado = blokes_sync_grupos_normalizar_nombre($forma);
+            if ($buscado !== '' && strpos($pn, $buscado) === 0) {
+                $candidatas[] = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
+                break;
+            }
         }
-        if (count($candidatas) === 1) return $candidatas[0];
     }
-    return null;
+    return array_values(array_unique($candidatas));
 }
 
 // Método tal y como lo escribe Eva en el Excel, a partir del método de WooCommerce — mapeo
@@ -12701,21 +12704,22 @@ function superadmin_clases_retencion($request) {
     // Externos del Excel de Grupos sumados a "Activos" por clase (Ramiro, 15/11 19:25/19:30):
     // antes "Activos" solo contaba suscripciones de WooCommerce — los que pagan por fuera
     // (transferencia, efectivo) no salían en NINGUNA clase, ni la suya ni otra (ejemplo real:
-    // 5 adolescentes de M-J 19:30-21:00 en la pestaña "M-J 19.30 ADOL"). Se empareja cada clase
-    // con su pestaña por blokes_grupos_excel_pestana_para_clase() y se cuentan los externos de
-    // ESE mes que no tengan ya una suscripción web activa en esa misma clase (sin duplicar).
+    // 5 adolescentes de M-J 19:30-21:00 en la pestaña "M-J 19.30 ADOL"). Se cuentan los externos
+    // de ESE mes que no tengan ya una suscripción web activa en esa misma clase (sin duplicar).
     //
-    // 15/11 19:50 (Ramiro, probado en vivo): varias clases distintas pueden casar con la MISMA
-    // pestaña (medianos salía en 2 filas, Adolescentes/Menores; "fuera" sumaba 49 por clases
-    // contra 29 personas reales porque una misma pestaña se repartía dos veces). Ahora se
-    // resuelve por PESTAÑA, no por clase: cada pestaña elige UNA sola clase ganadora —
-    // primero la del grupo de edad que sugiere el propio nombre de la pestaña
+    // 15/11 19:50 (Ramiro, probado en vivo, dos rondas): varias clases distintas pueden casar
+    // con la MISMA pestaña (medianos salía en 2 filas, Adolescentes/Menores; "fuera" sumaba 49
+    // por clases contra 29 personas reales) — y, al revés, DOS pestañas reales con el mismo
+    // "día hora-inicio" pero distinto sufijo ("M-J 19.30" adultos y "M-J 19.30 ADOL"
+    // adolescentes) hacían que exigir una única pestaña por clase no casara ninguna de las dos.
+    // blokes_grupos_excel_clases_candidatas_para_pestana() busca ahora por PESTAÑA (no por
+    // clase): cada pestaña con pago este mes elige UNA sola clase ganadora entre sus candidatas
+    // — primero la del grupo de edad que sugiere el propio nombre de la pestaña
     // (blokes_grupos_excel_categoria_pestana: "ADOL"/"KIDS"/"MEDIANOS" → no-adultos), y entre
     // las que empaten, la combinada (2 días) sobre la suelta y, si sigue habiendo más de una,
-    // la que ya tenga más alumnos web (la variante "principal"). Las pestañas que de verdad
-    // casen con 2+ clases de edades distintas sin un desempate claro, o con ninguna, se cuentan
-    // en "sin repartir" con el motivo — nunca se reparten a ciegas ni se duplican.
-    $pestanas_excel_reales = array_values(array_unique(array_column(blokes_grupos_excel_filas_crudas(), 'pestana')));
+    // la que ya tenga más alumnos web (la variante "principal"). Las pestañas que de verdad no
+    // casen con ninguna clase se cuentan en "sin repartir" con el motivo — nunca se reparten a
+    // ciegas ni se duplican.
     $filas_excel_mes_actual_por_pestana = array();
     foreach (blokes_grupos_excel_filas_crudas() as $f) {
         if (!in_array($now_ym, $f['pagos'], true)) continue;
@@ -12723,16 +12727,11 @@ function superadmin_clases_retencion($request) {
     }
     $clase_por_key = array();
     foreach ($clases_catalogo as $c) { $clase_por_key[$c['dia'] . '|' . $c['horario'] . '|' . $c['edad']] = $c; }
-    $clases_por_pestana = array(); // pestana => [classKey, ...]
-    foreach ($clases_catalogo as $c) {
-        $pestana = blokes_grupos_excel_pestana_para_clase($pestanas_excel_reales, $c['dia'], $c['horario']);
-        if ($pestana) $clases_por_pestana[$pestana][] = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
-    }
 
     $externos_activos_por_clase = array(); // classKey => nº de externos distintos
     $pestanas_sin_repartir_detalle = array(); // [{pestana, motivo}]
     foreach ($filas_excel_mes_actual_por_pestana as $pestana => $filas) {
-        $candidatos = array_values(array_unique($clases_por_pestana[$pestana] ?? array()));
+        $candidatos = blokes_grupos_excel_clases_candidatas_para_pestana($pestana, $clases_catalogo);
         if (!$candidatos) {
             $pestanas_sin_repartir_detalle[] = array('pestana' => $pestana, 'motivo' => 'no casa con ninguna clase conocida');
             continue;
@@ -12848,7 +12847,7 @@ function superadmin_clases_retencion($request) {
         // momento; si hace falta verlas una por una, se puede sacar un endpoint de diagnóstico.
         'pestanasSinRepartir' => $pestanas_sin_repartir,
         'pestanasSinRepartirDetalle' => $pestanas_sin_repartir_detalle,
-        'avisoFuente' => 'Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado. Retención por clase (16/11 16:40): fusiona Excel de Grupos + WooCommerce + hist-pagos con 1 mes de margen, pero los meses de antes de la migración solo se atribuyen a una clase cuando la persona no ha tenido más que una clase distinta en WooCommerce — con varias clases esos meses de antes no entran en la retención por clase (no se puede saber a cuál pertenecen sin adivinar). "Activos" por clase (15/11 19:25/19:30) ya suma los externos del Excel de Grupos que pagan por fuera, emparejados por día+hora de inicio con blokes_grupos_excel_pestana_para_clase() — lo que no case con ninguna clase se cuenta en "pestanasSinRepartir", nunca se adivina.',
+        'avisoFuente' => 'Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado. Retención por clase (16/11 16:40): fusiona Excel de Grupos + WooCommerce + hist-pagos con 1 mes de margen, pero los meses de antes de la migración solo se atribuyen a una clase cuando la persona no ha tenido más que una clase distinta en WooCommerce — con varias clases esos meses de antes no entran en la retención por clase (no se puede saber a cuál pertenecen sin adivinar). "Activos" por clase (15/11 19:25-19:50) ya suma los externos del Excel de Grupos que pagan por fuera, emparejados por día+hora de inicio con blokes_grupos_excel_clases_candidatas_para_pestana() — lo que no case con ninguna clase se cuenta en "pestanasSinRepartir", nunca se adivina.',
     )));
 }
 
