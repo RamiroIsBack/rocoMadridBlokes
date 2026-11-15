@@ -1650,48 +1650,57 @@ function superadmin_save_expenses($request) {
 // ancla equivocada, un movimiento de octubre, porque los CSV más antiguos no siempre traen
 // saldo). Semilla conocida para 2026: CSV "movimientosCuenta (club 1-4 2026).csv", primer
 // movimiento 05/01 TOTAL TARJETAS +475,60 con saldo posterior 515,28 → apertura 515,28 − 475,60 = 39,68 €.
-function blokes_expenses_apertura_club_get($year) {
-    $saved = get_option('blokes_apertura_club_' . intval($year), '');
+function blokes_expenses_apertura_get($year, $entity = 'club') {
+    $entity = sanitize_key($entity) ?: 'club';
+    $saved = get_option('blokes_apertura_' . $entity . '_' . intval($year), '');
     if ($saved !== '') {
         $d = json_decode($saved, true);
         if (is_array($d) && isset($d['saldo'])) return $d;
     }
-    if (intval($year) === 2026) return array('saldo' => 39.68, 'fecha' => '2026-01-01', 'semilla' => true);
+    // Semilla conocida solo para el Club 2026 (ver abajo) — la Rocoteca no tiene una por ahora
+    // (cowork, 15/11 11:45: "falta el saldo a 1/1 de su cuenta principal (Kutxa)"), hay que
+    // meterla a mano con POST /expenses/apertura.
+    if ($entity === 'club' && intval($year) === 2026) return array('saldo' => 39.68, 'fecha' => '2026-01-01', 'semilla' => true);
     return array('saldo' => null, 'fecha' => $year . '-01-01', 'semilla' => false);
 }
-function blokes_expenses_apertura_club_set($year, $saldo) {
-    update_option('blokes_apertura_club_' . intval($year), wp_json_encode(array(
+function blokes_expenses_apertura_set($year, $entity, $saldo) {
+    $entity = sanitize_key($entity) ?: 'club';
+    update_option('blokes_apertura_' . $entity . '_' . intval($year), wp_json_encode(array(
         'saldo' => floatval($saldo), 'fecha' => intval($year) . '-01-01', 'semilla' => false,
     )), false);
 }
 function superadmin_expenses_apertura_get($request) {
-    $year = intval($request->get_param('year') ?: (new DateTime())->format('Y'));
-    return rest_ensure_response(blokes_expenses_apertura_club_get($year));
+    $year   = intval($request->get_param('year') ?: (new DateTime())->format('Y'));
+    $entity = sanitize_key($request->get_param('entity') ?: 'club');
+    return rest_ensure_response(blokes_expenses_apertura_get($year, $entity));
 }
 function superadmin_expenses_apertura_set($request) {
-    $year  = intval($request->get_param('year'));
-    $saldo = $request->get_param('saldo');
+    $year   = intval($request->get_param('year'));
+    $entity = sanitize_key($request->get_param('entity') ?: 'club');
+    $saldo  = $request->get_param('saldo');
     if (!$year || $saldo === null || $saldo === '') {
         return new WP_Error('bad_request', 'Falta year o saldo.', array('status' => 400));
     }
-    blokes_expenses_apertura_club_set($year, $saldo);
-    return rest_ensure_response(blokes_expenses_apertura_club_get($year));
+    blokes_expenses_apertura_set($year, $entity, $saldo);
+    return rest_ensure_response(blokes_expenses_apertura_get($year, $entity));
 }
 
-// Cuadre saldo↔resultado del Club, por AÑO (NOTAS_PARA_CODE_gastos_banco.md, 15/11 11:00/11:15,
-// corrige el 10:55 que Ramiro anuló): apertura del año + ingresos − gastos (SIN "Uso de
-// Rocódromo", que no es gasto real — los gastos de la Rocoteca ya se contabilizan ahí) −
-// traspasos internos a la Rocoteca (línea aparte, tampoco es gasto, pero SÍ sale de la cuenta
-// del Club) = saldo de hoy. Solo sobre el año en curso (no todo el histórico — usar todo el
-// histórico fue el bug del 10:55/11:15: ancla mal el saldo inicial).
-function blokes_expenses_cuadre_club($year = null) {
-    $year = $year ?: intval((new DateTime())->format('Y'));
+// Cuadre saldo↔resultado de una entidad, por AÑO (NOTAS_PARA_CODE_gastos_banco.md, 15/11
+// 11:00/11:15, corrige el 10:55 que Ramiro anuló; generalizado a Rocoteca en 11:45): apertura del
+// año + ingresos − gastos (SIN "Uso de Rocódromo", que no es gasto/ingreso real — los gastos de
+// la Rocoteca con ese dinero ya se contabilizan en la Rocoteca) ± traspasos de "Uso de
+// Rocódromo" (línea aparte, informativa — SALE del Club, ENTRA en la Rocoteca) = saldo de hoy.
+// Solo sobre el año en curso (no todo el histórico — usar todo el histórico fue el bug del
+// 10:55/11:15: ancla mal el saldo inicial).
+function blokes_expenses_cuadre($year = null, $entity = 'club') {
+    $year   = $year ?: intval((new DateTime())->format('Y'));
+    $entity = sanitize_key($entity) ?: 'club';
     global $wpdb;
-    $like = $wpdb->esc_like('blokes_exp_' . $year . '_') . '%_club';
+    $like = $wpdb->esc_like('blokes_exp_' . $year . '_') . '%_' . $wpdb->esc_like($entity);
     $rows = $wpdb->get_results($wpdb->prepare(
         "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s", $like
     ), ARRAY_A);
-    $resultado = 0.0; $traspasos = 0.0;
+    $resultado = 0.0; $traspasos_salida = 0.0; $traspasos_entrada = 0.0;
     foreach ($rows as $row) {
         $saved = json_decode($row['option_value'], true);
         if (!$saved || !is_array($saved['items'] ?? null)) continue;
@@ -1700,11 +1709,13 @@ function blokes_expenses_cuadre_club($year = null) {
                 ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
                 : strtolower($item['concepto'] ?? '');
             $amt = abs(floatval($item['importe'] ?? 0));
-            // "Uso de Rocódromo" (Club → Rocoteca): sale de la cuenta pero NO es un gasto del
-            // Club (Ramiro, 15/11 11:00: los gastos de la Rocoteca ya se contabilizan con ese
-            // dinero) — se aparta en su propia línea para el cuadre, nunca en "gastos".
+            // "Uso de Rocódromo": sale de la cuenta del Club y entra en la de la Rocoteca, pero
+            // NO es gasto del Club ni ingreso de la Rocoteca (Ramiro, 15/11 11:00: los gastos de
+            // la Rocoteca con ese dinero ya se contabilizan ahí) — se aparta en su propia línea
+            // para el cuadre de saldo de cada entidad, nunca en "gastos"/"ingresos".
             if (strpos($concepto_norm, 'rocodromo') !== false) {
-                if (($item['section'] ?? 'costes') === 'costes') $traspasos += $amt;
+                $seccion = $item['section'] ?? 'costes';
+                if ($seccion === 'costes') $traspasos_salida += $amt; else $traspasos_entrada += $amt;
                 continue;
             }
             $es_interno = strpos($concepto_norm, 'transferencia entre cuentas') !== false || $item['excluded'];
@@ -1712,16 +1723,17 @@ function blokes_expenses_cuadre_club($year = null) {
             if (($item['section'] ?? 'costes') === 'costes') $resultado -= $amt; else $resultado += $amt;
         }
     }
-    $apertura       = blokes_expenses_apertura_club_get($year);
-    $saldo_hoy_data = blokes_expenses_saldo_real('club');
+    $apertura       = blokes_expenses_apertura_get($year, $entity);
+    $saldo_hoy_data = blokes_expenses_saldo_real($entity);
     $saldo_hoy      = $saldo_hoy_data['saldo'];
-    $saldo_esperado = ($apertura['saldo'] !== null) ? round($apertura['saldo'] + $resultado - $traspasos, 2) : null;
+    $traspasos_neto = $traspasos_entrada - $traspasos_salida; // Club: negativo (sale); Rocoteca: positivo (entra)
+    $saldo_esperado = ($apertura['saldo'] !== null) ? round($apertura['saldo'] + $resultado + $traspasos_neto, 2) : null;
     $diferencia     = ($saldo_esperado !== null && $saldo_hoy !== null) ? round($saldo_esperado - $saldo_hoy, 2) : null;
     return array(
-        'year' => $year,
+        'entity' => $entity, 'year' => $year,
         'apertura' => $apertura['saldo'], 'fechaApertura' => $apertura['fecha'], 'aperturaEsSemilla' => !empty($apertura['semilla']),
         'resultado' => round($resultado, 2),
-        'traspasosRocodromo' => round($traspasos, 2),
+        'traspasosRocodromo' => round($traspasos_neto, 2),
         'saldoEsperado' => $saldo_esperado,
         'saldoHoy' => $saldo_hoy, 'fechaHoy' => $saldo_hoy_data['fecha'],
         'diferencia' => $diferencia,
@@ -1850,7 +1862,10 @@ function superadmin_get_expenses($request) {
     return rest_ensure_response(array(
         'data' => $data,
         'saldoReal' => blokes_expenses_saldo_real('club'),
-        'cuadre' => blokes_expenses_cuadre_club(),
+        // El P&L (15/11 11:45) quiere las dos entidades a la vez para cuadrar la variación de
+        // saldo consolidada, no solo el Club.
+        'cuadre' => blokes_expenses_cuadre(),
+        'cuadreRocoteca' => blokes_expenses_cuadre(null, 'rocoteca'),
     ));
 }
 

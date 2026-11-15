@@ -197,8 +197,10 @@ export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [breakdown, setBreakdown] = useState(null)
   const [saldoReal, setSaldoReal] = useState(null)
   const [cuadre,    setCuadre]    = useState(null)
+  const [cuadreRocoteca, setCuadreRocoteca] = useState(null)
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   const url = `${CLUB_URL}/wp-json/superadmin/v1/expenses?from=${from || ''}&entity=${entity}&exclude_internal=${excludeInternal ? 1 : 0}`
 
@@ -207,9 +209,13 @@ export function useExpenses(from, entity = 'all', excludeInternal = true) {
     setError(null)
     fetchWithNonceRetry(() => fetch(url, { headers: { 'X-WP-Nonce': window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || '' } }))
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then(json => { setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setSaldoReal(json.saldoReal ?? null); setCuadre(json.cuadre ?? null); setLoading(false) })
+      .then(json => { setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setSaldoReal(json.saldoReal ?? null); setCuadre(json.cuadre ?? null); setCuadreRocoteca(json.cuadreRocoteca ?? null); setLoading(false) })
       .catch(e  => { setError(e.message); setLoading(false) })
-  }, [url])
+  }, [url, reloadKey])
 
-  return { data, breakdown, saldoReal, cuadre, loading, error }
+  return { data, breakdown, saldoReal, cuadre, cuadreRocoteca, loading, error, refetch: () => setReloadKey(k => k + 1) }
 }
+
+// POST /expenses/apertura -- saldo de apertura (1/1) editable de una entidad/año (Club por
+// defecto; también Rocoteca desde 15/11 11:45).
+export const expensesAperturaSet = (year, entity, saldo) => gestionPost('/expenses/apertura', { year, entity, saldo })

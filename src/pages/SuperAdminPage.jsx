@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useRevenue, useExpenses, useClasesRetencion, useIngresosDesglose, ingresosFamiliaSet } from '../hooks/useSuperAdmin'
+import { useRevenue, useExpenses, useClasesRetencion, useIngresosDesglose, ingresosFamiliaSet, expensesAperturaSet } from '../hooks/useSuperAdmin'
 import { PROF_META } from '../data/staffSchedule'
 import useTemaOscuro from '../hooks/useTemaOscuro'
 import ExpensesSection from '../components/ExpensesSection'
@@ -732,13 +732,27 @@ function PLTab() {
   // Ramiro; day para afinarlo por familia necesita blendear con el reparto real de WooCommerce,
   // que solo existe desde mayo -- lo dejo aparte, ver nota). WooCommerce queda como una cifra de
   // comparación aparte, no como el total.
-  const { data: expData, cuadre, loading: loadingExp } = useExpenses('', 'all', true)
+  const { data: expData, cuadre, cuadreRocoteca, loading: loadingExp, refetch: refetchExp } = useExpenses('', 'all', true)
   const monthsSinceJan = new Date().getMonth() + 1
   const { data: wcData, loading: loadingWc } = useRevenue(monthsSinceJan, true)
   const loading = loadingExp || loadingWc
   const [metric,  setMetric ] = useState('ventas')
   const [view,    setView   ] = useState('comparativa')
   const [showIva, setShowIva] = useState(true)
+  // Apertura editable por entidad (cowork, 15/11 11:45: la Rocoteca no tiene semilla, hay que
+  // poder metérsela a mano).
+  const [editandoApertura, setEditandoApertura] = useState(null) // 'club' | 'rocoteca' | null
+  const [aperturaValor, setAperturaValor] = useState('')
+  const [guardandoApertura, setGuardandoApertura] = useState(false)
+  async function guardarApertura(entity) {
+    const n = parseFloat(aperturaValor.replace(',', '.'))
+    if (isNaN(n)) return
+    setGuardandoApertura(true)
+    try {
+      await expensesAperturaSet(new Date().getFullYear(), entity, n)
+      await refetchExp()
+    } catch (e) { alert(e.message) } finally { setGuardandoApertura(false); setEditandoApertura(null) }
+  }
 
   const live2026 = useMemo(() => {
     if (!expData) return {}
@@ -851,13 +865,43 @@ function PLTab() {
           <span className="sa-kpi__label">Ventas en WooCommerce (desde may-26, no el total del año)</span>
         </div>
       </div>
-      {cuadre && cuadre.apertura != null && (
-        <p className={Math.abs(cuadre.diferencia ?? 0) > 50 ? 'sa-error' : 'sa-legend'}>
-          <strong>Cuadre con el banco (Club):</strong> apertura 1/1 {fmtPLVal(cuadre.apertura)}{cuadre.aperturaEsSemilla ? ' (estimada del CSV, editable)' : ''} + resultado Club {fmtPLVal(cuadre.resultado)} − traspasos a la Rocoteca {fmtPLVal(cuadre.traspasosRocodromo)} = {fmtPLVal((cuadre.apertura || 0) + cuadre.resultado - cuadre.traspasosRocodromo)}, saldo real {cuadre.fechaHoy ? `a ${cuadre.fechaHoy.slice(8,10)}/${cuadre.fechaHoy.slice(5,7)}` : 'hoy'} {fmtPLVal(cuadre.saldoHoy)}
-          {Math.abs(cuadre.diferencia ?? 0) > 50 ? ` — diferencia de ${fmtPLVal(cuadre.diferencia)} sin explicar.` : ' — cuadra ✓.'}
-          {' '}Los traspasos a la Rocoteca (ene-jul 26, antes de dejar de hacerse) no son gasto del Club: ese dinero paga gastos que la Rocoteca ya contabiliza aparte — por eso ene-jul el resultado real es el consolidado Club+Rocoteca, no solo el Club.
-        </p>
-      )}
+      {[['club', 'Club', cuadre], ['rocoteca', 'Rocoteca', cuadreRocoteca]].map(([entity, label, c]) => (
+        c && (
+          <p key={entity} className={Math.abs(c.diferencia ?? 0) > 50 ? 'sa-error' : 'sa-legend'}>
+            <strong>Cuadre con el banco ({label}):</strong>{' '}
+            apertura 1/1{' '}
+            {editandoApertura === entity ? (
+              <>
+                <input
+                  type="number" step="0.01" value={aperturaValor} autoFocus
+                  onChange={e => setAperturaValor(e.target.value)}
+                  style={{ width: 90 }}
+                />
+                <button className="sa-link" disabled={guardandoApertura} onClick={() => guardarApertura(entity)}>Guardar</button>
+                <button className="sa-link" onClick={() => setEditandoApertura(null)}>Cancelar</button>
+              </>
+            ) : c.apertura != null ? (
+              <>
+                {fmtPLVal(c.apertura)}{c.aperturaEsSemilla ? ' (estimada del CSV' : ''}{c.aperturaEsSemilla ? ')' : ''}{' '}
+                <button className="sa-link" onClick={() => { setEditandoApertura(entity); setAperturaValor(String(c.apertura)) }}>editar</button>
+              </>
+            ) : (
+              <button className="sa-link" onClick={() => { setEditandoApertura(entity); setAperturaValor('') }}>sin dato, añadir</button>
+            )}
+            {c.apertura != null && (
+              <>
+                {' '}+ resultado {fmtPLVal(c.resultado)}
+                {c.traspasosRocodromo !== 0 && <> {c.traspasosRocodromo >= 0 ? '+' : '−'} traspasos con la Rocoteca {fmtPLVal(Math.abs(c.traspasosRocodromo))}</>}
+                {' '}= {fmtPLVal(c.apertura + c.resultado + c.traspasosRocodromo)}, saldo real {c.fechaHoy ? `a ${c.fechaHoy.slice(8,10)}/${c.fechaHoy.slice(5,7)}` : 'hoy'} {fmtPLVal(c.saldoHoy)}
+                {Math.abs(c.diferencia ?? 0) > 50 ? ` — diferencia de ${fmtPLVal(c.diferencia)} sin explicar.` : ' — cuadra ✓.'}
+              </>
+            )}
+            {entity === 'club' && c.apertura != null && (
+              <> Los traspasos con la Rocoteca («Uso de Rocódromo», ene-jul 26, ya no se hace) no son gasto del Club: ese dinero paga gastos que la Rocoteca ya contabiliza aparte — por eso ene-jul el resultado real es el consolidado Club+Rocoteca, no solo el Club.</>
+            )}
+          </p>
+        )
+      ))}
 
       <div className="sa-pl-tabs">
         {PL_METRICS_LIST.map(m => (
