@@ -5592,6 +5592,11 @@ function superadmin_gestion_grupos($request) {
     // activa EN OTRA CLASE (no solo en la misma, que ya lo resuelve la fusión de más abajo) —
     // mismo cliente, cualquier clase, usado al construir "Revisar datos" en el frontend.
     $uid_por_sub = array(); $activas_por_uid = array();
+    // Para fusionar un "externo" (8.4) con su cuenta web cuando son la misma persona (cowork,
+    // 15/11 11:45/12:30: "Francisco Márquez · Fuera de la web" y "franciscomarquez · Activo"
+    // salen en dos filas con el mismo pago" → fusionar) — por grupo (mismo día/horario/edad),
+    // teléfono normalizado y nombre compacto (sin espacios) → persona_key de WooCommerce.
+    $telefono_a_pk_por_grupo = array(); $nombre_compacto_a_pk_por_grupo = array();
 
     foreach ($all as $sub) {
         if (empty($sub['id'])) continue;
@@ -5836,6 +5841,11 @@ function superadmin_gestion_grupos($request) {
 
         if (!isset($grupos[$gkey]['personas'][$persona_key])) $grupos[$gkey]['personas'][$persona_key] = array();
         $grupos[$gkey]['personas'][$persona_key][] = $fila;
+
+        $tel_norm = $telefono ? blokes_externos_normaliza_telefono($telefono) : '';
+        if ($tel_norm) $telefono_a_pk_por_grupo[$gkey][$tel_norm] = $persona_key;
+        $nombre_compacto = $alumno_nombre ? blokes_externos_normaliza_nombre_compacto($alumno_nombre) : '';
+        if ($nombre_compacto) $nombre_compacto_a_pk_por_grupo[$gkey][$nombre_compacto] = $persona_key;
     }
 
     // Alumnos "externos" (8.4: pagan fuera de la web, no tienen suscripción) — una fila más por
@@ -5855,7 +5865,15 @@ function superadmin_gestion_grupos($request) {
         }
         $pagos_ext = array_fill_keys($meses, null);
         foreach ($ext['pagos'] as $ym => $p) if (isset($meses_set[$ym])) $pagos_ext[$ym] = array_merge($p, array('estadoPedido' => 'completed'));
-        $persona_key_ext = 'ext' . $ext['id'];
+        // Fusionar con la cuenta web del mismo grupo si el teléfono o el nombre (sin espacios)
+        // casan — así no sale como fila aparte "Fuera de la web" cuando ya migró a WooCommerce.
+        $tel_ext_norm = $ext['telefono'] ? blokes_externos_normaliza_telefono($ext['telefono']) : '';
+        $nombre_ext_compacto = $ext['nombre'] ? blokes_externos_normaliza_nombre_compacto($ext['nombre']) : '';
+        $persona_key_ext = ($tel_ext_norm && isset($telefono_a_pk_por_grupo[$gkey_ext][$tel_ext_norm]))
+            ? $telefono_a_pk_por_grupo[$gkey_ext][$tel_ext_norm]
+            : (($nombre_ext_compacto && isset($nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto]))
+                ? $nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto]
+                : 'ext' . $ext['id']);
         $grupos[$gkey_ext]['personas'][$persona_key_ext][] = array(
             'subId' => 'ext-' . $ext['id'], 'alumno' => $ext['nombre'], 'telefono' => $ext['telefono'],
             'optinWhatsapp' => $ext['telefono'] ? ($optin_por_tel[blokes_externos_normaliza_telefono($ext['telefono'])] ?? null) : null,
@@ -5897,9 +5915,16 @@ function superadmin_gestion_grupos($request) {
                 if (!$principal['pendiente'] && !$principal['tieneAdelantado'] && !$principal_cobrado_este_mes && $otra['pendiente']) $principal['pendiente'] = $otra['pendiente'];
                 if ($otra['exento']) $principal['exento'] = true;
             }
-            if ($otras) {
-                $principal['otrasSubs'] = array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $otras);
-                $duplicados[] = array('alumno' => $principal['alumno'], 'subs' => array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $subs));
+            // Un "externo" fusionado aquí (misma persona, ya migró a WooCommerce — 15/11
+            // 11:45/12:30) no es un duplicado de verdad: no tiene un subId real, así que no
+            // puede entrar en "Fusionar"/"Revisar datos" (fallaría contra un ID falso) ni
+            // inflar el recuento de duplicados. Su historial de pagos ya se fusionó arriba.
+            $otras_reales = array_values(array_filter($otras, function($s) { return empty($s['esExterno']); }));
+            if (count($otras) > count($otras_reales)) $principal['fusionadoExterno'] = true; // aviso suave en el frontend, no es duplicado
+            if ($otras_reales) {
+                $principal['otrasSubs'] = array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $otras_reales);
+                $subs_reales = array_values(array_filter($subs, function($s) { return empty($s['esExterno']); }));
+                $duplicados[] = array('alumno' => $principal['alumno'], 'subs' => array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $subs_reales));
             } elseif (!$principal['enVigor']) {
                 // Sin duplicado EN ESTE grupo, pero puede tener otra activa en OTRO (se cambió de
                 // clase y la vieja se quedó en espera, cowork 14/11 18:40 punto 4) — para la
@@ -11558,6 +11583,31 @@ function blokes_altas_bajas_calcular($months) {
         }
     }
 
+    // Consolidar identidades: la misma persona real puede salir con personaKey distinta en
+    // suscripciones distintas si alguna no tiene customer_id (pedido de invitado) y otra sí —
+    // eso infla "personas activas" (cowork, 15/11 12:30: "nov «al final» 202 vs 164 activos de
+    // Grupos"). Si un teléfono aparece bajo un ÚNICO uid real Y también bajo alguna entrada sin
+    // uid, y los nombres se parecen (mismo guardia que el aviso de duplicados: nunca fundir
+    // hermanos que comparten el teléfono de un padre/madre, por eso solo actúa si el teléfono
+    // no es ambiguo — un solo uid detrás), esa entrada sin uid se reasigna al personaKey del uid.
+    $telefono_a_uids = array(); // telefono => [uid => nombre de ejemplo]
+    foreach ($enriquecidos as $e) {
+        if ($e['uid'] && $e['telefono']) {
+            $tel = blokes_externos_normaliza_telefono($e['telefono']);
+            if ($tel) $telefono_a_uids[$tel][$e['uid']] = $e['nombre'];
+        }
+    }
+    foreach ($enriquecidos as &$e) {
+        if ($e['uid'] || !$e['telefono']) continue;
+        $tel = blokes_externos_normaliza_telefono($e['telefono']);
+        if (!$tel || !isset($telefono_a_uids[$tel]) || count($telefono_a_uids[$tel]) !== 1) continue; // ambiguo o sin dato: no tocar
+        $uid_candidato = array_key_first($telefono_a_uids[$tel]);
+        $nombre_uid = $telefono_a_uids[$tel][$uid_candidato];
+        if ($nombre_uid && $e['nombre'] && !blokes_externos_nombres_parecidos(blokes_externos_normaliza_nombre($e['nombre']), blokes_externos_normaliza_nombre($nombre_uid))) continue;
+        $e['personaKey'] = 'u' . $uid_candidato;
+    }
+    unset($e);
+
     // ---- Mapas globales por persona, a partir de TODAS sus suscripciones.
     $persona_activo_en  = array(); // personaKey => [classKey => true] — sigue viniendo de verdad AHORA (pending-cancel incluido)
     $persona_min_start  = array(); // personaKey => Y-m más antiguo entre TODAS sus suscripciones
@@ -11757,6 +11807,23 @@ function blokes_altas_bajas_calcular($months) {
     }
     usort($data, function($a, $b) { return $b['active'] <=> $a['active']; });
 
+    // Intervalos "reales" (cowork, 15/11 12:30: "Por mes incoherente... al final no se
+    // recalcula... retención por cohorte sigue con los totales viejos" — todo tiene que salir
+    // de la MISMA fuente cruzada con hist-pagos/Excel, no solo "altas"). Por persona, si su
+    // alta real (externa) es anterior a su alta de WooCommerce, se extiende el intervalo MÁS
+    // ANTIGUO hacia atrás hasta esa fecha real — nunca se crea un intervalo nuevo aparte, para
+    // no abrir un hueco falso entre el histórico externo y el primer intervalo real de Woo.
+    $persona_intervalos_real = array();
+    foreach ($persona_intervalos as $pk => $ivs) {
+        $extendidos = $ivs;
+        $real_min = $persona_min_start_real[$pk] ?? null;
+        if ($real_min !== null && isset($persona_min_start[$pk]) && $real_min < $persona_min_start[$pk]) {
+            usort($extendidos, function($a, $b) { return strcmp($a['start'], $b['start']); });
+            $extendidos[0]['start'] = $real_min;
+        }
+        $persona_intervalos_real[$pk] = $extendidos;
+    }
+
     return array(
         'data' => $data, 'duplicadosMismaClase' => $duplicados_misma_clase,
         'monthsRange' => $months_range, 'startYm' => $start_ym, 'nowYm' => $now_ym,
@@ -11766,9 +11833,12 @@ function blokes_altas_bajas_calcular($months) {
         'personaActivoEn' => $persona_activo_en, 'personaIntervalos' => $persona_intervalos,
         'personaHistorial' => $persona_historial,
         'classSubIds' => $class_sub_ids, 'classMinStart' => $class_min_start,
-        // 'Nuevo' real cruzado con hist-pagos (11:15) — solo para members_active.new/history.new,
-        // nunca para cohortes/retención (personaMinStart de arriba sigue siendo 100% WooCommerce).
+        // 'Nuevo' real cruzado con hist-pagos+Excel (11:15/12:30): personaMinStartReal +
+        // personaIntervalosReal se usan en "Por mes" y en la retención por cohorte de
+        // superadmin_clases_retencion(); personaMinStart/personaIntervalos (100% WooCommerce,
+        // sin extender) se dejan intactos para quien los necesite tal cual.
         'personaMinStartReal' => $persona_min_start_real,
+        'personaIntervalosReal' => $persona_intervalos_real,
         'externosSinEmparejar' => $externos_sin_emparejar,
     );
 }
@@ -11852,13 +11922,14 @@ function superadmin_clases_retencion($request) {
     // pinta de estar vacíos. Admite ?mes=YYYY-MM para elegir otro.
     $mes_ingreso_param = sanitize_text_field((string) $request->get_param('mes'));
     $mes_ingreso = preg_match('/^\d{4}-\d{2}$/', $mes_ingreso_param) ? $mes_ingreso_param : blokes_mes_mas($now_ym, -1);
-    $persona_min_start  = $calculo['personaMinStart'];
-    // "Nuevo" real, cruzado con hist-pagos/Excel (cowork, 15/11 11:45: "Por mes sigue igual...
-    // usar la misma función que Altas y Bajas") — personaMinStart de arriba sigue siendo 100%
-    // WooCommerce (lo usan cohortes/retención, sin tocar).
-    $persona_min_start_real = $calculo['personaMinStartReal'];
+    // "Nuevo" real, cruzado con hist-pagos/Excel (cowork, 15/11 11:45/12:30: "Por mes
+    // incoherente... al final no se recalcula... retención por cohorte sigue con los totales
+    // viejos" — TODO (altas, inicio/fin, bajas, cohortes) tiene que salir de la MISMA fuente
+    // cruzada, si no las cuentas no casan entre sí). personaIntervalosReal extiende el intervalo
+    // más antiguo de cada persona hasta su alta real cuando es anterior a la de WooCommerce.
+    $persona_min_start_real  = $calculo['personaMinStartReal'];
+    $persona_intervalos_real = $calculo['personaIntervalosReal'];
     $persona_activo_en  = $calculo['personaActivoEn'];
-    $persona_intervalos = $calculo['personaIntervalos'];
     $persona_historial  = $calculo['personaHistorial'];
     $class_sub_ids      = $calculo['classSubIds'];
     $class_min_start    = $calculo['classMinStart'];
@@ -11887,7 +11958,7 @@ function superadmin_clases_retencion($request) {
     foreach ($months_range as $ym) {
         $mes_anterior = blokes_mes_mas($ym, -1);
         $inicio = 0; $fin = 0; $bajas = 0;
-        foreach ($persona_intervalos as $pk => $ivs) {
+        foreach ($persona_intervalos_real as $pk => $ivs) {
             $activo_antes = blokes_persona_cubre_mes($ivs, $mes_anterior);
             $activo_ahora = blokes_persona_cubre_mes($ivs, $ym);
             if ($activo_antes) $inicio++;
@@ -11907,7 +11978,7 @@ function superadmin_clases_retencion($request) {
     // ---- Cohortes: de quien se dio de alta en el mes X, % que sigue a 1/3/6 meses ----
     $cohortes = array();
     foreach ($months_range as $ym) {
-        $personas_cohorte = array_keys(array_filter($persona_min_start, function($v) use ($ym) { return $v === $ym; }));
+        $personas_cohorte = array_keys(array_filter($persona_min_start_real, function($v) use ($ym) { return $v === $ym; }));
         if (!$personas_cohorte) continue;
         $fila = array('mes' => $ym, 'total' => count($personas_cohorte));
         foreach (array(1, 3, 6) as $offset) {
@@ -11915,7 +11986,7 @@ function superadmin_clases_retencion($request) {
             if ($mes_objetivo > $now_ym) { $fila['m' . $offset] = null; continue; }
             $sigue = 0;
             foreach ($personas_cohorte as $pk) {
-                if (blokes_persona_retenida_continua($persona_intervalos[$pk] ?? array(), $ym, $mes_objetivo)) $sigue++;
+                if (blokes_persona_retenida_continua($persona_intervalos_real[$pk] ?? array(), $ym, $mes_objetivo)) $sigue++;
             }
             $fila['m' . $offset] = round($sigue / count($personas_cohorte) * 100, 1);
         }
@@ -11924,7 +11995,7 @@ function superadmin_clases_retencion($request) {
 
     // ---- Permanencia media (meses), activos vs. ya se han ido ----
     $permanencia_activos = array(); $permanencia_idos = array();
-    foreach ($persona_min_start as $pk => $min_ym) {
+    foreach ($persona_min_start_real as $pk => $min_ym) {
         $sigue_activo = !empty($persona_activo_en[$pk]);
         $hasta = $sigue_activo ? $now_ym : ($calculo['personaMaxEnd'][$pk] ?? $min_ym);
         $meses = blokes_meses_entre($min_ym, $hasta) + 1;

@@ -1480,6 +1480,9 @@ function TablaAlumnos({ alumnos, meses, onWa, onMenu }) {
                   {a.otrasSubs?.length > 0 && (
                     <span title={`${a.otrasSubs.length} suscripción(es) antigua(s) colgando en este grupo (duplicado)`}> ⚠</span>
                   )}
+                  {a.fusionadoExterno && (
+                    <span className="sv-ot-muted" title="Antes pagaba fuera de la web (Excel) — ya fusionado con esta cuenta, el historial de pagos del Excel está incluido aquí."> (fusionado con Excel)</span>
+                  )}
                   {(a.edad || '').includes('Menores') && (
                     a.tutorNombre || a.tutorTelefono
                       ? <div className="sv-ot-muted sv-grp-tutor">👪 {a.tutorNombre || '—'}{a.tutorTelefono ? ` · ${a.tutorTelefono}` : ''}</div>
