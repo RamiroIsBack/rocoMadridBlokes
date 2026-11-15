@@ -4875,41 +4875,57 @@ function _superadmin_orders_for_blog($start_date) {
     $cat_cache = array();
     $rows = array();
     foreach ($ids as $oid) {
-        $order = wc_get_order($oid);
-        if (!$order) continue;
-        // a) Facturas anuladas en VeriFactu: no cuentan como cobrado (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02).
-        if (blokes_pedido_factura_anulada($order)) continue;
-        // c) Mes por fecha de pago, no de creación — una renovación de octubre pagada en
-        // noviembre caía en octubre.
-        $dt = $order->get_date_paid() ?: $order->get_date_created();
-        if (!$dt) continue;
-        $month = $dt->format('Y-m');
-        // b) Reembolsos: se restan del total y de cada línea (antes no se veían las devoluciones).
-        $reembolsado_total = floatval($order->get_total_refunded());
-        $row   = array(
-            'month' => $month, 'total' => floatval($order->get_total()) - $reembolsado_total,
-            'tax' => floatval($order->get_total_tax()), 'items' => array(),
-        );
-        foreach ($order->get_items() as $item_id => $item) {
-            $cat     = '';
-            $product = $item->get_product();
-            if ($product) {
-                $pid = $product->get_parent_id() ?: $product->get_id();
-                if (!array_key_exists($pid, $cat_cache)) {
-                    $terms = get_the_terms($pid, 'product_cat');
-                    $cat_cache[$pid] = ($terms && !is_wp_error($terms)) ? $terms[0]->name : '';
-                }
-                $cat = $cat_cache[$pid];
-            }
-            $reembolsado_item = method_exists($order, 'get_total_refunded_for_item') ? floatval($order->get_total_refunded_for_item($item_id)) : 0.0;
-            $row['items'][] = array(
-                'name'     => $item->get_name(),
-                'qty'      => intval($item->get_quantity()),
-                'revenue'  => floatval($item->get_subtotal()) - $reembolsado_item,
-                'category' => $cat,
+        // Un pedido raro (datos corruptos, producto borrado...) no puede tirar la pestaña
+        // entera — con 'limit' => -1 son potencialmente miles de pedidos, y Superadmin ›
+        // Ingresos es la que más se mira (cowork, 15/11 09:55: HTTP 500 tras el cambio de
+        // reembolsos/fecha de pago).
+        try {
+            $order = wc_get_order($oid);
+            if (!$order) continue;
+            // a) Facturas anuladas en VeriFactu: no cuentan como cobrado (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02).
+            if (blokes_pedido_factura_anulada($order)) continue;
+            // c) Mes por fecha de pago, no de creación — una renovación de octubre pagada en
+            // noviembre caía en octubre.
+            $dt = $order->get_date_paid() ?: $order->get_date_created();
+            if (!$dt) continue;
+            $month = $dt->format('Y-m');
+            // b) Reembolsos: se restan del total y de cada línea (antes no se veían las devoluciones).
+            $reembolsado_total = floatval($order->get_total_refunded());
+            $row   = array(
+                'month' => $month, 'total' => floatval($order->get_total()) - $reembolsado_total,
+                'tax' => floatval($order->get_total_tax()), 'items' => array(),
             );
+            // Solo mirar el reembolso POR LÍNEA si de verdad hay algún reembolso en este pedido
+            // — get_total_refunded_for_item() hace una consulta aparte por cada línea, y la
+            // inmensa mayoría de pedidos no tienen reembolsos: con 'limit' => -1 recorriendo
+            // meses de pedidos, eso eran miles de consultas de más — la causa más probable del
+            // 500 (timeout/memoria), no un fallo de sintaxis.
+            $tiene_reembolso = $reembolsado_total > 0.0;
+            foreach ($order->get_items() as $item_id => $item) {
+                $cat     = '';
+                $product = $item->get_product();
+                if ($product) {
+                    $pid = $product->get_parent_id() ?: $product->get_id();
+                    if (!array_key_exists($pid, $cat_cache)) {
+                        $terms = get_the_terms($pid, 'product_cat');
+                        $cat_cache[$pid] = ($terms && !is_wp_error($terms)) ? $terms[0]->name : '';
+                    }
+                    $cat = $cat_cache[$pid];
+                }
+                $reembolsado_item = ($tiene_reembolso && method_exists($order, 'get_total_refunded_for_item'))
+                    ? floatval($order->get_total_refunded_for_item($item_id)) : 0.0;
+                $row['items'][] = array(
+                    'name'     => $item->get_name(),
+                    'qty'      => intval($item->get_quantity()),
+                    'revenue'  => floatval($item->get_subtotal()) - $reembolsado_item,
+                    'category' => $cat,
+                );
+            }
+            $rows[] = $row;
+        } catch (\Throwable $e) {
+            error_log('Blokes _superadmin_orders_for_blog: pedido ' . $oid . ' fallo: ' . $e->getMessage());
+            continue;
         }
-        $rows[] = $row;
     }
     return $rows;
 }
