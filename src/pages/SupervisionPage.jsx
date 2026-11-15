@@ -987,6 +987,10 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
   const [extPeriodo, setExtPeriodo] = useState(hoyISO().slice(0, 7))
   const [extCubreMeses, setExtCubreMeses] = useState(1)
   const [grupoNuevo, setGrupoNuevo] = useState('') // "dia|horario|edad" del <select>
+  // Ramiro/cowork, 15/11 17:25 (mover a los de medianos sin que les cambie el precio): por
+  // defecto marcado cuando el cambio es solo de horario (mismo día y edad que ahora) — en ese
+  // caso lo normal es que sea un movimiento administrativo, no un cambio de clase de verdad.
+  const [mantenerPrecio, setMantenerPrecio] = useState(false)
   // Marcar cobrado y cambiar de grupo pueden generar factura/cambio de precio de verdad: por
   // defecto se simulan. El resto ya están validadas con datos de prueba, así que por defecto
   // actúan de verdad.
@@ -1050,7 +1054,7 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
         if (!sim && preview?.posibleDuplicadoSub && !confirmarDuplicado) throw new Error('Confirma qué pasa con la otra suscripción de esa clase.')
         const [dia, horario, edad] = grupoNuevo.split('|')
         res = await gestionCambiarGrupo({
-          sub_id: alumno.subId, dia, horario, edad, simular: sim,
+          sub_id: alumno.subId, dia, horario, edad, simular: sim, mantenerPrecio,
           ...(preview?.posibleDuplicadoSub ? { confirmarDuplicado } : {}),
         })
       } else if (tipo === 'ext_cobrar') {
@@ -1269,7 +1273,17 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
                   {alumno.importeCatalogo != null ? ` · ${alumno.importeCatalogo} €` : ''}
                 </p>
                 <label className="sv-grp-field">Grupo nuevo
-                  <select className="sv-tests-select" value={grupoNuevo} onChange={e => setGrupoNuevo(e.target.value)}>
+                  <select className="sv-tests-select" value={grupoNuevo} onChange={e => {
+                    const valor = e.target.value
+                    setGrupoNuevo(valor)
+                    // Por defecto, mantener el precio cuando el cambio es solo de horario (mismo
+                    // día y la misma edad que ya tenía) — lo normal en ese caso es un movimiento
+                    // administrativo, no un cambio de clase de verdad.
+                    if (valor) {
+                      const [dia, , edad] = valor.split('|')
+                      setMantenerPrecio(dia === (alumno.dia || '') && edad === (alumno.edad || 'Adultos'))
+                    }
+                  }}>
                     <option value="">— Elige día · horario · edad —</option>
                     {clasesSemanales.map(c => (
                       <option key={`${c.dia}|${c.horario}|${c.edad}`} value={`${c.dia}|${c.horario}|${c.edad}`}>
@@ -1278,8 +1292,15 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
                     ))}
                   </select>
                 </label>
+                <label className="sv-grp-field sv-grp-field--check">
+                  <input type="checkbox" checked={mantenerPrecio} onChange={e => setMantenerPrecio(e.target.checked)} />
+                  Mantener precio actual (no recalcular con la tabla de tarifas)
+                </label>
                 <p className="sv-to-warn-txt">
-                  Cambia el precio de la suscripción a partir de la próxima renovación (según la tabla de tarifas vigente), sin tocar lo ya pagado. No genera pedido ni factura.
+                  {mantenerPrecio
+                    ? 'El precio de la suscripción se queda igual — solo cambia la clase (día/horario/edad).'
+                    : 'Cambia el precio de la suscripción a partir de la próxima renovación (según la tabla de tarifas vigente), sin tocar lo ya pagado.'}
+                  {' '}No genera pedido ni factura.
                 </p>
               </>
             )}

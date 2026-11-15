@@ -141,9 +141,11 @@ class RocoMadrid_SF_Shortcode {
 				'click_to_return' => __( 'Click to go back to this step', 'neve-child' ),
 				// Nombres de clases
 				'classes_full' => __( 'Classes full', 'neve-child' ),
-				'join_waiting_list' => __( 'Contact us to join the waiting list', 'neve-child' ),
-				'contact_via_whatsapp' => __( 'Contact via WhatsApp', 'neve-child' ),
-				'contact_form' => __( 'Contact form', 'neve-child' ),
+				// Sugerencia de alternativa cuando una franja está completa (Ramiro, 15/11
+				// 17:25, punto B) — sin lista de espera ni WhatsApp.
+				'suggestion_intro' => __( 'We suggest instead:', 'neve-child' ),
+				'spots_left' => __( 'spots left', 'neve-child' ),
+				'choose_this_class' => __( 'Choose this class', 'neve-child' ),
 			),
 		);
 

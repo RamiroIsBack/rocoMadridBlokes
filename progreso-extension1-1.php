@@ -11015,6 +11015,13 @@ function superadmin_gestion_cambiar_grupo($request) {
     $plan_key = ($periodo === 'year') ? 'annual' : (($interval >= 3) ? 'quarterly' : 'monthly');
     $precio_nuevo  = floatval($planes[$plan_key]['price'] ?? $planes['monthly']['price']);
     $precio_actual = floatval($sub->get_total());
+    // Ramiro/cowork, 15/11 17:25 (medianos → M-J 18:30-19:30: algunas suben de precio con la
+    // tarifa normal, p. ej. 55→74 o 157→200): con mantenerPrecio=true se ignora el precio
+    // recalculado y se conserva el de la línea/suscripción tal cual — solo cambia la clase
+    // (día/horario/edad), nunca el dinero. Pensado para mover gente de una franja a otra sin
+    // tocarle la tarifa que ya tenía.
+    $mantener_precio = (bool) $request->get_param('mantenerPrecio');
+    if ($mantener_precio) $precio_nuevo = $precio_actual;
 
     $antes   = array('dia' => $dia_actual, 'horario' => $horario_actual, 'edad' => $edad_actual, 'precio' => $precio_actual);
     $despues = array('dia' => $dia_nuevo,  'horario' => $horario_nuevo,  'edad' => $edad_nuevo,  'precio' => $precio_nuevo);
