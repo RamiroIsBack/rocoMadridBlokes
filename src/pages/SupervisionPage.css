@@ -1404,6 +1404,11 @@
   border: 1px solid color-mix(in srgb, var(--state-warn) 40%, transparent);
   color: var(--state-warn);
 }
+.sv-aviso--bad {
+  background: color-mix(in srgb, var(--state-bad) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-bad) 40%, transparent);
+  color: var(--state-bad);
+}
 .sv-aviso__lista { margin: 6px 0 0; padding-left: 20px; }
 .sv-aviso__lista li { margin: 2px 0; }
 

@@ -2512,6 +2512,46 @@ function blokes_alumno_customer_id_de_sub($s, $sub_obj = false) {
     if ($sub_obj === false) $sub_obj = blokes_alumno_sub_obj($s);
     return $sub_obj ? intval($sub_obj->get_customer_id()) : 0;
 }
+
+// Suscripciones activas/en espera/pendientes de una persona, para el aviso de duplicados antes
+// de crear una nueva o marcar cobrada otra (Ramiro, 15/11 08:35: "¿también esta nueva o es un
+// duplicado?"). Si se pasa $clase_objetivo (dia ya como pareja/horario/edad), cada suscripción
+// lleva 'mismaClase' (true/false) para que el frontend pinte rojo/amarillo sin repetir la
+// comparación; con $solo_misma_clase=true solo se devuelven las de esa misma clase (lo que
+// necesita "Marcar cobrado": ahí solo importa si hay otra de la MISMA clase).
+function blokes_subs_en_vigor_de_persona($uid, $excluir_sub_id = null, $clase_objetivo = null, $solo_misma_clase = false) {
+    if (!$uid) return array();
+    $out = array();
+    foreach (blokes_get_all_subscription_data() as $s) {
+        if (!in_array($s['status'] ?? '', array('active', 'on-hold', 'pending'), true)) continue;
+        $sub_id = intval($s['id'] ?? 0);
+        if (!$sub_id || ($excluir_sub_id && $sub_id === intval($excluir_sub_id))) continue;
+        $sub_obj = blokes_alumno_sub_obj($s);
+        if (blokes_alumno_customer_id_de_sub($s, $sub_obj) !== intval($uid)) continue;
+        $edad = $s['edad'] ?: 'Adultos';
+        $dia_pareja = blokes_dia_a_pareja($s['dia'] ?? '');
+        $misma_clase = $clase_objetivo
+            ? ($dia_pareja === $clase_objetivo['dia'] && ($s['horario'] ?? '') === $clase_objetivo['horario'] && $edad === $clase_objetivo['edad'])
+            : null;
+        if ($solo_misma_clase && !$misma_clase) continue;
+        $next_payment = ($sub_obj && $s['status'] === 'active' && method_exists($sub_obj, 'get_date')) ? $sub_obj->get_date('next_payment') : '';
+        $out[] = array(
+            'subId' => $sub_id, 'dia' => $dia_pareja, 'horario' => $s['horario'] ?? '', 'edad' => $edad,
+            'estado' => $s['status'], 'mismaClase' => $misma_clase,
+            'importe' => $sub_obj ? floatval($sub_obj->get_total()) : null,
+            'proximoPago' => $next_payment ? date('Y-m-d', strtotime($next_payment)) : null,
+        );
+    }
+    return $out;
+}
+
+// Pedido con la factura anulada en VeriFactu (FactuPress → Registros → «Anular»): el pedido
+// sigue en estado "Completado" en WooCommerce (Ramiro no lo toca para no disparar nada más),
+// pero Ramiro decidió el 15/11 08:30 que no debe contar como cobrado en ningún sitio de Blokes
+// (son facturas duplicadas anuladas a mano, no reembolsos reales — 5 pedidos, 367 €).
+function blokes_pedido_factura_anulada($order) {
+    return $order && $order->get_meta('_aeat_cancelled_invoice');
+}
 // Meses (sep/oct/nov 2026) con pago o exención de un alumno en el Excel, por teléfono o nombre.
 function blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel, $nombre) {
     $fila = ($tel && isset($excel_por_tel[$tel])) ? $excel_por_tel[$tel]
@@ -5011,6 +5051,7 @@ function superadmin_gestion_grupos($request) {
         foreach ($order_ids as $oid) {
             $order = wc_get_order($oid);
             if (!$order) continue;
+            if (blokes_pedido_factura_anulada($order)) continue; // 15/11 08:30: no cuenta como cobrado
             $fecha = $order->get_date_paid() ?: $order->get_date_created();
             if (!$fecha) continue;
             $o_status = $order->get_status();
@@ -6282,9 +6323,9 @@ function blokes_sync_grupos_dia_horario_de_sub($sub_id) {
         // El día de la suscripción es un día suelto ("Miércoles"), pero el grupo (y la pestaña
         // de Eva) es la pareja completa ("Lunes-Miércoles") — mismo criterio que Grupos (cowork,
         // 3/11 12:29: le llegaba el día suelto y la escritura nunca encontraba su pestaña).
-        if (intval($s['id'] ?? 0) === intval($sub_id)) return array('dia' => blokes_dia_a_pareja($s['dia'] ?? ''), 'horario' => $s['horario'] ?? '');
+        if (intval($s['id'] ?? 0) === intval($sub_id)) return array('dia' => blokes_dia_a_pareja($s['dia'] ?? ''), 'horario' => $s['horario'] ?? '', 'edad' => $s['edad'] ?: 'Adultos');
     }
-    return array('dia' => '', 'horario' => '');
+    return array('dia' => '', 'horario' => '', 'edad' => '');
 }
 
 // POST /gestion/sync-grupos/reintentar-cobro — reescribir a mano UN cobro concreto en el Excel
@@ -7239,6 +7280,11 @@ function blokes_sync_grupos_aplicar_efecto($cambio, $datos) {
             $req->set_param('fecha', $fecha);
             $req->set_param('nota', 'Detectado en el Excel de Eva (sincronización automática, pestaña ' . $cambio['pestana'] . ').');
             $req->set_param('simular', false);
+            // El aviso de duplicados (15/11 08:35) es para quien pulsa "Marcar cobrado" a mano
+            // sin haber mirado nada más — este camino viene de un pago que YA está en el Excel
+            // de Eva (bandeja ya revisada, o un tipo marcado "claramente seguro" para autoaplicar),
+            // así que no hace falta volver a preguntar aquí.
+            $req->set_param('confirmarDuplicado', true);
             return superadmin_gestion_marcar_cobrado($req);
         }
         $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/externos/' . intval($cambio['match_id']) . '/pago');
@@ -9210,6 +9256,18 @@ function superadmin_gestion_marcar_cobrado($request) {
     $metodo_label = blokes_gestion_metodo_label($metodo);
     $antes = array('status' => $sub->get_status());
 
+    // Ramiro, 15/11 08:35 (tras el incidente del 15/11 08:15, #7545/#7546/#7547 cobradas por
+    // error porque la persona tenía dos suscripciones activas de la misma clase): si tiene OTRA
+    // en vigor de la MISMA clase, avisar antes de marcar cobrada esta.
+    $confirmar_duplicado_sub = (bool) $request->get_param('confirmarDuplicado');
+    $uid_marcar_cobrado = blokes_alumno_customer_id_de_sub(array('id' => $sub_id), $sub);
+    $dh_marcar_cobrado = blokes_sync_grupos_dia_horario_de_sub($sub_id);
+    $subs_en_vigor = blokes_subs_en_vigor_de_persona($uid_marcar_cobrado, $sub_id, $dh_marcar_cobrado, true);
+    $hay_duplicado_sub_sin_resolver = !empty($subs_en_vigor) && !$confirmar_duplicado_sub;
+    if ($hay_duplicado_sub_sin_resolver && !$simular) {
+        return new WP_Error('duplicado_suscripcion', 'Esta persona tiene otra suscripción en vigor de la misma clase — confirma cuál es la que se cobra (confirmarDuplicado).', array('status' => 409));
+    }
+
     // ── Efectivo: nada de WooCommerce, nada de factura ──
     if ($es_efectivo) {
         $periodo = date('Y-m', $fecha_ts);
@@ -9227,7 +9285,10 @@ function superadmin_gestion_marcar_cobrado($request) {
                 'subId' => $sub_id, 'periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo_label,
                 'fecha' => $fecha_txt, 'parcial' => $parcial, 'reactivaLaSuscripcion' => $reactivaria,
                 'pedidosACancelar' => $pedidos_a_cancelar,
-                'aviso' => 'Simulación: no se escribiría nada todavía. El efectivo no toca WooCommerce ni genera factura, solo queda apuntado en Grupos.',
+                'posibleDuplicadoSub' => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+                'aviso' => $hay_duplicado_sub_sin_resolver
+                    ? 'Esta persona tiene otra suscripción en vigor de la misma clase — confirma cuál es la que se cobra.'
+                    : 'Simulación: no se escribiría nada todavía. El efectivo no toca WooCommerce ni genera factura, solo queda apuntado en Grupos.',
             )));
         }
         blokes_ensure_cobros_manuales_table();
@@ -9322,6 +9383,7 @@ function superadmin_gestion_marcar_cobrado($request) {
             'importeDistinto'      => $importe_distinto,
             'totalActual'          => $total_referencia,
             'ajustarPrecio'        => $ajustar_precio ?: null,
+            'posibleDuplicadoSub'  => !empty($subs_en_vigor) ? $subs_en_vigor : null,
             'opciones' => !$importe_distinto ? null : array(
                 'solo_este_mes' => array(
                     'disponible' => (bool) $order,
@@ -9633,9 +9695,12 @@ function superadmin_gestion_reanudar($request) {
 
 // Motivo de baja de clases (fijo, para poder agrupar bajas por motivo — campañas de WhatsApp,
 // 31/10) + un detalle libre opcional (sobre todo para "otro").
-const BLOKES_BAJA_MOTIVOS = array('precio', 'horario', 'lesion', 'mudanza', 'otro');
+// 'duplicado' (cowork/Ramiro, 15/11 08:15): no es una baja real — la persona sigue viniendo,
+// solo se cancela la suscripción vieja que quedó colgando. Excluida de members_lost en
+// superadmin_classes() y de cualquier campaña de "ya no viene" (31/10).
+const BLOKES_BAJA_MOTIVOS = array('precio', 'horario', 'lesion', 'mudanza', 'duplicado', 'otro');
 function blokes_baja_motivo_label($cat) {
-    $map = array('precio' => 'Precio', 'horario' => 'Horario', 'lesion' => 'Lesión', 'mudanza' => 'Mudanza', 'otro' => 'Otro');
+    $map = array('precio' => 'Precio', 'horario' => 'Horario', 'lesion' => 'Lesión', 'mudanza' => 'Mudanza', 'duplicado' => 'Duplicado (no es baja real)', 'otro' => 'Otro');
     return $map[$cat] ?? '';
 }
 
@@ -9727,6 +9792,32 @@ function blokes_buscar_sub_mas_nueva($sub_id_viejo) {
     return $misma_clase ?: $otra_clase;
 }
 
+// Dos suscripciones ACTIVAS duplicadas de la misma clase y cliente (cowork 15/11 08:15, el caso
+// real de octubre: Eva creaba una nueva en vez de marcar pagada la renovación). A diferencia de
+// blokes_buscar_sub_mas_nueva(): aquí SOLO vale la MISMA clase (otra clase sería una membresía
+// legítima aparte, no un duplicado) y SOLO si es estrictamente más nueva (subId mayor) que la
+// vieja — nunca al revés, para no arriesgarse a cancelar por error la que se debe quedar.
+function blokes_buscar_sub_misma_clase_mas_nueva_activa($sub_id_viejo) {
+    $all = blokes_get_all_subscription_data();
+    $viejo = null;
+    foreach ($all as $s) { if (intval($s['id']) === $sub_id_viejo) { $viejo = $s; break; } }
+    if (!$viejo) return null;
+    $uid_viejo = blokes_alumno_customer_id_de_sub($viejo);
+    foreach ($all as $s) {
+        $sid = intval($s['id']);
+        if ($sid <= $sub_id_viejo) continue;
+        if (($s['status'] ?? '') !== 'active') continue;
+        $mismo_cliente = $uid_viejo && blokes_alumno_customer_id_de_sub($s) === $uid_viejo;
+        if (!$mismo_cliente) $mismo_cliente = !empty($viejo['email']) && !empty($s['email']) && strcasecmp($s['email'], $viejo['email']) === 0;
+        if (!$mismo_cliente) continue;
+        $misma_clase = ($s['horario'] ?? '') === ($viejo['horario'] ?? '')
+            && ($s['edad'] ?? 'Adultos') === ($viejo['edad'] ?? 'Adultos')
+            && blokes_dia_a_pareja($s['dia'] ?? '') === blokes_dia_a_pareja($viejo['dia'] ?? '');
+        if ($misma_clase) return $s;
+    }
+    return null;
+}
+
 /**
  * Fusionar duplicados: cancela la suscripción vieja que se quedó colgando en espera/pendiente
  * cuando el alumno se volvió a apuntar con una nueva (los 19 casos de octubre) o se cambió de
@@ -9746,13 +9837,21 @@ function superadmin_gestion_fusionar($request) {
     if (!$sub_id_viejo) return new WP_Error('bad_request', 'Falta sub_id_viejo.', array('status' => 400));
     $sub = wcs_get_subscription($sub_id_viejo);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
-    if ($sub->has_status('active')) {
-        return new WP_Error('sigue_activa', 'Esa suscripción está activa, no es la vieja a cancelar — revisa el subId.', array('status' => 409));
-    }
 
-    $nueva = blokes_buscar_sub_mas_nueva($sub_id_viejo);
-    if (!$nueva) {
-        return new WP_Error('no_es_duplicado', 'No se ha encontrado ninguna suscripción más nueva en vigor del mismo alumno (ni en esta clase ni en otra) — esta puede ser la única suya. Revísalo antes de cancelarla a mano (usa "Dar de baja" si es lo que quieres).', array('status' => 409));
+    $nueva = null;
+    if ($sub->has_status('active')) {
+        // Cowork, 15/11 08:15: dos ACTIVAS duplicadas de la misma clase también se pueden
+        // fusionar (el caso real de octubre) — pero solo si hay otra, de la MISMA clase,
+        // estrictamente más nueva. Si no, sigue siendo un 409 (puede ser su única suscripción).
+        $nueva = blokes_buscar_sub_misma_clase_mas_nueva_activa($sub_id_viejo);
+        if (!$nueva) {
+            return new WP_Error('sigue_activa', 'Esa suscripción está activa y no hay otra más nueva de la misma clase — no es la vieja a cancelar, revisa el subId.', array('status' => 409));
+        }
+    } else {
+        $nueva = blokes_buscar_sub_mas_nueva($sub_id_viejo);
+        if (!$nueva) {
+            return new WP_Error('no_es_duplicado', 'No se ha encontrado ninguna suscripción más nueva en vigor del mismo alumno (ni en esta clase ni en otra) — esta puede ser la única suya. Revísalo antes de cancelarla a mano (usa "Dar de baja" si es lo que quieres).', array('status' => 409));
+        }
     }
 
     $pedidos_a_cancelar = blokes_cancelar_pedidos_impagados($sub, true);
@@ -9983,12 +10082,26 @@ function superadmin_gestion_cambiar_grupo($request) {
     $antes   = array('dia' => $dia_actual, 'horario' => $horario_actual, 'edad' => $edad_actual, 'precio' => $precio_actual);
     $despues = array('dia' => $dia_nuevo,  'horario' => $horario_nuevo,  'edad' => $edad_nuevo,  'precio' => $precio_nuevo);
 
+    // Ramiro, 15/11 08:35: si en la clase NUEVA esta persona ya tiene otra suscripción activa/en
+    // espera/pendiente, cambiar de grupo la dejaría duplicada ahí — avisar antes, igual que al
+    // crear o al marcar cobrado.
+    $confirmar_duplicado_sub = (bool) $request->get_param('confirmarDuplicado');
+    $uid_cambiar_grupo = blokes_alumno_customer_id_de_sub(array('id' => $sub_id), $sub);
+    $subs_en_vigor = blokes_subs_en_vigor_de_persona($uid_cambiar_grupo, $sub_id, array('dia' => blokes_dia_a_pareja($dia_nuevo), 'horario' => $horario_nuevo, 'edad' => $edad_nuevo ?: 'Adultos'), true);
+    $hay_duplicado_sub_sin_resolver = !empty($subs_en_vigor) && !$confirmar_duplicado_sub;
+
     if ($simular) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'subId' => $sub_id, 'antes' => $antes, 'despues' => $despues,
             'actualizaPedidoPendiente' => $item_padre ? $orden_padre->get_id() : null,
-            'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
+            'posibleDuplicadoSub' => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+            'aviso' => $hay_duplicado_sub_sin_resolver
+                ? 'Esta persona ya tiene otra suscripción en esa misma clase nueva — confirma si quiere las dos (confirmarDuplicado) o cancela la vieja primero.'
+                : 'Simulación: no se ha escrito nada en WooCommerce.',
         )));
+    }
+    if ($hay_duplicado_sub_sin_resolver) {
+        return new WP_Error('duplicado_suscripcion', 'Esta persona ya tiene otra suscripción en esa misma clase nueva — confirma (confirmarDuplicado) o cancela la vieja primero.', array('status' => 409));
     }
 
     blokes_gestion_sin_emails(function() use ($item, $sub, $item_padre, $orden_padre, $variacion_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo, $precio_nuevo, $selecciones_actuales, $frecuencia, $clave_dia_actual, $periodo, $interval) {
@@ -10396,6 +10509,14 @@ function superadmin_gestion_alta_cliente($request) {
     if ($uid_por_email && !$usar_cliente_id) $usar_cliente_id = intval($uid_por_email);
     $hay_duplicado_sin_resolver = $duplicado && !$usar_cliente_id && !$confirmar_nuevo;
 
+    // Ramiro, 15/11 08:35: aparte de si es la MISMA PERSONA (arriba), si esa persona YA tiene
+    // una suscripción activa/en espera/pendiente, hay que preguntar antes de crearle otra más
+    // — nunca automático, ni aunque ya se haya resuelto quién es.
+    $confirmar_duplicado_sub = (bool) $request->get_param('confirmarDuplicado');
+    $clase_objetivo_dup = ($tipo === 'clase' && $dia_norm) ? array('dia' => blokes_dia_a_pareja($dia_norm), 'horario' => $horario_norm, 'edad' => $edad_norm ?: 'Adultos') : null;
+    $subs_en_vigor = $usar_cliente_id ? blokes_subs_en_vigor_de_persona($usar_cliente_id, null, $clase_objetivo_dup) : array();
+    $hay_duplicado_sub_sin_resolver = !empty($subs_en_vigor) && !$confirmar_duplicado_sub;
+
     if ($simular) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'nombre' => trim($nombre . ' ' . $apellidos), 'email' => $email, 'telefono' => $telefono,
@@ -10405,6 +10526,7 @@ function superadmin_gestion_alta_cliente($request) {
             'billingPeriod' => $billing_period, 'billingInterval' => $billing_interval, 'fechaInicio' => $fecha_inicio,
             'primerPago' => $primer_pago, 'usaClienteExistente' => $usar_cliente_id ?: null,
             'posibleDuplicado' => $hay_duplicado_sin_resolver ? $duplicado : null,
+            'posibleDuplicadoSub' => !empty($subs_en_vigor) ? $subs_en_vigor : null,
             'aviso' => $hay_duplicado_sin_resolver
                 ? 'Ya hay alguien con ese teléfono/nombre parecido — elige "usar este cliente" o confirma que es una persona distinta antes de crear de verdad.'
                 : ($uid_por_email ? 'Ya existe un usuario de WordPress con ese email — se usará esa cuenta (no se crea una nueva).'
@@ -10414,6 +10536,9 @@ function superadmin_gestion_alta_cliente($request) {
 
     if ($hay_duplicado_sin_resolver) {
         return new WP_Error('posible_duplicado', 'Ya hay alguien con ese teléfono/nombre parecido — usa ese cliente (usarClienteId) o confirma que es una persona distinta (confirmarNuevo).', array('status' => 409));
+    }
+    if ($hay_duplicado_sub_sin_resolver) {
+        return new WP_Error('duplicado_suscripcion', 'Esta persona ya tiene una suscripción activa, en espera o pendiente — confirma si quieres crear otra (confirmarDuplicado) o usa esa.', array('status' => 409));
     }
 
     // --- Cliente: reutilizar o crear ---
@@ -10705,8 +10830,11 @@ function superadmin_classes($request) {
         } elseif (!in_array($e['status'], array('on-hold', 'pending')) && $e['endYm'] >= $two_months_ago) {
             // Baja real = la persona ya no tiene NINGUNA suscripción activa en ninguna clase.
             // Si sigue activa (en esta clase o en otra), es que canceló un duplicado o cambió
-            // de clase — no está de baja.
-            if (!isset($persona_activo_en[$pk])) {
+            // de clase — no está de baja. Tampoco cuenta si se canceló como "duplicado" (motivo
+            // _rm_baja_categoria === 'duplicado', cowork/Ramiro 15/11 08:15): no es una baja
+            // real, la persona sigue viniendo con la otra suscripción.
+            $es_baja_duplicado = get_post_meta($e['subId'], '_rm_baja_categoria', true) === 'duplicado';
+            if (!isset($persona_activo_en[$pk]) && !$es_baja_duplicado) {
                 $classes[$class_key]['members_lost'][] = array('name' => $e['nombre'], 'phone' => $e['telefono']);
             }
         }

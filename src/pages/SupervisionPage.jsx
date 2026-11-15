@@ -949,6 +949,10 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
   // defecto se simulan. El resto ya están validadas con datos de prueba, así que por defecto
   // actúan de verdad.
   const [simular, setSimular] = useState(tipo === 'marcar_cobrado' || tipo === 'cambiar_grupo')
+  // Ramiro, 15/11 08:35: "¿también esta nueva o es un duplicado?" — por defecto NO se confirma,
+  // así que si hay otra suscripción en vigor el botón de confirmar se queda bloqueado hasta que
+  // alguien elija a propósito "sí, quiero las dos/sigo con esta".
+  const [confirmarDuplicado, setConfirmarDuplicado] = useState(false)
   const [preview, setPreview] = useState(null)
   const [busy, setBusy]       = useState(false)
   const [err, setErr]         = useState(null)
@@ -977,9 +981,11 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
         if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
         if (!sim && preview?.importeDistinto && !ajustarPrecio) throw new Error('Elige si el precio distinto es solo este mes o también desde ahora.')
         if (!sim && preview?.importeDistinto && !motivoExcepcionPrecio.trim()) throw new Error('Pon el motivo de la excepción de precio.')
+        if (!sim && preview?.posibleDuplicadoSub && !confirmarDuplicado) throw new Error('Confirma qué pasa con la otra suscripción de la misma clase.')
         res = await gestionMarcarCobrado({
           sub_id: alumno.subId, importe: Number(importe), metodo, fecha, parcial, nota, mantener_pausa: mantenerPausa, simular: sim,
           ...(preview?.importeDistinto ? { ajustarPrecio, motivoExcepcion: motivoExcepcionPrecio } : {}),
+          ...(preview?.posibleDuplicadoSub ? { confirmarDuplicado } : {}),
         })
       } else if (tipo === 'pausar') {
         if (!motivo.trim()) throw new Error('Pon un motivo.')
@@ -999,8 +1005,12 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
           : await gestionExento({ sub_id: alumno.subId, exento: !alumno.exento })
       } else if (tipo === 'cambiar_grupo') {
         if (!grupoNuevo) throw new Error('Elige el grupo nuevo.')
+        if (!sim && preview?.posibleDuplicadoSub && !confirmarDuplicado) throw new Error('Confirma qué pasa con la otra suscripción de esa clase.')
         const [dia, horario, edad] = grupoNuevo.split('|')
-        res = await gestionCambiarGrupo({ sub_id: alumno.subId, dia, horario, edad, simular: sim })
+        res = await gestionCambiarGrupo({
+          sub_id: alumno.subId, dia, horario, edad, simular: sim,
+          ...(preview?.posibleDuplicadoSub ? { confirmarDuplicado } : {}),
+        })
       } else if (tipo === 'ext_cobrar') {
         if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
         res = await gestionExternoPago(alumno.externoId, { periodo: extPeriodo, importe: Number(importe), metodo, fecha, cubreMeses: Number(extCubreMeses) })
@@ -1037,11 +1047,25 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
             <p className="sv-to-warn-txt">Simulación: no se ha escrito nada todavía.</p>
             <ul className="sv-grp-preview">
               {Object.entries(preview)
-                .filter(([k, v]) => !['aviso', 'importeDistinto', 'totalActual', 'ajustarPrecio', 'opciones'].includes(k) && v !== null)
+                .filter(([k, v]) => !['aviso', 'importeDistinto', 'totalActual', 'ajustarPrecio', 'opciones', 'posibleDuplicadoSub'].includes(k) && v !== null)
                 .map(([k, v]) => (
                   <li key={k}><span>{previewLabel(k)}</span><span>{previewValor(v)}</span></li>
                 ))}
             </ul>
+            {(tipo === 'marcar_cobrado' || tipo === 'cambiar_grupo') && preview.posibleDuplicadoSub && (
+              <div className="sv-grp-field sv-to-warn-txt sv-dup-aviso">
+                <p>⚠️ <strong>Cuidado: esta persona ya tiene otra suscripción{tipo === 'cambiar_grupo' ? ' en esa misma clase nueva' : ' de la misma clase'}</strong>:</p>
+                <ul className="sv-aviso__lista">
+                  {preview.posibleDuplicadoSub.map(s => (
+                    <li key={s.subId}>#{s.subId} · {s.dia} {s.horario}{s.edad !== 'Adultos' ? ` · ${s.edad}` : ''} · {s.estado} · {s.importe != null ? fmtEur(s.importe) : '—'}{s.proximoPago ? ` · próximo pago ${s.proximoPago}` : ''}</li>
+                  ))}
+                </ul>
+                <label className="sv-grp-field sv-grp-field--check">
+                  <input type="checkbox" checked={confirmarDuplicado} onChange={e => setConfirmarDuplicado(e.target.checked)} />
+                  Sí, quiero las dos / sigo adelante con esta (si no, cancela esta acción y resuélvelo a mano)
+                </label>
+              </div>
+            )}
             {tipo === 'marcar_cobrado' && preview.importeDistinto && (
               <div className="sv-grp-field sv-to-warn-txt">
                 <p>
@@ -1134,6 +1158,7 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
                     <option value="horario">Horario</option>
                     <option value="lesion">Lesión</option>
                     <option value="mudanza">Mudanza</option>
+                    <option value="duplicado">Duplicado (no es baja real)</option>
                     <option value="otro">Otro</option>
                   </select>
                 </label>
@@ -1302,10 +1327,11 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
               <button
                 className="sv-tests-danger sv-tests-danger--confirm"
                 onClick={() => submit(true)}
-                disabled={busy || !!preview.adelantadoYaGuardado || (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim()))}
+                disabled={busy || !!preview.adelantadoYaGuardado || (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim())) || (preview.posibleDuplicadoSub && !confirmarDuplicado)}
                 title={preview.adelantadoYaGuardado
                   ? 'Ya hay un pago adelantado guardado para este mes — anúlalo primero si quieres cambiarlo.'
-                  : (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim()) ? 'Elige una opción y pon el motivo de la excepción de precio.' : undefined)}
+                  : (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim()) ? 'Elige una opción y pon el motivo de la excepción de precio.'
+                    : (preview.posibleDuplicadoSub && !confirmarDuplicado ? 'Marca la casilla si quieres seguir adelante con el duplicado.' : undefined))}
               >
                 {busy ? 'Guardando…' : (preview.adelantadoYaGuardado ? 'Ya hay un adelantado guardado' : 'Confirmar de verdad')}
               </button>
@@ -1614,6 +1640,9 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [] }) {
   const [enviarAcceso, setEnviarAcceso] = useState(false)
   const [usarClienteId, setUsarClienteId] = useState(null)
   const [confirmarNuevo, setConfirmarNuevo] = useState(false)
+  // Ramiro, 15/11 08:35: "¿también esta nueva o es un duplicado?" — por defecto no, hasta que
+  // alguien lo confirme a propósito.
+  const [confirmarDuplicado, setConfirmarDuplicado] = useState(false)
   const [preview, setPreview]     = useState(null)
   const [busy, setBusy]           = useState(false)
   const [err, setErr]             = useState(null)
@@ -1630,11 +1659,13 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [] }) {
       if (!email.trim() && !telefono.trim()) throw new Error('Pon email o teléfono (al menos uno).')
       if (tipo === 'clase' && !grupoNuevo) throw new Error('Elige el grupo.')
       if (primerPago === 'ya_pagado' && (!importe || Number(importe) <= 0)) throw new Error('Pon el importe del primer pago.')
+      if (forzarReal && preview?.posibleDuplicadoSub && !confirmarDuplicado) throw new Error('Confirma si es un duplicado o quieres crear otra suscripción para esta persona.')
       const body = {
         nombre: nombre.trim(), apellidos: apellidos.trim(), email: email.trim(), telefono: telefono.trim(),
         tipo, fechaInicio, primerPago, enviarAcceso, simular: !forzarReal,
         ...(usarClienteId ? { usarClienteId } : {}),
         ...(confirmarNuevo ? { confirmarNuevo: true } : {}),
+        ...(preview?.posibleDuplicadoSub ? { confirmarDuplicado } : {}),
         ...(tipo === 'clase' ? { dia, horario, edad, plan } : { productoAbonoId: abonoId }),
         ...(primerPago === 'ya_pagado' ? { metodo, importe: Number(importe), fechaPago } : {}),
         ...(preview?.precioCatalogo != null && Number(importe) !== preview.precioCatalogo && ajustarPrecio ? { ajustarPrecio, motivoExcepcion } : {}),
@@ -1674,6 +1705,23 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [] }) {
                 </button>
                 <button className="sv-tests-select" type="button" onClick={() => setConfirmarNuevo(true)}>
                   Es una persona distinta, crear de todas formas {confirmarNuevo ? '✓' : ''}
+                </button>
+              </div>
+            )}
+            {preview.posibleDuplicadoSub && (
+              <div className="sv-grp-field sv-to-warn-txt sv-dup-aviso">
+                <p>⚠️ <strong>Cuidado: esta persona ya tiene una suscripción</strong>:</p>
+                <ul className="sv-aviso__lista">
+                  {preview.posibleDuplicadoSub.map(s => (
+                    <li key={s.subId}>#{s.subId} · {s.dia} {s.horario}{s.edad !== 'Adultos' ? ` · ${s.edad}` : ''} · {s.estado} · {s.importe != null ? fmtEur(s.importe) : '—'}{s.proximoPago ? ` · próximo pago ${s.proximoPago}` : ''}</li>
+                  ))}
+                </ul>
+                <p>¿Quieres que tenga también esta nueva o es un duplicado?</p>
+                <button className="sv-tests-select" type="button" onClick={() => setConfirmarDuplicado(false)}>
+                  Es un duplicado: no crear {!confirmarDuplicado ? '✓' : ''}
+                </button>
+                <button className="sv-tests-select" type="button" onClick={() => setConfirmarDuplicado(true)}>
+                  Sí, quiero las dos {confirmarDuplicado ? '✓' : ''}
                 </button>
               </div>
             )}
@@ -1779,7 +1827,9 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [] }) {
           <button className="sv-tests-select" onClick={preview ? () => setPreview(null) : onVolver} disabled={busy}>Volver</button>
           {preview ? (
             <button
-              className="sv-tests-danger sv-tests-danger--confirm" disabled={busy}
+              className="sv-tests-danger sv-tests-danger--confirm"
+              disabled={busy || (preview.posibleDuplicadoSub && !confirmarDuplicado)}
+              title={preview.posibleDuplicadoSub && !confirmarDuplicado ? 'Elige "Es un duplicado" o "Sí, quiero las dos" antes de confirmar.' : undefined}
               onClick={() => submit(true)}
             >
               {busy ? 'Creando…' : 'Confirmar de verdad'}
@@ -2235,6 +2285,13 @@ function GruposTab({ onIrAPendientes }) {
         Las acciones (⋯) escriben de verdad en WooCommerce: <strong>pruébalas primero con una suscripción de prueba</strong>,
         no se envían correos al alumno, y todo queda registrado (quién, cuándo, antes → después).
       </p>
+
+      {duplicados.length > 0 && (
+        <div className="sv-aviso sv-aviso--bad">
+          <strong>⚠ {duplicados.length} {duplicados.length === 1 ? 'alumno' : 'alumnos'} con 2 suscripciones activas de la misma clase.</strong>{' '}
+          <button className="sv-tests-select" onClick={() => setVista('revisar-datos')}>Ver en «Revisar datos»</button>
+        </div>
+      )}
 
       <div className="sv-controls">
         <div className="sv-controls-left">
