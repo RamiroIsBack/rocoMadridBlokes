@@ -115,8 +115,8 @@ export const gestionBajaMotivoSet   = body => gestionPost('/gestion/bajas/motivo
 export const gestionBajaContacto    = body => gestionPost('/gestion/bajas/contacto', body)
 
 // Superadmin › Clases: retención + rentabilidad real (15/11 08:45 punto D + 09:10).
-export function useClasesRetencion(months = 12) {
-  return useEndpoint('/clases-retencion', { months })
+export function useClasesRetencion(months = 12, mes = '') {
+  return useEndpoint('/clases-retencion', { months, ...(mes ? { mes } : {}) })
 }
 
 // Lista de espera por grupo (8.5: interesados que aún no son alumnos).

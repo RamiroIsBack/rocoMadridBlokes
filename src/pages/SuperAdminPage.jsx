@@ -353,23 +353,37 @@ function profesorClaseConIsa(c) {
 
 function ClasesRetencionSection() {
   const [months, setMonths] = useState(12)
-  const { data, loading, error } = useClasesRetencion(months)
+  // Mes de "ingreso real" (cowork, 15/11 09:45): por defecto el último mes cerrado que decide
+  // el backend (mesIngreso) — el usuario puede elegir otro con el selector.
+  const [mesSel, setMesSel] = useState('')
+  const { data, loading, error } = useClasesRetencion(months, mesSel)
   const costes = useCostes()
 
+  // Cowork, 15/11 09:45: salía ~8 veces corto. €/hora de clase: la ficha (PROF_META.costoHClase)
+  // ya es el €/hora de CLASE directo — no recalcularlo desde costoMes/horasSem, que incluye
+  // horas de equipar y no coincide con costoHClase (p. ej. Sigurd: 903€/mes ÷ (9h×4,33) ≈
+  // 23,17€/h, pero su ficha dice 18,40€/h de clase). Si hay nómina real de este mes, se escala
+  // la ficha por la proporción nómina real/ficha (mismo €/h relativo, con el dato real del mes).
   function costeHoraReal(prof) {
     if (!prof || prof === 'Isa') return 0
     const meta = PROF_META[prof]
-    if (!meta) return 0
-    const mensual = costes.mes[prof] ?? meta.costoMes
-    const horasMes = (meta.horasSem || 0) * 4.33
-    return horasMes ? mensual / horasMes : 0
+    if (!meta || !meta.costoHClase) return 0
+    const real = costes.mes[prof]
+    if (real != null && meta.costoMes) return meta.costoHClase * (real / meta.costoMes)
+    return meta.costoHClase
+  }
+  // Sesiones por semana de esta clase: "Martes-Jueves"/"Lunes-Miércoles" = 2, un día suelto
+  // (p. ej. "Viernes") = 1 — faltaba este factor, por eso el coste salía de 1 sola sesión en
+  // vez del mes completo (× ~4,33 semanas/mes).
+  function sesionesSemana(dia) {
+    return (dia || '').includes('-') ? 2 : 1
   }
 
   const filasRentabilidad = useMemo(() => {
     if (!data?.porClase) return []
     return data.porClase.map(c => {
       const prof = profesorClaseConIsa(c)
-      const costeProfe = costeHoraReal(prof) * classDurationH(c.horario)
+      const costeProfe = costeHoraReal(prof) * classDurationH(c.horario) * sesionesSemana(c.dia) * 4.33
       const ocupacion = c.activos / 15
       const margen = c.ingresoMesReal - costeProfe
       const semaforo = margen < 0 ? 'bad' : (ocupacion < 0.5 ? 'warn' : 'ok')
@@ -429,16 +443,23 @@ function ClasesRetencionSection() {
             Permanencia media de quien ya se fue: <strong>{data.permanenciaMediaIdos ?? '—'} meses</strong> ({data.nIdos}).
           </p>
 
-          <h3 className="sa-subtitle">Rentabilidad por clase (ingreso de verdad cobrado, trimestrales/anuales ya prorrateados por mes)</h3>
+          <div className="sa-section__header">
+            <h3 className="sa-subtitle">Rentabilidad por clase (ingreso de verdad cobrado, trimestrales/anuales ya prorrateados por mes)</h3>
+            <select className="sa-chart-select" value={mesSel || data.mesIngreso || ''} onChange={e => setMesSel(e.target.value)}>
+              {(data.mesesDisponibles || []).slice().reverse().map(m => (
+                <option key={m} value={m}>{fmtMonth(m)}{m === data.mesIngreso && !mesSel ? ' (último cerrado)' : ''}</option>
+              ))}
+            </select>
+          </div>
           <p className="sa-legend">
             Coste del profe: misma fuente que Nóminas (nómina real del mes si existe, si no la ficha), por hora según sus horas semanales. Isa es voluntaria → 0 €.
             Semáforo: 🔴 margen negativo · 🟡 margen positivo pero ocupación por debajo del 50% (7-8 de 15) · 🟢 margen positivo y ocupación ≥ 50%.
-            El margen se calcula sobre el ingreso de este mes; las medias de 3/6/12 meses son solo para ver la tendencia.
+            El margen se calcula sobre el ingreso del mes elegido; las medias de 3/6/12 meses son solo para ver la tendencia.
           </p>
           <div className="sa-profit-wrap">
             <table className="sa-profit-table">
               <thead>
-                <tr><th></th><th>Clase</th><th>Profe</th><th>Activos</th><th>Ocupación/15</th><th>Ingreso este mes</th><th>Media 3m</th><th>Media 6m</th><th>Media 12m</th><th>Coste profe</th><th>Margen</th><th>Retención 3m</th><th>Recomendación</th></tr>
+                <tr><th></th><th>Clase</th><th>Profe</th><th>Activos</th><th>Ocupación/15</th><th>Ingreso del mes</th><th>Media 3m</th><th>Media 6m</th><th>Media 12m</th><th>Coste profe</th><th>Margen</th><th>Retención 3m</th><th>Recomendación</th></tr>
               </thead>
               <tbody>
                 {filasRentabilidad.map((c, i) => (

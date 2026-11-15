@@ -11256,6 +11256,19 @@ function blokes_persona_cubre_mes($intervalos, $ym) {
     }
     return false;
 }
+// "Sigue" de verdad = cubre TODOS los meses desde el alta hasta el objetivo, no solo el mes
+// objetivo suelto (cowork, 15/11 09:45: con solo el mes objetivo, una pausa/pago tardío que
+// vuelve a activarse después contaba como "sigue" en +6m sin haber contado en +3m — la
+// retención subía con el tiempo, imposible en una cohorte de verdad). Así +6m ⊆ +3m ⊆ +1m
+// siempre, por construcción.
+function blokes_persona_retenida_continua($intervalos, $desde_ym, $hasta_ym) {
+    $mes = $desde_ym;
+    while ($mes <= $hasta_ym) {
+        if (!blokes_persona_cubre_mes($intervalos, $mes)) return false;
+        $mes = blokes_mes_mas($mes, 1);
+    }
+    return true;
+}
 
 // GET /superadmin/v1/clases-retencion — Superadmin › Clases (15/11 08:45 punto D, solo
 // socios): altas/bajas por mes, retención por cohorte (1/3/6 meses), permanencia media y
@@ -11269,6 +11282,12 @@ function superadmin_clases_retencion($request) {
     $calculo = blokes_altas_bajas_calcular($months);
     $months_range = $calculo['monthsRange'];
     $now_ym = $calculo['nowYm'];
+    // Mes para "ingreso real" de la rentabilidad (cowork, 15/11 09:45): por defecto el último
+    // mes YA CERRADO, no el actual a medias — con el mes a medio empezar, un trimestral cobrado
+    // el día 3 aparentaba ingresos altos y dejaba los otros dos meses que de verdad cubre con
+    // pinta de estar vacíos. Admite ?mes=YYYY-MM para elegir otro.
+    $mes_ingreso_param = sanitize_text_field((string) $request->get_param('mes'));
+    $mes_ingreso = preg_match('/^\d{4}-\d{2}$/', $mes_ingreso_param) ? $mes_ingreso_param : blokes_mes_mas($now_ym, -1);
     $persona_min_start  = $calculo['personaMinStart'];
     $persona_activo_en  = $calculo['personaActivoEn'];
     $persona_intervalos = $calculo['personaIntervalos'];
@@ -11316,7 +11335,7 @@ function superadmin_clases_retencion($request) {
             if ($mes_objetivo > $now_ym) { $fila['m' . $offset] = null; continue; }
             $sigue = 0;
             foreach ($personas_cohorte as $pk) {
-                if (blokes_persona_cubre_mes($persona_intervalos[$pk] ?? array(), $mes_objetivo)) $sigue++;
+                if (blokes_persona_retenida_continua($persona_intervalos[$pk] ?? array(), $ym, $mes_objetivo)) $sigue++;
             }
             $fila['m' . $offset] = round($sigue / count($personas_cohorte) * 100, 1);
         }
@@ -11337,9 +11356,10 @@ function superadmin_clases_retencion($request) {
     // ingreso real de este mes y retención a 3 meses (09:10 — rentabilidad real, movida aquí
     // desde Superadmin › Ingresos; el coste del profe y el margen se calculan en el frontend,
     // que es donde vive la lista de quién da cada clase).
-    // Hasta 12 meses atrás (acotado a lo que se haya pedido) para las medias de 3/6/12 meses.
-    $meses_media = array_slice($months_range, -12);
-    $por_clase = array_map(function($c) use ($now_ym, $personas_por_clase_historico, $persona_activo_en, $meses_media) {
+    // Hasta 12 meses atrás DESDE $mes_ingreso (no desde el mes actual a medias) para las medias
+    // de 3/6/12 meses.
+    $meses_media = array_slice(array_values(array_filter($months_range, function($ym) use ($mes_ingreso) { return $ym <= $mes_ingreso; })), -12);
+    $por_clase = array_map(function($c) use ($mes_ingreso, $personas_por_clase_historico, $persona_activo_en, $meses_media) {
         $altas_mes = array_values(array_filter($c['members_active'], function($m) { return $m['new']; }));
         $motivos = array();
         foreach ($c['members_lost'] as $m) {
@@ -11354,7 +11374,7 @@ function superadmin_clases_retencion($request) {
             foreach ($c['members_active'] as $m) $t += blokes_sub_importe_cobrado_mes($m['subId'], $ym);
             $ingreso_por_mes[$ym] = $t;
         }
-        $ingreso_mes_real = $ingreso_por_mes[$now_ym] ?? 0.0;
+        $ingreso_mes_real = $ingreso_por_mes[$mes_ingreso] ?? 0.0;
         $media_n = function($n) use ($ingreso_por_mes) {
             $ult = array_slice($ingreso_por_mes, -$n);
             return $ult ? round(array_sum($ult) / count($ult), 2) : null;
@@ -11382,8 +11402,8 @@ function superadmin_clases_retencion($request) {
         'porMes' => $por_mes, 'cohortes' => $cohortes,
         'permanenciaMediaActivos' => $media($permanencia_activos), 'permanenciaMediaIdos' => $media($permanencia_idos),
         'nActivos' => count($permanencia_activos), 'nIdos' => count($permanencia_idos),
-        'porClase' => $por_clase,
-        'avisoFuente' => 'Solo suscripciones de WooCommerce en vigor desde la migración — todavía no cruza con hist-pagos (alumnos de antes) ni con los externos del Excel de Grupos.',
+        'porClase' => $por_clase, 'mesIngreso' => $mes_ingreso, 'mesesDisponibles' => array_slice($months_range, 0, -1),
+        'avisoFuente' => 'Altas/bajas/retención: solo suscripciones de WooCommerce en vigor desde la migración — todavía no cruza con hist-pagos (alumnos de antes) ni con los externos del Excel de Grupos. Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado.',
     )));
 }
 
