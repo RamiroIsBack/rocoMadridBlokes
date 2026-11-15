@@ -3894,8 +3894,25 @@ function blokes_get_abono_subscripciones() {
  */
 function blokes_get_all_subscription_data() {
     $base = class_exists('RocoMadrid_SF_Stats') ? RocoMadrid_SF_Stats::get_all_subscription_data() : array();
+    $base = array_map('blokes_corrige_medianos_huerfanos', $base);
     $base = array_map('blokes_corrige_edad_por_franja', $base);
     return array_merge($base, blokes_get_pending_cancel_alumnos(), blokes_get_abono_subscripciones());
+}
+
+// CIERRE 15/11 18:05 (Ramiro + selector, corrige lo dicho a las 17:30/17:45 sobre esta misma
+// franja): la variación huérfana "Martes-Jueves 18:30-20:00" (20 suscripciones, 1 y 2 días,
+// compradas con el suplemento "Adolescentes" del formulario porque era la única forma de
+// pagarla) SON la clase de Medianos — da igual lo que diga el formulario, para Blokes esta
+// franja siempre es "Medianos M-J 18:30-19:30, Isa", fusionada con el slot oficial del selector.
+// No toca ninguna suscripción real, su precio ni el día que tenga guardado (1 o 2 días) — solo
+// normaliza cómo Blokes la MUESTRA y la cuenta. Tiene que correr ANTES de
+// blokes_corrige_edad_por_franja() para que esa franja ya no se procese por su cuenta.
+function blokes_corrige_medianos_huerfanos($sub) {
+    if (blokes_dia_a_pareja($sub['dia'] ?? '') === 'Martes-Jueves' && ($sub['horario'] ?? '') === '18:30-20:00') {
+        $sub['horario'] = '18:30-19:30';
+        $sub['edad']    = 'Menores (6-12 años)';
+    }
+    return $sub;
 }
 
 // Ramiro, 15/11 16:20 (Fase 0 edad, "sube de prioridad"): el producto "Clases de escalada un
@@ -3908,24 +3925,18 @@ function blokes_get_all_subscription_data() {
 // hora, así que SIEMPRE son niños/adolescentes. Nunca pisa una edad que ya viniera bien puesta
 // (Woo o el formulario). M-J 19:30-21:00 NO entra aquí a propósito: el selector del formulario
 // («RocoMadrid steps») ya tiene un slot propio de adolescentes ahí y el age_addon es de fiar.
-// 15/11 17:30 (cowork, "zanjar esto bien" — cruce del selector de RocoMadrid steps + variaciones
-// de Woo + Excel de Grupos, sustituye la tabla de las 16:20): el selector oficial de "medianos"
-// M-J es 18:30-19:30 (como ya estaba) — PERO sigue publicada una variación de Woo vieja y huérfana
-// fuera del selector a las 18:30-**20:00** ("Martes-Jueves · Adultos · 18:30-20:00", stock 21),
-// con 13 suscripciones activas ahí mismo (11 niños según el formulario, "M-J 18.30 MEDIANOS" en
-// el Excel). Hasta que Ramiro decida si esas suscripciones se pasan al slot oficial (cambio de
-// producto/precio, NO tocar sin su OK), Blokes trata TAMBIÉN 18:30-20:00 M-J como medianos, para
-// no perderlas ni contarlas como adultos. También se añade Viernes 19:00-20:00 (adolescentes,
-// "V. Inf. 19.00" en el Excel), que antes no estaba cubierta.
+// 15/11 17:30/18:05 (cowork, "zanjar esto bien" — cruce del selector de RocoMadrid steps +
+// variaciones de Woo + Excel de Grupos, sustituye la tabla de las 16:20): el selector oficial de
+// "medianos" M-J es 18:30-19:30. La variación vieja y huérfana "Martes-Jueves · Adultos ·
+// 18:30-20:00" (20 suscripciones) se funde con esa misma clase de medianos ANTES de llegar aquí,
+// en blokes_corrige_medianos_huerfanos() — por eso ya no hace falta (ni aparece) una entrada para
+// 18:30-20:00 en esta tabla. También se añade Viernes 19:00-20:00 (adolescentes, "V. Inf. 19.00"
+// en el Excel), que antes no estaba cubierta.
 function blokes_corrige_edad_por_franja($sub) {
     if (($sub['edad'] ?? 'Adultos') !== 'Adultos') return $sub;
     $franjas_sin_adultos = array(
         'Martes-Jueves|17:30-18:30'   => 'Menores (6-12 años)',
         'Martes-Jueves|18:30-19:30'   => 'Menores (6-12 años)', // "medianos", slot oficial del selector
-        // "medianos" en la variación vieja huérfana — 15/11 17:45 (cowork, simulación con
-        // cambiar-grupo): casi todas marcadas Adolescentes por el formulario, no Menores como
-        // se creyó a las 17:30. Esto solo pisa a quien NO tenga ya edad del formulario/Woo.
-        'Martes-Jueves|18:30-20:00'   => 'Adolescentes (12-18 años)',
         'Lunes-Miércoles|17:30-18:30' => 'Menores (6-12 años)',
         'Viernes|18:00-19:00'         => 'Menores (6-12 años)',
         'Viernes|19:00-20:00'         => 'Adolescentes (12-18 años)',
