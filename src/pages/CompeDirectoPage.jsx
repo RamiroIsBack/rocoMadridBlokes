@@ -26,11 +26,12 @@ function Logo({ className, style }) {
 }
 
 // Contenido de una diapositiva de la Tele del Roco — se usa tanto sin compe como programada
-// (rotando con la cuenta atrás y el mapa).
-function renderSlide(slide) {
+// (rotando con la cuenta atrás y el mapa). Cowork, 15/11 18:35: si la imagen no carga, avanza
+// a la siguiente en vez de quedarse parada mostrando el hueco roto el resto de su turno.
+function renderSlide(slide, onImgError) {
   return (
     <div className="td-content-inner">
-      {slide.imagenUrl && <img src={slide.imagenUrl} alt={slide.titulo} className="td-img" />}
+      {slide.imagenUrl && <img src={slide.imagenUrl} alt={slide.titulo} className="td-img" onError={onImgError} />}
       <p className="td-slide-title">{slide.titulo}</p>
       {slide.texto && <p className="td-slide-text">{slide.texto}</p>}
       {slide.qrUrl && (
@@ -174,16 +175,20 @@ export default function CompeDirectoPage() {
   // 🐞 Cowork 11/11 09:40: con una compe programada, la tele no enseñaba nunca las diapositivas
   // de Superadmin → Tele (solo rotaba cuenta atrás ↔ mapa). Ahora, si hay diapositivas, "slide"
   // entra como tercera fase de la rotación — y "liga" como cuarta si hubo ascensos esta semana.
+  // Cowork, 15/11 18:35: el avance se saca a su propia función para poder llamarlo también
+  // desde el "onError" del cartel (saltar de fase ya mismo si la imagen no carga, en vez de
+  // esperar los 22 s completos con el hueco roto en pantalla).
+  const avanzarFase = () => {
+    setVistaPrecompe(v => {
+      const fases = ['cuenta', 'mapa']
+      if (slides.length > 0) fases.push('slide')
+      if (ligaSemana.length > 0) fases.push('liga')
+      const i = fases.indexOf(v)
+      return fases[(i + 1) % fases.length] ?? 'cuenta'
+    })
+  }
   useEffect(() => {
-    const id = setInterval(() => {
-      setVistaPrecompe(v => {
-        const fases = ['cuenta', 'mapa']
-        if (slides.length > 0) fases.push('slide')
-        if (ligaSemana.length > 0) fases.push('liga')
-        const i = fases.indexOf(v)
-        return fases[(i + 1) % fases.length] ?? 'cuenta'
-      })
-    }, ROTACION_MS)
+    const id = setInterval(avanzarFase, ROTACION_MS)
     return () => clearInterval(id)
   }, [slides.length, ligaSemana.length])
 
@@ -213,10 +218,11 @@ export default function CompeDirectoPage() {
     return () => { activo = false; clearInterval(id) }
   }, [])
 
+  const avanzarSlide = () => setSlideIndex(i => (slides.length ? (i + 1) % slides.length : 0))
   useEffect(() => {
     if (slides.length < 2) return
     const dur = (slides[slideIndex]?.duracionSeg || 12) * 1000
-    const id = setTimeout(() => setSlideIndex(i => (i + 1) % slides.length), dur)
+    const id = setTimeout(avanzarSlide, dur)
     return () => clearTimeout(id)
   }, [slides, slideIndex])
 
@@ -301,7 +307,7 @@ export default function CompeDirectoPage() {
         <div className="td-page" style={pageStyle}>
           <BotonPantallaCompleta />
           <div className="td-content">
-            {mostrarLiga ? renderLigaSemana(ligaPaginaActual, ligaPaginas.length, ligaPageIdx % ligaPaginas.length) : slide ? renderSlide(slide) : (
+            {mostrarLiga ? renderLigaSemana(ligaPaginaActual, ligaPaginas.length, ligaPageIdx % ligaPaginas.length) : slide ? renderSlide(slide, avanzarSlide) : (
               <div className="td-content-inner">
                 <Logo className="td-logo" style={{ height: 'min(12vh,110px)', width: 'min(12vh,110px)' }} />
                 <p className="td-sin-conexion">No hay compe activa ahora mismo.</p>
@@ -326,10 +332,10 @@ export default function CompeDirectoPage() {
           {mostrarLiga ? (
             renderLigaSemana(ligaPaginaActual, ligaPaginas.length, ligaPageIdx % ligaPaginas.length)
           ) : mostrarSlide && slideActual ? (
-            renderSlide(slideActual)
+            renderSlide(slideActual, avanzarSlide)
           ) : !mostrarMapa ? (
             <div className="td-row">
-              <img src={cartelCompe} alt={proxima.nombre} className="td-img" />
+              <img src={cartelCompe} alt={proxima.nombre} className="td-img" onError={avanzarFase} />
               <div>
                 <div className="td-qr-box">
                   <img
@@ -345,7 +351,7 @@ export default function CompeDirectoPage() {
           ) : (
             <div className="td-content-inner">
               <div className="td-mapa-wrap">
-                <img src={mapaEquipacion} alt="Mapa del rocódromo" />
+                <img src={mapaEquipacion} alt="Mapa del rocódromo" onError={avanzarFase} />
                 {bloquesColocados.map(b => (
                   <div key={b.numero} className="td-mapa-bloque" style={{
                     left: `${b.xPct}%`, top: `${b.yPct}%`,
