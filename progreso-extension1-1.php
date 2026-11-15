@@ -3922,7 +3922,10 @@ function blokes_corrige_edad_por_franja($sub) {
     $franjas_sin_adultos = array(
         'Martes-Jueves|17:30-18:30'   => 'Menores (6-12 años)',
         'Martes-Jueves|18:30-19:30'   => 'Menores (6-12 años)', // "medianos", slot oficial del selector
-        'Martes-Jueves|18:30-20:00'   => 'Menores (6-12 años)', // "medianos" — variación vieja huérfana, 15/11 17:30
+        // "medianos" en la variación vieja huérfana — 15/11 17:45 (cowork, simulación con
+        // cambiar-grupo): casi todas marcadas Adolescentes por el formulario, no Menores como
+        // se creyó a las 17:30. Esto solo pisa a quien NO tenga ya edad del formulario/Woo.
+        'Martes-Jueves|18:30-20:00'   => 'Adolescentes (12-18 años)',
         'Lunes-Miércoles|17:30-18:30' => 'Menores (6-12 años)',
         'Viernes|18:00-19:00'         => 'Menores (6-12 años)',
         'Viernes|19:00-20:00'         => 'Adolescentes (12-18 años)',
@@ -3930,6 +3933,24 @@ function blokes_corrige_edad_por_franja($sub) {
     $clave = blokes_dia_a_pareja($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '');
     if (isset($franjas_sin_adultos[$clave])) $sub['edad'] = $franjas_sin_adultos[$clave];
     return $sub;
+}
+
+// Ramiro, 15/11 18:00: estas franjas "ya no existen" — Blokes no debe mostrarlas como clases
+// activas ni contarlas en los cuadros de clases (Superadmin › Clases, Horario por día, Grupos).
+// Usa el PREFIJO de la hora de inicio, no el rango completo, porque la nota solo da la hora de
+// inicio (no tengo la de fin exacta y no quiero inventarla): L-X 09:00 y 10:30, M-J 07:00.
+// Viernes 19:00-21:00 "Adultos" sí lleva el rango completo porque el Curso de Tecnificación que
+// ocupaba ese hueco lo vende Amelia aparte, fuera de WooCommerce — 0 suscripciones reales hoy,
+// pero por si alguna cayera ahí por error de selector. Ojo: esto NO toca el dinero ni "Personas"
+// (quien ya paga en una de estas franjas sigue contando ahí) — solo oculta la FRANJA como clase,
+// que es lo que pedía la nota ("que no salga en los cuadros").
+function blokes_franja_clase_descontinuada($dia, $horario) {
+    $pareja = blokes_dia_a_pareja($dia);
+    $horario = (string) $horario;
+    if ($pareja === 'Lunes-Miércoles' && (strpos($horario, '09:00') === 0 || strpos($horario, '10:30') === 0)) return true;
+    if ($pareja === 'Martes-Jueves' && strpos($horario, '07:00') === 0) return true;
+    if ($pareja === 'Viernes' && $horario === '19:00-21:00') return true;
+    return false;
 }
 
 function progreso_get_alumnos($request) {
@@ -12190,6 +12211,10 @@ function blokes_altas_bajas_calcular($months) {
     foreach ($enriquecidos as $e) {
         $class_key = $e['classKey'];
         $pk        = $e['personaKey'];
+        // Franjas que "ya no existen" (Ramiro, 18:00): no entran en el catálogo de clases
+        // (Superadmin › Clases, Horario por día) — pero sí siguen contando en los mapas por
+        // persona de más arriba (ya calculados), para no tocar dinero/Personas por esto.
+        if (blokes_franja_clase_descontinuada($e['dia'], $e['horario'])) continue;
         if (!isset($classes[$class_key])) {
             $classes[$class_key] = array(
                 'label'           => $e['dia'] . ' · ' . $e['horario'],
