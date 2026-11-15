@@ -43,6 +43,17 @@ function PayrollConfig({ people, config, onSaved }) {
 
   const set = (id, field, value) => setForm(f => ({ ...f, [id]: { ...f[id], [field]: value } }))
 
+  // Ramiro, 15/11 14:25: "Isa va en Nóminas como voluntaria con compensación variable (horas ×
+  // €/h), igual que Ana y Edu; Carolina como voluntaria con importe fijo" -- pide que el tipo
+  // de cada voluntario (fijo vs por horas) se vea, no solo "Voluntario". Se deriva de si tiene
+  // nómina base puesta, no es un campo nuevo -- la base ya es editable para cualquier
+  // profesor/voluntario (hasBase), así que Carolina a 400 € es solo rellenar esa casilla.
+  const tipoDetalle = p => {
+    if (p.type !== 'voluntario') return typeLabel(p.type)
+    const base = parseFloat(form[p.id]?.base)
+    return base > 0 ? 'Voluntario · fijo' : 'Voluntario · por horas'
+  }
+
   async function handleSave() {
     setSaving(true)
     try {
@@ -96,7 +107,7 @@ function PayrollConfig({ people, config, onSaved }) {
             {active.map(p => (
               <tr key={p.id}>
                 <td className="sa-pay-nowrap"><span className="sa-pay-dot" style={{ background: p.color }} />{p.name}</td>
-                <td className="sa-pay-muted">{typeLabel(p.type)}</td>
+                <td className="sa-pay-muted">{tipoDetalle(p)}</td>
                 <td className="sa-pay-num">
                   {hasBase(p.type)
                     ? <input

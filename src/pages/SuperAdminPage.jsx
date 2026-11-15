@@ -363,8 +363,13 @@ function ClasesRetencionSection() {
   // backend ya lo calcula para $mesIngreso; aquí solo se divide por las horas del mes (clases +
   // equipar + gestión — PROF_META.horasSem ya es esa cifra semanal, no solo horas de clase).
   function costeHoraReal(prof) {
-    if (!prof || prof === 'Isa') return 0
+    if (!prof) return 0
     const meta = PROF_META[prof]
+    // Ramiro, 15/11 14:25: Isa SÍ va en Nóminas (voluntaria con compensación por horas, como
+    // Ana y Edu) — ya no es "gratis por definición". Sigue sin ficha en PROF_META a propósito
+    // (ese objeto también alimenta Playground/TimeOff, de personal real, no de voluntarios) y
+    // sin €/hora porque Ramiro pidió explícitamente no inventarlo — así que de momento sigue
+    // saliendo 0€ por falta de dato, no porque sea voluntaria.
     if (!meta || !meta.horasSem) return 0
     const real = data?.costeRealProfe?.[normForProf(prof)]
     // Si no hay dato real para ese mes (p. ej. Nóminas sin nada cargado para ese mes concreto),
@@ -378,7 +383,8 @@ function ClasesRetencionSection() {
   // verdad — si tiene fila de nómina de ESE mes (costeRealProfeFuente) usa nómina+SS banco,
   // si no, cae al plan B de la ficha (costoHClase), visible en vivo sin acceso al servidor.
   function fuenteProfe(prof) {
-    if (!prof || prof === 'Isa') return 'voluntaria, sin coste'
+    if (!prof) return ''
+    if (prof === 'Isa') return 'voluntaria con compensación por horas — pendiente del €/hora (Ramiro, 15/11 14:25)'
     const meta = PROF_META[prof]
     if (!meta || !meta.horasSem) return ''
     const mes = fmtMonth(data?.mesIngreso)
