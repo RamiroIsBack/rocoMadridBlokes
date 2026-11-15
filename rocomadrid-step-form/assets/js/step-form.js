@@ -608,15 +608,20 @@ jQuery(document).ready(function ($) {
     }
 
     // Etiqueta de día legible para una alternativa sugerida cuando una franja está completa
-    // (Ramiro, 15/11 17:25, punto B). 1 día: el valor YA es el nombre del día ("Monday"), se usa
-    // tal cual. 2 días: el valor es la pareja ("L-X"/"M-J"), se traduce con el mismo diccionario
-    // que ya usa el paso de "Días" (monday_wednesday/tuesday_thursday).
+    // (Ramiro, 15/11 17:25, punto B). Traducción directa a español (no depende del diccionario
+    // monday_wednesday/tuesday_thursday ni de los nombres de día de wcStepForm.i18n, que siguen
+    // en inglés — Ramiro, 15/11 19:30: "ningún texto nuevo en inglés").
     function altDiaLabel(diaValue) {
         if (state.selections.frequency !== '1_day') {
-            if (/l-x|lunes/i.test(diaValue)) return wcStepForm.i18n.monday_wednesday;
-            if (/m-j|martes/i.test(diaValue)) return wcStepForm.i18n.tuesday_thursday;
+            if (/l-x|lunes/i.test(diaValue)) return 'Lunes y miércoles'
+            if (/m-j|martes/i.test(diaValue)) return 'Martes y jueves'
+            return diaValue
         }
-        return diaValue;
+        const dias1Dia = {
+            monday: 'Lunes', tuesday: 'Martes', wednesday: 'Miércoles',
+            thursday: 'Jueves', friday: 'Viernes', saturday: 'Sábado', sunday: 'Domingo',
+        }
+        return dias1Dia[diaValue.toLowerCase()] || diaValue
     }
 
     function showError(message) {

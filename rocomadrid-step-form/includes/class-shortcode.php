@@ -140,12 +140,13 @@ class RocoMadrid_SF_Shortcode {
 				'add_another' => __( 'Add another class', 'neve-child' ),
 				'click_to_return' => __( 'Click to go back to this step', 'neve-child' ),
 				// Nombres de clases
-				'classes_full' => __( 'Classes full', 'neve-child' ),
+				'classes_full' => __( 'Completa', 'neve-child' ),
 				// Sugerencia de alternativa cuando una franja está completa (Ramiro, 15/11
-				// 17:25, punto B) — sin lista de espera ni WhatsApp.
-				'suggestion_intro' => __( 'We suggest instead:', 'neve-child' ),
-				'spots_left' => __( 'spots left', 'neve-child' ),
-				'choose_this_class' => __( 'Choose this class', 'neve-child' ),
+				// 17:25, punto B) — sin lista de espera ni WhatsApp. En español literal (no
+				// depende del .mo del tema, que no las traduce — Ramiro, 15/11 19:30).
+				'suggestion_intro' => __( 'Te sugerimos:', 'neve-child' ),
+				'spots_left' => __( 'plazas libres', 'neve-child' ),
+				'choose_this_class' => __( 'Elegir esta clase', 'neve-child' ),
 			),
 		);
 
