@@ -31,6 +31,12 @@ export const UNIDADES = ['ud', 'm²', 'ml', 'm³', 'h', 'placas', 'kit']
 export const isActiva   = p => p.estado !== 'descartado'
 export const isAceptada = p => p.estado === 'aprobado' || p.estado === 'comprado'
 
+// Actuaciones inmediatas: partidas marcadas que se pueden ejecutar ya.
+// «Hecha» es una partida en estado comprado.
+export const CAP_INMEDIATAS = 'Actuaciones inmediatas'
+export const isHecha   = p => p.estado === 'comprado'
+export const isPorHacer = p => p.inmediata && isActiva(p) && !isHecha(p)
+
 // Valor de la medida de la zona (null si faltan datos para calcularla
 // o si la zona no es una sala concreta)
 export function medidaZona(zona, medida) {

@@ -5,7 +5,7 @@ import {
 } from '../hooks/usePresupuestos'
 import {
   ESTADOS, ESTADO_LABEL, TIPOS, TIPO_BY_KEY, MEDIDAS, UNIDADES,
-  isActiva, isAceptada, medidaZona, cantidad, precioFinal, importePropuesto, importeFinal,
+  isActiva, isAceptada, isHecha, isPorHacer, CAP_INMEDIATAS, medidaZona, cantidad, precioFinal, importePropuesto, importeFinal,
   totales, porCapitulo, fmtEur, fmtCant, fmtFecha, fmtMedidas, textoMedidas, parsePrecio, dominio, urlSegura, exportar,
 } from '../utils/presupuestos'
 import './PresupuestosSection.css'
@@ -31,15 +31,19 @@ export default function PresupuestosSection() {
   const [aviso, setAviso]     = useState(null)
   const [partidaForm, setPartidaForm] = useState(null)   // partida | { nueva }
   const [zonaForm, setZonaForm]       = useState(null)   // zona | {}
+  const [nuevaInmediata, setNuevaInmediata] = useState(false)
   const fileRef = useRef(null)
 
   const zonas    = useMemo(() => [...(data?.zonas || [])].sort((a, b) => (a.orden || 0) - (b.orden || 0)), [data])
   const partidas = data?.partidas || []
   const zonaDe   = useMemo(() => Object.fromEntries(zonas.map(z => [z.id, z])), [zonas])
   const zona     = zonaDe[tab]
+  // Una partida se edita con su zona, también desde Actuaciones inmediatas
+  const zonaPartida = partidaForm && (zonaDe[partidaForm.zona_id] || zona)
+  const nPorHacer   = partidas.filter(isPorHacer).length
 
   // Si la pestaña guardada ya no existe, al resumen
-  useEffect(() => { if (data && tab !== 'general' && !zonaDe[tab]) setTab('general') }, [data, tab, zonaDe])
+  useEffect(() => { if (data && tab !== 'general' && tab !== 'inmediatas' && !zonaDe[tab]) setTab('general') }, [data, tab, zonaDe])
 
   function abrir(key) {
     setTab(key)
@@ -65,6 +69,7 @@ export default function PresupuestosSection() {
     const p = form.id ? await updatePartida(form.id, form) : await createPartida(form)
     ponPartida(p)
     setPartidaForm(null)
+    setNuevaInmediata(false)
   }
 
   async function borrarPartida(id) {
@@ -150,13 +155,23 @@ export default function PresupuestosSection() {
 
       <div className="ps-tabs">
         <button className={`ps-tab${tab === 'general' ? ' ps-tab--active' : ''}`} onClick={() => abrir('general')}>Resumen general</button>
+        <button className={`ps-tab ps-tab--inmediatas${tab === 'inmediatas' ? ' ps-tab--active' : ''}`} onClick={() => abrir('inmediatas')}>
+          ⚡ Actuaciones inmediatas{nPorHacer > 0 && <span className="ps-tab__n">{nPorHacer}</span>}
+        </button>
         {zonas.map(z => (
           <button key={z.id} className={`ps-tab${tab === z.id ? ' ps-tab--active' : ''}`} onClick={() => abrir(z.id)}>{z.nombre}</button>
         ))}
         {canEdit && <button className="ps-tab ps-tab--new" onClick={() => setZonaForm({})}>+ Nueva zona</button>}
       </div>
 
-      {zona
+      {tab === 'inmediatas'
+        ? <InmediatasView
+            zonas={zonas} partidas={partidas} zonaDe={zonaDe} canEdit={canEdit}
+            onCampo={guardarCampo}
+            onEditar={p => setPartidaForm(p)}
+            onNueva={() => setNuevaInmediata(true)}
+          />
+        : zona
         ? <ZonaView
             zona={zona} zonaDe={zonaDe} partidas={partidas.filter(p => p.zona_id === zona.id)}
             filtro={filtro} setFiltro={setFiltro} canEdit={canEdit}
@@ -174,12 +189,15 @@ export default function PresupuestosSection() {
         llegue la oferta real.
       </p>
 
-      {partidaForm && zona && (
+      {partidaForm && zonaPartida && (
         <PartidaModal
-          inicial={partidaForm} zona={zona}
-          capitulos={[...new Set(partidas.filter(p => p.zona_id === zona.id).map(p => p.capitulo))]}
+          inicial={partidaForm} zona={zonaPartida}
+          capitulos={[...new Set(partidas.filter(p => p.zona_id === zonaPartida.id).map(p => p.capitulo))]}
           onGuardar={guardarPartida} onBorrar={borrarPartida} onCerrar={() => setPartidaForm(null)} onFallo={fallo}
         />
+      )}
+      {nuevaInmediata && (
+        <InmediataModal zonas={zonas} onGuardar={guardarPartida} onCerrar={() => setNuevaInmediata(false)} onFallo={fallo} />
       )}
       {zonaForm && (
         <ZonaModal inicial={zonaForm} onGuardar={guardarZona} onBorrar={borrarZona} onCerrar={() => setZonaForm(null)} onFallo={fallo} />
@@ -397,6 +415,128 @@ function ZonaView({ zona, zonaDe, partidas, filtro, setFiltro, canEdit, onCampo,
   )
 }
 
+// ─── Actuaciones inmediatas ──────────────────────────────────────────────────
+// Las partidas marcadas «inmediata» de todas las zonas, como lista de tareas.
+// Siguen sumando en el presupuesto de su zona.
+function InmediatasView({ zonas, partidas, zonaDe, canEdit, onCampo, onEditar, onNueva }) {
+  const [filtro, setFiltro] = useState('porhacer')
+  const todas    = partidas.filter(p => p.inmediata)
+  const porHacer = todas.filter(isPorHacer)
+  const hechas   = todas.filter(isHecha)
+  const visibles = filtro === 'porhacer' ? porHacer : filtro === 'hechas' ? hechas : todas
+
+  // Primero lo pendiente, por fecha límite (sin fecha al final) y por zona
+  const ordenZona = Object.fromEntries(zonas.map((z, i) => [z.id, i]))
+  const lista = [...visibles].sort((a, b) =>
+    (isPorHacer(b) - isPorHacer(a)) ||
+    (a.fecha_limite || '9999').localeCompare(b.fecha_limite || '9999') ||
+    (ordenZona[a.zona_id] ?? 99) - (ordenZona[b.zona_id] ?? 99))
+
+  const coste = list => list.reduce((s, p) => s + importeFinal(p, zonaDe[p.zona_id]), 0)
+  const hoyStr = hoy()
+
+  return (
+    <div className="ps-inmediatas">
+      <p className="ps-kicker">Cosas pequeñas que se pueden hacer ya</p>
+      <h3 className="ps-titulo">Actuaciones inmediatas</h3>
+      <p className="ps-sub">
+        Partidas de cualquier zona marcadas como «⚡ Actuación inmediata»: no dependen de otras y se pueden ir
+        ejecutando. Siguen sumando en el presupuesto de su zona; al marcarlas como hechas pasan a «Comprado».
+      </p>
+
+      <div className="sa-kpis ps-kpis">
+        <Kpi label="Por hacer" value={porHacer.length} color="#f5c842" />
+        <Kpi label="Coste pendiente" value={fmtEur(coste(porHacer))} />
+        <Kpi label="Hechas" value={hechas.length} color={VERDE} />
+        <Kpi label="Gastado" value={fmtEur(coste(hechas))} color={VERDE} />
+      </div>
+
+      <div className="ps-toolbar">
+        <div className="sa-filters ps-chips">
+          <Chip k="porhacer" label="Por hacer" n={porHacer.length} filtro={filtro} setFiltro={setFiltro} />
+          <Chip k="hechas" label="Hechas" n={hechas.length} filtro={filtro} setFiltro={setFiltro} verde />
+          <Chip k="todas" label="Todas" n={todas.length} filtro={filtro} setFiltro={setFiltro} />
+        </div>
+        {canEdit
+          ? <button className="ps-btn ps-btn--primary" onClick={onNueva} disabled={!zonas.length}>+ Nueva actuación</button>
+          : <span className="ps-gris-in">Solo lectura</span>}
+      </div>
+
+      {todas.length === 0 ? (
+        <p className="ps-vacio">
+          Aún no hay actuaciones inmediatas. Crea una con «+ Nueva actuación» o marca «⚡ Actuación inmediata» al editar
+          cualquier partida de una zona.
+        </p>
+      ) : lista.length === 0 ? (
+        <p className="ps-vacio">{filtro === 'porhacer' ? 'No queda nada por hacer.' : 'Todavía no hay ninguna hecha.'}</p>
+      ) : (
+        <div className="ps-table-wrap">
+          <table className="ps-table ps-table--inmediatas">
+            <thead>
+              <tr>
+                <th /><th>Actuación</th><th>Zona</th><th className="num">Coste</th>
+                <th>Responsable</th><th>Fecha límite</th><th>Estado</th>{canEdit && <th />}
+              </tr>
+            </thead>
+            <tbody>
+              {lista.map(p => {
+                const z = zonaDe[p.zona_id]
+                const hecha = isHecha(p)
+                const vencida = isPorHacer(p) && p.fecha_limite && p.fecha_limite < hoyStr
+                const cant = cantidad(p, z)
+                return (
+                  <tr key={p.id} className={!isActiva(p) ? 'ps-row--descartada' : hecha ? 'ps-row--hecha' : ''}>
+                    <td>
+                      <button
+                        className={`ps-hecho${hecha ? ' ps-hecho--on' : ''}`}
+                        disabled={!canEdit || !isActiva(p)}
+                        title={hecha ? 'Hecha · pulsa para volver a pendiente' : 'Marcar como hecha'}
+                        onClick={() => onCampo(p, { estado: hecha ? 'pendiente' : 'comprado' })}
+                      >✓</button>
+                    </td>
+                    <td className="ps-col-partida">
+                      <strong>{p.concepto}</strong>
+                      {p.donde && <span className="ps-donde">{p.donde}</span>}
+                      {p.nota && <em className="ps-nota-partida">{p.nota}</em>}
+                    </td>
+                    <td>
+                      {z?.nombre}
+                      {p.capitulo !== CAP_INMEDIATAS && <span className="ps-gris">{p.capitulo}</span>}
+                    </td>
+                    <td className="num ps-nowrap">
+                      <strong>{fmtEur(importeFinal(p, z))}</strong>
+                      {cant !== 1 && <span className="ps-gris">{fmtCant(cant)} {p.unidad} × {fmtEur(precioFinal(p))}</span>}
+                    </td>
+                    <td>{p.responsable || <span className="ps-gris-in">—</span>}</td>
+                    <td className={`ps-nowrap${vencida ? ' ps-vencida' : ''}`}>
+                      {p.fecha_limite ? fmtFecha(p.fecha_limite) : <span className="ps-gris-in">—</span>}
+                      {vencida && <span className="ps-small">Vencida</span>}
+                    </td>
+                    <td>
+                      <select className={`ps-estado ps-estado--${p.estado}`} value={p.estado} disabled={!canEdit}
+                        onChange={e => onCampo(p, { estado: e.target.value })}>
+                        {ESTADOS.map(e => <option key={e.key} value={e.key}>{e.label}</option>)}
+                      </select>
+                    </td>
+                    {canEdit && <td><button className="ps-btn ps-btn--small" onClick={() => onEditar(p)}>Editar</button></td>}
+                  </tr>
+                )
+              })}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td /><td colSpan={2}>{filtro === 'hechas' ? 'Total gastado' : filtro === 'porhacer' ? 'Total pendiente' : 'Total (sin descartadas)'}</td>
+                <td className="num"><strong>{fmtEur(coste(lista.filter(isActiva)))}</strong></td>
+                <td colSpan={canEdit ? 4 : 3} />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Chip({ k, label, n, filtro, setFiltro, verde }) {
   return (
     <button className={`sa-filter-btn${filtro === k ? ' sa-filter-btn--active' : ''}${verde ? ' ps-chip--verde' : ''}`} onClick={() => setFiltro(k)}>
@@ -449,6 +589,7 @@ function PartidaRow({ p, zona, canEdit, onCampo, onEditar }) {
     <tr className={p.estado === 'descartado' ? 'ps-row--descartada' : ''}>
       <td className="ps-col-partida">
         <strong>{p.concepto}</strong>
+        {p.inmediata && <span className="ps-rayo" title="Actuación inmediata">⚡ Inmediata</span>}
         {p.donde && <span className="ps-donde">{p.donde}</span>}
         {p.descripcion && <span className="ps-gris">{p.descripcion}</span>}
         {p.nota && <em className="ps-nota-partida">{p.nota}</em>}
@@ -573,7 +714,8 @@ function PartidaModal({ inicial, zona, capitulos, onGuardar, onBorrar, onCerrar,
     ? { ...inicial, cantidad: num2str(inicial.cantidad), precio_propuesto: num2str(inicial.precio_propuesto), precio_conseguido: num2str(inicial.precio_conseguido), medida: inicial.medida || '' }
     : { zona_id: zona.id, concepto: '', donde: '', descripcion: '', capitulo: capitulos[capitulos.length - 1] || '', orden: 0,
         cantidad: '1', unidad: 'ud', medida: '', precio_propuesto: '0', precio_conseguido: '',
-        tipo_precio: 'estimación', estado: 'pendiente', proveedor: '', fuente: '', enlace: '', fecha_consulta: hoy(), nota: '' })
+        tipo_precio: 'estimación', estado: 'pendiente', proveedor: '', fuente: '', enlace: '', fecha_consulta: hoy(), nota: '',
+        inmediata: false, responsable: '', fecha_limite: '' })
   const [guardando, setGuardando] = useState(false)
   const [error, setError] = useState(null)
   const set = k => e => setF(x => ({ ...x, [k]: e.target.value }))
@@ -596,6 +738,7 @@ function PartidaModal({ inicial, zona, capitulos, onGuardar, onBorrar, onCerrar,
       await onGuardar({
         ...f, cantidad: cant, precio_propuesto: prop, precio_conseguido: cons,
         orden: parseInt(f.orden, 10) || 0, medida: (!zona.sin_sala && f.medida) || null,
+        inmediata: !!f.inmediata, fecha_limite: (f.inmediata && f.fecha_limite) || null,
       })
     } catch (err) {
       setError(err.message)
@@ -652,7 +795,75 @@ function PartidaModal({ inicial, zona, capitulos, onGuardar, onBorrar, onCerrar,
         <Field label="Fuente (dónde se ha buscado)" full><input value={f.fuente} onChange={set('fuente')} /></Field>
         <Field label="Enlace" full><input type="url" value={f.enlace} onChange={set('enlace')} placeholder="https://" /></Field>
         <Field label="Notas" full><textarea rows={2} value={f.nota} onChange={set('nota')} /></Field>
+        <label className="ps-check">
+          <input type="checkbox" checked={!!f.inmediata} onChange={e => setF(x => ({ ...x, inmediata: e.target.checked }))} />
+          <span>⚡ Actuación inmediata</span>
+          <small>Algo pequeño que se puede hacer ya, sin esperar a otras partidas. Sale en «Actuaciones inmediatas».</small>
+        </label>
+        {f.inmediata && (
+          <>
+            <Field label="Responsable"><input value={f.responsable || ''} onChange={set('responsable')} maxLength={80} /></Field>
+            <Field label="Fecha límite"><input type="date" value={f.fecha_limite || ''} onChange={set('fecha_limite')} /></Field>
+          </>
+        )}
         <ModalActions editando={editando} guardando={guardando} error={error} onBorrar={borrar} onCerrar={onCerrar} />
+      </form>
+    </Modal>
+  )
+}
+
+// Alta rápida: se guarda como partida de la zona, en el capítulo «Actuaciones inmediatas»
+function InmediataModal({ zonas, onGuardar, onCerrar, onFallo }) {
+  const porDefecto = zonas.find(z => z.sin_sala) || zonas[0]
+  const [f, setF] = useState({ concepto: '', zona_id: porDefecto?.id || '', donde: '', coste: '', responsable: '', fecha_limite: '', nota: '' })
+  const [guardando, setGuardando] = useState(false)
+  const [error, setError] = useState(null)
+  const set = k => e => setF(x => ({ ...x, [k]: e.target.value }))
+  const zona = zonas.find(z => z.id === f.zona_id)
+
+  async function submit(e) {
+    e.preventDefault()
+    const coste = parsePrecio(f.coste)
+    if (!f.concepto.trim()) return setError('Indica qué hay que hacer.')
+    if (!zona) return setError('Elige una zona.')
+    if (coste === undefined) return setError('El coste no es un número válido.')
+    setGuardando(true)
+    setError(null)
+    try {
+      await onGuardar({
+        zona_id: zona.id, concepto: f.concepto, donde: zona.sin_sala ? f.donde : '', capitulo: CAP_INMEDIATAS, orden: 0,
+        cantidad: 1, unidad: 'ud', medida: null, precio_propuesto: coste ?? 0, precio_conseguido: null,
+        tipo_precio: 'estimación', estado: 'pendiente', fecha_consulta: hoy(), nota: f.nota,
+        inmediata: true, responsable: f.responsable, fecha_limite: f.fecha_limite || null,
+      })
+    } catch (err) {
+      setError(err.message)
+      onFallo(err)
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <Modal titulo="Nueva actuación inmediata" onCerrar={onCerrar}>
+      <form className="ps-form" onSubmit={submit}>
+        <Field label="Qué hay que hacer *" full><input value={f.concepto} onChange={set('concepto')} autoFocus placeholder="Cambiar el fluorescente del pasillo" /></Field>
+        <Field label="Zona" full={!zona?.sin_sala}>
+          <select value={f.zona_id} onChange={set('zona_id')}>
+            {zonas.map(z => <option key={z.id} value={z.id}>{z.nombre}</option>)}
+          </select>
+        </Field>
+        {zona?.sin_sala && (
+          <Field label="Dónde"><input value={f.donde} onChange={set('donde')} placeholder="Sala 2 y vestuarios" maxLength={160} /></Field>
+        )}
+        <Field label="Coste aproximado (€ con IVA)" hint="Vacío = 0 €"><input inputMode="decimal" value={f.coste} onChange={set('coste')} /></Field>
+        <Field label="Responsable"><input value={f.responsable} onChange={set('responsable')} maxLength={80} /></Field>
+        <Field label="Fecha límite"><input type="date" value={f.fecha_limite} onChange={set('fecha_limite')} /></Field>
+        <Field label="Notas" full><textarea rows={2} value={f.nota} onChange={set('nota')} /></Field>
+        <p className="ps-nota">
+          Se guarda en la zona elegida, en el capítulo «{CAP_INMEDIATAS}», y suma en su presupuesto. Para añadir proveedor,
+          enlace o cantidades, usa «Editar» después.
+        </p>
+        <ModalActions editando={false} guardando={guardando} error={error} onCerrar={onCerrar} />
       </form>
     </Modal>
   )
