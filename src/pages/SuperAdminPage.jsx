@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useRevenue, useExpenses, useClasesRetencion, useClasesPagoEnCurso, useIngresosDesglose, ingresosFamiliaSet, expensesAperturaSet } from '../hooks/useSuperAdmin'
+import { useRevenue, useExpenses, useClasesRetencion, useClasesPagoEnCurso, useIngresosDesglose, ingresosFamiliaSet, expensesAperturaSet, useGestionGrupos } from '../hooks/useSuperAdmin'
 import { PROF_META } from '../data/staffSchedule'
 import useTemaOscuro from '../hooks/useTemaOscuro'
 import ExpensesSection from '../components/ExpensesSection'
@@ -470,6 +470,70 @@ function AlumnosPagoEnCursoChart() {
         </ResponsiveContainer>
       )}
     </>
+  )
+}
+
+// «Bajo tarifa» (16/11 07:35 punto B.5): solo socios. Mismos datos que Supervisión › Grupos
+// (/gestion/grupos, ya trae tarifaEsperada/diferenciaMensual/bajoTarifa* por alumno) — el total
+// que se deja de cobrar al mes es solo un reduce aquí, sin endpoint propio. Eva ve la diferencia
+// de cada alumno en Grupos (es suya, es un pendiente de ella), pero nunca este total agregado.
+function BajoTarifaResumenSection() {
+  const oscuro = useTemaOscuro()
+  const { data, loading, error } = useGestionGrupos(1)
+  const filas = useMemo(() => {
+    const out = []
+    for (const g of (data?.grupos || [])) {
+      for (const a of g.alumnos) {
+        if (a.bajoTarifa) out.push({ ...a, grupoLabel: g.label })
+      }
+    }
+    return out.sort((a, b) => (a.diferenciaMensual ?? 0) - (b.diferenciaMensual ?? 0))
+  }, [data])
+  const totalMes = useMemo(() => filas.reduce((s, a) => s + Math.abs(a.diferenciaMensual || 0), 0), [filas])
+  const sinRevisar = filas.filter(a => !a.bajoTarifaRevisado).length
+
+  if (loading) return null
+  if (error) return null
+  if (filas.length === 0) return null
+
+  return (
+    <section className="sa-section">
+      <SectionTitle>Bajo tarifa</SectionTitle>
+      <p className="sa-legend">
+        Alumnos que pagan menos que la tarifa de su clase (margen de 2 €). Eva escribe el motivo y lo marca revisado
+        desde Supervisión › Grupos — aquí solo el total agregado, que no es suyo.
+      </p>
+      <div className="sa-kpis">
+        <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#ef4444', oscuro) }}>
+          <span className="sa-kpi__value">−{fmtEur(totalMes)}</span>
+          <span className="sa-kpi__label">al mes, entre {filas.length} alumno{filas.length === 1 ? '' : 's'}</span>
+        </div>
+        {sinRevisar > 0 && (
+          <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#f5c842', oscuro) }}>
+            <span className="sa-kpi__value">{sinRevisar}</span>
+            <span className="sa-kpi__label">sin revisar todavía</span>
+          </div>
+        )}
+      </div>
+      <div className="sa-profit-wrap">
+        <table className="sa-profit-table">
+          <thead>
+            <tr><th>Alumno</th><th>Clase</th><th>Diferencia/mes</th><th>Motivo</th><th>Revisado</th></tr>
+          </thead>
+          <tbody>
+            {filas.map(a => (
+              <tr key={`${a.subId}-${a.grupoLabel}`}>
+                <td>{a.alumno || '—'}</td>
+                <td className="sa-profit__num--dim">{a.grupoLabel}</td>
+                <td className="sa-profit__ben sa-profit__ben--neg">−{fmtEur(Math.abs(a.diferenciaMensual || 0))}</td>
+                <td className="sa-profit__num--dim">{a.bajoTarifaMotivoEva || a.notas || 'sin motivo anotado'}</td>
+                <td className="sa-profit__num--dim">{a.bajoTarifaRevisado ? `✓ ${a.bajoTarifaRevisadoPor}` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   )
 }
 
@@ -1348,7 +1412,7 @@ export default function SuperAdminPage() {
           </p>
         </>
       )}
-      {saTab === 'clases'   && <ClasesRetencionSection />}
+      {saTab === 'clases'   && (<><ClasesRetencionSection /><BajoTarifaResumenSection /></>)}
       {saTab === 'gastos'   && <ExpensesSection />}
       {saTab === 'pl'       && <PLTab />}
       {saTab === 'nominas'  && <PayrollSection />}

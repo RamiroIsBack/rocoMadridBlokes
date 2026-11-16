@@ -92,6 +92,10 @@ export const gestionExento        = body => gestionPost('/gestion/exento', body)
 export const gestionCambiarGrupo  = body => gestionPost('/gestion/cambiar-grupo', body)
 export const gestionOptinWhatsapp = body => gestionPost('/gestion/optin-whatsapp', body)
 export const gestionEditarAlumno  = body => gestionPost('/gestion/editar-alumno', body)
+// Wellhub + «Bajo tarifa» en Grupos (16/11 07:35).
+export const gestionGrupoWellhubSet    = body => gestionPost('/gestion/grupos/wellhub', body)
+export const gestionGrupoWellhubChecks = body => gestionPost('/gestion/grupos/wellhub-checkins', body)
+export const gestionGrupoBajoTarifaSet = body => gestionPost('/gestion/grupos/bajo-tarifa', body)
 export const gestionBuscarAlumno  = q    => gestionCall('GET', `/gestion/buscar-alumno?q=${encodeURIComponent(q)}`)
 // Crear cliente nuevo en WooCommerce desde "Añadir alumno" (Ramiro, 07/11 08:06).
 export const gestionAltaCliente   = body => gestionPost('/gestion/alta-cliente', body)

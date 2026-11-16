@@ -734,6 +734,10 @@
 .sv-grp-estado--bad  { background: #2a1a1a; color: #f87171; }
 .sv-grp-estado--ext  { background: #1e2430; color: #94a3b8; }
 
+/* «Bajo tarifa» sin revisar (16/11 07:35 punto B.2) — fondo rojo tenue sobre toda la fila, se
+   quita solo al marcarla revisada o si deja de estar por debajo de su tarifa. */
+.sv-grp-row--bajo-tarifa > td { background: color-mix(in srgb, var(--state-bad) 14%, transparent); }
+
 .sv-grp-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.6);
   display: flex; align-items: center; justify-content: center;

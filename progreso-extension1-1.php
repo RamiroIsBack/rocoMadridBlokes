@@ -1072,6 +1072,22 @@ add_action('rest_api_init', function() {
         'permission_callback' => $sa_perm,
         'args'                => array('months' => array('type' => 'integer', 'default' => 4)),
     ));
+    // 16/11 07:35 (Ramiro): Wellhub + «Bajo tarifa» en Grupos.
+    register_rest_route('superadmin/v1', '/gestion/grupos/wellhub', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_grupos_wellhub',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/grupos/wellhub-checkins', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_grupos_wellhub_checkins',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/grupos/bajo-tarifa', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_grupos_bajo_tarifa',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/marcar-cobrado', array(
         'methods'             => 'POST',
         'callback'            => 'superadmin_gestion_marcar_cobrado',
@@ -5822,6 +5838,95 @@ function blokes_horario_agrupable($horario) {
     return preg_replace('/\s+/', ' ', $h);
 }
 
+// ─── Wellhub + «Bajo tarifa» en Grupos (Ramiro, 16/11 07:35) ──────────────────────────────
+define('BLOKES_TARIFA_MENORES_2D', 57.0);
+define('BLOKES_TARIFA_MENORES_1D', 47.0);
+define('BLOKES_TARIFA_ADOL_2D', 65.0);
+define('BLOKES_TARIFA_ADOL_1D', 55.0);
+define('BLOKES_TARIFA_YOGA', 30.0);
+define('BLOKES_WELLHUB_POR_CHECKIN', 4.88);
+
+// menor | adolescente | adulto, a partir del texto de "edad" (del formulario de la web o de la
+// pestaña del Excel — KIDS/V. Inf = menor, ADOL/MEDIANOS = adolescente, ya normalizados a algo
+// con "Menores"/"Adolescentes" antes de llegar aquí).
+function blokes_tarifa_categoria_edad($edad) {
+    $e = blokes_externos_normaliza_nombre((string) $edad);
+    if (strpos($e, 'adolescente') !== false) return 'adolescente';
+    if (strpos($e, 'menor') !== false || strpos($e, 'infantil') !== false) return 'menor';
+    return 'adulto';
+}
+
+// 16/11 07:35 punto B.1: "si la nota dice «solo un día», «solo lunes», etc., la tarifa es la de
+// 1 día" aunque la clase/pestaña sea de 2 días — para no poner en rojo a quien de verdad solo
+// va 1 día de una clase Martes-Jueves/Lunes-Miércoles.
+function blokes_tarifa_nota_fuerza_1dia($notas) {
+    $n = blokes_externos_normaliza_nombre((string) $notas);
+    if ($n === '') return false;
+    if (preg_match('/\bsolo (lunes|martes|miercoles|jueves|viernes)\b/', $n)) return true;
+    if (preg_match('/\b(1|un) dia\b/', $n)) return true;
+    return false;
+}
+
+// Precio real de catálogo de la variación de una suscripción de adultos — "Adultos = precio de
+// la variación" (16/11 07:35): más fiable que fijar un número a mano (se autoactualiza si
+// cambia el catálogo, y no hace falta decidir a cuál de los "1 día 68/74/78" que dio Ramiro
+// corresponde cada franja exacta).
+function blokes_tarifa_adulto_variacion($sub_obj) {
+    foreach ($sub_obj->get_items() as $item) {
+        $vid = method_exists($item, 'get_variation_id') ? $item->get_variation_id() : 0;
+        if (!$vid) continue;
+        $v = wc_get_product($vid);
+        if ($v) return floatval($v->get_price());
+    }
+    return null;
+}
+
+// Mapa "día pareja|horario agrupado" => precio de catálogo de adultos, calculado UNA vez a
+// partir de todas las suscripciones web activas de adultos — para poder dar tarifa también a
+// los externos adultos (que no tienen variación propia) de la MISMA franja real. Si una franja
+// no tiene ninguna referencia en la web (p. ej. Pilates, para el que Ramiro no dio tarifa fija),
+// se queda sin tarifa a propósito — nunca se inventa un número.
+function blokes_tarifa_adultos_por_franja($all_subs) {
+    $out = array();
+    foreach ($all_subs as $s) {
+        if (($s['edad'] ?? 'Adultos') !== 'Adultos') continue;
+        if (empty($s['id']) || empty($s['dia']) || empty($s['horario'])) continue;
+        $clave = blokes_dia_a_pareja($s['dia']) . '|' . blokes_horario_agrupable($s['horario']);
+        if (isset($out[$clave])) continue;
+        $sub_obj = wcs_get_subscription(intval($s['id']));
+        if (!$sub_obj) continue;
+        $precio = blokes_tarifa_adulto_variacion($sub_obj);
+        if ($precio !== null) $out[$clave] = $precio;
+    }
+    return $out;
+}
+
+// Tarifa MENSUAL que le toca a un alumno. null = no se puede calcular con garantías (adulto sin
+// ninguna referencia de precio real en la web para esa franja) — nunca se adivina un número.
+function blokes_tarifa_mensual_esperada($edad, $es_2dias, $es_yoga, $gkey_adultos, $precios_adultos_por_franja) {
+    if ($es_yoga) return BLOKES_TARIFA_YOGA;
+    $cat = blokes_tarifa_categoria_edad($edad);
+    if ($cat === 'menor') return $es_2dias ? BLOKES_TARIFA_MENORES_2D : BLOKES_TARIFA_MENORES_1D;
+    if ($cat === 'adolescente') return $es_2dias ? BLOKES_TARIFA_ADOL_2D : BLOKES_TARIFA_ADOL_1D;
+    return $precios_adultos_por_franja[$gkey_adultos] ?? null;
+}
+
+// Compara lo que alguien paga (en su propio periodo de facturación) contra su tarifa esperada,
+// con el margen de 2 € de redondeo que pidió Ramiro. $meses_ciclo: 1 = mensual, 3 = trimestral
+// (con el 10% de descuento ya aplicado), cualquier otro nº de meses que cubra el pago.
+function blokes_tarifa_comparar($tarifa_mensual, $pago_periodo, $meses_ciclo) {
+    if ($tarifa_mensual === null || $meses_ciclo < 1) {
+        return array('tarifa' => null, 'diferenciaMensual' => null, 'bajoTarifa' => false);
+    }
+    $tarifa_periodo = ($meses_ciclo === 3) ? ($tarifa_mensual * 3 * 0.9) : ($tarifa_mensual * $meses_ciclo);
+    $diferencia_mensual = ($pago_periodo - $tarifa_periodo) / $meses_ciclo;
+    return array(
+        'tarifa' => round($tarifa_mensual, 2),
+        'diferenciaMensual' => round($diferencia_mensual, 2),
+        'bajoTarifa' => $diferencia_mensual < -2,
+    );
+}
+
 function superadmin_gestion_grupos($request) {
     if (!class_exists('RocoMadrid_SF_Stats') || !function_exists('wcs_get_subscription')) {
         return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats/WooCommerce Subscriptions not available. Call this endpoint on the club subsite.', array('status' => 503));
@@ -5841,6 +5946,10 @@ function superadmin_gestion_grupos($request) {
     $cobros_manuales = blokes_cobros_manuales_todos(); // efectivo apuntado desde "Marcar cobrado", sin WooCommerce
     $optin_por_tel = blokes_optin_por_telefono(); // marca (WA) junto al nombre
     $hoy_ym = date('Y-m');
+    // Wellhub + «Bajo tarifa» (16/11 07:35): precio real de catálogo por franja de adultos,
+    // calculado una vez para toda la respuesta — ver blokes_tarifa_adultos_por_franja().
+    $precios_adultos_por_franja = blokes_tarifa_adultos_por_franja($all);
+    $es_socio_bt = blokes_get_app_role() === 'socio';
 
     // Pagos adelantados sin aplicar todavía (Ramiro, 1/11 18:55): si ya hay uno guardado para
     // esta suscripción, "Cobrar este mes" no debe parecer que nadie se ha ocupado — se marca
@@ -6070,8 +6179,47 @@ function superadmin_gestion_grupos($request) {
         }
         $alumno_nombre = $nombre_fact !== '' ? $nombre_fact : ($sub['cliente'] ?? '');
 
+        // Wellhub + «Bajo tarifa» (16/11 07:35) — ver las funciones blokes_tarifa_*() de arriba.
+        $notas_sub = get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '';
+        $es_yoga_bt = ($producto === 'Yoga');
+        $es_2dias_bt = count($dias_sub) > 1 && !blokes_tarifa_nota_fuerza_1dia($notas_sub);
+        $gkey_adultos_bt = blokes_dia_a_pareja($dia) . '|' . blokes_horario_agrupable($horario);
+        $tarifa_mensual_bt = blokes_tarifa_mensual_esperada($edad, $es_2dias_bt, $es_yoga_bt, $gkey_adultos_bt, $precios_adultos_por_franja);
+        $pago_periodo_bt = floatval($sub_obj->get_total());
+        $comp_bt = blokes_tarifa_comparar($tarifa_mensual_bt, $pago_periodo_bt, $meses_por_ciclo);
+        // Revisado por Eva vigente solo si lo que paga no ha cambiado desde que lo revisó — si
+        // cambia, se quita solo (16/11 07:35 punto B.4), sin tener que borrar nada a mano.
+        $bt_motivo_eva    = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_motivo', true) ?: '';
+        $bt_revisado_por  = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_por', true) ?: '';
+        $bt_revisado_en   = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_en', true) ?: '';
+        $bt_importe_rev   = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_importe_revisado', true);
+        $bt_vigente = $bt_revisado_por !== '' && $bt_importe_rev !== '' && abs(floatval($bt_importe_rev) - $pago_periodo_bt) < 0.01;
+        // Wellhub: "wellhub" en las notas como punto de partida; si Eva lo ha marcado/desmarcado
+        // a mano (meta no vacía), gana su decisión explícita sobre la detección automática.
+        $wh_meta_bt = get_post_meta($sub_obj->get_id(), '_rm_wellhub', true);
+        $wellhub_bt = $wh_meta_bt !== '' ? (bool) intval($wh_meta_bt) : (stripos($notas_sub, 'wellhub') !== false);
+        $wellhub_checkins_bt = null; $wellhub_falta_bt = null;
+        if ($wellhub_bt && $tarifa_mensual_bt !== null) {
+            $pago_mensual_equiv_bt = $pago_periodo_bt / max(1, $meses_por_ciclo);
+            $wellhub_falta_bt = round($tarifa_mensual_bt - $pago_mensual_equiv_bt, 2);
+            $wellhub_checkins_bt = $wellhub_falta_bt > 0 ? (int) ceil($wellhub_falta_bt / BLOKES_WELLHUB_POR_CHECKIN) : 0;
+        }
+
         $fila = array(
             'subId'       => intval($sub['id']),
+            'wellhub'       => $wellhub_bt,
+            'wellhubCheckinsFaltan' => $wellhub_checkins_bt,
+            // Dinero del Wellhub: solo socios (16/11 07:35 punto A) — se quita al final de la
+            // función para quien no sea socio, igual que el resto de dinero de esta pantalla.
+            'wellhubImporteFalta' => $wellhub_falta_bt,
+            'wellhubPorCheckin'   => BLOKES_WELLHUB_POR_CHECKIN,
+            'tarifaEsperada'      => $comp_bt['tarifa'],
+            'diferenciaMensual'   => $comp_bt['diferenciaMensual'],
+            'bajoTarifa'          => $comp_bt['bajoTarifa'],
+            'bajoTarifaRevisado'  => $bt_vigente,
+            'bajoTarifaMotivoEva' => $bt_vigente ? $bt_motivo_eva : '',
+            'bajoTarifaRevisadoPor' => $bt_vigente ? $bt_revisado_por : '',
+            'bajoTarifaRevisadoEn'  => $bt_vigente ? $bt_revisado_en : '',
             'alumno'      => $alumno_nombre,
             'telefono'    => $telefono,
             'optinWhatsapp' => $telefono ? ($optin_por_tel[blokes_externos_normaliza_telefono($telefono)] ?? null) : null,
@@ -6091,7 +6239,7 @@ function superadmin_gestion_grupos($request) {
             'pagos'       => $pagos,
             'pendiente'   => $pendiente,
             'tieneAdelantado' => (bool) $tiene_adelantado,
-            'notas'       => get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '',
+            'notas'       => $notas_sub,
             // Sin nombre de facturación ni en el perfil de WordPress: lo que se ve es el
             // nombre de usuario de la cuenta, no un nombre real.
             'sinNombre'   => $nombre_fact === '',
@@ -6153,6 +6301,38 @@ function superadmin_gestion_grupos($request) {
         // misma persona en el Excel, p. ej. una fila sin teléfono y otra con — 15/11 13:20).
         if ($tel_ext_norm && !isset($telefono_a_pk_por_grupo[$gkey_ext][$tel_ext_norm])) $telefono_a_pk_por_grupo[$gkey_ext][$tel_ext_norm] = $persona_key_ext;
         if ($nombre_ext_compacto && !isset($nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto])) $nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto] = $persona_key_ext;
+
+        // Wellhub + «Bajo tarifa» para externos (16/11 07:35) — mismas funciones que los de la
+        // web, usando el dia/horario/edad ya guardados en su fila (no se re-deriva de la pestaña
+        // del Excel: ese campo ya viene de ahí al crearse el externo, y Eva puede corregirlo a
+        // mano si hiciera falta). "Lo que paga" = su pago más reciente dentro de la ventana,
+        // mensualizado si cubre varios meses (trimestral/anual) — si no hay ningún pago en la
+        // ventana, no se puede comparar y no entra en "Bajo tarifa".
+        $pago_mensual_ext_bt = null;
+        foreach (array_reverse($meses) as $ym_chk) {
+            if (empty($pagos_ext[$ym_chk])) continue;
+            $p_chk = $pagos_ext[$ym_chk];
+            $divisor_chk = (($p_chk['tipo'] ?? null) === 'TRI') ? 3 : ((($p_chk['tipo'] ?? null) === 'ANUAL') ? 12 : 1);
+            $pago_mensual_ext_bt = floatval($p_chk['importe'] ?? 0) / $divisor_chk;
+            break;
+        }
+        $es_2dias_ext_bt = !$es_py_ext && strpos($dia_ext, '-') !== false && !blokes_tarifa_nota_fuerza_1dia($ext['notas']);
+        $es_yoga_ext_bt = ($dia_ext === 'Yoga');
+        $tarifa_mensual_ext_bt = blokes_tarifa_mensual_esperada($edad_ext, $es_2dias_ext_bt, $es_yoga_ext_bt, $pareja_ext . '|' . $horario_agrupa_ext, $precios_adultos_por_franja);
+        $comp_ext_bt = ($pago_mensual_ext_bt !== null)
+            ? blokes_tarifa_comparar($tarifa_mensual_ext_bt, $pago_mensual_ext_bt, 1)
+            : array('tarifa' => $tarifa_mensual_ext_bt !== null ? round($tarifa_mensual_ext_bt, 2) : null, 'diferenciaMensual' => null, 'bajoTarifa' => false);
+        $bt_revisado_por_ext = $ext['bajo_tarifa_revisado_por'] ?: '';
+        $bt_importe_rev_ext  = $ext['bajo_tarifa_importe_revisado'];
+        $bt_vigente_ext = $bt_revisado_por_ext !== '' && $bt_importe_rev_ext !== null && $pago_mensual_ext_bt !== null
+            && abs(floatval($bt_importe_rev_ext) - $pago_mensual_ext_bt) < 0.01;
+        $wellhub_ext_bt = $ext['wellhub'] !== null ? (bool) intval($ext['wellhub']) : (stripos($ext['notas'], 'wellhub') !== false);
+        $wellhub_checkins_ext_bt = null; $wellhub_falta_ext_bt = null;
+        if ($wellhub_ext_bt && $comp_ext_bt['tarifa'] !== null && $pago_mensual_ext_bt !== null) {
+            $wellhub_falta_ext_bt = round($comp_ext_bt['tarifa'] - $pago_mensual_ext_bt, 2);
+            $wellhub_checkins_ext_bt = $wellhub_falta_ext_bt > 0 ? (int) ceil($wellhub_falta_ext_bt / BLOKES_WELLHUB_POR_CHECKIN) : 0;
+        }
+
         $grupos[$gkey_ext]['personas'][$persona_key_ext][] = array(
             'subId' => 'ext-' . $ext['id'], 'alumno' => $ext['nombre'], 'telefono' => $ext['telefono'],
             'optinWhatsapp' => $ext['telefono'] ? ($optin_por_tel[blokes_externos_normaliza_telefono($ext['telefono'])] ?? null) : null,
@@ -6161,6 +6341,17 @@ function superadmin_gestion_grupos($request) {
             'pendiente' => null, 'notas' => $ext['notas'], 'sinNombre' => false, 'esExterno' => true,
             'externoId' => intval($ext['id']), 'externoDia' => $dia_ext, 'externoHorario' => $horario_ext, 'externoEdad' => $edad_ext,
             'tutorNombre' => $ext['tutor_nombre'] ?: '', 'tutorTelefono' => $ext['tutor_telefono'] ?: '',
+            'wellhub' => $wellhub_ext_bt,
+            'wellhubCheckinsFaltan' => $wellhub_checkins_ext_bt,
+            'wellhubImporteFalta'   => $wellhub_falta_ext_bt,
+            'wellhubPorCheckin'     => BLOKES_WELLHUB_POR_CHECKIN,
+            'tarifaEsperada'        => $comp_ext_bt['tarifa'],
+            'diferenciaMensual'     => $comp_ext_bt['diferenciaMensual'],
+            'bajoTarifa'            => $comp_ext_bt['bajoTarifa'],
+            'bajoTarifaRevisado'    => $bt_vigente_ext,
+            'bajoTarifaMotivoEva'   => $bt_vigente_ext ? ($ext['bajo_tarifa_motivo'] ?: '') : '',
+            'bajoTarifaRevisadoPor' => $bt_vigente_ext ? $bt_revisado_por_ext : '',
+            'bajoTarifaRevisadoEn'  => $bt_vigente_ext ? ($ext['bajo_tarifa_revisado_en'] ?: '') : '',
         );
     }
 
@@ -6222,7 +6413,144 @@ function superadmin_gestion_grupos($request) {
     }
     usort($data, function($a, $b) { return count($b['alumnos']) <=> count($a['alumnos']); });
 
-    return rest_ensure_response(array('success' => true, 'data' => array('meses' => $meses, 'grupos' => $data)));
+    // Wellhub + «Bajo tarifa» (16/11 07:35): recuentos para la cabecera de Grupos y el filtro
+    // «Bajo tarifa (N)». El dinero (importeFalta/porCheckin) es solo para socios — Eva ve el
+    // recuento de check-ins y la diferencia, nunca esos dos campos (punto A: "Eva... sin
+    // importes" — el resto de "Bajo tarifa" sí es suyo, solo el € de Wellhub se le quita).
+    $wellhub_total = 0; $bajo_tarifa_total = 0;
+    foreach ($data as &$grupo_bt) {
+        foreach ($grupo_bt['alumnos'] as &$alumno_bt) {
+            if ($alumno_bt['enVigor'] ?? true) {
+                if (!empty($alumno_bt['wellhub'])) $wellhub_total++;
+                if (!empty($alumno_bt['bajoTarifa'])) $bajo_tarifa_total++;
+            }
+            if (!$es_socio_bt) { unset($alumno_bt['wellhubImporteFalta']); unset($alumno_bt['wellhubPorCheckin']); }
+        }
+    }
+    unset($grupo_bt, $alumno_bt);
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'meses' => $meses, 'grupos' => $data,
+        'wellhubTotal' => $wellhub_total, 'bajoTarifaTotal' => $bajo_tarifa_total,
+    )));
+}
+
+// "subId" de Grupos tal como lo manda el frontend: numérico para una suscripción web, "ext-123"
+// para un externo. null si no se reconoce ninguna de las dos formas.
+function blokes_grupos_persona_parse($subId) {
+    $s = (string) $subId;
+    if (preg_match('/^ext-(\d+)$/', $s, $m)) return array('tipo' => 'externo', 'id' => intval($m[1]));
+    if (preg_match('/^\d+$/', $s)) return array('tipo' => 'sub', 'id' => intval($s));
+    return null;
+}
+
+// POST /gestion/grupos/wellhub — { subId, wellhub: true|false|null }. null = quita la decisión
+// manual de Eva y vuelve a la detección automática por las notas (16/11 07:35 punto A.1).
+function superadmin_gestion_grupos_wellhub($request) {
+    $body = $request->get_json_params();
+    $persona = blokes_grupos_persona_parse($body['subId'] ?? '');
+    if (!$persona) return new WP_Error('bad_request', 'Falta subId.', array('status' => 400));
+    $valor = array_key_exists('wellhub', $body) ? $body['wellhub'] : null;
+
+    if ($persona['tipo'] === 'sub') {
+        if (!function_exists('wcs_get_subscription')) return new WP_Error('no_disponible', 'WooCommerce Subscriptions no disponible.', array('status' => 503));
+        $sub_obj = wcs_get_subscription($persona['id']);
+        if (!$sub_obj) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+        if ($valor === null) delete_post_meta($sub_obj->get_id(), '_rm_wellhub');
+        else update_post_meta($sub_obj->get_id(), '_rm_wellhub', $valor ? '1' : '0');
+    } else {
+        global $wpdb;
+        blokes_ensure_externos_tables();
+        $wpdb->update(blokes_externos_table(), array('wellhub' => $valor === null ? null : ($valor ? 1 : 0)), array('id' => $persona['id']));
+    }
+    blokes_gestion_log(0, 'grupos_wellhub', null, array('subId' => $body['subId'] ?? '', 'wellhub' => $valor), 'Marca de Wellhub cambiada a mano en Grupos.');
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /gestion/grupos/wellhub-checkins — { subId, periodo (YYYY-MM), checkins } — lo que Eva ve
+// en el portal de Wellhub, apuntado a mano (16/11 07:35 punto A.4: "sin conexión con Wellhub, es
+// a mano").
+function superadmin_gestion_grupos_wellhub_checkins($request) {
+    $body = $request->get_json_params();
+    $persona = blokes_grupos_persona_parse($body['subId'] ?? '');
+    $periodo = sanitize_text_field((string) ($body['periodo'] ?? ''));
+    if (!$persona || !preg_match('/^\d{4}-\d{2}$/', $periodo)) return new WP_Error('bad_request', 'Faltan subId o periodo (YYYY-MM).', array('status' => 400));
+    $checkins = max(0, intval($body['checkins'] ?? 0));
+    global $wpdb;
+    blokes_ensure_externos_tables(); // crea también blokes_wellhub_checkins_table()
+    $ahora = current_time('mysql');
+    $wpdb->query($wpdb->prepare(
+        "INSERT INTO " . blokes_wellhub_checkins_table() . " (persona_tipo, persona_id, periodo, checkins, updated_at) VALUES (%s,%d,%s,%d,%s)
+         ON DUPLICATE KEY UPDATE checkins = %d, updated_at = %s",
+        $persona['tipo'], $persona['id'], $periodo, $checkins, $ahora, $checkins, $ahora
+    ));
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /gestion/grupos/bajo-tarifa — { subId, accion: 'marcar'|'quitar', motivo } — Eva escribe
+// el porqué y marca revisado (16/11 07:35 punto B.4); se guarda también lo que paga AHORA, para
+// que la fila vuelva sola a rojo si cambia más adelante (superadmin_gestion_grupos() ya lo
+// comprueba en cada carga, aquí solo se guarda el valor de referencia).
+function superadmin_gestion_grupos_bajo_tarifa($request) {
+    $body = $request->get_json_params();
+    $persona = blokes_grupos_persona_parse($body['subId'] ?? '');
+    if (!$persona) return new WP_Error('bad_request', 'Falta subId.', array('status' => 400));
+    $accion = sanitize_key((string) ($body['accion'] ?? 'marcar'));
+    $motivo = mb_substr(sanitize_text_field((string) ($body['motivo'] ?? '')), 0, 300);
+    $u = wp_get_current_user();
+    $ahora = current_time('mysql');
+
+    if ($persona['tipo'] === 'sub') {
+        if (!function_exists('wcs_get_subscription')) return new WP_Error('no_disponible', 'WooCommerce Subscriptions no disponible.', array('status' => 503));
+        $sub_obj = wcs_get_subscription($persona['id']);
+        if (!$sub_obj) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+        if ($accion === 'quitar') {
+            delete_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_motivo');
+            delete_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_por');
+            delete_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_en');
+            delete_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_importe_revisado');
+        } else {
+            if ($motivo === '') return new WP_Error('bad_request', 'Falta el motivo.', array('status' => 400));
+            update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_motivo', $motivo);
+            update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_por', $u ? $u->user_login : '');
+            update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_en', $ahora);
+            update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_importe_revisado', $sub_obj->get_total());
+        }
+    } else {
+        global $wpdb;
+        blokes_ensure_externos_tables();
+        $ext = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_externos_table() . " WHERE id = %d", $persona['id']), ARRAY_A);
+        if (!$ext) return new WP_Error('not_found', 'Externo no encontrado.', array('status' => 404));
+        if ($accion === 'quitar') {
+            $wpdb->update(blokes_externos_table(), array(
+                'bajo_tarifa_motivo' => '', 'bajo_tarifa_revisado_por' => '', 'bajo_tarifa_revisado_en' => null, 'bajo_tarifa_importe_revisado' => null,
+            ), array('id' => $persona['id']));
+        } else {
+            if ($motivo === '') return new WP_Error('bad_request', 'Falta el motivo.', array('status' => 400));
+            // "Lo que paga" ahora mismo, como referencia — si cambia más adelante, la próxima
+            // carga de Grupos ya no da por vigente este revisado (comparación en el propio
+            // superadmin_gestion_grupos()).
+            $pago_mensual = null;
+            foreach (blokes_externos_todos() as $e2) {
+                if (intval($e2['id']) !== $persona['id']) continue;
+                $yms = array_keys($e2['pagos']);
+                rsort($yms);
+                foreach ($yms as $ym_chk) {
+                    $p_chk = $e2['pagos'][$ym_chk];
+                    $divisor_chk = (($p_chk['tipo'] ?? null) === 'TRI') ? 3 : ((($p_chk['tipo'] ?? null) === 'ANUAL') ? 12 : 1);
+                    $pago_mensual = floatval($p_chk['importe'] ?? 0) / $divisor_chk;
+                    break;
+                }
+                break;
+            }
+            $wpdb->update(blokes_externos_table(), array(
+                'bajo_tarifa_motivo' => $motivo, 'bajo_tarifa_revisado_por' => $u ? $u->user_login : '',
+                'bajo_tarifa_revisado_en' => $ahora, 'bajo_tarifa_importe_revisado' => $pago_mensual,
+            ), array('id' => $persona['id']));
+        }
+    }
+    blokes_gestion_log(0, 'grupos_bajo_tarifa', null, array('subId' => $body['subId'] ?? '', 'accion' => $accion, 'motivo' => $motivo), 'Bajo tarifa revisado en Grupos.');
+    return rest_ensure_response(array('success' => true));
 }
 
 // ─── Sección 8.2: acciones de ExcelMuerte sobre WooCommerce (quedan registradas) ──────────
@@ -6571,6 +6899,11 @@ function blokes_ensure_externos_tables() {
         user_login  varchar(100)        NOT NULL DEFAULT '',
         created_at  datetime            NOT NULL,
         updated_at  datetime            NOT NULL,
+        wellhub                   tinyint(1) NULL,
+        bajo_tarifa_motivo        varchar(300) NOT NULL DEFAULT '',
+        bajo_tarifa_revisado_por  varchar(100) NOT NULL DEFAULT '',
+        bajo_tarifa_revisado_en   datetime NULL,
+        bajo_tarifa_importe_revisado decimal(10,2) NULL,
         PRIMARY KEY (id)
     ) {$charset};");
     dbDelta("CREATE TABLE " . blokes_externos_pagos_table() . " (
@@ -6584,7 +6917,20 @@ function blokes_ensure_externos_tables() {
         PRIMARY KEY (id),
         UNIQUE KEY externo_periodo (externo_id, periodo)
     ) {$charset};");
+    // Wellhub (16/11 07:35 punto A.4): check-ins que Eva ve en el portal, apuntados a mano (sin
+    // conexión con la API de Wellhub) — un número por persona (sub web o externo) y mes.
+    dbDelta("CREATE TABLE " . blokes_wellhub_checkins_table() . " (
+        id            bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        persona_tipo  varchar(10)   NOT NULL,
+        persona_id    bigint(20) UNSIGNED NOT NULL,
+        periodo       varchar(7)    NOT NULL,
+        checkins      smallint UNSIGNED NOT NULL DEFAULT 0,
+        updated_at    datetime      NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY persona_periodo (persona_tipo, persona_id, periodo)
+    ) {$charset};");
 }
+function blokes_wellhub_checkins_table() { global $wpdb; return $wpdb->prefix . 'blokes_wellhub_checkins'; }
 
 function blokes_externos_normaliza_telefono($t) {
     $d = preg_replace('/\D/', '', (string) $t);
@@ -19137,6 +19483,28 @@ add_action('init', function() {
         }
     }
     update_option('blokes_fix_variacion_6706_privada', 1, false);
+});
+
+// «Bajo tarifa» — 3 suscripciones en espera ya decididas por Ramiro (16/11 07:35 punto B.6):
+// 10% de descuento de la migración a WooCommerce, confirmado por él, no una duda de Eva. Solo
+// estas 3 (identificadas por subId, un dato seguro) se precargan como "revisado" — los demás
+// casos que dio por nombre + fila de Excel NO se tocan aquí: una fila de Excel no es un
+// identificador seguro para adivinar a cuál suscripción/externo corresponde sin arriesgarse a
+// marcarle el revisado a la persona equivocada (dinero de por medio). Esos quedan para que
+// alguien los marque a mano desde la lista, ya con el motivo que dio Ramiro.
+add_action('init', function() {
+    if (get_option('blokes_bajo_tarifa_migracion_10pc')) return;
+    if (function_exists('wcs_get_subscription')) {
+        foreach (array(5396, 5374, 5406) as $sub_id) {
+            $sub_obj = wcs_get_subscription($sub_id);
+            if (!$sub_obj) continue;
+            update_post_meta($sub_id, '_rm_bajo_tarifa_motivo', 'descuento migración 10 % (Ramiro)');
+            update_post_meta($sub_id, '_rm_bajo_tarifa_revisado_por', 'ramiro (migración)');
+            update_post_meta($sub_id, '_rm_bajo_tarifa_revisado_en', current_time('mysql'));
+            update_post_meta($sub_id, '_rm_bajo_tarifa_importe_revisado', $sub_obj->get_total());
+        }
+    }
+    update_option('blokes_bajo_tarifa_migracion_10pc', 1, false);
 });
 
 function nueve_config() {

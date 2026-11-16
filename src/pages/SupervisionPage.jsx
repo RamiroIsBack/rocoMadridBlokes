@@ -24,6 +24,7 @@ function kpiColorTema(hex, oscuro) {
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
   gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente,
+  gestionGrupoWellhubSet, gestionGrupoWellhubChecks, gestionGrupoBajoTarifaSet,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
@@ -1486,6 +1487,101 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
   )
 }
 
+// Wellhub (16/11 07:35 punto A): marca manual (gana sobre la detección automática por "wellhub"
+// en las notas), check-ins que le tocan al mes para completar su tarifa, y el registro opcional
+// de los que Eva ve en el portal (sin conexión con Wellhub, a mano). El € (importeFalta/
+// porCheckin) solo llega aquí si el backend decidió que este usuario es socio.
+function WellhubModal({ alumno, onClose, onDone }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const [checkins, setCheckins] = useState('')
+  const periodoActual = hoyISO().slice(0, 7)
+
+  const marcar = async valor => {
+    setBusy(true); setErr(null)
+    try { await gestionGrupoWellhubSet({ subId: alumno.subId, wellhub: valor }); onDone() }
+    catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+  const guardarCheckins = async () => {
+    if (checkins === '') return
+    setBusy(true); setErr(null)
+    try { await gestionGrupoWellhubChecks({ subId: alumno.subId, periodo: periodoActual, checkins: Number(checkins) }); onDone() }
+    catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="sv-grp-overlay" onClick={onClose}>
+      <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
+        <h3>Wellhub — {alumno.alumno || `Suscripción #${alumno.subId}`}</h3>
+        <p className="sv-note">
+          Paga parte de su cuota con Wellhub: el portal paga 4,88 € por cada check-in que pase, el día 15-17 del mes
+          siguiente. Tiene que pasar el pase SIEMPRE que venga — si no, no se cobra esa parte.
+          {alumno.wellhub && alumno.wellhubCheckinsFaltan != null && <> Le tocan <strong>{alumno.wellhubCheckinsFaltan}</strong> check-ins este mes para completar su tarifa.</>}
+        </p>
+        {err && <p className="sv-to-warn-txt">{err}</p>}
+        <div className="sv-grp-modal__actions">
+          <button className="sv-tests-select" disabled={busy} onClick={() => marcar(null)}>Automático (según las notas)</button>
+          <button className="sv-tests-select" disabled={busy} onClick={() => marcar(false)}>No paga con Wellhub</button>
+          <button className="sv-tests-save" disabled={busy} onClick={() => marcar(true)}>Sí, paga con Wellhub</button>
+        </div>
+        {alumno.wellhub && (
+          <label className="sv-grp-field">
+            Check-ins vistos en el portal este mes ({mesLabelLargo(periodoActual)})
+            <input className="sv-tests-input" type="number" min="0" style={{ width: 70 }} value={checkins} onChange={e => setCheckins(e.target.value)} />
+            <button className="sv-tests-select" disabled={busy || checkins === ''} onClick={guardarCheckins}>Guardar</button>
+          </label>
+        )}
+        <div className="sv-grp-modal__actions">
+          <button className="sv-tests-select" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// «Bajo tarifa» (16/11 07:35 punto B.4): Eva escribe el porqué y marca revisado — la fila deja
+// de estar en rojo. Si después cambia lo que paga, el backend ya no da por vigente este revisado
+// y vuelve a salir en rojo solo, sin que haga falta borrar nada aquí.
+function BajoTarifaModal({ alumno, onClose, onDone }) {
+  const [motivo, setMotivo] = useState(alumno.bajoTarifaMotivoEva || alumno.notas || '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+
+  const marcar = async () => {
+    if (!motivo.trim()) { setErr('Pon el motivo.'); return }
+    setBusy(true); setErr(null)
+    try { await gestionGrupoBajoTarifaSet({ subId: alumno.subId, accion: 'marcar', motivo: motivo.trim() }); onDone() }
+    catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+  const quitar = async () => {
+    setBusy(true); setErr(null)
+    try { await gestionGrupoBajoTarifaSet({ subId: alumno.subId, accion: 'quitar' }); onDone() }
+    catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="sv-grp-overlay" onClick={onClose}>
+      <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
+        <h3>Bajo tarifa — {alumno.alumno || `Suscripción #${alumno.subId}`}</h3>
+        <p className="sv-note">
+          Tarifa esperada {alumno.tarifaEsperada != null ? fmtEur(alumno.tarifaEsperada) : '—'}/mes
+          {alumno.diferenciaMensual != null && <> · paga <strong>{fmtEur(Math.abs(alumno.diferenciaMensual))}</strong>/mes de menos</>}.
+          {alumno.bajoTarifaRevisado && <> Ya revisado por {alumno.bajoTarifaRevisadoPor} ({alumno.bajoTarifaRevisadoEn?.slice(0, 10)}).</>}
+        </p>
+        <label className="sv-grp-field">Motivo
+          <input className="sv-tests-input" type="text" value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Hermanos, bono familiar, Wellhub, 50%…" />
+        </label>
+        {err && <p className="sv-to-warn-txt">{err}</p>}
+        <div className="sv-grp-modal__actions">
+          <button className="sv-tests-select" onClick={onClose}>Cerrar</button>
+          {alumno.bajoTarifaRevisado && <button className="sv-tests-remove" disabled={busy} onClick={quitar}>Quitar revisado</button>}
+          <button className="sv-tests-save" disabled={busy} onClick={marcar}>Marcar revisado</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function AccionMenu({ alumno, onPick, onClose }) {
   if (alumno.esExterno) {
     return (
@@ -1494,6 +1590,8 @@ function AccionMenu({ alumno, onPick, onClose }) {
           <button onClick={() => onPick('ext_cobrar')}>Marcar cobrado</button>
           <button onClick={() => onPick('ext_editar')}>Editar datos</button>
           <button onClick={() => onPick('exento')}>{alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio'}</button>
+          <button onClick={() => onPick('wellhub')}>Wellhub{alumno.wellhub ? ' ✓' : ''}</button>
+          {alumno.bajoTarifa && <button onClick={() => onPick('bajo_tarifa')}>Bajo tarifa{alumno.bajoTarifaRevisado ? ' ✓' : ''}</button>}
           <button onClick={() => onPick('ext_borrar')}>Eliminar (alta por error)</button>
           <button className="sv-grp-menu__cancel" onClick={onClose}>Cancelar</button>
         </div>
@@ -1515,6 +1613,8 @@ function AccionMenu({ alumno, onPick, onClose }) {
         <button onClick={() => onPick('cambiar_grupo')}>Cambiar de grupo/horario</button>
         <button onClick={() => onPick('optin_whatsapp')}>Consentimiento WhatsApp</button>
         <button onClick={() => onPick('editar_alumno')}>Editar nombre/teléfono</button>
+        <button onClick={() => onPick('wellhub')}>Wellhub{alumno.wellhub ? ' ✓' : ''}</button>
+        {alumno.bajoTarifa && <button onClick={() => onPick('bajo_tarifa')}>Bajo tarifa{alumno.bajoTarifaRevisado ? ' ✓' : ''}</button>}
         {alumno.otrasSubs?.map(s => (
           <button key={s.subId} onClick={() => onPick('fusionar', s.subId)}>Fusionar — cancelar #{s.subId}</button>
         ))}
@@ -1601,8 +1701,11 @@ function TablaAlumnos({ alumnos, meses, onWa, onMenu }) {
         <tbody>
           {alumnos.map(a => {
             const est = ESTADO_LABEL[a.estado] || { txt: a.estado, cls: '' }
+            // Wellhub + «Bajo tarifa» (16/11 07:35): rojo solo mientras de verdad falta revisar
+            // — una vez Eva lo marca, se queda con el chip pero sin el fondo rojo.
+            const bajoTarifaSinRevisar = a.bajoTarifa && !a.bajoTarifaRevisado
             return (
-              <tr key={a.subId}>
+              <tr key={a.subId} className={bajoTarifaSinRevisar ? 'sv-grp-row--bajo-tarifa' : ''}>
                 <td>
                   {a.alumno || <span className="sv-ot-muted">—</span>}
                   {a.telefono
@@ -1618,6 +1721,14 @@ function TablaAlumnos({ alumnos, meses, onWa, onMenu }) {
                   )}
                   {a.fusionadoExterno && (
                     <span className="sv-ot-muted" title="Antes pagaba fuera de la web (Excel) — ya fusionado con esta cuenta, el historial de pagos del Excel está incluido aquí."> (fusionado con Excel)</span>
+                  )}
+                  {a.wellhub && (
+                    <span className="sv-to-warn-txt" title={`Paga parte de su cuota con Wellhub: tiene que pasar el pase SIEMPRE que venga, si no no se cobra esa parte.${a.wellhubCheckinsFaltan != null ? ` Le tocan ${a.wellhubCheckinsFaltan} check-ins/mes.` : ''}`}> 📱 Wellhub{a.wellhubCheckinsFaltan != null ? ` (${a.wellhubCheckinsFaltan})` : ''}</span>
+                  )}
+                  {a.bajoTarifa && (
+                    <span className={a.bajoTarifaRevisado ? 'sv-ot-muted' : 'sv-to-bad'} title={`Tarifa esperada ${a.tarifaEsperada != null ? fmtEur(a.tarifaEsperada) : '—'}/mes · paga ${a.diferenciaMensual != null ? fmtEur(Math.abs(a.diferenciaMensual)) : '—'}/mes de menos${a.bajoTarifaRevisado ? ` · revisado por ${a.bajoTarifaRevisadoPor}: ${a.bajoTarifaMotivoEva}` : ' · sin revisar'}`}>
+                      {' '}{a.bajoTarifaRevisado ? '✓' : '⚠'} bajo tarifa (−{a.diferenciaMensual != null ? fmtEur(Math.abs(a.diferenciaMensual)) : '?'}/mes)
+                    </span>
                   )}
                   {(a.edad || '').includes('Menores') && (
                     a.tutorNombre || a.tutorTelefono
@@ -2341,6 +2452,8 @@ function GruposTab() {
   const [vista, setVista]     = useState('grupos') // 'grupos' | 'altas-bajas' | 'pendientes-cobro' | 'revisar-datos' | 'sindatos'
   const [menuFor, setMenuFor] = useState(null)   // alumno con el menú de acciones abierto
   const [accion, setAccion]   = useState(null)   // { alumno, tipo } con el modal abierto
+  const [wellhubFor, setWellhubFor]     = useState(null) // alumno con el modal de Wellhub abierto
+  const [bajoTarifaFor, setBajoTarifaFor] = useState(null) // alumno con el modal de Bajo tarifa abierto
   const [buscador, setBuscador] = useState(false) // modal de "Añadir alumno" (buscar)
   const [busqueda, setBusqueda] = useState('') // buscador de arriba: filtra todas las tablas de Grupos a la vez
   const [espera, setEspera] = useState(null) // lista de espera (8.5), cargada al entrar en esa vista
@@ -2440,6 +2553,15 @@ function GruposTab() {
     }).filter(coincide)
   }, [sinDatos, duplicados, cambioDeClase, terminoBusq, telBusq])
 
+  // «Bajo tarifa» (16/11 07:35 punto B.3): todos los grupos juntos, con lo que paga, la tarifa,
+  // la diferencia y el motivo. El contador del botón solo cuenta los que de verdad faltan
+  // revisar — la lista en sí enseña también los ya revisados (para ver el historial de Eva).
+  const bajoTarifaLista = useMemo(() => conGrupo.filter(a => a.bajoTarifa).filter(coincide), [conGrupo, terminoBusq, telBusq])
+  const bajoTarifaSinRevisarN = useMemo(() => bajoTarifaLista.filter(a => !a.bajoTarifaRevisado).length, [bajoTarifaLista])
+  // Wellhub (16/11 07:35 punto A.2/A.3): contador para la cabecera y recordatorio fijo si hay
+  // alguno — el € (importeFalta) solo llega del backend si eres socio, Eva solo ve el recuento.
+  const wellhubLista = useMemo(() => conGrupo.filter(a => a.wellhub && a.enVigor).filter(coincide), [conGrupo, terminoBusq, telBusq])
+
   // Cuántos coinciden en la vista actual — Ramiro, 2/11 09:40: no sabía "dónde darle a buscar"
   // ni si el filtro seguía puesto al cambiar de pestaña; este número deja claro ambas cosas.
   const resultadosBusqueda = (terminoBusq || telBusq) ? ({
@@ -2513,6 +2635,15 @@ function GruposTab() {
         </div>
       )}
 
+      {/* 16/11 07:35 punto A.3: recordatorio fijo en la cabecera de Grupos si hay alguien con
+          Wellhub — Eva no necesita el importe, solo saber que existen y pasar el pase siempre. */}
+      {wellhubLista.length > 0 && (
+        <div className="sv-aviso sv-aviso--warn">
+          <strong>📱 {wellhubLista.length} alumno{wellhubLista.length === 1 ? '' : 's'} con Wellhub.</strong>{' '}
+          Tienen que pasar el pase SIEMPRE que vengan — si no, no se cobra esa parte de su cuota ({wellhubLista.map(a => a.alumno).join(', ')}).
+        </div>
+      )}
+
       <div className="sv-controls">
         <div className="sv-controls-left">
           <button className={`sv-tab-mini ${vista === 'grupos' ? 'is-active' : ''}`} onClick={() => setVista('grupos')}>Grupos</button>
@@ -2530,6 +2661,9 @@ function GruposTab() {
           </button>
           <button className={`sv-tab-mini ${vista === 'revisar-datos' ? 'is-active' : ''}`} onClick={() => setVista('revisar-datos')}>
             Revisar datos {revisarDatos.length ? <span className="sv-tab-mini__count">({revisarDatos.length})</span> : ''}
+          </button>
+          <button className={`sv-tab-mini ${vista === 'bajo-tarifa' ? 'is-active' : ''}`} onClick={() => setVista('bajo-tarifa')}>
+            Bajo tarifa {bajoTarifaSinRevisarN > 0 ? <span className="sv-tab-mini__count">({bajoTarifaSinRevisarN})</span> : ''}
           </button>
           <button className={`sv-tab-mini ${vista === 'espera' ? 'is-active' : ''}`} onClick={abrirEspera}>
             Lista de espera {esperaNuevasWeb > 0 ? <span className="sv-tab-mini__count">({esperaNuevasWeb})</span> : ''}
@@ -2712,6 +2846,38 @@ function GruposTab() {
         </>
       )}
 
+      {vista === 'bajo-tarifa' && (
+        <>
+          <p className="sv-note">
+            Paga menos que la tarifa de su clase (margen de 2 € por redondeos). Pulsa ⋯ → «Bajo tarifa» para escribir
+            el porqué y marcarlo revisado — la fila deja de salir en rojo. Si después cambia lo que paga, vuelve a
+            salir en rojo sola.
+          </p>
+          <div className="sv-tests-scroll">
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Alumno</th><th>Grupo</th><th>Paga</th><th>Tarifa</th><th>Diferencia</th><th>Motivo</th><th>Revisado</th><th></th></tr>
+              </thead>
+              <tbody>
+                {bajoTarifaLista.map(a => (
+                  <tr key={`${a.subId}-${a.grupoLabel}`} className={!a.bajoTarifaRevisado ? 'sv-grp-row--bajo-tarifa' : ''}>
+                    <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                    <td className="sv-ot-muted">{a.grupoLabel}</td>
+                    <td>{a.diferenciaMensual != null ? fmtEur((a.tarifaEsperada || 0) + a.diferenciaMensual) : '—'}</td>
+                    <td className="sv-ot-muted">{a.tarifaEsperada != null ? fmtEur(a.tarifaEsperada) : '—'}</td>
+                    <td className={a.bajoTarifaRevisado ? 'sv-ot-muted' : 'sv-to-bad'}>{a.diferenciaMensual != null ? `−${fmtEur(Math.abs(a.diferenciaMensual))}` : '—'}</td>
+                    <td className="sv-ot-muted">{a.bajoTarifaMotivoEva || a.notas || 'sin motivo anotado'}</td>
+                    <td className="sv-ot-muted">{a.bajoTarifaRevisado ? `✓ ${a.bajoTarifaRevisadoPor}` : '—'}</td>
+                    <td><button className="sv-tests-remove" onClick={() => setBajoTarifaFor(a)} title="Revisar">⋯</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {bajoTarifaLista.length === 0 && <p className="sv-empty">Nadie pagando por debajo de su tarifa ahora mismo.</p>}
+        </>
+      )}
+
       {vista === 'espera' && (
         <>
           <p className="sv-note">
@@ -2860,8 +3026,18 @@ function GruposTab() {
         <AccionMenu
           alumno={menuFor}
           onClose={() => setMenuFor(null)}
-          onPick={(tipo, targetId) => { setAccion({ alumno: menuFor, tipo, targetId }); setMenuFor(null) }}
+          onPick={(tipo, targetId) => {
+            if (tipo === 'wellhub') { setWellhubFor(menuFor); setMenuFor(null); return }
+            if (tipo === 'bajo_tarifa') { setBajoTarifaFor(menuFor); setMenuFor(null); return }
+            setAccion({ alumno: menuFor, tipo, targetId }); setMenuFor(null)
+          }}
         />
+      )}
+      {wellhubFor && (
+        <WellhubModal alumno={wellhubFor} onClose={() => setWellhubFor(null)} onDone={() => { setWellhubFor(null); refetch() }} />
+      )}
+      {bajoTarifaFor && (
+        <BajoTarifaModal alumno={bajoTarifaFor} onClose={() => setBajoTarifaFor(null)} onDone={() => { setBajoTarifaFor(null); refetch() }} />
       )}
       {accion && (
         <AccionModal
