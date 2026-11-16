@@ -20087,6 +20087,7 @@ function presup_clean_partida($p) {
     $medida = (string) ($p['medida'] ?? '');
     $enlace = esc_url_raw(trim((string) ($p['enlace'] ?? '')), array('http', 'https'));
     $fecha  = (string) ($p['fecha_consulta'] ?? '');
+    $limite = (string) ($p['fecha_limite'] ?? '');
     return array(
         'id'                => $p['id'] ?? wp_generate_uuid4(),
         'zona_id'           => $zona_id,
@@ -20107,6 +20108,10 @@ function presup_clean_partida($p) {
         'enlace'            => mb_substr($enlace, 0, 500),
         'fecha_consulta'    => timeoff_valid_date($fecha) ? $fecha : null,
         'nota'              => presup_longtext($p['nota'] ?? '', 2000),
+        // Actuaciones inmediatas: tareas pequeñas que se pueden ejecutar ya
+        'inmediata'         => filter_var($p['inmediata'] ?? false, FILTER_VALIDATE_BOOLEAN),
+        'responsable'       => presup_text($p['responsable'] ?? '', 80),
+        'fecha_limite'      => timeoff_valid_date($limite) ? $limite : null,
         'actualizado'       => current_time('mysql'),
         'por'               => timeoff_user_name(),
     );
