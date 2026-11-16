@@ -915,9 +915,12 @@ const PL_METRICS_LIST = [
 const PL_YEAR_COLORS = { 2024: '#f5c842', 2025: '#60a5fa', 2026: '#34d399' }
 
 
+// Cowork, 16/11 07:00: sin maximumFractionDigits, toLocaleString('es-ES') deja hasta 3
+// decimales en valores no enteros (bank-derived, con prorrateos) — salían cifras como
+// «131.288,267€». Redondeado a euros enteros, como se pidió.
 function fmtPLVal(v) {
   if (v == null) return '—'
-  return `${v < 0 ? '-' : ''}${Math.abs(v).toLocaleString('es-ES')}€`
+  return `${v < 0 ? '-' : ''}${Math.abs(v).toLocaleString('es-ES', { maximumFractionDigits: 0 })}€`
 }
 
 function PLTab() {
@@ -1235,10 +1238,10 @@ function PLAccordion({ live2026, lastMonth }) {
                 <span className="sa-pl-acc-header__month">{PL_MONTHS_FULL[m - 1]}</span>
                 <div className="sa-pl-acc-pills">
                   {v25ventas != null && (
-                    <span className="sa-pl-pill sa-pl-pill--25">2025: {Math.abs(v25ventas).toLocaleString('es-ES')}€</span>
+                    <span className="sa-pl-pill sa-pl-pill--25">2025: {Math.abs(v25ventas).toLocaleString('es-ES', { maximumFractionDigits: 0 })}€</span>
                   )}
                   {v26?.ventas != null && (
-                    <span className="sa-pl-pill sa-pl-pill--26" title={`Ingresos sin IVA = ingresos del banco (Club+Rocoteca, sin internos) − ${v26.ivaFuente}.`}>2026: {Math.abs(v26.ventas).toLocaleString('es-ES')}€ banco ⓘ</span>
+                    <span className="sa-pl-pill sa-pl-pill--26" title={`Ingresos sin IVA = ingresos del banco (Club+Rocoteca, sin internos) − ${v26.ivaFuente}.`}>2026: {Math.abs(v26.ventas).toLocaleString('es-ES', { maximumFractionDigits: 0 })}€ banco ⓘ</span>
                   )}
                 </div>
               </div>
@@ -1254,6 +1257,7 @@ function PLAccordion({ live2026, lastMonth }) {
                       <th style={{ color: kpiColorTema(PL_YEAR_COLORS[2025], oscuro) }}>2025</th>
                       <th style={{ color: kpiColorTema(PL_YEAR_COLORS[2026], oscuro) }}>2026 banco</th>
                       <th>Var. 25/24</th>
+                      <th>Var. 26/25</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1261,18 +1265,25 @@ function PLAccordion({ live2026, lastMonth }) {
                       const v24 = PL_DATA[key][2024][m - 1]
                       const v25 = PL_DATA[key][2025][m - 1]
                       const v2026 = v26?.[key] ?? null
-                      const delta = v24 != null && v25 != null && v24 !== 0
+                      const delta2524 = v24 != null && v25 != null && v24 !== 0
                         ? (v25 - v24) / Math.abs(v24) * 100 : null
+                      // Cowork, 16/11 07:00 punto 2: faltaba la variación con el año en curso,
+                      // que es la que de verdad interesa ahora (misma fórmula que Var. 25/24).
+                      const delta2625 = v2026 != null && v25 != null && v25 !== 0
+                        ? (v2026 - v25) / Math.abs(v25) * 100 : null
                       return (
                         <tr key={key}>
                           <td className="sa-pl-table__metric">{label}</td>
-                          <td className="sa-pl-table__val">{v24 != null ? Math.abs(v24).toLocaleString('es-ES') + '€' : '—'}</td>
-                          <td className="sa-pl-table__val">{v25 != null ? Math.abs(v25).toLocaleString('es-ES') + '€' : '—'}</td>
+                          <td className="sa-pl-table__val">{v24 != null ? Math.abs(v24).toLocaleString('es-ES', { maximumFractionDigits: 0 }) + '€' : '—'}</td>
+                          <td className="sa-pl-table__val">{v25 != null ? Math.abs(v25).toLocaleString('es-ES', { maximumFractionDigits: 0 }) + '€' : '—'}</td>
                           <td className="sa-pl-table__val sa-pl-table__val--26" title={key === 'ventas' && v26 ? v26.ivaFuente : (key === 'costes' ? 'Con IVA: casi todo lo que vendemos va exento, el IVA de las compras no se recupera y es coste.' : undefined)}>
-                            {v2026 != null ? Math.abs(v2026).toLocaleString('es-ES') + '€' : '—'}{key === 'ventas' && v2026 != null ? ' ⓘ' : ''}
+                            {v2026 != null ? Math.abs(v2026).toLocaleString('es-ES', { maximumFractionDigits: 0 }) + '€' : '—'}{key === 'ventas' && v2026 != null ? ' ⓘ' : ''}
                           </td>
-                          <td className={`sa-pl-table__delta${delta == null ? '' : delta >= 0 ? ' sa-pl-table__delta--pos' : ' sa-pl-table__delta--neg'}`}>
-                            {delta != null ? `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%` : '—'}
+                          <td className={`sa-pl-table__delta${delta2524 == null ? '' : delta2524 >= 0 ? ' sa-pl-table__delta--pos' : ' sa-pl-table__delta--neg'}`}>
+                            {delta2524 != null ? `${delta2524 >= 0 ? '+' : ''}${delta2524.toFixed(1)}%` : '—'}
+                          </td>
+                          <td className={`sa-pl-table__delta${delta2625 == null ? '' : delta2625 >= 0 ? ' sa-pl-table__delta--pos' : ' sa-pl-table__delta--neg'}`}>
+                            {delta2625 != null ? `${delta2625 >= 0 ? '+' : ''}${delta2625.toFixed(1)}%` : '—'}
                           </td>
                         </tr>
                       )

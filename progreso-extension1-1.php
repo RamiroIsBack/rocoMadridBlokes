@@ -7597,6 +7597,14 @@ function blokes_sync_grupos_detectar_columnas($valores, $primer_mes_col) {
     return array('tel' => $tel_col, 'notas' => $notas_col, 'email' => $email_col);
 }
 
+// Ramiro, 16/11 07:00: ninguna clase ha cobrado nunca más de unos pocos cientos de euros (ni
+// trimestral/anual prorrateado) — un importe por encima de 1.000 € es casi con toda seguridad
+// una celda rota (el caso real: una fecha de Excel, que como número de serie siempre cae muy
+// por encima de 40.000, metida por error en la columna de importe).
+function blokes_sync_grupos_importe_sospechoso($importe) {
+    return floatval($importe) > 1000;
+}
+
 // Pago de un mes en una fila: [pago|null, exento_bool]. Mismas reglas que _parse.py: "*"
 // marca exento, "web"/"bizum" sin importe numérico cuenta igual como pago con importe 0, y
 // 0/vacío/texto no numérico es "sin pago ese mes".
@@ -7705,6 +7713,13 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
         // el layout de la pestaña cada vez que se escribe una celda.
         $fila = array(
             'nombre' => $nombre, 'telefono' => $tel, 'notas' => $notas, 'exento' => false, 'exentoMeses' => array(), 'pagos' => array(),
+            // Ramiro, 16/11 07:00 (dato roto en el Excel: fila Fintan, L-X 20.30, mar-26 = 46733
+            // — una fecha de Excel metida por error en la celda de importe, nunca un cobro real)
+            // — importes claramente imposibles para una clase (blokes_sync_grupos_importe_sospechoso)
+            // se guardan aparte y NUNCA entran en 'pagos': ningún sitio que lea esta función los
+            // suma ni los cuenta como mes pagado. blokes_sync_grupos_sincronizar() los avisa en
+            // "Cambios del Excel" para que alguien corrija la celda.
+            'pagosSospechosos' => array(),
             '_row' => $r,
             // true si justo antes había una fila vacía (posible lista de espera/reserva bajo un
             // separador, no necesariamente un alumno activo normal) — se marca para revisar a
@@ -7714,7 +7729,11 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
         foreach ($bloques as $b) {
             list($pago, $exento) = blokes_sync_grupos_leer_pago($valores, $r, $b['layout']);
             if ($exento) { $fila['exento'] = true; $fila['exentoMeses'][] = $b['ym']; }
-            if ($pago) $fila['pagos'][$b['ym']] = $pago; // 'YYYY-MM' real, no solo el nombre del mes (se repite cada temporada)
+            if ($pago && blokes_sync_grupos_importe_sospechoso($pago['importe'])) {
+                $fila['pagosSospechosos'][$b['ym']] = $pago;
+            } elseif ($pago) {
+                $fila['pagos'][$b['ym']] = $pago; // 'YYYY-MM' real, no solo el nombre del mes (se repite cada temporada)
+            }
         }
         $filas[] = $fila;
         $r++;
@@ -8187,6 +8206,20 @@ function blokes_sync_grupos_sincronizar() {
                         blokes_sync_grupos_autoaplicar_si_seguro($cid, 'pago_nuevo', $match);
                         $cambios_pestana++;
                     }
+                }
+            }
+            // 16/11 07:00: avisa SIEMPRE (incluso en la foto inicial de la pestaña — un dato roto
+            // no es "un cambio desde la última vez", es un problema de la celda ahora mismo) de
+            // cualquier importe sospechoso que haya quedado fuera de 'pagos'. upsert_cambio ya
+            // refresca el mismo pendiente en vez de duplicarlo mientras nadie lo resuelve. Nunca
+            // se autoaplica: hay que corregir la celda del Excel primero.
+            if (!empty($fila['pagosSospechosos'])) {
+                $match_sosp = $es_foto_inicial ? blokes_sync_grupos_emparejar($fila['telefono'], $fila['nombre'], $subs_por_tel, $externos_por_tel) : $match;
+                foreach ($fila['pagosSospechosos'] as $ym => $pago) {
+                    blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'importe_sospechoso', $ym, array(
+                        'importe' => $pago['importe'], 'metodo' => $pago['metodo'], 'fecha' => $pago['fecha'] ?? null,
+                    ), $match_sosp);
+                    $cambios_pestana++;
                 }
             }
 

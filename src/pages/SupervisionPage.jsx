@@ -2052,6 +2052,7 @@ const CAMBIO_TIPO_LABEL = {
   alumno_nuevo: 'Alumno nuevo', fila_borrada: 'Fila borrada del Excel',
   web_sin_fila: 'Cobro web sin fila en el Excel',
   fila_duplicada_excel: 'Fila repetida en el Excel',
+  importe_sospechoso: '⚠ Importe sospechoso en el Excel',
 }
 
 // Descripción de cada cambio según su tipo — "datos" viene en camelCase desde el servidor
@@ -2073,6 +2074,8 @@ function CambioDetalle({ c }) {
       return <span>Se cobró en la web ({fmtEur(d.importe)}, {d.metodo}) pero no se encontró su fila en el Excel — añádela y pulsa Aplicar para escribirlo solo.</span>
     case 'fila_duplicada_excel':
       return <span>Misma persona en {d.claves?.length || 2} filas de esta pestaña del Excel{d.telefonos?.length > 1 ? ` (teléfonos: ${d.telefonos.filter(Boolean).join(', ') || 'alguna sin teléfono'})` : ''} — Blokes no escribe en el Excel, bórrala a mano cuando puedas y luego marca esto como visto.</span>
+    case 'importe_sospechoso':
+      return <span>{fmtEur(d.importe)} ({d.metodo}) en mes {c.mes} — nadie cobra tanto por una clase; seguramente una fecha u otro dato metido por error en la columna de importe. No se ha sumado a ningún total. Corrige la celda en el Excel y luego marca esto como visto (Aplicar no hace nada aquí, solo lo quita de la lista).</span>
     default:
       return <span className="sv-ot-muted">{JSON.stringify(d)}</span>
   }
