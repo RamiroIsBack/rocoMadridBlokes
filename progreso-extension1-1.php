@@ -5856,9 +5856,33 @@ function blokes_tarifa_categoria_edad($edad) {
     return 'adulto';
 }
 
-// 16/11 07:35 punto B.1: "si la nota dice «solo un día», «solo lunes», etc., la tarifa es la de
-// 1 día" aunque la clase/pestaña sea de 2 días — para no poner en rojo a quien de verdad solo
-// va 1 día de una clase Martes-Jueves/Lunes-Miércoles.
+// 16/11 09:30 (Cowork, Luis Corregidor/Álvaro Herrero): dos externos de la pestaña "M-J 19.30
+// ADOL" tenían la edad heredada mal (de un hermano/vecino de franja adulto, por el mecanismo
+// VIEJO de autocrear externos — blokes_sync_grupos_grupo_de_pestana() — que saca la edad de una
+// suscripción web cualquiera de esa franja, no de la pestaña). Sus notas SÍ llevan el nombre de
+// la pestaña real ("...pestaña M-J 19.30 ADOL...", puesto por blokes_sync_grupos_autocrear_alumno_nuevo()
+// — y ahora también llega a cualquier fila fusionada, ver el punto de más abajo) — si la edad no
+// basta, esas palabras clave de la pestaña (las mismas que ya usa blokes_grupos_excel_categoria_pestana())
+// valen más que una edad mal heredada. Nunca al revés: una edad que YA diga menor/adolescente no
+// se pisa por lo que digan las notas.
+function blokes_tarifa_categoria($edad, $notas) {
+    $cat = blokes_tarifa_categoria_edad($edad);
+    if ($cat !== 'adulto') return $cat;
+    // Ojo: NO blokes_externos_normaliza_nombre() aquí — esa función borra el contenido entre
+    // paréntesis (pensada para nombres como "Juan (16 años)"), y la nota que pone
+    // blokes_sync_grupos_autocrear_alumno_nuevo() lleva el nombre real de la pestaña DENTRO de
+    // un paréntesis ("...(sincronización automática, pestaña M-J 19.30 ADOL)."), que es
+    // justo el dato que se necesita leer aquí.
+    $n = mb_strtolower(remove_accents((string) $notas));
+    if ($n === '') return 'adulto';
+    if (preg_match('/\badol\b/', $n)) return 'adolescente';
+    if (preg_match('/\b(kids?|infantil|inf|medianos?|nino|chiqui)\b/', $n)) return 'menor';
+    return 'adulto';
+}
+
+// 16/11 07:35 punto B.1 + 16/11 09:30 punto 1: "si la nota dice «solo un día», «solo lunes»,
+// etc., la tarifa es la de 1 día" aunque la clase/pestaña sea de 2 días — para no poner en rojo
+// a quien de verdad solo va 1 día de una clase Martes-Jueves/Lunes-Miércoles.
 function blokes_tarifa_nota_fuerza_1dia($notas) {
     $n = blokes_externos_normaliza_nombre((string) $notas);
     if ($n === '') return false;
@@ -5867,10 +5891,22 @@ function blokes_tarifa_nota_fuerza_1dia($notas) {
     return false;
 }
 
-// Precio real de catálogo de la variación de una suscripción de adultos — "Adultos = precio de
-// la variación" (16/11 07:35): más fiable que fijar un número a mano (se autoactualiza si
-// cambia el catálogo, y no hace falta decidir a cuál de los "1 día 68/74/78" que dio Ramiro
-// corresponde cada franja exacta).
+// 16/11 09:30 punto 1 (Cowork, probado en vivo): comparar a alguien de 1 día con el precio de la
+// variación de 2 días inflaba "bajo tarifa" con 29 falsos positivos (74€ reales vs 86€
+// esperados). Adultos de 1 día compran la variación de "Clases de escalada un día" (#4516), que
+// Ramiro dio ya con sus 3 precios reales por franja — fijos, no dinámicos, porque esa variación
+// no se presta al mismo "precio de catálogo por franja" que la de 2 días (varias franjas de 1
+// día comparten el mismo precio por turno, no por día+hora exactos).
+function blokes_tarifa_adultos_1dia($dia, $horario) {
+    if (trim((string) $dia) === 'Viernes') return 78.0;
+    $inicio = (int) explode(':', trim((string) explode('-', (string) $horario)[0]))[0];
+    return $inicio < 16 ? 68.0 : 74.0;
+}
+
+// Precio real de catálogo de la variación de una suscripción de adultos de 2 DÍAS — "Adultos =
+// precio de la variación" (16/11 07:35): más fiable que fijar un número a mano para esas
+// variaciones combinadas (se autoactualiza si cambia el catálogo). Los de 1 día tienen su propia
+// tarifa fija aparte (blokes_tarifa_adultos_1dia) desde el 09:30 — ver el porqué ahí.
 function blokes_tarifa_adulto_variacion($sub_obj) {
     foreach ($sub_obj->get_items() as $item) {
         $vid = method_exists($item, 'get_variation_id') ? $item->get_variation_id() : 0;
@@ -5881,16 +5917,19 @@ function blokes_tarifa_adulto_variacion($sub_obj) {
     return null;
 }
 
-// Mapa "día pareja|horario agrupado" => precio de catálogo de adultos, calculado UNA vez a
-// partir de todas las suscripciones web activas de adultos — para poder dar tarifa también a
-// los externos adultos (que no tienen variación propia) de la MISMA franja real. Si una franja
-// no tiene ninguna referencia en la web (p. ej. Pilates, para el que Ramiro no dio tarifa fija),
-// se queda sin tarifa a propósito — nunca se inventa un número.
+// Mapa "día pareja|horario agrupado" => precio de catálogo de adultos de 2 días, calculado UNA
+// vez a partir de las suscripciones web de 2 días activas de adultos — para dar tarifa también a
+// los externos adultos de 2 días (que no tienen variación propia) de la MISMA franja real. Solo
+// suscripciones de 2 días (16/11 09:30 punto 1): mezclar aquí precios de 1 y 2 días fue lo que
+// hizo que los de 1 día salieran comparados contra 86€/77€ en vez de su propia tarifa fija. Si
+// una franja no tiene ninguna referencia de 2 días en la web (p. ej. Pilates, sin tarifa fija
+// dada), se queda sin tarifa a propósito — nunca se inventa un número.
 function blokes_tarifa_adultos_por_franja($all_subs) {
     $out = array();
     foreach ($all_subs as $s) {
         if (($s['edad'] ?? 'Adultos') !== 'Adultos') continue;
         if (empty($s['id']) || empty($s['dia']) || empty($s['horario'])) continue;
+        if (strpos($s['dia'], '-') === false) continue; // solo combos de 2 días
         $clave = blokes_dia_a_pareja($s['dia']) . '|' . blokes_horario_agrupable($s['horario']);
         if (isset($out[$clave])) continue;
         $sub_obj = wcs_get_subscription(intval($s['id']));
@@ -5901,22 +5940,25 @@ function blokes_tarifa_adultos_por_franja($all_subs) {
     return $out;
 }
 
-// Tarifa MENSUAL que le toca a un alumno. null = no se puede calcular con garantías (adulto sin
-// ninguna referencia de precio real en la web para esa franja) — nunca se adivina un número.
-function blokes_tarifa_mensual_esperada($edad, $es_2dias, $es_yoga, $gkey_adultos, $precios_adultos_por_franja) {
+// Tarifa MENSUAL que le toca a un alumno. null = no se puede calcular con garantías (adulto de 2
+// días sin ninguna referencia de precio real en la web para esa franja) — nunca se adivina un
+// número.
+function blokes_tarifa_mensual_esperada($edad, $notas, $dia, $horario, $es_2dias, $es_yoga, $precios_adultos_por_franja) {
     if ($es_yoga) return BLOKES_TARIFA_YOGA;
-    $cat = blokes_tarifa_categoria_edad($edad);
+    $cat = blokes_tarifa_categoria($edad, $notas);
     if ($cat === 'menor') return $es_2dias ? BLOKES_TARIFA_MENORES_2D : BLOKES_TARIFA_MENORES_1D;
     if ($cat === 'adolescente') return $es_2dias ? BLOKES_TARIFA_ADOL_2D : BLOKES_TARIFA_ADOL_1D;
-    return $precios_adultos_por_franja[$gkey_adultos] ?? null;
+    if (!$es_2dias) return blokes_tarifa_adultos_1dia($dia, $horario);
+    $clave = blokes_dia_a_pareja($dia) . '|' . blokes_horario_agrupable($horario);
+    return $precios_adultos_por_franja[$clave] ?? null;
 }
 
-// Compara lo que alguien paga (en su propio periodo de facturación) contra su tarifa esperada,
-// con el margen de 2 € de redondeo que pidió Ramiro. $meses_ciclo: 1 = mensual, 3 = trimestral
-// (con el 10% de descuento ya aplicado), cualquier otro nº de meses que cubra el pago.
+// Compara lo que alguien paga de verdad (en su propio periodo de facturación) contra su tarifa
+// esperada, con el margen de 2 € de redondeo que pidió Ramiro. $meses_ciclo: 1 = mensual, 3 =
+// trimestral (con el 10% de descuento ya aplicado), cualquier otro nº de meses que cubra el pago.
 function blokes_tarifa_comparar($tarifa_mensual, $pago_periodo, $meses_ciclo) {
-    if ($tarifa_mensual === null || $meses_ciclo < 1) {
-        return array('tarifa' => null, 'diferenciaMensual' => null, 'bajoTarifa' => false);
+    if ($tarifa_mensual === null || $meses_ciclo < 1 || $pago_periodo === null) {
+        return array('tarifa' => $tarifa_mensual !== null ? round($tarifa_mensual, 2) : null, 'diferenciaMensual' => null, 'bajoTarifa' => false);
     }
     $tarifa_periodo = ($meses_ciclo === 3) ? ($tarifa_mensual * 3 * 0.9) : ($tarifa_mensual * $meses_ciclo);
     $diferencia_mensual = ($pago_periodo - $tarifa_periodo) / $meses_ciclo;
@@ -5925,6 +5967,49 @@ function blokes_tarifa_comparar($tarifa_mensual, $pago_periodo, $meses_ciclo) {
         'diferenciaMensual' => round($diferencia_mensual, 2),
         'bajoTarifa' => $diferencia_mensual < -2,
     );
+}
+
+// 16/11 09:30 punto 2 (Cowork, probado en vivo): comparar con importeCatalogo (el total
+// CONFIGURADO de la suscripción) en vez de con lo que de verdad ha pagado deja fuera a quien
+// tiene un precio real distinto del de catálogo (altas manuales con precio pactado aparte, por
+// ejemplo Irene 23,50€/Viviana 47€ con importeCatalogo 86€ los dos). Busca hacia atrás en los
+// meses ya cargados el último pago real (completado/procesando o un adelantado guardado — nunca
+// uno "cubierto", que es solo la copia de display de un trimestral/anual, no un cobro nuevo) y
+// usa ESE importe; si no hay ninguno en la ventana, cae al total configurado de la suscripción
+// (mejor approximación que nada, nunca peor que lo que ya hacíamos).
+function blokes_tarifa_pago_real_reciente($pagos, $meses) {
+    foreach (array_reverse($meses) as $ym) {
+        $p = $pagos[$ym] ?? null;
+        if (!$p || !empty($p['cubierto'])) continue;
+        if (!in_array($p['estadoPedido'] ?? '', array('completed', 'processing', 'adelantado'), true)) continue;
+        return floatval($p['importe'] ?? 0);
+    }
+    return null;
+}
+
+// Versión standalone de blokes_tarifa_pago_real_reciente() para el endpoint de "marcar revisado"
+// (superadmin_gestion_grupos_bajo_tarifa()), que no tiene a mano los $pagos/$meses ya construidos
+// de superadmin_gestion_grupos() — reconstruye lo mismo a partir de la propia suscripción (cobro
+// manual del mes en curso o el anterior, si lo hay, si no el pedido completado/procesando más
+// reciente), para que el importe de referencia que se guarda sea el mismo que se comparará la
+// próxima vez y el revisado no se vea "caducado" sin que nadie haya cambiado nada de verdad.
+function blokes_tarifa_pago_real_sub_actual($sub_obj) {
+    $cobros = blokes_cobros_manuales_todos();
+    $hoy_ym = date('Y-m');
+    foreach (array($hoy_ym, blokes_mes_mas($hoy_ym, -1)) as $ym) {
+        if (isset($cobros[$sub_obj->get_id() . '|' . $ym])) return floatval($cobros[$sub_obj->get_id() . '|' . $ym]['importe']);
+    }
+    $order_ids = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
+    $mejor = null; $mejor_ts = -1;
+    foreach ($order_ids as $oid) {
+        $order = wc_get_order($oid);
+        if (!$order || !in_array($order->get_status(), array('completed', 'processing'), true)) continue;
+        if (blokes_pedido_factura_anulada($order)) continue;
+        $fecha = $order->get_date_created();
+        if (!$fecha) continue;
+        if ($fecha->getTimestamp() > $mejor_ts) { $mejor_ts = $fecha->getTimestamp(); $mejor = floatval($order->get_total()); }
+    }
+    return $mejor ?? floatval($sub_obj->get_total());
 }
 
 function superadmin_gestion_grupos($request) {
@@ -6179,28 +6264,30 @@ function superadmin_gestion_grupos($request) {
         }
         $alumno_nombre = $nombre_fact !== '' ? $nombre_fact : ($sub['cliente'] ?? '');
 
-        // Wellhub + «Bajo tarifa» (16/11 07:35) — ver las funciones blokes_tarifa_*() de arriba.
+        // Wellhub + «Bajo tarifa» (16/11 07:35, corregido 16/11 09:30) — ver las funciones
+        // blokes_tarifa_*() de arriba.
         $notas_sub = get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '';
         $es_yoga_bt = ($producto === 'Yoga');
         $es_2dias_bt = count($dias_sub) > 1 && !blokes_tarifa_nota_fuerza_1dia($notas_sub);
-        $gkey_adultos_bt = blokes_dia_a_pareja($dia) . '|' . blokes_horario_agrupable($horario);
-        $tarifa_mensual_bt = blokes_tarifa_mensual_esperada($edad, $es_2dias_bt, $es_yoga_bt, $gkey_adultos_bt, $precios_adultos_por_franja);
-        $pago_periodo_bt = floatval($sub_obj->get_total());
-        $comp_bt = blokes_tarifa_comparar($tarifa_mensual_bt, $pago_periodo_bt, $meses_por_ciclo);
+        $tarifa_mensual_bt = blokes_tarifa_mensual_esperada($edad, $notas_sub, $dia, $horario, $es_2dias_bt, $es_yoga_bt, $precios_adultos_por_franja);
+        // 09:30 punto 2: comparar con lo que de verdad ha pagado hace poco, no con el total
+        // configurado de la suscripción (que puede no reflejar un precio pactado aparte).
+        $pago_real_bt = blokes_tarifa_pago_real_reciente($pagos, $meses) ?? floatval($sub_obj->get_total());
+        $comp_bt = blokes_tarifa_comparar($tarifa_mensual_bt, $pago_real_bt, $meses_por_ciclo);
         // Revisado por Eva vigente solo si lo que paga no ha cambiado desde que lo revisó — si
         // cambia, se quita solo (16/11 07:35 punto B.4), sin tener que borrar nada a mano.
         $bt_motivo_eva    = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_motivo', true) ?: '';
         $bt_revisado_por  = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_por', true) ?: '';
         $bt_revisado_en   = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_en', true) ?: '';
         $bt_importe_rev   = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_importe_revisado', true);
-        $bt_vigente = $bt_revisado_por !== '' && $bt_importe_rev !== '' && abs(floatval($bt_importe_rev) - $pago_periodo_bt) < 0.01;
+        $bt_vigente = $bt_revisado_por !== '' && $bt_importe_rev !== '' && abs(floatval($bt_importe_rev) - $pago_real_bt) < 0.01;
         // Wellhub: "wellhub" en las notas como punto de partida; si Eva lo ha marcado/desmarcado
         // a mano (meta no vacía), gana su decisión explícita sobre la detección automática.
         $wh_meta_bt = get_post_meta($sub_obj->get_id(), '_rm_wellhub', true);
         $wellhub_bt = $wh_meta_bt !== '' ? (bool) intval($wh_meta_bt) : (stripos($notas_sub, 'wellhub') !== false);
         $wellhub_checkins_bt = null; $wellhub_falta_bt = null;
         if ($wellhub_bt && $tarifa_mensual_bt !== null) {
-            $pago_mensual_equiv_bt = $pago_periodo_bt / max(1, $meses_por_ciclo);
+            $pago_mensual_equiv_bt = $pago_real_bt / max(1, $meses_por_ciclo);
             $wellhub_falta_bt = round($tarifa_mensual_bt - $pago_mensual_equiv_bt, 2);
             $wellhub_checkins_bt = $wellhub_falta_bt > 0 ? (int) ceil($wellhub_falta_bt / BLOKES_WELLHUB_POR_CHECKIN) : 0;
         }
@@ -6318,7 +6405,7 @@ function superadmin_gestion_grupos($request) {
         }
         $es_2dias_ext_bt = !$es_py_ext && strpos($dia_ext, '-') !== false && !blokes_tarifa_nota_fuerza_1dia($ext['notas']);
         $es_yoga_ext_bt = ($dia_ext === 'Yoga');
-        $tarifa_mensual_ext_bt = blokes_tarifa_mensual_esperada($edad_ext, $es_2dias_ext_bt, $es_yoga_ext_bt, $pareja_ext . '|' . $horario_agrupa_ext, $precios_adultos_por_franja);
+        $tarifa_mensual_ext_bt = blokes_tarifa_mensual_esperada($edad_ext, $ext['notas'], $dia_ext, $horario_ext, $es_2dias_ext_bt, $es_yoga_ext_bt, $precios_adultos_por_franja);
         $comp_ext_bt = ($pago_mensual_ext_bt !== null)
             ? blokes_tarifa_comparar($tarifa_mensual_ext_bt, $pago_mensual_ext_bt, 1)
             : array('tarifa' => $tarifa_mensual_ext_bt !== null ? round($tarifa_mensual_ext_bt, 2) : null, 'diferenciaMensual' => null, 'bajoTarifa' => false);
@@ -6384,6 +6471,24 @@ function superadmin_gestion_grupos($request) {
                     && in_array($principal['pagos'][$hoy_ym]['estadoPedido'] ?? '', array('completed', 'processing'), true);
                 if (!$principal['pendiente'] && !$principal['tieneAdelantado'] && !$principal_cobrado_este_mes && $otra['pendiente']) $principal['pendiente'] = $otra['pendiente'];
                 if ($otra['exento']) $principal['exento'] = true;
+                // 16/11 09:30 punto 3 (Cowork, probado en vivo): las notas de Eva vivían en el
+                // externo fusionado (p. ej. Irene/Adrián/Viviana, con "wellhub" apuntado ahí) y
+                // nunca llegaban a la fila fusionada (la suscripción web, que no tenía su propia
+                // nota) — wellhubTotal salía 0 y los motivos de «Bajo tarifa» vacíos. Se propaga
+                // el texto (si la principal no tiene ya el suyo) y el booleano de Wellhub ya
+                // calculado en esa otra fila (no hace falta recalcularlo: si la otra fila tenía
+                // "wellhub" en sus notas, su propio wellhub ya salió true).
+                if (empty($principal['notas']) && !empty($otra['notas'])) $principal['notas'] = $otra['notas'];
+                if (!empty($otra['wellhub'])) $principal['wellhub'] = true;
+                if (empty($principal['bajoTarifaMotivoEva']) && !empty($otra['bajoTarifaMotivoEva'])) $principal['bajoTarifaMotivoEva'] = $otra['bajoTarifaMotivoEva'];
+            }
+            // El booleano de Wellhub puede haber cambiado de false a true por la fusión de arriba
+            // — si antes no tenía check-ins calculados (porque entonces no hacía falta), se
+            // derivan ahora de tarifaEsperada/diferenciaMensual, ya calculados con el pago real.
+            if ($principal['wellhub'] && $principal['wellhubCheckinsFaltan'] === null && $principal['diferenciaMensual'] !== null) {
+                $falta_wh = round(-$principal['diferenciaMensual'], 2);
+                $principal['wellhubImporteFalta']   = $falta_wh > 0 ? $falta_wh : 0;
+                $principal['wellhubCheckinsFaltan'] = $falta_wh > 0 ? (int) ceil($falta_wh / BLOKES_WELLHUB_POR_CHECKIN) : 0;
             }
             // Un "externo" fusionado aquí (misma persona, ya migró a WooCommerce — 15/11
             // 11:45/12:30) no es un duplicado de verdad: no tiene un subId real, así que no
@@ -6514,7 +6619,11 @@ function superadmin_gestion_grupos_bajo_tarifa($request) {
             update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_motivo', $motivo);
             update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_por', $u ? $u->user_login : '');
             update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_en', $ahora);
-            update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_importe_revisado', $sub_obj->get_total());
+            // 16/11 09:30 punto 2: el mismo "pago real reciente" que usa superadmin_gestion_grupos()
+            // para decidir "bajo tarifa" — si se guardara aquí el total configurado de la
+            // suscripción en vez de esto, el revisado se vería "caducado" la próxima carga aunque
+            // nadie hubiera cambiado nada.
+            update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_importe_revisado', blokes_tarifa_pago_real_sub_actual($sub_obj));
         }
     } else {
         global $wpdb;
