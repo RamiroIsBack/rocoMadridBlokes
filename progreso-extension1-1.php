@@ -3006,30 +3006,35 @@ function blokes_onhold_diagnostico_calcular() {
             'subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad,
             'uid' => $uid, 'tieneNombreFacturacion' => $tiene_nombre_facturacion,
         );
-        // 17/11 18:15/19:10 (cowork): agrupar por teléfono sin más es el caso de una familia que
-        // comparte móvil (Alvaro Fernandez Alvarez/Carlota, los Frachini) — nunca debe bastar
-        // por sí solo. Pero Sergi Escribano/Sandra Álvarez SON la misma persona sin cuenta de
-        // WordPress propia (sin uid), y ahí SÍ hace falta agrupar por teléfono para no perderlos
-        // de "duplicado en espera"/Pendientes de cobro — la diferencia real es si el NOMBRE de
-        // facturación también coincide (se revisa más abajo, tras construir $grupos_en_espera:
-        // un grupo agrupado solo por teléfono con nombres que NO se parecen se deshace). Una
-        // clase sin día/horario (abono, bono familiar...) nunca es "la misma clase" que otra por
-        // casualidad de que las dos estén vacías.
+        // 17/11 18:15/19:10/19:45 (cowork): agrupar por teléfono sin más es el caso de una
+        // familia que comparte móvil — nunca debe bastar por sí solo. Pero Sergi Escribano/
+        // Sandra Álvarez SON la misma persona sin cuenta de WordPress propia (sin uid), y ahí SÍ
+        // hace falta agrupar por teléfono para no perderlos de "duplicado en espera" — la
+        // diferencia real es si el NOMBRE de facturación también coincide (se revisa más abajo,
+        // tras construir $grupos_en_espera). Una clase sin día/horario (abono, bono
+        // familiar...) nunca es "la misma clase" que otra por casualidad de que las dos estén
+        // vacías.
         $clave_persona = ($dia !== '' && $horario !== '') ? ($uid ? 'u' . $uid : ($tel ? 't' . $tel : null)) : null;
         $clave = $clave_persona !== null ? $clave_persona . '|' . $dia . '|' . $horario . '|' . $edad : ('s' . $sub_id);
         $grupos_en_espera[$clave][] = $sub_id;
     }
-    // Deshace los grupos agrupados SOLO por teléfono (clave empieza por 't') cuyos nombres de
-    // facturación no se parecen entre sí — nunca se cancela la suscripción de un familiar por
-    // compartir el móvil con otro. Los agrupados por cliente real ('u...') no se tocan: ahí el
-    // customer_id ya es un dato de verdad, no una coincidencia de teléfono.
+    // Deshace cualquier grupo (tanto por teléfono como por cliente real) cuyos nombres de
+    // facturación no confirmen que es la MISMA persona. 17/11 19:45 (cowork, Alvaro Fernandez
+    // Alvarez/Carlota, los Frachini): un mismo customer_id ('u...') NO siempre es una sola
+    // persona real — una cuenta de WordPress familiar puede llevar las suscripciones de varios
+    // hermanos o de un padre y su hijo, así que fiarse solo del uid (como se hacía hasta ahora)
+    // también mezclaba a familiares. Y un nombre vacío o sin espacio (solo el usuario, p. ej.
+    // "nicolafrachini") nunca confirma nada por sí solo — "nombre desconocido" cuenta como que
+    // NO se parece a nadie, nunca como una coincidencia válida.
     foreach (array_keys($grupos_en_espera) as $clave) {
-        if ($clave[0] !== 't' || count($grupos_en_espera[$clave]) < 2) continue;
+        if ($clave[0] === 's' || count($grupos_en_espera[$clave]) < 2) continue;
         $grupo = $grupos_en_espera[$clave];
         $nombre_base = null; $todas_parecidas = true;
         foreach ($grupo as $sid) {
             $n = blokes_externos_normaliza_nombre($info_por_sub[$sid]['nombre'] ?? '');
-            if ($n === '') continue;
+            // Un nombre sin espacio (solo el usuario de la cuenta, sin apellido real) no es un
+            // dato de fiar para confirmar que es la misma persona — nunca cuenta como coincidencia.
+            if ($n === '' || strpos($n, ' ') === false) { $todas_parecidas = false; break; }
             if ($nombre_base === null) { $nombre_base = $n; continue; }
             if (!blokes_externos_nombres_parecidos($nombre_base, $n)) { $todas_parecidas = false; break; }
         }
@@ -3098,13 +3103,30 @@ function blokes_onhold_diagnostico_calcular() {
 
         $info = array('subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad, 'uid' => $uid);
 
-        $activa_misma_clase = null; $activa_otra_clase = null;
+        $activa_misma_clase = null; $activa_otra_clase = null; $activa_misma_clase_sin_confirmar = null;
         if ($uid && !empty($activas_por_customer[$uid])) {
             foreach ($activas_por_customer[$uid] as $otra) {
                 // 17/11 18:15: una clase sin día/horario (abono, bono familiar...) nunca es "la
                 // misma clase" que otra por coincidir las dos en vacío.
                 $misma_clase = $dia !== '' && $horario !== '' && ($otra['dia'] ?? '') === $dia && ($otra['horario'] ?? '') === $horario && ($otra['edad'] ?? 'Adultos') === $edad;
-                if ($misma_clase) { $activa_misma_clase = $otra; break; }
+                if ($misma_clase) {
+                    // 17/11 19:45 (cowork, Alvaro Fernandez Alvarez/Carlota): mismo customer_id
+                    // NO siempre es la misma persona — una cuenta de WordPress familiar puede
+                    // llevar las suscripciones de un padre y su hijo/a, o de varios hermanos.
+                    // Antes de dar por "duplicado" de verdad, confirma que el nombre de
+                    // facturación también coincide (nunca con un nombre vacío o sin espacio —
+                    // solo el usuario de la cuenta — que no confirma nada por sí solo).
+                    $otra_sub_obj = blokes_alumno_sub_obj($otra);
+                    $otra_nombre = blokes_alumno_nombre_de_sub($otra, $uid, $otra_sub_obj);
+                    $n_esta = blokes_externos_normaliza_nombre($nombre);
+                    $n_otra = blokes_externos_normaliza_nombre($otra_nombre);
+                    $nombres_confirman = $n_esta !== '' && strpos($n_esta, ' ') !== false
+                        && $n_otra !== '' && strpos($n_otra, ' ') !== false
+                        && blokes_externos_nombres_parecidos($n_esta, $n_otra);
+                    if ($nombres_confirman) { $activa_misma_clase = $otra; break; }
+                    if (!$activa_misma_clase_sin_confirmar) $activa_misma_clase_sin_confirmar = $otra;
+                    continue;
+                }
                 if (!$activa_otra_clase) $activa_otra_clase = $otra;
             }
         }
@@ -3112,6 +3134,12 @@ function blokes_onhold_diagnostico_calcular() {
             $info['activaId'] = intval($activa_misma_clase['id'] ?? 0);
             $info['motivo'] = 'Mismo cliente y misma clase con otra suscripción activa.';
             $asignar('duplicado', $info);
+            continue;
+        }
+        if ($activa_misma_clase_sin_confirmar) {
+            $info['activaId'] = intval($activa_misma_clase_sin_confirmar['id'] ?? 0);
+            $info['motivo'] = 'Misma cuenta de WordPress y misma clase con otra suscripción activa, pero el nombre de facturación no coincide (o no se puede confirmar) — probablemente una cuenta familiar compartida, no cancelar sin mirarlo.';
+            $asignar('revisar', $info);
             continue;
         }
 
@@ -13390,9 +13418,19 @@ function blokes_altas_bajas_calcular($months) {
             // real — y dos hermanos que van a la misma clase con el teléfono de un padre/madre
             // comparten ese personaKey sin ser la misma persona (ya hay precedente en
             // onhold-diagnóstico: "mismo teléfono, misma clase, cliente distinto" se trata como
-            // "revisar", nunca como duplicado automático). Solo cuenta como duplicado de
-            // verdad si las dos suscripciones tienen el MISMO customer_id real.
-            if ($previo && $previo['subId'] !== $e['subId'] && $e['uid'] && $previo['uid'] && $e['uid'] === $previo['uid']) {
+            // "revisar", nunca como duplicado automático).
+            // 17/11 19:45 (cowork, Alvaro Fernandez Alvarez/los Frachini): el MISMO customer_id
+            // tampoco basta por sí solo — una cuenta de WordPress familiar puede llevar las
+            // suscripciones de varios hermanos o de un padre y su hijo/a. Solo cuenta como
+            // duplicado de verdad si, además del mismo customer_id, el nombre de facturación
+            // también se parece (nunca con un nombre vacío o sin espacio — solo el usuario de
+            // la cuenta — que no confirma nada por sí solo).
+            $n_prev = $previo ? blokes_externos_normaliza_nombre($previo['nombre'] ?? '') : '';
+            $n_este = blokes_externos_normaliza_nombre($e['nombre'] ?? '');
+            $nombres_confirman_dup = $n_prev !== '' && strpos($n_prev, ' ') !== false
+                && $n_este !== '' && strpos($n_este, ' ') !== false
+                && blokes_externos_nombres_parecidos($n_prev, $n_este);
+            if ($previo && $previo['subId'] !== $e['subId'] && $e['uid'] && $previo['uid'] && $e['uid'] === $previo['uid'] && $nombres_confirman_dup) {
                 $es_duplicado = true;
                 $duplicados_misma_clase[] = array(
                     'dia' => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad'],
@@ -13400,7 +13438,7 @@ function blokes_altas_bajas_calcular($months) {
                     'subIds' => array($previo['subId'], $e['subId']),
                 );
             } else {
-                $activos_por_clase[$class_key][$pk] = array('subId' => $e['subId'], 'uid' => $e['uid']);
+                $activos_por_clase[$class_key][$pk] = array('subId' => $e['subId'], 'uid' => $e['uid'], 'nombre' => $e['nombre']);
                 $classes[$class_key]['active']++;
                 // Nuevo de verdad = esta suscripción empezó este mes Y es la actividad más
                 // antigua de la persona en TODO el sistema (no tenía ninguna suscripción antes,
