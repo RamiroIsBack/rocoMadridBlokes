@@ -206,6 +206,9 @@ export const syncGruposSincronizar    = ()         => gestionPost('/gestion/sync
 export const syncGruposCambiosGet     = (estado = 'pendiente') => gestionCall('GET', `/gestion/sync-grupos/cambios?estado=${estado}`)
 export const syncGruposCambioAplicar  = id         => gestionPost(`/gestion/sync-grupos/cambios/${id}/aplicar`)
 export const syncGruposCambioDescartar = id        => gestionPost(`/gestion/sync-grupos/cambios/${id}/descartar`)
+// Limpieza única (17/11 16:20, cowork): descarta de golpe las propuestas pendientes de pestañas
+// Balance y los "pago nuevo" de meses viejos que ya estaban colgando ANTES de 589ab3a.
+export const syncGruposLimpiarPendientesViejos = () => gestionPost('/gestion/sync-grupos/limpiar-pendientes-589ab3a')
 // Reintentar a mano la escritura Web→Excel de un cobro concreto (3/11 12:29: para pagos que
 // fallaron antes del arreglo de la pestaña, o que nunca pasaron por este camino).
 export const syncGruposReintentarCobro = body       => gestionPost('/gestion/sync-grupos/reintentar-cobro', body)

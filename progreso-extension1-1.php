@@ -1255,6 +1255,11 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/reintentar-cobro', array(
         'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_reintentar_cobro', 'permission_callback' => $sa_perm,
     ));
+    // Limpieza única (17/11 16:20, cowork): descarta las propuestas pendientes de pestañas
+    // Balance y los "pago nuevo" de meses viejos que ya estaban colgando ANTES de 589ab3a.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/limpiar-pendientes-589ab3a', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_limpiar_pendientes_589ab3a', 'permission_callback' => $sa_perm,
+    ));
     // WP-Cron no corre de fiar con poco tráfico (pseudo-cron: solo se dispara si entra una
     // visita después de la hora programada) — Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05:
     // "esto tiene que pasar automático". Ruta pública protegida por secreto (como el webhook de
@@ -3262,6 +3267,10 @@ function superadmin_gestion_bajas($request) {
                 'dia' => $c['dia'], 'horario' => $c['horario'], 'edad' => $c['edad'],
                 'fecha' => $m['fecha'], 'origen' => $m['motivoCategoria'] ? 'cancelo' : 'impago',
                 'motivoCategoria' => $m['motivoCategoria'], 'motivoTexto' => $m['motivoTexto'],
+                // 17/11 16:20 (cowork, Fernando Heras Díez): sigue pagando por fuera (Excel/hist-
+                // pagos) después del mes de la baja — probablemente solo falta reactivar su
+                // suscripción, no es una baja real.
+                'pagoFueraTrasBaja' => $m['pagoFueraTrasBaja'] ?? null,
             );
         }
     }
@@ -3286,6 +3295,32 @@ function superadmin_gestion_bajas($request) {
             );
         }
     }
+    // 17/11 16:20 (cowork, punto 8): la misma persona con varias suscripciones canceladas (una
+    // por clase a la que estuvo, o una vieja colgando) salía como varias bajas distintas (Sandra
+    // Álvarez ×2 en octubre, Marta Marcos/Ángel Lumbreras en octubre Y septiembre). Se agrupa por
+    // persona (teléfono normalizado, o el nombre si no hay teléfono) y se deja solo la fila con
+    // la fecha más reciente — igual que ya se agrupa en otros sitios de Grupos. Sin teléfono ni
+    // nombre no hay por dónde agrupar: esas se quedan tal cual, sin tocar.
+    $por_persona = array();
+    $sin_clave = array();
+    foreach ($filas as $f) {
+        $tel_norm = blokes_externos_normaliza_telefono((string) ($f['telefono'] ?: ''));
+        $nombre_norm = blokes_sync_grupos_normalizar_nombre((string) ($f['nombre'] ?: ''));
+        if ($tel_norm === '' && $nombre_norm === '') { $sin_clave[] = $f; continue; }
+        $clave = $tel_norm ?: ('n' . $nombre_norm);
+        if (!isset($por_persona[$clave])) {
+            $por_persona[$clave] = $f;
+        } else {
+            $actual = $por_persona[$clave];
+            $mas_reciente = strcmp((string) $f['fecha'], (string) $actual['fecha']) > 0 ? $f : $actual;
+            // Nunca se pierde el aviso de "pagó por fuera tras la baja" aunque viva en la fila
+            // más vieja de las dos.
+            $mas_reciente['pagoFueraTrasBaja'] = ($f['pagoFueraTrasBaja'] ?? null) ?: ($actual['pagoFueraTrasBaja'] ?? null);
+            $por_persona[$clave] = $mas_reciente;
+        }
+    }
+    $filas = array_merge(array_values($por_persona), $sin_clave);
+
     // El profe se calcula en el frontend (profesoresDeGrupo(), staffSchedule.js + la regla de
     // Isa/Eva en niños/adolescentes) — no hay un equivalente en PHP, igual que en Pendientes de
     // cobro: aquí solo se manda dia/horario/edad.
@@ -7761,9 +7796,32 @@ function blokes_sync_grupos_escribir_cobro($dia, $horario, $telefono, $nombre, $
             $nombre_norm = mb_strtolower(trim((string) $nombre));
             foreach ($r['filas'] as $f) { if (mb_strtolower(trim($f['nombre'])) === $nombre_norm) { $fila_encontrada = $f; break; } }
         }
+        // 17/11 16:20 (cowork, Raúl Bañez/Sandra Balaguera/Pablo Casals/Raul García Cordero): el
+        // teléfono ya normaliza bien (+34 fuera) — el problema real es que un mismo grupo tiene
+        // DOS pestañas en el Excel para la misma franja ("V 19.00" adultos y "V. Inf. 19.00"
+        // infantil/adolescente, misma hora), y pestana_de_grupo() con el día/horario de la
+        // suscripción solo encuentra UNA. Antes de rendirse, busca por teléfono en TODAS las
+        // demás pestañas (por nombre no: dos clases distintas pueden compartir nombre de sobra).
+        $pestana_original = $pestana;
+        if (!$fila_encontrada && $tel_norm) {
+            foreach ($pestanas as $otra_pestana) {
+                if ($otra_pestana === $pestana_original) continue;
+                $valores_otra = blokes_sync_grupos_leer_valores($activa['id'], $otra_pestana);
+                if (is_wp_error($valores_otra)) continue;
+                $r_otra = blokes_sync_grupos_leer_pestana_filas($valores_otra);
+                foreach ($r_otra['filas'] as $f) {
+                    if ($f['telefono'] === $tel_norm) { $fila_encontrada = $f; $pestana = $otra_pestana; $r = $r_otra; break 2; }
+                }
+            }
+            if ($fila_encontrada) {
+                blokes_gestion_log(0, 'sync_grupos_fila_en_otra_pestana', null, array(
+                    'pestanaEsperada' => $pestana_original, 'pestanaReal' => $pestana, 'telefono' => $tel_norm, 'nombre' => $nombre,
+                ));
+            }
+        }
         if (!$fila_encontrada) {
-            blokes_gestion_log(0, 'sync_grupos_fila_no_encontrada', null, array('pestana' => $pestana, 'telefono' => $tel_norm, 'nombre' => $nombre));
-            blokes_sync_grupos_pendiente_sin_fila($pestana, $nombre, $telefono, $ym, $importe, $metodo, $fecha, $dia, $horario, $sub_id);
+            blokes_gestion_log(0, 'sync_grupos_fila_no_encontrada', null, array('pestana' => $pestana_original, 'telefono' => $tel_norm, 'nombre' => $nombre));
+            blokes_sync_grupos_pendiente_sin_fila($pestana_original, $nombre, $telefono, $ym, $importe, $metodo, $fecha, $dia, $horario, $sub_id);
             return false;
         }
 
@@ -9009,6 +9067,35 @@ function superadmin_sync_grupos_cambio_descartar($request) {
     $u = wp_get_current_user();
     $wpdb->update($tabla, array('estado' => 'descartado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => $u ? $u->user_login : ''), array('id' => $id));
     return rest_ensure_response(array('success' => true));
+}
+
+// Limpieza única (cowork, 17/11 16:20, tras probar 589ab3a): el arreglo evita que se generen
+// NUEVAS propuestas de pestañas Balance o de pagos viejos por un cambio de pestaña, pero no
+// toca las que ya estaban pendientes de antes — las descarta de golpe con un motivo claro.
+// Nunca borra nada (igual que "descartar" de una en una), solo marca 'descartado' lo que ya no
+// hace falta mirar porque el código que lo causaba está arreglado.
+function superadmin_sync_grupos_limpiar_pendientes_589ab3a($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $mes_corte = blokes_mes_mas(date('Y-m'), -2);
+    $pendientes = $wpdb->get_results("SELECT id, pestana, tipo, mes FROM {$tabla} WHERE estado = 'pendiente'", ARRAY_A);
+    $ids = array();
+    foreach ($pendientes as $p) {
+        $es_balance = stripos($p['pestana'], 'balance') !== false;
+        $es_pago_viejo = $p['tipo'] === 'pago_nuevo' && $p['mes'] !== null && $p['mes'] < $mes_corte;
+        if ($es_balance || $es_pago_viejo) $ids[] = intval($p['id']);
+    }
+    if ($ids) {
+        $u = wp_get_current_user();
+        $ph = implode(',', array_fill(0, count($ids), '%d'));
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$tabla} SET estado = 'descartado', resuelto_at = %s,
+             resuelto_por = %s WHERE id IN ($ph)",
+            current_time('mysql'), ($u ? $u->user_login : '') . ' · generado por error, arreglado en 589ab3a', ...$ids
+        ));
+    }
+    return rest_ensure_response(array('success' => true, 'descartados' => count($ids)));
 }
 
 // ============================================================
@@ -12920,6 +13007,12 @@ function blokes_altas_bajas_calcular($months) {
 
     // ---- Mapas globales por persona, a partir de TODAS sus suscripciones.
     $persona_activo_en  = array(); // personaKey => [classKey => true] — sigue viniendo de verdad AHORA (pending-cancel incluido)
+    // 17/11 16:20 (cowork, Daniel Aragoneses/Abril Jiménez): "en espera" es alguien que pagó el
+    // mes pasado y le falta el de ahora — sigue apuntado, no de baja, aunque la comprobación de
+    // "¿activo en otra clase?" de abajo solo miraba $persona_activo_en (solo 'active'). Mapa
+    // aparte (no se toca $persona_activo_en, que exporta `personaActivoEn` y lo usa Retención con
+    // su propio significado de siempre) solo para decidir si una baja es real.
+    $persona_sigue_apuntado_en = array(); // personaKey => [classKey => true] — activa, en espera o pendiente
     $persona_min_start  = array(); // personaKey => Y-m más antiguo entre TODAS sus suscripciones
     $persona_max_end    = array(); // personaKey => Y-m más reciente con cobertura (para permanencia, Superadmin Clases)
     $persona_historial  = array(); // personaKey => [ ['classKey','startYm','dia','horario','edad'], ... ]
@@ -12960,6 +13053,7 @@ function blokes_altas_bajas_calcular($months) {
         if (!isset($persona_min_start[$pk]) || $e['startYm'] < $persona_min_start[$pk]) $persona_min_start[$pk] = $e['startYm'];
         if (!isset($persona_max_end[$pk]) || $e['endYm'] > $persona_max_end[$pk]) $persona_max_end[$pk] = $e['endYm'];
         if ($e['status'] === 'active') $persona_activo_en[$pk][$e['classKey']] = true;
+        if (in_array($e['status'], array('active', 'on-hold', 'pending'), true)) $persona_sigue_apuntado_en[$pk][$e['classKey']] = true;
         $persona_historial[$pk][] = array('classKey' => $e['classKey'], 'startYm' => $e['startYm'], 'dia' => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad']);
         $persona_intervalos[$pk][] = array('start' => $e['startYm'], 'end' => $e['endYm']);
         // Cobertura REAL de pago (cowork, 15/11 14:00 punto 1: "al final = solo personas con el
@@ -13128,17 +13222,29 @@ function blokes_altas_bajas_calcular($months) {
                 $classes[$class_key]['members_pending'][] = array('subId' => $e['subId'], 'name' => $e['nombre'], 'phone' => $e['telefono']);
             }
         } elseif (!in_array($e['status'], array('on-hold', 'pending')) && $e['endYm'] >= $two_months_ago) {
-            // Baja real = la persona ya no tiene NINGUNA suscripción activa en ninguna clase.
-            // Si sigue activa (en esta clase o en otra), es que canceló un duplicado o cambió
-            // de clase — no está de baja. Tampoco cuenta si se canceló como "duplicado" (motivo
-            // _rm_baja_categoria === 'duplicado', cowork/Ramiro 15/11 08:15): no es una baja
-            // real, la persona sigue viniendo con la otra suscripción.
+            // Baja real = la persona ya no tiene NINGUNA suscripción activa NI en espera/pendiente
+            // en ninguna clase. Si sigue activa, en espera o pendiente (en esta clase o en otra),
+            // es que canceló un duplicado, cambió de clase, o simplemente le falta pagar el mes
+            // (Daniel Aragoneses/Abril Jiménez, 17/11 16:20: "en espera" no es de baja) — no está
+            // de baja. Tampoco cuenta si se canceló como "duplicado" (motivo _rm_baja_categoria
+            // === 'duplicado', cowork/Ramiro 15/11 08:15): no es una baja real, la persona sigue
+            // viniendo con la otra suscripción.
             $baja_categoria = get_post_meta($e['subId'], '_rm_baja_categoria', true);
-            if (!isset($persona_activo_en[$pk]) && $baja_categoria !== 'duplicado') {
+            if (!isset($persona_sigue_apuntado_en[$pk]) && $baja_categoria !== 'duplicado') {
+                // 17/11 16:20 (cowork, Fernando Heras Díez): la baja es real en WooCommerce (se
+                // canceló sola por impago), pero sigue pagando por fuera (transferencia apuntada
+                // en el Excel, 03/11) — $persona_externo_meses[$pk] ya tiene TODOS los meses
+                // pagados fuera de WooCommerce (hist-pagos + Excel de Grupos); si alguno es
+                // posterior al mes de la baja, avisa en vez de darla por perdida sin más.
+                $meses_ext_tras_baja = array_values(array_filter(
+                    $persona_externo_meses[$pk] ?? array(), function($ym) use ($e) { return $ym > $e['endYm']; }
+                ));
+                sort($meses_ext_tras_baja);
                 $classes[$class_key]['members_lost'][] = array(
                     'subId' => $e['subId'], 'name' => $e['nombre'], 'phone' => $e['telefono'],
                     'fecha' => $e['endYm'], 'motivoCategoria' => $baja_categoria ?: null,
                     'motivoTexto' => get_post_meta($e['subId'], '_rm_baja_motivo', true) ?: null,
+                    'pagoFueraTrasBaja' => $meses_ext_tras_baja ?: null,
                 );
             }
         }

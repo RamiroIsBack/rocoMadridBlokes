@@ -29,6 +29,7 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
+  syncGruposLimpiarPendientesViejos,
   gestionFacturasPendientesGet,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
@@ -2210,6 +2211,7 @@ function SyncGruposCambiosPanel() {
   const [busyId, setBusyId] = useState(null)
   const [err, setErr] = useState(null)
   const [resumenSync, setResumenSync] = useState(null)
+  const [limpiando, setLimpiando] = useState(false)
 
   async function cargar(estado = estadoFiltro) {
     setErr(null)
@@ -2239,6 +2241,18 @@ function SyncGruposCambiosPanel() {
     try { await syncGruposCambioDescartar(id); await cargar() }
     catch (e) { setErr(e.message) } finally { setBusyId(null) }
   }
+  // Limpieza única (17/11 16:20, cowork): las propuestas de pestañas Balance y los pagos viejos
+  // ya pendientes de ANTES de 589ab3a no se limpian solas (el arreglo solo evita que se creen
+  // nuevas) — este botón las descarta de golpe.
+  async function limpiarPendientesViejos() {
+    if (!window.confirm('¿Descartar las propuestas pendientes de pestañas Balance y los pagos viejos de antes del arreglo? No se puede deshacer de golpe (quedan como "descartado", nunca se borran).')) return
+    setLimpiando(true); setErr(null)
+    try {
+      const r = await syncGruposLimpiarPendientesViejos()
+      await cargar()
+      window.alert(`${r.descartados} propuesta(s) descartada(s).`)
+    } catch (e) { setErr(e.message) } finally { setLimpiando(false) }
+  }
 
   return (
     <div>
@@ -2251,6 +2265,9 @@ function SyncGruposCambiosPanel() {
         <div className="sv-controls-left">
           <button className="sv-tests-save" onClick={sincronizarAhora} disabled={sincronizando}>
             {sincronizando ? 'Sincronizando…' : 'Sincronizar ahora'}
+          </button>
+          <button className="sv-tests-remove" onClick={limpiarPendientesViejos} disabled={limpiando} title="Descarta las propuestas de pestañas Balance y los pagos viejos que ya estaban pendientes de antes del arreglo de 589ab3a">
+            {limpiando ? 'Limpiando…' : 'Limpiar pendientes viejos (Balance / pagos antiguos)'}
           </button>
           <span className="sv-ot-muted">
             {ultima ? `Última sincronización: ${new Date(ultima.replace(' ', 'T')).toLocaleString('es-ES')}` : 'Todavía no se ha sincronizado nunca.'}
@@ -2408,7 +2425,17 @@ function BajaRow({ f, onContactado }) {
   return (
     <>
       <tr>
-        <td>{f.nombre || <span className="sv-ot-muted">—</span>}</td>
+        <td>
+          {f.nombre || <span className="sv-ot-muted">—</span>}
+          {/* 17/11 16:20 (cowork, Fernando Heras Díez): sigue pagando por fuera (Excel/hist-
+              pagos) después del mes de la baja — probablemente solo falta reactivar la
+              suscripción, no es una baja real. */}
+          {f.pagoFueraTrasBaja?.length > 0 && (
+            <div className="sv-to-warn-txt" title={`Pagos fuera de la web: ${f.pagoFueraTrasBaja.join(', ')}`}>
+              ⚠ Pagó por fuera después de la baja ({f.pagoFueraTrasBaja.join(', ')}) → reactivar suscripción
+            </div>
+          )}
+        </td>
         <td className="sv-ot-muted">{f.dia} {f.horario}{f.edad !== 'Adultos' ? ` · ${f.edad}` : ''}</td>
         <td className="sv-ot-muted">{f.fecha ? mesLabelGrp(f.fecha) : '—'}</td>
         <td className="sv-ot-muted">{BAJA_ORIGEN_LABEL[f.origen] || f.origen}</td>
