@@ -8479,6 +8479,22 @@ function blokes_sync_grupos_emparejar($telefono, $nombre_fila, $subs_por_tel, $e
     return null;
 }
 
+// 17/11 12:18 (cowork, Irene Pérez de Ciriza/Viviana Aragundi/Adrián Mendoza): la nota del Excel
+// solo se propagaba cuando CAMBIABA respecto a la foto anterior (blokes_sync_grupos_sincronizar(),
+// más abajo) — si la nota de Eva ya estaba puesta la primera vez que esa fila se fotografió (antes
+// de que existiera Wellhub/Bajo tarifa), nunca "cambia" y se queda para siempre solo en el Excel,
+// aunque la persona ya tenga una suscripción real emparejada. Para saber si de verdad hace falta
+// propagarla (y no limitarse a "¿cambió?"), hay que mirar si el DESTINO (la suscripción o el
+// externo ya emparejados) todavía no tiene ninguna nota — nunca se sobrescribe una que ya exista.
+function blokes_sync_grupos_notas_destino($match) {
+    if (empty($match['tipo']) || empty($match['id'])) return null; // sin match: no se puede comprobar
+    if ($match['tipo'] === 'sub') return trim((string) get_post_meta(intval($match['id']), '_rm_nota', true));
+    global $wpdb;
+    return trim((string) $wpdb->get_var($wpdb->prepare(
+        "SELECT notas FROM " . blokes_externos_table() . " WHERE id = %d", intval($match['id'])
+    )));
+}
+
 // El método tal y como lo escribe Eva en el Excel ('ta'/'tr'/'ef'/'bizum'/'web'…) ya llega
 // traducido a transferencia/efectivo/bizum/web por blokes_sync_grupos_leer_pago(); aquí solo
 // falta encajarlo en los 5 métodos que acepta Marcar cobrado — "web" (pago con tarjeta en la
@@ -8676,7 +8692,25 @@ function blokes_sync_grupos_sincronizar() {
             $anterior = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla_snap} WHERE pestana = %s AND clave = %s", $tab, $clave), ARRAY_A);
             $pagos_anteriores = $anterior ? (json_decode($anterior['pagos_json'], true) ?: array()) : array();
 
-            if (!$es_foto_inicial) {
+            if ($es_foto_inicial) {
+                // 17/11 12:18 (cowork): en la foto inicial de una pestaña no se avisa de nada —
+                // es solo la primera vez que se ve, no "un cambio". Pero si la fila YA trae una
+                // nota de Eva y encaja con un sub/externo que todavía no tiene ninguna (p. ej.
+                // Wellhub se puso en el Excel antes de que existiera esta sincronización), hay
+                // que propagarla ya mismo — si no, se queda para siempre sin llegar, igual que el
+                // caso de "nunca cambia respecto a la foto anterior" de más abajo.
+                $fila_nota_inicial = trim((string) $fila['notas']);
+                if ($fila_nota_inicial !== '') {
+                    $match_inicial = blokes_sync_grupos_emparejar($fila['telefono'], $fila['nombre'], $subs_por_tel, $externos_por_tel);
+                    if (blokes_sync_grupos_notas_destino($match_inicial) === '') {
+                        $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'nota', null, array(
+                            'notaAntes' => '', 'notaDespues' => $fila['notas'],
+                        ), $match_inicial);
+                        blokes_sync_grupos_autoaplicar_si_seguro($cid, 'nota', $match_inicial);
+                        $cambios_pestana++;
+                    }
+                }
+            } else {
                 $match = blokes_sync_grupos_emparejar($fila['telefono'], $fila['nombre'], $subs_por_tel, $externos_por_tel);
                 if (!$anterior) {
                     $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'alumno_nuevo', null, array(
@@ -8686,7 +8720,13 @@ function blokes_sync_grupos_sincronizar() {
                     else blokes_sync_grupos_resolver_alumno_nuevo_ya_existe($cid, $match);
                     $cambios_pestana++;
                 } else {
-                    if (trim($anterior['notas']) !== trim($fila['notas']) && $fila['notas'] !== '') {
+                    // 17/11 12:18 (cowork): no basta con "¿cambió respecto a la última foto?" —
+                    // una nota que ya estaba puesta desde antes de que existiera esta detección
+                    // nunca "cambia" y se queda solo en el Excel. También se propaga si el
+                    // destino emparejado (sub o externo) todavía no tiene ninguna nota —
+                    // blokes_sync_grupos_notas_destino() nunca sobrescribe una que ya exista.
+                    $fila_nota_trim = trim((string) $fila['notas']);
+                    if ($fila_nota_trim !== '' && (trim($anterior['notas']) !== $fila_nota_trim || blokes_sync_grupos_notas_destino($match) === '')) {
                         $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'nota', null, array(
                             'notaAntes' => $anterior['notas'], 'notaDespues' => $fila['notas'],
                         ), $match);
