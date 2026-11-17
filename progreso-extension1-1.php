@@ -1097,6 +1097,14 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_marcar_cobrado',
         'permission_callback' => $sa_perm,
     ));
+    // "Vuelve tras lesión/ausencia" (17/11 19:10, Ramiro) — anula los pedidos de los meses que
+    // no vino, cobra el actual con el importe/método que diga Eva y reactiva, todo en la misma
+    // suscripción.
+    register_rest_route('superadmin/v1', '/gestion/vuelve-tras-lesion', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_vuelve_tras_lesion',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/facturas-pendientes', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_gestion_facturas_pendientes',
@@ -2998,14 +3006,37 @@ function blokes_onhold_diagnostico_calcular() {
             'subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad,
             'uid' => $uid, 'tieneNombreFacturacion' => $tiene_nombre_facturacion,
         );
-        // 17/11 18:15 (cowork, Alvaro Fernandez Alvarez/Frachini/Rodríguez Martinez): agrupar
-        // por teléfono (sin uid) es exactamente el caso de una familia que comparte móvil —
-        // nunca debe bastar por sí solo para proponer cancelar. Y una clase sin día/horario
-        // (abono, bono familiar...) nunca es "la misma clase" que otra por casualidad de que las
-        // dos estén vacías — sin eso, cada sub_id queda en su propio grupo de 1 y no se agrupa.
-        $clave_persona = ($dia !== '' && $horario !== '') ? ($uid ? 'u' . $uid : null) : null;
+        // 17/11 18:15/19:10 (cowork): agrupar por teléfono sin más es el caso de una familia que
+        // comparte móvil (Alvaro Fernandez Alvarez/Carlota, los Frachini) — nunca debe bastar
+        // por sí solo. Pero Sergi Escribano/Sandra Álvarez SON la misma persona sin cuenta de
+        // WordPress propia (sin uid), y ahí SÍ hace falta agrupar por teléfono para no perderlos
+        // de "duplicado en espera"/Pendientes de cobro — la diferencia real es si el NOMBRE de
+        // facturación también coincide (se revisa más abajo, tras construir $grupos_en_espera:
+        // un grupo agrupado solo por teléfono con nombres que NO se parecen se deshace). Una
+        // clase sin día/horario (abono, bono familiar...) nunca es "la misma clase" que otra por
+        // casualidad de que las dos estén vacías.
+        $clave_persona = ($dia !== '' && $horario !== '') ? ($uid ? 'u' . $uid : ($tel ? 't' . $tel : null)) : null;
         $clave = $clave_persona !== null ? $clave_persona . '|' . $dia . '|' . $horario . '|' . $edad : ('s' . $sub_id);
         $grupos_en_espera[$clave][] = $sub_id;
+    }
+    // Deshace los grupos agrupados SOLO por teléfono (clave empieza por 't') cuyos nombres de
+    // facturación no se parecen entre sí — nunca se cancela la suscripción de un familiar por
+    // compartir el móvil con otro. Los agrupados por cliente real ('u...') no se tocan: ahí el
+    // customer_id ya es un dato de verdad, no una coincidencia de teléfono.
+    foreach (array_keys($grupos_en_espera) as $clave) {
+        if ($clave[0] !== 't' || count($grupos_en_espera[$clave]) < 2) continue;
+        $grupo = $grupos_en_espera[$clave];
+        $nombre_base = null; $todas_parecidas = true;
+        foreach ($grupo as $sid) {
+            $n = blokes_externos_normaliza_nombre($info_por_sub[$sid]['nombre'] ?? '');
+            if ($n === '') continue;
+            if ($nombre_base === null) { $nombre_base = $n; continue; }
+            if (!blokes_externos_nombres_parecidos($nombre_base, $n)) { $todas_parecidas = false; break; }
+        }
+        if (!$todas_parecidas) {
+            foreach ($grupo as $sid) $grupos_en_espera['s' . $sid] = array($sid);
+            unset($grupos_en_espera[$clave]);
+        }
     }
 
     $duplicados_en_espera = array();
@@ -8215,7 +8246,11 @@ function blokes_sync_grupos_leer_pago($valores, $row, $layout) {
     if (!blokes_sync_grupos_es_numero($cant) || floatval($cant) == 0) return array(null, false);
 
     $metodo_raw = is_string($met) ? mb_strtolower(trim($met)) : '';
-    $map = array('ta' => 'transferencia', 'tr' => 'transferencia', 'ana' => 'transferencia', 'ef' => 'efectivo', 'bizum' => 'bizum');
+    // 17/11 19:10 (cowork, confirmado por Ramiro): "TA" en el Excel de Eva es TARJETA, no
+    // transferencia — iba al revés del sentido (TA/TR son letras distintas a propósito). Mismo
+    // criterio que ya usa blokes_sync_grupos_metodo_a_excel() al escribir ('tarjeta' => 'TA'),
+    // antes solo iba bien en ese sentido y mal al leer de vuelta.
+    $map = array('ta' => 'tarjeta', 'tr' => 'transferencia', 'ana' => 'transferencia', 'ef' => 'efectivo', 'bizum' => 'bizum');
     $metodo = $map[$metodo_raw] ?? $metodo_raw;
 
     $pago = array('importe' => round(floatval($cant), 2), 'metodo' => $metodo);
@@ -8540,6 +8575,28 @@ function blokes_sync_grupos_emparejar($telefono, $nombre_fila, $subs_por_tel, $e
             $s = $coincide[0];
             return array('tipo' => 'sub', 'id' => intval($s['id']), 'label' => ($s['_nombre_fact'] ?: ('Suscripción #' . $s['id'])));
         }
+        // 17/11 19:10 (cowork, Sergi Escribano): seguían empatadas en prioridad y en el primer
+        // nombre — exactamente el caso de la MISMA persona con dos suscripciones duplicadas
+        // (#6614 y #6240) de la misma clase, nunca dos hermanos de verdad (esos tendrían
+        // apellidos o nombre completo distintos). Si el nombre COMPLETO de todas las que
+        // coinciden se parece entre sí, da igual a cuál de las dos se apunte el pago — son la
+        // misma persona — se elige la de id más alto (la más reciente, mismo criterio de
+        // "más reciente gana" que ya usa el resto de este fichero). Si de verdad hay nombres
+        // distintos detrás (hermanos con el mismo nombre de pila), se sigue sin resolver solo.
+        if (count($coincide) > 1) {
+            $nombres_completos = array_values(array_filter(array_map(function($s) {
+                return blokes_externos_normaliza_nombre((string) ($s['_nombre_fact'] ?? ''));
+            }, $coincide)));
+            $todas_parecidas = count($nombres_completos) > 0;
+            foreach ($nombres_completos as $n) {
+                if (!blokes_externos_nombres_parecidos($nombres_completos[0], $n)) { $todas_parecidas = false; break; }
+            }
+            if ($todas_parecidas) {
+                usort($coincide, function($a, $b) { return intval($b['id']) - intval($a['id']); });
+                $s = $coincide[0];
+                return array('tipo' => 'sub', 'id' => intval($s['id']), 'label' => ($s['_nombre_fact'] ?: ('Suscripción #' . $s['id'])));
+            }
+        }
         return null;
     }
     if (isset($externos_por_tel[$tel])) {
@@ -8566,11 +8623,13 @@ function blokes_sync_grupos_notas_destino($match) {
 }
 
 // El método tal y como lo escribe Eva en el Excel ('ta'/'tr'/'ef'/'bizum'/'web'…) ya llega
-// traducido a transferencia/efectivo/bizum/web por blokes_sync_grupos_leer_pago(); aquí solo
-// falta encajarlo en los 5 métodos que acepta Marcar cobrado — "web" (pago con tarjeta en la
-// web, sin Redsys automático detrás) se trata como tarjeta a mano, igual que un TPV.
+// traducido a tarjeta/transferencia/efectivo/bizum/web por blokes_sync_grupos_leer_pago(); aquí
+// solo falta encajarlo en los 5 métodos que acepta Marcar cobrado — "web" (pago con tarjeta en
+// la web, sin Redsys automático detrás) se trata como tarjeta a mano, igual que un TPV.
 function blokes_sync_grupos_metodo_a_cobrado($metodo) {
-    $map = array('web' => 'tarjeta', 'transferencia' => 'transferencia', 'efectivo' => 'efectivo', 'bizum' => 'bizum', 'ana' => 'transferencia');
+    // 17/11 19:10: 'tarjeta' (de "TA", confirmado por Ramiro) caía al "transferencia" por
+    // defecto de aquí abajo — no estaba en este mapa, aunque leer_pago() ya la produjera bien.
+    $map = array('web' => 'tarjeta', 'tarjeta' => 'tarjeta', 'transferencia' => 'transferencia', 'efectivo' => 'efectivo', 'bizum' => 'bizum', 'ana' => 'transferencia');
     return $map[$metodo] ?? 'transferencia';
 }
 
@@ -11294,6 +11353,100 @@ function superadmin_gestion_marcar_cobrado($request) {
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
+// "Vuelve tras lesión/ausencia" (Ramiro, 17/11 19:10, confirmado tras el caso de Sergi Escribano
+// #6614 — NOTAS_PARA_CODE_pestanas_grupos.md §18:30/§19:10): reproduce exactamente los pasos que
+// hizo cowork a mano, en la misma suscripción, sin crear otra:
+// (a) anula sin factura los pedidos pendientes de los meses que no vino (motivo "lesión");
+// (b) el pedido que SÍ se cobra se redata a hoy (o a la fecha que diga Eva) — si no, el pago
+//     queda archivado en el mes del pedido viejo, no en el de ahora (confirmado a mano);
+// (c) llama al mismo superadmin_gestion_marcar_cobrado() de siempre, con el importe/método de
+//     Eva y ajustarPrecio=solo_este_mes (para el pago a mitad de mes, p. ej. 43€ en vez de los
+//     86€ del catálogo) — ese endpoint ya reactiva la suscripción sola y deja el siguiente
+//     cobro el día 3 del mes que viene (lo hace WooCommerce Subscriptions al completar el
+//     pedido, no hace falta tocarlo aparte).
+function superadmin_gestion_vuelve_tras_lesion($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id  = intval($request->get_param('sub_id'));
+    $importe = floatval($request->get_param('importe'));
+    $metodo  = sanitize_key($request->get_param('metodo'));
+    $motivo  = sanitize_text_field((string) $request->get_param('motivo'));
+    if ($motivo === '') $motivo = 'Vuelve tras lesión/ausencia';
+    $fecha   = sanitize_text_field((string) $request->get_param('fecha')); // Y-m-d, opcional: hoy por defecto
+    $simular = (bool) $request->get_param('simular');
+    // Pedidos que Eva quiere anular sin cobrar (los meses que no vino) — si no dice cuáles,
+    // se anulan solos todos los pendientes salvo el que se va a cobrar (nunca se quedan
+    // colgando generando otro aviso de impago).
+    $anular_pedidos_param = $request->get_param('anularPedidos');
+    $anular_pedidos_param = is_array($anular_pedidos_param) ? array_map('intval', $anular_pedidos_param) : null;
+
+    if (!$sub_id || $importe <= 0 || !$metodo) {
+        return new WP_Error('bad_request', 'Faltan sub_id, importe o metodo.', array('status' => 400));
+    }
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
+    $pendientes = array();
+    foreach (array_reverse($order_ids) as $oid) {
+        $o = wc_get_order($oid);
+        if ($o && in_array($o->get_status(), array('pending', 'on-hold', 'failed'), true)) $pendientes[] = $o;
+    }
+    if (!$pendientes) {
+        return new WP_Error('sin_pedido', 'Esta suscripción no tiene ningún pedido pendiente de pago — usa "Marcar cobrado" normal.', array('status' => 409));
+    }
+    // El más reciente es el que se cobra; el resto (u otros si Eva los elige a mano) se anulan.
+    $order_a_cobrar = $pendientes[0];
+    $ids_a_anular = $anular_pedidos_param !== null
+        ? array_values(array_filter($anular_pedidos_param, function($id) use ($order_a_cobrar) { return $id !== $order_a_cobrar->get_id(); }))
+        : array_values(array_slice(array_map(function($o) { return $o->get_id(); }, $pendientes), 1));
+
+    $fecha_ts = $fecha ? strtotime($fecha . ' 12:00:00') : time();
+    $fecha_ymd = date('Y-m-d', $fecha_ts);
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'subId' => $sub_id, 'pedidoACobrar' => $order_a_cobrar->get_id(), 'pedidosAAnular' => $ids_a_anular,
+            'importe' => $importe, 'metodo' => $metodo, 'motivo' => $motivo, 'fecha' => $fecha_ymd,
+            'aviso' => sprintf(
+                'Simulación: no se ha escrito nada. Se anularían %d pedido(s) sin factura, se redataría el pedido #%d a %s y se marcaría cobrado (%s €, %s, ajustarPrecio=solo_este_mes si el importe no es el del catálogo).',
+                count($ids_a_anular), $order_a_cobrar->get_id(), date_i18n('d/m/Y', $fecha_ts), number_format($importe, 2, ',', '.'), $metodo
+            ),
+        )));
+    }
+
+    $antes = array('status' => $sub->get_status());
+    foreach ($ids_a_anular as $oid) {
+        $o = wc_get_order($oid);
+        if (!$o) continue;
+        $o->add_order_note('Vuelve tras lesión/ausencia: pedido anulado, no se cobra — ' . $motivo . '.');
+        $o->update_status('cancelled', 'Vuelve tras lesión/ausencia.');
+    }
+
+    $order_a_cobrar->set_date_created($fecha_ts);
+    $order_a_cobrar->save();
+
+    $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
+    $req->set_param('sub_id', $sub_id);
+    $req->set_param('importe', $importe);
+    $req->set_param('metodo', $metodo);
+    $req->set_param('fecha', $fecha_ymd);
+    $req->set_param('nota', $motivo);
+    $req->set_param('ajustarPrecio', 'solo_este_mes');
+    $req->set_param('motivoExcepcion', $motivo);
+    $req->set_param('confirmarDuplicado', true);
+    $req->set_param('simular', false);
+    $resultado = superadmin_gestion_marcar_cobrado($req);
+    if (is_wp_error($resultado)) return $resultado;
+
+    blokes_gestion_log($sub_id, 'vuelve_tras_lesion', $antes, array('pedidoCobrado' => $order_a_cobrar->get_id(), 'pedidosAnulados' => $ids_a_anular), array('motivo' => $motivo, 'importe' => $importe, 'metodo' => $metodo));
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'subId' => $sub_id, 'pedidoCobrado' => $order_a_cobrar->get_id(), 'pedidosAnulados' => $ids_a_anular,
+        'marcarCobrado' => $resultado->get_data(),
+    )));
+}
+
 // "Mandar factura" (NOTAS_PARA_CODE_pestanas_grupos.md, pestaña 3): pedidos de renovación de
 // tarjeta ya cobrados de verdad por el banco (Redsys/la pasarela confirmó la transacción) pero
 // que WooCommerce dejó en "processing" en vez de "completed" — así nunca sale la factura
@@ -13029,6 +13182,30 @@ function blokes_altas_bajas_calcular($months) {
             $tel = blokes_externos_normaliza_telefono($e['telefono']);
             if ($tel) $telefono_a_uids[$tel][$e['uid']] = $e['nombre'];
         }
+    }
+    // 17/11 19:10 (cowork, Sandra Álvarez): dos cuentas de WordPress REALES (#1102 y #920) de la
+    // misma persona, compartiendo teléfono — antes solo se tocaban las entradas SIN uid; si las
+    // dos cuentas tienen uid (como aquí), count($telefono_a_uids[$tel]) > 1 y se dejaban
+    // "ambiguas" sin tocar, así que sus pagos/meses quedaban repartidos entre dos personaKey
+    // distintos y "Altas y Bajas" nunca veía el cuadro completo de ninguno de los dos (de ahí
+    // que no avisara "pagó por fuera después de la baja"). Si TODOS los nombres detrás de ese
+    // teléfono se parecen entre sí (mismo guardia de siempre: nunca funde padre/hijo o
+    // hermanos, que tienen nombres distintos), se fusionan en un solo personaKey — el uid más
+    // bajo, por determinismo. La fusión real de las cuentas de WordPress (que pidió cowork) sigue
+    // haciendo falta aparte; esto solo corrige el CÁLCULO mientras tanto.
+    foreach ($telefono_a_uids as $tel => $uids) {
+        if (count($uids) < 2) continue;
+        $nombres = array_values(array_filter(array_map('blokes_externos_normaliza_nombre', $uids)));
+        $todas_parecidas = true;
+        foreach ($nombres as $n) {
+            if (!blokes_externos_nombres_parecidos($nombres[0], $n)) { $todas_parecidas = false; break; }
+        }
+        if (!$todas_parecidas) continue;
+        $uid_canonico = min(array_keys($uids));
+        foreach ($enriquecidos as &$e) {
+            if ($e['uid'] && isset($uids[$e['uid']]) && $e['uid'] !== $uid_canonico) $e['personaKey'] = 'u' . $uid_canonico;
+        }
+        unset($e);
     }
     foreach ($enriquecidos as &$e) {
         if ($e['uid'] || !$e['telefono']) continue;

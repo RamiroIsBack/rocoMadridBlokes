@@ -23,7 +23,7 @@ function kpiColorTema(hex, oscuro) {
 }
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente,
+  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente,
   gestionGrupoWellhubSet, gestionGrupoWellhubChecks, gestionGrupoBajoTarifaSet,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
@@ -1077,7 +1077,7 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
   // Marcar cobrado y cambiar de grupo pueden generar factura/cambio de precio de verdad: por
   // defecto se simulan. El resto ya están validadas con datos de prueba, así que por defecto
   // actúan de verdad.
-  const [simular, setSimular] = useState(tipo === 'marcar_cobrado' || tipo === 'cambiar_grupo')
+  const [simular, setSimular] = useState(tipo === 'marcar_cobrado' || tipo === 'cambiar_grupo' || tipo === 'vuelve_tras_lesion')
   // Ramiro, 15/11 08:35: "¿también esta nueva o es un duplicado?" — por defecto NO se confirma,
   // así que si hay otra suscripción en vigor el botón de confirmar se queda bloqueado hasta que
   // alguien elija a propósito "sí, quiero las dos/sigo con esta".
@@ -1088,13 +1088,14 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
 
   const titulos = {
     marcar_cobrado: 'Marcar cobrado', pausar: 'Pausar', reanudar: 'Reanudar', nota: 'Nota',
+    vuelve_tras_lesion: 'Vuelve tras lesión/ausencia',
     dar_de_baja: 'Dar de baja', fusionar: 'Fusionar duplicado',
     exento: alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio',
     cambiar_grupo: 'Cambiar de grupo/horario',
     ext_cobrar: 'Marcar cobrado (fuera de la web)', ext_editar: alumno.externoId ? 'Editar datos' : 'Alta de alumno externo', ext_borrar: 'Eliminar alumno externo',
     optin_whatsapp: 'Consentimiento WhatsApp', editar_alumno: 'Editar nombre/teléfono',
   }
-  const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'dar_de_baja', 'fusionar', 'cambiar_grupo'].includes(tipo)
+  const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'dar_de_baja', 'fusionar', 'cambiar_grupo', 'vuelve_tras_lesion'].includes(tipo)
   // Cowork, 14/11 18:40 punto 6: "Cambiar de grupo" ofrecía las 163 variaciones de WooCommerce
   // (mañanas L/X/V, Martes 07:00, Sábado, "Menores"/"Children" repetidos…) en vez de las clases
   // que existen de verdad. Ahora sale de la MISMA lista de grupos de Supervisión → Grupos (ya
@@ -1121,6 +1122,9 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
         res = await gestionPausar({ sub_id: alumno.subId, motivo, fecha_vuelta: fechaVuelta, simular: sim })
       } else if (tipo === 'reanudar') {
         res = await gestionReanudar({ sub_id: alumno.subId, simular: sim })
+      } else if (tipo === 'vuelve_tras_lesion') {
+        if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
+        res = await gestionVuelveTrasLesion({ sub_id: alumno.subId, importe: Number(importe), metodo, fecha, motivo, simular: sim })
       } else if (tipo === 'nota') {
         res = await gestionNota({ sub_id: alumno.subId, nota })
       } else if (tipo === 'dar_de_baja') {
@@ -1267,6 +1271,30 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
 
             {tipo === 'reanudar' && (
               <p>¿Reanudar esta suscripción (vuelve a «Activo»)?</p>
+            )}
+
+            {tipo === 'vuelve_tras_lesion' && (
+              <>
+                <p className="sv-note">
+                  Anula sin factura los pedidos pendientes de los meses que no vino, cobra el mes actual con el
+                  importe y método de abajo, y reactiva la suscripción — el siguiente cobro vuelve solo al día 3
+                  del mes que viene. Todo en esta misma suscripción (#{alumno.subId}), sin crear otra.
+                </p>
+                <label className="sv-grp-field">Importe de este mes (€)
+                  <input className="sv-tests-input" type="number" step="0.01" min="0" value={importe} onChange={e => setImporte(e.target.value)} placeholder={alumno.importeCatalogo ? `Catálogo: ${alumno.importeCatalogo} €` : ''} />
+                </label>
+                <label className="sv-grp-field">Método
+                  <select className="sv-tests-select" value={metodo} onChange={e => setMetodo(e.target.value)}>
+                    {METODO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
+                  </select>
+                </label>
+                <label className="sv-grp-field">Fecha
+                  <input className="sv-tests-input" type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+                </label>
+                <label className="sv-grp-field">Motivo
+                  <input className="sv-tests-input" type="text" value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Vuelve tras lesión/ausencia" />
+                </label>
+              </>
             )}
 
             {tipo === 'dar_de_baja' && (
@@ -1615,6 +1643,10 @@ function AccionMenu({ alumno, onPick, onClose }) {
         <button onClick={() => onPick('marcar_cobrado')}>Marcar cobrado</button>
         {puedePausar   && <button onClick={() => onPick('pausar')}>Pausar</button>}
         {puedeReanudar && <button onClick={() => onPick('reanudar')}>Reanudar</button>}
+        {/* 17/11 19:10 (Ramiro, caso de Sergi Escribano): vuelve a clase tras lesión/ausencia a
+            mitad de mes — anula los meses que no vino y cobra el actual, todo en la misma
+            suscripción, sin duplicar ni tener que arreglarlo a mano. */}
+        <button onClick={() => onPick('vuelve_tras_lesion')}>Vuelve tras lesión/ausencia</button>
         {puedeBaja     && <button onClick={() => onPick('dar_de_baja')}>Dar de baja</button>}
         <button onClick={() => onPick('nota')}>Nota</button>
         <button onClick={() => onPick('exento')}>{alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio'}</button>

@@ -83,6 +83,9 @@ async function gestionCall(method, path, body) {
 const gestionPost = (path, body) => gestionCall('POST', path, body)
 
 export const gestionMarcarCobrado = body => gestionPost('/gestion/marcar-cobrado', body)
+// "Vuelve tras lesión/ausencia" (17/11 19:10, Ramiro): anula los pedidos de los meses que no
+// vino, cobra el actual con el importe/método de Eva y reactiva, todo en la misma suscripción.
+export const gestionVuelveTrasLesion = body => gestionPost('/gestion/vuelve-tras-lesion', body)
 export const gestionPausar        = body => gestionPost('/gestion/pausar', body)
 export const gestionReanudar      = body => gestionPost('/gestion/reanudar', body)
 export const gestionNota          = body => gestionPost('/gestion/nota', body)
