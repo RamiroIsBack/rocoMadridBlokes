@@ -496,6 +496,12 @@
    horizontal — antes eran columnas de ancho fijo en una fila (`flex`), así que por mucho que
    el contenedor se ensanchara, seguían sin caber y salía la barra. Con `grid` + `auto-fit` se
    reparten solas: más columnas en pantalla ancha, menos (hasta 1) en móvil, sin scroll. */
+/* 17/11 punto B.3: aviso de arrastradas + filtro Todas/Pendientes/Retrasadas del tablero. */
+.org__board-aviso-arrastre {
+  background: #fdf0d8; border: 1px solid #c8961e; color: #8a6416;
+  padding: 8px 10px; margin-bottom: 10px; font-size: 0.82rem; font-weight: 600;
+}
+.org__board-filtro { display: flex; gap: 4px; margin-bottom: 10px; max-width: 360px; }
 .org__board {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -507,6 +513,10 @@
   background: var(--color-surface);
   border: 1.5px solid var(--color-border);
   padding: 10px;
+  /* 17/11 punto B.1: "cada columna con su propia altura" — por defecto una fila de CSS grid
+     estira todas sus celdas a la altura de la más alta (la de más tareas); con align-self:
+     start cada columna solo ocupa lo que necesita. */
+  align-self: start;
 }
 .org__board-col--over {
   border-color: #c8961e;
@@ -526,7 +536,7 @@
 
 .org__tile {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: flex-start;
   gap: 8px;
   background: var(--color-surface);
@@ -595,6 +605,21 @@
   padding: 4px 6px;
   cursor: pointer;
 }
+/* 17/11 punto B.2: una línea por tarea en el tablero de escritorio (checkbox + título +
+   iconos pequeños que aparecen al pasar el ratón) en vez de los 3-4 botones de ancho completo
+   de arriba (.org__tile-postpone/-edit/-delete, que siguen igual para el plan de la compe, que
+   no tenía ese problema). */
+.org__tile-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; opacity: 0; transition: opacity 0.1s; }
+.org__tile:hover .org__tile-actions, .org__tile:focus-within .org__tile-actions { opacity: 1; }
+.org__tile-icon-btn {
+  background: none; border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 0.8rem; line-height: 1; padding: 3px 6px;
+  cursor: pointer;
+}
+.org__tile-icon-btn:disabled { opacity: 0.6; cursor: default; }
+.org__tile-icon-btn--danger { color: #a33d33; border-color: #c8928c; }
+
 .org__task-rastro { font-size: 0.66rem; color: var(--color-text-secondary); font-style: italic; }
 .org__task--retrasada { border-color: #c8961e; background: #fdf0d8; }
 .org__task--moved { opacity: 0.6; }

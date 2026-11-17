@@ -512,6 +512,8 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
   const [showTest, setShowTest] = useState(false)
   // "Dar por cerradas las arrastradas de antes de..." (cowork, 17/11 10:40, urgente).
   const [showCerrar, setShowCerrar] = useState(false)
+  // 17/11 punto B.3: filtro del tablero de escritorio — "Todas / Pendientes / Retrasadas".
+  const [filtroTablero, setFiltroTablero] = useState('todas')
   const showToast = useToast()
 
   // Calendario de semanas + rotación de zonas (Ramiro, 12/11 09:31): tira de 4 semanas —
@@ -809,11 +811,34 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
         ) : (
         <>
         <p className="org__hint">Arrastra una tarjeta a otra persona para reasignarla.</p>
+        {/* 17/11 punto B.3: aviso de tareas arrastradas (postponedCount > 0 y sin hacer) + filtro
+            Todas/Pendientes/Retrasadas, para encontrarlas sin tener que mirar columna a columna. */}
+        {(() => {
+          const arrastradas = detail.assignments.flatMap(a => a.tasks).filter(t => !t.done && t.postponedCount > 0)
+          if (arrastradas.length === 0) return null
+          const masAntigua = arrastradas.reduce((min, t) => (!min || (t.originalDate || t.date) < min) ? (t.originalDate || t.date) : min, null)
+          return (
+            <p className="org__board-aviso-arrastre">
+              ⚠ {arrastradas.length} tarea{arrastradas.length === 1 ? '' : 's'} viene{arrastradas.length === 1 ? '' : 'n'} del {dayLabel(masAntigua)} → cerrar (arriba, "Cerrar tareas arrastradas...") o reasignar.
+            </p>
+          )
+        })()}
+        <div className="org__board-filtro">
+          {[['todas', 'Todas'], ['pendientes', 'Pendientes'], ['retrasadas', 'Retrasadas']].map(([key, label]) => (
+            <button
+              key={key} type="button"
+              className={`org__switch-btn${filtroTablero === key ? ' org__switch-btn--active' : ''}`}
+              onClick={() => setFiltroTablero(key)}
+            >{label}</button>
+          ))}
+        </div>
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
           {detail.assignments.map(a => {
             const worker = workerById[a.workerId]
             const effectiveDays = a.workDays?.length ? a.workDays : (worker?.workDays || [])
-            const tareasOrdenadas = [...a.tasks].sort((x, y) => x.date.localeCompare(y.date))
+            const tareasOrdenadas = [...a.tasks]
+              .filter(t => filtroTablero === 'todas' ? true : filtroTablero === 'pendientes' ? !t.done : tareaEsRetrasada(t, todayS))
+              .sort((x, y) => x.date.localeCompare(y.date))
             return (
               <div
                 key={a.id}
@@ -872,9 +897,13 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
                     onDelete={deleteTask}
                     deleting={deletingTask === t.id}
                     onDuplicate={taskId => { setDuplicandoTask(taskId); setDuplicarSeleccion([]) }}
+                    otherAssignments={detail.assignments.filter(other => other.id !== a.id)}
+                    onReassign={reassignTask}
                   />
                 ))}
-                {tareasOrdenadas.length === 0 && <p className="org__hint">Sin tareas (no le tocó ninguna esta semana).</p>}
+                {tareasOrdenadas.length === 0 && (
+                  <p className="org__hint">{filtroTablero === 'todas' ? 'Sin tareas (no le tocó ninguna esta semana).' : 'Ninguna con este filtro.'}</p>
+                )}
                 {duplicandoTask && tareasOrdenadas.some(t => t.id === duplicandoTask) && (
                   <div className="org__add-form">
                     <p className="org__hint">Duplicar a:</p>
@@ -1581,7 +1610,14 @@ function TaskEditForm({ task, byWorkerId, assignments, assignmentId, onDone, onC
 // no se cancelan, solo se mueven a la semana siguiente ("→ Semana
 // siguiente"), y quedan marcadas "retrasada" para que no se pierda el
 // histórico de lo que se fue quedando atrás.
-function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canManage, onEdit, onDelete, deleting, onDuplicate }) {
+function TaskTile({
+  task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canManage, onEdit, onDelete, deleting, onDuplicate,
+  otherAssignments, onReassign,
+}) {
+  // 17/11 punto B.5: "se mantiene el arrastre con ratón. Además, Reasignar a… en el ⋯, para que
+  // el móvil y el ordenador hagan lo mismo" — alternativa de un clic al arrastre (que sigue
+  // intacto), mismo reassignTask() de siempre.
+  const [reasignando, setReasignando] = useState(false)
   const params = Object.entries(task.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
   const movedAway = task.status === 'retrasada' && task.movedToTaskId
   // Una tarea ya hecha no es "un atraso visible" — solo importa que quede constancia discreta
@@ -1632,41 +1668,63 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
         {badge && <span className={`org__tile-badge${badgeDiscreto ? ' org__tile-badge--discreto' : ''}`}>{badge}</span>}
         {rastro && <span className="org__task-rastro">{rastro}</span>}
       </div>
-      {canPostpone && (
-        <button
-          type="button"
-          className="org__tile-postpone"
+      {/* 17/11 punto B.2: "tarjeta de una línea... iconos pequeños que aparecen al pasar el
+          ratón, quitar los 4 botones grandes" — antes cada acción era su propio botón de ancho
+          completo (flex: 0 0 100%), hasta 3 filas extra por tarea. Mismos handlers de siempre,
+          solo iconos sueltos escondidos con opacity hasta pasar el ratón o entrar por teclado
+          (:focus-within, para no depender solo del hover). */}
+      {canManage && reasignando ? (
+        <select
+          autoFocus
           onPointerDown={e => e.stopPropagation()}
-          onClick={() => onPostpone(task.id)}
-          disabled={postponing}
-        >{postponing ? '...' : '→ Semana siguiente'}</button>
-      )}
-      {canManage && !movedAway && (
-        <button
-          type="button"
-          className="org__tile-edit"
-          onPointerDown={e => e.stopPropagation()}
-          onClick={onEdit}
-        >✎ Editar</button>
-      )}
-      {canManage && onDuplicate && (
-        <button
-          type="button"
-          className="org__tile-edit"
-          onPointerDown={e => e.stopPropagation()}
-          onClick={() => onDuplicate(task.id)}
-          title="Duplicar esta tarea para otras personas"
-        >⧉ Duplicar a…</button>
-      )}
-      {canManage && (
-        <button
-          type="button"
-          className="org__tile-delete"
-          onPointerDown={e => e.stopPropagation()}
-          onClick={() => onDelete(task.id)}
-          disabled={deleting}
-          title="Quitar esta tarea"
-        >{deleting ? '...' : '✕ Quitar'}</button>
+          onChange={e => { setReasignando(false); if (e.target.value) onReassign(task.id, Number(e.target.value), task.date) }}
+          onBlur={() => setReasignando(false)}
+        >
+          <option value="">— reasignar a… —</option>
+          {(otherAssignments || []).map(o => <option key={o.id} value={o.id}>{o.workerName}</option>)}
+        </select>
+      ) : (canPostpone || (canManage && !movedAway) || (canManage && onDuplicate) || canManage) && (
+        <span className="org__tile-actions">
+          {canPostpone && (
+            <button
+              type="button" className="org__tile-icon-btn"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => onPostpone(task.id)}
+              disabled={postponing} title="Semana siguiente"
+            >{postponing ? '…' : '→'}</button>
+          )}
+          {canManage && onReassign && (otherAssignments || []).length > 0 && (
+            <button
+              type="button" className="org__tile-icon-btn"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => setReasignando(true)}
+              title="Reasignar a otra persona"
+            >⇄</button>
+          )}
+          {canManage && !movedAway && (
+            <button
+              type="button" className="org__tile-icon-btn"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={onEdit} title="Editar"
+            >✎</button>
+          )}
+          {canManage && onDuplicate && (
+            <button
+              type="button" className="org__tile-icon-btn"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => onDuplicate(task.id)}
+              title="Duplicar a otras personas"
+            >⧉</button>
+          )}
+          {canManage && (
+            <button
+              type="button" className="org__tile-icon-btn org__tile-icon-btn--danger"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => onDelete(task.id)}
+              disabled={deleting} title="Quitar"
+            >{deleting ? '…' : '✕'}</button>
+          )}
+        </span>
       )}
     </div>
   )
