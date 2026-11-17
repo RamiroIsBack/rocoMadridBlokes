@@ -104,6 +104,26 @@ function daysUntil(dateStr) {
   return Math.round((target - today) / 86400000)
 }
 
+// 17/11 (NOTAS_PARA_CODE_tareas_movil.md): el tablero de columnas y el plan de la compe no se
+// pueden usar en el móvil (medido a 390 px: scroll lateral de 2600/327 px, columnas de 4600 px
+// de alto vacío, 60 botones en una sola pantalla...). Mismos datos y endpoints, pero dos vistas
+// distintas según el ancho — no es solo CSS, la estructura cambia (lista vs tablero), así que
+// hace falta saberlo en JS, no solo con una media query.
+const MOBILE_BREAKPOINT = 700
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth <= MOBILE_BREAKPOINT : false
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`)
+    const onChange = () => setIsMobile(mq.matches)
+    onChange()
+    mq.addEventListener ? mq.addEventListener('change', onChange) : mq.addListener(onChange)
+    return () => { mq.removeEventListener ? mq.removeEventListener('change', onChange) : mq.removeListener(onChange) }
+  }, [])
+  return isMobile
+}
+
 // Aviso visible de "algo falló" (Ramiro, 4/11 05:48: casi todas las llamadas se tragaban el error
 // con `.catch(() => {})` y no pasaba nada en pantalla — parecía que la acción "no estaba").
 // Un contexto en vez de pasar la función por props por media docena de niveles de componentes.
@@ -163,6 +183,18 @@ export default function OrganizacionPage() {
     setWorkerId(id)
     try { localStorage.setItem(WHOAMI_KEY, String(id)) } catch {}
   }
+  // 17/11 punto A.1: "coge la persona del usuario logueado; «¿Quién eres?» solo aparece si no
+  // se puede deducir" — pero solo la PRIMERA vez (si nunca se ha elegido nada, ni siquiera "No
+  // soy yo"). chooseWorker(null) deja en localStorage el texto "null" (no borra la clave), así
+  // que se distingue de "nunca se ha tocado esto" (clave ausente) — si ya dijiste "No soy yo" a
+  // propósito, eso se respeta y no se vuelve a autorellenar en cada carga.
+  useEffect(() => {
+    if (!config?.miWorkerId || workerId) return
+    let yaElegido = true
+    try { yaElegido = localStorage.getItem(WHOAMI_KEY) !== null } catch {}
+    if (!yaElegido) chooseWorker(config.miWorkerId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config?.miWorkerId])
   // Ramiro, 12/11 11:35: "ni Ana ni Edu ni Sara" pueden crear, editar, mover ni quitar tareas —
   // solo Álvaro (el jefe de equipación) o un socio. Antes `canManage` salía del selector local
   // de "quién soy" (`currentWorker?.isLead`), que cualquiera puede cambiar sin ninguna
@@ -209,11 +241,13 @@ export default function OrganizacionPage() {
 
         <CompeResumenHoy workerId={workerId} onGoToCompe={() => setView('compe')} />
 
+        {/* 17/11 punto A.6: "Compe de hoy" tiene que salir ARRIBA, no al final de los 5000 px de
+            Semana — antes se pintaba después de SemanaView, con ningún motivo técnico para eso. */}
+        {view === 'semana' && <MiParteCompesHoy config={config} />}
+
         {view === 'semana' && <SemanaView config={config} workers={workers} workerId={workerId} canEdit={canEdit} canManage={canManage} onWorkersChanged={reloadWorkers} />}
         {view === 'normas' && <NormasView config={config} workers={workers} canManage={canEdit} onConfigChanged={reloadConfig} />}
         {view === 'compe' && <CompeView config={config} workers={workers} canManage={canManage} />}
-
-        {view === 'semana' && <MiParteCompesHoy config={config} />}
       </div>
     </ToastProvider>
   )
@@ -435,6 +469,7 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
 
 // ─── Semana ───────────────────────────────────────────────────────────
 function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersChanged }) {
+  const isMobile = useIsMobile()
   const [weeks, setWeeks] = useState([])
   const [detail, setDetail] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -707,6 +742,41 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
         {detail.isAuto && <p className="org__hint org__hint--auto">Semana creada automáticamente: reparte las tareas arrastrándolas.</p>}
         {/* Ramiro 12/11 11:45: "las tareas son de la semana, no de un día concreto" — ya no se
             arrastra entre días, solo entre personas. */}
+        {isMobile ? (
+          // 17/11 (NOTAS_PARA_CODE_tareas_movil.md, puntos A.1-A.3): el tablero de columnas no
+          // se puede usar en el móvil (9 columnas de 280 px con scroll lateral, 60 botones por
+          // pantalla...) — misma información y endpoints, pero en una lista: "Mis tareas"
+          // primero (compe → retrasadas → el resto), el equipo en un acordeón, acciones en ⋯.
+          <MisTareasMovil
+            assignments={detail.assignments}
+            myWorkerId={workerId}
+            canManage={canManage}
+            taskTypeById={taskTypeById}
+            todayS={todayS}
+            holdsets={holdsets}
+            config={config}
+            addingBlockFor={addingBlockFor}
+            setAddingBlockFor={setAddingBlockFor}
+            addingTaskFor={addingTaskFor}
+            setAddingTaskFor={setAddingTaskFor}
+            onReload={() => openWeek(detail.id)}
+            postponing={postponing}
+            onPostpone={postponeTask}
+            deletingTask={deletingTask}
+            onDelete={deleteTask}
+            editingTask={editingTask}
+            setEditingTask={setEditingTask}
+            onToggleDone={toggleTaskDone}
+            duplicandoTask={duplicandoTask}
+            setDuplicandoTask={setDuplicandoTask}
+            duplicarSeleccion={duplicarSeleccion}
+            toggleDuplicarWorker={toggleDuplicarWorker}
+            confirmarDuplicar={confirmarDuplicar}
+            duplicando={duplicando}
+            onReassign={reassignTask}
+          />
+        ) : (
+        <>
         <p className="org__hint">Arrastra una tarjeta a otra persona para reasignarla.</p>
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
           {detail.assignments.map(a => {
@@ -832,6 +902,8 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
               return t ? taskLabel(t, taskTypeById) : ''
             })()}
           </div>
+        )}
+        </>
         )}
         {canManage && (
           <div className="org__danger-zone">
@@ -1505,6 +1577,234 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
           disabled={deleting}
           title="Quitar esta tarea"
         >{deleting ? '...' : '✕ Quitar'}</button>
+      )}
+    </div>
+  )
+}
+
+// ─── Mis tareas (móvil) ────────────────────────────────────────────────
+// 17/11 (NOTAS_PARA_CODE_tareas_movil.md, puntos A.1-A.3): mismos datos y endpoints que el
+// tablero de escritorio (TaskTile/reassignTask/postponeTask/deleteTask/confirmarDuplicar ya
+// existían) — solo cambia cómo se ven y se tocan. "Retrasada" aquí es la misma condición que ya
+// usa el badge de TaskTile (venía de antes y sigue sin hacerse), no una nueva regla de negocio.
+function tareaEsRetrasada(t, todayS) {
+  return !t.done && (t.status === 'retrasada' || t.postponedCount > 0 || t.date < todayS)
+}
+// Orden pedido: compe primero, luego retrasadas, luego el resto.
+function ordenarTareasMovil(tasks, todayS) {
+  const rango = t => (t.competitionId ? 0 : (tareaEsRetrasada(t, todayS) ? 1 : 2))
+  return [...tasks].sort((x, y) => {
+    const rx = rango(x), ry = rango(y)
+    return rx !== ry ? rx - ry : x.date.localeCompare(y.date)
+  })
+}
+function tareaMovida(t) { return t.status === 'retrasada' && !!t.movedToTaskId }
+
+// Una línea por tarea: casilla + título + acciones en un menú ⋯ (hoja/desplegable), en vez de
+// los 3-4 botones de ancho completo del tablero (punto A.2). "Reasignar a…" es la alternativa
+// táctil al arrastre del escritorio — mismo reassignTask() de siempre, solo cambia cómo se elige
+// a quién.
+function TaskLineaMovil({
+  task, typeName, isMissed, isRetrasada, canManage, canPostpone, postponing, deleting,
+  onToggleDone, onPostpone, onEdit, onDelete, onDuplicateOpen, onReassignOpen, movedAway,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const rastro = rastroTarea(task)
+  let badge = null, badgeDiscreto = false
+  if (task.done) {
+    if (movedAway || task.postponedCount > 0) { badge = `viene del ${dayLabel(task.originalDate || task.date)}`; badgeDiscreto = true }
+  } else if (movedAway) {
+    badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
+  } else if (task.postponedCount > 0) {
+    badge = `retrasada ${task.postponedCount} sem`
+  } else if (isMissed) {
+    badge = 'FALTÓ'
+  }
+  return (
+    <div className={`org__tm-linea${task.done ? ' org__tm-linea--done' : ''}${isRetrasada ? ' org__tm-linea--retrasada' : ''}`}>
+      <label className="org__tm-check">
+        <input type="checkbox" checked={task.done} onChange={e => onToggleDone(task.id, e.target.checked)} />
+      </label>
+      <div className="org__tm-body" onClick={() => setMenuOpen(true)}>
+        {task.competitionId && <span className="org__tm-compe-tag" title="Tarea de la compe">🏆</span>}
+        <span className="org__tm-nombre">{typeName}</span>
+        {badge && <span className={`org__tile-badge${badgeDiscreto ? ' org__tile-badge--discreto' : ''}`}>{badge}</span>}
+        {rastro && <span className="org__task-rastro">{rastro}</span>}
+      </div>
+      <button type="button" className="org__tm-mas" onClick={() => setMenuOpen(true)} aria-label="Acciones">⋯</button>
+      {menuOpen && (
+        <TaskActionsMenu
+          onClose={() => setMenuOpen(false)}
+          canPostpone={canPostpone} postponing={postponing}
+          canManage={canManage} movedAway={movedAway} deleting={deleting}
+          onPostpone={() => { onPostpone(task.id); setMenuOpen(false) }}
+          onEdit={() => { onEdit(); setMenuOpen(false) }}
+          onDuplicate={() => { onDuplicateOpen(); setMenuOpen(false) }}
+          onReassign={() => { onReassignOpen(); setMenuOpen(false) }}
+          onDelete={() => { onDelete(task.id); setMenuOpen(false) }}
+        />
+      )}
+    </div>
+  )
+}
+
+// Menú ⋯ de una tarea (punto A.2): mismas acciones que los botones del tablero, "Quitar" al
+// final en rojo y pidiendo confirmación (ya la pide onDelete=deleteTask, no hace falta repetirla
+// aquí).
+function TaskActionsMenu({ onClose, canPostpone, postponing, canManage, movedAway, deleting, onPostpone, onEdit, onDuplicate, onReassign, onDelete }) {
+  return (
+    <div className="org__tm-menu-overlay" onClick={onClose}>
+      <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+        {canPostpone && <button type="button" onClick={onPostpone} disabled={postponing}>→ Semana siguiente</button>}
+        {canManage && !movedAway && <button type="button" onClick={onEdit}>✎ Editar</button>}
+        {canManage && <button type="button" onClick={onDuplicate}>⧉ Duplicar a…</button>}
+        {canManage && <button type="button" onClick={onReassign}>⇄ Reasignar a…</button>}
+        {canManage && <button type="button" className="org__tm-menu__quitar" onClick={onDelete} disabled={deleting}>✕ Quitar</button>}
+        <button type="button" className="org__tm-menu__cancelar" onClick={onClose}>Cancelar</button>
+      </div>
+    </div>
+  )
+}
+
+// Vista completa del móvil para una semana: "Mis tareas" (la persona conectada) arriba, el
+// resto del equipo en un acordeón cerrado por defecto (punto A.3). Reutiliza EXACTAMENTE los
+// mismos handlers que ya tenía el tablero de escritorio (pasados por SemanaView) — nunca
+// lógica nueva de negocio, solo una disposición distinta.
+function MisTareasMovil({
+  assignments, myWorkerId, canManage, taskTypeById, todayS, holdsets, config,
+  addingBlockFor, setAddingBlockFor, addingTaskFor, setAddingTaskFor, onReload,
+  postponing, onPostpone, deletingTask, onDelete, editingTask, setEditingTask, onToggleDone,
+  duplicandoTask, setDuplicandoTask, duplicarSeleccion, toggleDuplicarWorker, confirmarDuplicar, duplicando,
+  onReassign,
+}) {
+  const [abiertos, setAbiertos] = useState(() => new Set())
+  const toggleAbierto = id => setAbiertos(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const [reasignando, setReasignando] = useState(null) // { taskId, assignmentId, date }
+
+  const seccion = a => {
+    const tareas = ordenarTareasMovil(a.tasks, todayS)
+    return (
+      <div className="org__tm-seccion">
+        {canManage && (
+          <button type="button" className="org__link-btn" onClick={() => setAddingTaskFor(cur => cur === a.id ? null : a.id)}>+ Tarea</button>
+        )}
+        {addingTaskFor === a.id && (
+          <LooseTaskForm
+            config={config} weekStart={undefined} byWorkerId={myWorkerId}
+            onDone={() => { setAddingTaskFor(null); onReload() }}
+            onCancel={() => setAddingTaskFor(null)}
+            assignmentId={a.id}
+          />
+        )}
+        {tareas.map(t => editingTask === t.id ? (
+          <TaskEditForm
+            key={t.id} task={t} byWorkerId={myWorkerId}
+            assignments={assignments} assignmentId={a.id}
+            onDone={() => { setEditingTask(null); onReload() }}
+            onCancel={() => setEditingTask(null)}
+          />
+        ) : (
+          <TaskLineaMovil
+            key={t.id}
+            task={t}
+            typeName={taskLabel(t, taskTypeById)}
+            isMissed={!t.done && t.date < todayS && t.status !== 'retrasada' && !t.postponedCount}
+            isRetrasada={tareaEsRetrasada(t, todayS)}
+            canManage={canManage}
+            canPostpone={!t.done && !(t.status === 'retrasada' && t.movedToTaskId) && canManage}
+            postponing={postponing === t.id}
+            deleting={deletingTask === t.id}
+            onToggleDone={onToggleDone}
+            onPostpone={onPostpone}
+            onEdit={() => setEditingTask(t.id)}
+            onDelete={onDelete}
+            onDuplicateOpen={() => { setDuplicandoTask(t.id) }}
+            onReassignOpen={() => setReasignando({ taskId: t.id, assignmentId: a.id, date: t.date })}
+            movedAway={tareaMovida(t)}
+          />
+        ))}
+        {tareas.length === 0 && <p className="org__hint">Sin tareas.</p>}
+        {duplicandoTask && tareas.some(t => t.id === duplicandoTask) && (
+          <div className="org__add-form">
+            <p className="org__hint">Duplicar a:</p>
+            <div className="org__holdset-chips">
+              {assignments.filter(other => other.id !== a.id).map(other => (
+                <button
+                  key={other.id} type="button"
+                  className={`org__holdset-chip${duplicarSeleccion.includes(other.workerId) ? ' org__holdset-chip--on' : ''}`}
+                  onClick={() => toggleDuplicarWorker(other.workerId)}
+                >{other.workerName}</button>
+              ))}
+            </div>
+            <div className="org__add-actions">
+              <button className="org__btn" onClick={() => confirmarDuplicar(false)} disabled={duplicando || duplicarSeleccion.length === 0}>
+                {duplicando ? 'Duplicando...' : `Duplicar a ${duplicarSeleccion.length} persona(s)`}
+              </button>
+              <button className="org__btn" onClick={() => confirmarDuplicar(true)} disabled={duplicando}>Todos los de esta semana</button>
+              <button className="org__link-btn" onClick={() => setDuplicandoTask(null)}>Cancelar</button>
+            </div>
+          </div>
+        )}
+        {reasignando && tareas.some(t => t.id === reasignando.taskId) && (
+          <div className="org__tm-menu-overlay" onClick={() => setReasignando(null)}>
+            <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+              <p className="org__hint">Reasignar a…</p>
+              {assignments.filter(other => other.id !== a.id).map(other => (
+                <button
+                  key={other.id} type="button"
+                  onClick={async () => { const info = reasignando; setReasignando(null); await onReassign(info.taskId, other.id, info.date) }}
+                >{other.workerName}</button>
+              ))}
+              <button type="button" className="org__tm-menu__cancelar" onClick={() => setReasignando(null)}>Cancelar</button>
+            </div>
+          </div>
+        )}
+        {a.blocks.length > 0 && (
+          <ul className="org__block-list">
+            {a.blocks.map(b => <BlockRow key={b.id} block={b} holdsets={holdsets} onChanged={onReload} />)}
+          </ul>
+        )}
+        {addingBlockFor === a.id ? (
+          <AddBlockForm config={config} holdsets={holdsets} assignmentId={a.id} onDone={() => { setAddingBlockFor(null); onReload() }} onCancel={() => setAddingBlockFor(null)} />
+        ) : <button type="button" className="org__add-btn" onClick={() => setAddingBlockFor(a.id)}>+ Añadir bloque</button>}
+      </div>
+    )
+  }
+
+  const mia = assignments.find(a => String(a.workerId) === String(myWorkerId))
+  const otras = assignments.filter(a => a !== mia)
+
+  return (
+    <div className="org__tm">
+      {mia ? (
+        <div className="org__tm-mia">
+          <p className="org__tm-mia-titulo">Mis tareas</p>
+          {seccion(mia)}
+        </div>
+      ) : (
+        <p className="org__hint">No tienes ninguna columna esta semana — mira el resto del equipo abajo.</p>
+      )}
+
+      {otras.length > 0 && (
+        <div className="org__tm-resto">
+          <p className="org__tm-mia-titulo">Resto del equipo</p>
+          {otras.map(a => {
+            const nAtrasadas = a.tasks.filter(t => tareaEsRetrasada(t, todayS)).length
+            const abierta = abiertos.has(a.id)
+            return (
+              <div key={a.id} className="org__tm-acordeon">
+                <button type="button" className="org__tm-acordeon-cabecera" onClick={() => toggleAbierto(a.id)}>
+                  <span>
+                    {a.workerName}{a.isLead ? ' · responsable' : ''} · {a.tasks.length} tarea{a.tasks.length === 1 ? '' : 's'}
+                    {nAtrasadas > 0 ? ` · ${nAtrasadas} retrasada${nAtrasadas === 1 ? '' : 's'}` : ''}
+                  </span>
+                  <span className="org__tm-acordeon-flecha">{abierta ? '▾' : '▸'}</span>
+                </button>
+                {abierta && seccion(a)}
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )

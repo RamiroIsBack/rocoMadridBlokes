@@ -573,6 +573,60 @@
 .org__task--moved .org__task-name { text-decoration: line-through; }
 .org__task--inactive { opacity: 0.55; }
 
+/* ── "Mis tareas" (móvil ≤700px) — NOTAS_PARA_CODE_tareas_movil.md, 17/11. Lista en vez de
+   tablero: una línea por tarea, acciones en un menú ⋯ (hoja inferior). Reutiliza los mismos
+   colores que .org__tile/.org__tile-badge para que "retrasada"/"FALTÓ" se vean igual en las
+   dos vistas. */
+.org__tm { margin-bottom: 16px; }
+.org__tm-mia-titulo {
+  font-weight: 700; font-size: 0.95rem; color: var(--color-text-primary);
+  margin: 14px 0 6px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.org__tm-seccion { margin-bottom: 8px; }
+.org__tm-acordeon { border-bottom: 1px solid var(--color-border); }
+.org__tm-acordeon-cabecera {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: none; border: none; padding: 12px 2px; font-size: 0.88rem; font-weight: 600;
+  color: var(--color-text-primary); text-align: left; cursor: pointer; min-height: 44px;
+}
+.org__tm-acordeon-flecha { color: var(--color-text-secondary); font-size: 0.8rem; }
+.org__tm-linea {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  padding: 8px; margin-bottom: 6px; min-height: 44px;
+}
+.org__tm-linea--done { opacity: 0.55; }
+.org__tm-linea--retrasada { border-color: #c8961e; background: #fdf0d8; }
+.org__tm-check { display: flex; align-items: center; cursor: pointer; flex: 0 0 auto; }
+.org__tm-check input { width: 20px; height: 20px; }
+.org__tm-body { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
+.org__tm-nombre { font-weight: 600; color: var(--color-text-primary); font-size: 0.85rem; overflow-wrap: anywhere; }
+.org__tm-compe-tag { font-size: 0.8rem; }
+.org__tm-mas {
+  flex: 0 0 auto; background: none; border: none; color: var(--color-text-secondary);
+  font-size: 1.3rem; font-weight: 700; line-height: 1; padding: 8px 6px; cursor: pointer; min-height: 44px;
+}
+/* Hoja inferior de acciones (alternativa táctil a lo que en escritorio son botones sueltos/
+   arrastre) — "⇄ Reasignar a…" reutiliza el mismo reassignTask() del tablero. */
+.org__tm-menu-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: flex-end; justify-content: center; z-index: 60;
+}
+.org__tm-menu {
+  width: 100%; max-width: 480px; background: var(--color-surface);
+  border-radius: 14px 14px 0 0; padding: 10px 0; display: flex; flex-direction: column;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25);
+}
+.org__tm-menu button {
+  background: none; border: none; border-bottom: 1px solid var(--color-border);
+  text-align: left; padding: 13px 18px; font-size: 0.92rem; color: var(--color-text-primary);
+  cursor: pointer; min-height: 44px;
+}
+.org__tm-menu button:last-child { border-bottom: none; }
+.org__tm-menu button:disabled { opacity: 0.5; cursor: default; }
+.org__tm-menu__quitar { color: var(--state-bad) !important; }
+.org__tm-menu__cancelar { text-align: center !important; font-weight: 700; color: var(--color-text-secondary) !important; }
+
 /* ── Semana: histórico ── */
 .org__historico {
   display: flex;
@@ -727,7 +781,10 @@
   :root:not([data-theme="light"]) .org__block-row--planificado { background: var(--color-bg); }
   :root:not([data-theme="light"]) .org__tile--missed { background: rgba(248, 113, 113, 0.14); }
   :root:not([data-theme="light"]) .org__tile--retrasada,
-  :root:not([data-theme="light"]) .org__task--retrasada { background: rgba(245, 200, 66, 0.14); }
+  :root:not([data-theme="light"]) .org__task--retrasada,
+  :root:not([data-theme="light"]) .org__tm-linea--retrasada { background: rgba(245, 200, 66, 0.14); }
+  :root:not([data-theme="light"]) .org__tm-linea,
+  :root:not([data-theme="light"]) .org__tm-menu { background: var(--color-surface); border-color: var(--color-border); }
 }
 :root[data-theme="dark"] .org__section-title,
 :root[data-theme="dark"] .org__who-name,
@@ -777,7 +834,10 @@
 :root[data-theme="dark"] .org__block-row--planificado { background: var(--color-bg); }
 :root[data-theme="dark"] .org__tile--missed { background: rgba(248, 113, 113, 0.14); }
 :root[data-theme="dark"] .org__tile--retrasada,
-:root[data-theme="dark"] .org__task--retrasada { background: rgba(245, 200, 66, 0.14); }
+:root[data-theme="dark"] .org__task--retrasada,
+:root[data-theme="dark"] .org__tm-linea--retrasada { background: rgba(245, 200, 66, 0.14); }
+:root[data-theme="dark"] .org__tm-linea,
+:root[data-theme="dark"] .org__tm-menu { background: var(--color-surface); border-color: var(--color-border); }
 
 /* ══ Calendario de semanas + rotación de zonas (Ramiro, 12/11 09:31/09:35/09:37) ══
    Escrito ya con variables de tema desde el principio — no hace falta otra ronda de arreglos

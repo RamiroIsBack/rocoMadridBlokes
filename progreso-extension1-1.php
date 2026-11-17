@@ -15686,7 +15686,23 @@ function progreso_equip_get_config() {
         // Ramiro 12/11 11:35: para que el frontend solo PINTE los botones de editar/mover/
         // quitar tareas con la sesión real (nunca con el selector local de "quién soy").
         'esJefeOSocio' => progreso_equip_es_jefe_o_socio(),
+        // 17/11 (NOTAS_PARA_CODE_tareas_movil.md, punto A.1): "coge la persona del usuario
+        // logueado; «¿Quién eres?» solo aparece si no se puede deducir" — por el email de la
+        // cuenta de WordPress contra el de la ficha de equipador, un dato real, nunca adivinado.
+        'miWorkerId'   => progreso_equip_mi_worker_id(),
     )));
+}
+
+function progreso_equip_mi_worker_id() {
+    if (!is_user_logged_in()) return null;
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    if ($email === '') return null;
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $id = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND email != '' AND LOWER(email) = %s LIMIT 1", $email
+    ));
+    return $id ? intval($id) : null;
 }
 
 // Crea la semana actual y la siguiente si no existen todavía (ni reales ni de prueba), con
@@ -17208,6 +17224,10 @@ function progreso_equip_get_week_detail($request) {
                 'movedToDate' => $moved_to_task_id && isset($moved_to_dates[$moved_to_task_id]) ? $moved_to_dates[$moved_to_task_id]->task_date : null,
                 'createdBy' => $t['created_by'] ?? null, 'createdAt' => $t['created_at'] ?? null,
                 'updatedBy' => $t['updated_by'] ?? null, 'updatedAt' => $t['updated_at'] ?? null,
+                // 17/11 (NOTAS_PARA_CODE_tareas_movil.md, punto A.1): «Mis tareas» del móvil
+                // necesita saber qué tareas son de compe para ponerlas primero — antes no se
+                // mandaba, aunque la columna ya existe desde que se generan los planes de compe.
+                'competitionId' => $t['competition_id'] ? intval($t['competition_id']) : null,
             );
         }
         $blocks = $wpdb->get_results($wpdb->prepare(
