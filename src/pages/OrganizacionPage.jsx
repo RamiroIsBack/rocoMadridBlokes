@@ -183,10 +183,12 @@ export default function OrganizacionPage() {
     setWorkerId(id)
     try { localStorage.setItem(WHOAMI_KEY, String(id)) } catch {}
   }
-  // 17/11 punto A.1: "coge la persona del usuario logueado; «¿Quién eres?» solo aparece si no
-  // se puede deducir" — pero solo la PRIMERA vez (si nunca se ha elegido nada, ni siquiera "No
-  // soy yo"). chooseWorker(null) deja en localStorage el texto "null" (no borra la clave), así
-  // que se distingue de "nunca se ha tocado esto" (clave ausente) — si ya dijiste "No soy yo" a
+  // 17/11 §10:50 (cowork, sustituye el punto A.1 de §09:40): "«¿Quién eres?» no se bloquea
+  // nunca. Cada uno elige en el selector y ya está." — el selector solo se PRERRELLENA la
+  // primera vez (si nunca se ha elegido nada, ni siquiera "No soy yo"); después siempre se
+  // puede volver a cambiar directamente desde el propio selector, sin pasos intermedios.
+  // chooseWorker(null) deja en localStorage el texto "null" (no borra la clave), así que se
+  // distingue de "nunca se ha tocado esto" (clave ausente) — si ya elegiste "— elige —" a
   // propósito, eso se respeta y no se vuelve a autorellenar en cada carga.
   useEffect(() => {
     if (!config?.miWorkerId || workerId) return
@@ -215,22 +217,19 @@ export default function OrganizacionPage() {
     <ToastProvider>
       <div className="org">
         {/* Identidad ("¿quién soy?"), antes solo dentro de la vista "Hoy" que se ha quitado —
-            sigue haciendo falta para firmar lo que se añade o cambia desde cualquier vista. */}
+            sigue haciendo falta para firmar lo que se añade o cambia desde cualquier vista.
+            17/11 §10:50 (cowork): el selector nunca se bloquea — siempre se puede elegir o
+            cambiar directamente ahí, sin un paso intermedio de "No soy yo". */}
         <div className="org__who-row">
-          {currentWorkerName ? (
-            <>
-              <span className="org__who-name">{currentWorkerName}{currentWorker?.isLead ? ' · responsable' : ''}</span>
-              <button className="org__link-btn" onClick={() => chooseWorker(null)}>No soy yo</button>
-            </>
-          ) : (
-            <>
-              <span className="org__hint">¿Quién eres? (solo para firmar lo que añadas o cambies)</span>
-              <select className="org__whoami-select" value="" onChange={e => { if (e.target.value) chooseWorker(Number(e.target.value)) }}>
-                <option value="">— elige —</option>
-                {workers.map(w => <option key={w.id} value={w.id}>{w.name}{w.eventual ? ' (solo compe)' : ''}</option>)}
-              </select>
-            </>
-          )}
+          <span className="org__hint">¿Quién eres? (solo para firmar lo que añadas o cambies)</span>
+          <select
+            className="org__whoami-select" value={workerId || ''}
+            onChange={e => chooseWorker(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">— elige —</option>
+            {workers.map(w => <option key={w.id} value={w.id}>{w.name}{w.eventual ? ' (solo compe)' : ''}</option>)}
+          </select>
+          {currentWorker?.isLead && <span className="org__who-name">· responsable</span>}
         </div>
 
         <div className="org__switch">
@@ -247,7 +246,7 @@ export default function OrganizacionPage() {
 
         {view === 'semana' && <SemanaView config={config} workers={workers} workerId={workerId} canEdit={canEdit} canManage={canManage} onWorkersChanged={reloadWorkers} />}
         {view === 'normas' && <NormasView config={config} workers={workers} canManage={canEdit} onConfigChanged={reloadConfig} />}
-        {view === 'compe' && <CompeView config={config} workers={workers} canManage={canManage} />}
+        {view === 'compe' && <CompeView config={config} workers={workers} canManage={canManage} workerId={workerId} />}
       </div>
     </ToastProvider>
   )
@@ -485,6 +484,8 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
   // Las semanas de prueba no salen en la lista normal del equipo (cowork las necesita para
   // probar sin dejar residuos) — este botón las enseña aparte para poder gestionarlas.
   const [showTest, setShowTest] = useState(false)
+  // "Dar por cerradas las arrastradas de antes de..." (cowork, 17/11 10:40, urgente).
+  const [showCerrar, setShowCerrar] = useState(false)
   const showToast = useToast()
 
   // Calendario de semanas + rotación de zonas (Ramiro, 12/11 09:31): tira de 4 semanas —
@@ -943,8 +944,16 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
         <button className="org__link-btn" onClick={() => setShowTest(s => !s)}>
           {showTest ? 'Ver semanas normales' : 'Ver semanas de prueba'}
         </button>
+        {canManage && (
+          <button className="org__link-btn" onClick={() => setShowCerrar(s => !s)}>
+            {showCerrar ? 'Ocultar cerrar arrastradas' : 'Cerrar tareas arrastradas...'}
+          </button>
+        )}
       </div>
       {showWorkers && <WorkersAdmin workers={workers} onChanged={onWorkersChanged} />}
+      {showCerrar && (
+        <CerrarArrastradasForm onDone={() => { setShowCerrar(false); reloadWeeks() }} showToast={showToast} />
+      )}
       {showCreate && (
         <CreateWeekForm
           config={config} workers={workers} initialDate={createDate}
@@ -1145,55 +1154,10 @@ function HistoricoView() {
 }
 
 // Crear/editar/borrar personas — "a veces participa más gente en las tareas".
-// Email de un equipador, editable en línea — lo usa progreso_equip_mi_worker_id() (17/11,
-// NOTAS_PARA_CODE_tareas_movil.md punto A.1) para deducir quién eres en el móvil por el email
-// de tu cuenta de WordPress. Cowork, 17/11 09:40: "con lo que hay ahora, miWorkerId sale null
-// para todos — no hay ningún sitio donde ponerlo. No los rellenes a ojo": este campo lo
-// rellenan Álvaro/Ramiro a mano, nunca se adivina ni se pone por defecto.
-function WorkerEmailEditor({ worker, onChanged }) {
-  const [editing, setEditing] = useState(false)
-  const [value, setValue] = useState(worker.email || '')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState(null)
-
-  const save = async () => {
-    setSaving(true); setError(null)
-    try {
-      await api('PUT', `/equipacion/workers/${worker.id}`, { email: value.trim() })
-      setEditing(false)
-      onChanged()
-    } catch (e) { setError(e.message) } finally { setSaving(false) }
-  }
-
-  if (!editing) {
-    return (
-      <span className="org__worker-email">
-        {worker.email ? worker.email : <span className="org__hint">sin email</span>}
-        {' '}<button type="button" className="org__link-btn" onClick={() => { setValue(worker.email || ''); setEditing(true) }}>
-          {worker.email ? 'editar email' : '+ email'}
-        </button>
-      </span>
-    )
-  }
-  return (
-    <span className="org__worker-email">
-      <input
-        type="email" className="org__worker-email-input" value={value} autoFocus
-        onChange={e => setValue(e.target.value)} placeholder="correo@ejemplo.com"
-        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
-      />
-      <button type="button" className="org__link-btn" onClick={save} disabled={saving}>{saving ? '...' : 'Guardar'}</button>
-      <button type="button" className="org__link-btn" onClick={() => setEditing(false)} disabled={saving}>Cancelar</button>
-      {error && <span className="org__error">{error}</span>}
-    </span>
-  )
-}
-
 function WorkersAdmin({ workers, onChanged }) {
   const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
   const [showAdd, setShowAdd] = useState(false)
   const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
   const [days, setDays] = useState(['mon', 'tue', 'wed', 'thu', 'fri'])
   const [blocksMin, setBlocksMin] = useState(1)
   const [blocksMax, setBlocksMax] = useState(2)
@@ -1208,8 +1172,8 @@ function WorkersAdmin({ workers, onChanged }) {
     if (!name.trim()) { setError('Escribe un nombre'); return }
     setSaving(true); setError(null)
     try {
-      await api('POST', '/equipacion/workers', { name: name.trim(), email: email.trim(), workDays: days, blocksMin, blocksMax, isLead, eventual })
-      setName(''); setEmail(''); setDays(['mon', 'tue', 'wed', 'thu', 'fri']); setBlocksMin(1); setBlocksMax(2); setIsLead(false); setEventual(false)
+      await api('POST', '/equipacion/workers', { name: name.trim(), workDays: days, blocksMin, blocksMax, isLead, eventual })
+      setName(''); setDays(['mon', 'tue', 'wed', 'thu', 'fri']); setBlocksMin(1); setBlocksMax(2); setIsLead(false); setEventual(false)
       setShowAdd(false)
       onChanged()
     } catch (e) {
@@ -1239,7 +1203,6 @@ function WorkersAdmin({ workers, onChanged }) {
           <li key={w.id} className="org__worker-row">
             <span className="org__worker-name">{w.name}{w.isLead ? ' · responsable' : ''}{w.eventual ? ' · eventual' : ''}</span>
             <span className="org__worker-meta">{w.workDays.map(d => DAY_LABEL[d]).join('/')} · {w.blocksMin}-{w.blocksMax} bloques</span>
-            <WorkerEmailEditor worker={w} onChanged={onChanged} />
             <button className="org__link-btn" onClick={() => toggleEventual(w)} title="Eventual: solo viene a compes puntuales, no entra en el reparto normal de mantenimiento">
               {w.eventual ? 'Quitar eventual' : 'Marcar eventual'}
             </button>
@@ -1253,10 +1216,6 @@ function WorkersAdmin({ workers, onChanged }) {
           <div className="org__add-row">
             <label>Nombre</label>
             <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Nombre" />
-          </div>
-          <div className="org__add-row">
-            <label>Email (de su cuenta de WordPress — para "Mis tareas" en el móvil, opcional)</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="correo@ejemplo.com" />
           </div>
           <div className="org__add-row">
             <label>Días que trabaja</label>
@@ -1290,6 +1249,50 @@ function WorkersAdmin({ workers, onChanged }) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// "Dar por cerradas las arrastradas de antes de..." (cowork, 17/11 10:40, urgente): para
+// tareas viejas sin hacer que nadie va a ponerse a hacer ya — las marca (a ellas y a toda la
+// cadena de copias que el barrido fuera arrastrando) como "descartada", sin borrar nada, para
+// que dejen de recogerse semana tras semana. Jefe/socio, con una fecha de corte a propósito
+// (nunca "todo lo de antes de hoy" por defecto).
+function CerrarArrastradasForm({ onDone, showToast }) {
+  const [antesDe, setAntesDe] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  const submit = async () => {
+    if (!antesDe) { setError('Elige una fecha de corte'); return }
+    if (!window.confirm(`¿Dar por cerradas (sin borrar) las tareas sin hacer de antes del ${antesDe}? No se puede deshacer desde aquí.`)) return
+    setSaving(true); setError(null)
+    try {
+      const res = await api('POST', '/equipacion/tasks/cerrar-arrastradas', { antesDe })
+      showToast?.(`${res.cerradas ?? 0} tarea(s) cerradas.`)
+      onDone()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="org__add-form">
+      <p className="org__hint">
+        Marca como "descartada" (queda en el histórico como no hecha, nunca se borra) cualquier tarea
+        sin hacer con fecha anterior a la de corte, y toda su cadena de copias arrastradas. Así el
+        barrido deja de volver a recogerlas.
+      </p>
+      <div className="org__add-row">
+        <label>Cerrar las de antes de</label>
+        <input type="date" value={antesDe} onChange={e => setAntesDe(e.target.value)} />
+      </div>
+      {error && <p className="org__error">{error}</p>}
+      <div className="org__add-actions">
+        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Cerrando...' : 'Cerrar arrastradas'}</button>
+      </div>
     </div>
   )
 }
@@ -1566,7 +1569,13 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
 
   let badge = null
   let badgeDiscreto = false
-  if (task.done) {
+  // 17/11 10:40 (cowork): cerrada a mano (progreso_equip_cerrar_arrastradas() / Quitar en una
+  // arrastrada) — "que quede en el histórico como no hecha", nunca con el aviso llamativo de
+  // RETRASADA, puesto que ya no se va a recoger ni a hacer.
+  if (task.status === 'descartada') {
+    badge = 'cerrada (no se hizo)'
+    badgeDiscreto = true
+  } else if (task.done) {
     if (movedAway) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
     else if (task.postponedCount > 0) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
     badgeDiscreto = true
@@ -1665,7 +1674,10 @@ function TaskLineaMovil({
   const [menuOpen, setMenuOpen] = useState(false)
   const rastro = rastroTarea(task)
   let badge = null, badgeDiscreto = false
-  if (task.done) {
+  if (task.status === 'descartada') {
+    badge = 'cerrada (no se hizo)'
+    badgeDiscreto = true
+  } else if (task.done) {
     if (movedAway || task.postponedCount > 0) { badge = `viene del ${dayLabel(task.originalDate || task.date)}`; badgeDiscreto = true }
   } else if (movedAway) {
     badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
@@ -2107,7 +2119,7 @@ function CreateTaskTypeForm({ config, onDone, onCancel }) {
 // Organización de una competición: fecha, semanas de antelación para las
 // tareas de equipación, y dónde va cada uno de los 16 bloques en el mapa.
 // Más reglas (categorías, puntuación...) se añaden sobre la marcha.
-function CompeView({ config, workers, canManage }) {
+function CompeView({ config, workers, canManage, workerId }) {
   const [competitions, setCompetitions] = useState([])
   const [current, setCurrent] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -2124,7 +2136,7 @@ function CompeView({ config, workers, canManage }) {
   if (current) {
     return (
       <CompeMapEditor
-        comp={current} config={config} workers={workers} canManage={canManage}
+        comp={current} config={config} workers={workers} canManage={canManage} workerId={workerId}
         onBack={() => { setCurrent(null); reload() }}
         onRefresh={() => openComp(current.id)}
       />
@@ -2213,7 +2225,9 @@ function CreateCompForm({ onDone, onCancel }) {
 // filtro por persona para que cada uno vea solo lo suyo (encargo "Preparador de compes", 1/11).
 const COMP_TAREA_VACIA = { taskTypeId: '', customText: '', date: '', notas: '' }
 
-function CompePlanView({ compId, taskTypeById, workers, canManage }) {
+function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
+  const isMobile = useIsMobile()
+  const myName = useMemo(() => (workers || []).find(w => w.id === workerId)?.name || null, [workers, workerId])
   const [plan, setPlan] = useState(null)
   const [generating, setGenerating] = useState(false)
   const [columnaExpandida, setColumnaExpandida] = useState(null)
@@ -2361,6 +2375,110 @@ function CompePlanView({ compId, taskTypeById, workers, canManage }) {
     </span>
   )
 
+  // 17/11 09:40 (A4): sacado del bucle de columnas del tablero para reutilizarlo igual en la
+  // lista vertical del móvil (NOTAS_PARA_CODE_tareas_movil.md) — ninguna lógica nueva, los
+  // mismos handlers de siempre (toggleDone/moverTarea/quitarTarea/confirmarDuplicarCompe).
+  // `mostrarPersona` añade el nombre delante del título, para cuando la tarea no está ya
+  // agrupada en la columna de su persona (el modo "Todos por día" del móvil).
+  const renderTareaLi = (t, mostrarPersona = false) => (
+    <li
+      key={t.id}
+      draggable={canManage && !mostrarPersona}
+      onDragStart={() => canManage && !mostrarPersona && setDragTareaId(t.id)}
+      onDragEnd={() => setDragTareaId(null)}
+      className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}${t.manual ? ' org__task--manual' : ''}${dragTareaId === t.id ? ' org__task--dragging' : ''}`}
+    >
+      <label className="org__task-check" onPointerDown={e => e.stopPropagation()}>
+        <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
+      </label>
+      <div className="org__task-body">
+        <span className="org__task-title">
+          {mostrarPersona && <strong>{t.workerName} · </strong>}
+          {tareaLabel(t)} ({dayLabel(t.date)})
+          {t.manual && <span className="org__task-manual-badge" title="Puesta a mano">a mano</span>}
+        </span>
+        {t.params?.notas && <span className="org__task-notas">{t.params.notas}</span>}
+      </div>
+      {canManage && (
+        <span className="org__task-actions">
+          {confirmandoQuitar === t.id ? (
+            <>
+              <button type="button" className="org__link-btn org__link-btn--danger" onClick={() => quitarTarea(t.id)} disabled={quitandoTarea === t.id}>
+                {quitandoTarea === t.id ? '...' : 'Sí, quitar'}
+              </button>
+              <button type="button" className="org__link-btn" onClick={() => setConfirmandoQuitar(null)}>Cancelar</button>
+            </>
+          ) : reasignandoTarea === t.id ? (
+            <select autoFocus value={t.workerName} onChange={e => moverTarea(t.id, e.target.value)} onBlur={() => setReasignandoTarea(null)}>
+              {Array.from(nombres).sort().map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          ) : (
+            <>
+              <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignandoTarea(t.id)} title="Mover a otra persona">⇄</button>
+              <button type="button" className="org__tile-edit" onClick={() => { setDuplicandoTarea(t.id); setDuplicarSeleccionCompe([]) }} title="Duplicar esta tarea para otras personas">⧉ Duplicar a…</button>
+              <button type="button" className="org__tile-delete" onClick={() => setConfirmandoQuitar(t.id)} title="Quitar esta tarea">✕</button>
+            </>
+          )}
+        </span>
+      )}
+      {duplicandoTarea === t.id && (
+        <div className="org__add-form org__add-form--compe-tarea">
+          <p className="org__hint">Duplicar a:</p>
+          <div className="org__holdset-chips">
+            {(workers || []).filter(w => w.active && w.name !== t.workerName).map(w => (
+              <button
+                key={w.id} type="button"
+                className={`org__holdset-chip${duplicarSeleccionCompe.includes(w.id) ? ' org__holdset-chip--on' : ''}`}
+                onClick={() => setDuplicarSeleccionCompe(cur => cur.includes(w.id) ? cur.filter(x => x !== w.id) : [...cur, w.id])}
+              >{w.name}</button>
+            ))}
+          </div>
+          <div className="org__add-actions">
+            <button className="org__btn" onClick={() => confirmarDuplicarCompe(false)} disabled={duplicandoCompe || duplicarSeleccionCompe.length === 0}>
+              {duplicandoCompe ? 'Duplicando...' : `Duplicar a ${duplicarSeleccionCompe.length} persona(s)`}
+            </button>
+            <button className="org__link-btn" onClick={() => setDuplicandoTarea(null)}>Cancelar</button>
+          </div>
+        </div>
+      )}
+    </li>
+  )
+
+  if (isMobile) {
+    return (
+      <div className="org__section">
+        <h4 className="org__section-title">Plan de la compe</h4>
+        {(!plan || plan.total === 0) ? (
+          <p className="org__hint">Todavía no hay un plan generado.</p>
+        ) : (
+          <p className="org__hint">{plan.pctHecho}% hecho ({plan.hechas}/{plan.total}) · {plan.retrasadas} retrasada(s)</p>
+        )}
+        {canManage && (
+          <div className="org__add-actions">
+            <button className="org__btn" onClick={generate} disabled={generating}>{generating ? 'Generando...' : (plan?.total ? 'Regenerar plan' : 'Generar plan')}</button>
+          </div>
+        )}
+        <CompePlanMovil
+          columnas={columnas}
+          bloquesSinAsignar={bloquesSinAsignar}
+          tasks={tasks}
+          myName={myName}
+          chipReasignable={chipReasignable}
+          renderTareaLi={renderTareaLi}
+          canManage={canManage}
+          addingTareaFor={addingTareaFor}
+          nuevaTarea={nuevaTarea}
+          setNuevaTarea={setNuevaTarea}
+          compTaskTypes={compTaskTypes}
+          abrirNuevaTarea={abrirNuevaTarea}
+          guardarNuevaTarea={guardarNuevaTarea}
+          savingTarea={savingTarea}
+          onCancelNuevaTarea={() => setAddingTareaFor(null)}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="org__section">
       <h4 className="org__section-title">Plan de la compe</h4>
@@ -2398,70 +2516,7 @@ function CompePlanView({ compId, taskTypeById, workers, canManage }) {
               onDragOver={e => { if (canManage) e.preventDefault() }}
               onDrop={e => { if (!canManage) return; e.preventDefault(); if (dragTareaId) moverTarea(dragTareaId, col.nombre); setDragTareaId(null) }}
             >
-              {col.tareas.map(t => (
-                <li
-                  key={t.id}
-                  draggable={canManage}
-                  onDragStart={() => canManage && setDragTareaId(t.id)}
-                  onDragEnd={() => setDragTareaId(null)}
-                  className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}${t.manual ? ' org__task--manual' : ''}${dragTareaId === t.id ? ' org__task--dragging' : ''}`}
-                >
-                  <label className="org__task-check" onPointerDown={e => e.stopPropagation()}>
-                    <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
-                  </label>
-                  <div className="org__task-body">
-                    <span className="org__task-title">
-                      {tareaLabel(t)} ({dayLabel(t.date)})
-                      {t.manual && <span className="org__task-manual-badge" title="Puesta a mano">a mano</span>}
-                    </span>
-                    {t.params?.notas && <span className="org__task-notas">{t.params.notas}</span>}
-                  </div>
-                  {/* Ramiro 12/11 11:35: mover, quitar o editar una tarea es solo de Álvaro o un
-                      socio — Ana/Edu/Sara solo ven y marcan hecha (el checkbox de arriba). */}
-                  {canManage && (
-                    <span className="org__task-actions">
-                      {confirmandoQuitar === t.id ? (
-                        <>
-                          <button type="button" className="org__link-btn org__link-btn--danger" onClick={() => quitarTarea(t.id)} disabled={quitandoTarea === t.id}>
-                            {quitandoTarea === t.id ? '...' : 'Sí, quitar'}
-                          </button>
-                          <button type="button" className="org__link-btn" onClick={() => setConfirmandoQuitar(null)}>Cancelar</button>
-                        </>
-                      ) : reasignandoTarea === t.id ? (
-                        <select autoFocus value={col.nombre} onChange={e => moverTarea(t.id, e.target.value)} onBlur={() => setReasignandoTarea(null)}>
-                          {Array.from(nombres).sort().map(n => <option key={n} value={n}>{n}</option>)}
-                        </select>
-                      ) : (
-                        <>
-                          <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignandoTarea(t.id)} title="Mover a otra persona">⇄</button>
-                          <button type="button" className="org__tile-edit" onClick={() => { setDuplicandoTarea(t.id); setDuplicarSeleccionCompe([]) }} title="Duplicar esta tarea para otras personas">⧉ Duplicar a…</button>
-                          <button type="button" className="org__tile-delete" onClick={() => setConfirmandoQuitar(t.id)} title="Quitar esta tarea">✕</button>
-                        </>
-                      )}
-                    </span>
-                  )}
-                  {duplicandoTarea === t.id && (
-                    <div className="org__add-form org__add-form--compe-tarea">
-                      <p className="org__hint">Duplicar a:</p>
-                      <div className="org__holdset-chips">
-                        {(workers || []).filter(w => w.active && w.name !== col.nombre).map(w => (
-                          <button
-                            key={w.id} type="button"
-                            className={`org__holdset-chip${duplicarSeleccionCompe.includes(w.id) ? ' org__holdset-chip--on' : ''}`}
-                            onClick={() => setDuplicarSeleccionCompe(cur => cur.includes(w.id) ? cur.filter(x => x !== w.id) : [...cur, w.id])}
-                          >{w.name}</button>
-                        ))}
-                      </div>
-                      <div className="org__add-actions">
-                        <button className="org__btn" onClick={() => confirmarDuplicarCompe(false)} disabled={duplicandoCompe || duplicarSeleccionCompe.length === 0}>
-                          {duplicandoCompe ? 'Duplicando...' : `Duplicar a ${duplicarSeleccionCompe.length} persona(s)`}
-                        </button>
-                        <button className="org__link-btn" onClick={() => setDuplicandoTarea(null)}>Cancelar</button>
-                      </div>
-                    </div>
-                  )}
-                </li>
-              ))}
+              {col.tareas.map(t => renderTareaLi(t))}
             </ul>
             {canManage && (addingTareaFor === col.nombre ? (
               <div className="org__add-form org__add-form--compe-tarea">
@@ -2496,6 +2551,85 @@ function CompePlanView({ compId, taskTypeById, workers, canManage }) {
   )
 }
 
+// 17/11 09:40 (A4, pedido por Ramiro/Cowork como prioridad 1 para el móvil, antes que A5/B — la
+// preparación de la compe empieza el 25/11): "arriba un selector «Persona: [yo ▾] / Todos por
+// día», y debajo una sola lista vertical. Nunca columnas." — reutiliza `columnas`/`tasks` que ya
+// calcula CompePlanView y los mismos renderTareaLi()/chipReasignable() que el tablero de
+// escritorio, nunca lógica nueva de negocio.
+function CompePlanMovil({
+  columnas, bloquesSinAsignar, tasks, myName, chipReasignable, renderTareaLi, canManage,
+  addingTareaFor, nuevaTarea, setNuevaTarea, compTaskTypes, abrirNuevaTarea, guardarNuevaTarea, savingTarea, onCancelNuevaTarea,
+}) {
+  const nombresConDatos = columnas.map(c => c.nombre)
+  const [modo, setModo] = useState(() => (myName && nombresConDatos.includes(myName)) ? myName : (nombresConDatos[0] || 'todos'))
+  const colSeleccionada = columnas.find(c => c.nombre === modo)
+
+  const porDia = useMemo(() => {
+    const mapa = {}
+    tasks.forEach(t => { (mapa[t.date] = mapa[t.date] || []).push(t) })
+    return Object.keys(mapa).sort().map(date => ({
+      date, tareas: mapa[date].sort((a, b) => a.workerName.localeCompare(b.workerName)),
+    }))
+  }, [tasks])
+
+  return (
+    <div className="org__cp-movil">
+      <select className="org__cp-movil-selector" value={modo} onChange={e => setModo(e.target.value)}>
+        {myName && nombresConDatos.includes(myName) && <option value={myName}>Persona: yo ({myName})</option>}
+        {nombresConDatos.filter(n => n !== myName).map(n => <option key={n} value={n}>Persona: {n}</option>)}
+        <option value="todos">Todos por día</option>
+      </select>
+
+      {modo === 'todos' ? (
+        <div className="org__cp-movil-dias">
+          {porDia.map(({ date, tareas }) => (
+            <div key={date} className="org__cp-movil-dia">
+              <p className="org__cp-movil-dia-titulo">{dayLabel(date)}</p>
+              <ul className="org__task-list">{tareas.map(t => renderTareaLi(t, true))}</ul>
+            </div>
+          ))}
+          {porDia.length === 0 && <p className="org__hint">Sin tareas todavía.</p>}
+          {bloquesSinAsignar.length > 0 && (
+            <div className="org__cp-movil-dia">
+              <p className="org__cp-movil-dia-titulo">Bloques sin asignar</p>
+              <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
+            </div>
+          )}
+        </div>
+      ) : colSeleccionada ? (
+        <div>
+          {colSeleccionada.bloques.length > 0 && (
+            <div className="org__comp-plan-bloques">{colSeleccionada.bloques.map(b => chipReasignable(b, colSeleccionada.nombre))}</div>
+          )}
+          <ul className="org__task-list">{colSeleccionada.tareas.map(t => renderTareaLi(t))}</ul>
+          {colSeleccionada.tareas.length === 0 && colSeleccionada.bloques.length === 0 && <p className="org__hint">Sin tareas ni bloques.</p>}
+          {canManage && (addingTareaFor === modo ? (
+            <div className="org__add-form org__add-form--compe-tarea">
+              <select value={nuevaTarea.taskTypeId} onChange={e => setNuevaTarea(n => ({ ...n, taskTypeId: e.target.value, customText: '' }))}>
+                <option value="">— Texto libre —</option>
+                {compTaskTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              {!nuevaTarea.taskTypeId && (
+                <input type="text" placeholder="Texto de la tarea" value={nuevaTarea.customText} onChange={e => setNuevaTarea(n => ({ ...n, customText: e.target.value }))} />
+              )}
+              <input type="date" value={nuevaTarea.date} onChange={e => setNuevaTarea(n => ({ ...n, date: e.target.value }))} />
+              <input type="text" placeholder="Notas (opcional)" value={nuevaTarea.notas} onChange={e => setNuevaTarea(n => ({ ...n, notas: e.target.value }))} />
+              <div className="org__add-actions">
+                <button type="button" className="org__btn" onClick={guardarNuevaTarea} disabled={savingTarea}>{savingTarea ? 'Guardando...' : 'Añadir'}</button>
+                <button type="button" className="org__link-btn" onClick={onCancelNuevaTarea}>Cancelar</button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" className="org__link-btn" onClick={() => abrirNuevaTarea(modo)}>+ Tarea</button>
+          ))}
+        </div>
+      ) : (
+        <p className="org__hint">Sin tareas para esa persona.</p>
+      )}
+    </div>
+  )
+}
+
 // Rectángulos aproximados (en % del mapa `mapa-equipacion.jpg`, 1600×570 px) de cada subzona
 // dibujada en el plano, para deducir la subzona sola al colocar/mover una burbuja (Ramiro,
 // 11/11 05:01). Sacados a ojo del propio dibujo (los rótulos "SUBZONA #n" ya están en la
@@ -2519,7 +2653,7 @@ function subzonaDesdePosicion(xPct, yPct) {
 // Arrastra una burbuja ya colocada para moverla, o toca un número sin
 // colocar y luego el sitio del mapa — pensado para funcionar igual con
 // ratón que con el dedo en la tablet.
-function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
+function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) {
   const wrapRef = useRef(null)
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const [blocks, setBlocks] = useState(comp.blocks)
@@ -2803,7 +2937,7 @@ function CompeMapEditor({ comp, config, workers, canManage, onBack }) {
         />
       )}
 
-      <CompePlanView compId={comp.id} taskTypeById={taskTypeById} workers={workers || []} canManage={canManage} />
+      <CompePlanView compId={comp.id} taskTypeById={taskTypeById} workers={workers || []} canManage={canManage} workerId={workerId} />
     </div>
   )
 }

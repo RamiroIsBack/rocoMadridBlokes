@@ -851,6 +851,10 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)/duplicar', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_duplicar_tarea', 'permission_callback' => $equip_jefe_perm,
     ));
+    // "Dar por cerradas las arrastradas de antes de..." (cowork, 17/11 10:40, urgente).
+    register_rest_route('progreso/v1', '/equipacion/tasks/cerrar-arrastradas', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_cerrar_arrastradas', 'permission_callback' => $equip_jefe_perm,
+    ));
     register_rest_route('progreso/v1', '/equipacion/weeks/historico', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_weeks_historico', 'permission_callback' => $equip_perm,
     ));
@@ -15686,9 +15690,12 @@ function progreso_equip_get_config() {
         // Ramiro 12/11 11:35: para que el frontend solo PINTE los botones de editar/mover/
         // quitar tareas con la sesión real (nunca con el selector local de "quién soy").
         'esJefeOSocio' => progreso_equip_es_jefe_o_socio(),
-        // 17/11 (NOTAS_PARA_CODE_tareas_movil.md, punto A.1): "coge la persona del usuario
-        // logueado; «¿Quién eres?» solo aparece si no se puede deducir" — por el email de la
-        // cuenta de WordPress contra el de la ficha de equipador, un dato real, nunca adivinado.
+        // 17/11 §10:50 (cowork, sustituye el punto A.1 de §09:40): "el selector sale ya elegido
+        // si el email de la cuenta coincide con el de la ficha de Nóminas. Sin campo email nuevo
+        // en Gestionar personas" — se reutiliza el email que ya hay en la ficha personal de
+        // Superadmin › Nóminas (payroll_get_personal(), de pedírselo para las nóminas), nunca un
+        // dato adivinado ni un campo nuevo. A Organización solo llega este id, nunca el DNI, el
+        // IBAN ni el email de la ficha.
         'miWorkerId'   => progreso_equip_mi_worker_id(),
     )));
 }
@@ -15697,10 +15704,23 @@ function progreso_equip_mi_worker_id() {
     if (!is_user_logged_in()) return null;
     $email = strtolower(trim(wp_get_current_user()->user_email));
     if ($email === '') return null;
+
+    $slug = null;
+    foreach (payroll_get_personal() as $personaId => $ficha) {
+        if (strtolower(trim((string) ($ficha['email'] ?? ''))) === $email) { $slug = $personaId; break; }
+    }
+    if ($slug === null) return null;
+
+    $nombre = '';
+    foreach (overtime_get_people() as $p) {
+        if (($p['id'] ?? '') === $slug) { $nombre = trim((string) ($p['name'] ?? '')); break; }
+    }
+    if ($nombre === '') return null;
+
     global $wpdb;
     progreso_equip_ensure_tables();
     $id = $wpdb->get_var($wpdb->prepare(
-        "SELECT id FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND email != '' AND LOWER(email) = %s LIMIT 1", $email
+        "SELECT id FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND LOWER(name) = %s LIMIT 1", strtolower($nombre)
     ));
     return $id ? intval($id) : null;
 }
@@ -16586,6 +16606,7 @@ function progreso_equip_merge_rolled_task($week_id, $assignment_id, $type_id, $t
         "SELECT t.* FROM {$tasks_table} t
          JOIN {$assignments_table} a ON a.id = t.assignment_id
          WHERE a.week_id = %d AND t.task_type_id = %s AND t.done = 0 AND t.moved_to_task_id IS NULL
+           AND t.status != 'descartada'
          ORDER BY t.id ASC LIMIT 1",
         $week_id, $type_id
     ), ARRAY_A);
@@ -16637,11 +16658,16 @@ function progreso_equip_sweep_overdue_into_current_week() {
     if (!$week) return;
     $week_id = intval($week['id']);
 
+    // 17/11 10:40 (cowork, urgente): excluye las "descartadas" (progreso_equip_delete_task() /
+    // progreso_equip_cerrar_arrastradas()) — si no, una tarea vieja que se acaba de dar por
+    // cerrada vuelve a parecer "pendiente, sin mover" y el barrido la recrea en la siguiente
+    // carga, justo lo que se acababa de quitar.
     $pending = $wpdb->get_results($wpdb->prepare(
         "SELECT t.*, a.worker_id FROM {$tasks_table} t
          JOIN {$assignments_table} a ON a.id = t.assignment_id
          JOIN {$weeks_table} wk ON wk.id = a.week_id
          WHERE t.task_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL
+           AND t.status != 'descartada'
            AND wk.start_date < %s AND wk.id != %d",
         $today, $week['start_date'], $week_id
     ), ARRAY_A);
@@ -16985,11 +17011,15 @@ function progreso_equip_create_week($request) {
         $today = current_time('Y-m-d');
         // Nunca mezclar prueba con real (cowork, 4/11 07:20): una tarea atrasada de una semana de
         // PRUEBA no debe colarse en la primera semana REAL que se cree después, ni al revés.
+        // 17/11 10:40 (cowork, urgente): mismo arreglo que en progreso_equip_sweep_overdue_
+        // into_current_week() — excluye las "descartadas", para que una tarea ya cerrada no
+        // vuelva a arrastrarse a la semana nueva.
         $pending = $wpdb->get_results($wpdb->prepare(
             "SELECT t.*, a.worker_id FROM {$tasks_table} t
              JOIN {$assignments_table} a ON a.id = t.assignment_id
              JOIN " . progreso_equip_table('weeks') . " wk ON wk.id = a.week_id
              WHERE t.task_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL
+               AND t.status != 'descartada'
                AND wk.start_date < %s AND wk.id != %d AND wk.is_test = %d",
             $today, $start_date, $week_id, $is_test
         ), ARRAY_A);
@@ -17474,11 +17504,15 @@ function progreso_equip_limpiar_retrasadas_falsas($request) {
     $assignment_ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM {$assignments_table} WHERE week_id = %d", $week_id));
     if (!$assignment_ids) return new WP_Error('not_found', 'Semana sin asignaciones.', array('status' => 404));
 
+    // 17/11 10:40 (cowork): nunca reabre una "descartada" (progreso_equip_delete_task() /
+    // progreso_equip_cerrar_arrastradas()) — es un arreglo de retrasos, no debe deshacer un
+    // cierre deliberado.
     $afectadas = $wpdb->query(
         "UPDATE {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id
          SET t.status = 'pendiente', t.postponed_count = 0, t.original_date = t.task_date,
              t.moved_to_task_id = NULL, t.original_worker_id = a.worker_id
-         WHERE t.assignment_id IN (" . implode(',', array_map('intval', $assignment_ids)) . ") AND t.done = 0"
+         WHERE t.assignment_id IN (" . implode(',', array_map('intval', $assignment_ids)) . ")
+           AND t.done = 0 AND t.status != 'descartada'"
     );
     return rest_ensure_response(array('success' => true, 'afectadas' => intval($afectadas)));
 }
@@ -17659,18 +17693,64 @@ function progreso_equip_update_task($request) {
 
 // Quitar una tarea concreta de la semana (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30: Ramiro
 // quiere poder quitarlas, no solo moverlas a la semana siguiente). Borrado de verdad, no un
-// estado "cancelada" — el frontend solo enseña el botón al responsable o a un socio. Si otra
-// tarea ya movida apuntaba a esta como destino, se desenlaza para no dejar un movedToTaskId
-// roto.
+// estado "cancelada" — el frontend solo enseña el botón al responsable o a un socio.
+//
+// 17/11 10:40 (Cowork, URGENTE — probado en vivo): si otra tarea ya movida apuntaba a esta como
+// destino (el caso normal: una tarea vieja sin hacer que el barrido progreso_equip_sweep_
+// overdue_into_current_week() fue arrastrando semana tras semana hasta esta), antes se
+// "desenlazaba" poniendo su moved_to_task_id a null — pensado para no dejar un puntero roto,
+// pero el efecto real es que esa tarea vieja vuelve a quedar "pendiente, sin mover" y el
+// barrido la vuelve a recoger en la siguiente carga, recreando exactamente lo que se acababa de
+// quitar (comprobado en vivo: borrar la copia de la semana 37 hizo reaparecer 10 tareas nuevas
+// con postponedCount 2). Un moved_to_task_id apuntando a un id ya borrado no rompe nada al
+// leerlo (superadmin_get_week_detail ya comprobaba si existía antes de usarlo) — así que ahora,
+// en vez de desenlazar, se marca la vieja como "descartada" (deja de contar como pendiente para
+// el barrido, sin borrarla: queda en el histórico como no hecha, tal como pidió Ramiro).
 function progreso_equip_delete_task($request) {
     global $wpdb;
     $id = intval($request['id']);
     $tasks_table = progreso_equip_table('tasks');
     $task = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$tasks_table} WHERE id = %d", $id));
     if (!$task) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
-    $wpdb->update($tasks_table, array('moved_to_task_id' => null), array('moved_to_task_id' => $id), array('%s'), array('%d'));
+    $wpdb->update($tasks_table, array('status' => 'descartada'), array('moved_to_task_id' => $id), array('%s'), array('%d'));
     $wpdb->delete($tasks_table, array('id' => $id), array('%d'));
     return rest_ensure_response(array('success' => true));
+}
+
+// "Dar por cerradas las arrastradas de antes de una fecha" (Cowork, 17/11 10:40 — jefe/socio):
+// para las tareas viejas, sin hacer, que nadie va a ponerse a hacer ya — se marcan (ellas y toda
+// su cadena de copias arrastradas, si el barrido ya las había movido alguna vez) como
+// "descartada", NUNCA se borran. Punto (b) de la misma nota (que "Quitar" haga esto con la
+// original) ya queda cubierto por progreso_equip_delete_task(); esto es para cerrarlas de golpe
+// sin tener que quitar una por una.
+function progreso_equip_cerrar_arrastradas($request) {
+    global $wpdb;
+    $tasks_table = progreso_equip_table('tasks');
+    $antes_de = sanitize_text_field((string) $request->get_param('antesDe'));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $antes_de)) {
+        return new WP_Error('bad_request', 'Falta antesDe (fecha YYYY-MM-DD).', array('status' => 400));
+    }
+    $raices = $wpdb->get_col($wpdb->prepare(
+        "SELECT id FROM {$tasks_table} WHERE task_date < %s AND done = 0 AND status != 'descartada'", $antes_de
+    ));
+    if (!$raices) return rest_ensure_response(array('success' => true, 'cerradas' => 0));
+
+    // Sigue la cadena de moved_to_task_id (puede haber varias generaciones de arrastre, una por
+    // cada semana que la fue recogiendo) y marca TODAS las que encuentre — nunca se borra nada.
+    $vistos = array();
+    $pendientes = $raices;
+    while ($pendientes) {
+        $id = intval(array_shift($pendientes));
+        if (isset($vistos[$id])) continue;
+        $vistos[$id] = true;
+        $siguiente = $wpdb->get_var($wpdb->prepare("SELECT moved_to_task_id FROM {$tasks_table} WHERE id = %d", $id));
+        if ($siguiente) $pendientes[] = intval($siguiente);
+    }
+    $ids = array_keys($vistos);
+    $ph = implode(',', array_fill(0, count($ids), '%d'));
+    $wpdb->query($wpdb->prepare("UPDATE {$tasks_table} SET status = 'descartada' WHERE id IN ($ph)", ...$ids));
+
+    return rest_ensure_response(array('success' => true, 'cerradas' => count($ids)));
 }
 
 // Las tareas no se cancelan: solo se mueven a la semana siguiente. La
