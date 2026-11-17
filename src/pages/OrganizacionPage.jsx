@@ -2327,6 +2327,10 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
   // 17/11 11:25 (cowork): el ⋯ del móvil (igual que en Semana) en vez de los botones ⇄/⧉/✕ en
   // línea, que se salían de ancho (scrollWidth 496 en 375).
   const [menuTareaAbierto, setMenuTareaAbierto] = useState(null)
+  // 17/11 punto B.4: vista tabla del plan de la compe (personas en filas × días en columnas),
+  // alternativa a las columnas por persona — el mismo generate-plan/tasks/blocks de siempre,
+  // solo otra forma de verlos.
+  const [vistaCompe, setVistaCompe] = useState('columnas')
   const showToast = useToast()
 
   const compTaskTypes = useMemo(
@@ -2449,6 +2453,8 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
   })).filter(c => c.tareas.length > 0 || c.bloques.length > 0 || (workers || []).some(w => w.name === c.nombre && w.active))
   const bloquesSinAsignar = blocks.filter(b => !b.equipador).sort((a, b) => a.number - b.number)
   const columnasAMostrar = columnaExpandida ? columnas.filter(c => c.nombre === columnaExpandida) : columnas
+  // 17/11 punto B.4: fechas únicas de las tareas del plan, para las columnas de la vista tabla.
+  const diasCompeTabla = useMemo(() => Array.from(new Set(tasks.map(t => t.date))).sort(), [tasks])
 
   const chipReasignable = (b, nombreActual) => (
     <span key={b.id} className={`org__comp-plan-bloque-chip${b.tested ? ' org__comp-plan-bloque-chip--probado' : ''}`}>
@@ -2671,8 +2677,50 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
         {columnaExpandida && (
           <button className="org__link-btn" onClick={() => setColumnaExpandida(null)}>← Ver todas las columnas</button>
         )}
+        {/* 17/11 punto B.4: columnas por persona (de siempre, con arrastre) o tabla personas ×
+            días — la misma lista de tareas/bloques, solo otra forma de verlos. */}
+        <div className="org__board-filtro">
+          <button type="button" className={`org__switch-btn${vistaCompe === 'columnas' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('columnas')}>Columnas</button>
+          <button type="button" className={`org__switch-btn${vistaCompe === 'tabla' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('tabla')}>Tabla</button>
+        </div>
       </div>
 
+      {vistaCompe === 'tabla' ? (
+        <div className="org__cp-tabla-wrap">
+          <table className="org__cp-tabla">
+            <thead>
+              <tr>
+                <th>Persona</th>
+                {diasCompeTabla.map(d => <th key={d}>{dayLabel(d)}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {columnas.map(col => (
+                <tr key={col.nombre}>
+                  <td className="org__cp-tabla-persona">
+                    {col.nombre}
+                    {col.bloques.length > 0 && <div className="org__comp-plan-bloques">{col.bloques.map(b => chipReasignable(b, col.nombre))}</div>}
+                  </td>
+                  {diasCompeTabla.map(d => (
+                    <td key={d}>
+                      <ul className="org__task-list">{col.tareas.filter(t => t.date === d).map(t => renderTareaLi(t))}</ul>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {bloquesSinAsignar.length > 0 && (
+                <tr>
+                  <td className="org__cp-tabla-persona">Sin asignar</td>
+                  <td colSpan={diasCompeTabla.length}>
+                    <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          {diasCompeTabla.length === 0 && <p className="org__hint">Todavía no hay tareas con fecha en el plan.</p>}
+        </div>
+      ) : (
       <div className="org__board org__board--compe-plan">
         {columnasAMostrar.map(col => (
           <div key={col.nombre} className={`org__board-col${columnaExpandida ? ' org__board-col--expandida' : ''}`}>
@@ -2723,6 +2771,7 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

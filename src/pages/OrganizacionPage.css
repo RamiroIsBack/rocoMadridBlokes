@@ -693,6 +693,17 @@
   margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.04em;
 }
 
+/* 17/11 punto B.4: vista tabla del plan de la compe (personas en filas × días en columnas). */
+.org__cp-tabla-wrap { overflow-x: auto; }
+.org__cp-tabla { border-collapse: collapse; width: 100%; min-width: 640px; }
+.org__cp-tabla th, .org__cp-tabla td {
+  border: 1px solid var(--color-border);
+  padding: 6px; vertical-align: top; text-align: left;
+}
+.org__cp-tabla th { background: var(--color-surface); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-secondary); white-space: nowrap; }
+.org__cp-tabla-persona { font-weight: 700; color: var(--color-text-primary); white-space: nowrap; min-width: 120px; }
+.org__cp-tabla .org__task-list { min-width: 160px; }
+
 /* ── Semana: histórico ── */
 .org__historico {
   display: flex;
