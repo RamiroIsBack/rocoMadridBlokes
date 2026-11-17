@@ -8667,11 +8667,20 @@ function blokes_sync_grupos_sincronizar() {
 
     $subs_por_tel     = blokes_sync_grupos_subs_por_telefono();
     $externos_por_tel = blokes_campanas_externos_por_telefono();
+    // 17/11 15:50 (Ramiro/cowork, prioridad 3): un pago antiguo que aparece de golpe porque su
+    // FILA es nueva en una pestaña que ya existía (p. ej. alguien cambió de pestaña — Tomás
+    // Gasca, ADOL → MEDIANOS) no debe tratarse como "pago nuevo" mes a mes hasta 2025-09 — eso
+    // dispararía un aviso (y un auto-aplicar) por cada mes antiguo. Solo los meses recientes
+    // cuentan como "nuevo" de verdad; los más viejos se absorben en la foto sin avisar.
+    $mes_pago_reciente_desde = blokes_mes_mas(date('Y-m'), -2);
 
     $resumen = array('hojaUsada' => $activa['cual'], 'pestanas' => array(), 'cambiosNuevos' => 0, 'fotoInicial' => array());
     foreach ($pestanas as $tab) {
+        // 17/11 15:50 punto 5 (Ramiro/cowork): las pestañas "Balance..." no son una clase con
+        // alumnos — se leían como si lo fueran (filas repetidas, importes enormes sospechosos).
+        if (stripos($tab, 'balance') !== false) continue;
         $r = blokes_sync_grupos_leer_pestana_filas($valores_por_pestana[$tab] ?? array());
-        if (!$r['filas'] && !$r['bloques']) continue; // pestaña sin formato de clase (Balance, Bonos de 10…)
+        if (!$r['filas'] && !$r['bloques']) continue; // pestaña sin formato de clase (Bonos de 10…)
 
         $tabla_snap = blokes_sync_grupos_snapshot_table();
         $es_foto_inicial = !$wpdb->get_var($wpdb->prepare("SELECT id FROM {$tabla_snap} WHERE pestana = %s LIMIT 1", $tab));
@@ -8743,6 +8752,12 @@ function blokes_sync_grupos_sincronizar() {
                     }
                 }
                 foreach ($fila['pagos'] as $ym => $pago) {
+                    // 17/11 15:50 punto 3: sin $anterior (fila nueva en esta pestaña), TODOS sus
+                    // pagos históricos parecerían "nuevos" a la vez (Tomás Gasca, 9 pagos desde
+                    // 2025-09) — solo los de los últimos meses merecen un aviso/auto-aplicar; los
+                    // más viejos se guardan en la foto sin generar ruido ni reescribir nada en
+                    // WooCommerce por un cobro de hace más de un año.
+                    if (!$anterior && $ym < $mes_pago_reciente_desde) continue;
                     $antes = $pagos_anteriores[$ym] ?? null;
                     $igual = $antes && floatval($antes['importe'] ?? 0) === floatval($pago['importe'] ?? 0) && ($antes['metodo'] ?? '') === ($pago['metodo'] ?? '');
                     if (!$igual) {
@@ -12841,6 +12856,14 @@ function blokes_altas_bajas_calcular($months) {
             // renuevan. Van aparte («se van este mes»), no al recuento de activos.
             $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
             $uid = blokes_alumno_customer_id_de_sub($sub, $sub_obj);
+            // 17/11 15:50 punto 11 (Ramiro/cowork): "«PRUEBA COWORK» sale como baja: las
+            // suscripciones de prueba hay que excluirlas" — mismo criterio que ya usa Ligas
+            // (_blokes_cuenta_prueba, blokes_es_cuenta_prueba()) más el nombre literal "prueba"
+            // en el nombre de facturación (la convención real de estas cuentas de prueba, que no
+            // siempre pasan por marcar la cuenta como tal). Fuera de Altas y Bajas (y de todo lo
+            // demás que lee esta función: Retención, Clases) desde el origen, nunca solo ocultada
+            // en la pantalla de bajas.
+            if (($uid && blokes_es_cuenta_prueba($uid)) || stripos($member_name, 'prueba') !== false) continue;
             $persona_key = $uid ? 'u' . $uid : ($member_phone ? 't' . $member_phone : 'n' . blokes_sync_grupos_normalizar_nombre($member_name));
 
             $dt_created = $sub_obj->get_date_created();
