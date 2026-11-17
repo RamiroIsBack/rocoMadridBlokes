@@ -1260,6 +1260,11 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/limpiar-pendientes-589ab3a', array(
         'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_limpiar_pendientes_589ab3a', 'permission_callback' => $sa_perm,
     ));
+    // 17/11 18:15 (cowork): reintenta de golpe los "Cobro web sin fila" pendientes con la
+    // búsqueda por teléfono en otras pestañas (9efad0e), que esos pendientes viejos no tuvieron.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/reevaluar-sin-fila', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_reevaluar_sin_fila', 'permission_callback' => $sa_perm,
+    ));
     // WP-Cron no corre de fiar con poco tráfico (pseudo-cron: solo se dispara si entra una
     // visita después de la hora programada) — Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05:
     // "esto tiene que pasar automático". Ruta pública protegida por secreto (como el webhook de
@@ -2993,7 +2998,12 @@ function blokes_onhold_diagnostico_calcular() {
             'subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad,
             'uid' => $uid, 'tieneNombreFacturacion' => $tiene_nombre_facturacion,
         );
-        $clave_persona = $uid ? 'u' . $uid : ($tel ? 't' . $tel : null);
+        // 17/11 18:15 (cowork, Alvaro Fernandez Alvarez/Frachini/Rodríguez Martinez): agrupar
+        // por teléfono (sin uid) es exactamente el caso de una familia que comparte móvil —
+        // nunca debe bastar por sí solo para proponer cancelar. Y una clase sin día/horario
+        // (abono, bono familiar...) nunca es "la misma clase" que otra por casualidad de que las
+        // dos estén vacías — sin eso, cada sub_id queda en su propio grupo de 1 y no se agrupa.
+        $clave_persona = ($dia !== '' && $horario !== '') ? ($uid ? 'u' . $uid : null) : null;
         $clave = $clave_persona !== null ? $clave_persona . '|' . $dia . '|' . $horario . '|' . $edad : ('s' . $sub_id);
         $grupos_en_espera[$clave][] = $sub_id;
     }
@@ -3060,7 +3070,9 @@ function blokes_onhold_diagnostico_calcular() {
         $activa_misma_clase = null; $activa_otra_clase = null;
         if ($uid && !empty($activas_por_customer[$uid])) {
             foreach ($activas_por_customer[$uid] as $otra) {
-                $misma_clase = ($otra['dia'] ?? '') === $dia && ($otra['horario'] ?? '') === $horario && ($otra['edad'] ?? 'Adultos') === $edad;
+                // 17/11 18:15: una clase sin día/horario (abono, bono familiar...) nunca es "la
+                // misma clase" que otra por coincidir las dos en vacío.
+                $misma_clase = $dia !== '' && $horario !== '' && ($otra['dia'] ?? '') === $dia && ($otra['horario'] ?? '') === $horario && ($otra['edad'] ?? 'Adultos') === $edad;
                 if ($misma_clase) { $activa_misma_clase = $otra; break; }
                 if (!$activa_otra_clase) $activa_otra_clase = $otra;
             }
@@ -9054,6 +9066,30 @@ function superadmin_sync_grupos_cambio_aplicar($request) {
     $u = wp_get_current_user();
     $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => $u ? $u->user_login : ''), array('id' => $id));
     return rest_ensure_response(array('success' => true, 'data' => $resultado ? $resultado->get_data() : null));
+}
+
+// 17/11 18:15 (cowork): "Cobro web sin fila" viejos (Raúl Bañez y los demás de «V 19.00») se
+// quedaron pendientes de ANTES del arreglo de la búsqueda por teléfono en otras pestañas
+// (9efad0e) — reintenta cada uno de golpe con la misma lógica de "Aplicar" de uno en uno;
+// los que ya encuentren su fila quedan aplicados, los que sigan sin encontrarla se quedan
+// pendientes igual (nunca se pierden ni se descartan solos).
+function superadmin_sync_grupos_reevaluar_sin_fila($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = %s", 'web_sin_fila'
+    ), ARRAY_A);
+    $aplicados = 0; $siguen_pendientes = 0;
+    $u = wp_get_current_user();
+    foreach ($pendientes as $cambio) {
+        $datos = json_decode($cambio['datos_json'], true) ?: array();
+        $resultado = blokes_sync_grupos_aplicar_efecto($cambio, $datos);
+        if (is_wp_error($resultado)) { $siguen_pendientes++; continue; }
+        $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => ($u ? $u->user_login : '') . ' · reevaluado'), array('id' => intval($cambio['id'])));
+        $aplicados++;
+    }
+    return rest_ensure_response(array('success' => true, 'aplicados' => $aplicados, 'siguenPendientes' => $siguen_pendientes));
 }
 
 function superadmin_sync_grupos_cambio_descartar($request) {

@@ -51,6 +51,34 @@
 }
 .instalar__pasos h2 { font-size: 0.95rem; margin: 0 0 10px; color: var(--color-text-primary); }
 .instalar__pasos ol { margin: 0; padding-left: 20px; font-size: 0.9rem; line-height: 1.6; color: var(--color-text-primary); }
+.instalar__hint { font-size: 0.82rem; color: var(--color-text-secondary); margin: 10px 0 0; line-height: 1.5; }
+
+/* 17/11 18:30 (cowork, Eva: "pincha el enlace y no se descarga nada") — aviso grande arriba del
+   todo cuando la página se abre dentro del navegador de WhatsApp/Instagram/Facebook, en vez de
+   un botón suelto sin contexto. */
+.instalar__webview-aviso {
+  text-align: left;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-accent);
+  border-radius: 12px;
+  padding: 16px 18px;
+}
+.instalar__webview-titulo { font-size: 1.05rem; font-weight: 700; color: var(--color-text-primary); margin: 0 0 8px; }
+.instalar__webview-aviso p { font-size: 0.88rem; color: var(--color-text-secondary); line-height: 1.5; margin: 0 0 14px; }
+.instalar__webview-aviso .instalar__cta { margin-bottom: 10px; }
+.instalar__link-btn {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  font-family: inherit;
+  cursor: pointer;
+}
 
 /* Vídeo tutorial (Ramiro, 12/11 16:40/16:37): plegado con una miniatura grande y visible,
    nunca un enlace o línea pequeña. Vertical (1080×1920) — ancho máximo en ordenador, a todo

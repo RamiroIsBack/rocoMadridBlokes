@@ -17,8 +17,15 @@ function detectarEntorno() {
   // Navegador interno de WhatsApp/Instagram/Facebook — ahí no hay beforeinstallprompt ni
   // "Añadir a pantalla de inicio" (Ramiro, 09/11 11:53). En Android, ese webview también
   // suele llevar "; wv)" en el user-agent.
-  const esWebviewEmbebido = /FBAN|FBAV|Instagram|WhatsApp|Line\//i.test(ua) || (esAndroid && /; wv\)/i.test(ua))
-  return { esIOS, esAndroid, esWebviewEmbebido }
+  const esWhatsApp = /WhatsApp/i.test(ua)
+  const esInstagram = /Instagram/i.test(ua)
+  const esFacebook = /FBAN|FBAV/i.test(ua)
+  const esWebviewEmbebido = esWhatsApp || esInstagram || esFacebook || /Line\//i.test(ua) || (esAndroid && /; wv\)/i.test(ua))
+  // 17/11 18:30 (cowork, Eva: "pincha el enlace y no se descarga nada"): nombrar la app de
+  // verdad en el aviso, no un genérico "tu navegador" — ayuda a que la gente entienda por qué
+  // hace falta un paso más.
+  const nombreWebview = esWhatsApp ? 'WhatsApp' : esInstagram ? 'Instagram' : esFacebook ? 'Facebook' : 'esta app'
+  return { esIOS, esAndroid, esWebviewEmbebido, nombreWebview }
 }
 
 function registrarEvento(tipo) {
@@ -80,7 +87,28 @@ export default function InstalarPage() {
   const [compe, setCompe] = useState(null)
   const [yaInstalada, setYaInstalada] = useState(false)
   const [sinPrompt, setSinPrompt] = useState(false)
+  const [enlaceCopiado, setEnlaceCopiado] = useState(false)
   const promptEventRef = useRef(null)
+
+  // 17/11 18:30 (cowork): "Copiar enlace" para quien está atrapado en el navegador de WhatsApp/
+  // Instagram y prefiere pegarlo él mismo en Chrome/Safari en vez de fiarse del botón "Abrir en
+  // Chrome" (que no siempre funciona según la versión del teléfono).
+  const copiarEnlace = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+    } catch {
+      // Clipboard API puede fallar dentro de un webview sin permiso — selecciona el texto en un
+      // campo temporal y usa el comando viejo como respaldo, nunca se queda sin hacer nada.
+      const input = document.createElement('input')
+      input.value = window.location.href
+      document.body.appendChild(input)
+      input.select()
+      try { document.execCommand('copy') } catch {}
+      document.body.removeChild(input)
+    }
+    setEnlaceCopiado(true)
+    setTimeout(() => setEnlaceCopiado(false), 3000)
+  }
 
   useEffect(() => {
     setYaInstalada(!!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches))
@@ -143,18 +171,35 @@ export default function InstalarPage() {
       {yaInstalada ? (
         <div className="instalar__ya-tienes">✓ Ya la tienes instalada</div>
       ) : entorno.esWebviewEmbebido ? (
-        entorno.esAndroid ? (
-          <button className="instalar__cta" onClick={abrirEnChrome}>Abrir en Chrome para instalar</button>
-        ) : (
-          <div className="instalar__pasos">
-            <h2>Para instalarla, ábrela en Safari:</h2>
-            <ol>
-              <li>Toca <strong>⋯</strong> o el icono de Safari, arriba o abajo de esta pantalla.</li>
-              <li>Elige <strong>"Abrir en Safari"</strong>.</li>
-              <li>Ahí, toca compartir <strong>⬆️</strong> y luego <strong>"Añadir a pantalla de inicio"</strong>.</li>
-            </ol>
-          </div>
-        )
+        <div className="instalar__webview-aviso">
+          {/* 17/11 18:30 (cowork, Eva: "pincha y no se descarga nada"): un aviso grande que
+              nombre el problema de verdad — la gente esperaba una descarga de tienda al ver
+              "Instálala ya" en el WhatsApp de la campaña. */}
+          <p className="instalar__webview-titulo">⚠ Estás dentro de {entorno.nombreWebview}</p>
+          <p>
+            Para instalar Blokes tienes que abrir esta página en {entorno.esAndroid ? 'Chrome' : 'Safari'}.
+            {' '}Blokes no se descarga de Play Store ni de App Store: se añade a tu pantalla de inicio desde
+            el navegador. No ocupa espacio y se actualiza sola.
+          </p>
+          {entorno.esAndroid ? (
+            <button className="instalar__cta" onClick={abrirEnChrome}>Abrir en Chrome para instalar</button>
+          ) : (
+            <div className="instalar__pasos">
+              <h2>Para instalarla, ábrela en Safari:</h2>
+              <ol>
+                <li>Toca <strong>⋯</strong> o el icono de Safari, arriba o abajo de esta pantalla.</li>
+                <li>Elige <strong>"Abrir en Safari"</strong>.</li>
+                <li>Ahí, toca compartir <strong>⬆️</strong> y luego <strong>"Añadir a pantalla de inicio"</strong>.</li>
+              </ol>
+            </div>
+          )}
+          <button type="button" className="instalar__link-btn" onClick={copiarEnlace}>
+            {enlaceCopiado ? '✓ Enlace copiado' : '📋 Copiar enlace (para pegarlo en Chrome o Safari)'}
+          </button>
+          <a className="instalar__cta instalar__cta--secundario" href={`${import.meta.env.BASE_URL}`}>
+            Usarla sin instalar →
+          </a>
+        </div>
       ) : entorno.esIOS ? (
         <div className="instalar__pasos">
           <h2>En iPhone (no sale un botón, se hace así):</h2>
@@ -162,6 +207,10 @@ export default function InstalarPage() {
             <li>Toca el icono de compartir <strong>⬆️</strong> (abajo en Safari).</li>
             <li>Elige <strong>"Añadir a pantalla de inicio"</strong>.</li>
           </ol>
+          <p className="instalar__hint">
+            Blokes no se descarga de Play Store ni de App Store: se añade a tu pantalla de inicio desde
+            Safari. No ocupa espacio y se actualiza sola.
+          </p>
         </div>
       ) : (
         <>
@@ -182,6 +231,10 @@ export default function InstalarPage() {
                 <li>Abre el menú <strong>⋮</strong> arriba a la derecha.</li>
                 <li>Elige <strong>"Instalar aplicación"</strong> o <strong>"Añadir a pantalla de inicio"</strong>.</li>
               </ol>
+              <p className="instalar__hint">
+                Blokes no se descarga de Play Store ni de App Store: se añade a tu pantalla de inicio desde
+                el navegador. No ocupa espacio y se actualiza sola.
+              </p>
             </div>
           )}
         </>

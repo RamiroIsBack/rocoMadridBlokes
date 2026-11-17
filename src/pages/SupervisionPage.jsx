@@ -29,7 +29,7 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
-  syncGruposLimpiarPendientesViejos,
+  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila,
   gestionFacturasPendientesGet,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
@@ -2212,6 +2212,7 @@ function SyncGruposCambiosPanel() {
   const [err, setErr] = useState(null)
   const [resumenSync, setResumenSync] = useState(null)
   const [limpiando, setLimpiando] = useState(false)
+  const [reevaluando, setReevaluando] = useState(false)
 
   async function cargar(estado = estadoFiltro) {
     setErr(null)
@@ -2253,6 +2254,16 @@ function SyncGruposCambiosPanel() {
       window.alert(`${r.descartados} propuesta(s) descartada(s).`)
     } catch (e) { setErr(e.message) } finally { setLimpiando(false) }
   }
+  // 17/11 18:15 (cowork): "Cobro web sin fila" viejos (Raúl Bañez...) se quedaron pendientes de
+  // antes de la búsqueda por teléfono en otras pestañas — esto los reintenta de golpe.
+  async function reevaluarSinFila() {
+    setReevaluando(true); setErr(null)
+    try {
+      const r = await syncGruposReevaluarSinFila()
+      await cargar()
+      window.alert(`${r.aplicados} encontrada(s) y escrita(s). ${r.siguenPendientes} siguen sin encontrar su fila.`)
+    } catch (e) { setErr(e.message) } finally { setReevaluando(false) }
+  }
 
   return (
     <div>
@@ -2268,6 +2279,9 @@ function SyncGruposCambiosPanel() {
           </button>
           <button className="sv-tests-remove" onClick={limpiarPendientesViejos} disabled={limpiando} title="Descarta las propuestas de pestañas Balance y los pagos viejos que ya estaban pendientes de antes del arreglo de 589ab3a">
             {limpiando ? 'Limpiando…' : 'Limpiar pendientes viejos (Balance / pagos antiguos)'}
+          </button>
+          <button className="sv-tests-save" onClick={reevaluarSinFila} disabled={reevaluando} title="Reintenta los «Cobro web sin fila» con la búsqueda por teléfono en otras pestañas">
+            {reevaluando ? 'Reevaluando…' : 'Reevaluar «sin fila»'}
           </button>
           <span className="sv-ot-muted">
             {ultima ? `Última sincronización: ${new Date(ultima.replace(' ', 'T')).toLocaleString('es-ES')}` : 'Todavía no se ha sincronizado nunca.'}
