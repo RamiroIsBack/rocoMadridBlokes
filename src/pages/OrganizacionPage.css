@@ -317,6 +317,8 @@
 }
 .org__worker-name { font-weight: 700; color: var(--color-text-primary); flex: 1; }
 .org__worker-meta { font-size: 0.78rem; color: var(--color-text-secondary); }
+.org__worker-email { font-size: 0.78rem; color: var(--color-text-secondary); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.org__worker-email-input { padding: 3px 6px; border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 0.78rem; min-width: 150px; }
 .org__blocks-range { display: flex; align-items: center; gap: 8px; }
 .org__blocks-range input { width: 60px; padding: 8px; border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary); }
 
@@ -626,6 +628,7 @@
 .org__tm-menu button:disabled { opacity: 0.5; cursor: default; }
 .org__tm-menu__quitar { color: var(--state-bad) !important; }
 .org__tm-menu__cancelar { text-align: center !important; font-weight: 700; color: var(--color-text-secondary) !important; }
+.org__tm-menu-pregunta { padding: 13px 18px; margin: 0; font-size: 0.92rem; color: var(--color-text-primary); }
 
 /* ── Semana: histórico ── */
 .org__historico {

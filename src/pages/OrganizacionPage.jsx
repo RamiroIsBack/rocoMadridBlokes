@@ -571,8 +571,12 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
   // Quitar una tarea de verdad (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30) — distinto de
   // "→ Semana siguiente", que la mueve. Solo Álvaro o un socio (canManage, Ramiro 12/11 11:35).
   const [deletingTask, setDeletingTask] = useState(null)
-  const deleteTask = async taskId => {
-    if (!window.confirm('¿Quitar esta tarea? No se puede deshacer.')) return
+  // Cowork, 17/11 09:40 punto 3: en el ⋯ del móvil (hoja inferior) queda mejor confirmar DENTRO
+  // de la propia hoja («¿Quitar? Sí/No») que con el window.confirm() nativo — `alreadyConfirmed`
+  // deja que la vista móvil se salte este confirm porque ya lo hizo ella misma; el botón del
+  // tablero de escritorio sigue llamando sin el segundo argumento, así que ahí no cambia nada.
+  const deleteTask = async (taskId, alreadyConfirmed = false) => {
+    if (!alreadyConfirmed && !window.confirm('¿Quitar esta tarea? No se puede deshacer.')) return
     setDeletingTask(taskId)
     try { await api('DELETE', `/equipacion/tasks/${taskId}`) } catch { showToast('No se ha podido quitar la tarea.') }
     await openWeek(detail.id)
@@ -1141,10 +1145,55 @@ function HistoricoView() {
 }
 
 // Crear/editar/borrar personas — "a veces participa más gente en las tareas".
+// Email de un equipador, editable en línea — lo usa progreso_equip_mi_worker_id() (17/11,
+// NOTAS_PARA_CODE_tareas_movil.md punto A.1) para deducir quién eres en el móvil por el email
+// de tu cuenta de WordPress. Cowork, 17/11 09:40: "con lo que hay ahora, miWorkerId sale null
+// para todos — no hay ningún sitio donde ponerlo. No los rellenes a ojo": este campo lo
+// rellenan Álvaro/Ramiro a mano, nunca se adivina ni se pone por defecto.
+function WorkerEmailEditor({ worker, onChanged }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(worker.email || '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  const save = async () => {
+    setSaving(true); setError(null)
+    try {
+      await api('PUT', `/equipacion/workers/${worker.id}`, { email: value.trim() })
+      setEditing(false)
+      onChanged()
+    } catch (e) { setError(e.message) } finally { setSaving(false) }
+  }
+
+  if (!editing) {
+    return (
+      <span className="org__worker-email">
+        {worker.email ? worker.email : <span className="org__hint">sin email</span>}
+        {' '}<button type="button" className="org__link-btn" onClick={() => { setValue(worker.email || ''); setEditing(true) }}>
+          {worker.email ? 'editar email' : '+ email'}
+        </button>
+      </span>
+    )
+  }
+  return (
+    <span className="org__worker-email">
+      <input
+        type="email" className="org__worker-email-input" value={value} autoFocus
+        onChange={e => setValue(e.target.value)} placeholder="correo@ejemplo.com"
+        onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+      />
+      <button type="button" className="org__link-btn" onClick={save} disabled={saving}>{saving ? '...' : 'Guardar'}</button>
+      <button type="button" className="org__link-btn" onClick={() => setEditing(false)} disabled={saving}>Cancelar</button>
+      {error && <span className="org__error">{error}</span>}
+    </span>
+  )
+}
+
 function WorkersAdmin({ workers, onChanged }) {
   const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
   const [showAdd, setShowAdd] = useState(false)
   const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
   const [days, setDays] = useState(['mon', 'tue', 'wed', 'thu', 'fri'])
   const [blocksMin, setBlocksMin] = useState(1)
   const [blocksMax, setBlocksMax] = useState(2)
@@ -1159,8 +1208,8 @@ function WorkersAdmin({ workers, onChanged }) {
     if (!name.trim()) { setError('Escribe un nombre'); return }
     setSaving(true); setError(null)
     try {
-      await api('POST', '/equipacion/workers', { name: name.trim(), workDays: days, blocksMin, blocksMax, isLead, eventual })
-      setName(''); setDays(['mon', 'tue', 'wed', 'thu', 'fri']); setBlocksMin(1); setBlocksMax(2); setIsLead(false); setEventual(false)
+      await api('POST', '/equipacion/workers', { name: name.trim(), email: email.trim(), workDays: days, blocksMin, blocksMax, isLead, eventual })
+      setName(''); setEmail(''); setDays(['mon', 'tue', 'wed', 'thu', 'fri']); setBlocksMin(1); setBlocksMax(2); setIsLead(false); setEventual(false)
       setShowAdd(false)
       onChanged()
     } catch (e) {
@@ -1190,6 +1239,7 @@ function WorkersAdmin({ workers, onChanged }) {
           <li key={w.id} className="org__worker-row">
             <span className="org__worker-name">{w.name}{w.isLead ? ' · responsable' : ''}{w.eventual ? ' · eventual' : ''}</span>
             <span className="org__worker-meta">{w.workDays.map(d => DAY_LABEL[d]).join('/')} · {w.blocksMin}-{w.blocksMax} bloques</span>
+            <WorkerEmailEditor worker={w} onChanged={onChanged} />
             <button className="org__link-btn" onClick={() => toggleEventual(w)} title="Eventual: solo viene a compes puntuales, no entra en el reparto normal de mantenimiento">
               {w.eventual ? 'Quitar eventual' : 'Marcar eventual'}
             </button>
@@ -1203,6 +1253,10 @@ function WorkersAdmin({ workers, onChanged }) {
           <div className="org__add-row">
             <label>Nombre</label>
             <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Nombre" />
+          </div>
+          <div className="org__add-row">
+            <label>Email (de su cuenta de WordPress — para "Mis tareas" en el móvil, opcional)</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="correo@ejemplo.com" />
           </div>
           <div className="org__add-row">
             <label>Días que trabaja</label>
@@ -1635,31 +1689,48 @@ function TaskLineaMovil({
       {menuOpen && (
         <TaskActionsMenu
           onClose={() => setMenuOpen(false)}
+          done={task.done}
+          onToggleDone={() => { onToggleDone(task.id, !task.done); setMenuOpen(false) }}
           canPostpone={canPostpone} postponing={postponing}
           canManage={canManage} movedAway={movedAway} deleting={deleting}
           onPostpone={() => { onPostpone(task.id); setMenuOpen(false) }}
           onEdit={() => { onEdit(); setMenuOpen(false) }}
           onDuplicate={() => { onDuplicateOpen(); setMenuOpen(false) }}
           onReassign={() => { onReassignOpen(); setMenuOpen(false) }}
-          onDelete={() => { onDelete(task.id); setMenuOpen(false) }}
+          onConfirmDelete={() => { onDelete(task.id, true); setMenuOpen(false) }}
         />
       )}
     </div>
   )
 }
 
-// Menú ⋯ de una tarea (punto A.2): mismas acciones que los botones del tablero, "Quitar" al
-// final en rojo y pidiendo confirmación (ya la pide onDelete=deleteTask, no hace falta repetirla
-// aquí).
-function TaskActionsMenu({ onClose, canPostpone, postponing, canManage, movedAway, deleting, onPostpone, onEdit, onDuplicate, onReassign, onDelete }) {
+// Menú ⋯ de una tarea (punto A.2, arreglado 17/11 09:40 puntos 2 y 3 con lo que vio Cowork
+// leyendo el código): "Marcar/Desmarcar hecha" siempre está (nunca sin sesión de jefe/socio),
+// para que a Ana/Edu/Sara (que solo pueden marcar hecha) nunca se les quede el ⋯ vacío con solo
+// "Cancelar". "Quitar" confirma DENTRO de la propia hoja («¿Quitar? Sí/No») en vez del
+// window.confirm() nativo, mejor en el móvil.
+function TaskActionsMenu({ onClose, done, onToggleDone, canPostpone, postponing, canManage, movedAway, deleting, onPostpone, onEdit, onDuplicate, onReassign, onConfirmDelete }) {
+  const [confirmandoQuitar, setConfirmandoQuitar] = useState(false)
+  if (confirmandoQuitar) {
+    return (
+      <div className="org__tm-menu-overlay" onClick={onClose}>
+        <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+          <p className="org__tm-menu-pregunta">¿Quitar esta tarea? No se puede deshacer.</p>
+          <button type="button" className="org__tm-menu__quitar" onClick={onConfirmDelete} disabled={deleting}>{deleting ? 'Quitando…' : 'Sí, quitar'}</button>
+          <button type="button" onClick={() => setConfirmandoQuitar(false)}>No</button>
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="org__tm-menu-overlay" onClick={onClose}>
       <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+        <button type="button" onClick={onToggleDone}>{done ? '☐ Desmarcar hecha' : '✓ Marcar hecha'}</button>
         {canPostpone && <button type="button" onClick={onPostpone} disabled={postponing}>→ Semana siguiente</button>}
         {canManage && !movedAway && <button type="button" onClick={onEdit}>✎ Editar</button>}
         {canManage && <button type="button" onClick={onDuplicate}>⧉ Duplicar a…</button>}
         {canManage && <button type="button" onClick={onReassign}>⇄ Reasignar a…</button>}
-        {canManage && <button type="button" className="org__tm-menu__quitar" onClick={onDelete} disabled={deleting}>✕ Quitar</button>}
+        {canManage && <button type="button" className="org__tm-menu__quitar" onClick={() => setConfirmandoQuitar(true)}>✕ Quitar</button>}
         <button type="button" className="org__tm-menu__cancelar" onClick={onClose}>Cancelar</button>
       </div>
     </div>
