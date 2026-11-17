@@ -526,7 +526,9 @@ function BajoTarifaResumenSection() {
                 <td>{a.alumno || '—'}</td>
                 <td className="sa-profit__num--dim">{a.grupoLabel}</td>
                 <td className="sa-profit__ben sa-profit__ben--neg">−{fmtEur(Math.abs(a.diferenciaMensual || 0))}</td>
-                <td className="sa-profit__num--dim">{a.bajoTarifaMotivoEva || a.notas || 'sin motivo anotado'}</td>
+                <td className="sa-profit__num--dim">
+                  {a.bajoTarifaMotivoEva || a.notas || (a.bajoTarifaMotivoSugerido ? <em>{a.bajoTarifaMotivoSugerido}</em> : 'sin motivo anotado')}
+                </td>
                 <td className="sa-profit__num--dim">{a.bajoTarifaRevisado ? `✓ ${a.bajoTarifaRevisadoPor}` : '—'}</td>
               </tr>
             ))}

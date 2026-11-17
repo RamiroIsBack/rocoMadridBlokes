@@ -5959,18 +5959,37 @@ function blokes_tarifa_mensual_esperada($edad, $notas, $dia, $horario, $es_2dias
 
 // Compara lo que alguien paga de verdad (en su propio periodo de facturación) contra su tarifa
 // esperada, con el margen de 2 € de redondeo que pidió Ramiro. $meses_ciclo: 1 = mensual, 3 =
-// trimestral (con el 10% de descuento ya aplicado), cualquier otro nº de meses que cubra el pago.
+// trimestral, 12 = anual (los dos con el 10% de descuento, igual que aplica el catálogo —
+// 17/11 11:50, cowork: Franc Beltrán con anual 799€ salía "bajo tarifa" sin el descuento, cuando
+// 799 = 74 × 12 × 0,9 está bien pagado), cualquier otro nº de meses que cubra el pago sin
+// descuento.
 function blokes_tarifa_comparar($tarifa_mensual, $pago_periodo, $meses_ciclo) {
     if ($tarifa_mensual === null || $meses_ciclo < 1 || $pago_periodo === null) {
         return array('tarifa' => $tarifa_mensual !== null ? round($tarifa_mensual, 2) : null, 'diferenciaMensual' => null, 'bajoTarifa' => false);
     }
-    $tarifa_periodo = ($meses_ciclo === 3) ? ($tarifa_mensual * 3 * 0.9) : ($tarifa_mensual * $meses_ciclo);
+    $tarifa_periodo = in_array($meses_ciclo, array(3, 12), true) ? ($tarifa_mensual * $meses_ciclo * 0.9) : ($tarifa_mensual * $meses_ciclo);
     $diferencia_mensual = ($pago_periodo - $tarifa_periodo) / $meses_ciclo;
     return array(
         'tarifa' => round($tarifa_mensual, 2),
         'diferenciaMensual' => round($diferencia_mensual, 2),
         'bajoTarifa' => $diferencia_mensual < -2,
     );
+}
+
+// 17/11 11:50 (cowork): varios niños en «Bajo tarifa» pagaban 37,60 € = 47 € (menores 1 día) ×
+// 0,8 — un 20% menos, sin ningún motivo apuntado. Nunca se inventa que es descuento de hermanos:
+// si el pedido lleva un cupón de verdad, ESE es el motivo real; si no hay cupón pero el importe
+// casa justo con el 80% de la tarifa de menores, se sugiere "¿Hermanos? (20%)" como pregunta
+// para que Eva lo confirme (o lo descarte) desde "Bajo tarifa" — nunca se marca como resuelto
+// solo, sigue en rojo hasta que ella lo revise.
+function blokes_tarifa_motivo_sugerido($categoria, $bajo_tarifa, $tarifa_mensual, $pago_mensual_equiv, $coupon_codes) {
+    if (!$bajo_tarifa) return '';
+    if (!empty($coupon_codes)) return 'Cupón: ' . implode(', ', $coupon_codes);
+    if ($categoria === 'menor' && $tarifa_mensual !== null && $pago_mensual_equiv !== null
+        && abs($pago_mensual_equiv - $tarifa_mensual * 0.8) < 2) {
+        return '¿Hermanos? (20%)';
+    }
+    return '';
 }
 
 // 16/11 09:30 punto 2 (Cowork, probado en vivo): comparar con importeCatalogo (el total
@@ -6278,6 +6297,10 @@ function superadmin_gestion_grupos($request) {
         // configurado de la suscripción (que puede no reflejar un precio pactado aparte).
         $pago_real_bt = blokes_tarifa_pago_real_reciente($pagos, $meses) ?? floatval($sub_obj->get_total());
         $comp_bt = blokes_tarifa_comparar($tarifa_mensual_bt, $pago_real_bt, $meses_por_ciclo);
+        $motivo_sugerido_bt = blokes_tarifa_motivo_sugerido(
+            blokes_tarifa_categoria($edad, $notas_sub), $comp_bt['bajoTarifa'], $tarifa_mensual_bt,
+            $pago_real_bt / max(1, $meses_por_ciclo), $sub_obj->get_used_coupons()
+        );
         // Revisado por Eva vigente solo si lo que paga no ha cambiado desde que lo revisó — si
         // cambia, se quita solo (16/11 07:35 punto B.4), sin tener que borrar nada a mano.
         $bt_motivo_eva    = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_motivo', true) ?: '';
@@ -6307,6 +6330,7 @@ function superadmin_gestion_grupos($request) {
             'tarifaEsperada'      => $comp_bt['tarifa'],
             'diferenciaMensual'   => $comp_bt['diferenciaMensual'],
             'bajoTarifa'          => $comp_bt['bajoTarifa'],
+            'bajoTarifaMotivoSugerido' => $motivo_sugerido_bt,
             'bajoTarifaRevisado'  => $bt_vigente,
             'bajoTarifaMotivoEva' => $bt_vigente ? $bt_motivo_eva : '',
             'bajoTarifaRevisadoPor' => $bt_vigente ? $bt_revisado_por : '',
@@ -6371,11 +6395,27 @@ function superadmin_gestion_grupos($request) {
         $es_py_ext = in_array($dia_ext, array('Pilates', 'Yoga'), true);
         $pareja_ext = $es_py_ext ? $dia_ext : blokes_dia_a_pareja($dia_ext);
         $horario_agrupa_ext = blokes_horario_agrupable($horario_ext);
-        $gkey_ext = $pareja_ext . '|' . $horario_agrupa_ext . '|' . $edad_ext;
+        // 17/11 11:50 (cowork, Luis Corregidor/Álvaro Herrero): el gkey (a qué fila/grupo cae)
+        // se calculaba con el edad del Excel SIN corregir por las notas — así, un externo de la
+        // pestaña "M-J 19.30 ADOL" con el campo edad mal puesto a "Adultos" caía agrupado en
+        // "M-J 19:30 Adultos" (huérfano, sin fusionarse con nadie) aunque blokes_tarifa_categoria()
+        // ya sabía por las notas que era adolescente — de ahí la fila duplicada: esa huérfana en
+        // el grupo equivocado + la fila de verdad, ya bien fusionada, en "M-J 18:30-19:30
+        // Adolescentes". Mismo criterio que ya usa la tarifa (nunca al revés de lo que ya diga un
+        // edad que YA sea menor/adolescente), solo que aplicado también al agrupar, no solo al
+        // calcular el precio esperado. `externoEdad` (lo que ve/edita Eva) se queda con el
+        // original, sin tocar.
+        $edad_ext_grupo = $edad_ext;
+        $categoria_ext_notas = blokes_tarifa_categoria($edad_ext, $ext['notas']);
+        if (blokes_tarifa_categoria_edad($edad_ext) === 'adulto') {
+            if ($categoria_ext_notas === 'adolescente') $edad_ext_grupo = 'Adolescentes';
+            elseif ($categoria_ext_notas === 'menor') $edad_ext_grupo = 'Menores';
+        }
+        $gkey_ext = $pareja_ext . '|' . $horario_agrupa_ext . '|' . $edad_ext_grupo;
         if (!isset($grupos[$gkey_ext])) {
-            $edad_suffix = (!$es_py_ext && $edad_ext !== 'Adultos') ? ' · ' . (stripos($edad_ext, 'Menores') !== false ? 'Niños' : (stripos($edad_ext, 'Adolescentes') !== false ? 'Adol.' : $edad_ext)) : '';
+            $edad_suffix = (!$es_py_ext && $edad_ext_grupo !== 'Adultos') ? ' · ' . (stripos($edad_ext_grupo, 'Menores') !== false ? 'Niños' : (stripos($edad_ext_grupo, 'Adolescentes') !== false ? 'Adol.' : $edad_ext_grupo)) : '';
             $label_ext = $es_py_ext ? $dia_ext : (trim($pareja_ext . ' · ' . $horario_agrupa_ext) . $edad_suffix);
-            $grupos[$gkey_ext] = array('label' => $label_ext, 'dia' => $pareja_ext, 'horario' => $horario_agrupa_ext, 'edad' => $edad_ext, 'personas' => array());
+            $grupos[$gkey_ext] = array('label' => $label_ext, 'dia' => $pareja_ext, 'horario' => $horario_agrupa_ext, 'edad' => $edad_ext_grupo, 'personas' => array());
         }
         $pagos_ext = array_fill_keys($meses, null);
         foreach ($ext['pagos'] as $ym => $p) if (isset($meses_set[$ym])) $pagos_ext[$ym] = array_merge($p, array('estadoPedido' => 'completed'));
@@ -6423,6 +6463,11 @@ function superadmin_gestion_grupos($request) {
             $wellhub_falta_ext_bt = round($comp_ext_bt['tarifa'] - $pago_mensual_ext_bt, 2);
             $wellhub_checkins_ext_bt = $wellhub_falta_ext_bt > 0 ? (int) ceil($wellhub_falta_ext_bt / BLOKES_WELLHUB_POR_CHECKIN) : 0;
         }
+        // Un externo no tiene pedido de WooCommerce con cupón que comprobar — solo queda la
+        // sugerencia de "¿Hermanos?" si el importe casa con el 80% de la tarifa de menores.
+        $motivo_sugerido_ext_bt = blokes_tarifa_motivo_sugerido(
+            blokes_tarifa_categoria($edad_ext, $ext['notas']), $comp_ext_bt['bajoTarifa'], $tarifa_mensual_ext_bt, $pago_mensual_ext_bt, array()
+        );
 
         $grupos[$gkey_ext]['personas'][$persona_key_ext][] = array(
             'subId' => 'ext-' . $ext['id'], 'alumno' => $ext['nombre'], 'telefono' => $ext['telefono'],
@@ -6439,6 +6484,7 @@ function superadmin_gestion_grupos($request) {
             'tarifaEsperada'        => $comp_ext_bt['tarifa'],
             'diferenciaMensual'     => $comp_ext_bt['diferenciaMensual'],
             'bajoTarifa'            => $comp_ext_bt['bajoTarifa'],
+            'bajoTarifaMotivoSugerido' => $motivo_sugerido_ext_bt,
             'bajoTarifaRevisado'    => $bt_vigente_ext,
             'bajoTarifaMotivoEva'   => $bt_vigente_ext ? ($ext['bajo_tarifa_motivo'] ?: '') : '',
             'bajoTarifaRevisadoPor' => $bt_vigente_ext ? $bt_revisado_por_ext : '',
@@ -6485,6 +6531,7 @@ function superadmin_gestion_grupos($request) {
                 if (empty($principal['notas']) && !empty($otra['notas'])) $principal['notas'] = $otra['notas'];
                 if (!empty($otra['wellhub'])) $principal['wellhub'] = true;
                 if (empty($principal['bajoTarifaMotivoEva']) && !empty($otra['bajoTarifaMotivoEva'])) $principal['bajoTarifaMotivoEva'] = $otra['bajoTarifaMotivoEva'];
+                if (empty($principal['bajoTarifaMotivoSugerido']) && !empty($otra['bajoTarifaMotivoSugerido'])) $principal['bajoTarifaMotivoSugerido'] = $otra['bajoTarifaMotivoSugerido'];
             }
             // El booleano de Wellhub puede haber cambiado de false a true por la fusión de arriba
             // — si antes no tenía check-ins calculados (porque entonces no hacía falta), se

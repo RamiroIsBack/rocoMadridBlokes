@@ -1543,7 +1543,11 @@ function WellhubModal({ alumno, onClose, onDone }) {
 // de estar en rojo. Si después cambia lo que paga, el backend ya no da por vigente este revisado
 // y vuelve a salir en rojo solo, sin que haga falta borrar nada aquí.
 function BajoTarifaModal({ alumno, onClose, onDone }) {
-  const [motivo, setMotivo] = useState(alumno.bajoTarifaMotivoEva || alumno.notas || '')
+  // 17/11 11:50 (cowork): niños pagando el 80% de la tarifa sin ningún motivo apuntado —
+  // bajoTarifaMotivoSugerido es solo una PREGUNTA del servidor ("¿Hermanos? (20%)", o el cupón
+  // real si lo hay), nunca una decisión tomada sola — se precarga en el campo para que Eva la
+  // confirme o la cambie, pero sigue en rojo hasta que ella pulse "Marcar revisado".
+  const [motivo, setMotivo] = useState(alumno.bajoTarifaMotivoEva || alumno.bajoTarifaMotivoSugerido || alumno.notas || '')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
@@ -1568,6 +1572,9 @@ function BajoTarifaModal({ alumno, onClose, onDone }) {
           {alumno.diferenciaMensual != null && <> · paga <strong>{fmtEur(Math.abs(alumno.diferenciaMensual))}</strong>/mes de menos</>}.
           {alumno.bajoTarifaRevisado && <> Ya revisado por {alumno.bajoTarifaRevisadoPor} ({alumno.bajoTarifaRevisadoEn?.slice(0, 10)}).</>}
         </p>
+        {!alumno.bajoTarifaRevisado && alumno.bajoTarifaMotivoSugerido && (
+          <p className="sv-note">Sugerencia (confírmala o cámbiala): <strong>{alumno.bajoTarifaMotivoSugerido}</strong></p>
+        )}
         <label className="sv-grp-field">Motivo
           <input className="sv-tests-input" type="text" value={motivo} onChange={e => setMotivo(e.target.value)} placeholder="Hermanos, bono familiar, Wellhub, 50%…" />
         </label>
@@ -2866,7 +2873,9 @@ function GruposTab() {
                     <td>{a.diferenciaMensual != null ? fmtEur((a.tarifaEsperada || 0) + a.diferenciaMensual) : '—'}</td>
                     <td className="sv-ot-muted">{a.tarifaEsperada != null ? fmtEur(a.tarifaEsperada) : '—'}</td>
                     <td className={a.bajoTarifaRevisado ? 'sv-ot-muted' : 'sv-to-bad'}>{a.diferenciaMensual != null ? `−${fmtEur(Math.abs(a.diferenciaMensual))}` : '—'}</td>
-                    <td className="sv-ot-muted">{a.bajoTarifaMotivoEva || a.notas || 'sin motivo anotado'}</td>
+                    <td className="sv-ot-muted">
+                      {a.bajoTarifaMotivoEva || a.notas || (a.bajoTarifaMotivoSugerido ? <em>{a.bajoTarifaMotivoSugerido}</em> : 'sin motivo anotado')}
+                    </td>
                     <td className="sv-ot-muted">{a.bajoTarifaRevisado ? `✓ ${a.bajoTarifaRevisadoPor}` : '—'}</td>
                     <td><button className="sv-tests-remove" onClick={() => setBajoTarifaFor(a)} title="Revisar">⋯</button></td>
                   </tr>
