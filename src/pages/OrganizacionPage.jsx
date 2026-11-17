@@ -1141,6 +1141,7 @@ function HistoricoView() {
           </p>
           <p className="org__historico-meta">
             {w.hechas} hecha(s) · {w.retrasadas} retrasada(s) · {w.pendientes} sin hacer todavía
+            {w.descartadas > 0 ? ` · ${w.descartadas} descartada(s)` : ''}
           </p>
           {Object.keys(w.retrasosPorPersona || {}).length > 0 && (
             <p className="org__historico-meta">
@@ -2239,6 +2240,9 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
   const [nuevaTarea, setNuevaTarea] = useState(COMP_TAREA_VACIA)
   const [savingTarea, setSavingTarea] = useState(false)
   const [dragTareaId, setDragTareaId] = useState(null)
+  // 17/11 11:25 (cowork): el ⋯ del móvil (igual que en Semana) en vez de los botones ⇄/⧉/✕ en
+  // línea, que se salían de ancho (scrollWidth 496 en 375).
+  const [menuTareaAbierto, setMenuTareaAbierto] = useState(null)
   const showToast = useToast()
 
   const compTaskTypes = useMemo(
@@ -2298,6 +2302,7 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
   // "¿Seguro? Sí/Cancelar" ya usado en la ficha de bloque.
   const quitarTarea = async taskId => {
     setConfirmandoQuitar(null)
+    setMenuTareaAbierto(null)
     setQuitandoTarea(taskId)
     setPlan(p => ({ ...p, tasks: p.tasks.filter(t => t.id !== taskId) }))
     try { await api('DELETE', `/equipacion/tasks/${taskId}`) }
@@ -2309,6 +2314,7 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
   // los bloques más abajo (chipReasignable).
   const moverTarea = async (taskId, nuevoNombre) => {
     setReasignandoTarea(null)
+    setMenuTareaAbierto(null)
     if (!nuevoNombre) return
     setPlan(p => ({ ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, workerName: nuevoNombre } : t) }))
     try { await api('PUT', `/equipacion/tasks/${taskId}`, { workerName: nuevoNombre }) }
@@ -2325,7 +2331,7 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
       const body = todos ? { all: true } : { workerIds: duplicarSeleccionCompe }
       const res = await api('POST', `/equipacion/tasks/${duplicandoTarea}/duplicar`, body)
       showToast(`Duplicada a ${res.creadas} persona(s)${res.omitidas ? ` (${res.omitidas} ya la tenían)` : ''}.`)
-      setDuplicandoTarea(null); setDuplicarSeleccionCompe([])
+      setDuplicandoTarea(null); setDuplicarSeleccionCompe([]); setMenuTareaAbierto(null)
       await reload()
     } catch (e) { showToast(e.message) } finally { setDuplicandoCompe(false) }
   }
@@ -2444,6 +2450,92 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
     </li>
   )
 
+  // 17/11 11:25 (cowork): versión móvil de la misma tarjeta — una sola línea (checkbox +
+  // título) con las acciones en un ⋯ (igual que TaskActionsMenu en Semana), en vez de los
+  // botones ⇄/⧉ Duplicar a…/✕ en línea de renderTareaLi, que en 375 px sacaban la fila fuera
+  // de ancho (scrollWidth 496). Mismos handlers de siempre, ninguna lógica nueva.
+  const renderTareaLiMovil = (t, mostrarPersona = false) => {
+    const faltó = !t.done && t.date < today
+    const cerrarTodo = () => { setMenuTareaAbierto(null); setConfirmandoQuitar(null); setReasignandoTarea(null); setDuplicandoTarea(null) }
+    let overlay = null
+    if (confirmandoQuitar === t.id) {
+      overlay = (
+        <div className="org__tm-menu-overlay" onClick={cerrarTodo}>
+          <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+            <p className="org__tm-menu-pregunta">¿Quitar esta tarea? No se puede deshacer.</p>
+            <button type="button" className="org__tm-menu__quitar" onClick={() => quitarTarea(t.id)} disabled={quitandoTarea === t.id}>
+              {quitandoTarea === t.id ? 'Quitando…' : 'Sí, quitar'}
+            </button>
+            <button type="button" onClick={() => setConfirmandoQuitar(null)}>No</button>
+          </div>
+        </div>
+      )
+    } else if (reasignandoTarea === t.id) {
+      overlay = (
+        <div className="org__tm-menu-overlay" onClick={cerrarTodo}>
+          <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+            <p className="org__hint">Reasignar a…</p>
+            {Array.from(nombres).sort().filter(n => n !== t.workerName).map(n => (
+              <button key={n} type="button" onClick={() => moverTarea(t.id, n)}>{n}</button>
+            ))}
+            <button type="button" className="org__tm-menu__cancelar" onClick={() => setReasignandoTarea(null)}>Cancelar</button>
+          </div>
+        </div>
+      )
+    } else if (duplicandoTarea === t.id) {
+      overlay = (
+        <div className="org__tm-menu-overlay" onClick={cerrarTodo}>
+          <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+            <p className="org__hint">Duplicar a:</p>
+            <div className="org__holdset-chips">
+              {(workers || []).filter(w => w.active && w.name !== t.workerName).map(w => (
+                <button
+                  key={w.id} type="button"
+                  className={`org__holdset-chip${duplicarSeleccionCompe.includes(w.id) ? ' org__holdset-chip--on' : ''}`}
+                  onClick={() => setDuplicarSeleccionCompe(cur => cur.includes(w.id) ? cur.filter(x => x !== w.id) : [...cur, w.id])}
+                >{w.name}</button>
+              ))}
+            </div>
+            <button type="button" className="org__btn" onClick={() => confirmarDuplicarCompe(false)} disabled={duplicandoCompe || duplicarSeleccionCompe.length === 0}>
+              {duplicandoCompe ? 'Duplicando...' : `Duplicar a ${duplicarSeleccionCompe.length} persona(s)`}
+            </button>
+            <button type="button" className="org__tm-menu__cancelar" onClick={() => setDuplicandoTarea(null)}>Cancelar</button>
+          </div>
+        </div>
+      )
+    } else if (menuTareaAbierto === t.id) {
+      overlay = (
+        <div className="org__tm-menu-overlay" onClick={cerrarTodo}>
+          <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+            <button type="button" onClick={() => { toggleDone(t.id, !t.done); cerrarTodo() }}>{t.done ? '☐ Desmarcar hecha' : '✓ Marcar hecha'}</button>
+            {canManage && <button type="button" onClick={() => setReasignandoTarea(t.id)}>⇄ Reasignar a…</button>}
+            {canManage && <button type="button" onClick={() => { setDuplicandoTarea(t.id); setDuplicarSeleccionCompe([]) }}>⧉ Duplicar a…</button>}
+            {canManage && <button type="button" className="org__tm-menu__quitar" onClick={() => setConfirmandoQuitar(t.id)}>✕ Quitar</button>}
+            <button type="button" className="org__tm-menu__cancelar" onClick={cerrarTodo}>Cancelar</button>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <li key={t.id} className={`org__tm-linea${t.done ? ' org__tm-linea--done' : ''}`}>
+        <label className="org__tm-check" onClick={e => e.stopPropagation()}>
+          <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
+        </label>
+        <div className="org__tm-body" onClick={() => setMenuTareaAbierto(t.id)}>
+          <span className="org__tm-nombre">
+            {mostrarPersona && <strong>{t.workerName} · </strong>}
+            {tareaLabel(t)} ({dayLabel(t.date)})
+            {t.manual && <span className="org__task-manual-badge" title="Puesta a mano">a mano</span>}
+          </span>
+          {faltó && <span className="org__tile-badge">FALTÓ</span>}
+          {t.params?.notas && <span className="org__task-notas">{t.params.notas}</span>}
+        </div>
+        <button type="button" className="org__tm-mas" onClick={() => setMenuTareaAbierto(t.id)} aria-label="Acciones">⋯</button>
+        {overlay}
+      </li>
+    )
+  }
+
   if (isMobile) {
     return (
       <div className="org__section">
@@ -2464,7 +2556,7 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
           tasks={tasks}
           myName={myName}
           chipReasignable={chipReasignable}
-          renderTareaLi={renderTareaLi}
+          renderTareaLi={renderTareaLiMovil}
           canManage={canManage}
           addingTareaFor={addingTareaFor}
           nuevaTarea={nuevaTarea}
@@ -2561,7 +2653,10 @@ function CompePlanMovil({
   addingTareaFor, nuevaTarea, setNuevaTarea, compTaskTypes, abrirNuevaTarea, guardarNuevaTarea, savingTarea, onCancelNuevaTarea,
 }) {
   const nombresConDatos = columnas.map(c => c.nombre)
-  const [modo, setModo] = useState(() => (myName && nombresConDatos.includes(myName)) ? myName : (nombresConDatos[0] || 'todos'))
+  // 17/11 11:25 (cowork): salía "Persona: Ana" (la primera alfabética) cuando no hay miWorkerId
+  // — por defecto, la persona elegida en "¿Quién eres?" si la tiene, o si no "Todos por día",
+  // nunca una persona al azar.
+  const [modo, setModo] = useState(() => (myName && nombresConDatos.includes(myName)) ? myName : 'todos')
   const colSeleccionada = columnas.find(c => c.nombre === modo)
 
   const porDia = useMemo(() => {

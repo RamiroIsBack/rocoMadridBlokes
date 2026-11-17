@@ -16530,13 +16530,16 @@ function progreso_equip_get_weeks($request = null) {
     // y si hay festivo o compe esa semana, sin tener que pedir el detalle entero.
     return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) use ($wpdb, $tasks_table, $assignments_table) {
         $week_id = intval($r['id']);
+        // 17/11 11:25 (cowork): una «descartada» (progreso_equip_cerrar_arrastradas() / Quitar en
+        // una arrastrada) no es una tarea de esta semana de cara al equipo — nunca cuenta aquí,
+        // solo sigue visible en Ver histórico.
         $hechas = (int) $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id
-             WHERE a.week_id = %d AND t.done = 1", $week_id
+             WHERE a.week_id = %d AND t.done = 1 AND t.status != 'descartada'", $week_id
         ));
         $total = (int) $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id
-             WHERE a.week_id = %d", $week_id
+             WHERE a.week_id = %d AND t.status != 'descartada'", $week_id
         ));
         $fin = date('Y-m-d', strtotime($r['start_date']) + 6 * 86400);
         $tiene_festivo = !empty(blokes_club_days_cerrados($r['start_date'], $fin));
@@ -16571,9 +16574,13 @@ function progreso_equip_get_weeks_historico() {
              LEFT JOIN " . progreso_equip_table('workers') . " orig ON orig.id = t.original_worker_id
              WHERE a.week_id = %d", $week_id
         ), ARRAY_A);
-        $hechas = 0; $retrasadas = 0; $pendientes = 0; $por_persona = array();
+        $hechas = 0; $retrasadas = 0; $pendientes = 0; $descartadas = 0; $por_persona = array();
         foreach ($rows as $r) {
             if ($r['done']) { $hechas++; continue; }
+            // 17/11 11:25 (cowork): una «descartada» (progreso_equip_cerrar_arrastradas() /
+            // Quitar en una arrastrada) se queda solo aquí, en el histórico — nunca en "sin hacer
+            // todavía" (ya no se va a hacer) ni en "retrasada" (ya no se va a volver a arrastrar).
+            if ($r['status'] === 'descartada') { $descartadas++; continue; }
             if ($r['status'] === 'retrasada') {
                 $retrasadas++;
                 $name = $r['original_worker_name'] ?: $r['worker_name'];
@@ -16584,7 +16591,7 @@ function progreso_equip_get_weeks_historico() {
         }
         $out[] = array(
             'id' => $week_id, 'startDate' => $w['start_date'], 'archived' => (bool) $w['archived'],
-            'hechas' => $hechas, 'retrasadas' => $retrasadas, 'pendientes' => $pendientes,
+            'hechas' => $hechas, 'retrasadas' => $retrasadas, 'pendientes' => $pendientes, 'descartadas' => $descartadas,
             'retrasosPorPersona' => $por_persona,
         );
     }
@@ -17229,8 +17236,11 @@ function progreso_equip_get_week_detail($request) {
     $blocks_by_assignment = array();
     if ($assignment_ids) {
         $ph = implode(',', array_fill(0, count($assignment_ids), '%d'));
+        // 17/11 11:25 (cowork): una «descartada» ya no es una tarea de esta semana de cara al
+        // equipo (contaba como pendiente/retrasada en Semana y en la tira) — se queda solo en
+        // Ver histórico (progreso_equip_get_weeks_historico() no filtra por status).
         $tasks = $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM " . progreso_equip_table('tasks') . " WHERE assignment_id IN ($ph) ORDER BY task_date ASC, id ASC",
+            "SELECT * FROM " . progreso_equip_table('tasks') . " WHERE assignment_id IN ($ph) AND status != 'descartada' ORDER BY task_date ASC, id ASC",
             ...$assignment_ids
         ), ARRAY_A);
         $moved_to_ids = array_values(array_filter(array_map(function($t) { return intval($t['moved_to_task_id']); }, $tasks)));
