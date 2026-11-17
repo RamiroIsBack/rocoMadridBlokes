@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react'
+import { useNavigate } from 'react-router-dom'
 import mapaEquipacion from '../assets/mapa-equipacion.jpg'
 import { colorPorNumeroBloque } from '../utils/compeColorScale'
 import { fetchWithNonceRetry } from '../utils/wpNonce'
@@ -152,6 +153,8 @@ function ToastProvider({ children }) {
 }
 
 export default function OrganizacionPage() {
+  const isMobile = useIsMobile()
+  const navigate = useNavigate()
   const [config, setConfig] = useState(null)
   const [workers, setWorkers] = useState([])
   const [loading, setLoading] = useState(true)
@@ -215,7 +218,7 @@ export default function OrganizacionPage() {
 
   return (
     <ToastProvider>
-      <div className="org">
+      <div className={`org${isMobile ? ' org--con-barra' : ''}`}>
         {/* Identidad ("¿quién soy?"), antes solo dentro de la vista "Hoy" que se ha quitado —
             sigue haciendo falta para firmar lo que se añade o cambia desde cualquier vista.
             17/11 §10:50 (cowork): el selector nunca se bloquea — siempre se puede elegir o
@@ -248,6 +251,29 @@ export default function OrganizacionPage() {
         {view === 'normas' && <NormasView config={config} workers={workers} canManage={canEdit} onConfigChanged={reloadConfig} />}
         {view === 'compe' && <CompeView config={config} workers={workers} canManage={canManage} workerId={workerId} />}
       </div>
+
+      {/* 17/11 punto A.5: barra fija abajo — a diferencia de .org__switch (que sube con el
+          contenido y desaparece al hacer scroll en una lista larga), esta se queda siempre
+          visible. Mismos 3 destinos que .org__switch (Semana/Normas/Compe, sin "Hoy": ya no
+          existe como vista propia desde el 12/11, su sitio lo ocupa Semana) + "Crear bloke", la
+          única de las 4 que es otra página entera (/tareas/crear-bloke), para no tener que
+          volver al menú de arriba (el que no cabe y por eso hacía falta esto). */}
+      {isMobile && (
+        <nav className="org__bottombar">
+          <button type="button" className={`org__bottombar-btn${view === 'semana' ? ' org__bottombar-btn--active' : ''}`} onClick={() => setView('semana')}>
+            <span className="org__bottombar-icon">📋</span>Semana
+          </button>
+          <button type="button" className={`org__bottombar-btn${view === 'normas' ? ' org__bottombar-btn--active' : ''}`} onClick={() => setView('normas')}>
+            <span className="org__bottombar-icon">📖</span>Normas
+          </button>
+          <button type="button" className={`org__bottombar-btn${view === 'compe' ? ' org__bottombar-btn--active' : ''}`} onClick={() => setView('compe')}>
+            <span className="org__bottombar-icon">🏆</span>Compe
+          </button>
+          <button type="button" className="org__bottombar-btn" onClick={() => navigate('/tareas/crear-bloke')}>
+            <span className="org__bottombar-icon">➕</span>Crear bloke
+          </button>
+        </nav>
+      )}
     </ToastProvider>
   )
 }

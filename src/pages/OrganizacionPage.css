@@ -35,6 +35,29 @@
   color: #f5c842;
 }
 
+/* 17/11 punto A.5: barra fija abajo en el móvil (Semana/Normas/Compe + Crear bloke) — a
+   diferencia de .org__switch (que sube con el contenido), esta se queda siempre visible aunque
+   se haga scroll en una lista larga. .org--con-barra reserva el hueco de la barra abajo del
+   todo para que el último elemento de la página no quede tapado. */
+.org--con-barra { padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+.org__bottombar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  display: flex;
+  background: var(--color-surface); border-top: 1.5px solid var(--color-border);
+  padding: 4px 4px calc(4px + env(safe-area-inset-bottom, 0px));
+}
+.org__bottombar-btn {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 2px;
+  background: none; border: none;
+  color: var(--color-text-secondary);
+  font-size: 0.68rem; font-weight: 600;
+  min-height: 44px;
+}
+.org__bottombar-icon { font-size: 1.1rem; line-height: 1; }
+.org__bottombar-btn--active { color: #f5c842; }
+
 .org__whoami-list {
   display: flex;
   flex-wrap: wrap;
