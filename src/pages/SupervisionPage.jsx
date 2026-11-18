@@ -29,7 +29,7 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
-  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo, syncGruposLimpiarPagoNuevoMismoImporte, syncGruposDeshacerLimpiezaMismoImporte,
+  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo, syncGruposLimpiarPagoNuevoMismoImporte, syncGruposDeshacerLimpiezaMismoImporte, syncGruposInformeAutoaplicados,
   gestionFacturasPendientesGet,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
@@ -2253,6 +2253,8 @@ function SyncGruposCambiosPanel() {
   const [resultadoMismoImporte, setResultadoMismoImporte] = useState(null)
   const [deshaciendo, setDeshaciendo] = useState(false)
   const [resultadoDeshacer, setResultadoDeshacer] = useState(null)
+  const [cargandoInforme, setCargandoInforme] = useState(false)
+  const [informeAutoaplicados, setInformeAutoaplicados] = useState(null)
 
   async function cargar(estado = estadoFiltro) {
     setErr(null)
@@ -2369,6 +2371,14 @@ function SyncGruposCambiosPanel() {
       window.alert(`${r.corregidos} método(s) corregido(s). ${r.sinCambio} ya estaban bien. ${r.sinFila} sin encontrar su fila ahora mismo.`)
     } catch (e) { setErr(e.message) } finally { setReevaluandoMetodo(false) }
   }
+  // 18/11 10:45 (cowork, URGENTE — GRAVE): informe de solo lectura de todo lo que el
+  // auto-aplicado (ya desactivado) llegó a escribir de verdad en WooCommerce — para que Ramiro
+  // lo revise con la asesoría. Nunca toca nada.
+  async function cargarInformeAutoaplicados() {
+    setCargandoInforme(true); setErr(null)
+    try { setInformeAutoaplicados(await syncGruposInformeAutoaplicados()) }
+    catch (e) { setErr(e.message) } finally { setCargandoInforme(false) }
+  }
 
   return (
     <div>
@@ -2400,6 +2410,9 @@ function SyncGruposCambiosPanel() {
           <button className="sv-tests-select" onClick={deshacerLimpiezaMismoImporte} disabled={deshaciendo} title="Reabre lo descartado por la limpieza rota de antes (comparaba contra el Excel) y lo reevalúa contra la web de verdad">
             {deshaciendo ? 'Deshaciendo…' : 'Deshacer limpieza rota (09:30)'}
           </button>
+          <button className="sv-tests-remove" onClick={cargarInformeAutoaplicados} disabled={cargandoInforme} title="Lista todo lo que el auto-aplicado (ya desactivado) llegó a escribir de verdad en WooCommerce, para revisar con la asesoría">
+            {cargandoInforme ? 'Cargando…' : 'Informe auto-aplicados (AEAT)'}
+          </button>
           <span className="sv-ot-muted">
             {ultima ? `Última sincronización: ${new Date(ultima.replace(' ', 'T')).toLocaleString('es-ES')}` : 'Todavía no se ha sincronizado nunca.'}
           </span>
@@ -2421,6 +2434,36 @@ function SyncGruposCambiosPanel() {
         </p>
       )}
       {err && <p className="sv-error">{err}</p>}
+
+      {informeAutoaplicados && (
+        <div className="sv-note" style={{ marginBottom: 14 }}>
+          <strong>{informeAutoaplicados.total}</strong> pedido(s) escrito(s) en WooCommerce por el auto-aplicado (sin ninguna sesión, código de cron), por un total de <strong>{informeAutoaplicados.importeTotal} €</strong>. Revisa con la asesoría si alguno hace falta rectificar con la AEAT.
+          <div className="sv-tests-scroll" style={{ marginTop: 8 }}>
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Registrado</th><th>Alumno</th><th>Acción</th><th>Importe Excel</th><th>Método Excel</th><th>Fecha Excel</th><th>Pedido</th><th>Estado pedido</th><th>Total pedido</th><th>Método real</th><th>Factura (meta encontrada)</th></tr>
+              </thead>
+              <tbody>
+                {informeAutoaplicados.filas?.map(f => (
+                  <tr key={f.logId}>
+                    <td className="sv-ot-muted">{f.fechaRegistrado}</td>
+                    <td>{f.nombre || `sub #${f.subId}`}</td>
+                    <td className="sv-ot-muted">{f.accion}</td>
+                    <td>{f.importe} €</td>
+                    <td className="sv-ot-muted">{f.metodo || '—'}</td>
+                    <td className="sv-ot-muted">{f.fechaDelExcel || '—'}</td>
+                    <td>{f.orderId || '—'}</td>
+                    <td className="sv-ot-muted">{f.orderEstado || '—'}</td>
+                    <td className="sv-ot-muted">{f.orderTotal != null ? `${f.orderTotal} €` : '—'}</td>
+                    <td className="sv-ot-muted">{f.orderMetodoReal || '—'}</td>
+                    <td className="sv-ot-muted">{f.facturaMeta || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {resultadoDeshacer && (
         <p className="sv-note" style={{ marginBottom: 14 }}>

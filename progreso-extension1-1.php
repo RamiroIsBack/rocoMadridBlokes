@@ -1294,6 +1294,11 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/deshacer-limpieza-mismo-importe', array(
         'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_deshacer_limpieza_mismo_importe', 'permission_callback' => $sa_perm,
     ));
+    // 18/11 10:45 (cowork, URGENTE — GRAVE): lista todo lo que el auto-aplicado (ya desactivado)
+    // llegó a escribir de verdad en WooCommerce, para revisar con la asesoría si hay que rectificar.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/informe-autoaplicados', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_informe_autoaplicados', 'permission_callback' => $sa_perm,
+    ));
     // WP-Cron no corre de fiar con poco tráfico (pseudo-cron: solo se dispara si entra una
     // visita después de la hora programada) — Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05:
     // "esto tiene que pasar automático". Ruta pública protegida por secreto (como el webhook de
@@ -8769,21 +8774,20 @@ function blokes_sync_grupos_upsert_cambio($pestana, $clave, $nombre, $telefono, 
     return $wpdb->insert_id;
 }
 
-// Auto-aplica un cambio recién creado si es de un tipo seguro (pago_nuevo/nota) Y está
-// emparejado sin ambigüedad — todo lo demás (sin match, teléfono, alumno nuevo, fila borrada)
-// se queda pendiente en la bandeja para que alguien decida (Ramiro, 3/11 17:05: "esto tiene que
-// pasar automático" para lo claro, nunca para lo dudoso). Si el efecto falla por cualquier
-// motivo, se deja pendiente igual — nunca se pierde el aviso.
+// 18/11 10:45 (cowork, URGENTE — GRAVE): DESACTIVADO. Esto auto-aplicaba un "pago nuevo"
+// emparejado sin ambigüedad desde 3/11 (Ramiro: "esto tiene que pasar automático" para lo
+// claro). El 17/11 entre 22:00 y 23:05, al corregir TA→tarjeta (792f28b), esto escribió 32
+// pedidos reales por WooCommerce como "Tarjeta (TPV roco)" (2.253 €, con factura Verifactu
+// enviada a la AEAT y correo al cliente) para pagos históricos que en realidad eran de otros
+// métodos y fechas — la remesa real de tarjeta de ese día en el banco fue de solo 262,50 €.
+// Nunca más se escribe nada solo: toda propuesta ("pago nuevo" y "nota") se queda SIEMPRE
+// pendiente en "Cambios del Excel" para que alguien la revise y pulse "Aplicar" a mano — "que
+// solo proponga", como pedía la propia pestaña y como de verdad hace falta ahora. Para volver a
+// activar un auto-aplicado de verdad (solo si Ramiro decide que hace falta, y nunca para
+// "pago_nuevo" sin que alguien vea antes fecha/método/importe), habría que rehacer esta función
+// desde cero con esa decisión explícita — no basta con deshacer este commit.
 function blokes_sync_grupos_autoaplicar_si_seguro($cambio_id, $tipo, $match) {
-    if (!in_array($tipo, array('pago_nuevo', 'nota'), true) || empty($match['tipo']) || empty($match['id'])) return;
-    global $wpdb;
-    $tabla = blokes_sync_grupos_cambios_table();
-    $cambio = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla} WHERE id = %d", $cambio_id), ARRAY_A);
-    if (!$cambio || $cambio['estado'] !== 'pendiente') return;
-    $datos = json_decode($cambio['datos_json'], true) ?: array();
-    $resultado = blokes_sync_grupos_aplicar_efecto($cambio, $datos);
-    if (is_wp_error($resultado)) return;
-    $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => 'auto (sincronización)'), array('id' => $cambio_id));
+    return;
 }
 
 // Dado el nombre real de una pestaña ("M-J 17.30"), busca entre los grupos que YA existen de
@@ -9514,6 +9518,68 @@ function superadmin_sync_grupos_deshacer_limpieza_mismo_importe($request) {
     ));
     $r = blokes_sync_grupos_cerrar_pago_nuevo_resueltos(($u ? $u->user_login : '') . ' · reevaluado tras deshacer: ya cobrado de verdad en la web para ese mes');
     return rest_ensure_response(array('success' => true, 'reabiertos' => intval($reabiertos), 'siguenPendientes' => intval($reabiertos) - $r['descartados'], 'vueltosACerrarConfirmados' => $r['descartados']));
+}
+
+// 18/11 10:45 (cowork, URGENTE — GRAVE): informe de TODO lo que escribió de verdad en
+// WooCommerce el auto-aplicado de Sync Grupos (ahora desactivado, ver
+// blokes_sync_grupos_autoaplicar_si_seguro() más arriba) desde que existe — para que Ramiro
+// decida con la asesoría si hace falta rectificar algo con la AEAT. Nunca toca nada, solo lista:
+// cada fila de blokes_gestion_log con accion marcar_cobrado/marcar_cobrado_adelantado y
+// user_id = 0 — la marca de que fue el cron (/cron-tick, sin sesión de WordPress) quien disparó
+// la sincronización, nunca una persona con sesión abierta — junto con el pedido real de
+// WooCommerce (estado actual, total, método de pago) para poder cruzarlo con el banco y con
+// Verifactu. Si alguna vez se disparó también desde un "Sincronizar ahora" con sesión (poco
+// probable a las horas que vio cowork, pero posible), esa fila quedaría con el user_id de quien
+// pulsó el botón, no con 0 — este informe no la vería; dilo si hace falta ampliarlo a eso.
+function superadmin_sync_grupos_informe_autoaplicados($request) {
+    global $wpdb;
+    blokes_ensure_gestion_log_table();
+    $tabla_log = blokes_gestion_log_table();
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla_log} WHERE user_id = 0 AND accion IN (%s, %s) ORDER BY id ASC",
+        'marcar_cobrado', 'marcar_cobrado_adelantado'
+    ), ARRAY_A);
+    $informe = array();
+    $total_importe = 0;
+    foreach ($rows as $r) {
+        $detalle = json_decode($r['detalle'], true) ?: array();
+        $despues = json_decode($r['despues'], true) ?: array();
+        $order_id = intval($despues['order_id'] ?? 0);
+        $order_estado = null; $order_total = null; $order_metodo_real = null; $factura_meta = null;
+        if ($order_id && function_exists('wc_get_order')) {
+            $order = wc_get_order($order_id);
+            if ($order) {
+                $order_estado = $order->get_status();
+                $order_total = $order->get_total();
+                $order_metodo_real = $order->get_payment_method_title();
+                // 18/11 (Ramiro: "nº de factura") — no sé con qué plugin se emite la factura
+                // real a la AEAT (Verifactu) ni la clave exacta donde guarda el número, así que
+                // en vez de adivinar una, busco entre TODOS los metadatos del pedido cualquier
+                // clave que suene a factura/invoice/verifactu y la enseño tal cual (clave +
+                // valor) — confírmame cuál es la de verdad y la dejo fija la próxima vez.
+                foreach ($order->get_meta_data() as $meta) {
+                    $k = $meta->key;
+                    if (stripos($k, 'factura') !== false || stripos($k, 'invoice') !== false || stripos($k, 'verifactu') !== false) {
+                        $v = $meta->value;
+                        if ($v !== '' && $v !== null && !is_array($v)) { $factura_meta = $k . ': ' . $v; break; }
+                    }
+                }
+            }
+        }
+        $sub = (function_exists('wcs_get_subscription')) ? wcs_get_subscription(intval($r['sub_id'])) : null;
+        $importe = floatval($detalle['importe'] ?? 0);
+        $total_importe += $importe;
+        $informe[] = array(
+            'logId' => intval($r['id']), 'subId' => intval($r['sub_id']),
+            'nombre' => $sub ? trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()) : null,
+            'accion' => $r['accion'], 'fechaRegistrado' => $r['created_at'],
+            'importe' => $importe, 'metodo' => $detalle['metodo'] ?? null, 'fechaDelExcel' => $detalle['fecha'] ?? null,
+            'orderId' => $order_id ?: null, 'orderEstado' => $order_estado, 'orderTotal' => $order_total, 'orderMetodoReal' => $order_metodo_real,
+            'facturaMeta' => $factura_meta,
+            'nota' => $detalle['nota'] ?? null,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'total' => count($informe), 'importeTotal' => round($total_importe, 2), 'filas' => $informe));
 }
 
 // ============================================================

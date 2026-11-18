@@ -226,6 +226,10 @@ export const syncGruposLimpiarPagoNuevoMismoImporte = () => gestionPost('/gestio
 // 18/11 09:30 (cowork, GRAVE): deshace la limpieza rota (comparaba contra el Excel y descartó
 // pagos reales) — reabre todo lo descartado por ese motivo y lo reevalúa ya contra la web.
 export const syncGruposDeshacerLimpiezaMismoImporte = () => gestionPost('/gestion/sync-grupos/deshacer-limpieza-mismo-importe')
+// 18/11 10:45 (cowork, URGENTE — GRAVE): lista todo lo que el auto-aplicado (ya desactivado)
+// llegó a escribir de verdad en WooCommerce (facturas Verifactu incluidas), para revisar con
+// la asesoría si hay que rectificar algo con la AEAT.
+export const syncGruposInformeAutoaplicados = () => gestionCall('GET', '/gestion/sync-grupos/informe-autoaplicados')
 export const syncGruposCambioDescartar = id        => gestionPost(`/gestion/sync-grupos/cambios/${id}/descartar`)
 // Limpieza única (17/11 16:20, cowork): descarta de golpe las propuestas pendientes de pestañas
 // Balance y los "pago nuevo" de meses viejos que ya estaban colgando ANTES de 589ab3a.
