@@ -2402,11 +2402,19 @@ function SyncGruposCambiosPanel() {
 
       {diagnostico && (
         <div className="sv-note" style={{ marginBottom: 14 }}>
-          <strong>{diagnostico.totalPendientesViejos} «pago nuevo» pendientes de hace más de 2 meses en total.</strong> Muestra de {diagnostico.muestra?.length || 0}:
+          <strong>{diagnostico.totalPendientesViejos} «pago nuevo» pendientes de hace más de 2 meses en total.</strong>
+          {diagnostico.porPestana?.length > 0 && (
+            <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+              {diagnostico.porPestana.map(p => (
+                <li key={p.pestana}>{p.pestana}: {p.total} ({p.sinEmparejar} sin emparejar)</li>
+              ))}
+            </ul>
+          )}
+          <p style={{ margin: '8px 0 0' }}>Muestra de {diagnostico.muestra?.length || 0}:</p>
           <div className="sv-tests-scroll" style={{ marginTop: 8 }}>
             <table className="sv-tests-table">
               <thead>
-                <tr><th>Pestaña</th><th>Alumno</th><th>Mes</th><th>Propuesto</th><th>¿Hay foto?</th><th>Meses en la foto</th><th>¿Tiene ese mes?</th><th>Pago en la foto</th></tr>
+                <tr><th>Pestaña</th><th>Alumno</th><th>Mes</th><th>Propuesto</th><th>Emparejado</th><th>¿Hay foto?</th><th>Meses en la foto</th><th>¿Tiene ese mes?</th><th>Pago en la foto</th></tr>
               </thead>
               <tbody>
                 {diagnostico.muestra?.map(d => (
@@ -2415,6 +2423,7 @@ function SyncGruposCambiosPanel() {
                     <td>{d.nombre || d.telefono || '—'}</td>
                     <td>{d.mes}</td>
                     <td className="sv-ot-muted">{d.importePropuesto ?? '—'} € ({d.metodoPropuesto || '—'})</td>
+                    <td className="sv-ot-muted">{d.matchTipo || 'sin emparejar'}</td>
                     <td>{d.snapshotExiste ? 'Sí' : 'No'}</td>
                     <td>{d.snapshotMesesGuardados}</td>
                     <td>{d.snapshotTieneEseMes ? 'Sí' : 'No'}</td>

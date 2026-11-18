@@ -9326,6 +9326,7 @@ function superadmin_sync_grupos_diagnostico_pago_viejo($request) {
         $muestra[] = array(
             'id' => intval($c['id']), 'pestana' => $c['pestana'], 'nombre' => $c['nombre'], 'telefono' => $c['telefono'],
             'clave' => $clave, 'mes' => $c['mes'], 'importePropuesto' => $datos['importe'] ?? null, 'metodoPropuesto' => $datos['metodo'] ?? null,
+            'matchTipo' => $c['match_tipo'], 'matchLabel' => $c['match_label'],
             'snapshotExiste' => (bool) $snap, 'snapshotMesesGuardados' => count($pagos_snap),
             'snapshotTieneEseMes' => isset($pagos_snap[$c['mes']]),
             'snapshotPagoEseMes' => $pagos_snap[$c['mes']] ?? null,
@@ -9335,7 +9336,15 @@ function superadmin_sync_grupos_diagnostico_pago_viejo($request) {
     $total_viejos = intval($wpdb->get_var($wpdb->prepare(
         "SELECT COUNT(*) FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL AND mes < %s", $mes_corte
     )));
-    return rest_ensure_response(array('success' => true, 'totalPendientesViejos' => $total_viejos, 'muestra' => $muestra));
+    // Cowork, 18/11 07:10: "casi todos sin emparejar" e "incluye las pestañas de Yoga" — este
+    // desglose por pestaña y por si tiene match o no deja ver de un vistazo si el problema está
+    // concentrado en unas pocas pestañas concretas (p. ej. Yoga) en vez de repartido por todas.
+    $por_pestana = $wpdb->get_results($wpdb->prepare(
+        "SELECT pestana, COUNT(*) as total, SUM(match_tipo IS NULL OR match_tipo = '') as sinEmparejar
+         FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL AND mes < %s
+         GROUP BY pestana ORDER BY total DESC", $mes_corte
+    ), ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'totalPendientesViejos' => $total_viejos, 'porPestana' => $por_pestana, 'muestra' => $muestra));
 }
 
 // ============================================================
