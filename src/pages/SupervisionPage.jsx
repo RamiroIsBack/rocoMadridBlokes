@@ -29,7 +29,7 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
-  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo, syncGruposLimpiarPagoNuevoMismoImporte, syncGruposDeshacerLimpiezaMismoImporte, syncGruposInformeAutoaplicados,
+  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo, syncGruposLimpiarPagoNuevoMismoImporte, syncGruposDeshacerLimpiezaMismoImporte, syncGruposInformeAutoaplicados, syncGruposInformeCeldasEscritas, syncGruposLimpiarCeldasEscritas,
   gestionFacturasPendientesGet,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
@@ -2255,6 +2255,9 @@ function SyncGruposCambiosPanel() {
   const [resultadoDeshacer, setResultadoDeshacer] = useState(null)
   const [cargandoInforme, setCargandoInforme] = useState(false)
   const [informeAutoaplicados, setInformeAutoaplicados] = useState(null)
+  const [cargandoCeldas, setCargandoCeldas] = useState(false)
+  const [informeCeldas, setInformeCeldas] = useState(null)
+  const [limpiandoCeldas, setLimpiandoCeldas] = useState(false)
 
   async function cargar(estado = estadoFiltro) {
     setErr(null)
@@ -2379,6 +2382,23 @@ function SyncGruposCambiosPanel() {
     try { setInformeAutoaplicados(await syncGruposInformeAutoaplicados()) }
     catch (e) { setErr(e.message) } finally { setCargandoInforme(false) }
   }
+  // 18/11 (Ramiro): celdas "TA 17/11/2026" que la propia sincronización escribió por error en
+  // el Excel — informe de solo lectura, con una simulación real de "¿se emitiría factura
+  // nueva si se cobrara ahora?" para cada una.
+  async function cargarInformeCeldas() {
+    setCargandoCeldas(true); setErr(null)
+    try { setInformeCeldas(await syncGruposInformeCeldasEscritas()) }
+    catch (e) { setErr(e.message) } finally { setCargandoCeldas(false) }
+  }
+  async function limpiarCeldas() {
+    if (!window.confirm('¿Dejar vacías las celdas que la sincronización escribió por error (solo las que parecen seguir siendo exactamente esa escritura)? No se puede deshacer de golpe.')) return
+    setLimpiandoCeldas(true); setErr(null)
+    try {
+      const r = await syncGruposLimpiarCeldasEscritas()
+      await cargarInformeCeldas()
+      window.alert(`${r.limpiadas} celda(s) dejadas vacías. ${r.saltadas} no coincidían (no se han tocado).`)
+    } catch (e) { setErr(e.message) } finally { setLimpiandoCeldas(false) }
+  }
 
   return (
     <div>
@@ -2413,6 +2433,14 @@ function SyncGruposCambiosPanel() {
           <button className="sv-tests-remove" onClick={cargarInformeAutoaplicados} disabled={cargandoInforme} title="Lista todo lo que el auto-aplicado (ya desactivado) llegó a escribir de verdad en WooCommerce, para revisar con la asesoría">
             {cargandoInforme ? 'Cargando…' : 'Informe auto-aplicados (AEAT)'}
           </button>
+          <button className="sv-tests-select" onClick={cargarInformeCeldas} disabled={cargandoCeldas} title="Celdas que la sincronización escribió por error en el Excel de Eva, con una simulación de qué pasaría si se cobrara ahora">
+            {cargandoCeldas ? 'Cargando…' : 'Informe celdas escritas por error'}
+          </button>
+          {informeCeldas && (
+            <button className="sv-tests-remove" onClick={limpiarCeldas} disabled={limpiandoCeldas} title="Deja vacías las celdas que parecen seguir siendo exactamente la escritura del bug">
+              {limpiandoCeldas ? 'Limpiando…' : 'Limpiar celdas escritas por error'}
+            </button>
+          )}
           <span className="sv-ot-muted">
             {ultima ? `Última sincronización: ${new Date(ultima.replace(' ', 'T')).toLocaleString('es-ES')}` : 'Todavía no se ha sincronizado nunca.'}
           </span>
@@ -2434,6 +2462,41 @@ function SyncGruposCambiosPanel() {
         </p>
       )}
       {err && <p className="sv-error">{err}</p>}
+
+      {informeCeldas && (
+        <div className="sv-note" style={{ marginBottom: 14 }}>
+          <strong>{informeCeldas.total}</strong> celda(s) escrita(s) por la sincronización sin sesión. La columna «¿Factura nueva si se cobra ahora?» es una simulación real (nunca escribe nada) de qué pasaría con cada suscripción.
+          <div className="sv-tests-scroll" style={{ marginTop: 8 }}>
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Pestaña</th><th>Alumno</th><th>Mes</th><th>Importe actual</th><th>Método actual</th><th>Fecha actual</th><th>¿Parece el bug?</th><th>¿Factura nueva si se cobra ahora?</th></tr>
+              </thead>
+              <tbody>
+                {informeCeldas.filas?.map(f => (
+                  <tr key={f.logId}>
+                    <td className="sv-ot-muted">{f.pestana}</td>
+                    <td>{f.nombre || '—'}</td>
+                    <td>{f.mes}</td>
+                    <td>{f.importeActual ?? '—'} €</td>
+                    <td className="sv-ot-muted">{f.metodoActual || '—'}</td>
+                    <td className="sv-ot-muted">{f.fechaActual || '—'}</td>
+                    <td>{f.pareceSerElBug ? 'Sí' : 'No (no se tocaría)'}</td>
+                    <td className="sv-ot-muted">
+                      {f.simulacionCobrarAhora
+                        ? (f.simulacionCobrarAhora.completariaPedidoYaExistente
+                            ? 'No — completaría el pedido ya existente (el de este bug), misma factura'
+                            : f.simulacionCobrarAhora.seGuardariaComoAdelantadoSinFactura
+                              ? 'No todavía — se guardaría como adelantado, sin factura, hasta la próxima renovación'
+                              : f.simulacionCobrarAhora.aviso || '—')
+                        : '— (sin subId emparejado o no se pudo simular)'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {informeAutoaplicados && (
         <div className="sv-note" style={{ marginBottom: 14 }}>

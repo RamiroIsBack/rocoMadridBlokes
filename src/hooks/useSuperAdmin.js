@@ -230,6 +230,11 @@ export const syncGruposDeshacerLimpiezaMismoImporte = () => gestionPost('/gestio
 // llegó a escribir de verdad en WooCommerce (facturas Verifactu incluidas), para revisar con
 // la asesoría si hay que rectificar algo con la AEAT.
 export const syncGruposInformeAutoaplicados = () => gestionCall('GET', '/gestion/sync-grupos/informe-autoaplicados')
+// 18/11 (Ramiro): celdas "TA 17/11/2026" que la propia sincronización escribió por error en el
+// Excel de Eva — informe (solo lee, incluye una simulación real de "qué pasaría si se cobrara
+// ahora") y limpieza (deja la celda vacía, nunca escribe un dato inventado).
+export const syncGruposInformeCeldasEscritas = () => gestionCall('GET', '/gestion/sync-grupos/informe-celdas-escritas')
+export const syncGruposLimpiarCeldasEscritas = () => gestionPost('/gestion/sync-grupos/limpiar-celdas-escritas')
 export const syncGruposCambioDescartar = id        => gestionPost(`/gestion/sync-grupos/cambios/${id}/descartar`)
 // Limpieza única (17/11 16:20, cowork): descarta de golpe las propuestas pendientes de pestañas
 // Balance y los "pago nuevo" de meses viejos que ya estaban colgando ANTES de 589ab3a.
