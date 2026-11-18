@@ -1273,6 +1273,11 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/reevaluar-sin-fila', array(
         'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_reevaluar_sin_fila', 'permission_callback' => $sa_perm,
     ));
+    // 18/11 (cowork): corrige el método guardado en los "pago nuevo" pendientes de antes del
+    // arreglo de "TA"=tarjeta (792f28b), releyendo la fila de verdad en el Excel.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/reevaluar-metodo-pago', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_reevaluar_metodo_pago_nuevo', 'permission_callback' => $sa_perm,
+    ));
     // WP-Cron no corre de fiar con poco tráfico (pseudo-cron: solo se dispara si entra una
     // visita después de la hora programada) — Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05:
     // "esto tiene que pasar automático". Ruta pública protegida por secreto (como el webhook de
@@ -9169,14 +9174,73 @@ function superadmin_sync_grupos_reevaluar_sin_fila($request) {
     ), ARRAY_A);
     $aplicados = 0; $siguen_pendientes = 0;
     $u = wp_get_current_user();
+    // 18/11 (cowork, los 4 de «V 19.00» que siguen sin encontrarse): devuelve el detalle de
+    // cada uno (pestaña buscada, teléfono usado, si al final se encontró) para poder ver DÓNDE
+    // falla sin tener que ir al log de gestión aparte.
+    $detalle = array();
     foreach ($pendientes as $cambio) {
         $datos = json_decode($cambio['datos_json'], true) ?: array();
         $resultado = blokes_sync_grupos_aplicar_efecto($cambio, $datos);
-        if (is_wp_error($resultado)) { $siguen_pendientes++; continue; }
+        $encontrado = !is_wp_error($resultado);
+        $detalle[] = array(
+            'id' => intval($cambio['id']), 'nombre' => $cambio['nombre'], 'telefono' => $cambio['telefono'],
+            'pestanaBuscada' => $cambio['pestana'], 'mes' => $cambio['mes'],
+            'dia' => $datos['dia'] ?? null, 'horario' => $datos['horario'] ?? null,
+            'encontrado' => $encontrado, 'error' => $encontrado ? null : $resultado->get_error_message(),
+        );
+        if (!$encontrado) { $siguen_pendientes++; continue; }
         $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => ($u ? $u->user_login : '') . ' · reevaluado'), array('id' => intval($cambio['id'])));
         $aplicados++;
     }
-    return rest_ensure_response(array('success' => true, 'aplicados' => $aplicados, 'siguenPendientes' => $siguen_pendientes));
+    return rest_ensure_response(array('success' => true, 'aplicados' => $aplicados, 'siguenPendientes' => $siguen_pendientes, 'detalle' => $detalle));
+}
+
+// 18/11 (cowork, pestanas_grupos §19:45): las propuestas de "pago nuevo" que ya estaban
+// pendientes de ANTES del arreglo de "TA"=tarjeta (792f28b) se quedaron con el método
+// equivocado guardado en su propio datos_json — nunca se corrigen solas, porque el arreglo solo
+// cambia cómo se LEE el Excel a partir de ahora, no lo que ya se guardó. Esto relee la fila de
+// verdad en el Excel y corrige el método guardado en cada pendiente de 'pago_nuevo' si ha
+// cambiado — sin aplicar nada en WooCommerce todavía, solo corrige la PROPUESTA para que al
+// pulsar "Aplicar" ya salga con el método bueno.
+function superadmin_sync_grupos_reevaluar_metodo_pago_nuevo($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $activa = blokes_sync_grupos_sheet_activa();
+    if (!$activa['id']) return new WP_Error('falta_config', 'No hay Hoja configurada.', array('status' => 400));
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = %s", 'pago_nuevo'
+    ), ARRAY_A);
+    $cache_pestanas = array(); // pestana => filas ya leídas, para no releer la misma pestaña una vez por fila
+    $corregidos = 0; $sin_cambio = 0; $sin_fila = 0;
+    foreach ($pendientes as $cambio) {
+        $pestana = $cambio['pestana'];
+        if (!array_key_exists($pestana, $cache_pestanas)) {
+            $valores = blokes_sync_grupos_leer_valores($activa['id'], $pestana);
+            $cache_pestanas[$pestana] = is_wp_error($valores) ? null : blokes_sync_grupos_leer_pestana_filas($valores);
+        }
+        $r = $cache_pestanas[$pestana];
+        if (!$r) { $sin_fila++; continue; }
+        $tel_norm = blokes_externos_normaliza_telefono((string) $cambio['telefono']);
+        $fila_actual = null;
+        if ($tel_norm) {
+            foreach ($r['filas'] as $f) { if ($f['telefono'] === $tel_norm) { $fila_actual = $f; break; } }
+        }
+        if (!$fila_actual && $cambio['nombre']) {
+            $nombre_norm = mb_strtolower(trim((string) $cambio['nombre']));
+            foreach ($r['filas'] as $f) { if (mb_strtolower(trim($f['nombre'])) === $nombre_norm) { $fila_actual = $f; break; } }
+        }
+        if (!$fila_actual) { $sin_fila++; continue; }
+        $pago_actual = $fila_actual['pagos'][$cambio['mes']] ?? null;
+        if (!$pago_actual) { $sin_fila++; continue; }
+        $datos = json_decode($cambio['datos_json'], true) ?: array();
+        $metodo_nuevo = $pago_actual['metodo'] ?? null;
+        if ($metodo_nuevo === null || $metodo_nuevo === ($datos['metodo'] ?? null)) { $sin_cambio++; continue; }
+        $datos['metodo'] = $metodo_nuevo;
+        $wpdb->update($tabla, array('datos_json' => wp_json_encode($datos)), array('id' => intval($cambio['id'])));
+        $corregidos++;
+    }
+    return rest_ensure_response(array('success' => true, 'corregidos' => $corregidos, 'sinCambio' => $sin_cambio, 'sinFila' => $sin_fila));
 }
 
 function superadmin_sync_grupos_cambio_descartar($request) {

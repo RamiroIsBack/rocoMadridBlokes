@@ -215,6 +215,9 @@ export const syncGruposLimpiarPendientesViejos = () => gestionPost('/gestion/syn
 // 17/11 18:15 (cowork): reintenta de golpe los "Cobro web sin fila" con la búsqueda por teléfono
 // en otras pestañas, que esos pendientes viejos no tuvieron.
 export const syncGruposReevaluarSinFila = () => gestionPost('/gestion/sync-grupos/reevaluar-sin-fila')
+// 18/11 (cowork): corrige el método guardado en los "pago nuevo" pendientes de antes del
+// arreglo de "TA"=tarjeta, releyendo la fila de verdad en el Excel.
+export const syncGruposReevaluarMetodoPago = () => gestionPost('/gestion/sync-grupos/reevaluar-metodo-pago')
 // Reintentar a mano la escritura Web→Excel de un cobro concreto (3/11 12:29: para pagos que
 // fallaron antes del arreglo de la pestaña, o que nunca pasaron por este camino).
 export const syncGruposReintentarCobro = body       => gestionPost('/gestion/sync-grupos/reintentar-cobro', body)

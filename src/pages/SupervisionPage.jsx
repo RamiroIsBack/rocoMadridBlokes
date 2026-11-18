@@ -29,7 +29,7 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
-  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila,
+  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago,
   gestionFacturasPendientesGet,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
@@ -2245,6 +2245,7 @@ function SyncGruposCambiosPanel() {
   const [resumenSync, setResumenSync] = useState(null)
   const [limpiando, setLimpiando] = useState(false)
   const [reevaluando, setReevaluando] = useState(false)
+  const [reevaluandoMetodo, setReevaluandoMetodo] = useState(false)
 
   async function cargar(estado = estadoFiltro) {
     setErr(null)
@@ -2287,14 +2288,32 @@ function SyncGruposCambiosPanel() {
     } catch (e) { setErr(e.message) } finally { setLimpiando(false) }
   }
   // 17/11 18:15 (cowork): "Cobro web sin fila" viejos (Raúl Bañez...) se quedaron pendientes de
-  // antes de la búsqueda por teléfono en otras pestañas — esto los reintenta de golpe.
+  // antes de la búsqueda por teléfono en otras pestañas — esto los reintenta de golpe. 18/11:
+  // además del recuento, enseña el detalle de cada uno (pestaña buscada, teléfono) para poder
+  // ver dónde falla sin tener que pedir el log de gestión aparte.
   async function reevaluarSinFila() {
     setReevaluando(true); setErr(null)
     try {
       const r = await syncGruposReevaluarSinFila()
       await cargar()
-      window.alert(`${r.aplicados} encontrada(s) y escrita(s). ${r.siguenPendientes} siguen sin encontrar su fila.`)
+      const siguen = (r.detalle || []).filter(d => !d.encontrado)
+      const detalleTxt = siguen.length
+        ? '\n\nSiguen sin encontrarse:\n' + siguen.map(d => `· ${d.nombre || d.telefono} — buscado en "${d.pestanaBuscada}" (tel. ${d.telefono || '—'})`).join('\n')
+        : ''
+      window.alert(`${r.aplicados} encontrada(s) y escrita(s). ${r.siguenPendientes} siguen sin encontrar su fila.${detalleTxt}`)
     } catch (e) { setErr(e.message) } finally { setReevaluando(false) }
+  }
+  // 18/11 (cowork): las propuestas de "pago nuevo" que ya estaban pendientes de antes del
+  // arreglo de "TA"=tarjeta se quedaron con el método equivocado guardado — esto relee la fila
+  // de verdad en el Excel y corrige el método guardado en cada pendiente, sin aplicar nada en
+  // WooCommerce todavía (sigue habiendo que pulsar "Aplicar" para cada una).
+  async function reevaluarMetodoPago() {
+    setReevaluandoMetodo(true); setErr(null)
+    try {
+      const r = await syncGruposReevaluarMetodoPago()
+      await cargar()
+      window.alert(`${r.corregidos} método(s) corregido(s). ${r.sinCambio} ya estaban bien. ${r.sinFila} sin encontrar su fila ahora mismo.`)
+    } catch (e) { setErr(e.message) } finally { setReevaluandoMetodo(false) }
   }
 
   return (
@@ -2314,6 +2333,9 @@ function SyncGruposCambiosPanel() {
           </button>
           <button className="sv-tests-save" onClick={reevaluarSinFila} disabled={reevaluando} title="Reintenta los «Cobro web sin fila» con la búsqueda por teléfono en otras pestañas">
             {reevaluando ? 'Reevaluando…' : 'Reevaluar «sin fila»'}
+          </button>
+          <button className="sv-tests-save" onClick={reevaluarMetodoPago} disabled={reevaluandoMetodo} title="Corrige el método (TA=tarjeta) de los «pago nuevo» pendientes de antes del arreglo">
+            {reevaluandoMetodo ? 'Reevaluando…' : 'Reevaluar método (TA)'}
           </button>
           <span className="sv-ot-muted">
             {ultima ? `Última sincronización: ${new Date(ultima.replace(' ', 'T')).toLocaleString('es-ES')}` : 'Todavía no se ha sincronizado nunca.'}
