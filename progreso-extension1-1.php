@@ -1278,6 +1278,12 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/reevaluar-metodo-pago', array(
         'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_reevaluar_metodo_pago_nuevo', 'permission_callback' => $sa_perm,
     ));
+    // 18/11 (cowork, GRAVE: 499 "pago nuevo" viejos desde el sync del 17/11 19:05): muestra, para
+    // una muestra de ellos, qué hay de verdad en la foto (snapshot) de esa fila — para localizar
+    // la causa real en vez de adivinarla.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/diagnostico-pago-viejo', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_diagnostico_pago_viejo', 'permission_callback' => $sa_perm,
+    ));
     // WP-Cron no corre de fiar con poco tráfico (pseudo-cron: solo se dispara si entra una
     // visita después de la hora programada) — Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05:
     // "esto tiene que pasar automático". Ruta pública protegida por secreto (como el webhook de
@@ -9150,6 +9156,13 @@ function superadmin_sync_grupos_cambio_aplicar($request) {
     $cambio = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla} WHERE id = %d", $id), ARRAY_A);
     if (!$cambio) return new WP_Error('not_found', 'Cambio no encontrado.', array('status' => 404));
     if ($cambio['estado'] !== 'pendiente') return new WP_Error('ya_resuelto', 'Este cambio ya estaba resuelto.', array('status' => 409));
+    // 18/11 (cowork, URGENTE: 499 "pago nuevo" de 2024-03 a 2026-11 colándose como pendientes) —
+    // "Aplicar" nunca debe poder escribir un cobro/factura de un mes de hace más de 2 meses sin
+    // que alguien lo confirme a propósito, pase lo que pase con la detección de arriba.
+    $mes_corte_aplicar = blokes_mes_mas(date('Y-m'), -2);
+    if ($cambio['tipo'] === 'pago_nuevo' && $cambio['mes'] && $cambio['mes'] < $mes_corte_aplicar && !$request->get_param('confirmarMesAntiguo')) {
+        return new WP_Error('mes_antiguo', 'Este pago es de ' . $cambio['mes'] . ', de hace más de 2 meses — revísalo antes de aplicarlo (podría ser un dato viejo que no hace falta cobrar ya). Si de verdad quieres aplicarlo, marca "Confirmo que es de verdad este mes" y vuelve a pulsar Aplicar.', array('status' => 409));
+    }
     $datos = json_decode($cambio['datos_json'], true) ?: array();
 
     $resultado = blokes_sync_grupos_aplicar_efecto($cambio, $datos);
@@ -9256,11 +9269,13 @@ function superadmin_sync_grupos_cambio_descartar($request) {
     return rest_ensure_response(array('success' => true));
 }
 
-// Limpieza única (cowork, 17/11 16:20, tras probar 589ab3a): el arreglo evita que se generen
-// NUEVAS propuestas de pestañas Balance o de pagos viejos por un cambio de pestaña, pero no
-// toca las que ya estaban pendientes de antes — las descarta de golpe con un motivo claro.
-// Nunca borra nada (igual que "descartar" de una en una), solo marca 'descartado' lo que ya no
-// hace falta mirar porque el código que lo causaba está arreglado.
+// Limpieza única (cowork, 17/11 16:20, tras probar 589ab3a; reutilizada el 18/11 para los 499
+// "pago nuevo" de 2024-03 a 2026-11 que aparecieron con el sync del 17/11 19:05): descarta de
+// golpe las propuestas pendientes de pestañas Balance y CUALQUIER "pago nuevo" de hace más de 2
+// meses, sea de donde sea que venga el motivo real — nunca se borra nada, solo se marca
+// 'descartado' con quién y por qué, igual que "descartar" de una en una. Si de verdad hiciera
+// falta cobrar alguno de esos meses, "Aplicar" sigue pidiendo confirmación aparte
+// (confirmarMesAntiguo) antes de escribir nada en WooCommerce.
 function superadmin_sync_grupos_limpiar_pendientes_589ab3a($request) {
     blokes_sync_grupos_ensure_tables();
     global $wpdb;
@@ -9279,10 +9294,48 @@ function superadmin_sync_grupos_limpiar_pendientes_589ab3a($request) {
         $wpdb->query($wpdb->prepare(
             "UPDATE {$tabla} SET estado = 'descartado', resuelto_at = %s,
              resuelto_por = %s WHERE id IN ($ph)",
-            current_time('mysql'), ($u ? $u->user_login : '') . ' · generado por error, arreglado en 589ab3a', ...$ids
+            current_time('mysql'), ($u ? $u->user_login : '') . ' · pago de hace más de 2 meses, descartado en limpieza (revisar a mano si de verdad falta cobrarlo)', ...$ids
         ));
     }
     return rest_ensure_response(array('success' => true, 'descartados' => count($ids)));
+}
+
+// Diagnóstico (18/11, GRAVE: 499 "pago nuevo" de 2024-03 a 2026-11 desde el sync del 17/11
+// 19:05, 12 con método "(Paco)") — antes de adivinar la causa sin verla, esto enseña para una
+// muestra de los "pago nuevo" viejos pendientes qué hay de verdad en la FOTO (snapshot) de esa
+// fila: si existe, cuántos meses tiene guardados, y si el mes en cuestión está ahí o no — para
+// distinguir entre "la foto no tiene ese mes guardado" (bug real en el snapshot) y "la fila no
+// emparejó con ninguna foto" (clave distinta de la que se guardó antes).
+function superadmin_sync_grupos_diagnostico_pago_viejo($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $limit = max(1, min(100, intval($request->get_param('limit')) ?: 15));
+    $tabla = blokes_sync_grupos_cambios_table();
+    $tabla_snap = blokes_sync_grupos_snapshot_table();
+    $mes_corte = blokes_mes_mas(date('Y-m'), -2);
+    $pendientes = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL AND mes < %s ORDER BY id DESC LIMIT %d",
+        $mes_corte, $limit
+    ), ARRAY_A);
+    $muestra = array();
+    foreach ($pendientes as $c) {
+        $clave = blokes_sync_grupos_clave($c['nombre'], $c['telefono']);
+        $snap = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla_snap} WHERE pestana = %s AND clave = %s", $c['pestana'], $clave), ARRAY_A);
+        $pagos_snap = $snap ? (json_decode($snap['pagos_json'], true) ?: array()) : array();
+        $datos = json_decode($c['datos_json'], true) ?: array();
+        $muestra[] = array(
+            'id' => intval($c['id']), 'pestana' => $c['pestana'], 'nombre' => $c['nombre'], 'telefono' => $c['telefono'],
+            'clave' => $clave, 'mes' => $c['mes'], 'importePropuesto' => $datos['importe'] ?? null, 'metodoPropuesto' => $datos['metodo'] ?? null,
+            'snapshotExiste' => (bool) $snap, 'snapshotMesesGuardados' => count($pagos_snap),
+            'snapshotTieneEseMes' => isset($pagos_snap[$c['mes']]),
+            'snapshotPagoEseMes' => $pagos_snap[$c['mes']] ?? null,
+            'snapshotActualizadoAt' => $snap['updated_at'] ?? null,
+        );
+    }
+    $total_viejos = intval($wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL AND mes < %s", $mes_corte
+    )));
+    return rest_ensure_response(array('success' => true, 'totalPendientesViejos' => $total_viejos, 'muestra' => $muestra));
 }
 
 // ============================================================

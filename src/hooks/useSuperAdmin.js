@@ -77,7 +77,14 @@ async function gestionCall(method, path, body) {
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   }))
   const json = await res.json().catch(() => null)
-  if (!res.ok) throw new Error(json?.message || `HTTP ${res.status}`)
+  if (!res.ok) {
+    const err = new Error(json?.message || `HTTP ${res.status}`)
+    // 18/11 (cowork, GRAVE: 499 "pago nuevo" viejos): el código del WP_Error (p. ej.
+    // "mes_antiguo") hace falta para que el frontend pueda reaccionar al bloqueo sin tener que
+    // adivinarlo del texto del mensaje.
+    err.code = json?.code
+    throw err
+  }
   return json?.data ?? json
 }
 const gestionPost = (path, body) => gestionCall('POST', path, body)
@@ -207,7 +214,12 @@ export const syncGruposConfigGet      = ()         => gestionCall('GET', '/gesti
 export const syncGruposConfigSet      = body        => gestionPost('/gestion/sync-grupos/config', body)
 export const syncGruposSincronizar    = ()         => gestionPost('/gestion/sync-grupos/sincronizar')
 export const syncGruposCambiosGet     = (estado = 'pendiente') => gestionCall('GET', `/gestion/sync-grupos/cambios?estado=${estado}`)
-export const syncGruposCambioAplicar  = id         => gestionPost(`/gestion/sync-grupos/cambios/${id}/aplicar`)
+// 18/11 (cowork, GRAVE): confirmarMesAntiguo=true solo cuando alguien ya confirmó a propósito
+// que quiere aplicar un "pago nuevo" de hace más de 2 meses (ver mes_antiguo en el backend).
+export const syncGruposCambioAplicar  = (id, confirmarMesAntiguo = false) => gestionPost(`/gestion/sync-grupos/cambios/${id}/aplicar`, confirmarMesAntiguo ? { confirmarMesAntiguo: true } : undefined)
+// Diagnóstico de un "pago nuevo" viejo concreto: qué hay guardado en la foto (snapshot) de esa
+// fila para ver por qué se disparó como "nuevo" — para no adivinar la causa sin datos reales.
+export const syncGruposDiagnosticoPagoViejo = (limit = 15) => gestionCall('GET', `/gestion/sync-grupos/diagnostico-pago-viejo?limit=${limit}`)
 export const syncGruposCambioDescartar = id        => gestionPost(`/gestion/sync-grupos/cambios/${id}/descartar`)
 // Limpieza única (17/11 16:20, cowork): descarta de golpe las propuestas pendientes de pestañas
 // Balance y los "pago nuevo" de meses viejos que ya estaban colgando ANTES de 589ab3a.

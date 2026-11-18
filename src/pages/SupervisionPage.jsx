@@ -29,7 +29,7 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
-  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago,
+  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo,
   gestionFacturasPendientesGet,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
@@ -2246,6 +2246,9 @@ function SyncGruposCambiosPanel() {
   const [limpiando, setLimpiando] = useState(false)
   const [reevaluando, setReevaluando] = useState(false)
   const [reevaluandoMetodo, setReevaluandoMetodo] = useState(false)
+  const [detalleSinFila, setDetalleSinFila] = useState(null)
+  const [diagnosticando, setDiagnosticando] = useState(false)
+  const [diagnostico, setDiagnostico] = useState(null)
 
   async function cargar(estado = estadoFiltro) {
     setErr(null)
@@ -2265,10 +2268,25 @@ function SyncGruposCambiosPanel() {
       await cargar()
     } catch (e) { setErr(e.message) } finally { setSincronizando(false) }
   }
+  // 18/11 (cowork, GRAVE: 499 "pago nuevo" de hace meses colándose como pendientes): el backend
+  // ahora bloquea "Aplicar" en un pago de hace más de 2 meses (código mes_antiguo) hasta que
+  // alguien confirme a propósito que de verdad quiere escribirlo — para que Eva no pueda apuntar
+  // ni facturar un cobro viejo por error de un solo click.
   async function aplicar(id) {
     setBusyId(id); setErr(null)
-    try { await syncGruposCambioAplicar(id); await cargar() }
-    catch (e) { setErr(e.message) } finally { setBusyId(null) }
+    try {
+      await syncGruposCambioAplicar(id)
+      await cargar()
+    } catch (e) {
+      if (e.code === 'mes_antiguo') {
+        if (window.confirm(e.message + '\n\n¿Confirmas que quieres aplicarlo de verdad?')) {
+          try { await syncGruposCambioAplicar(id, true); await cargar() }
+          catch (e2) { setErr(e2.message) }
+        }
+      } else {
+        setErr(e.message)
+      }
+    } finally { setBusyId(null) }
   }
   async function descartar(id) {
     setBusyId(id); setErr(null)
@@ -2291,17 +2309,22 @@ function SyncGruposCambiosPanel() {
   // antes de la búsqueda por teléfono en otras pestañas — esto los reintenta de golpe. 18/11:
   // además del recuento, enseña el detalle de cada uno (pestaña buscada, teléfono) para poder
   // ver dónde falla sin tener que pedir el log de gestión aparte.
+  // 18/11 (cowork): "el panel prometido no aparece en la página" — el detalle se mandaba solo
+  // por window.alert(), un diálogo del navegador que no queda en el DOM de la página (y puede
+  // estar bloqueado en según qué entorno de pruebas). Ahora se guarda en estado y se pinta
+  // inline, debajo de los botones, además de seguir devolviéndolo la API.
   async function reevaluarSinFila() {
-    setReevaluando(true); setErr(null)
+    setReevaluando(true); setErr(null); setDetalleSinFila(null)
     try {
       const r = await syncGruposReevaluarSinFila()
       await cargar()
-      const siguen = (r.detalle || []).filter(d => !d.encontrado)
-      const detalleTxt = siguen.length
-        ? '\n\nSiguen sin encontrarse:\n' + siguen.map(d => `· ${d.nombre || d.telefono} — buscado en "${d.pestanaBuscada}" (tel. ${d.telefono || '—'})`).join('\n')
-        : ''
-      window.alert(`${r.aplicados} encontrada(s) y escrita(s). ${r.siguenPendientes} siguen sin encontrar su fila.${detalleTxt}`)
+      setDetalleSinFila(r)
     } catch (e) { setErr(e.message) } finally { setReevaluando(false) }
+  }
+  async function diagnosticarPagoViejo() {
+    setDiagnosticando(true); setErr(null); setDiagnostico(null)
+    try { setDiagnostico(await syncGruposDiagnosticoPagoViejo(15)) }
+    catch (e) { setErr(e.message) } finally { setDiagnosticando(false) }
   }
   // 18/11 (cowork): las propuestas de "pago nuevo" que ya estaban pendientes de antes del
   // arreglo de "TA"=tarjeta se quedaron con el método equivocado guardado — esto relee la fila
@@ -2337,6 +2360,9 @@ function SyncGruposCambiosPanel() {
           <button className="sv-tests-save" onClick={reevaluarMetodoPago} disabled={reevaluandoMetodo} title="Corrige el método (TA=tarjeta) de los «pago nuevo» pendientes de antes del arreglo">
             {reevaluandoMetodo ? 'Reevaluando…' : 'Reevaluar método (TA)'}
           </button>
+          <button className="sv-tests-select" onClick={diagnosticarPagoViejo} disabled={diagnosticando} title="Enseña qué hay guardado en la foto (snapshot) de una muestra de los «pago nuevo» de hace más de 2 meses, para ver la causa real">
+            {diagnosticando ? 'Mirando…' : 'Diagnóstico pago viejo'}
+          </button>
           <span className="sv-ot-muted">
             {ultima ? `Última sincronización: ${new Date(ultima.replace(' ', 'T')).toLocaleString('es-ES')}` : 'Todavía no se ha sincronizado nunca.'}
           </span>
@@ -2357,6 +2383,49 @@ function SyncGruposCambiosPanel() {
         </p>
       )}
       {err && <p className="sv-error">{err}</p>}
+
+      {detalleSinFila && (
+        <div className="sv-note" style={{ marginBottom: 14 }}>
+          <strong>{detalleSinFila.aplicados} encontrada(s) y escrita(s). {detalleSinFila.siguenPendientes} siguen sin encontrar su fila.</strong>
+          {detalleSinFila.detalle?.filter(d => !d.encontrado).length > 0 && (
+            <ul style={{ margin: '8px 0 0', paddingLeft: 18 }}>
+              {detalleSinFila.detalle.filter(d => !d.encontrado).map(d => (
+                <li key={d.id}>
+                  {d.nombre || d.telefono || '—'} — buscado en «{d.pestanaBuscada}» (tel. {d.telefono || '—'}, mes {d.mes || '—'})
+                  {d.error ? <span className="sv-ot-muted"> · {d.error}</span> : null}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {diagnostico && (
+        <div className="sv-note" style={{ marginBottom: 14 }}>
+          <strong>{diagnostico.totalPendientesViejos} «pago nuevo» pendientes de hace más de 2 meses en total.</strong> Muestra de {diagnostico.muestra?.length || 0}:
+          <div className="sv-tests-scroll" style={{ marginTop: 8 }}>
+            <table className="sv-tests-table">
+              <thead>
+                <tr><th>Pestaña</th><th>Alumno</th><th>Mes</th><th>Propuesto</th><th>¿Hay foto?</th><th>Meses en la foto</th><th>¿Tiene ese mes?</th><th>Pago en la foto</th></tr>
+              </thead>
+              <tbody>
+                {diagnostico.muestra?.map(d => (
+                  <tr key={d.id}>
+                    <td className="sv-ot-muted">{d.pestana}</td>
+                    <td>{d.nombre || d.telefono || '—'}</td>
+                    <td>{d.mes}</td>
+                    <td className="sv-ot-muted">{d.importePropuesto ?? '—'} € ({d.metodoPropuesto || '—'})</td>
+                    <td>{d.snapshotExiste ? 'Sí' : 'No'}</td>
+                    <td>{d.snapshotMesesGuardados}</td>
+                    <td>{d.snapshotTieneEseMes ? 'Sí' : 'No'}</td>
+                    <td className="sv-ot-muted">{d.snapshotPagoEseMes ? `${d.snapshotPagoEseMes.importe} € (${d.snapshotPagoEseMes.metodo})` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {cambios === null ? (
         <p className="sv-loading">Cargando…</p>
