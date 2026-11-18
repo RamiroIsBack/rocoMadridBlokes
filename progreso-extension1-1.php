@@ -1284,10 +1284,15 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/diagnostico-pago-viejo', array(
         'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_diagnostico_pago_viejo', 'permission_callback' => $sa_perm,
     ));
-    // 18/11 (cowork §07:50): descarta de golpe los "pago nuevo" pendientes cuyo importe ya
-    // coincide con el que hay guardado en la foto para ese mes — la tormenta de TA→tarjeta.
+    // 18/11 (arreglado tras el aviso de cowork 09:30): descarta de golpe los "pago nuevo"
+    // pendientes que YA estén cobrados de verdad en la web para ese mes (nunca contra la foto).
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/limpiar-pago-nuevo-mismo-importe', array(
         'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe', 'permission_callback' => $sa_perm,
+    ));
+    // 18/11 09:30 (cowork, GRAVE): deshace la limpieza rota que comparaba contra la foto —
+    // reabre todo lo descartado por ese motivo y lo reevalúa ya contra la web de verdad.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/deshacer-limpieza-mismo-importe', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_deshacer_limpieza_mismo_importe', 'permission_callback' => $sa_perm,
     ));
     // WP-Cron no corre de fiar con poco tráfico (pseudo-cron: solo se dispara si entra una
     // visita después de la hora programada) — Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05:
@@ -9035,14 +9040,6 @@ function blokes_sync_grupos_sincronizar() {
 
     blokes_sync_grupos_reintentar_pendientes($pestanas, $subs_por_tel, $externos_por_tel);
 
-    // 18/11 (Ramiro, relayando cowork §07:50: "cierra solas las propuestas que ya coinciden con
-    // lo guardado") — además de que el arreglo de arriba evite que se creen MÁS "pago nuevo" por
-    // un cambio de método/fecha, esto cierra solas, en cada sincronización, las que ya estuvieran
-    // pendientes de antes por el mismo motivo (p. ej. las de la tormenta TA→tarjeta que queden
-    // sin limpiar a mano) — nunca toca una cuyo importe de verdad sea distinto al de la foto.
-    $cierre_automatico = blokes_sync_grupos_cerrar_pago_nuevo_resueltos('auto (sincronización) · mismo importe ya en la foto (solo cambió método/fecha, no dinero nuevo)');
-    $resumen['pagoNuevoCerradoSolo'] = $cierre_automatico['descartados'];
-
     update_option('blokes_sync_grupos_ultima_sincronizacion', current_time('mysql'), false);
     return $resumen;
 }
@@ -9398,30 +9395,41 @@ function superadmin_sync_grupos_diagnostico_pago_viejo($request) {
 
 // 18/11 (Ramiro, relayando cowork §07:50: "cierra solas las propuestas que ya coinciden con lo
 // guardado") — misma comprobación que el arreglo de blokes_sync_grupos_sincronizar() (importe
-// igual al de la foto = no es dinero nuevo), pero contra TODOS los "pago nuevo" pendientes que
-// ya existieran (de antes del arreglo) — se usa tanto automáticamente en cada sincronización
-// (reintentar_pendientes) como a mano desde el botón "Limpiar". Descarta (nunca borra), nunca
-// toca los que de verdad tengan un importe distinto al guardado — esos sí podrían ser dinero real
-// sin cobrar y se dejan para que alguien los mire. $motivo se guarda en resuelto_por para poder
-// distinguir el cierre automático del manual si hace falta.
+// igual al de la foto = no es dinero nuevo) — GRAVE, roto (cowork, 18/11 09:30): comparar contra
+// la FOTO (snapshot) nunca sirve para saber si un pago "ya está resuelto", porque la foto ES el
+// propio Excel (se sobreescribe con la misma lectura que crea la propuesta) — importe y foto
+// coinciden SIEMPRE, así que esto descartaba también pagos reales que Eva acababa de apuntar y
+// que todavía no habían llegado a la web (17 de octubre/noviembre: Ruano, Aguí, Torres,
+// Silvestre, Corregidor, Heras, Irurozki, Yoga...). Reescrito para comparar contra la WEB de
+// verdad: un "pago nuevo" solo se cierra solo si YA hay un cobro real para ese mes — un pedido
+// completed/processing de esa suscripción (mismo criterio que ya usa
+// blokes_sync_grupos_sub_ya_cobrado_mes(), el que ya protege "Aplicar" de un cobro duplicado) o
+// una fila en la tabla de pagos de externos para ese periodo. Si no hay match, o el match no
+// tiene nada cobrado todavía en la web, se deja pendiente — nunca se descarta a ciegas.
 function blokes_sync_grupos_cerrar_pago_nuevo_resueltos($motivo) {
     global $wpdb;
     $tabla = blokes_sync_grupos_cambios_table();
-    $tabla_snap = blokes_sync_grupos_snapshot_table();
     $pendientes = $wpdb->get_results(
         "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL", ARRAY_A
     );
     $ids = array(); $revisados = 0;
     foreach ($pendientes as $c) {
         $revisados++;
-        $clave = blokes_sync_grupos_clave($c['nombre'], $c['telefono']);
-        $snap = $wpdb->get_row($wpdb->prepare("SELECT pagos_json FROM {$tabla_snap} WHERE pestana = %s AND clave = %s", $c['pestana'], $clave), ARRAY_A);
-        if (!$snap) continue;
-        $pagos_snap = json_decode($snap['pagos_json'], true) ?: array();
-        $pago_snap = $pagos_snap[$c['mes']] ?? null;
-        if (!$pago_snap) continue;
-        $datos = json_decode($c['datos_json'], true) ?: array();
-        if (floatval($pago_snap['importe'] ?? 0) === floatval($datos['importe'] ?? 0)) $ids[] = intval($c['id']);
+        if (!$c['match_tipo'] || !$c['match_id']) continue; // sin emparejar: nunca se puede saber si ya está cobrado
+        if ($c['match_tipo'] === 'sub') {
+            if (blokes_sync_grupos_sub_ya_cobrado_mes(intval($c['match_id']), (string) $c['mes'])) $ids[] = intval($c['id']);
+            continue;
+        }
+        if ($c['match_tipo'] === 'externo') {
+            $tabla_ext_pagos = blokes_externos_pagos_table();
+            $pago_externo = $wpdb->get_row($wpdb->prepare(
+                "SELECT importe FROM {$tabla_ext_pagos} WHERE externo_id = %d AND periodo = %s", intval($c['match_id']), (string) $c['mes']
+            ), ARRAY_A);
+            if ($pago_externo) {
+                $datos = json_decode($c['datos_json'], true) ?: array();
+                if (floatval($pago_externo['importe']) === floatval($datos['importe'] ?? 0)) $ids[] = intval($c['id']);
+            }
+        }
     }
     if ($ids) {
         $ph = implode(',', array_fill(0, count($ids), '%d'));
@@ -9436,8 +9444,30 @@ function blokes_sync_grupos_cerrar_pago_nuevo_resueltos($motivo) {
 function superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe($request) {
     blokes_sync_grupos_ensure_tables();
     $u = wp_get_current_user();
-    $r = blokes_sync_grupos_cerrar_pago_nuevo_resueltos(($u ? $u->user_login : '') . ' · mismo importe ya en la foto (solo cambió método/fecha, no dinero nuevo)');
+    $r = blokes_sync_grupos_cerrar_pago_nuevo_resueltos(($u ? $u->user_login : '') . ' · ya cobrado de verdad en la web para ese mes');
     return rest_ensure_response(array('success' => true, 'revisados' => $r['revisados'], 'descartados' => $r['descartados']));
+}
+
+// Deshacer (18/11 09:30, cowork): la limpieza "mismo importe ya en la foto" (4f12088/b3767f5)
+// comparaba contra el propio Excel y descartó también pagos reales (17 de octubre/noviembre:
+// Ruano, Aguí, Torres, Silvestre, Corregidor, Heras, Irurozki, Yoga...) que todavía no habían
+// llegado a la web. Esto vuelve a poner en 'pendiente' TODO lo que se descartó por ese motivo
+// (tanto el botón manual como el cierre automático de b3767f5 usaban el mismo texto), y acto
+// seguido reevalúa cada uno con la comprobación ya arreglada (contra la web de verdad, nunca
+// contra la foto) — así solo quedan descartados los que de verdad ya estén cobrados; el resto
+// vuelve a "Cambios del Excel" pendiente, visible para Aplicar.
+function superadmin_sync_grupos_deshacer_limpieza_mismo_importe($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $u = wp_get_current_user();
+    $reabiertos = $wpdb->query($wpdb->prepare(
+        "UPDATE {$tabla} SET estado = 'pendiente', resuelto_at = NULL, resuelto_por = %s
+         WHERE estado = 'descartado' AND tipo = 'pago_nuevo' AND resuelto_por LIKE %s",
+        ($u ? $u->user_login : '') . ' · reabierto (la limpieza comparaba contra el Excel, nunca contra la web)', '%mismo importe ya en la foto%'
+    ));
+    $r = blokes_sync_grupos_cerrar_pago_nuevo_resueltos(($u ? $u->user_login : '') . ' · reevaluado tras deshacer: ya cobrado de verdad en la web para ese mes');
+    return rest_ensure_response(array('success' => true, 'reabiertos' => intval($reabiertos), 'siguenPendientes' => intval($reabiertos) - $r['descartados'], 'vueltosACerrarConfirmados' => $r['descartados']));
 }
 
 // ============================================================

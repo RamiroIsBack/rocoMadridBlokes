@@ -29,7 +29,7 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
-  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo, syncGruposLimpiarPagoNuevoMismoImporte,
+  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo, syncGruposLimpiarPagoNuevoMismoImporte, syncGruposDeshacerLimpiezaMismoImporte,
   gestionFacturasPendientesGet,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
@@ -2251,6 +2251,8 @@ function SyncGruposCambiosPanel() {
   const [diagnostico, setDiagnostico] = useState(null)
   const [limpiandoMismoImporte, setLimpiandoMismoImporte] = useState(false)
   const [resultadoMismoImporte, setResultadoMismoImporte] = useState(null)
+  const [deshaciendo, setDeshaciendo] = useState(false)
+  const [resultadoDeshacer, setResultadoDeshacer] = useState(null)
 
   async function cargar(estado = estadoFiltro) {
     setErr(null)
@@ -2328,16 +2330,32 @@ function SyncGruposCambiosPanel() {
     try { setDiagnostico(await syncGruposDiagnosticoPagoViejo(15)) }
     catch (e) { setErr(e.message) } finally { setDiagnosticando(false) }
   }
-  // 18/11 (cowork §07:50): la tormenta de TA→tarjeta deja "pago nuevo" pendientes cuyo importe
-  // ya coincide con el que hay en la foto — no hace falta cobrar nada, solo limpiar el aviso.
+  // 18/11 09:30 (cowork, GRAVE): la versión anterior de este botón comparaba contra la FOTO del
+  // Excel (que siempre coincide con el Excel, por definición) y descartó también pagos reales
+  // de octubre/noviembre que todavía no habían llegado a la web. Arreglado para comparar contra
+  // la WEB de verdad (pedido completed/processing de la suscripción, o la tabla de pagos de
+  // externos) — solo cierra lo que YA está cobrado de verdad.
   async function limpiarPagoNuevoMismoImporte() {
-    if (!window.confirm('¿Descartar los «pago nuevo» pendientes cuyo importe ya coincide con el que hay guardado en la foto? No se puede deshacer de golpe (quedan como "descartado", nunca se borran).')) return
+    if (!window.confirm('¿Descartar los «pago nuevo» pendientes que ya estén cobrados de verdad en la web para ese mes? No se puede deshacer de golpe (quedan como "descartado", nunca se borran).')) return
     setLimpiandoMismoImporte(true); setErr(null); setResultadoMismoImporte(null)
     try {
       const r = await syncGruposLimpiarPagoNuevoMismoImporte()
       await cargar()
       setResultadoMismoImporte(r)
     } catch (e) { setErr(e.message) } finally { setLimpiandoMismoImporte(false) }
+  }
+  // 18/11 09:30 (cowork, GRAVE): deshace la limpieza rota — reabre (vuelve a "pendiente") todo
+  // lo que se había descartado por ese motivo (tanto el botón manual como el cierre automático
+  // de b3767f5, ya quitado) y lo reevalúa ya con la comprobación arreglada, para que solo
+  // queden descartados los que de verdad estén cobrados en la web.
+  async function deshacerLimpiezaMismoImporte() {
+    if (!window.confirm('¿Reabrir todo lo que se descartó por error con la limpieza rota (comparaba contra el Excel) y reevaluarlo contra la web de verdad?')) return
+    setDeshaciendo(true); setErr(null); setResultadoDeshacer(null)
+    try {
+      const r = await syncGruposDeshacerLimpiezaMismoImporte()
+      await cargar()
+      setResultadoDeshacer(r)
+    } catch (e) { setErr(e.message) } finally { setDeshaciendo(false) }
   }
   // 18/11 (cowork): las propuestas de "pago nuevo" que ya estaban pendientes de antes del
   // arreglo de "TA"=tarjeta se quedaron con el método equivocado guardado — esto relee la fila
@@ -2376,8 +2394,11 @@ function SyncGruposCambiosPanel() {
           <button className="sv-tests-select" onClick={diagnosticarPagoViejo} disabled={diagnosticando} title="Enseña qué hay guardado en la foto (snapshot) de una muestra de los «pago nuevo» de hace más de 2 meses, para ver la causa real">
             {diagnosticando ? 'Mirando…' : 'Diagnóstico pago viejo'}
           </button>
-          <button className="sv-tests-remove" onClick={limpiarPagoNuevoMismoImporte} disabled={limpiandoMismoImporte} title="Descarta los «pago nuevo» pendientes cuyo importe ya coincide con el que hay en la foto (tormenta TA→tarjeta, 18/11)">
-            {limpiandoMismoImporte ? 'Limpiando…' : 'Limpiar «mismo importe ya en la foto»'}
+          <button className="sv-tests-remove" onClick={limpiarPagoNuevoMismoImporte} disabled={limpiandoMismoImporte} title="Descarta los «pago nuevo» pendientes que ya estén cobrados de verdad en la web para ese mes (nunca contra el Excel)">
+            {limpiandoMismoImporte ? 'Limpiando…' : 'Limpiar «ya cobrado en la web»'}
+          </button>
+          <button className="sv-tests-select" onClick={deshacerLimpiezaMismoImporte} disabled={deshaciendo} title="Reabre lo descartado por la limpieza rota de antes (comparaba contra el Excel) y lo reevalúa contra la web de verdad">
+            {deshaciendo ? 'Deshaciendo…' : 'Deshacer limpieza rota (09:30)'}
           </button>
           <span className="sv-ot-muted">
             {ultima ? `Última sincronización: ${new Date(ultima.replace(' ', 'T')).toLocaleString('es-ES')}` : 'Todavía no se ha sincronizado nunca.'}
@@ -2395,11 +2416,16 @@ function SyncGruposCambiosPanel() {
       {resumenSync && (
         <p className="sv-ot-muted">
           Sincronizado: {resumenSync.cambiosNuevos} cambio{resumenSync.cambiosNuevos === 1 ? '' : 's'} nuevo{resumenSync.cambiosNuevos === 1 ? '' : 's'}
-          {resumenSync.fotoInicial?.length ? ` · foto inicial de ${resumenSync.fotoInicial.length} pestaña(s)` : ''}
-          {resumenSync.pagoNuevoCerradoSolo ? ` · ${resumenSync.pagoNuevoCerradoSolo} "pago nuevo" viejo(s) cerrado(s) solos (mismo importe ya en la foto)` : ''}.
+          {resumenSync.fotoInicial?.length ? ` · foto inicial de ${resumenSync.fotoInicial.length} pestaña(s)` : ''}.
         </p>
       )}
       {err && <p className="sv-error">{err}</p>}
+
+      {resultadoDeshacer && (
+        <p className="sv-note" style={{ marginBottom: 14 }}>
+          <strong>{resultadoDeshacer.reabiertos}</strong> reabierto(s). De esos, <strong>{resultadoDeshacer.vueltosACerrarConfirmados}</strong> ya estaban cobrados de verdad en la web y se han vuelto a cerrar; quedan <strong>{resultadoDeshacer.siguenPendientes}</strong> pendientes de verdad en «Cambios del Excel».
+        </p>
+      )}
 
       {detalleSinFila && (
         <div className="sv-note" style={{ marginBottom: 14 }}>

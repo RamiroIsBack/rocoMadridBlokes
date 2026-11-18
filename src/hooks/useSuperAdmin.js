@@ -220,10 +220,12 @@ export const syncGruposCambioAplicar  = (id, confirmarMesAntiguo = false) => ges
 // Diagnóstico de un "pago nuevo" viejo concreto: qué hay guardado en la foto (snapshot) de esa
 // fila para ver por qué se disparó como "nuevo" — para no adivinar la causa sin datos reales.
 export const syncGruposDiagnosticoPagoViejo = (limit = 15) => gestionCall('GET', `/gestion/sync-grupos/diagnostico-pago-viejo?limit=${limit}`)
-// 18/11 (cowork §07:50, tormenta TA→tarjeta): descarta de golpe los "pago nuevo" pendientes
-// cuyo importe ya coincide con el que hay guardado en la foto para ese mes — no es dinero
-// nuevo, solo cambió el método o la fecha.
+// 18/11 (arreglado tras el aviso de cowork 09:30): descarta de golpe los "pago nuevo"
+// pendientes que YA estén cobrados de verdad en la web para ese mes (nunca contra la foto/Excel).
 export const syncGruposLimpiarPagoNuevoMismoImporte = () => gestionPost('/gestion/sync-grupos/limpiar-pago-nuevo-mismo-importe')
+// 18/11 09:30 (cowork, GRAVE): deshace la limpieza rota (comparaba contra el Excel y descartó
+// pagos reales) — reabre todo lo descartado por ese motivo y lo reevalúa ya contra la web.
+export const syncGruposDeshacerLimpiezaMismoImporte = () => gestionPost('/gestion/sync-grupos/deshacer-limpieza-mismo-importe')
 export const syncGruposCambioDescartar = id        => gestionPost(`/gestion/sync-grupos/cambios/${id}/descartar`)
 // Limpieza única (17/11 16:20, cowork): descarta de golpe las propuestas pendientes de pestañas
 // Balance y los "pago nuevo" de meses viejos que ya estaban colgando ANTES de 589ab3a.
