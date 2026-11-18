@@ -9628,6 +9628,25 @@ function blokes_sync_grupos_sub_afectada_bug_1711($sub_id) {
 // para sacar el subId y simular (simular=true, NUNCA escribe nada) qué pasaría si Eva cobrara
 // ahora ese mismo pedido — para responder "¿se emitiría una factura nueva?" con un dato real del
 // propio sistema en vez de una suposición.
+// Compara la celda que hay AHORA (releída de verdad) contra lo que el log de 'marcar_cobrado'
+// sin sesión dice que se escribió — importe exacto, método exacto (mapeado al código de Excel,
+// "TA"/"TR"/"EF") y la fecha cayendo en el mismo día que el log. Las tres cosas a la vez, no solo
+// "mismo día" — cowork, 18/11 11:00: "que solo borre si la celda coincide exactamente con lo
+// escrito por la sync". Devuelve también el sub_id (para poder simular) y el propio detalle del
+// marcar_cobrado emparejado.
+function blokes_sync_grupos_celda_coincide_con_log($r, $pago_actual, $marcar_cobrado_rows) {
+    $mc_asociado = null;
+    foreach ($marcar_cobrado_rows as $mc) {
+        if ($mc['created_at'] === $r['created_at']) { $mc_asociado = $mc; break; }
+    }
+    if (!$mc_asociado || !$pago_actual) return array('coincide' => false, 'subId' => null);
+    $detalle_mc = json_decode($mc_asociado['detalle'], true) ?: array();
+    $mismo_dia = isset($pago_actual['fecha']) && substr($r['created_at'], 0, 10) === date('Y-m-d', strtotime(str_replace('/', '-', $pago_actual['fecha'])));
+    $mismo_importe = abs(floatval($pago_actual['importe'] ?? 0) - floatval($detalle_mc['importe'] ?? -1)) < 0.01;
+    $mismo_metodo = blokes_sync_grupos_metodo_a_excel((string) ($pago_actual['metodo'] ?? '')) === blokes_sync_grupos_metodo_a_excel((string) ($detalle_mc['metodo'] ?? ''));
+    return array('coincide' => $mismo_dia && $mismo_importe && $mismo_metodo, 'subId' => intval($mc_asociado['sub_id']));
+}
+
 function superadmin_sync_grupos_informe_celdas_escritas($request) {
     global $wpdb;
     blokes_ensure_gestion_log_table();
@@ -9658,17 +9677,8 @@ function superadmin_sync_grupos_informe_celdas_escritas($request) {
             foreach ($rp['filas'] as $f) { if (intval($f['_row']) + 1 === $fila_sheet) { $fila_actual = $f; break; } }
         }
         $pago_actual = $fila_actual ? ($fila_actual['pagos'][$mes] ?? null) : null;
-        // Mismo día de calendario que el log = casi seguro es esta misma escritura (nadie más
-        // suele tocar esa celda exacta horas después); otro día, o la celda ahora vacía, es que
-        // alguien ya la corrigió o nunca llegó a escribirse — no se toca en ese caso.
-        $mismo_dia = $pago_actual && isset($pago_actual['fecha']) && substr($r['created_at'], 0, 10) === date('Y-m-d', strtotime(str_replace('/', '-', $pago_actual['fecha'])));
-        // Mismo created_at (mismo segundo, misma llamada PHP) en el log de 'marcar_cobrado' sin
-        // sesión = el pedido real que este cobro escrito vino a completar — de ahí sacamos el
-        // subId para poder simular "¿qué pasaría si se cobrara de nuevo?" sin inventarlo.
-        $sub_id_asociado = null;
-        foreach ($marcar_cobrado_rows as $mc) {
-            if ($mc['created_at'] === $r['created_at']) { $sub_id_asociado = intval($mc['sub_id']); break; }
-        }
+        $match = blokes_sync_grupos_celda_coincide_con_log($r, $pago_actual, $marcar_cobrado_rows);
+        $sub_id_asociado = $match['subId'];
         $simulacion = null;
         if ($sub_id_asociado && function_exists('wcs_get_subscription')) {
             $sub_sim = wcs_get_subscription($sub_id_asociado);
@@ -9693,7 +9703,7 @@ function superadmin_sync_grupos_informe_celdas_escritas($request) {
             'logId' => intval($r['id']), 'pestana' => $pestana, 'fila' => $fila_sheet, 'mes' => $mes,
             'nombre' => $fila_actual['nombre'] ?? null, 'registradoEn' => $r['created_at'],
             'importeActual' => $pago_actual['importe'] ?? null, 'metodoActual' => $pago_actual['metodo'] ?? null, 'fechaActual' => $pago_actual['fecha'] ?? null,
-            'pareceSerElBug' => (bool) $mismo_dia, 'subId' => $sub_id_asociado, 'simulacionCobrarAhora' => $simulacion,
+            'pareceSerElBug' => (bool) $match['coincide'], 'subId' => $sub_id_asociado, 'simulacionCobrarAhora' => $simulacion,
         );
     }
     return rest_ensure_response(array('success' => true, 'total' => count($informe), 'filas' => $informe));
@@ -9709,6 +9719,9 @@ function superadmin_sync_grupos_limpiar_celdas_escritas($request) {
     $tabla_log = blokes_gestion_log_table();
     $rows = $wpdb->get_results(
         "SELECT * FROM {$tabla_log} WHERE accion = 'sync_grupos_cobro_escrito' AND user_id = 0 ORDER BY id ASC", ARRAY_A
+    );
+    $marcar_cobrado_rows = $wpdb->get_results(
+        "SELECT * FROM {$tabla_log} WHERE accion = 'marcar_cobrado' AND user_id = 0 ORDER BY id ASC", ARRAY_A
     );
     $activa = blokes_sync_grupos_sheet_activa();
     if (!$activa['id']) return new WP_Error('falta_config', 'No hay Hoja configurada.', array('status' => 400));
@@ -9729,8 +9742,8 @@ function superadmin_sync_grupos_limpiar_celdas_escritas($request) {
         $fila_actual = null;
         foreach ($rp['filas'] as $f) { if (intval($f['_row']) + 1 === $fila_sheet) { $fila_actual = $f; break; } }
         $pago_actual = $fila_actual ? ($fila_actual['pagos'][$mes] ?? null) : null;
-        $mismo_dia = $pago_actual && isset($pago_actual['fecha']) && substr($r['created_at'], 0, 10) === date('Y-m-d', strtotime(str_replace('/', '-', $pago_actual['fecha'])));
-        if (!$mismo_dia) { $saltadas[] = intval($r['id']); continue; }
+        $match = blokes_sync_grupos_celda_coincide_con_log($r, $pago_actual, $marcar_cobrado_rows);
+        if (!$match['coincide']) { $saltadas[] = intval($r['id']); continue; }
         $bloque = null;
         foreach ($rp['bloquesLayout'] as $b) { if ($b['ym'] === $mes) { $bloque = $b; break; } }
         if (!$bloque) { $saltadas[] = intval($r['id']); continue; }
@@ -11884,6 +11897,16 @@ function superadmin_gestion_marcar_cobrado($request) {
         update_post_meta($order->get_id(), '_rm_importe_cobrado', $importe);
         update_post_meta($order->get_id(), '_rm_metodo_cobro', $metodo);
         if ($parcial) update_post_meta($order->get_id(), '_rm_pago_parcial', $nota ?: '1');
+        // 18/11 (cowork §11:00, pedido 3 de la limpieza del bug del auto-aplicado): este pedido
+        // puede llegar aquí con `_aeat_cancelled_invoice` de una anulación anterior (los 22 del
+        // 17/11, vueltos a "pending" a propósito para que se pudieran cobrar de verdad) — si lo
+        // estamos completando AHORA, de verdad, es que hay una factura nueva de camino (o ya
+        // hecha) para este cobro; blokes_pedido_factura_anulada() nunca debe seguir excluyéndolo
+        // de los ingresos para siempre solo por una anulación vieja que ya quedó resuelta.
+        if ($order->get_meta('_aeat_cancelled_invoice')) {
+            $order->delete_meta_data('_aeat_cancelled_invoice');
+            $order->save();
+        }
         $order->payment_complete();
         // payment_complete() deja "processing" (el producto no es virtual/descargable):
         // aquí se considera cobrado de verdad, así que pasa a "completado" — esto emite la
