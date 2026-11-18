@@ -1284,6 +1284,11 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/diagnostico-pago-viejo', array(
         'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_diagnostico_pago_viejo', 'permission_callback' => $sa_perm,
     ));
+    // 18/11 (cowork §07:50): descarta de golpe los "pago nuevo" pendientes cuyo importe ya
+    // coincide con el que hay guardado en la foto para ese mes — la tormenta de TA→tarjeta.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/limpiar-pago-nuevo-mismo-importe', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe', 'permission_callback' => $sa_perm,
+    ));
     // WP-Cron no corre de fiar con poco tráfico (pseudo-cron: solo se dispara si entra una
     // visita después de la hora programada) — Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05:
     // "esto tiene que pasar automático". Ruta pública protegida por secreto (como el webhook de
@@ -8927,8 +8932,22 @@ function blokes_sync_grupos_sincronizar() {
                     // WooCommerce por un cobro de hace más de un año.
                     if (!$anterior && $ym < $mes_pago_reciente_desde) continue;
                     $antes = $pagos_anteriores[$ym] ?? null;
-                    $igual = $antes && floatval($antes['importe'] ?? 0) === floatval($pago['importe'] ?? 0) && ($antes['metodo'] ?? '') === ($pago['metodo'] ?? '');
-                    if (!$igual) {
+                    $mismo_importe = $antes && floatval($antes['importe'] ?? 0) === floatval($pago['importe'] ?? 0);
+                    $igual = $mismo_importe && ($antes['metodo'] ?? '') === ($pago['metodo'] ?? '');
+                    // 18/11 (cowork, GRAVE: 499→1233 "pago nuevo" de 2024-03 a 2026-11, todos con
+                    // el mismo importe que ya había en la foto) — un mes que YA tenía ese importe
+                    // guardado y solo cambia de MÉTODO (o de formato de fecha) no es dinero nuevo
+                    // que haga falta cobrar: es justo lo que pasó al arreglar "TA"=tarjeta
+                    // (792f28b) — cada fila con un TA histórico guardado como "transferencia" (el
+                    // mapeo viejo, roto) se relee ahora como "tarjeta" y antes se disparaba como
+                    // "pago nuevo" entero, con el riesgo de que alguien le diera a "Aplicar" a un
+                    // cobro que ya estaba hecho. Si el importe coincide, se corrige el método en
+                    // la foto sin avisar ni auto-aplicar nada — solo un importe distinto es de
+                    // verdad "dinero nuevo".
+                    if (!$igual && $mismo_importe) {
+                        // no-op: la foto se actualiza igual al final del bucle de la fila: con
+                        // el método/fecha ya corregidos, sin generar ruido.
+                    } elseif (!$igual) {
                         $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'pago_nuevo', $ym, array(
                             'importe' => $pago['importe'], 'metodo' => $pago['metodo'], 'fecha' => $pago['fecha'] ?? null,
                         ), $match);
@@ -9345,6 +9364,46 @@ function superadmin_sync_grupos_diagnostico_pago_viejo($request) {
          GROUP BY pestana ORDER BY total DESC", $mes_corte
     ), ARRAY_A);
     return rest_ensure_response(array('success' => true, 'totalPendientesViejos' => $total_viejos, 'porPestana' => $por_pestana, 'muestra' => $muestra));
+}
+
+// Limpieza única (18/11, cowork §07:50: "cerrar automáticamente las propuestas Pago nuevo
+// pendientes cuyo mes ya está en la foto con el mismo importe") — los 1233 "pago nuevo" de la
+// tormenta de TA→tarjeta son, uno a uno, meses que la foto YA tenía con el mismo importe (la
+// muestra del diagnóstico dio 15 de 15 iguales): no es dinero nuevo que haga falta cobrar, solo
+// el método/fecha corregido. Descarta (nunca borra) cualquier "pago nuevo" pendiente cuyo
+// importe coincida con el que ya hay guardado en la foto para ese mes — si el importe NO
+// coincide, lo deja tal cual para que alguien lo mire a mano (eso sí podría ser dinero de
+// verdad). El arreglo de blokes_sync_grupos_sincronizar() de este mismo commit evita que se
+// generen más a partir de ahora.
+function superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $tabla_snap = blokes_sync_grupos_snapshot_table();
+    $pendientes = $wpdb->get_results(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL", ARRAY_A
+    );
+    $ids = array(); $revisados = 0;
+    foreach ($pendientes as $c) {
+        $revisados++;
+        $clave = blokes_sync_grupos_clave($c['nombre'], $c['telefono']);
+        $snap = $wpdb->get_row($wpdb->prepare("SELECT pagos_json FROM {$tabla_snap} WHERE pestana = %s AND clave = %s", $c['pestana'], $clave), ARRAY_A);
+        if (!$snap) continue;
+        $pagos_snap = json_decode($snap['pagos_json'], true) ?: array();
+        $pago_snap = $pagos_snap[$c['mes']] ?? null;
+        if (!$pago_snap) continue;
+        $datos = json_decode($c['datos_json'], true) ?: array();
+        if (floatval($pago_snap['importe'] ?? 0) === floatval($datos['importe'] ?? 0)) $ids[] = intval($c['id']);
+    }
+    if ($ids) {
+        $u = wp_get_current_user();
+        $ph = implode(',', array_fill(0, count($ids), '%d'));
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$tabla} SET estado = 'descartado', resuelto_at = %s, resuelto_por = %s WHERE id IN ($ph)",
+            current_time('mysql'), ($u ? $u->user_login : '') . ' · mismo importe ya en la foto (solo cambió método/fecha, no dinero nuevo)', ...$ids
+        ));
+    }
+    return rest_ensure_response(array('success' => true, 'revisados' => $revisados, 'descartados' => count($ids)));
 }
 
 // ============================================================

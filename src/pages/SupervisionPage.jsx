@@ -29,7 +29,7 @@ import {
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
-  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo,
+  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo, syncGruposLimpiarPagoNuevoMismoImporte,
   gestionFacturasPendientesGet,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
@@ -2249,6 +2249,8 @@ function SyncGruposCambiosPanel() {
   const [detalleSinFila, setDetalleSinFila] = useState(null)
   const [diagnosticando, setDiagnosticando] = useState(false)
   const [diagnostico, setDiagnostico] = useState(null)
+  const [limpiandoMismoImporte, setLimpiandoMismoImporte] = useState(false)
+  const [resultadoMismoImporte, setResultadoMismoImporte] = useState(null)
 
   async function cargar(estado = estadoFiltro) {
     setErr(null)
@@ -2326,6 +2328,17 @@ function SyncGruposCambiosPanel() {
     try { setDiagnostico(await syncGruposDiagnosticoPagoViejo(15)) }
     catch (e) { setErr(e.message) } finally { setDiagnosticando(false) }
   }
+  // 18/11 (cowork §07:50): la tormenta de TA→tarjeta deja "pago nuevo" pendientes cuyo importe
+  // ya coincide con el que hay en la foto — no hace falta cobrar nada, solo limpiar el aviso.
+  async function limpiarPagoNuevoMismoImporte() {
+    if (!window.confirm('¿Descartar los «pago nuevo» pendientes cuyo importe ya coincide con el que hay guardado en la foto? No se puede deshacer de golpe (quedan como "descartado", nunca se borran).')) return
+    setLimpiandoMismoImporte(true); setErr(null); setResultadoMismoImporte(null)
+    try {
+      const r = await syncGruposLimpiarPagoNuevoMismoImporte()
+      await cargar()
+      setResultadoMismoImporte(r)
+    } catch (e) { setErr(e.message) } finally { setLimpiandoMismoImporte(false) }
+  }
   // 18/11 (cowork): las propuestas de "pago nuevo" que ya estaban pendientes de antes del
   // arreglo de "TA"=tarjeta se quedaron con el método equivocado guardado — esto relee la fila
   // de verdad en el Excel y corrige el método guardado en cada pendiente, sin aplicar nada en
@@ -2363,6 +2376,9 @@ function SyncGruposCambiosPanel() {
           <button className="sv-tests-select" onClick={diagnosticarPagoViejo} disabled={diagnosticando} title="Enseña qué hay guardado en la foto (snapshot) de una muestra de los «pago nuevo» de hace más de 2 meses, para ver la causa real">
             {diagnosticando ? 'Mirando…' : 'Diagnóstico pago viejo'}
           </button>
+          <button className="sv-tests-remove" onClick={limpiarPagoNuevoMismoImporte} disabled={limpiandoMismoImporte} title="Descarta los «pago nuevo» pendientes cuyo importe ya coincide con el que hay en la foto (tormenta TA→tarjeta, 18/11)">
+            {limpiandoMismoImporte ? 'Limpiando…' : 'Limpiar «mismo importe ya en la foto»'}
+          </button>
           <span className="sv-ot-muted">
             {ultima ? `Última sincronización: ${new Date(ultima.replace(' ', 'T')).toLocaleString('es-ES')}` : 'Todavía no se ha sincronizado nunca.'}
           </span>
@@ -2398,6 +2414,12 @@ function SyncGruposCambiosPanel() {
             </ul>
           )}
         </div>
+      )}
+
+      {resultadoMismoImporte && (
+        <p className="sv-note" style={{ marginBottom: 14 }}>
+          <strong>{resultadoMismoImporte.descartados}</strong> de {resultadoMismoImporte.revisados} «pago nuevo» descartado(s) (mismo importe ya en la foto).
+        </p>
       )}
 
       {diagnostico && (
