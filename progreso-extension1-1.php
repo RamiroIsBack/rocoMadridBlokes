@@ -8256,6 +8256,28 @@ function blokes_sync_grupos_importe_sospechoso($importe) {
     return floatval($importe) > 1000;
 }
 
+// 18/11 (Ramiro, relayando cowork §07:50): la fecha de un pago puede venir de Google Sheets en
+// más de un formato ("1/6/26", "01/06/2026", "2026-06-01"...) según cómo tenga la celda Eva —
+// nunca se comparaba (así que no causó la tormenta de TA→tarjeta: solo importe/método entran en
+// $igual), pero guardar siempre el mismo formato evita que dos sincronizaciones del MISMO pago
+// parezcan distintas si algún día la fecha sí entra en una comparación, y se ve más limpio en
+// el detalle. Siempre devuelve 'd/m/Y' (día y mes sin cero por delante, año de 4 cifras); si no
+// se reconoce el formato, se deja tal cual en vez de inventar una fecha.
+function blokes_sync_grupos_normalizar_fecha($fec) {
+    if (!is_string($fec)) return $fec;
+    $fec = trim($fec);
+    if ($fec === '') return $fec;
+    if (preg_match('/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})$/', $fec, $m)) {
+        $d = intval($m[1]); $mo = intval($m[2]); $y = intval($m[3]);
+        if ($y < 100) $y += 2000; // "26" → 2026, mismo criterio que el resto de Sync Grupos (temporadas actuales)
+        if ($d >= 1 && $d <= 31 && $mo >= 1 && $mo <= 12) return "{$d}/{$mo}/{$y}";
+    }
+    if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})$/', $fec, $m)) {
+        return intval($m[3]) . '/' . intval($m[2]) . '/' . intval($m[1]);
+    }
+    return $fec; // formato no reconocido — se deja tal cual, nunca se inventa una fecha
+}
+
 // Pago de un mes en una fila: [pago|null, exento_bool]. Mismas reglas que _parse.py: "*"
 // marca exento, "web"/"bizum" sin importe numérico cuenta igual como pago con importe 0, y
 // 0/vacío/texto no numérico es "sin pago ese mes".
@@ -8283,7 +8305,7 @@ function blokes_sync_grupos_leer_pago($valores, $row, $layout) {
     }
     if ($metodo_sin_importe !== null && !blokes_sync_grupos_es_numero($cant)) {
         $pago = array('importe' => 0, 'metodo' => $metodo_sin_importe);
-        if (is_string($fec) && $fec !== '') $pago['fecha'] = $fec;
+        if (is_string($fec) && $fec !== '') $pago['fecha'] = blokes_sync_grupos_normalizar_fecha($fec);
         return array($pago, false);
     }
 
@@ -8298,7 +8320,7 @@ function blokes_sync_grupos_leer_pago($valores, $row, $layout) {
     $metodo = $map[$metodo_raw] ?? $metodo_raw;
 
     $pago = array('importe' => round(floatval($cant), 2), 'metodo' => $metodo);
-    if (is_string($fec) && $fec !== '') $pago['fecha'] = $fec;
+    if (is_string($fec) && $fec !== '') $pago['fecha'] = blokes_sync_grupos_normalizar_fecha($fec);
     return array($pago, false);
 }
 
@@ -9013,6 +9035,14 @@ function blokes_sync_grupos_sincronizar() {
 
     blokes_sync_grupos_reintentar_pendientes($pestanas, $subs_por_tel, $externos_por_tel);
 
+    // 18/11 (Ramiro, relayando cowork §07:50: "cierra solas las propuestas que ya coinciden con
+    // lo guardado") — además de que el arreglo de arriba evite que se creen MÁS "pago nuevo" por
+    // un cambio de método/fecha, esto cierra solas, en cada sincronización, las que ya estuvieran
+    // pendientes de antes por el mismo motivo (p. ej. las de la tormenta TA→tarjeta que queden
+    // sin limpiar a mano) — nunca toca una cuyo importe de verdad sea distinto al de la foto.
+    $cierre_automatico = blokes_sync_grupos_cerrar_pago_nuevo_resueltos('auto (sincronización) · mismo importe ya en la foto (solo cambió método/fecha, no dinero nuevo)');
+    $resumen['pagoNuevoCerradoSolo'] = $cierre_automatico['descartados'];
+
     update_option('blokes_sync_grupos_ultima_sincronizacion', current_time('mysql'), false);
     return $resumen;
 }
@@ -9366,17 +9396,15 @@ function superadmin_sync_grupos_diagnostico_pago_viejo($request) {
     return rest_ensure_response(array('success' => true, 'totalPendientesViejos' => $total_viejos, 'porPestana' => $por_pestana, 'muestra' => $muestra));
 }
 
-// Limpieza única (18/11, cowork §07:50: "cerrar automáticamente las propuestas Pago nuevo
-// pendientes cuyo mes ya está en la foto con el mismo importe") — los 1233 "pago nuevo" de la
-// tormenta de TA→tarjeta son, uno a uno, meses que la foto YA tenía con el mismo importe (la
-// muestra del diagnóstico dio 15 de 15 iguales): no es dinero nuevo que haga falta cobrar, solo
-// el método/fecha corregido. Descarta (nunca borra) cualquier "pago nuevo" pendiente cuyo
-// importe coincida con el que ya hay guardado en la foto para ese mes — si el importe NO
-// coincide, lo deja tal cual para que alguien lo mire a mano (eso sí podría ser dinero de
-// verdad). El arreglo de blokes_sync_grupos_sincronizar() de este mismo commit evita que se
-// generen más a partir de ahora.
-function superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe($request) {
-    blokes_sync_grupos_ensure_tables();
+// 18/11 (Ramiro, relayando cowork §07:50: "cierra solas las propuestas que ya coinciden con lo
+// guardado") — misma comprobación que el arreglo de blokes_sync_grupos_sincronizar() (importe
+// igual al de la foto = no es dinero nuevo), pero contra TODOS los "pago nuevo" pendientes que
+// ya existieran (de antes del arreglo) — se usa tanto automáticamente en cada sincronización
+// (reintentar_pendientes) como a mano desde el botón "Limpiar". Descarta (nunca borra), nunca
+// toca los que de verdad tengan un importe distinto al guardado — esos sí podrían ser dinero real
+// sin cobrar y se dejan para que alguien los mire. $motivo se guarda en resuelto_por para poder
+// distinguir el cierre automático del manual si hace falta.
+function blokes_sync_grupos_cerrar_pago_nuevo_resueltos($motivo) {
     global $wpdb;
     $tabla = blokes_sync_grupos_cambios_table();
     $tabla_snap = blokes_sync_grupos_snapshot_table();
@@ -9396,14 +9424,20 @@ function superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe($request) {
         if (floatval($pago_snap['importe'] ?? 0) === floatval($datos['importe'] ?? 0)) $ids[] = intval($c['id']);
     }
     if ($ids) {
-        $u = wp_get_current_user();
         $ph = implode(',', array_fill(0, count($ids), '%d'));
         $wpdb->query($wpdb->prepare(
             "UPDATE {$tabla} SET estado = 'descartado', resuelto_at = %s, resuelto_por = %s WHERE id IN ($ph)",
-            current_time('mysql'), ($u ? $u->user_login : '') . ' · mismo importe ya en la foto (solo cambió método/fecha, no dinero nuevo)', ...$ids
+            current_time('mysql'), $motivo, ...$ids
         ));
     }
-    return rest_ensure_response(array('success' => true, 'revisados' => $revisados, 'descartados' => count($ids)));
+    return array('revisados' => $revisados, 'descartados' => count($ids));
+}
+
+function superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe($request) {
+    blokes_sync_grupos_ensure_tables();
+    $u = wp_get_current_user();
+    $r = blokes_sync_grupos_cerrar_pago_nuevo_resueltos(($u ? $u->user_login : '') . ' · mismo importe ya en la foto (solo cambió método/fecha, no dinero nuevo)');
+    return rest_ensure_response(array('success' => true, 'revisados' => $r['revisados'], 'descartados' => $r['descartados']));
 }
 
 // ============================================================

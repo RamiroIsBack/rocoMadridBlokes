@@ -2395,7 +2395,8 @@ function SyncGruposCambiosPanel() {
       {resumenSync && (
         <p className="sv-ot-muted">
           Sincronizado: {resumenSync.cambiosNuevos} cambio{resumenSync.cambiosNuevos === 1 ? '' : 's'} nuevo{resumenSync.cambiosNuevos === 1 ? '' : 's'}
-          {resumenSync.fotoInicial?.length ? ` · foto inicial de ${resumenSync.fotoInicial.length} pestaña(s)` : ''}.
+          {resumenSync.fotoInicial?.length ? ` · foto inicial de ${resumenSync.fotoInicial.length} pestaña(s)` : ''}
+          {resumenSync.pagoNuevoCerradoSolo ? ` · ${resumenSync.pagoNuevoCerradoSolo} "pago nuevo" viejo(s) cerrado(s) solos (mismo importe ya en la foto)` : ''}.
         </p>
       )}
       {err && <p className="sv-error">{err}</p>}
