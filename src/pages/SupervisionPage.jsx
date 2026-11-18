@@ -2416,7 +2416,8 @@ function SyncGruposCambiosPanel() {
       {resumenSync && (
         <p className="sv-ot-muted">
           Sincronizado: {resumenSync.cambiosNuevos} cambio{resumenSync.cambiosNuevos === 1 ? '' : 's'} nuevo{resumenSync.cambiosNuevos === 1 ? '' : 's'}
-          {resumenSync.fotoInicial?.length ? ` · foto inicial de ${resumenSync.fotoInicial.length} pestaña(s)` : ''}.
+          {resumenSync.fotoInicial?.length ? ` · foto inicial de ${resumenSync.fotoInicial.length} pestaña(s)` : ''}
+          {resumenSync.pestanasProcesadas != null ? ` · ${resumenSync.pestanasProcesadas} pestaña(s) procesadas en ${resumenSync.duracionSeg}s` : ''}.
         </p>
       )}
       {err && <p className="sv-error">{err}</p>}

@@ -8852,6 +8852,12 @@ function blokes_sync_grupos_autocrear_alumno_nuevo($cambio_id, $tab, $pestanas_r
 // instantánea guardada y deja en la bandeja solo lo que cambió. Lo usan tanto el cron (cada
 // hora) como el botón "Sincronizar ahora".
 function blokes_sync_grupos_sincronizar() {
+    // 18/11 (cowork §09:50: "sigue abierta la causa de los 499→1233") — hipótesis sin confirmar:
+    // varias sincronizaciones seguidas en poco tiempo, cada una tardando cerca del límite de
+    // tiempo de PHP de SiteGround, podrían cortar la ejecución a medias y dejar cada intento
+    // corrigiendo solo un subconjunto de pestañas. Guarda cuánto tarda y cuántas pestañas se
+    // procesan de verdad, para poder confirmar (o descartar) esto la próxima vez sin adivinar.
+    $t0 = microtime(true);
     blokes_sync_grupos_ensure_tables();
     global $wpdb;
     $activa = blokes_sync_grupos_sheet_activa();
@@ -9040,7 +9046,10 @@ function blokes_sync_grupos_sincronizar() {
 
     blokes_sync_grupos_reintentar_pendientes($pestanas, $subs_por_tel, $externos_por_tel);
 
+    $resumen['duracionSeg'] = round(microtime(true) - $t0, 1);
+    $resumen['pestanasProcesadas'] = count($pestanas);
     update_option('blokes_sync_grupos_ultima_sincronizacion', current_time('mysql'), false);
+    update_option('blokes_sync_grupos_ultima_duracion', $resumen['duracionSeg'], false);
     return $resumen;
 }
 
@@ -9098,8 +9107,21 @@ function superadmin_sync_grupos_cambios_listar($request) {
 // ¿Esta suscripción ya tiene un pedido completed/processing de ese mes? Mismo criterio de "a qué
 // mes pertenece" que usa Grupos (date_created, no date_paid — un adelantado deja la fecha real
 // del banco, que puede caer en el mes anterior al que de verdad cubre).
+// 18/11 (cowork §09:50, Samuel González #7394 — "47 = 47 pero no cierra"): un cobro en EFECTIVO
+// nunca pasa por WooCommerce ("Ramiro, 29/10: sin WooCommerce y sin factura"), vive solo en
+// blokes_cobros_manuales_table() — esta función solo miraba pedidos de WooCommerce, así que un
+// mes cobrado en efectivo (el caso real de Samuel) nunca contaba como "ya cobrado". Esto afecta
+// también a blokes_sync_grupos_aplicar_efecto(), que usa este mismo criterio para no duplicar un
+// cobro ya hecho: sin este arreglo, un "Aplicar" sobre un mes ya pagado en efectivo habría
+// intentado cobrarlo también por WooCommerce.
 function blokes_sync_grupos_sub_ya_cobrado_mes($sub_id, $ym) {
-    if (!function_exists('wcs_get_subscription') || $ym === '') return false;
+    if ($ym === '') return false;
+    global $wpdb;
+    $en_efectivo = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . blokes_cobros_manuales_table() . " WHERE sub_id = %d AND periodo = %s LIMIT 1", intval($sub_id), $ym
+    ));
+    if ($en_efectivo) return true;
+    if (!function_exists('wcs_get_subscription')) return false;
     $sub = wcs_get_subscription(intval($sub_id));
     if (!$sub) return false;
     $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
@@ -9416,11 +9438,35 @@ function blokes_sync_grupos_cerrar_pago_nuevo_resueltos($motivo) {
     foreach ($pendientes as $c) {
         $revisados++;
         if (!$c['match_tipo'] || !$c['match_id']) continue; // sin emparejar: nunca se puede saber si ya está cobrado
+        // 18/11 (cowork §09:50, Cecilia DI Zeo — Yoga): blokes_sync_grupos_emparejar() solo mira
+        // el teléfono cuando hay un único candidato, SIN comprobar el nombre — si ese teléfono es
+        // en realidad de otra persona (familia), el match_tipo/match_id de esta propuesta
+        // apuntaría a la suscripción/externo de otra persona. Está bien para muchos usos (es solo
+        // una propuesta que alguien revisa antes de Aplicar), pero aquí decide si se CIERRA SOLA
+        // una propuesta — así que antes de cerrar, confirma que el nombre de la fila del Excel se
+        // parece al nombre real del match; si no se parece (o cualquiera de los dos nombres está
+        // vacío o es solo un apodo sin espacio), nunca cierra solo, se queda pendiente para que
+        // alguien lo mire a mano.
+        $nombre_fila_norm = blokes_externos_normaliza_nombre((string) $c['nombre']);
         if ($c['match_tipo'] === 'sub') {
+            if (function_exists('wcs_get_subscription')) {
+                $sub_match = wcs_get_subscription(intval($c['match_id']));
+                $nombre_sub_norm = $sub_match ? blokes_externos_normaliza_nombre(trim($sub_match->get_billing_first_name() . ' ' . $sub_match->get_billing_last_name())) : '';
+            } else { $nombre_sub_norm = ''; }
+            $nombres_confirman = $nombre_fila_norm !== '' && strpos($nombre_fila_norm, ' ') !== false
+                && $nombre_sub_norm !== '' && strpos($nombre_sub_norm, ' ') !== false
+                && blokes_externos_nombres_parecidos($nombre_fila_norm, $nombre_sub_norm);
+            if (!$nombres_confirman) continue;
             if (blokes_sync_grupos_sub_ya_cobrado_mes(intval($c['match_id']), (string) $c['mes'])) $ids[] = intval($c['id']);
             continue;
         }
         if ($c['match_tipo'] === 'externo') {
+            $externo_match = $wpdb->get_row($wpdb->prepare("SELECT nombre FROM " . blokes_externos_table() . " WHERE id = %d", intval($c['match_id'])), ARRAY_A);
+            $nombre_externo_norm = $externo_match ? blokes_externos_normaliza_nombre($externo_match['nombre']) : '';
+            $nombres_confirman = $nombre_fila_norm !== '' && strpos($nombre_fila_norm, ' ') !== false
+                && $nombre_externo_norm !== '' && strpos($nombre_externo_norm, ' ') !== false
+                && blokes_externos_nombres_parecidos($nombre_fila_norm, $nombre_externo_norm);
+            if (!$nombres_confirman) continue;
             $tabla_ext_pagos = blokes_externos_pagos_table();
             $pago_externo = $wpdb->get_row($wpdb->prepare(
                 "SELECT importe FROM {$tabla_ext_pagos} WHERE externo_id = %d AND periodo = %s", intval($c['match_id']), (string) $c['mes']
