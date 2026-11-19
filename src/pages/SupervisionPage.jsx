@@ -2265,6 +2265,10 @@ function SyncGruposCambiosPanel() {
   const [cargandoCeldas, setCargandoCeldas] = useState(false)
   const [informeCeldas, setInformeCeldas] = useState(null)
   const [limpiandoCeldas, setLimpiandoCeldas] = useState(false)
+  // 19/11 05:50 (cowork, GRAVE): la firma "tarjeta + 17/11/2026" también atrapa pagos reales de
+  // ese mismo día — ya no se puede limpiar todo de golpe, hay que elegir fila a fila.
+  const [celdasSeleccionadas, setCeldasSeleccionadas] = useState(() => new Set())
+  const claveCelda = c => `${c.pestana}|${c.fila}|${c.mes}`
 
   async function cargar(estado = estadoFiltro) {
     setErr(null)
@@ -2394,16 +2398,29 @@ function SyncGruposCambiosPanel() {
   // nueva si se cobrara ahora?" para cada una.
   async function cargarInformeCeldas() {
     setCargandoCeldas(true); setErr(null)
-    try { setInformeCeldas(await syncGruposInformeCeldasEscritas()) }
-    catch (e) { setErr(e.message) } finally { setCargandoCeldas(false) }
+    try {
+      const r = await syncGruposInformeCeldasEscritas()
+      setInformeCeldas(r)
+      setCeldasSeleccionadas(new Set())
+    } catch (e) { setErr(e.message) } finally { setCargandoCeldas(false) }
+  }
+  function alternarCelda(c) {
+    setCeldasSeleccionadas(prev => {
+      const next = new Set(prev)
+      const k = claveCelda(c)
+      if (next.has(k)) next.delete(k); else next.add(k)
+      return next
+    })
   }
   async function limpiarCeldas() {
-    if (!window.confirm('¿Dejar vacías las celdas que la sincronización escribió por error (solo las que parecen seguir siendo exactamente esa escritura)? No se puede deshacer de golpe.')) return
+    const celdas = (informeCeldas?.filas || []).filter(f => celdasSeleccionadas.has(claveCelda(f))).map(f => ({ pestana: f.pestana, fila: f.fila, mes: f.mes }))
+    if (!celdas.length) { window.alert('Marca al menos una fila — la firma también atrapa pagos reales del mismo día, así que ya no se limpia todo de golpe.'); return }
+    if (!window.confirm(`¿Dejar vacías estas ${celdas.length} celda(s) seleccionadas? Se vuelve a comprobar cada una contra la firma del bug justo antes de escribir. No se puede deshacer de golpe.`)) return
     setLimpiandoCeldas(true); setErr(null)
     try {
-      const r = await syncGruposLimpiarCeldasEscritas()
+      const r = await syncGruposLimpiarCeldasEscritas(celdas)
       await cargarInformeCeldas()
-      window.alert(`${r.limpiadas} celda(s) dejadas vacías. ${r.saltadas} no coincidían (no se han tocado).`)
+      window.alert(`${r.limpiadas} celda(s) dejadas vacías. ${r.saltadas} no coincidían o no estaban en la lista (no se han tocado).`)
     } catch (e) { setErr(e.message) } finally { setLimpiandoCeldas(false) }
   }
 
@@ -2444,8 +2461,8 @@ function SyncGruposCambiosPanel() {
             {cargandoCeldas ? 'Cargando…' : 'Informe celdas escritas por error'}
           </button>
           {informeCeldas && (
-            <button className="sv-tests-remove" onClick={limpiarCeldas} disabled={limpiandoCeldas} title="Deja vacías las celdas que parecen seguir siendo exactamente la escritura del bug">
-              {limpiandoCeldas ? 'Limpiando…' : 'Limpiar celdas escritas por error'}
+            <button className="sv-tests-remove" onClick={limpiarCeldas} disabled={limpiandoCeldas} title="Deja vacías SOLO las celdas marcadas con la casilla de la tabla de abajo">
+              {limpiandoCeldas ? 'Limpiando…' : `Limpiar seleccionadas (${celdasSeleccionadas.size})`}
             </button>
           )}
           <span className="sv-ot-muted">
@@ -2472,22 +2489,26 @@ function SyncGruposCambiosPanel() {
 
       {informeCeldas && (
         <div className="sv-note" style={{ marginBottom: 14 }}>
-          <strong>{informeCeldas.total}</strong> celda(s) escrita(s) por la sincronización sin sesión. La columna «¿Factura nueva si se cobra ahora?» es una simulación real (nunca escribe nada) de qué pasaría con cada suscripción.
+          <strong>{informeCeldas.total}</strong> celda(s) con la firma «tarjeta + 17/11/2026». <strong>Ojo:</strong> esta firma también atrapa pagos reales hechos ese mismo día — revisa cada una (cruza con WooCommerce si hace falta) antes de marcarla para limpiar. La columna «¿Factura nueva si se cobra ahora?» es una simulación real (nunca escribe nada).
+          <div style={{ margin: '8px 0' }}>
+            <button className="sv-tab-mini" onClick={() => setCeldasSeleccionadas(new Set((informeCeldas.filas || []).map(claveCelda)))}>Marcar todas</button>{' '}
+            <button className="sv-tab-mini" onClick={() => setCeldasSeleccionadas(new Set())}>Marcar ninguna</button>
+          </div>
           <div className="sv-tests-scroll" style={{ marginTop: 8 }}>
             <table className="sv-tests-table">
               <thead>
-                <tr><th>Pestaña</th><th>Alumno</th><th>Mes</th><th>Importe actual</th><th>Método actual</th><th>Fecha actual</th><th>¿Parece el bug?</th><th>¿Factura nueva si se cobra ahora?</th></tr>
+                <tr><th>Limpiar</th><th>Pestaña</th><th>Alumno</th><th>Mes</th><th>Importe actual</th><th>Método actual</th><th>Fecha actual</th><th>¿Factura nueva si se cobra ahora?</th></tr>
               </thead>
               <tbody>
                 {informeCeldas.filas?.map(f => (
-                  <tr key={f.logId}>
+                  <tr key={claveCelda(f)}>
+                    <td><input type="checkbox" checked={celdasSeleccionadas.has(claveCelda(f))} onChange={() => alternarCelda(f)} /></td>
                     <td className="sv-ot-muted">{f.pestana}</td>
                     <td>{f.nombre || '—'}</td>
                     <td>{f.mes}</td>
                     <td>{f.importeActual ?? '—'} €</td>
                     <td className="sv-ot-muted">{f.metodoActual || '—'}</td>
                     <td className="sv-ot-muted">{f.fechaActual || '—'}</td>
-                    <td>{f.pareceSerElBug ? 'Sí' : 'No (no se tocaría)'}</td>
                     <td className="sv-ot-muted">
                       {f.simulacionCobrarAhora
                         ? (f.simulacionCobrarAhora.completariaPedidoYaExistente

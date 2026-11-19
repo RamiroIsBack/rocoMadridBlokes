@@ -234,7 +234,9 @@ export const syncGruposInformeAutoaplicados = () => gestionCall('GET', '/gestion
 // Excel de Eva — informe (solo lee, incluye una simulación real de "qué pasaría si se cobrara
 // ahora") y limpieza (deja la celda vacía, nunca escribe un dato inventado).
 export const syncGruposInformeCeldasEscritas = () => gestionCall('GET', '/gestion/sync-grupos/informe-celdas-escritas')
-export const syncGruposLimpiarCeldasEscritas = () => gestionPost('/gestion/sync-grupos/limpiar-celdas-escritas')
+// 19/11 05:50 (cowork, GRAVE): la firma también atrapa pagos reales del mismo día — ya no se
+// limpia todo de golpe, hay que pasar la lista exacta [{pestana, fila, mes}] a borrar.
+export const syncGruposLimpiarCeldasEscritas = celdas => gestionPost('/gestion/sync-grupos/limpiar-celdas-escritas', { celdas })
 export const syncGruposCambioDescartar = id        => gestionPost(`/gestion/sync-grupos/cambios/${id}/descartar`)
 // Limpieza única (17/11 16:20, cowork): descarta de golpe las propuestas pendientes de pestañas
 // Balance y los "pago nuevo" de meses viejos que ya estaban colgando ANTES de 589ab3a.

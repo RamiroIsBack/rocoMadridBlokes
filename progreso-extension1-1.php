@@ -2962,29 +2962,52 @@ function blokes_sync_grupos_pago_parece_bug_1711($pago) {
     return is_array($pago) && ($pago['metodo'] ?? '') === 'tarjeta' && ($pago['fecha'] ?? '') === '17/11/2026';
 }
 
-// 18/11 21:10 (cowork): «Informe celdas escritas por error» dependía del log
-// ('sync_grupos_cobro_escrito' cruzado con 'marcar_cobrado', ambos user_id=0) para encontrar las
-// 22 celdas — y ese cruce no encontró nada, aunque las celdas siguen en el Excel (Joel, Lucía,
-// Paco, Zahara, Víctor Agüí...). En vez de seguir dependiendo de ese log (que por lo que sea no
-// tiene lo que se esperaba), esto relee la Hoja entera de verdad y busca la firma directamente en
-// el CONTENIDO de cada celda — nunca puede dar "0 filas" mientras la celda siga ahí, porque no
-// depende de que ningún log haya quedado como se esperaba. Devuelve una fila por cada mes de cada
-// alumno con la firma, emparejado por teléfono con su suscripción/externo si lo encuentra.
+// 19/11 05:50 (cowork): dos cosas arregladas sobre la versión de 18/11 21:10 —
+// (a) ya no dependía del log (eso ya estaba arreglado), pero SÍ dependía de que
+// blokes_sync_grupos_leer_pago() hubiera conseguido parsear el importe como número — a Víctor
+// Agüí y Marta Verdú, Google Sheets les convirtió el importe (86) en una fecha de serie
+// ("26/03/1900") al leer la celda, así que es_numero() lo rechazaba y la fila entera se perdía
+// de $f['pagos'], nunca llegaba a compararse. Ahora se mira el valor EN BRUTO de las celdas de
+// método y fecha directamente (antes de que nadie intente parsear el importe), así que no
+// importa si el importe viene roto — la firma del bug está en método+fecha, no en el importe.
+// (b) la firma "tarjeta + 17/11/2026" también atrapa pagos REALES hechos ese mismo día (Gema
+// Herrero, Sergi Escribano, Alicia Escudero, Sergio Díaz-noviembre) — cowork los identificó a
+// mano cruzando con WooCommerce; blokes_sync_grupos_celdas_bug_1711() ya no puede distinguirlos
+// por sí sola (de ahí que superadmin_sync_grupos_limpiar_celdas_escritas() exija ahora una lista
+// explícita en vez de actuar sobre todo lo que salga aquí).
 function blokes_sync_grupos_celdas_bug_1711() {
     $subs_por_tel = blokes_sync_grupos_subs_por_telefono();
     $externos_por_tel = blokes_campanas_externos_por_telefono();
+    $activa = blokes_sync_grupos_sheet_activa();
+    if (!$activa['id']) return array();
+    $meta = blokes_sync_grupos_get($activa['id'], '?fields=sheets.properties.title');
+    if (is_wp_error($meta)) return array();
+    $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
+    $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($activa['id'], $pestanas);
+    if (is_wp_error($valores_por_pestana)) return array();
     $celdas = array();
-    foreach (blokes_sync_grupos_todas_las_filas() as $f) {
-        foreach ($f['pagos'] as $ym => $pago) {
-            if (!blokes_sync_grupos_pago_parece_bug_1711($pago)) continue;
-            $match = blokes_sync_grupos_emparejar($f['telefono'], $f['nombre'], $subs_por_tel, $externos_por_tel);
-            $celdas[] = array(
-                'pestana' => $f['_pestana'], 'fila' => intval($f['_row']) + 1, 'mes' => $ym,
-                'nombre' => $f['nombre'], 'telefono' => $f['telefono'],
-                'importe' => $pago['importe'] ?? null, 'metodo' => $pago['metodo'] ?? null, 'fecha' => $pago['fecha'] ?? null,
-                'matchTipo' => $match['tipo'] ?? null, 'subId' => ($match['tipo'] ?? null) === 'sub' ? intval($match['id']) : null,
-                'matchLabel' => $match['label'] ?? null,
-            );
+    foreach ($pestanas as $tab) {
+        $valores = $valores_por_pestana[$tab] ?? array();
+        $r = blokes_sync_grupos_leer_pestana_filas($valores);
+        if (!$r['filas']) continue;
+        foreach ($r['filas'] as $f) {
+            $row = intval($f['_row']);
+            foreach ($r['bloquesLayout'] as $b) {
+                if ($b['layout']['kind'] !== 'cantidad') continue; // "TA" solo existe como texto en este formato
+                $met_raw = $valores[$row][$b['layout']['metodo']] ?? null;
+                if (!is_string($met_raw) || mb_strtoupper(trim($met_raw)) !== 'TA') continue;
+                $fec_raw = $valores[$row][$b['layout']['fecha']] ?? null;
+                $fec_norm = is_string($fec_raw) ? blokes_sync_grupos_normalizar_fecha($fec_raw) : null;
+                if ($fec_norm !== '17/11/2026') continue;
+                $match = blokes_sync_grupos_emparejar($f['telefono'], $f['nombre'], $subs_por_tel, $externos_por_tel);
+                $celdas[] = array(
+                    'pestana' => $tab, 'fila' => $row + 1, 'mes' => $b['ym'],
+                    'nombre' => $f['nombre'], 'telefono' => $f['telefono'],
+                    'importe' => $valores[$row][$b['layout']['importe']] ?? null, 'metodo' => 'tarjeta', 'fecha' => $fec_norm,
+                    'matchTipo' => $match['tipo'] ?? null, 'subId' => ($match['tipo'] ?? null) === 'sub' ? intval($match['id']) : null,
+                    'matchLabel' => $match['label'] ?? null,
+                );
+            }
         }
     }
     return $celdas;
@@ -9696,16 +9719,36 @@ function superadmin_sync_grupos_informe_celdas_escritas($request) {
     return rest_ensure_response(array('success' => true, 'total' => count($informe), 'filas' => $informe));
 }
 
-// Borra (deja la celda vacía, nunca escribe un dato inventado) las 3 celdas (importe, método,
-// fecha) de cada una que blokes_sync_grupos_celdas_bug_1711() encuentre AHORA MISMO releyendo la
-// Hoja de verdad — nunca depende de un log, así que no puede dejar de limpiar algo solo porque
-// un registro de log no quedara donde se esperaba.
+// 19/11 05:50 (cowork, GRAVE): la firma "tarjeta + 17/11/2026" también atrapa pagos REALES
+// hechos ese mismo día (Gema Herrero #7467, Sergi Escribano #6614, Alicia Escudero #6868, y la
+// fila de noviembre de Sergio Díaz #6526 — su fila de octubre sí es del bug) — no hay forma de
+// distinguirlos solo por el contenido de la celda, hace falta mirar el pedido real en
+// WooCommerce, como ya hizo cowork a mano. Por eso esto YA NO actúa sobre todo lo que detecte
+// blokes_sync_grupos_celdas_bug_1711() — exige la lista exacta de celdas a limpiar
+// (`celdas: [{pestana, fila, mes}, ...]`, los mismos campos que ya devuelve el informe), y
+// vuelve a comprobar cada una contra la detección de verdad justo antes de escribir — si alguna
+// de la lista ya no coincide con la firma (alguien la corrigió, o nunca lo era), se salta sin
+// tocarla. Borra (deja la celda vacía, nunca escribe un dato inventado) las 3 celdas (importe,
+// método, fecha).
 function superadmin_sync_grupos_limpiar_celdas_escritas($request) {
-    $celdas = blokes_sync_grupos_celdas_bug_1711();
+    $celdas_pedidas = $request->get_param('celdas');
+    if (!is_array($celdas_pedidas) || !$celdas_pedidas) {
+        return new WP_Error('falta_lista', 'Pasa "celdas": [{pestana, fila, mes}, ...] — la firma "tarjeta + 17/11/2026" también atrapa pagos reales de ese mismo día, así que ya no se limpia todo a ciegas. Usa las filas del informe que de verdad quieras borrar.', array('status' => 400));
+    }
+    $detectadas = blokes_sync_grupos_celdas_bug_1711();
+    $celdas = array();
+    foreach ($celdas_pedidas as $pedida) {
+        foreach ($detectadas as $d) {
+            if ($d['pestana'] === ($pedida['pestana'] ?? null) && $d['fila'] === intval($pedida['fila'] ?? 0) && $d['mes'] === ($pedida['mes'] ?? null)) {
+                $celdas[] = $d;
+                break;
+            }
+        }
+    }
     $activa = blokes_sync_grupos_sheet_activa();
     if (!$activa['id']) return new WP_Error('falta_config', 'No hay Hoja configurada.', array('status' => 400));
     $cache_pestanas = array();
-    $limpiadas = 0; $saltadas = 0;
+    $limpiadas = 0; $saltadas = count($celdas_pedidas) - count($celdas);
     foreach ($celdas as $c) {
         $pestana = $c['pestana']; $fila_sheet = $c['fila']; $mes = $c['mes'];
         if (!array_key_exists($pestana, $cache_pestanas)) {
