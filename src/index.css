@@ -1,9 +1,15 @@
 /* ============================================
-   GOOGLE FONTS — matches rocomadrid.com brand
+   FUENTES — autoalojadas vía @fontsource-variable (19/11, encargo de cookies/LSSI:
+   antes se pedían a fonts.googleapis.com/fonts.gstatic.com en cada visita, lo que
+   manda la IP a Google sin consentimiento — Jairo Ochoa/dixitalmedia, correo 18/11).
+   Mismo resultado visual que rocomadrid.com (misma fuente de origen, Google Fonts),
+   pero empaquetadas con el build, nunca una petición a terceros.
    Playfair Display: display headings (retro serif)
    Montserrat: headings | Inter: body text
    ============================================ */
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=Montserrat:wght@700;800&family=Inter:wght@400;500;600&display=swap');
+@import '@fontsource-variable/playfair-display/wght.css';
+@import '@fontsource-variable/montserrat/wght.css';
+@import '@fontsource-variable/inter/wght.css';
 
 /* ============================================
    GLOBAL RESET & DESIGN TOKENS
@@ -76,10 +82,11 @@
   --spacing-lg: 24px;
   --spacing-xl: 40px;
 
-  /* Typography */
-  --font-body: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-heading: 'Montserrat', 'Segoe UI', system-ui, sans-serif;
-  --font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  /* Typography — nombre "Variable" primero (el que trae @fontsource-variable), con el
+     nombre normal como respaldo por si alguna vez se cargara el estático por otro lado. */
+  --font-body: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Montserrat Variable', 'Montserrat', 'Segoe UI', system-ui, sans-serif;
+  --font-serif: 'Playfair Display Variable', 'Playfair Display', Georgia, 'Times New Roman', serif;
   --font-size-sm: 14px;
   --font-size-base: 16px;
   --font-size-lg: 20px;

@@ -11066,7 +11066,18 @@ add_action('template_redirect', function() {
     $es_bot_vista_previa = (bool) preg_match('#WhatsApp|facebookexternalhit|Facebot|Twitterbot|TelegramBot#i', $ua);
     if (!$es_bot_vista_previa) {
         $repetido = isset($_COOKIE['roco_cmp']) ? 1 : 0;
-        setcookie('roco_cmp', $token, time() + 60 * DAY_IN_SECONDS, '/', '', is_ssl(), true);
+        // 19/11 (Jairo Ochoa/dixitalmedia, correo 18/11 — LSSI art. 22.2): roco_cmp es una
+        // cookie de seguimiento (liga el clic a un contacto, 60 días, se usa para atribuir
+        // instalaciones/pedidos a la campaña) — antes se ponía siempre, también a quien había
+        // rechazado las cookies. Ahora solo se pone si ya hay consentimiento de estadísticas
+        // (el sitio principal, donde vive /c/, usa el prefijo cmplz_rt_; el club usa cmplz_).
+        // El registro del clic en la tabla se queda igual, nunca depende de la cookie — lo que
+        // se pierde sin consentimiento es poder atribuir la instalación o el pedido de esa visita.
+        $consiente = (isset($_COOKIE['cmplz_rt_statistics']) && 'allow' === $_COOKIE['cmplz_rt_statistics'])
+                  || (isset($_COOKIE['cmplz_statistics'])    && 'allow' === $_COOKIE['cmplz_statistics']);
+        if ($consiente) {
+            setcookie('roco_cmp', $token, time() + 60 * DAY_IN_SECONDS, '/', '', is_ssl(), true);
+        }
         $dispositivo = preg_match('#Mobi|Android|iPhone|iPad#i', $ua) ? 'movil' : 'escritorio';
         $wpdb->insert(blokes_campana_clics_table(), array(
             'token' => $token, 'dispositivo' => $dispositivo, 'repetido' => $repetido, 'created_at' => current_time('mysql'),

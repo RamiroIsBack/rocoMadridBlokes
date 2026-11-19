@@ -240,7 +240,7 @@
   padding: 20px 22px;
   background: #100e09;
   border: 1px solid #3a3020;
-  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 .ps-modal__title { margin: 0 0 16px; font-size: 1rem; font-weight: 700; color: #f0ece0; }
 .ps-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }

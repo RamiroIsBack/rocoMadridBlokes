@@ -236,7 +236,7 @@
 }
 .exp-kpi__val {
   display: block;
-  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 1.2rem;
   font-weight: 700;
   color: var(--c, #888);
