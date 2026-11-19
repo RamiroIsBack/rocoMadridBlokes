@@ -2412,12 +2412,16 @@ function SyncGruposCambiosPanel() {
       return next
     })
   }
+  // 19/11 (Ramiro: "con simulación primero") — primero se simula (nunca escribe nada) y se
+  // enseña el detalle fila a fila; solo si la persona confirma ESO se llama de verdad.
   async function limpiarCeldas() {
     const celdas = (informeCeldas?.filas || []).filter(f => celdasSeleccionadas.has(claveCelda(f))).map(f => ({ pestana: f.pestana, fila: f.fila, mes: f.mes }))
     if (!celdas.length) { window.alert('Marca al menos una fila — la firma también atrapa pagos reales del mismo día, así que ya no se limpia todo de golpe.'); return }
-    if (!window.confirm(`¿Dejar vacías estas ${celdas.length} celda(s) seleccionadas? Se vuelve a comprobar cada una contra la firma del bug justo antes de escribir. No se puede deshacer de golpe.`)) return
     setLimpiandoCeldas(true); setErr(null)
     try {
+      const sim = await syncGruposLimpiarCeldasEscritas(celdas, true)
+      const texto = sim.detalle.map(d => `· ${d.pestana} fila ${d.fila} ${d.mes}: ${d.seLimpiaria ? 'SE LIMPIARÍA' : 'NO (ya no coincide)'}`).join('\n')
+      if (!window.confirm(`Simulación (nada escrito todavía):\n${texto}\n\n¿Confirmas dejar vacías las ${sim.seLimpiarian} que sí coinciden? No se puede deshacer de golpe.`)) return
       const r = await syncGruposLimpiarCeldasEscritas(celdas)
       await cargarInformeCeldas()
       window.alert(`${r.limpiadas} celda(s) dejadas vacías. ${r.saltadas} no coincidían o no estaban en la lista (no se han tocado).`)

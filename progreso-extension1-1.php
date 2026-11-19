@@ -9729,21 +9729,40 @@ function superadmin_sync_grupos_informe_celdas_escritas($request) {
 // vuelve a comprobar cada una contra la detección de verdad justo antes de escribir — si alguna
 // de la lista ya no coincide con la firma (alguien la corrigió, o nunca lo era), se salta sin
 // tocarla. Borra (deja la celda vacía, nunca escribe un dato inventado) las 3 celdas (importe,
-// método, fecha).
+// método, fecha). `simular=true` (Ramiro, 19/11: "con simulación primero") hace exactamente la
+// misma comprobación fila a fila, pero nunca llama a blokes_sync_grupos_escribir_valores() — en
+// vez de limpiadas/saltadas, devuelve el detalle de qué pasaría con cada celda de la lista.
 function superadmin_sync_grupos_limpiar_celdas_escritas($request) {
+    $simular = (bool) $request->get_param('simular');
     $celdas_pedidas = $request->get_param('celdas');
     if (!is_array($celdas_pedidas) || !$celdas_pedidas) {
         return new WP_Error('falta_lista', 'Pasa "celdas": [{pestana, fila, mes}, ...] — la firma "tarjeta + 17/11/2026" también atrapa pagos reales de ese mismo día, así que ya no se limpia todo a ciegas. Usa las filas del informe que de verdad quieras borrar.', array('status' => 400));
     }
     $detectadas = blokes_sync_grupos_celdas_bug_1711();
     $celdas = array();
+    $detalle_simulado = array();
     foreach ($celdas_pedidas as $pedida) {
+        $encontrada = null;
         foreach ($detectadas as $d) {
             if ($d['pestana'] === ($pedida['pestana'] ?? null) && $d['fila'] === intval($pedida['fila'] ?? 0) && $d['mes'] === ($pedida['mes'] ?? null)) {
-                $celdas[] = $d;
+                $encontrada = $d;
                 break;
             }
         }
+        if ($encontrada) $celdas[] = $encontrada;
+        if ($simular) {
+            $detalle_simulado[] = array(
+                'pestana' => $pedida['pestana'] ?? null, 'fila' => intval($pedida['fila'] ?? 0), 'mes' => $pedida['mes'] ?? null,
+                'seLimpiaria' => (bool) $encontrada,
+                'motivo' => $encontrada ? 'Coincide con la firma del bug ahora mismo — se dejarían vacías importe/método/fecha.' : 'Ya no coincide con la firma (alguien la corrigió, o nunca lo era) — no se tocaría.',
+                'importeActual' => $encontrada['importe'] ?? null, 'metodoActual' => $encontrada['metodo'] ?? null, 'fechaActual' => $encontrada['fecha'] ?? null,
+            );
+        }
+    }
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'seLimpiarian' => count($celdas), 'noSeTocarian' => count($celdas_pedidas) - count($celdas), 'detalle' => $detalle_simulado,
+        )));
     }
     $activa = blokes_sync_grupos_sheet_activa();
     if (!$activa['id']) return new WP_Error('falta_config', 'No hay Hoja configurada.', array('status' => 400));
