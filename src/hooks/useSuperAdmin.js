@@ -95,6 +95,9 @@ export const gestionMarcarCobrado = body => gestionPost('/gestion/marcar-cobrado
 export const gestionVuelveTrasLesion = body => gestionPost('/gestion/vuelve-tras-lesion', body)
 export const gestionPausar        = body => gestionPost('/gestion/pausar', body)
 export const gestionReanudar      = body => gestionPost('/gestion/reanudar', body)
+// 19/11 21:30 (Eva/cowork, punto 2): congelar uno o varios meses de una sub activa, sin pausarla
+// ni cobrarle — mueve next_payment hacia delante.
+export const gestionCongelarMes   = body => gestionPost('/gestion/congelar-mes', body)
 export const gestionNota          = body => gestionPost('/gestion/nota', body)
 export const gestionDarDeBaja     = body => gestionPost('/gestion/dar-de-baja', body)
 export const gestionFusionar      = body => gestionPost('/gestion/fusionar', body)

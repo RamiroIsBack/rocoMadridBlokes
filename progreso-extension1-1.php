@@ -1128,6 +1128,13 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_reanudar',
         'permission_callback' => $sa_perm,
     ));
+    // 19/11 21:30 (Eva/cowork, punto 2 — Borja Erice): congelar uno o varios meses de un
+    // trimestral sin pausarlo ni cobrarle, moviendo next_payment hacia delante.
+    register_rest_route('superadmin/v1', '/gestion/congelar-mes', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_congelar_mes',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/log', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_gestion_log_get',
@@ -12498,15 +12505,21 @@ function superadmin_gestion_pausar($request) {
     $motivo       = sanitize_text_field($request->get_param('motivo'));
     $fecha_vuelta = sanitize_text_field($request->get_param('fecha_vuelta')); // 'Y-m-d', opcional
     $simular      = (bool) $request->get_param('simular');
+    // 19/11 21:30 (Eva/cowork, punto 3 — María Clara Garrido): al pausar con un pedido del mes
+    // en curso sin pagar, ofrecer cancelarlo (sin factura, nunca se llegó a generar una) para
+    // que deje de salir en Pendientes mientras está en pausa.
+    $cancelar_pendientes = (bool) $request->get_param('cancelarPedidosPendientes');
 
     if (!$sub_id || !$motivo) return new WP_Error('bad_request', 'Faltan sub_id o motivo.', array('status' => 400));
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
 
     if ($simular) {
+        $pedidos_pendientes = blokes_cancelar_pedidos_impagados($sub, true);
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'subId' => $sub_id, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => 'on-hold',
             'motivo' => $motivo, 'fecha_vuelta' => $fecha_vuelta,
+            'pedidosPendientes' => $pedidos_pendientes ?: null,
             'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
         )));
     }
@@ -12519,7 +12532,9 @@ function superadmin_gestion_pausar($request) {
     if ($fecha_vuelta) update_post_meta($sub_id, '_rm_pausa_hasta', $fecha_vuelta);
     else delete_post_meta($sub_id, '_rm_pausa_hasta');
 
-    $despues = array('status' => 'on-hold', 'motivo' => $motivo, 'fecha_vuelta' => $fecha_vuelta);
+    $pedidos_cancelados = $cancelar_pendientes ? blokes_cancelar_pedidos_impagados($sub, false) : array();
+
+    $despues = array('status' => 'on-hold', 'motivo' => $motivo, 'fecha_vuelta' => $fecha_vuelta, 'pedidosCancelados' => $pedidos_cancelados ?: null);
     blokes_gestion_log($sub_id, 'pausar', $antes, $despues);
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
@@ -12552,6 +12567,56 @@ function superadmin_gestion_reanudar($request) {
 
     $despues = array('status' => 'active');
     blokes_gestion_log($sub_id, 'reanudar', $antes, $despues);
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// "Congelar mes(es)" (19/11 21:30, Eva/cowork, punto 2 — Borja Erice, trimestral que congela
+// diciembre y vuelve en enero): a diferencia de "Pausar" (que pone on-hold y no mueve ninguna
+// fecha, pensado para quien deja de venir un tiempo indefinido y hay que avisar cuando vuelva),
+// esto es para quien SIGUE siendo alumno activo pero no cuenta ese mes — mueve next_payment
+// hacia delante los meses que haga falta, sin tocar el estado (se queda "active") y sin cobrar
+// ni mandar ningún email. Deja nota en la sub y log en gestión, igual que el resto de acciones.
+function superadmin_gestion_congelar_mes($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id  = intval($request->get_param('sub_id'));
+    $meses   = max(1, intval($request->get_param('meses')) ?: 1);
+    $nota    = sanitize_text_field((string) $request->get_param('nota'));
+    $simular = (bool) $request->get_param('simular');
+
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    if ($sub->get_status() !== 'active') {
+        return new WP_Error('estado_no_valido', 'Solo se puede congelar una suscripción activa — si ya está pausada, usa "Pausar"/"Reanudar".', array('status' => 409));
+    }
+    $next_payment_actual = $sub->get_date('next_payment');
+    if (!$next_payment_actual) {
+        return new WP_Error('sin_next_payment', 'Esta suscripción no tiene próximo pago programado — no hay fecha que mover.', array('status' => 409));
+    }
+    $next_payment_nueva = gmdate('Y-m-d H:i:s', strtotime("+{$meses} months", strtotime($next_payment_actual)));
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'subId' => $sub_id, 'meses' => $meses,
+            'proximoPagoAntes' => date('Y-m-d', strtotime($next_payment_actual)),
+            'proximoPagoDespues' => date('Y-m-d', strtotime($next_payment_nueva)),
+            'aviso' => 'Simulación: no se ha escrito nada en WooCommerce. No se cobra nada ni se manda ningún email.',
+        )));
+    }
+
+    $antes = array('proximoPago' => $next_payment_actual);
+    blokes_gestion_sin_emails(function() use ($sub, $next_payment_nueva, $meses) {
+        try { $sub->update_dates(array('next_payment' => $next_payment_nueva)); } catch (Exception $e) {}
+        $sub->add_order_note(sprintf('Congelado %d mes(es) vía Grupos — próximo pago movido al %s, sin cobrar.', $meses, date('d/m/Y', strtotime($next_payment_nueva))));
+        $sub->save();
+    });
+    if ($nota) update_post_meta($sub_id, '_rm_nota', $nota);
+
+    $despues = array('proximoPago' => $next_payment_nueva, 'meses' => $meses, 'nota' => $nota);
+    blokes_gestion_log($sub_id, 'congelar_mes', $antes, $despues);
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
