@@ -2947,6 +2947,49 @@ function blokes_subs_en_vigor_de_persona($uid, $excluir_sub_id = null, $clase_ob
 function blokes_pedido_factura_anulada($order) {
     return $order && $order->get_meta('_aeat_cancelled_invoice');
 }
+
+// 18/11 21:10 (cowork, GRAVE/URGENTE): firma exacta de las celdas que el bug del auto-aplicado
+// (17/11 22:00-23:05, ya desactivado) escribió por error en 22 alumnos: método "tarjeta" (la
+// propia sincronización, nunca Eva, usó siempre tarjeta) y fecha EXACTAMENTE el día del bug.
+// Cualquier pago real de verdad con esa combinación concreta (tarjeta + ese día exacto) sería
+// una coincidencia tan improbable que no hace falta pedir también el importe para confiar en
+// esto — y pedirlo aquí exigiría tener ya el importe del pedido a mano, que esta función no
+// tiene. Usada tanto para que "Pendientes de cobro" deje de contarlas como pago real, como por
+// el informe/limpieza de celdas (más abajo), que ya no depende de encontrar el log exacto del
+// momento en que se escribieron (ese log no estaba donde se esperaba — "no cuenta sola" es más
+// fiable que "la encontré en el log").
+function blokes_sync_grupos_pago_parece_bug_1711($pago) {
+    return is_array($pago) && ($pago['metodo'] ?? '') === 'tarjeta' && ($pago['fecha'] ?? '') === '17/11/2026';
+}
+
+// 18/11 21:10 (cowork): «Informe celdas escritas por error» dependía del log
+// ('sync_grupos_cobro_escrito' cruzado con 'marcar_cobrado', ambos user_id=0) para encontrar las
+// 22 celdas — y ese cruce no encontró nada, aunque las celdas siguen en el Excel (Joel, Lucía,
+// Paco, Zahara, Víctor Agüí...). En vez de seguir dependiendo de ese log (que por lo que sea no
+// tiene lo que se esperaba), esto relee la Hoja entera de verdad y busca la firma directamente en
+// el CONTENIDO de cada celda — nunca puede dar "0 filas" mientras la celda siga ahí, porque no
+// depende de que ningún log haya quedado como se esperaba. Devuelve una fila por cada mes de cada
+// alumno con la firma, emparejado por teléfono con su suscripción/externo si lo encuentra.
+function blokes_sync_grupos_celdas_bug_1711() {
+    $subs_por_tel = blokes_sync_grupos_subs_por_telefono();
+    $externos_por_tel = blokes_campanas_externos_por_telefono();
+    $celdas = array();
+    foreach (blokes_sync_grupos_todas_las_filas() as $f) {
+        foreach ($f['pagos'] as $ym => $pago) {
+            if (!blokes_sync_grupos_pago_parece_bug_1711($pago)) continue;
+            $match = blokes_sync_grupos_emparejar($f['telefono'], $f['nombre'], $subs_por_tel, $externos_por_tel);
+            $celdas[] = array(
+                'pestana' => $f['_pestana'], 'fila' => intval($f['_row']) + 1, 'mes' => $ym,
+                'nombre' => $f['nombre'], 'telefono' => $f['telefono'],
+                'importe' => $pago['importe'] ?? null, 'metodo' => $pago['metodo'] ?? null, 'fecha' => $pago['fecha'] ?? null,
+                'matchTipo' => $match['tipo'] ?? null, 'subId' => ($match['tipo'] ?? null) === 'sub' ? intval($match['id']) : null,
+                'matchLabel' => $match['label'] ?? null,
+            );
+        }
+    }
+    return $celdas;
+}
+
 // Meses (sep/oct/nov 2026) con pago o exención de un alumno en el Excel, por teléfono o nombre.
 function blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel, $nombre) {
     $fila = ($tel && isset($excel_por_tel[$tel])) ? $excel_por_tel[$tel]
@@ -2995,6 +3038,10 @@ function blokes_onhold_diagnostico_calcular() {
         // (int). De ahí el 0 en pagaronNoviembre/pagaronSoloOctubre aunque el Excel sí tuviera
         // el pago. Forzamos (string) para que $meses sea siempre ['09','10','11'], nunca mixto.
         foreach (array('09' => '2026-09', '10' => '2026-10', '11' => '2026-11') as $mm => $ym) {
+            // 18/11 21:10: una celda con la firma exacta del bug del auto-aplicado (tarjeta +
+            // 17/11/2026) nunca cuenta como pago real — si no, "Pendientes de cobro" sigue
+            // mandando a Eva a cobrar (otra vez) algo que ya se anuló a propósito.
+            if (blokes_sync_grupos_pago_parece_bug_1711($f['pagos'][$ym] ?? null)) continue;
             if (!empty($f['pagos'][$ym]) || in_array($ym, $f['exentoMeses'], true)) $meses[] = (string) $mm;
         }
         if (!$meses) continue;
@@ -9590,19 +9637,17 @@ function superadmin_sync_grupos_informe_autoaplicados($request) {
     return rest_ensure_response(array('success' => true, 'total' => count($informe), 'importeTotal' => round($total_importe, 2), 'filas' => $informe));
 }
 
-// subId de las suscripciones cuyo pedido pendiente completó el bug del auto-aplicado (cruzando
-// 'sync_grupos_cobro_escrito' con el 'marcar_cobrado' del mismo instante, sin sesión) — usado
-// tanto por el informe como por el bloqueo en superadmin_gestion_marcar_cobrado().
+// 18/11 21:10 (cowork, GRAVE): esto dependía del log ('sync_grupos_cobro_escrito' cruzado con
+// 'marcar_cobrado', ambos user_id=0) para saber qué subId estaban afectados — ese cruce no
+// encontraba nada aunque las celdas seguían en el Excel, así que el bloqueo de abajo podía dejar
+// de proteger sin que nadie lo notara. Reescrita para usar blokes_sync_grupos_celdas_bug_1711()
+// (relee la Hoja de verdad, busca la firma en el contenido) — nunca depende del log.
 function blokes_sync_grupos_subs_afectadas_bug_1711() {
-    global $wpdb;
-    blokes_ensure_gestion_log_table();
-    $tabla_log = blokes_gestion_log_table();
-    $escritos = $wpdb->get_col("SELECT created_at FROM {$tabla_log} WHERE accion = 'sync_grupos_cobro_escrito' AND user_id = 0");
-    if (!$escritos) return array();
-    $ph = implode(',', array_fill(0, count($escritos), '%s'));
-    return array_map('intval', $wpdb->get_col($wpdb->prepare(
-        "SELECT DISTINCT sub_id FROM {$tabla_log} WHERE accion = 'marcar_cobrado' AND user_id = 0 AND created_at IN ($ph)", ...$escritos
-    )));
+    $subs = array();
+    foreach (blokes_sync_grupos_celdas_bug_1711() as $c) {
+        if ($c['subId']) $subs[] = intval($c['subId']);
+    }
+    return array_values(array_unique($subs));
 }
 function blokes_sync_grupos_sub_afectada_bug_1711($sub_id) {
     static $cache = null;
@@ -9610,81 +9655,23 @@ function blokes_sync_grupos_sub_afectada_bug_1711($sub_id) {
     return in_array(intval($sub_id), $cache, true);
 }
 
-// 18/11 (Ramiro, relayando a cowork): el auto-aplicado (ya desactivado) no solo escribió pedidos
-// en WooCommerce — su propio paso de "Web → Excel" (blokes_sync_grupos_escribir_cobro(), pensado
-// para que el cobro quede también apuntado en la Hoja de Eva) escribió celdas "TA 17/11/2026" en
-// 22 alumnos cuyo mes todavía estaba vacío en el Excel. Mirando el código: esto solo puede pasar
-// desde la rama que SÍ completa un pedido real de WooCommerce (marcar_cobrado, nunca
-// marcar_cobrado_adelantado — esa ni toca el Excel ni genera factura) — es decir, estos 22 son
-// casos donde YA existía un pedido de renovación pendiente (el periodo que de verdad toca cobrar
-// ahora, normalmente el mes en curso) y el bug lo completó con fecha/método de la sincronización
-// en vez de los reales, justo ANTES de que Eva lo cobrara de verdad — por eso la celda de ese mes
-// estaba vacía en el Excel. Cada vez que escribe de verdad, queda un log
-// 'sync_grupos_cobro_escrito' (pestana+fila+mes) — con user_id=0 solo cuando lo disparó el cron,
-// igual que el informe de arriba. Esta función localiza esas filas y relee el valor QUE HAY AHORA
-// MISMO en esas celdas, sin tocar nada — para confirmar antes de borrar que de verdad siguen
-// siendo la escritura del bug y no algo que alguien ya corrigiera a mano después. También cruza
-// cada fila con el log de marcar_cobrado más cercano en el tiempo (mismo segundo, misma llamada)
-// para sacar el subId y simular (simular=true, NUNCA escribe nada) qué pasaría si Eva cobrara
-// ahora ese mismo pedido — para responder "¿se emitiría una factura nueva?" con un dato real del
+// 18/11 (Ramiro/cowork): el auto-aplicado (ya desactivado) escribió celdas "TA 17/11/2026" en 22
+// alumnos cuyo mes todavía estaba vacío en el Excel, al completar su pedido de renovación
+// pendiente con fecha/método de la sincronización en vez de los reales. Informe de solo lectura
+// (blokes_sync_grupos_celdas_bug_1711() relee la Hoja y busca la firma en el contenido, nunca en
+// un log) + una simulación real (simular=true, nunca escribe nada) de qué pasaría si se cobrara
+// ahora ese mismo pedido, para responder "¿se emitiría una factura nueva?" con un dato real del
 // propio sistema en vez de una suposición.
-// Compara la celda que hay AHORA (releída de verdad) contra lo que el log de 'marcar_cobrado'
-// sin sesión dice que se escribió — importe exacto, método exacto (mapeado al código de Excel,
-// "TA"/"TR"/"EF") y la fecha cayendo en el mismo día que el log. Las tres cosas a la vez, no solo
-// "mismo día" — cowork, 18/11 11:00: "que solo borre si la celda coincide exactamente con lo
-// escrito por la sync". Devuelve también el sub_id (para poder simular) y el propio detalle del
-// marcar_cobrado emparejado.
-function blokes_sync_grupos_celda_coincide_con_log($r, $pago_actual, $marcar_cobrado_rows) {
-    $mc_asociado = null;
-    foreach ($marcar_cobrado_rows as $mc) {
-        if ($mc['created_at'] === $r['created_at']) { $mc_asociado = $mc; break; }
-    }
-    if (!$mc_asociado || !$pago_actual) return array('coincide' => false, 'subId' => null);
-    $detalle_mc = json_decode($mc_asociado['detalle'], true) ?: array();
-    $mismo_dia = isset($pago_actual['fecha']) && substr($r['created_at'], 0, 10) === date('Y-m-d', strtotime(str_replace('/', '-', $pago_actual['fecha'])));
-    $mismo_importe = abs(floatval($pago_actual['importe'] ?? 0) - floatval($detalle_mc['importe'] ?? -1)) < 0.01;
-    $mismo_metodo = blokes_sync_grupos_metodo_a_excel((string) ($pago_actual['metodo'] ?? '')) === blokes_sync_grupos_metodo_a_excel((string) ($detalle_mc['metodo'] ?? ''));
-    return array('coincide' => $mismo_dia && $mismo_importe && $mismo_metodo, 'subId' => intval($mc_asociado['sub_id']));
-}
-
 function superadmin_sync_grupos_informe_celdas_escritas($request) {
-    global $wpdb;
-    blokes_ensure_gestion_log_table();
-    $tabla_log = blokes_gestion_log_table();
-    $rows = $wpdb->get_results(
-        "SELECT * FROM {$tabla_log} WHERE accion = 'sync_grupos_cobro_escrito' AND user_id = 0 ORDER BY id ASC", ARRAY_A
-    );
-    $marcar_cobrado_rows = $wpdb->get_results(
-        "SELECT * FROM {$tabla_log} WHERE accion = 'marcar_cobrado' AND user_id = 0 ORDER BY id ASC", ARRAY_A
-    );
-    $activa = blokes_sync_grupos_sheet_activa();
-    if (!$activa['id']) return new WP_Error('falta_config', 'No hay Hoja configurada.', array('status' => 400));
-    $cache_pestanas = array();
+    $celdas = blokes_sync_grupos_celdas_bug_1711();
     $informe = array();
-    foreach ($rows as $r) {
-        $detalle = json_decode($r['detalle'], true) ?: array();
-        $pestana = (string) ($detalle['pestana'] ?? '');
-        $fila_sheet = intval($detalle['fila'] ?? 0);
-        $mes = (string) ($detalle['mes'] ?? '');
-        if ($pestana === '' || !$fila_sheet || $mes === '') continue;
-        if (!array_key_exists($pestana, $cache_pestanas)) {
-            $valores = blokes_sync_grupos_leer_valores($activa['id'], $pestana);
-            $cache_pestanas[$pestana] = is_wp_error($valores) ? null : blokes_sync_grupos_leer_pestana_filas($valores);
-        }
-        $rp = $cache_pestanas[$pestana];
-        $fila_actual = null;
-        if ($rp) {
-            foreach ($rp['filas'] as $f) { if (intval($f['_row']) + 1 === $fila_sheet) { $fila_actual = $f; break; } }
-        }
-        $pago_actual = $fila_actual ? ($fila_actual['pagos'][$mes] ?? null) : null;
-        $match = blokes_sync_grupos_celda_coincide_con_log($r, $pago_actual, $marcar_cobrado_rows);
-        $sub_id_asociado = $match['subId'];
+    foreach ($celdas as $c) {
         $simulacion = null;
-        if ($sub_id_asociado && function_exists('wcs_get_subscription')) {
-            $sub_sim = wcs_get_subscription($sub_id_asociado);
+        if ($c['subId'] && function_exists('wcs_get_subscription')) {
+            $sub_sim = wcs_get_subscription($c['subId']);
             if ($sub_sim) {
                 $req_sim = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
-                $req_sim->set_param('sub_id', $sub_id_asociado);
+                $req_sim->set_param('sub_id', $c['subId']);
                 $req_sim->set_param('importe', floatval($sub_sim->get_total()));
                 $req_sim->set_param('metodo', 'tarjeta');
                 $req_sim->set_param('simular', true);
@@ -9700,53 +9687,36 @@ function superadmin_sync_grupos_informe_celdas_escritas($request) {
             }
         }
         $informe[] = array(
-            'logId' => intval($r['id']), 'pestana' => $pestana, 'fila' => $fila_sheet, 'mes' => $mes,
-            'nombre' => $fila_actual['nombre'] ?? null, 'registradoEn' => $r['created_at'],
-            'importeActual' => $pago_actual['importe'] ?? null, 'metodoActual' => $pago_actual['metodo'] ?? null, 'fechaActual' => $pago_actual['fecha'] ?? null,
-            'pareceSerElBug' => (bool) $match['coincide'], 'subId' => $sub_id_asociado, 'simulacionCobrarAhora' => $simulacion,
+            'pestana' => $c['pestana'], 'fila' => $c['fila'], 'mes' => $c['mes'],
+            'nombre' => $c['nombre'], 'telefono' => $c['telefono'],
+            'importeActual' => $c['importe'], 'metodoActual' => $c['metodo'], 'fechaActual' => $c['fecha'],
+            'matchLabel' => $c['matchLabel'], 'subId' => $c['subId'], 'simulacionCobrarAhora' => $simulacion,
         );
     }
     return rest_ensure_response(array('success' => true, 'total' => count($informe), 'filas' => $informe));
 }
 
 // Borra (deja la celda vacía, nunca escribe un dato inventado) las 3 celdas (importe, método,
-// fecha) de cada fila que superadmin_sync_grupos_informe_celdas_escritas() marcó como
-// `pareceSerElBug` — la misma comprobación se repite aquí mismo justo antes de escribir, nunca
-// se fía solo de lo que diga el frontend.
+// fecha) de cada una que blokes_sync_grupos_celdas_bug_1711() encuentre AHORA MISMO releyendo la
+// Hoja de verdad — nunca depende de un log, así que no puede dejar de limpiar algo solo porque
+// un registro de log no quedara donde se esperaba.
 function superadmin_sync_grupos_limpiar_celdas_escritas($request) {
-    global $wpdb;
-    blokes_ensure_gestion_log_table();
-    $tabla_log = blokes_gestion_log_table();
-    $rows = $wpdb->get_results(
-        "SELECT * FROM {$tabla_log} WHERE accion = 'sync_grupos_cobro_escrito' AND user_id = 0 ORDER BY id ASC", ARRAY_A
-    );
-    $marcar_cobrado_rows = $wpdb->get_results(
-        "SELECT * FROM {$tabla_log} WHERE accion = 'marcar_cobrado' AND user_id = 0 ORDER BY id ASC", ARRAY_A
-    );
+    $celdas = blokes_sync_grupos_celdas_bug_1711();
     $activa = blokes_sync_grupos_sheet_activa();
     if (!$activa['id']) return new WP_Error('falta_config', 'No hay Hoja configurada.', array('status' => 400));
     $cache_pestanas = array();
-    $limpiadas = array(); $saltadas = array();
-    foreach ($rows as $r) {
-        $detalle = json_decode($r['detalle'], true) ?: array();
-        $pestana = (string) ($detalle['pestana'] ?? '');
-        $fila_sheet = intval($detalle['fila'] ?? 0);
-        $mes = (string) ($detalle['mes'] ?? '');
-        if ($pestana === '' || !$fila_sheet || $mes === '') continue;
+    $limpiadas = 0; $saltadas = 0;
+    foreach ($celdas as $c) {
+        $pestana = $c['pestana']; $fila_sheet = $c['fila']; $mes = $c['mes'];
         if (!array_key_exists($pestana, $cache_pestanas)) {
             $valores = blokes_sync_grupos_leer_valores($activa['id'], $pestana);
             $cache_pestanas[$pestana] = is_wp_error($valores) ? null : blokes_sync_grupos_leer_pestana_filas($valores);
         }
         $rp = $cache_pestanas[$pestana];
-        if (!$rp) { $saltadas[] = intval($r['id']); continue; }
-        $fila_actual = null;
-        foreach ($rp['filas'] as $f) { if (intval($f['_row']) + 1 === $fila_sheet) { $fila_actual = $f; break; } }
-        $pago_actual = $fila_actual ? ($fila_actual['pagos'][$mes] ?? null) : null;
-        $match = blokes_sync_grupos_celda_coincide_con_log($r, $pago_actual, $marcar_cobrado_rows);
-        if (!$match['coincide']) { $saltadas[] = intval($r['id']); continue; }
+        if (!$rp) { $saltadas++; continue; }
         $bloque = null;
         foreach ($rp['bloquesLayout'] as $b) { if ($b['ym'] === $mes) { $bloque = $b; break; } }
-        if (!$bloque) { $saltadas[] = intval($r['id']); continue; }
+        if (!$bloque) { $saltadas++; continue; }
         $prefijo = blokes_sync_grupos_a1_pestana($pestana) . '!';
         $data = array();
         if ($bloque['layout']['kind'] === 'cantidad') {
@@ -9754,17 +9724,16 @@ function superadmin_sync_grupos_limpiar_celdas_escritas($request) {
             $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['metodo']) . $fila_sheet, 'values' => array(array('')));
             $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['fecha']) . $fila_sheet, 'values' => array(array('')));
         } else {
-            $col = ($pago_actual['metodo'] ?? '') === 'efectivo' ? $bloque['layout']['efectivo'] : $bloque['layout']['transf'];
-            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($col) . $fila_sheet, 'values' => array(array('')));
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['transf']) . $fila_sheet, 'values' => array(array('')));
             $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['fecha']) . $fila_sheet, 'values' => array(array('')));
         }
         $res = blokes_sync_grupos_escribir_valores($activa['id'], $data);
-        if (is_wp_error($res)) { $saltadas[] = intval($r['id']); continue; }
+        if (is_wp_error($res)) { $saltadas++; continue; }
         $u = wp_get_current_user();
-        blokes_gestion_log(0, 'sync_grupos_celda_limpiada', array('pestana' => $pestana, 'fila' => $fila_sheet, 'mes' => $mes, 'antes' => $pago_actual), null, array('por' => $u ? $u->user_login : ''));
-        $limpiadas[] = intval($r['id']);
+        blokes_gestion_log(0, 'sync_grupos_celda_limpiada', array('pestana' => $pestana, 'fila' => $fila_sheet, 'mes' => $mes, 'antes' => array('importe' => $c['importe'], 'metodo' => $c['metodo'], 'fecha' => $c['fecha'])), null, array('por' => $u ? $u->user_login : ''));
+        $limpiadas++;
     }
-    return rest_ensure_response(array('success' => true, 'limpiadas' => count($limpiadas), 'saltadas' => count($saltadas)));
+    return rest_ensure_response(array('success' => true, 'limpiadas' => $limpiadas, 'saltadas' => $saltadas));
 }
 
 // ============================================================
@@ -11662,7 +11631,12 @@ function superadmin_gestion_marcar_cobrado($request) {
     // de verdad sobre ellas (nunca la simulación, que es justo la herramienta para comprobar qué
     // pasaría) hasta que alguien confirme a propósito — ver NOTAS_PARA_CODE_pestanas_grupos.md
     // §18/11 y el botón "Informe celdas escritas por error" (trae la simulación ya hecha).
-    if (!$simular && !$request->get_param('confirmarRevisionBug1711') && blokes_sync_grupos_sub_afectada_bug_1711($sub_id)) {
+    // 18/11 21:10 (cowork, GRAVE): calculado SIEMPRE, incluso simulando — así la propia
+    // simulación (la que ve "Pendientes de cobro" antes de dejar confirmar) ya puede avisar y
+    // desactivar "Confirmar de verdad" en el frontend, en vez de que la persona se entere del
+    // bloqueo solo al chocar contra el 409 con el botón ya habilitado.
+    $bloqueado_bug_1711 = blokes_sync_grupos_sub_afectada_bug_1711($sub_id);
+    if (!$simular && $bloqueado_bug_1711 && !$request->get_param('confirmarRevisionBug1711')) {
         return new WP_Error('revisar_antes_1711', 'Esta suscripción fue completada por el bug del auto-aplicado (17/11) — antes de cobrarla de verdad, mira la simulación en "Informe celdas escritas por error" o confirma a propósito (confirmarRevisionBug1711).', array('status' => 409));
     }
 
@@ -11701,10 +11675,16 @@ function superadmin_gestion_marcar_cobrado($request) {
                 'fecha' => $fecha_txt, 'parcial' => $parcial, 'reactivaLaSuscripcion' => $reactivaria,
                 'pedidosACancelar' => $pedidos_a_cancelar,
                 'posibleDuplicadoSub' => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+                'bloqueadoBug1711' => $bloqueado_bug_1711,
                 'aviso' => $hay_duplicado_sub_sin_resolver
                     ? 'Esta persona tiene otra suscripción en vigor de la misma clase — confirma cuál es la que se cobra.'
                     : 'Simulación: no se escribiría nada todavía. El efectivo no toca WooCommerce ni genera factura, solo queda apuntado en Grupos.',
             )));
+        }
+        // Repetida a propósito (ya se comprobó arriba, antes de saber si era efectivo o no) —
+        // nunca está de más que la guarda de dinero se vuelva a mirar justo antes de escribir.
+        if ($bloqueado_bug_1711 && !$request->get_param('confirmarRevisionBug1711')) {
+            return new WP_Error('revisar_antes_1711', 'Esta suscripción fue completada por el bug del auto-aplicado (17/11) — antes de cobrarla de verdad, mira la simulación en "Informe celdas escritas por error" o confirma a propósito (confirmarRevisionBug1711).', array('status' => 409));
         }
         blokes_ensure_cobros_manuales_table();
         global $wpdb;
@@ -11799,6 +11779,7 @@ function superadmin_gestion_marcar_cobrado($request) {
             'totalActual'          => $total_referencia,
             'ajustarPrecio'        => $ajustar_precio ?: null,
             'posibleDuplicadoSub'  => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+            'bloqueadoBug1711'     => $bloqueado_bug_1711,
             'opciones' => !$importe_distinto ? null : array(
                 'solo_este_mes' => array(
                     'disponible' => (bool) $order,

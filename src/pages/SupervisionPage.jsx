@@ -1180,11 +1180,16 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
             <p className="sv-to-warn-txt">Simulación: no se ha escrito nada todavía.</p>
             <ul className="sv-grp-preview">
               {Object.entries(preview)
-                .filter(([k, v]) => !['aviso', 'importeDistinto', 'totalActual', 'ajustarPrecio', 'opciones', 'posibleDuplicadoSub'].includes(k) && v !== null)
+                .filter(([k, v]) => !['aviso', 'importeDistinto', 'totalActual', 'ajustarPrecio', 'opciones', 'posibleDuplicadoSub', 'bloqueadoBug1711'].includes(k) && v !== null)
                 .map(([k, v]) => (
                   <li key={k}><span>{previewLabel(k)}</span><span>{previewValor(v)}</span></li>
                 ))}
             </ul>
+            {tipo === 'marcar_cobrado' && preview.bloqueadoBug1711 && (
+              <div className="sv-grp-field sv-to-warn-txt sv-dup-aviso">
+                <p>🔴 <strong>Bloqueado: esta suscripción fue completada por el bug del auto-aplicado (17/11)</strong> — tiene (o tuvo) una celda «tarjeta 17/11/2026» escrita por error en el Excel, no por Eva. Antes de cobrarla de verdad hay que revisarlo (ver «Informe celdas escritas por error» en Supervisión → Cambios del Excel). No se puede confirmar desde aquí mientras siga el bloqueo.</p>
+              </div>
+            )}
             {(tipo === 'marcar_cobrado' || tipo === 'cambiar_grupo') && preview.posibleDuplicadoSub && (
               <div className="sv-grp-field sv-to-warn-txt sv-dup-aviso">
                 <p>⚠️ <strong>Cuidado: esta persona ya tiene otra suscripción{tipo === 'cambiar_grupo' ? ' en esa misma clase nueva' : ' de la misma clase'}</strong>:</p>
@@ -1496,13 +1501,15 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
               <button
                 className="sv-tests-danger sv-tests-danger--confirm"
                 onClick={() => submit(true)}
-                disabled={busy || !!preview.adelantadoYaGuardado || (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim())) || (preview.posibleDuplicadoSub && !confirmarDuplicado)}
-                title={preview.adelantadoYaGuardado
-                  ? 'Ya hay un pago adelantado guardado para este mes — anúlalo primero si quieres cambiarlo.'
-                  : (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim()) ? 'Elige una opción y pon el motivo de la excepción de precio.'
-                    : (preview.posibleDuplicadoSub && !confirmarDuplicado ? 'Marca la casilla si quieres seguir adelante con el duplicado.' : undefined))}
+                disabled={busy || !!preview.bloqueadoBug1711 || !!preview.adelantadoYaGuardado || (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim())) || (preview.posibleDuplicadoSub && !confirmarDuplicado)}
+                title={preview.bloqueadoBug1711
+                  ? 'Bloqueado por el bug del auto-aplicado (17/11) — revísalo en "Informe celdas escritas por error" antes de cobrar.'
+                  : (preview.adelantadoYaGuardado
+                    ? 'Ya hay un pago adelantado guardado para este mes — anúlalo primero si quieres cambiarlo.'
+                    : (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim()) ? 'Elige una opción y pon el motivo de la excepción de precio.'
+                      : (preview.posibleDuplicadoSub && !confirmarDuplicado ? 'Marca la casilla si quieres seguir adelante con el duplicado.' : undefined)))}
               >
-                {busy ? 'Guardando…' : (preview.adelantadoYaGuardado ? 'Ya hay un adelantado guardado' : 'Confirmar de verdad')}
+                {busy ? 'Guardando…' : (preview.bloqueadoBug1711 ? 'Bloqueado (revisar primero)' : (preview.adelantadoYaGuardado ? 'Ya hay un adelantado guardado' : 'Confirmar de verdad'))}
               </button>
             </>
           ) : (
