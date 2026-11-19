@@ -6598,6 +6598,10 @@ function superadmin_gestion_grupos($request) {
             'telefono'    => $telefono,
             'optinWhatsapp' => $telefono ? ($optin_por_tel[blokes_externos_normaliza_telefono($telefono)] ?? null) : null,
             'dias'        => count($dias_sub) ?: 1,
+            // 19/11 21:30 (Eva/cowork, punto 1 — Rita Acero): el grupo se agrupa por la pareja
+            // (Lunes-Miércoles), así que "dias"=1 ya dice que viene un solo día, pero no CUÁL —
+            // esto deja ver "(solo Miércoles)" en vez de solo el número.
+            'diaReal'     => $dia,
             'estado'      => $estado,
             'enVigor'     => $en_vigor,
             'pausaMotivo' => $pausa_motivo ?: '',

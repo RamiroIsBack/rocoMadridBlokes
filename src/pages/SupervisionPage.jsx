@@ -4,6 +4,7 @@ import {
   Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import useTemaOscuro from '../hooks/useTemaOscuro'
+import { useClases } from '../hooks/useClases'
 
 // Cowork 11/11 15:00: mismo caso que Superadmin — los --kpi-color vivos de las pestañas que
 // ya eran "siempre oscuras" (Alumnos/Evolución/Clases/Histórico, dentro de .sv-section) ahora
@@ -1809,7 +1810,7 @@ function TablaAlumnos({ alumnos, meses, onWa, onMenu }) {
                   )}
                 </td>
                 <td className="sv-ot-muted">{a.telefono || '—'}</td>
-                <td>{a.dias}</td>
+                <td>{a.dias}{a.dias === 1 && a.diaReal ? <span className="sv-ot-muted"> (solo {a.diaReal})</span> : ''}</td>
                 <td><span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span></td>
                 {meses.map(m => {
                   const p = a.pagos[m]
@@ -1860,6 +1861,10 @@ function BuscarAlumnoModal({ onClose, grupos = [] }) {
   const [buscando, setBuscando]     = useState(false)
   const [err, setErr]       = useState(null)
   const [crear, setCrear]   = useState(false) // "Crear cliente en la web" (Ramiro, 07/11 08:06)
+  // 19/11 21:30 (Eva/cowork, punto 4 — Patricia Bravo): ya existía la vía ("Crear cliente" →
+  // Simular → "Usar este cliente"), pero no se encontraba. Este botón va derecho al formulario
+  // con usarClienteId ya puesto, sin el paso intermedio.
+  const [clienteParaAlta, setClienteParaAlta] = useState(null)
 
   async function buscar() {
     if (q.trim().length < 2) { setErr('Escribe al menos 2 caracteres.'); return }
@@ -1874,7 +1879,7 @@ function BuscarAlumnoModal({ onClose, grupos = [] }) {
     }
   }
 
-  if (crear) return <CrearClienteForm onClose={onClose} onVolver={() => setCrear(false)} qInicial={q} grupos={grupos} />
+  if (crear) return <CrearClienteForm onClose={onClose} onVolver={() => setCrear(false)} qInicial={q} grupos={grupos} clientePrefill={clienteParaAlta} />
 
   return (
     <div className="sv-grp-overlay" onClick={onClose}>
@@ -1913,7 +1918,14 @@ function BuscarAlumnoModal({ onClose, grupos = [] }) {
                     <span className="sv-ot-muted">👪 Tutor: {p.tutorNombre || '—'}{p.tutorTelefono ? ` · ${p.tutorTelefono}` : ''}</span>
                   )}
                   {p.grupos.length === 0 ? (
-                    <span className="sv-to-warn-txt">Registrado en WordPress, sin ninguna clase activa ni externo.</span>
+                    <>
+                      <span className="sv-to-warn-txt">Registrado en WordPress, sin ninguna clase activa ni externo.</span>
+                      {p.uid && (
+                        <button className="sv-tests-select" onClick={() => { setClienteParaAlta(p); setCrear(true) }}>
+                          Dar de alta a esta persona
+                        </button>
+                      )}
+                    </>
                   ) : (
                     p.grupos.map((g, j) => (
                       <span key={j} className="sv-ot-muted">
@@ -1946,11 +1958,11 @@ const ABONOS_OPCIONES = [
 // "Crear cliente en la web" (Ramiro, 07/11 08:06): hasta ahora "Añadir alumno" solo buscaba o
 // daba de alta un externo (fuera de la web) — esto crea de verdad el cliente de WooCommerce + su
 // suscripción, con Simular primero como el resto de acciones de Grupos.
-function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [] }) {
-  const [nombre, setNombre]       = useState('')
+function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePrefill = null }) {
+  const [nombre, setNombre]       = useState(clientePrefill?.nombre || '')
   const [apellidos, setApellidos] = useState('')
-  const [email, setEmail]         = useState(qInicial?.includes('@') ? qInicial : '')
-  const [telefono, setTelefono]   = useState(qInicial && !qInicial.includes('@') ? qInicial : '')
+  const [email, setEmail]         = useState(clientePrefill?.email || (qInicial?.includes('@') ? qInicial : ''))
+  const [telefono, setTelefono]   = useState(clientePrefill?.telefono || (qInicial && !qInicial.includes('@') ? qInicial : ''))
   const [tipo, setTipo]           = useState('clase') // 'clase' | 'abono'
   const [grupoNuevo, setGrupoNuevo] = useState('') // "dia|horario|edad"
   const [plan, setPlan]           = useState('monthly')
@@ -1963,7 +1975,9 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [] }) {
   const [ajustarPrecio, setAjustarPrecio] = useState('')
   const [motivoExcepcion, setMotivoExcepcion] = useState('')
   const [enviarAcceso, setEnviarAcceso] = useState(false)
-  const [usarClienteId, setUsarClienteId] = useState(null)
+  // 19/11 21:30 (punto 4): viniendo del botón "Dar de alta a esta persona" ya sabemos el uid —
+  // usarClienteId empieza puesto, sin pasar por "Simular" → "Usar este cliente".
+  const [usarClienteId, setUsarClienteId] = useState(clientePrefill?.uid || null)
   const [confirmarNuevo, setConfirmarNuevo] = useState(false)
   // Ramiro, 15/11 08:35: "¿también esta nueva o es un duplicado?" — por defecto no, hasta que
   // alguien lo confirme a propósito.
@@ -2913,6 +2927,23 @@ function GruposTab() {
   const meses  = data?.meses || []
   const mesActual = meses[meses.length - 1]
 
+  // 19/11 21:30 (Eva/cowork, punto 1 — Rita Acero): `grupos` solo trae combinaciones con algún
+  // alumno YA en vigor, agrupadas por pareja (Lunes-Miércoles) — un día suelto nunca aparece
+  // como opción propia aunque el catálogo de WooCommerce ya tenga esa variación (Días sueltos).
+  // Se añaden aparte, del mismo catálogo que ya usa CTRL Time Off (useClases → /progreso/v1/
+  // clases, tipo "single"), solo para el selector de "Crear cliente"/"Cambiar de grupo" — nunca
+  // para el listado real de grupos de arriba, que sigue siendo solo quien ya está en vigor.
+  const { clases: catalogoClases } = useClases(true)
+  const gruposParaSelector = useMemo(() => {
+    const sueltos = catalogoClases
+      .filter(c => c.tipo === 'single' && c.dia && c.horario)
+      .map(c => ({
+        dia: c.dia, horario: c.horario, edad: c.edad || 'Adultos',
+        label: `${c.dia} · ${c.horario}${c.edad && c.edad !== 'Adultos' ? ` (${c.edad})` : ''} — solo ${c.dia}`,
+      }))
+    return [...grupos, ...sueltos]
+  }, [grupos, catalogoClases])
+
   // dia/horario/edad del grupo se cuelgan de cada fila (no solo el label) para que "Cambiar de
   // grupo/horario" sepa cuál es el grupo actual sin tener que repartirlo por props aparte.
   const conGrupoDatos = g => g.alumnos.map(a => ({ ...a, grupoLabel: g.label, dia: g.dia, horario: g.horario, edad: g.edad }))
@@ -3136,7 +3167,7 @@ function GruposTab() {
         </p>
       )}
 
-      {buscador && <BuscarAlumnoModal onClose={() => setBuscador(false)} grupos={grupos} />}
+      {buscador && <BuscarAlumnoModal onClose={() => setBuscador(false)} grupos={gruposParaSelector} />}
 
       {vista === 'altas-manuales' && (
         <>
@@ -3469,7 +3500,7 @@ function GruposTab() {
           alumno={accion.alumno}
           tipo={accion.tipo}
           targetId={accion.targetId ?? accion.alumno.subId}
-          grupos={grupos}
+          grupos={gruposParaSelector}
           onClose={() => setAccion(null)}
           onDone={() => { setAccion(null); refetch() }}
         />
