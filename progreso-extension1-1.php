@@ -344,31 +344,15 @@ add_action('template_redirect', function() {
 }, 1);
 
 // ============================================================
-//  Legacy /blokes support — operaciones sin login WordPress
-//  Cubre: validación de credenciales, subida de medios y creación de posts
-//  TODO: eliminar cuando /blokes use sesión WP
+//  19/11: quitado el shim legacy "/blokes sin login WordPress" que había aquí.
+//  Suplantaba al primer administrador del sitio (wp_set_current_user) para
+//  CUALQUIER petición sin sesión a /wp/v2/users/me, POST /wp/v2/media, POST
+//  /blokes/v1/create|update-acf y DELETE /blokes/v1/delete/* — confirmado en vivo
+//  (un curl anónimo a /wp/v2/users/me devolvía 200 con los datos reales del admin).
+//  Ramiro, 19/11: no le ve utilidad (no es el modo tablet, que ya usa sesión real
+//  + header "ver como" — ver blokes_get_app_role más arriba), así que se quita.
+//  Las rutas de creación/edición/borrado de blokes pasan a exigir sesión real.
 // ============================================================
-add_filter('rest_pre_dispatch', function($result, $server, $request) {
-    if (is_user_logged_in()) return $result;
-
-    $route  = $request->get_route();
-    $method = $request->get_method();
-
-    $needs_user =
-        ($route === '/wp/v2/users/me')                                          ||  // validación de credenciales
-        ($route === '/wp/v2/media'             && $method === 'POST')           ||  // subida de imágenes
-        (preg_match('#^/blokes/v1/(create|update-acf)#', $route) && $method === 'POST')  ||  // crear/editar bloke
-        (preg_match('#^/blokes/v1/delete/#', $route)             && $method === 'DELETE'); // eliminar bloke
-
-    if ($needs_user) {
-        $admins = get_users(array('role' => 'administrator', 'number' => 1, 'fields' => 'ID'));
-        if (!empty($admins)) {
-            wp_set_current_user((int) $admins[0]);
-        }
-    }
-
-    return $result;
-}, 10, 3);
 
 // ============================================================
 //  REST API — inject extra fields into blokes responses
