@@ -23,13 +23,13 @@ function kpiColorTema(hex, oscuro) {
 }
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente,
+  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionNota, gestionDarDeBaja, gestionFusionar, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente,
   gestionGrupoWellhubSet, gestionGrupoWellhubChecks, gestionGrupoBajoTarifaSet,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
   histPagosImportar, histPagosEstadisticas,
   syncGruposSincronizar, syncGruposCambiosGet, syncGruposCambioAplicar, syncGruposCambioDescartar, syncGruposReintentarCobro,
-  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo, syncGruposLimpiarPagoNuevoMismoImporte, syncGruposDeshacerLimpiezaMismoImporte, syncGruposInformeAutoaplicados, syncGruposInformeCeldasEscritas, syncGruposLimpiarCeldasEscritas,
+  syncGruposLimpiarPendientesViejos, syncGruposReevaluarSinFila, syncGruposReevaluarMetodoPago, syncGruposDiagnosticoPagoViejo, syncGruposLimpiarPagoNuevoMismoImporte, syncGruposDeshacerLimpiezaMismoImporte, syncGruposInformeAutoaplicados, syncGruposInformeCeldasEscritas, syncGruposLimpiarCeldasEscritas, syncGruposLimpiarPagoNuevoDuplicados,
   gestionFacturasPendientesGet,
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
@@ -1085,6 +1085,17 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
   const [preview, setPreview] = useState(null)
   const [busy, setBusy]       = useState(false)
   const [err, setErr]         = useState(null)
+  // 19/11 (cowork §06:25 punto 4): "no deje cancelar a rol gestión" — puede simular/ver el
+  // aviso, pero cancelar un duplicado de verdad queda para Ramiro; gestión avisa en su lugar.
+  const esGestion = window.blokesSiteData?.userRole === 'gestion'
+  async function avisarRamiro() {
+    setBusy(true); setErr(null)
+    try {
+      await gestionAvisarDuplicado({ sub_id_viejo: targetId, sub_id_nueva: preview?.subIdNueva, motivo })
+      window.alert('Avisado — Ramiro lo revisará y decidirá si cancelar.')
+      onDone()
+    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
 
   const titulos = {
     marcar_cobrado: 'Marcar cobrado', pausar: 'Pausar', reanudar: 'Reanudar', nota: 'Nota',
@@ -1193,11 +1204,19 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
             {(tipo === 'marcar_cobrado' || tipo === 'cambiar_grupo') && preview.posibleDuplicadoSub && (
               <div className="sv-grp-field sv-to-warn-txt sv-dup-aviso">
                 <p>⚠️ <strong>Cuidado: esta persona ya tiene otra suscripción{tipo === 'cambiar_grupo' ? ' en esa misma clase nueva' : ' de la misma clase'}</strong>:</p>
+                {/* 19/11 (cowork §06:25 punto 4): "que enseñe las dos (alta, último pago,
+                    pedidos pendientes), recomiende cuál quedarse" — antes solo salía la otra. */}
+                {tipo === 'marcar_cobrado' && preview.estaSub && (
+                  <p className="sv-ot-muted">Esta: #{preview.estaSub.subId} · {preview.estaSub.estado} · alta {preview.estaSub.altaFecha || '—'} · último pago {preview.estaSub.ultimoPago || '—'} · {preview.estaSub.pedidosPendientes || 0} pedido(s) pendiente(s)</p>
+                )}
                 <ul className="sv-aviso__lista">
                   {preview.posibleDuplicadoSub.map(s => (
-                    <li key={s.subId}>#{s.subId} · {s.dia} {s.horario}{s.edad !== 'Adultos' ? ` · ${s.edad}` : ''} · {s.estado} · {s.importe != null ? fmtEur(s.importe) : '—'}{s.proximoPago ? ` · próximo pago ${s.proximoPago}` : ''}</li>
+                    <li key={s.subId}>#{s.subId} · {s.dia} {s.horario}{s.edad !== 'Adultos' ? ` · ${s.edad}` : ''} · {s.estado} · {s.importe != null ? fmtEur(s.importe) : '—'}{s.proximoPago ? ` · próximo pago ${s.proximoPago}` : ''}{tipo === 'marcar_cobrado' ? ` · alta ${s.altaFecha || '—'} · último pago ${s.ultimoPago || '—'} · ${s.pedidosPendientes || 0} pedido(s) pendiente(s)` : ''}</li>
                   ))}
                 </ul>
+                {tipo === 'marcar_cobrado' && preview.recomendacionDuplicado && (
+                  <p><strong>Recomendación:</strong> quedarse con #{preview.recomendacionDuplicado.subIdRecomendada} — {preview.recomendacionDuplicado.motivo} (Ramiro decide, esto es solo una sugerencia).</p>
+                )}
                 <label className="sv-grp-field sv-grp-field--check">
                   <input type="checkbox" checked={confirmarDuplicado} onChange={e => setConfirmarDuplicado(e.target.checked)} />
                   Sí, quiero las dos / sigo adelante con esta (si no, cancela esta acción y resuélvelo a mano)
@@ -1498,6 +1517,11 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
           {preview ? (
             <>
               <button className="sv-tests-select" onClick={() => setPreview(null)} disabled={busy}>Volver</button>
+              {tipo === 'fusionar' && esGestion ? (
+                <button className="sv-tests-danger sv-tests-danger--confirm" onClick={avisarRamiro} disabled={busy} title="Cancelar un duplicado es cosa de Ramiro — esto le avisa para que lo decida él.">
+                  {busy ? 'Avisando…' : 'Avisar a Ramiro'}
+                </button>
+              ) : (
               <button
                 className="sv-tests-danger sv-tests-danger--confirm"
                 onClick={() => submit(true)}
@@ -1511,6 +1535,7 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
               >
                 {busy ? 'Guardando…' : (preview.bloqueadoBug1711 ? 'Bloqueado (revisar primero)' : (preview.adelantadoYaGuardado ? 'Ya hay un adelantado guardado' : 'Confirmar de verdad'))}
               </button>
+              )}
             </>
           ) : (
             <button className="sv-tests-danger sv-tests-danger--confirm" onClick={() => submit(false)} disabled={busy}>
@@ -2229,7 +2254,9 @@ function CambioDetalle({ c }) {
     case 'fila_borrada':
       return <span>Ya no está en el Excel — no se da de baja sola, solo aviso.</span>
     case 'web_sin_fila':
-      return <span>Se cobró en la web ({fmtEur(d.importe)}, {d.metodo}) pero no se encontró su fila en el Excel — añádela y pulsa Aplicar para escribirlo solo.</span>
+      return d.motivo === 'fallo_escritura'
+        ? <span>Se cobró en la web ({fmtEur(d.importe)}, {d.metodo}) pero la Hoja de Google no respondió al escribirlo (seguramente cuota agotada) — pulsa Aplicar para reintentarlo, no hace falta tocar el Excel.</span>
+        : <span>Se cobró en la web ({fmtEur(d.importe)}, {d.metodo}) pero no se encontró su fila en el Excel — añádela y pulsa Aplicar para escribirlo solo.</span>
     case 'fila_duplicada_excel':
       return <span>Misma persona en {d.claves?.length || 2} filas de esta pestaña del Excel{d.telefonos?.length > 1 ? ` (teléfonos: ${d.telefonos.filter(Boolean).join(', ') || 'alguna sin teléfono'})` : ''} — Blokes no escribe en el Excel, bórrala a mano cuando puedas y luego marca esto como visto.</span>
     case 'importe_sospechoso':
@@ -2258,6 +2285,7 @@ function SyncGruposCambiosPanel() {
   const [diagnostico, setDiagnostico] = useState(null)
   const [limpiandoMismoImporte, setLimpiandoMismoImporte] = useState(false)
   const [resultadoMismoImporte, setResultadoMismoImporte] = useState(null)
+  const [limpiandoDuplicados, setLimpiandoDuplicados] = useState(false)
   const [deshaciendo, setDeshaciendo] = useState(false)
   const [resultadoDeshacer, setResultadoDeshacer] = useState(null)
   const [cargandoInforme, setCargandoInforme] = useState(false)
@@ -2288,25 +2316,39 @@ function SyncGruposCambiosPanel() {
       await cargar()
     } catch (e) { setErr(e.message) } finally { setSincronizando(false) }
   }
-  // 18/11 (cowork, GRAVE: 499 "pago nuevo" de hace meses colándose como pendientes): el backend
-  // ahora bloquea "Aplicar" en un pago de hace más de 2 meses (código mes_antiguo) hasta que
-  // alguien confirme a propósito que de verdad quiere escribirlo — para que Eva no pueda apuntar
-  // ni facturar un cobro viejo por error de un solo click.
-  async function aplicar(id) {
+  // 19/11 (cowork §06:25 punto 1): "Aplicar" sobre un "pago_nuevo" simula primero (como "Marcar
+  // cobrado") y enseña sub/pedido/mes que cubre/importe/método/fecha del Excel antes de pedir
+  // confirmar — con los mismos bloqueos que "Marcar cobrado" (duplicado de la misma clase, uno
+  // de los 22 del bug, mes de hace más de 2 meses). Para el resto de tipos (nota, teléfono…)
+  // sigue siendo de un clic, como antes — no tocan dinero.
+  async function aplicar(c) {
+    const id = c.id
+    if (c.tipo !== 'pago_nuevo') {
+      setBusyId(id); setErr(null)
+      try { await syncGruposCambioAplicar(id); await cargar() }
+      catch (e) { setErr(e.message) } finally { setBusyId(null) }
+      return
+    }
     setBusyId(id); setErr(null)
     try {
-      await syncGruposCambioAplicar(id)
-      await cargar()
-    } catch (e) {
-      if (e.code === 'mes_antiguo') {
-        if (window.confirm(e.message + '\n\n¿Confirmas que quieres aplicarlo de verdad?')) {
-          try { await syncGruposCambioAplicar(id, true); await cargar() }
-          catch (e2) { setErr(e2.message) }
-        }
-      } else {
-        setErr(e.message)
+      const sim = await syncGruposCambioAplicar(id, { simular: true })
+      const d = sim.data || {}
+      const lineas = [
+        `Mes que cubre: ${c.mes}`, `Importe: ${d.importe != null ? d.importe + ' €' : '—'}`, `Método: ${d.metodo || '—'}`, `Fecha del Excel: ${d.fecha || '—'}`,
+      ]
+      if (d.mesAntiguo) lineas.push('⚠ Este mes es de hace más de 2 meses — revísalo antes de confirmar.')
+      if (d.bloqueadoBug1711) { window.alert('Bloqueado: esta suscripción fue completada por el bug del auto-aplicado (17/11) — revísalo en "Informe celdas escritas por error" antes de aplicar.'); return }
+      if (d.posibleDuplicadoSub?.length) {
+        lineas.push('⚠ Esta persona tiene otra suscripción en vigor de la misma clase:')
+        d.posibleDuplicadoSub.forEach(s => lineas.push(`  #${s.subId} · ${s.estado} · alta ${s.altaFecha || '—'} · último pago ${s.ultimoPago || '—'} · ${s.pedidosPendientes || 0} pedido(s) pendiente(s)`))
+        if (d.recomendacionDuplicado) lineas.push(`  Recomendación: quedarse con #${d.recomendacionDuplicado.subIdRecomendada} (${d.recomendacionDuplicado.motivo})`)
       }
-    } finally { setBusyId(null) }
+      if (!window.confirm(`Simulación (nada escrito todavía):\n${lineas.join('\n')}\n\n¿Confirmas aplicar de verdad?`)) return
+      await syncGruposCambioAplicar(id, {
+        confirmarMesAntiguo: !!d.mesAntiguo, confirmarDuplicado: !!d.posibleDuplicadoSub?.length,
+      })
+      await cargar()
+    } catch (e) { setErr(e.message) } finally { setBusyId(null) }
   }
   async function descartar(id) {
     setBusyId(id); setErr(null)
@@ -2359,6 +2401,16 @@ function SyncGruposCambiosPanel() {
       await cargar()
       setResultadoMismoImporte(r)
     } catch (e) { setErr(e.message) } finally { setLimpiandoMismoImporte(false) }
+  }
+  // 19/11 (cowork §06:25 punto 2): Anne Sophie Onadeko salía dos veces (mismo teléfono+mes+importe).
+  async function limpiarPagoNuevoDuplicados() {
+    if (!window.confirm('¿Descartar las propuestas "pago nuevo" duplicadas (mismo teléfono+mes+importe), quedándose con la más reciente? No se puede deshacer de golpe.')) return
+    setLimpiandoDuplicados(true); setErr(null)
+    try {
+      const r = await syncGruposLimpiarPagoNuevoDuplicados()
+      await cargar()
+      window.alert(`${r.descartados} propuesta(s) duplicada(s) descartada(s).`)
+    } catch (e) { setErr(e.message) } finally { setLimpiandoDuplicados(false) }
   }
   // 18/11 09:30 (cowork, GRAVE): deshace la limpieza rota — reabre (vuelve a "pendiente") todo
   // lo que se había descartado por ese motivo (tanto el botón manual como el cierre automático
@@ -2454,6 +2506,9 @@ function SyncGruposCambiosPanel() {
           </button>
           <button className="sv-tests-remove" onClick={limpiarPagoNuevoMismoImporte} disabled={limpiandoMismoImporte} title="Descarta los «pago nuevo» pendientes que ya estén cobrados de verdad en la web para ese mes (nunca contra el Excel)">
             {limpiandoMismoImporte ? 'Limpiando…' : 'Limpiar «ya cobrado en la web»'}
+          </button>
+          <button className="sv-tests-remove" onClick={limpiarPagoNuevoDuplicados} disabled={limpiandoDuplicados} title="Descarta las propuestas «pago nuevo» duplicadas (mismo teléfono+mes+importe), quedándose con la más reciente">
+            {limpiandoDuplicados ? 'Limpiando…' : 'Limpiar duplicados'}
           </button>
           <button className="sv-tests-select" onClick={deshacerLimpiezaMismoImporte} disabled={deshaciendo} title="Reabre lo descartado por la limpieza rota de antes (comparaba contra el Excel) y lo reevalúa contra la web de verdad">
             {deshaciendo ? 'Deshaciendo…' : 'Deshacer limpieza rota (09:30)'}
@@ -2649,7 +2704,7 @@ function SyncGruposCambiosPanel() {
                         <button
                           className="sv-tests-save" disabled={busyId === c.id || (c.tipo === 'pago_nuevo' && !c.match_tipo)}
                           title={c.tipo === 'pago_nuevo' && !c.match_tipo ? 'No hay nadie emparejado por teléfono — apúntalo a mano en Grupos.' : undefined}
-                          onClick={() => aplicar(c.id)}
+                          onClick={() => aplicar(c)}
                         >
                           Aplicar
                         </button>{' '}

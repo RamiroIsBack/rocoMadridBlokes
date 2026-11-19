@@ -98,6 +98,8 @@ export const gestionReanudar      = body => gestionPost('/gestion/reanudar', bod
 export const gestionNota          = body => gestionPost('/gestion/nota', body)
 export const gestionDarDeBaja     = body => gestionPost('/gestion/dar-de-baja', body)
 export const gestionFusionar      = body => gestionPost('/gestion/fusionar', body)
+// 19/11 (cowork §06:25 punto 4): lo que rol gestión usa en vez de cancelar un duplicado de verdad.
+export const gestionAvisarDuplicado = body => gestionPost('/gestion/avisar-duplicado', body)
 export const gestionExento        = body => gestionPost('/gestion/exento', body)
 export const gestionCambiarGrupo  = body => gestionPost('/gestion/cambiar-grupo', body)
 export const gestionOptinWhatsapp = body => gestionPost('/gestion/optin-whatsapp', body)
@@ -214,9 +216,21 @@ export const syncGruposConfigGet      = ()         => gestionCall('GET', '/gesti
 export const syncGruposConfigSet      = body        => gestionPost('/gestion/sync-grupos/config', body)
 export const syncGruposSincronizar    = ()         => gestionPost('/gestion/sync-grupos/sincronizar')
 export const syncGruposCambiosGet     = (estado = 'pendiente') => gestionCall('GET', `/gestion/sync-grupos/cambios?estado=${estado}`)
-// 18/11 (cowork, GRAVE): confirmarMesAntiguo=true solo cuando alguien ya confirmó a propósito
-// que quiere aplicar un "pago nuevo" de hace más de 2 meses (ver mes_antiguo en el backend).
-export const syncGruposCambioAplicar  = (id, confirmarMesAntiguo = false) => gestionPost(`/gestion/sync-grupos/cambios/${id}/aplicar`, confirmarMesAntiguo ? { confirmarMesAntiguo: true } : undefined)
+// 19/11 (cowork §06:25 punto 1): "Aplicar" ya simula primero para "pago_nuevo" (simular=true,
+// nunca escribe nada) igual que "Marcar cobrado" — confirmarMesAntiguo/confirmarDuplicado/
+// confirmarRevisionBug1711 solo cuando alguien ya los confirmó a propósito tras ver el aviso.
+export const syncGruposCambioAplicar = (id, opciones = {}) => {
+  const { simular = false, confirmarMesAntiguo = false, confirmarDuplicado = false, confirmarRevisionBug1711 = false } = opciones
+  const body = {}
+  if (simular) body.simular = true
+  if (confirmarMesAntiguo) body.confirmarMesAntiguo = true
+  if (confirmarDuplicado) body.confirmarDuplicado = true
+  if (confirmarRevisionBug1711) body.confirmarRevisionBug1711 = true
+  return gestionPost(`/gestion/sync-grupos/cambios/${id}/aplicar`, Object.keys(body).length ? body : undefined)
+}
+// Limpieza única (19/11, cowork §06:25 punto 2): "pago_nuevo" duplicados (mismo
+// teléfono+mes+importe, Anne Sophie Onadeko) de antes del arreglo en upsert_cambio.
+export const syncGruposLimpiarPagoNuevoDuplicados = () => gestionPost('/gestion/sync-grupos/limpiar-pago-nuevo-duplicados')
 // Diagnóstico de un "pago nuevo" viejo concreto: qué hay guardado en la foto (snapshot) de esa
 // fila para ver por qué se disparó como "nuevo" — para no adivinar la causa sin datos reales.
 export const syncGruposDiagnosticoPagoViejo = (limit = 15) => gestionCall('GET', `/gestion/sync-grupos/diagnostico-pago-viejo?limit=${limit}`)

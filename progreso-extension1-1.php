@@ -1155,6 +1155,12 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_fusionar',
         'permission_callback' => $sa_perm,
     ));
+    // 19/11 (cowork §06:25 punto 4): lo que rol gestión usa en vez de cancelar un duplicado.
+    register_rest_route('superadmin/v1', '/gestion/avisar-duplicado', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_avisar_duplicado',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/exento', array(
         'methods'             => 'POST',
         'callback'            => 'superadmin_gestion_exento',
@@ -1288,6 +1294,11 @@ add_action('rest_api_init', function() {
     // pendientes que YA estén cobrados de verdad en la web para ese mes (nunca contra la foto).
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/limpiar-pago-nuevo-mismo-importe', array(
         'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe', 'permission_callback' => $sa_perm,
+    ));
+    // 19/11 (cowork §06:25 punto 2): limpieza única de "pago_nuevo" duplicados (mismo
+    // teléfono+mes+importe, Anne Sophie Onadeko) que se crearon antes del arreglo en upsert_cambio.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/limpiar-pago-nuevo-duplicados', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_limpiar_pago_nuevo_duplicados', 'permission_callback' => $sa_perm,
     ));
     // 18/11 09:30 (cowork, GRAVE): deshace la limpieza rota que comparaba contra la foto —
     // reabre todo lo descartado por ese motivo y lo reevalúa ya contra la web de verdad.
@@ -2930,14 +2941,59 @@ function blokes_subs_en_vigor_de_persona($uid, $excluir_sub_id = null, $clase_ob
             : null;
         if ($solo_misma_clase && !$misma_clase) continue;
         $next_payment = ($sub_obj && $s['status'] === 'active' && method_exists($sub_obj, 'get_date')) ? $sub_obj->get_date('next_payment') : '';
+        // 19/11 (cowork §06:25, punto 4 — "que enseñe las dos (alta, último pago, pedidos
+        // pendientes), recomiende cuál quedarse"): antes el aviso de duplicado solo decía que
+        // existía otra — ahora trae lo que de verdad hace falta para decidir sin tener que abrir
+        // cada suscripción aparte.
+        $alta_fecha = null; $ultimo_pago = null; $pedidos_pendientes = 0;
+        if ($sub_obj) {
+            $fecha_inicio = method_exists($sub_obj, 'get_date') ? $sub_obj->get_date('date_created') : '';
+            if ($fecha_inicio) $alta_fecha = date('Y-m-d', strtotime($fecha_inicio));
+            $order_ids_s = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
+            $mejor_fecha = null;
+            foreach ($order_ids_s as $oid_s) {
+                $o_s = wc_get_order($oid_s);
+                if (!$o_s) continue;
+                if (in_array($o_s->get_status(), array('pending', 'on-hold', 'failed'), true)) { $pedidos_pendientes++; continue; }
+                if (!in_array($o_s->get_status(), array('completed', 'processing'), true)) continue;
+                $f_s = $o_s->get_date_created() ?: $o_s->get_date_paid();
+                if ($f_s && (!$mejor_fecha || $f_s->getTimestamp() > $mejor_fecha->getTimestamp())) $mejor_fecha = $f_s;
+            }
+            if ($mejor_fecha) $ultimo_pago = $mejor_fecha->date('Y-m-d');
+        }
         $out[] = array(
             'subId' => $sub_id, 'dia' => $dia_pareja, 'horario' => $s['horario'] ?? '', 'edad' => $edad,
             'estado' => $s['status'], 'mismaClase' => $misma_clase,
             'importe' => $sub_obj ? floatval($sub_obj->get_total()) : null,
             'proximoPago' => $next_payment ? date('Y-m-d', strtotime($next_payment)) : null,
+            'altaFecha' => $alta_fecha, 'ultimoPago' => $ultimo_pago, 'pedidosPendientes' => $pedidos_pendientes,
         );
     }
     return $out;
+}
+
+// 19/11 (cowork §06:25, punto 4): recomendación simple y transparente de cuál de las dos
+// suscripciones duplicadas conservar — nunca decide sola, solo sugiere con el motivo a la
+// vista, para que quien decide (Ramiro) lo confirme. Orden de criterios: (1) "active" gana a
+// "on-hold"/"pending" (es la que de verdad sigue viniendo); (2) entre dos activas, la que pagó
+// más recientemente; (3) si sigue sin desempatar, la de alta más reciente (probablemente la de
+// verdad, si la vieja es un resto sin cancelar).
+function blokes_sync_grupos_recomendar_duplicado($esta, $otras) {
+    $candidatas = array_filter(array_merge(array($esta), $otras));
+    if (count($candidatas) < 2) return null;
+    $prioridad_estado = array('active' => 2, 'on-hold' => 1, 'pending' => 0);
+    usort($candidatas, function($a, $b) use ($prioridad_estado) {
+        $pa = $prioridad_estado[$a['estado']] ?? -1; $pb = $prioridad_estado[$b['estado']] ?? -1;
+        if ($pa !== $pb) return $pb - $pa;
+        $ua = $a['ultimoPago'] ?? ''; $ub = $b['ultimoPago'] ?? '';
+        if ($ua !== $ub) return strcmp($ub, $ua);
+        return strcmp((string) ($b['altaFecha'] ?? ''), (string) ($a['altaFecha'] ?? ''));
+    });
+    $mejor = $candidatas[0];
+    $motivo = ($prioridad_estado[$mejor['estado']] ?? -1) > ($prioridad_estado[$candidatas[1]['estado']] ?? -1)
+        ? 'Está activa y la otra no.'
+        : ($mejor['ultimoPago'] ? 'Pagó más recientemente (' . $mejor['ultimoPago'] . ').' : 'Es la de alta más reciente.');
+    return array('subIdRecomendada' => $mejor['subId'], 'motivo' => $motivo);
 }
 
 // Pedido con la factura anulada en VeriFactu (FactuPress → Registros → «Anular»): el pedido
@@ -7825,22 +7881,35 @@ function blokes_sync_grupos_get($sheet_id, $path) {
 // Llamada de escritura a la Sheets API v4 (values:batchUpdate) — el token ya tiene permiso de
 // escritura (scope "spreadsheets" completo, no "readonly"). USER_ENTERED para que Google
 // interprete números/fechas como si Eva los hubiera tecleado a mano, no como texto literal.
+// 19/11 (cowork §06:25, punto 5): "Read requests per minute" (429) de Google Sheets ya se veía
+// en el log (`sync_grupos_escribir_error`) sin que nadie se enterara en el momento — Eva podía
+// pensar que el cobro no se había hecho de verdad. Reintenta con espera (1s, 3s, 6s) antes de
+// rendirse — la cuota de Sheets es POR MINUTO, así que unos segundos de espera suelen bastar
+// para que la siguiente llamada ya entre bien. Si sigue fallando tras los reintentos, el que
+// llama (blokes_sync_grupos_escribir_cobro) lo deja en la cola de "sin apuntar en el Excel".
 function blokes_sync_grupos_escribir_valores($sheet_id, $data) {
     $token = blokes_sync_grupos_access_token();
     if (is_wp_error($token)) return $token;
     $url = 'https://sheets.googleapis.com/v4/spreadsheets/' . rawurlencode($sheet_id) . '/values:batchUpdate';
-    $res = wp_remote_request($url, array(
-        'method' => 'POST', 'timeout' => 20,
-        'headers' => array('Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json'),
-        'body' => wp_json_encode(array('valueInputOption' => 'USER_ENTERED', 'data' => $data)),
-    ));
-    if (is_wp_error($res)) return $res;
-    $code = wp_remote_retrieve_response_code($res);
-    $body = json_decode(wp_remote_retrieve_body($res), true);
-    if ($code >= 300) {
-        return new WP_Error('sheets_api_error', 'Google Sheets API devolvió ' . $code . ': ' . ($body['error']['message'] ?? wp_remote_retrieve_body($res)));
+    $esperas = array(1, 3, 6);
+    $intento = 0;
+    while (true) {
+        $res = wp_remote_request($url, array(
+            'method' => 'POST', 'timeout' => 20,
+            'headers' => array('Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json'),
+            'body' => wp_json_encode(array('valueInputOption' => 'USER_ENTERED', 'data' => $data)),
+        ));
+        if (is_wp_error($res)) return $res;
+        $code = wp_remote_retrieve_response_code($res);
+        $body = json_decode(wp_remote_retrieve_body($res), true);
+        if ($code < 300) return $body;
+        $es_cuota = $code === 429 || $code === 503;
+        if (!$es_cuota || !isset($esperas[$intento])) {
+            return new WP_Error('sheets_api_error', 'Google Sheets API devolvió ' . $code . ': ' . ($body['error']['message'] ?? wp_remote_retrieve_body($res)));
+        }
+        sleep($esperas[$intento]);
+        $intento++;
     }
-    return $body;
 }
 
 function blokes_sync_grupos_col_letra($idx0) {
@@ -8025,7 +8094,16 @@ function blokes_sync_grupos_escribir_cobro($dia, $horario, $telefono, $nombre, $
             $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['fecha']) . $fila_sheet, 'values' => array(array($fecha)));
         }
         $res = blokes_sync_grupos_escribir_valores($activa['id'], $data);
-        if (is_wp_error($res)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'escribir', 'pestana' => $pestana, 'error' => $res->get_error_message())); return false; }
+        if (is_wp_error($res)) {
+            blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'escribir', 'pestana' => $pestana, 'error' => $res->get_error_message()));
+            // 19/11 (cowork §06:25, punto 5): aquí SÍ hay fila (a diferencia del caso de arriba)
+            // — la escritura falló de verdad (cuota agotada incluso tras los reintentos de
+            // blokes_sync_grupos_escribir_valores) y no debe perderse en silencio: queda visible
+            // en "Cambios del Excel" con todo lo necesario para reintentarla con "Aplicar"/
+            // "Reevaluar sin fila", en vez de que solo quede un log que nadie mira a tiempo.
+            blokes_sync_grupos_pendiente_sin_fila($pestana, $nombre, $telefono, $ym, $importe, $metodo, $fecha, $dia, $horario, $sub_id, 'fallo_escritura');
+            return false;
+        }
         blokes_gestion_log(0, 'sync_grupos_cobro_escrito', null, array('pestana' => $pestana, 'fila' => $fila_sheet, 'mes' => $ym, 'hoja' => $activa['cual']));
         return true;
     } catch (\Throwable $e) {
@@ -8038,11 +8116,14 @@ function blokes_sync_grupos_escribir_cobro($dia, $horario, $telefono, $nombre, $
 // pero esta persona todavía no tiene fila en el Excel de Eva — en vez de perder el dato, se deja
 // en Cambios del Excel con todo lo necesario para que, en cuanto Eva añada la fila, "Aplicar"
 // reintente la misma escritura sin que nadie tenga que volver a teclear nada.
-function blokes_sync_grupos_pendiente_sin_fila($pestana, $nombre, $telefono, $ym, $importe, $metodo, $fecha, $dia, $horario, $sub_id) {
+// 19/11 (cowork §06:25, punto 5): mismo mecanismo, reutilizado para cuando SÍ hay fila pero la
+// escritura falló de verdad (cuota de Sheets agotada incluso tras los reintentos) — $motivo
+// distingue los dos casos para que el panel no diga "sin fila" cuando la fila existe.
+function blokes_sync_grupos_pendiente_sin_fila($pestana, $nombre, $telefono, $ym, $importe, $metodo, $fecha, $dia, $horario, $sub_id, $motivo = 'sin_fila') {
     blokes_sync_grupos_ensure_tables();
     $clave = blokes_sync_grupos_clave($nombre, $telefono);
     blokes_sync_grupos_upsert_cambio($pestana, $clave, $nombre, $telefono, 'web_sin_fila', $ym, array(
-        'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha, 'dia' => $dia, 'horario' => $horario, 'subId' => $sub_id,
+        'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha, 'dia' => $dia, 'horario' => $horario, 'subId' => $sub_id, 'motivo' => $motivo,
     ), null);
 }
 
@@ -8364,6 +8445,23 @@ function blokes_sync_grupos_normalizar_fecha($fec) {
         return intval($m[3]) . '/' . intval($m[2]) . '/' . intval($m[1]);
     }
     return $fec; // formato no reconocido — se deja tal cual, nunca se inventa una fecha
+}
+
+// 19/11 (cowork §06:25, punto 1): blokes_sync_grupos_aplicar_efecto() solo aceptaba la fecha del
+// Excel si ya venía en ISO ('YYYY-MM-DD') — pero el Excel (y blokes_sync_grupos_normalizar_fecha)
+// la guardan como 'd/m/Y' ("3/11/2026"), así que esa comprobación NUNCA coincidía y "Aplicar"
+// siempre acababa usando la fecha de HOY en vez de la real del Excel. Convierte 'd/m/Y' (o
+// 'd/m/y') a ISO de verdad; null si no se reconoce el formato — nunca se inventa una fecha.
+function blokes_sync_grupos_fecha_excel_a_iso($fec) {
+    if (!is_string($fec)) return null;
+    $fec = trim($fec);
+    if (preg_match('/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/', $fec, $m)) {
+        $d = intval($m[1]); $mo = intval($m[2]); $y = intval($m[3]);
+        if ($y < 100) $y += 2000;
+        if ($d >= 1 && $d <= 31 && $mo >= 1 && $mo <= 12) return sprintf('%04d-%02d-%02d', $y, $mo, $d);
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $fec)) return $fec; // ya estaba en ISO
+    return null;
 }
 
 // Pago de un mes en una fila: [pago|null, exento_bool]. Mismas reglas que _parse.py: "*"
@@ -8838,6 +8936,25 @@ function blokes_sync_grupos_upsert_cambio($pestana, $clave, $nombre, $telefono, 
         "SELECT id FROM {$tabla} WHERE pestana = %s AND clave = %s AND tipo = %s AND estado = 'pendiente' AND " . ($mes ? "mes = %s" : "mes IS NULL"),
         ...array_filter(array($pestana, $clave, $tipo, $mes), function($v) { return $v !== null; })
     ));
+    // 19/11 (cowork §06:25, punto 2 — Anne Sophie Onadeko salía dos veces, ids 1967/1973, misma
+    // pestaña/mes/importe): la clave de arriba (pestana+clave+tipo+mes) no basta para un
+    // "pago_nuevo" cuando la misma fila genera dos claves distintas (p. ej. una errata de
+    // teléfono entre una sincronización y la siguiente) — se duplicaba en vez de actualizarse.
+    // Para "pago_nuevo" se comprueba TAMBIÉN por teléfono+mes+importe, sin mirar la clave, antes
+    // de dar por hecho que es una propuesta nueva.
+    if (!$existente && $tipo === 'pago_nuevo' && $telefono) {
+        $tel_norm = blokes_externos_normaliza_telefono((string) $telefono);
+        $importe = floatval($datos['importe'] ?? 0);
+        if ($tel_norm) {
+            $candidatos = $wpdb->get_results($wpdb->prepare(
+                "SELECT id, datos_json FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes = %s AND telefono = %s", $mes, $tel_norm
+            ), ARRAY_A);
+            foreach ($candidatos as $cand) {
+                $datos_cand = json_decode($cand['datos_json'], true) ?: array();
+                if (abs(floatval($datos_cand['importe'] ?? 0) - $importe) < 0.01) { $existente = $cand['id']; break; }
+            }
+        }
+    }
     $campos = array(
         'nombre' => $nombre, 'telefono' => $telefono, 'datos_json' => wp_json_encode($datos),
         'match_tipo' => $match['tipo'] ?? null, 'match_id' => $match['id'] ?? null, 'match_label' => $match['label'] ?? '',
@@ -8850,6 +8967,31 @@ function blokes_sync_grupos_upsert_cambio($pestana, $clave, $nombre, $telefono, 
         'pestana' => $pestana, 'clave' => $clave, 'tipo' => $tipo, 'mes' => $mes, 'estado' => 'pendiente', 'creado_at' => current_time('mysql'),
     )));
     return $wpdb->insert_id;
+}
+
+// 19/11 (cowork §06:25, punto 3): cuando una alta nueva ("+ Añadir alumno") marca "ya pagado" un
+// mes que el Excel ya tenía apuntado, el "pago nuevo" que la sincronización había creado antes
+// (sin emparejar, porque todavía no existía ninguna suscripción) se cierra solo — ya está
+// cobrado de verdad en esta misma alta, no hace falta que nadie pulse "Aplicar" encima. Solo si
+// el importe coincide (si no, puede ser un pago distinto de la misma persona/mes, y se deja para
+// que alguien lo mire a mano, nunca se da por resuelto a ciegas).
+function blokes_sync_grupos_resolver_pago_nuevo_tras_alta($telefono, $ym, $importe, $sub_id) {
+    global $wpdb;
+    blokes_sync_grupos_ensure_tables();
+    $tel_norm = blokes_externos_normaliza_telefono((string) $telefono);
+    if (!$tel_norm) return;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes = %s AND telefono = %s", $ym, $tel_norm
+    ), ARRAY_A);
+    foreach ($pendientes as $p) {
+        $datos = json_decode($p['datos_json'], true) ?: array();
+        if (abs(floatval($datos['importe'] ?? 0) - floatval($importe)) > 0.01) continue;
+        $wpdb->update($tabla, array(
+            'estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => 'auto (alta nueva ya cobrada)',
+            'match_tipo' => 'sub', 'match_id' => intval($sub_id),
+        ), array('id' => intval($p['id'])));
+    }
 }
 
 // 18/11 10:45 (cowork, URGENTE — GRAVE): DESACTIVADO. Esto auto-aplicaba un "pago nuevo"
@@ -9223,13 +9365,16 @@ function blokes_sync_grupos_sub_ya_cobrado_mes($sub_id, $ym) {
 // borrada) sigue sin tener efecto propio — ambiguos a propósito, se quedan en la bandeja para
 // que alguien decida a mano (Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05: solo lo
 // claramente seguro se aplica solo; lo dudoso sigue pasando por la bandeja).
-function blokes_sync_grupos_aplicar_efecto($cambio, $datos) {
+function blokes_sync_grupos_aplicar_efecto($cambio, $datos, $simular = false, $confirmar = array()) {
     if ($cambio['tipo'] === 'pago_nuevo') {
         if (!$cambio['match_tipo'] || !$cambio['match_id']) {
             return new WP_Error('sin_match', 'No hay nadie emparejado por teléfono para este pago — apúntalo a mano en Grupos.', array('status' => 409));
         }
-        $fecha = (string) ($datos['fecha'] ?? '');
-        $fecha = preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha) ? $fecha : current_time('Y-m-d');
+        // 19/11 (cowork §06:25, punto 1): esta comprobación nunca podía ser cierta — la fecha del
+        // Excel se guarda como 'd/m/Y' ("3/11/2026"), nunca como ISO — así que "Aplicar" SIEMPRE
+        // acababa usando la fecha de HOY en vez de la real del Excel. Arreglado con un conversor
+        // de verdad; solo si el Excel no trae ninguna fecha reconocible se usa la de hoy.
+        $fecha = blokes_sync_grupos_fecha_excel_a_iso((string) ($datos['fecha'] ?? '')) ?: current_time('Y-m-d');
         if ($cambio['match_tipo'] === 'sub') {
             // Si la web ya tiene un pedido completed/processing de ESE mes (p. ej. cobro
             // automático por Redsys que ya pasó solo, o un pago ya marcado por otro camino), el
@@ -9237,7 +9382,7 @@ function blokes_sync_grupos_aplicar_efecto($cambio, $datos) {
             // además con "cobro automático" si la suscripción cobra sola, dejando el cambio
             // pendiente para siempre sin motivo real (cowork, 4/11 04:30: un pago ya cobrado en
             // la web se quedaba pendiente en Sync Grupos indefinidamente).
-            if (blokes_sync_grupos_sub_ya_cobrado_mes(intval($cambio['match_id']), (string) $cambio['mes'])) {
+            if (!$simular && blokes_sync_grupos_sub_ya_cobrado_mes(intval($cambio['match_id']), (string) $cambio['mes'])) {
                 return rest_ensure_response(array('success' => true, 'yaCobrado' => true));
             }
             $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
@@ -9246,13 +9391,26 @@ function blokes_sync_grupos_aplicar_efecto($cambio, $datos) {
             $req->set_param('metodo', blokes_sync_grupos_metodo_a_cobrado($datos['metodo'] ?? ''));
             $req->set_param('fecha', $fecha);
             $req->set_param('nota', 'Detectado en el Excel de Eva (sincronización automática, pestaña ' . $cambio['pestana'] . ').');
-            $req->set_param('simular', false);
-            // El aviso de duplicados (15/11 08:35) es para quien pulsa "Marcar cobrado" a mano
-            // sin haber mirado nada más — este camino viene de un pago que YA está en el Excel
-            // de Eva (bandeja ya revisada, o un tipo marcado "claramente seguro" para autoaplicar),
-            // así que no hace falta volver a preguntar aquí.
-            $req->set_param('confirmarDuplicado', true);
+            $req->set_param('simular', $simular);
+            // 19/11 (cowork §06:25, punto 1 — "que se bloquee igual que Marcar cobrado si tiene
+            // otra suscripción de la misma clase, o si es uno de los 22"): antes esto confirmaba
+            // el duplicado a ciegas ("el Excel ya está revisado, no hace falta volver a
+            // preguntar") — pero eso es justo lo que no queremos para "Aplicar" ahora que Eva
+            // trabaja solo con Blokes. Ya no se confirma nada por defecto; solo si el frontend lo
+            // manda explícito (tras enseñar el aviso, igual que en "Marcar cobrado").
+            if (!empty($confirmar['confirmarDuplicado'])) $req->set_param('confirmarDuplicado', true);
+            if (!empty($confirmar['confirmarRevisionBug1711'])) $req->set_param('confirmarRevisionBug1711', true);
             return superadmin_gestion_marcar_cobrado($req);
+        }
+        // 19/11 (cowork §06:25, punto 1): un externo no tiene ni duplicado de clase ni el bug de
+        // los 22 (no pasa por WooCommerce) — simular aquí solo enseña lo que se escribiría, sin
+        // llamar nunca a superadmin_gestion_externos_pago() de verdad.
+        if ($simular) {
+            return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+                'tipo' => 'externo', 'externoId' => intval($cambio['match_id']), 'periodo' => (string) $cambio['mes'],
+                'importe' => floatval($datos['importe'] ?? 0), 'metodo' => $datos['metodo'] ?? 'efectivo', 'fecha' => $fecha,
+                'aviso' => 'Simulación: no se ha escrito nada. Los externos no pasan por WooCommerce, no hay factura ni duplicado de clase que comprobar.',
+            )));
         }
         $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/externos/' . intval($cambio['match_id']) . '/pago');
         $req->set_param('id', intval($cambio['match_id']));
@@ -9291,7 +9449,13 @@ function blokes_sync_grupos_aplicar_efecto($cambio, $datos) {
             (string) ($datos['fecha'] ?? ''), $datos['subId'] ?? null
         );
         if (!$escrito) {
-            return new WP_Error('sin_fila', 'Todavía no se encuentra esta fila en el Excel — añade a la persona y vuelve a pulsar Aplicar.', array('status' => 409));
+            // 19/11 (cowork §06:25, punto 5): si el motivo real es "fallo_escritura" (cuota de
+            // Sheets), la fila SÍ existe — decirle a Eva que "añada a la persona" no tiene
+            // sentido y la confundiría más que ayudarla.
+            $msg_sin_fila = ($datos['motivo'] ?? 'sin_fila') === 'fallo_escritura'
+                ? 'No se pudo escribir en el Excel (la Hoja de Google no respondió — probablemente cuota agotada). Vuelve a pulsar Aplicar en un minuto.'
+                : 'Todavía no se encuentra esta fila en el Excel — añade a la persona y vuelve a pulsar Aplicar.';
+            return new WP_Error('sin_fila', $msg_sin_fila, array('status' => 409));
         }
         return rest_ensure_response(array('success' => true));
     }
@@ -9306,17 +9470,33 @@ function superadmin_sync_grupos_cambio_aplicar($request) {
     $cambio = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla} WHERE id = %d", $id), ARRAY_A);
     if (!$cambio) return new WP_Error('not_found', 'Cambio no encontrado.', array('status' => 404));
     if ($cambio['estado'] !== 'pendiente') return new WP_Error('ya_resuelto', 'Este cambio ya estaba resuelto.', array('status' => 409));
+    // 19/11 (cowork §06:25, punto 1): "Aplicar" ya tiene su propia simulación, como "Marcar
+    // cobrado" — solo para "pago_nuevo" (nota/teléfono/etc. no tocan dinero, siguen aplicándose
+    // de un clic). Nunca escribe nada mientras $simular sea true.
+    $simular = $cambio['tipo'] === 'pago_nuevo' && (bool) $request->get_param('simular');
     // 18/11 (cowork, URGENTE: 499 "pago nuevo" de 2024-03 a 2026-11 colándose como pendientes) —
     // "Aplicar" nunca debe poder escribir un cobro/factura de un mes de hace más de 2 meses sin
-    // que alguien lo confirme a propósito, pase lo que pase con la detección de arriba.
+    // que alguien lo confirme a propósito, pase lo que pase con la detección de arriba. Se salta
+    // en modo simulación — ahí el aviso se enseña como dato, nunca como bloqueo duro.
     $mes_corte_aplicar = blokes_mes_mas(date('Y-m'), -2);
-    if ($cambio['tipo'] === 'pago_nuevo' && $cambio['mes'] && $cambio['mes'] < $mes_corte_aplicar && !$request->get_param('confirmarMesAntiguo')) {
+    $es_mes_antiguo = $cambio['tipo'] === 'pago_nuevo' && $cambio['mes'] && $cambio['mes'] < $mes_corte_aplicar;
+    if (!$simular && $es_mes_antiguo && !$request->get_param('confirmarMesAntiguo')) {
         return new WP_Error('mes_antiguo', 'Este pago es de ' . $cambio['mes'] . ', de hace más de 2 meses — revísalo antes de aplicarlo (podría ser un dato viejo que no hace falta cobrar ya). Si de verdad quieres aplicarlo, marca "Confirmo que es de verdad este mes" y vuelve a pulsar Aplicar.', array('status' => 409));
     }
     $datos = json_decode($cambio['datos_json'], true) ?: array();
+    $confirmar = array(
+        'confirmarDuplicado' => (bool) $request->get_param('confirmarDuplicado'),
+        'confirmarRevisionBug1711' => (bool) $request->get_param('confirmarRevisionBug1711'),
+    );
 
-    $resultado = blokes_sync_grupos_aplicar_efecto($cambio, $datos);
+    $resultado = blokes_sync_grupos_aplicar_efecto($cambio, $datos, $simular, $confirmar);
     if (is_wp_error($resultado)) return new WP_Error($resultado->get_error_code(), $resultado->get_error_message(), array('status' => 409));
+
+    if ($simular) {
+        $data_sim = $resultado ? $resultado->get_data() : null;
+        if (is_array($data_sim) && is_array($data_sim['data'] ?? null)) $data_sim['data']['mesAntiguo'] = $es_mes_antiguo;
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $data_sim['data'] ?? null));
+    }
 
     $u = wp_get_current_user();
     $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => $u ? $u->user_login : ''), array('id' => $id));
@@ -9349,6 +9529,7 @@ function superadmin_sync_grupos_reevaluar_sin_fila($request) {
             'id' => intval($cambio['id']), 'nombre' => $cambio['nombre'], 'telefono' => $cambio['telefono'],
             'pestanaBuscada' => $cambio['pestana'], 'mes' => $cambio['mes'],
             'dia' => $datos['dia'] ?? null, 'horario' => $datos['horario'] ?? null,
+            'motivo' => $datos['motivo'] ?? 'sin_fila',
             'encontrado' => $encontrado, 'error' => $encontrado ? null : $resultado->get_error_message(),
         );
         if (!$encontrado) { $siguen_pendientes++; continue; }
@@ -9574,6 +9755,45 @@ function superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe($request) {
     $u = wp_get_current_user();
     $r = blokes_sync_grupos_cerrar_pago_nuevo_resueltos(($u ? $u->user_login : '') . ' · ya cobrado de verdad en la web para ese mes');
     return rest_ensure_response(array('success' => true, 'revisados' => $r['revisados'], 'descartados' => $r['descartados']));
+}
+
+// 19/11 (cowork §06:25, punto 2): limpieza única de los "pago_nuevo" que ya estaban duplicados
+// de ANTES del arreglo en blokes_sync_grupos_upsert_cambio() (Anne Sophie Onadeko, ids 1967 y
+// 1973 — mismo teléfono+mes+importe, pestaña L-X 17.30 KIDS). Agrupa los pendientes por
+// teléfono+mes+importe, se queda con el más reciente (id más alto) y descarta el resto —
+// nunca borra. El arreglo de upsert_cambio ya evita que se creen más duplicados nuevos.
+function superadmin_sync_grupos_limpiar_pago_nuevo_duplicados($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL ORDER BY id ASC", ARRAY_A
+    );
+    $grupos = array();
+    foreach ($pendientes as $p) {
+        $tel_norm = blokes_externos_normaliza_telefono((string) $p['telefono']);
+        if (!$tel_norm) continue;
+        $datos = json_decode($p['datos_json'], true) ?: array();
+        $importe_redondeado = round(floatval($datos['importe'] ?? 0), 2);
+        $clave = $tel_norm . '|' . $p['mes'] . '|' . $importe_redondeado;
+        $grupos[$clave][] = intval($p['id']);
+    }
+    $ids_descartar = array();
+    foreach ($grupos as $ids) {
+        if (count($ids) < 2) continue;
+        sort($ids);
+        array_pop($ids); // el más reciente (id más alto) se queda; el resto se descarta
+        foreach ($ids as $id) $ids_descartar[] = $id;
+    }
+    if ($ids_descartar) {
+        $u = wp_get_current_user();
+        $ph = implode(',', array_fill(0, count($ids_descartar), '%d'));
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$tabla} SET estado = 'descartado', resuelto_at = %s, resuelto_por = %s WHERE id IN ($ph)",
+            current_time('mysql'), ($u ? $u->user_login : '') . ' · propuesta duplicada (mismo teléfono+mes+importe), se queda la más reciente', ...$ids_descartar
+        ));
+    }
+    return rest_ensure_response(array('success' => true, 'descartados' => count($ids_descartar)));
 }
 
 // Deshacer (18/11 09:30, cowork): la limpieza "mismo importe ya en la foto" (4f12088/b3767f5)
@@ -11714,6 +11934,14 @@ function superadmin_gestion_marcar_cobrado($request) {
     $uid_marcar_cobrado = blokes_alumno_customer_id_de_sub(array('id' => $sub_id), $sub);
     $dh_marcar_cobrado = blokes_sync_grupos_dia_horario_de_sub($sub_id);
     $subs_en_vigor = blokes_subs_en_vigor_de_persona($uid_marcar_cobrado, $sub_id, $dh_marcar_cobrado, true);
+    // 19/11 (cowork §06:25, punto 4): "que enseñe las dos... y recomiende cuál quedarse" — sin
+    // excluir esta suscripción, para poder compararla con la(s) otra(s) con los mismos datos.
+    $esta_sub_info = null; $recomendacion = null;
+    if (!empty($subs_en_vigor)) {
+        $todas_misma_clase = blokes_subs_en_vigor_de_persona($uid_marcar_cobrado, null, $dh_marcar_cobrado, true);
+        foreach ($todas_misma_clase as $info) { if ($info['subId'] === $sub_id) { $esta_sub_info = $info; break; } }
+        $recomendacion = blokes_sync_grupos_recomendar_duplicado($esta_sub_info, $subs_en_vigor);
+    }
     $hay_duplicado_sub_sin_resolver = !empty($subs_en_vigor) && !$confirmar_duplicado_sub;
     if ($hay_duplicado_sub_sin_resolver && !$simular) {
         return new WP_Error('duplicado_suscripcion', 'Esta persona tiene otra suscripción en vigor de la misma clase — confirma cuál es la que se cobra (confirmarDuplicado).', array('status' => 409));
@@ -11737,6 +11965,7 @@ function superadmin_gestion_marcar_cobrado($request) {
                 'fecha' => $fecha_txt, 'parcial' => $parcial, 'reactivaLaSuscripcion' => $reactivaria,
                 'pedidosACancelar' => $pedidos_a_cancelar,
                 'posibleDuplicadoSub' => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+                'estaSub' => $esta_sub_info, 'recomendacionDuplicado' => $recomendacion,
                 'bloqueadoBug1711' => $bloqueado_bug_1711,
                 'aviso' => $hay_duplicado_sub_sin_resolver
                     ? 'Esta persona tiene otra suscripción en vigor de la misma clase — confirma cuál es la que se cobra.'
@@ -11797,7 +12026,21 @@ function superadmin_gestion_marcar_cobrado($request) {
     // (blokes_aplicar_adelantado_si_hay), para no arriesgar un pedido/factura doble.
     $next_payment_mysql = method_exists($sub, 'get_date') ? $sub->get_date('next_payment') : '';
     $next_payment_ts = $next_payment_mysql ? strtotime($next_payment_mysql) : null;
-    $periodo_cubre = $next_payment_ts ? date('Y-m', $next_payment_ts) : date('Y-m');
+    // 19/11 (cowork §06:25, punto 6 — Sergi Escribano #6614: su único pago de verdad quedó
+    // escrito en octubre Y noviembre de la Hoja): `next_payment` mira hacia DELANTE y
+    // WooCommerce Subscriptions lo adelanta al generar la renovación, siga pagada o no — si el
+    // pedido pendiente que se está completando ahora es viejo (p. ej. octubre, sin pagar
+    // semanas), `next_payment` ya puede estar en noviembre o más allá, y el Excel se escribía en
+    // el mes equivocado. Cuando YA existe un pedido pendiente de verdad, el mes que cubre el
+    // pago es el de ESE pedido — mismo criterio de "a qué mes pertenece un pedido" que ya usa
+    // blokes_sync_grupos_sub_ya_cobrado_mes() (date_created, no date_paid). `next_payment` solo
+    // sirve para el caso adelantado (sin pedido todavía, hay que mirar hacia delante de verdad).
+    if ($order) {
+        $fecha_pedido = $order->get_date_created() ?: $order->get_date_paid();
+        $periodo_cubre = $fecha_pedido ? $fecha_pedido->date('Y-m') : ($next_payment_ts ? date('Y-m', $next_payment_ts) : date('Y-m'));
+    } else {
+        $periodo_cubre = $next_payment_ts ? date('Y-m', $next_payment_ts) : date('Y-m');
+    }
 
     // Ya hay un adelantado guardado para este mismo mes de esta suscripción: avisar en la
     // simulación y no dejar duplicarlo al confirmar (cowork, 2/11 09:42, punto 3) — anúlalo
@@ -11841,6 +12084,7 @@ function superadmin_gestion_marcar_cobrado($request) {
             'totalActual'          => $total_referencia,
             'ajustarPrecio'        => $ajustar_precio ?: null,
             'posibleDuplicadoSub'  => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+            'estaSub' => $esta_sub_info, 'recomendacionDuplicado' => $recomendacion,
             'bloqueadoBug1711'     => $bloqueado_bug_1711,
             'opciones' => !$importe_distinto ? null : array(
                 'solo_este_mes' => array(
@@ -12474,6 +12718,13 @@ function superadmin_gestion_fusionar($request) {
 
     $pedidos_a_cancelar = blokes_cancelar_pedidos_impagados($sub, true);
 
+    // 19/11 (cowork §06:25, punto 4): "no deje cancelar a rol gestión" — Eva puede ver el aviso
+    // y simular (para entender qué pasaría), pero cancelar de verdad un duplicado queda para
+    // Ramiro; gestión usa "Avisar a Ramiro" (superadmin_gestion_avisar_duplicado) en su lugar.
+    if (!$simular && blokes_get_app_role() === 'gestion') {
+        return new WP_Error('solo_socio', 'Cancelar un duplicado es cosa de Ramiro — usa "Avisar a Ramiro" para que lo decida él.', array('status' => 403));
+    }
+
     if ($simular) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'subId' => $sub_id_viejo, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => 'cancelled',
@@ -12492,6 +12743,29 @@ function superadmin_gestion_fusionar($request) {
     blokes_gestion_log($sub_id_viejo, 'fusionar', $antes, $despues, array('subIdNueva' => intval($nueva['id'])));
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// 19/11 (cowork §06:25, punto 4): lo que rol gestión usa en vez de cancelar un duplicado de
+// verdad — deja un aviso visible (log de gestión, consultable con GET /gestion/log) y, de
+// mejor esfuerzo, un correo a las direcciones de "socios" (Ramiro) con los datos para decidir.
+// Nunca toca ninguna suscripción.
+function superadmin_gestion_avisar_duplicado($request) {
+    $sub_id_viejo = intval($request->get_param('sub_id_viejo'));
+    $sub_id_nueva = intval($request->get_param('sub_id_nueva'));
+    $motivo = sanitize_text_field((string) $request->get_param('motivo'));
+    if (!$sub_id_viejo) return new WP_Error('bad_request', 'Falta sub_id_viejo.', array('status' => 400));
+    $u = wp_get_current_user();
+    blokes_gestion_log($sub_id_viejo, 'aviso_duplicado_pendiente', null, array('subIdNueva' => $sub_id_nueva ?: null, 'motivo' => $motivo, 'por' => $u ? $u->user_login : ''));
+    $lists = blokes_get_email_lists();
+    $destinatarios = array_filter(array_map('strtolower', $lists['socios'] ?? array()));
+    if ($destinatarios) {
+        $cuerpo = sprintf(
+            "Posible suscripción duplicada que gestión no ha cancelado (decide tú):\n\nVieja/sospechosa: #%d\nMás nueva/recomendada: %s\nMotivo apuntado: %s\nQuién avisó: %s\n\nRevísalo en Supervisión.",
+            $sub_id_viejo, $sub_id_nueva ? ('#' . $sub_id_nueva) : '—', $motivo ?: '—', $u ? $u->user_login : '—'
+        );
+        wp_mail($destinatarios, 'Blokes: duplicado pendiente de decidir (#' . $sub_id_viejo . ')', $cuerpo);
+    }
+    return rest_ensure_response(array('success' => true));
 }
 
 /** Historial de acciones (para depurar o ver «quién, cuándo»). Sin sub_id, las últimas 50. */
@@ -13286,12 +13560,20 @@ function superadmin_gestion_alta_cliente($request) {
     if (is_wp_error($r)) return $r;
 
     if ($primer_pago === 'ya_pagado') {
+        $periodo_alta = date('Y-m', strtotime($fecha_pago ?: $fecha_inicio));
         $dh = ($tipo === 'clase') ? array('dia' => $dia_norm, 'horario' => $horario_norm) : blokes_sync_grupos_dia_horario_de_sub($r['subscription']->get_id());
         blokes_sync_grupos_escribir_cobro(
             $dh['dia'], $dh['horario'], $telefono, trim($nombre . ' ' . $apellidos),
-            date('Y-m', strtotime($fecha_pago ?: $fecha_inicio)), $importe_final, $metodo,
+            $periodo_alta, $importe_final, $metodo,
             date_i18n('d/m/Y', $fecha_pago ? strtotime($fecha_pago) : time()), $r['subscription']->get_id()
         );
+        // 19/11 (cowork §06:25, punto 3): Patricia Bravo y Rita Acero ya estaban en el Excel con
+        // su pago cuando Eva las dio de alta con "+ Añadir alumno" — el "pago nuevo" que la
+        // sincronización ya había creado (sin emparejar, porque todavía no existía ninguna
+        // suscripción) se quedaba pendiente para siempre, pidiendo "Aplicar" sobre un pago que ya
+        // está cobrado de verdad en esta alta. Se cierra solo, nunca a ciegas: solo si el importe
+        // coincide (si no, puede ser un pago distinto y se deja para que alguien lo mire).
+        blokes_sync_grupos_resolver_pago_nuevo_tras_alta($telefono, $periodo_alta, $importe_final, $r['subscription']->get_id());
     }
 
     $despues = array(
