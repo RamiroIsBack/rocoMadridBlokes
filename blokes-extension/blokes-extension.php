@@ -41,29 +41,36 @@ add_action('rest_api_init', function() {
     register_rest_route('blokes/v1', '/create', array(
         'methods' => 'POST',
         'callback' => 'blokes_create_with_acf',
-        // TODO: restaurar login obligatorio cuando /blokes use el plugin con sesión WP
-        // 'permission_callback' => function() { return is_user_logged_in(); },
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'blokes_extension_puede_editar',
     ));
 
     // Endpoint to update ACF fields for existing bloke
     register_rest_route('blokes/v1', '/update-acf/(?P<id>\d+)', array(
         'methods' => 'POST',
         'callback' => 'blokes_update_acf',
-        // TODO: restaurar login obligatorio cuando /blokes use el plugin con sesión WP
-        // 'permission_callback' => function() { return is_user_logged_in(); },
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'blokes_extension_puede_editar',
     ));
-    
+
     // Endpoint to delete a bloke and its associated media
     register_rest_route('blokes/v1', '/delete/(?P<id>\d+)', array(
         'methods' => 'DELETE',
         'callback' => 'blokes_delete_with_media',
-        'permission_callback' => function() {
-            return is_user_logged_in();
-        }
+        'permission_callback' => 'blokes_extension_puede_editar',
     ));
 });
+
+// 19/11: create y update-acf estaban completamente abiertos (permission_callback
+// '__return_true', el is_user_logged_in() real estaba comentado con un TODO) — cualquiera en
+// internet, sin sesión, podía crear blokes o reescribir los de cualquier otro. delete solo
+// exigía is_user_logged_in(), sin mirar el rol, así que cualquier usuario logueado de
+// WordPress (cualquier tipo de cuenta) podía borrar cualquier bloke. Único punto de permiso
+// para los tres: mismo rol de aplicación (profesor/gestion/socio/tablet) que usa
+// progreso-extension1-1.php vía blokes_can_supervise(); si ese plugin no estuviera activo,
+// cae a exigir sesión como mínimo (nunca más permisivo que antes de este cambio).
+function blokes_extension_puede_editar() {
+    if (function_exists('blokes_can_supervise')) return blokes_can_supervise();
+    return is_user_logged_in();
+}
 
 /**
  * Record an interaction (icon click) - public endpoint
