@@ -767,6 +767,15 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/workers/(?P<id>\d+)', array(
         'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_worker', 'permission_callback' => $equip_perm,
     ));
+    // 19/11 (Ramiro: "todos nos logueamos con nuestro email, ya sabes quién está editando") —
+    // en vez de pedir que alguien escriba a mano el email de un worker en un formulario, la
+    // propia persona (logueada con su cuenta real de WordPress) vincula su fila de un clic; el
+    // servidor usa el email de su sesión, nunca uno que mande el cliente. Solo mientras la fila
+    // siga sin email (no se puede robar una ya vinculada) — un socio puede desvincularla con el
+    // PUT normal (email: '') si hiciera falta corregirlo.
+    register_rest_route('progreso/v1', '/equipacion/workers/(?P<id>\d+)/vincular-mi-email', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_vincular_mi_email', 'permission_callback' => $equip_perm,
+    ));
 
     register_rest_route('progreso/v1', '/equipacion/holdsets', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_holdsets', 'permission_callback' => $equip_perm,
@@ -17832,6 +17841,24 @@ function progreso_equip_update_worker($request) {
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     $wpdb->update(progreso_equip_table('workers'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
+}
+
+// 19/11: vincula un worker con la sesión real de quien lo pulsa — nunca con un email que
+// mande el cliente, para que esto siga sirviendo de verdad para progreso_equip_es_jefe_o_socio()
+// (si cualquiera pudiera escribir el email, cualquiera podría autonombrarse "jefe").
+function progreso_equip_vincular_mi_email($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    if ($email === '') return new WP_Error('sin_email', 'Tu sesión no tiene un email de WordPress.', array('status' => 400));
+    $table = progreso_equip_table('workers');
+    $actual = $wpdb->get_var($wpdb->prepare("SELECT email FROM $table WHERE id = %d", $id));
+    if ($actual === null) return new WP_Error('not_found', 'Persona no encontrada.', array('status' => 404));
+    if ($actual !== '') {
+        return new WP_Error('ya_vinculado', 'Esta fila ya tiene un email vinculado — pide a un socio que la desvincule primero si hace falta cambiarlo.', array('status' => 409));
+    }
+    $wpdb->update($table, array('email' => $email), array('id' => $id), array('%s'), array('%d'));
+    return rest_ensure_response(array('success' => true, 'data' => array('email' => $email)));
 }
 
 function progreso_equip_delete_worker($request) {

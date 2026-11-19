@@ -1005,7 +1005,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
           </button>
         )}
       </div>
-      {showWorkers && <WorkersAdmin workers={workers} onChanged={onWorkersChanged} />}
+      {showWorkers && <WorkersAdmin workers={workers} canManage={canManage} onChanged={onWorkersChanged} />}
       {showCerrar && (
         <CerrarArrastradasForm onDone={() => { setShowCerrar(false); reloadWeeks() }} showToast={showToast} />
       )}
@@ -1210,8 +1210,9 @@ function HistoricoView() {
 }
 
 // Crear/editar/borrar personas — "a veces participa más gente en las tareas".
-function WorkersAdmin({ workers, onChanged }) {
+function WorkersAdmin({ workers, canManage, onChanged }) {
   const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  const showToast = useToast()
   const [showAdd, setShowAdd] = useState(false)
   const [name, setName] = useState('')
   const [days, setDays] = useState(['mon', 'tue', 'wed', 'thu', 'fri'])
@@ -1221,6 +1222,34 @@ function WorkersAdmin({ workers, onChanged }) {
   const [eventual, setEventual] = useState(false)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [vinculando, setVinculando] = useState(null)
+
+  // 19/11 (Ramiro: "todos nos logueamos con nuestro email, ya sabes quién está editando") — la
+  // propia persona vincula su fila de un clic, con el email de su sesión real; el servidor nunca
+  // se fía de un email escrito a mano aquí. Hace falta para que "responsable" (is_lead) se
+  // traduzca de verdad en permisos de jefe (progreso_equip_es_jefe_o_socio compara emails).
+  const vincularMiEmail = async w => {
+    setVinculando(w.id)
+    try {
+      const res = await api('POST', `/equipacion/workers/${w.id}/vincular-mi-email`)
+      showToast(`Vinculado — esta fila ya usa tu email (${res.data.email}).`)
+      onChanged()
+    } catch (e) {
+      showToast(e.message || 'No se ha podido vincular.')
+    } finally {
+      setVinculando(null)
+    }
+  }
+
+  const desvincularEmail = async w => {
+    if (!window.confirm(`¿Quitar el email vinculado a ${w.name}? Dejará de contar como "jefe" hasta que alguien vuelva a vincularse.`)) return
+    try {
+      await api('PUT', `/equipacion/workers/${w.id}`, { email: '' })
+      onChanged()
+    } catch (e) {
+      showToast(e.message || 'No se ha podido desvincular.')
+    }
+  }
 
   const toggleDay = d => setDays(cur => cur.includes(d) ? cur.filter(x => x !== d) : [...cur, d])
 
@@ -1259,6 +1288,16 @@ function WorkersAdmin({ workers, onChanged }) {
           <li key={w.id} className="org__worker-row">
             <span className="org__worker-name">{w.name}{w.isLead ? ' · responsable' : ''}{w.eventual ? ' · eventual' : ''}</span>
             <span className="org__worker-meta">{w.workDays.map(d => DAY_LABEL[d]).join('/')} · {w.blocksMin}-{w.blocksMax} bloques</span>
+            {w.email ? (
+              <>
+                <span className="org__worker-meta" title={w.email}>✓ vinculado</span>
+                {canManage && <button className="org__link-btn" onClick={() => desvincularEmail(w)}>Quitar vínculo</button>}
+              </>
+            ) : (
+              <button className="org__link-btn" onClick={() => vincularMiEmail(w)} disabled={vinculando === w.id} title="Solo pulsa esto si ERES tú — vincula esta fila con el email de tu propia sesión">
+                {vinculando === w.id ? 'Vinculando...' : 'Soy yo — vincular mi sesión'}
+              </button>
+            )}
             <button className="org__link-btn" onClick={() => toggleEventual(w)} title="Eventual: solo viene a compes puntuales, no entra en el reparto normal de mantenimiento">
               {w.eventual ? 'Quitar eventual' : 'Marcar eventual'}
             </button>
@@ -2898,7 +2937,22 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
 
   useEffect(() => { setBlocks(comp.blocks) }, [comp])
   useEffect(() => { setModoActivo(!!comp.modoActivo) }, [comp.modoActivo])
-  useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
+  // Cowork 19/11: esto fallaba en silencio (catch vacío) y se quedaba sin presas que elegir, sin
+  // ningún aviso — se veía igual que "no puedo seleccionar". Ahora avisa si falla.
+  useEffect(() => {
+    api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || []))
+      .catch(e => showToast(e.message || 'No se han podido cargar los juegos de presas.'))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Botón "+ nuevo juego de presas…" en la ficha del bloque — Ramiro 19/11: Álvaro necesita
+  // poder dar de alta un color/forma de presa que todavía no esté en la lista, sin tener que
+  // pedírselo a nadie. Reutiliza el POST /equipacion/holdsets que ya existía (antes sin UI).
+  const crearHoldset = async nombre => {
+    const res = await api('POST', '/equipacion/holdsets', { name: nombre })
+    const nuevo = { id: res.id, name: nombre }
+    setHoldsets(cur => [...cur, nuevo].sort((a, b) => a.name.localeCompare(b.name)))
+    return nuevo.id
+  }
 
   // Botón bien visible para encender/apagar el modo compe (Ramiro, 11/11 05:01: "tiene que
   // quedar claro para el socio") — antes había que llamar a la API a mano.
@@ -3157,6 +3211,7 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
         <CompBlockFicha
           block={blocks.find(b => b.id === editingBlockId)}
           config={config} holdsets={holdsets} workers={workers || []} blocks={blocks}
+          onCreateHoldset={crearHoldset}
           onClose={() => setEditingBlockId(null)}
           onSaved={patch => { setBlocks(cur => cur.map(b => b.id === editingBlockId ? { ...b, ...patch } : b)) }}
           onSwapped={(id1, numero1, id2, numero2) => {
@@ -3173,7 +3228,8 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
 // Ficha de un bloque de compe: subzona, color, presas, volúmenes, equipador, foto (subida
 // desde el móvil) y probado sí/no — Álvaro la rellena tocando una burbuja del mapa (Ramiro,
 // 1/11 17:20).
-function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onSaved, onSwapped }) {
+function CompBlockFicha({ block, config, holdsets, workers, blocks, onCreateHoldset, onClose, onSaved, onSwapped }) {
+  const showToast = useToast()
   const [fijado, setFijado] = useState(false)
   const [swapping, setSwapping] = useState(false)
   const [subzone, setSubzone] = useState(block.subzone ?? '')
@@ -3184,6 +3240,11 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
   const [photoUrl, setPhotoUrl] = useState(block.photoUrl || '')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Ramiro 19/11: "añadir un botón para meter un color y forma de presa mediante descripción
+  // que no esté aún añadida" — Álvaro da de alta el juego de presas nuevo sin pedírselo a nadie.
+  const [nuevoHoldset, setNuevoHoldset] = useState(false)
+  const [nombreHoldset, setNombreHoldset] = useState('')
+  const [creandoHoldset, setCreandoHoldset] = useState(false)
 
   // Equipador: desplegable de personas de equipación (activas, fijas y eventuales), más
   // cualquier nombre "Otro…" que ya se haya usado en OTRO bloque de ESTA MISMA compe (vale
@@ -3198,6 +3259,22 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
   const [equipador, setEquipador] = useState(block.equipador || '')
 
   const toggleHoldSet = id => setHoldSetIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+
+  const crearYSeleccionarHoldset = async () => {
+    const nombre = nombreHoldset.trim()
+    if (!nombre) return
+    setCreandoHoldset(true)
+    try {
+      const id = await onCreateHoldset(nombre)
+      setHoldSetIds(ids => ids.includes(id) ? ids : [...ids, id])
+      setNombreHoldset('')
+      setNuevoHoldset(false)
+    } catch (e) {
+      showToast(e.message || 'No se ha podido crear el juego de presas.')
+    } finally {
+      setCreandoHoldset(false)
+    }
+  }
 
   // Punto 8 (Ramiro, 11/11 05:01): "Fijar bloque" — con la palanca activada el número se puede
   // clicar para intercambiarlo con otro bloque ya puesto (p. ej. resultó demasiado difícil para
@@ -3319,7 +3396,24 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onClose, onS
           {holdsets.map(h => (
             <button key={h.id} type="button" className={`org__holdset-chip${holdSetIds.includes(h.id) ? ' org__holdset-chip--on' : ''}`} onClick={() => toggleHoldSet(h.id)}>{h.name}</button>
           ))}
+          {!holdsets.length && <span className="org__hint">No se ha podido cargar ningún juego de presas — recarga la página.</span>}
         </div>
+        {nuevoHoldset ? (
+          <div className="org__add-row--holdsets">
+            <input
+              type="text" value={nombreHoldset} autoFocus
+              onChange={e => setNombreHoldset(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') crearYSeleccionarHoldset() }}
+              placeholder="Color y forma, p. ej. «Moradas BS» o «Volúmenes turquesa/negro»"
+            />
+            <button type="button" className="org__link-btn" onClick={crearYSeleccionarHoldset} disabled={creandoHoldset || !nombreHoldset.trim()}>
+              {creandoHoldset ? 'Añadiendo...' : 'Añadir y seleccionar'}
+            </button>
+            <button type="button" className="org__link-btn" onClick={() => { setNuevoHoldset(false); setNombreHoldset('') }} disabled={creandoHoldset}>Cancelar</button>
+          </div>
+        ) : (
+          <button type="button" className="org__link-btn" onClick={() => setNuevoHoldset(true)}>+ Nuevo color/forma de presa…</button>
+        )}
       </div>
       <div className="org__add-row">
         <label>Volúmenes</label>
