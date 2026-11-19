@@ -2928,6 +2928,7 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
   const [selectedToPlace, setSelectedToPlace] = useState(null)
   const [editingBlockId, setEditingBlockId] = useState(null)
   const [holdsets, setHoldsets] = useState([])
+  const [holdsetsError, setHoldsetsError] = useState(false)
   const dragIdRef = useRef(null)
   const dragStartRef = useRef(null)
   const [trayDrag, setTrayDrag] = useState(null)
@@ -2941,7 +2942,7 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
   // ningún aviso — se veía igual que "no puedo seleccionar". Ahora avisa si falla.
   useEffect(() => {
     api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || []))
-      .catch(e => showToast(e.message || 'No se han podido cargar los juegos de presas.'))
+      .catch(e => { setHoldsetsError(true); showToast(e.message || 'No se han podido cargar los juegos de presas.') })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Botón "+ nuevo juego de presas…" en la ficha del bloque — Ramiro 19/11: Álvaro necesita
@@ -3210,7 +3211,7 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
       {editingBlockId != null && (
         <CompBlockFicha
           block={blocks.find(b => b.id === editingBlockId)}
-          config={config} holdsets={holdsets} workers={workers || []} blocks={blocks}
+          config={config} holdsets={holdsets} holdsetsError={holdsetsError} workers={workers || []} blocks={blocks}
           onCreateHoldset={crearHoldset}
           onClose={() => setEditingBlockId(null)}
           onSaved={patch => { setBlocks(cur => cur.map(b => b.id === editingBlockId ? { ...b, ...patch } : b)) }}
@@ -3228,7 +3229,7 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
 // Ficha de un bloque de compe: subzona, color, presas, volúmenes, equipador, foto (subida
 // desde el móvil) y probado sí/no — Álvaro la rellena tocando una burbuja del mapa (Ramiro,
 // 1/11 17:20).
-function CompBlockFicha({ block, config, holdsets, workers, blocks, onCreateHoldset, onClose, onSaved, onSwapped }) {
+function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, blocks, onCreateHoldset, onClose, onSaved, onSwapped }) {
   const showToast = useToast()
   const [fijado, setFijado] = useState(false)
   const [swapping, setSwapping] = useState(false)
@@ -3396,7 +3397,7 @@ function CompBlockFicha({ block, config, holdsets, workers, blocks, onCreateHold
           {holdsets.map(h => (
             <button key={h.id} type="button" className={`org__holdset-chip${holdSetIds.includes(h.id) ? ' org__holdset-chip--on' : ''}`} onClick={() => toggleHoldSet(h.id)}>{h.name}</button>
           ))}
-          {!holdsets.length && <span className="org__hint">No se ha podido cargar ningún juego de presas — recarga la página.</span>}
+          {holdsetsError && <span className="org__hint">No se ha podido cargar ningún juego de presas — recarga la página.</span>}
         </div>
         {nuevoHoldset ? (
           <div className="org__add-row--holdsets">
