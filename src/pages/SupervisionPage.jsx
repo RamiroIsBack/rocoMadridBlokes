@@ -2037,6 +2037,10 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
   // Ramiro, 15/11 08:35: "¿también esta nueva o es un duplicado?" — por defecto no, hasta que
   // alguien lo confirme a propósito.
   const [confirmarDuplicado, setConfirmarDuplicado] = useState(false)
+  // 20/11 (Ramiro, 26 duplicados limpiados a mano): si ya tiene una suscripción EN ESPERA de
+  // esta misma clase, reactivarla en vez de crear otra — se elige entre los candidatos que
+  // devuelve la simulación (subsEnEsperaMismaClase), nunca un id libre.
+  const [reactivarSubId, setReactivarSubId] = useState(null)
   const [preview, setPreview]     = useState(null)
   const [busy, setBusy]           = useState(false)
   const [err, setErr]             = useState(null)
@@ -2053,20 +2057,24 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
       if (!email.trim() && !telefono.trim()) throw new Error('Pon email o teléfono (al menos uno).')
       if (tipo === 'clase' && !grupoNuevo) throw new Error('Elige el grupo.')
       if (primerPago === 'ya_pagado' && (!importe || Number(importe) <= 0)) throw new Error('Pon el importe del primer pago.')
-      if (forzarReal && preview?.posibleDuplicadoSub && !confirmarDuplicado) throw new Error('Confirma si es un duplicado o quieres crear otra suscripción para esta persona.')
+      if (forzarReal && preview?.posibleDuplicadoSub && !confirmarDuplicado && !reactivarSubId) throw new Error('Confirma si es un duplicado, quieres crear otra suscripción, o reactiva la que ya está en espera.')
       const body = {
         nombre: nombre.trim(), apellidos: apellidos.trim(), email: email.trim(), telefono: telefono.trim(),
         tipo, fechaInicio, primerPago, enviarAcceso, simular: !forzarReal,
         ...(usarClienteId ? { usarClienteId } : {}),
         ...(confirmarNuevo ? { confirmarNuevo: true } : {}),
-        ...(preview?.posibleDuplicadoSub ? { confirmarDuplicado } : {}),
+        ...(preview?.posibleDuplicadoSub && !reactivarSubId ? { confirmarDuplicado } : {}),
+        ...(reactivarSubId ? { reactivarSubId } : {}),
         ...(tipo === 'clase' ? { dia, horario, edad, plan } : { productoAbonoId: abonoId }),
         ...(primerPago === 'ya_pagado' ? { metodo, importe: Number(importe), fechaPago } : {}),
         ...(preview?.precioCatalogo != null && Number(importe) !== preview.precioCatalogo && ajustarPrecio ? { ajustarPrecio, motivoExcepcion } : {}),
       }
       const res = await gestionAltaCliente(body)
       if (!forzarReal) setPreview(res)
-      else { onClose(); alert(res?.pagoUrl ? `Cliente creado. Enlace de pago: ${res.pagoUrl}` : 'Cliente creado.') }
+      else {
+        onClose()
+        alert(res?.reactivada ? `Suscripción #${res.subId} reactivada en vez de crear una duplicada.` : (res?.pagoUrl ? `Cliente creado. Enlace de pago: ${res.pagoUrl}` : 'Cliente creado.'))
+      }
     } catch (e) {
       setErr(e.message)
     } finally {
@@ -2102,7 +2110,23 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
                 </button>
               </div>
             )}
-            {preview.posibleDuplicadoSub && (
+            {preview.subsEnEsperaMismaClase && (
+              <div className="sv-grp-field sv-to-warn-txt sv-dup-aviso">
+                <p>⏸️ <strong>Ya tiene una suscripción EN ESPERA de esta misma clase</strong> — casi seguro que es la misma persona volviendo, no una nueva:</p>
+                <ul className="sv-aviso__lista">
+                  {preview.subsEnEsperaMismaClase.map(s => (
+                    <li key={s.subId}>#{s.subId} · {s.dia} {s.horario}{s.edad !== 'Adultos' ? ` · ${s.edad}` : ''} · alta {s.altaFecha || '—'} · último pago {s.ultimoPago || '—'}
+                      {' '}
+                      <button className="sv-tests-select" type="button" onClick={() => { setReactivarSubId(s.subId); setConfirmarDuplicado(false) }}>
+                        Reactivar esta en vez de crear otra {reactivarSubId === s.subId ? '✓' : ''}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {reactivarSubId && <p className="sv-ot-muted">Se reactivará la #{reactivarSubId} — no se creará ninguna suscripción nueva{primerPago === 'ya_pagado' ? ' y el primer pago se apunta en esa misma.' : '.'}</p>}
+              </div>
+            )}
+            {preview.posibleDuplicadoSub && !reactivarSubId && (
               <div className="sv-grp-field sv-to-warn-txt sv-dup-aviso">
                 <p>⚠️ <strong>Cuidado: esta persona ya tiene una suscripción</strong>:</p>
                 <ul className="sv-aviso__lista">
@@ -2222,11 +2246,11 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
           {preview ? (
             <button
               className="sv-tests-danger sv-tests-danger--confirm"
-              disabled={busy || (preview.posibleDuplicadoSub && !confirmarDuplicado)}
-              title={preview.posibleDuplicadoSub && !confirmarDuplicado ? 'Elige "Es un duplicado" o "Sí, quiero las dos" antes de confirmar.' : undefined}
+              disabled={busy || (preview.posibleDuplicadoSub && !confirmarDuplicado && !reactivarSubId)}
+              title={preview.posibleDuplicadoSub && !confirmarDuplicado && !reactivarSubId ? 'Elige "Es un duplicado", "Sí, quiero las dos" o reactiva la que está en espera antes de confirmar.' : undefined}
               onClick={() => submit(true)}
             >
-              {busy ? 'Creando…' : 'Confirmar de verdad'}
+              {busy ? (reactivarSubId ? 'Reactivando…' : 'Creando…') : (reactivarSubId ? 'Confirmar reactivación' : 'Confirmar de verdad')}
             </button>
           ) : (
             <button className="sv-tests-save" disabled={busy} onClick={() => submit(false)}>{busy ? 'Simulando…' : 'Simular'}</button>

@@ -13415,6 +13415,12 @@ function superadmin_gestion_alta_cliente($request) {
     $usar_cliente_id = intval($request->get_param('usarClienteId'));
     $confirmar_nuevo = (bool) $request->get_param('confirmarNuevo');
     $simular         = (bool) $request->get_param('simular');
+    // 20/11 (Ramiro, 26 duplicados limpiados a mano en Sync Grupos): si la persona ya tiene una
+    // suscripción EN ESPERA de esta misma clase, reactivarla en vez de crear otra — casi todos
+    // los duplicados eran justo esto (una vieja en espera + una nueva). Rehecho tras perderse en
+    // un commit anterior — esta vez en commit aparte, siempre pasa primero por $simular (abajo),
+    // que es lo único que revela subsEnEsperaMismaClase para que el frontend pueda ofrecerlo.
+    $reactivar_sub_id = intval($request->get_param('reactivarSubId'));
 
     if (!$nombre || (!$email && !$telefono)) {
         return new WP_Error('bad_request', 'Falta el nombre y al menos email o teléfono.', array('status' => 400));
@@ -13501,7 +13507,11 @@ function superadmin_gestion_alta_cliente($request) {
     $confirmar_duplicado_sub = (bool) $request->get_param('confirmarDuplicado');
     $clase_objetivo_dup = ($tipo === 'clase' && $dia_norm) ? array('dia' => blokes_dia_a_pareja($dia_norm), 'horario' => $horario_norm, 'edad' => $edad_norm ?: 'Adultos') : null;
     $subs_en_vigor = $usar_cliente_id ? blokes_subs_en_vigor_de_persona($usar_cliente_id, null, $clase_objetivo_dup) : array();
-    $hay_duplicado_sub_sin_resolver = !empty($subs_en_vigor) && !$confirmar_duplicado_sub;
+    // 20/11: de las "en vigor" de esta misma clase, las "on-hold" son candidatas claras a
+    // reactivar en vez de crear otra — las "active"/"pending" no (esas sí son confirmarDuplicado
+    // de verdad: dos suscripciones cobrando a la vez, no una vieja parada esperando).
+    $subs_en_espera_misma_clase = array_values(array_filter($subs_en_vigor, function($s) { return $s['estado'] === 'on-hold'; }));
+    $hay_duplicado_sub_sin_resolver = !empty($subs_en_vigor) && !$confirmar_duplicado_sub && !$reactivar_sub_id;
 
     if ($simular) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
@@ -13513,10 +13523,13 @@ function superadmin_gestion_alta_cliente($request) {
             'primerPago' => $primer_pago, 'usaClienteExistente' => $usar_cliente_id ?: null,
             'posibleDuplicado' => $hay_duplicado_sin_resolver ? $duplicado : null,
             'posibleDuplicadoSub' => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+            'subsEnEsperaMismaClase' => !empty($subs_en_espera_misma_clase) ? $subs_en_espera_misma_clase : null,
             'aviso' => $hay_duplicado_sin_resolver
                 ? 'Ya hay alguien con ese teléfono/nombre parecido — elige "usar este cliente" o confirma que es una persona distinta antes de crear de verdad.'
-                : ($uid_por_email ? 'Ya existe un usuario de WordPress con ese email — se usará esa cuenta (no se crea una nueva).'
-                    : 'Simulación: no se ha creado nada todavía.'),
+                : (!empty($subs_en_espera_misma_clase)
+                    ? 'Esta persona ya tiene una suscripción en espera de esta misma clase — mejor reactivarla (reactivarSubId) que crear otra.'
+                    : ($uid_por_email ? 'Ya existe un usuario de WordPress con ese email — se usará esa cuenta (no se crea una nueva).'
+                        : 'Simulación: no se ha creado nada todavía.')),
         )));
     }
 
@@ -13524,7 +13537,38 @@ function superadmin_gestion_alta_cliente($request) {
         return new WP_Error('posible_duplicado', 'Ya hay alguien con ese teléfono/nombre parecido — usa ese cliente (usarClienteId) o confirma que es una persona distinta (confirmarNuevo).', array('status' => 409));
     }
     if ($hay_duplicado_sub_sin_resolver) {
-        return new WP_Error('duplicado_suscripcion', 'Esta persona ya tiene una suscripción activa, en espera o pendiente — confirma si quieres crear otra (confirmarDuplicado) o usa esa.', array('status' => 409));
+        return new WP_Error('duplicado_suscripcion', 'Esta persona ya tiene una suscripción activa, en espera o pendiente — confirma si quieres crear otra (confirmarDuplicado) o, si es una «en espera» de esta misma clase, reactívala en vez de crear otra (reactivarSubId).', array('status' => 409));
+    }
+    // 20/11 (Ramiro): en vez de crear nada, reactiva la suscripción en espera indicada — mismo
+    // efecto que "Reanudar", y si ya se cobró este alta, lo marca cobrado en ESA suscripción
+    // (nunca en una nueva). Solo si de verdad está en la lista de candidatas de esta persona y
+    // esta clase — nunca un subId cualquiera que alguien pueda inventarse desde el cliente. Esto
+    // solo se alcanza habiendo pasado por $simular antes (es lo único que da a conocer
+    // reactivarSubId al frontend), así que "siempre Simular antes de escribir" queda garantizado
+    // por el propio flujo, no solo por convención.
+    if ($reactivar_sub_id) {
+        $es_candidata_valida = false;
+        foreach ($subs_en_espera_misma_clase as $s) { if ($s['subId'] === $reactivar_sub_id) { $es_candidata_valida = true; break; } }
+        if (!$es_candidata_valida) {
+            return new WP_Error('reactivar_no_valido', 'Esa suscripción no está en espera de esta misma clase para esta persona — revisa el subId.', array('status' => 409));
+        }
+        $req_reanudar = new WP_REST_Request('POST', '/superadmin/v1/gestion/reanudar');
+        $req_reanudar->set_param('sub_id', $reactivar_sub_id);
+        $resultado_reanudar = superadmin_gestion_reanudar($req_reanudar);
+        if (is_wp_error($resultado_reanudar)) return $resultado_reanudar;
+        $despues_reactivar = array('subId' => $reactivar_sub_id, 'reactivada' => true);
+        if ($primer_pago === 'ya_pagado') {
+            $req_cobro = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
+            $req_cobro->set_param('sub_id', $reactivar_sub_id);
+            $req_cobro->set_param('importe', $importe_final);
+            $req_cobro->set_param('metodo', $metodo);
+            $req_cobro->set_param('fecha', $fecha_pago ?: $fecha_inicio);
+            $req_cobro->set_param('confirmarDuplicado', true); // ya decidido: reactivar ESTA, no crear otra
+            $resultado_cobro = superadmin_gestion_marcar_cobrado($req_cobro);
+            if (!is_wp_error($resultado_cobro)) $despues_reactivar['cobrado'] = true;
+        }
+        blokes_gestion_log($reactivar_sub_id, 'alta_cliente_reactivada_en_vez_de_duplicar', null, $despues_reactivar);
+        return rest_ensure_response(array('success' => true, 'data' => $despues_reactivar));
     }
 
     // --- Cliente: reutilizar o crear ---
