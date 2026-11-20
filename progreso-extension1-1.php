@@ -22042,6 +22042,26 @@ add_action('init', function() {
     update_option('blokes_fix_variacion_6706_privada', 1, false);
 });
 
+// Ramiro, 20/11 12:20: renombra los 14 participantes de prueba del simulador de compe que se
+// crearon ANTES del arreglo del punto 2 de la prueba del 09:45 ("Prueba M1".."Prueba M5" etc.,
+// indistinguibles en la tele) al mismo esquema nuevo (nombre inventado + apellido "Prueba") —
+// solo cambia el campo 'nombre', nunca el id, así que los tops ya apuntados en la compe #26
+// durante las pruebas de cowork se quedan exactamente donde estaban. Migración de una sola vez.
+add_action('init', function() {
+    if (get_option('blokes_rm_renombrar_prueba_antiguos')) return;
+    global $wpdb;
+    $tabla = progreso_equip_table('comp_participantes_rapidos');
+    $mapa = array(
+        'Prueba M1' => 'Daniel Prueba', 'Prueba M2' => 'Pablo Prueba', 'Prueba M3' => 'Alvaro Prueba', 'Prueba M4' => 'Sergio Prueba', 'Prueba M5' => 'Marcos Prueba',
+        'Prueba F1' => 'Marta Prueba',  'Prueba F2' => 'Laura Prueba', 'Prueba F3' => 'Elena Prueba',  'Prueba F4' => 'Sara Prueba',   'Prueba F5' => 'Paula Prueba',
+        'Prueba I1' => 'Leo Prueba',    'Prueba I2' => 'Ana Prueba',   'Prueba I3' => 'Mia Prueba',    'Prueba I4' => 'Jan Prueba',
+    );
+    foreach ($mapa as $viejo => $nuevo) {
+        $wpdb->update($tabla, array('nombre' => $nuevo), array('nombre' => $viejo, 'created_by' => 'simulador'));
+    }
+    update_option('blokes_rm_renombrar_prueba_antiguos', 1, false);
+});
+
 // «Bajo tarifa» — 3 suscripciones en espera ya decididas por Ramiro (16/11 07:35 punto B.6):
 // 10% de descuento de la migración a WooCommerce, confirmado por él, no una duda de Eva. Solo
 // estas 3 (identificadas por subId, un dato seguro) se precargan como "revisado" — los demás
