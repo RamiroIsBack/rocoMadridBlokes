@@ -6,6 +6,7 @@ import {
 } from '../hooks/useEvents'
 import { fmtEur } from '../utils/monthFormat'
 import './SuperAdminPage.css'
+import { useTabParam } from '../hooks/useTabParam'
 import './EventosPage.css'
 
 // ─── Fechas ─────────────────────────────────────────────────────────────────
@@ -497,6 +498,7 @@ export default function EventosPage() {
   const can = useEventsAccess()
   const { data, setData, loading, error } = useBookings()
   const [tab, setTab]       = useState('reservas')
+  useTabParam('tab', t => TABS.some(x => x.key === t), setTab)
   const [week, setWeek]     = useState(() => weekStart(today()))
   const [month, setMonth]   = useState(() => monthOf(today()))
   const [editing, setEditing] = useState(null)

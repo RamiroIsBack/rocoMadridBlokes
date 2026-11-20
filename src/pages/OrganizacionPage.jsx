@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import mapaEquipacion from '../assets/mapa-equipacion.jpg'
 import { colorPorNumeroBloque } from '../utils/compeColorScale'
 import { fetchWithNonceRetry } from '../utils/wpNonce'
+import { useTabParam } from '../hooks/useTabParam'
 import './OrganizacionPage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -161,6 +162,7 @@ export default function OrganizacionPage() {
   // Ramiro, 12/11 11:45: "quitar el HOY... dejar solo la semana para dar algo de libertad" — las
   // tareas son de la semana, no de un día concreto. "Semana" es ahora la vista por defecto.
   const [view, setView] = useState('semana') // 'semana' | 'normas' | 'compe'
+  useTabParam('vista', v => ['semana', 'normas', 'compe'].includes(v), setView)
   const [workerId, setWorkerId] = useState(() => {
     try { return Number(localStorage.getItem(WHOAMI_KEY)) || null } catch { return null }
   })

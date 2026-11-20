@@ -5,6 +5,7 @@ import { ZONES, TESTS as TEST_MAP } from '../components/BodyDiagram'
 import { getConfig, saveTests, saveTestsToServer, setMockValue, clearMockValue } from '../utils/trainingConfig'
 import { normalizeName, consolidateAlumnos } from '../utils/alumnoUtils'
 import '../admin/AdminLogin.css'
+import { useTabParam } from '../hooks/useTabParam'
 import './EntrenamientosPage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -368,6 +369,7 @@ export default function EntrenamientosPage() {
   const isAuthenticated = ['profesor', 'gestion', 'socio'].includes(window.blokesSiteData?.userRole)
   const esSocio = window.blokesSiteData?.userRole === 'socio'
   const [viewMode, setViewMode]         = useState('alumno') // 'alumno' | 'test' | 'definiciones'
+  useTabParam('tab', t => ['alumno', 'test', 'definiciones'].includes(t), setViewMode)
   const [filters, setFilters]           = useState(EMPTY_FILTERS)
   const [allClases, setAllClases]       = useState([])
   const [selectedAlumno, setSelectedAlumno] = useState(null)

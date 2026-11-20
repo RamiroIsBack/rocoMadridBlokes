@@ -9,6 +9,7 @@ import useTemaOscuro from '../hooks/useTemaOscuro'
 import ExpensesSection from '../components/ExpensesSection'
 import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
 import PayrollSection from '../components/PayrollSection'
+import { useTabParam } from '../hooks/useTabParam'
 import PresupuestosSection from '../components/PresupuestosSection'
 import BudgetSection from '../components/BudgetSection'
 import ProjectsSection from '../components/ProjectsSection'
@@ -1369,6 +1370,7 @@ function PLAccordion({ live2026, lastMonth }) {
 export default function SuperAdminPage() {
   const role = window.blokesSiteData?.userRole
   const [saTab, setSaTab]               = useState('ingresos')
+  useTabParam('tab', t => ['ingresos', 'clases', 'gastos', 'pl', 'nominas', 'presupuesto-anual', 'acceso', 'presupuestos', 'proyectos', 'mapa'].includes(t), setSaTab)
   // Por defecto "Sin uso Rocódromo" (Ramiro 15/11 09:02 (d): la factura entre empresas infla el
   // total combinado — se puede ver con el botón, pero no es lo que sale por defecto).
   const [excludeTransfer, setExclude]   = useState(true)
