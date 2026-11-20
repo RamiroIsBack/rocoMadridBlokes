@@ -24,7 +24,7 @@ function kpiColorTema(hex, oscuro) {
 }
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionCongelarMes, gestionNota, gestionDarDeBaja, gestionFusionar, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente, gestionNombresPorRevisarGet, gestionNombreOmitir, gestionNinosAsociar,
+  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionCongelarMes, gestionNota, gestionDarDeBaja, gestionFusionar, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente, gestionNombresPorRevisarGet, gestionNombreOmitir, gestionNinosAsociar, gestionVincularActividadGet, gestionVincularActividad,
   gestionGrupoWellhubSet, gestionGrupoWellhubChecks, gestionGrupoBajoTarifaSet,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
@@ -3256,6 +3256,9 @@ function GruposTab() {
           <button className={`sv-tab-mini ${vista === 'ninos' ? 'is-active' : ''}`} onClick={() => setVista('ninos')}>
             Niños {ninosSinRevisar > 0 ? <span className="sv-tab-mini__count">({ninosSinRevisar})</span> : ''}
           </button>
+          <button className={`sv-tab-mini ${vista === 'vincular' ? 'is-active' : ''}`} onClick={() => setVista('vincular')}>
+            Vincular actividad
+          </button>
         </div>
         <div className="sv-controls-right">
           <span className="sv-grp-buscar-wrap">
@@ -3400,6 +3403,8 @@ function GruposTab() {
       {vista === 'nombres' && <NombresPorRevisarTab />}
 
       {vista === 'ninos' && <NinosTab grupos={grupos} refetch={refetch} />}
+
+      {vista === 'vincular' && <VincularActividadTab />}
 
       {vista === 'revisar-datos' && (
         <>
@@ -4032,6 +4037,158 @@ function NinosTab({ grupos, refetch }) {
                               {' '}<button className="sv-tests-save" disabled={busy === a.subId} onClick={() => confirmar(a.subId)}>{busy === a.subId ? 'Creando…' : 'Confirmar de verdad'}</button>
                             </div>
                           )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )
+}
+
+// 20/11 07:23 (Ramiro, pestaña «Vincular actividad»): unifica el enlace de alumnos manuales
+// (adultos y niños) creados desde la tablet con «Soy nuevo» — hoy solo existía "Vincular" en
+// Entrenamientos, y solo por email exacto. Aquí se busca por nombre/teléfono/email (el mismo
+// buscador de «+ Añadir alumno»), se puede crear la cuenta del niño si no existe, o borrar el
+// provisional. Siempre Simular → Confirmar, como el resto de esta pantalla. Fetch propio (no son
+// suscripciones, no hay nada que compartir con Grupos/Niños).
+function VincularActividadTab() {
+  const [filas, setFilas] = useState(null)
+  const [error, setError] = useState(null)
+  const [busy, setBusy]   = useState(null) // id en curso
+  const [modo, setModo]   = useState({})   // id -> 'buscar' | 'crear' | 'borrar' | null
+  const [form, setForm]   = useState({})   // id -> { nombre, apellidos, tutorTelefono, q, resultados, buscando }
+  const [preview, setPreview] = useState({}) // id -> { accion, extra, data }
+
+  const cargar = useCallback(() => {
+    setFilas(null); setError(null)
+    gestionVincularActividadGet().then(d => setFilas(Array.isArray(d) ? d : [])).catch(e => setError(e.message))
+  }, [])
+  useEffect(() => { cargar() }, [cargar])
+
+  const valores = id => form[id] || { nombre: '', apellidos: '', tutorTelefono: '', q: '', resultados: null, buscando: false }
+  const setValor = (id, campo, v) => setForm(cur => ({ ...cur, [id]: { ...valores(id), [campo]: v } }))
+  function abrirModo(id, m) {
+    setModo(cur => ({ ...cur, [id]: m }))
+    setPreview(cur => { const { [id]: _o, ...rest } = cur; return rest })
+  }
+  function cerrarModo(id) {
+    setModo(cur => ({ ...cur, [id]: null }))
+    setPreview(cur => { const { [id]: _o, ...rest } = cur; return rest })
+  }
+
+  async function buscar(id) {
+    const v = valores(id)
+    if (v.q.trim().length < 2) return
+    setValor(id, 'buscando', true)
+    try { setValor(id, 'resultados', await gestionBuscarAlumno(v.q.trim())) }
+    catch (e) { setError(e.message) } finally { setValor(id, 'buscando', false) }
+  }
+
+  async function simular(id, accion, extra = {}) {
+    setBusy(id); setError(null)
+    try {
+      const data = await gestionVincularActividad({ placeholder_id: id, accion, simular: true, ...extra })
+      setPreview(cur => ({ ...cur, [id]: { accion, extra, data } }))
+    } catch (e) { setError(e.message) } finally { setBusy(null) }
+  }
+  async function confirmar(id) {
+    const p = preview[id]
+    if (!p) return
+    setBusy(id); setError(null)
+    try {
+      await gestionVincularActividad({ placeholder_id: id, accion: p.accion, simular: false, ...p.extra })
+      setFilas(cur => cur.filter(f => f.id !== id))
+      cerrarModo(id)
+    } catch (e) { setError(e.message) } finally { setBusy(null) }
+  }
+
+  if (filas === null) return <p className="sv-loading">Cargando…</p>
+  return (
+    <>
+      <p className="sv-note">
+        Todos los alumnos manuales (adultos y niños) creados desde «Soy nuevo» en la tablet o desde Entrenamientos,
+        todavía sin vincular a ninguna cuenta. «Vincular a cuenta existente» busca por nombre, teléfono o email (no
+        solo email exacto). «Crear niño» crea su cuenta sin email real. Un provisional que parece de un niño nunca
+        se debería vincular a la cuenta de quien paga — si no existe todavía, usa «Crear niño». Simular siempre
+        antes de confirmar.
+      </p>
+      {error && <p className="sv-to-warn-txt">{error}</p>}
+      {filas.length === 0 ? <p className="sv-empty">Nada pendiente de vincular.</p> : (
+        <div className="sv-tests-scroll">
+          <table className="sv-tests-table">
+            <thead><tr><th>Nombre</th><th>Clase</th><th>Creado</th><th>Tops / mediciones</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {filas.map(f => {
+                const m = modo[f.id]
+                const v = valores(f.id)
+                const p = preview[f.id]
+                return (
+                  <tr key={f.id}>
+                    <td>{f.nombre || <span className="sv-ot-muted">—</span>}{f.pareceMenor && <div className="sv-to-warn-txt">parece un niño</div>}</td>
+                    <td className="sv-ot-muted">{[f.dia, f.horario].filter(Boolean).join(' · ') || '—'}{f.edad && f.edad !== 'Adultos' ? ` · ${f.edad}` : ''}</td>
+                    <td className="sv-ot-muted">{f.creadoPor || '—'}{f.createdAt ? <div>{f.createdAt.slice(0, 10)}</div> : null}</td>
+                    <td className="sv-ot-muted">{f.nTops} / {f.nMediciones}</td>
+                    <td>
+                      {!m && (
+                        <>
+                          <button className="sv-tests-select" onClick={() => abrirModo(f.id, 'buscar')}>Vincular a cuenta existente</button>{' '}
+                          <button className="sv-tests-select" onClick={() => abrirModo(f.id, 'crear')}>Crear niño</button>{' '}
+                          <button className="sv-tests-select" disabled={busy === f.id} onClick={() => simular(f.id, 'borrar')}>Borrar</button>
+                        </>
+                      )}
+                      {m === 'buscar' && (
+                        <div className="sv-grp-tutor">
+                          <input
+                            className="sv-tests-input" type="text" placeholder="Nombre, teléfono o email" value={v.q} autoFocus
+                            onChange={e => setValor(f.id, 'q', e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') buscar(f.id) }}
+                          />{' '}
+                          <button className="sv-tests-select" disabled={v.buscando} onClick={() => buscar(f.id)}>{v.buscando ? 'Buscando…' : 'Buscar'}</button>{' '}
+                          <button className="sv-tests-select" onClick={() => cerrarModo(f.id)}>Cancelar</button>
+                          {v.resultados && (
+                            <div className="sv-grp-tutor">
+                              {v.resultados.filter(r => r.uid).length === 0 && <p className="sv-empty">Nadie con cuenta de WordPress coincide.</p>}
+                              {v.resultados.filter(r => r.uid).map(r => (
+                                <button key={r.uid} className="sv-tests-select" onClick={() => simular(f.id, 'vincular_existente', { uid: r.uid })}>
+                                  {r.nombre} (uid {r.uid})
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {p && p.accion === 'vincular_existente' && (
+                            <div className="sv-ot-muted">
+                              → {p.data?.nTops} top(s) y {p.data?.nMediciones} medición(es) pasan a «{p.data?.destino?.nombre}»
+                              {' '}<button className="sv-tests-save" disabled={busy === f.id} onClick={() => confirmar(f.id)}>{busy === f.id ? 'Guardando…' : 'Confirmar de verdad'}</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {m === 'crear' && (
+                        <div className="sv-grp-tutor">
+                          <input className="sv-tests-input" type="text" placeholder="Nombre" value={v.nombre} autoFocus onChange={e => setValor(f.id, 'nombre', e.target.value)} />{' '}
+                          <input className="sv-tests-input" type="text" placeholder="Apellidos" value={v.apellidos} onChange={e => setValor(f.id, 'apellidos', e.target.value)} />{' '}
+                          <input className="sv-tests-input" type="text" placeholder="Teléfono del tutor" value={v.tutorTelefono} onChange={e => setValor(f.id, 'tutorTelefono', e.target.value)} />{' '}
+                          <button className="sv-tests-select" disabled={!v.nombre.trim()} onClick={() => simular(f.id, 'crear_nino', { nombre: v.nombre.trim(), apellidos: v.apellidos.trim(), tutorTelefono: v.tutorTelefono.trim() })}>Simular</button>{' '}
+                          <button className="sv-tests-select" onClick={() => cerrarModo(f.id)}>Cancelar</button>
+                          {p && p.accion === 'crear_nino' && (
+                            <div className="sv-ot-muted">
+                              → se crea la cuenta de «{p.data?.destino?.nombre}» y pasan {p.data?.nTops} top(s) y {p.data?.nMediciones} medición(es)
+                              {' '}<button className="sv-tests-save" disabled={busy === f.id} onClick={() => confirmar(f.id)}>{busy === f.id ? 'Creando…' : 'Confirmar de verdad'}</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {!m && p && p.accion === 'borrar' && (
+                        <div className="sv-ot-muted">
+                          → se borra «{p.data?.placeholder?.nombre}» y sus {f.nTops} top(s)/{f.nMediciones} medición(es)
+                          {' '}<button className="sv-tests-danger sv-tests-danger--confirm" disabled={busy === f.id} onClick={() => confirmar(f.id)}>{busy === f.id ? 'Borrando…' : 'Borrar de verdad'}</button>
+                          {' '}<button className="sv-tests-select" onClick={() => cerrarModo(f.id)}>Cancelar</button>
                         </div>
                       )}
                     </td>

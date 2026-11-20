@@ -1216,6 +1216,19 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_ninos_asociar',
         'permission_callback' => $sa_perm,
     ));
+    // 20/11 07:23: pestaña "Vincular actividad" — todos los alumnos manuales (adultos y niños)
+    // sin vincular, con sus tops/mediciones; vincular a cuenta existente, crear niño y vincular,
+    // o borrar. Generaliza /alumnos/manual/{id}/link (solo email exacto) con Simular y uid.
+    register_rest_route('superadmin/v1', '/gestion/vincular-actividad', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_vincular_actividad_listado',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/vincular-actividad', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_vincular_actividad',
+        'permission_callback' => $sa_perm,
+    ));
     // Buscar alumno (nombre, teléfono o email) en suscripciones, externos y usuarios de
     // WordPress, para el botón "Añadir alumno" de cada grupo (grupos_como_excel.md, punto 5).
     register_rest_route('superadmin/v1', '/gestion/buscar-alumno', array(
@@ -4773,6 +4786,173 @@ function progreso_link_alumno_manual($request) {
     ), array('id' => $id), array('%s', '%d', '%s'), array('%d'));
 
     return rest_ensure_response(array('success' => true, 'user_id' => $user->ID));
+}
+
+// 20/11 07:23 (Ramiro, pestaña «Vincular actividad»): mismo traspaso de tops/mediciones que
+// progreso_link_alumno_manual() (que se deja intacta, la usa el "Vincular" de Entrenamientos
+// por email exacto), pero por uid (buscador por nombre/teléfono/email) y con Simular antes de
+// escribir — devuelve el array de datos en vez de una respuesta REST, para poder envolverlo en
+// 'simulado' desde el endpoint que llama a esto.
+function blokes_rm_migrar_placeholder($placeholder_id, $uid, $simular) {
+    global $wpdb;
+    blokes_ensure_placeholder_table();
+    $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_placeholder_table() . ' WHERE id = %d', $placeholder_id), ARRAY_A);
+    if (!$row) return new WP_Error('not_found', 'No encontrado.', array('status' => 404));
+    if ($row['status'] !== 'pending') return new WP_Error('already_linked', 'Ya estaba vinculado.', array('status' => 400));
+    $user = get_user_by('id', $uid);
+    if (!$user) return new WP_Error('user_not_found', 'Ese usuario de WordPress no existe.', array('status' => 404));
+
+    progreso_ensure_training_table();
+    blokes_ensure_placeholder_completions_table();
+    $n_tops   = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . progreso_training_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+    $n_medic  = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . blokes_placeholder_completions_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+
+    if ($simular) {
+        return array(
+            'placeholder' => array('id' => $placeholder_id, 'nombre' => $row['nombre']),
+            'destino'     => array('uid' => $uid, 'nombre' => $user->display_name),
+            'nTops' => $n_tops, 'nMediciones' => $n_medic,
+            'aviso' => 'Simulación: no se ha escrito nada todavía.',
+        );
+    }
+
+    $wpdb->update(progreso_training_table(), array('user_id' => $user->ID, 'placeholder_id' => 0), array('placeholder_id' => $placeholder_id), array('%d', '%d'), array('%d'));
+
+    $pc_table = blokes_placeholder_completions_table();
+    $ph_completions = $wpdb->get_results($wpdb->prepare(
+        "SELECT post_id, color, sala, completed_at FROM {$pc_table} WHERE placeholder_id = %d ORDER BY completed_at ASC", $placeholder_id
+    ), ARRAY_A);
+    if ($ph_completions) {
+        $completed_ids = get_user_meta($user->ID, '_blokes_completed', true);
+        $completed_ids = is_array($completed_ids) ? array_map('intval', $completed_ids) : array();
+        $log = get_user_meta($user->ID, '_blokes_completion_log', true);
+        $log = is_array($log) ? $log : array();
+        $newly_completed = array();
+        foreach ($ph_completions as $pc_row) {
+            $pid = intval($pc_row['post_id']);
+            if (in_array($pid, $completed_ids, true)) continue; // ya lo tenía de verdad, no duplicar
+            $completed_ids[] = $pid;
+            $log[] = array('postId' => $pid, 'color' => $pc_row['color'], 'sala' => $pc_row['sala'], 'timestamp' => date('c', strtotime($pc_row['completed_at'])));
+            $newly_completed[] = $pid;
+        }
+        update_user_meta($user->ID, '_blokes_completed', $completed_ids);
+        update_user_meta($user->ID, '_blokes_completion_log', $log);
+        foreach ($newly_completed as $pid) blokes_register_top_for_leagues($user->ID, $pid);
+        $wpdb->delete($pc_table, array('placeholder_id' => $placeholder_id), array('%d'));
+    }
+
+    $wpdb->update(blokes_placeholder_table(), array(
+        'status' => 'linked', 'linked_user_id' => $user->ID, 'linked_at' => current_time('mysql'),
+    ), array('id' => $placeholder_id), array('%s', '%d', '%s'), array('%d'));
+
+    return array(
+        'placeholder' => array('id' => $placeholder_id, 'nombre' => $row['nombre']),
+        'destino'     => array('uid' => $user->ID, 'nombre' => $user->display_name),
+        'nTops' => $n_tops, 'nMediciones' => $n_medic,
+    );
+}
+
+// Listado de la pestaña "Vincular actividad": todos los alumnos manuales (adultos y niños) sin
+// vincular todavía, con cuántos tops/mediciones tienen ya apuntados y quién los creó.
+function superadmin_gestion_vincular_actividad_listado($request) {
+    global $wpdb;
+    blokes_ensure_placeholder_table();
+    progreso_ensure_training_table();
+    blokes_ensure_placeholder_completions_table();
+
+    $tops_map = array();
+    foreach ($wpdb->get_results("SELECT placeholder_id, COUNT(*) n FROM " . blokes_placeholder_completions_table() . " GROUP BY placeholder_id", ARRAY_A) as $r) {
+        $tops_map[intval($r['placeholder_id'])] = intval($r['n']);
+    }
+    $medic_map = array();
+    foreach ($wpdb->get_results("SELECT placeholder_id, COUNT(*) n FROM " . progreso_training_table() . " WHERE placeholder_id > 0 GROUP BY placeholder_id", ARRAY_A) as $r) {
+        $medic_map[intval($r['placeholder_id'])] = intval($r['n']);
+    }
+
+    $out = array();
+    $rows = $wpdb->get_results("SELECT * FROM " . blokes_placeholder_table() . " WHERE status = 'pending' ORDER BY created_at DESC", ARRAY_A);
+    foreach ($rows as $row) {
+        $id = intval($row['id']);
+        $creador_id = intval($row['created_by']);
+        $creador = $creador_id ? get_user_by('id', $creador_id) : null;
+        $out[] = array(
+            'id' => $id, 'nombre' => $row['nombre'],
+            'dia' => $row['dia'], 'horario' => $row['horario'], 'edad' => $row['edad'] ?: '',
+            'createdAt' => $row['created_at'], 'creadoPor' => $creador ? $creador->display_name : '',
+            'nTops' => $tops_map[$id] ?? 0, 'nMediciones' => $medic_map[$id] ?? 0,
+            // Pista, no certeza: un día/horario de Menores/Adolescentes suele ser un niño, pero
+            // sin clase guardada (creado desde la tablet sin franja) no hay forma de saberlo.
+            'pareceMenor' => ($row['edad'] !== '' && $row['edad'] !== 'Adultos'),
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// Acciones de "Vincular actividad": vincular a una cuenta existente (buscador, no solo email
+// exacto), crear la cuenta del niño y vincular, o borrar el provisional. Simular primero, igual
+// que el resto de Grupos.
+function superadmin_gestion_vincular_actividad($request) {
+    global $wpdb;
+    $placeholder_id = intval($request->get_param('placeholder_id'));
+    $accion    = sanitize_key((string) $request->get_param('accion')); // vincular_existente | crear_nino | borrar
+    $uid_in    = intval($request->get_param('uid'));
+    $nombre    = sanitize_text_field((string) $request->get_param('nombre'));
+    $apellidos = sanitize_text_field((string) $request->get_param('apellidos'));
+    $tutor_telefono = sanitize_text_field((string) $request->get_param('tutorTelefono'));
+    $simular   = (bool) $request->get_param('simular');
+
+    if (!$placeholder_id) return new WP_Error('bad_request', 'Falta placeholder_id.', array('status' => 400));
+    if (!in_array($accion, array('vincular_existente', 'crear_nino', 'borrar'), true)) {
+        return new WP_Error('bad_request', 'accion debe ser vincular_existente, crear_nino o borrar.', array('status' => 400));
+    }
+
+    if ($accion === 'borrar') {
+        blokes_ensure_placeholder_table();
+        $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_placeholder_table() . ' WHERE id = %d', $placeholder_id), ARRAY_A);
+        if (!$row) return new WP_Error('not_found', 'No encontrado.', array('status' => 404));
+        if ($row['status'] !== 'pending') return new WP_Error('already_linked', 'Ya está vinculado, no se puede borrar.', array('status' => 400));
+        if ($simular) {
+            return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array('placeholder' => array('id' => $placeholder_id, 'nombre' => $row['nombre']), 'aviso' => 'Simulación: no se ha borrado nada todavía.')));
+        }
+        progreso_ensure_training_table();
+        $wpdb->delete(progreso_training_table(), array('placeholder_id' => $placeholder_id), array('%d'));
+        $wpdb->delete(blokes_placeholder_table(), array('id' => $placeholder_id), array('%d'));
+        blokes_gestion_log(0, 'vincular_actividad_borrar', null, array('placeholderId' => $placeholder_id, 'nombre' => $row['nombre']));
+        return rest_ensure_response(array('success' => true, 'data' => array('borrado' => true)));
+    }
+
+    if ($accion === 'vincular_existente' && !$uid_in) return new WP_Error('bad_request', 'Falta uid.', array('status' => 400));
+    if ($accion === 'crear_nino' && trim($nombre) === '') return new WP_Error('bad_request', 'Falta el nombre del niño.', array('status' => 400));
+
+    // "crear_nino" simulado: no se crea ninguna cuenta todavía, solo se enseña qué pasaría —
+    // blokes_rm_migrar_placeholder() necesita un uid real, así que aquí se corta antes.
+    if ($accion === 'crear_nino' && $simular) {
+        blokes_ensure_placeholder_table();
+        $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_placeholder_table() . ' WHERE id = %d', $placeholder_id), ARRAY_A);
+        if (!$row) return new WP_Error('not_found', 'No encontrado.', array('status' => 404));
+        progreso_ensure_training_table(); blokes_ensure_placeholder_completions_table();
+        $n_tops  = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . progreso_training_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+        $n_medic = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . blokes_placeholder_completions_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'placeholder' => array('id' => $placeholder_id, 'nombre' => $row['nombre']),
+            'destino' => array('uid' => null, 'nombre' => trim($nombre . ' ' . $apellidos), 'creaCuentaNueva' => true),
+            'nTops' => $n_tops, 'nMediciones' => $n_medic,
+            'aviso' => 'Simulación: no se ha creado ni escrito nada todavía.',
+        )));
+    }
+
+    $uid = $uid_in;
+    if ($accion === 'crear_nino') { // aquí ya nunca es simulación (cortada arriba)
+        $nuevo = blokes_rm_crear_nino($nombre, $apellidos, 0, '', $tutor_telefono);
+        if (is_wp_error($nuevo)) return $nuevo;
+        $uid = $nuevo;
+    }
+
+    $res = blokes_rm_migrar_placeholder($placeholder_id, $uid, $simular);
+    if (is_wp_error($res)) return $res;
+    if ($simular) return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $res));
+    blokes_gestion_log(0, 'vincular_actividad', null, $res, array('accion' => $accion, 'placeholderId' => $placeholder_id));
+    return rest_ensure_response(array('success' => true, 'data' => $res));
 }
 
 // ============================================================

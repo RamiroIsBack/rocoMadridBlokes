@@ -112,6 +112,9 @@ export const gestionNombresPorRevisarGet = () => gestionCall('GET', '/gestion/no
 export const gestionNombreOmitir  = uid  => gestionPost(`/gestion/nombres-por-revisar/${uid}/omitir`)
 // 20/11 07:20: pestaña "Niños" — confirmar, asociar a cuenta existente o crear la del niño.
 export const gestionNinosAsociar  = body => gestionPost('/gestion/ninos-asociar', body)
+// 20/11 07:23: pestaña "Vincular actividad" — todos los alumnos manuales sin vincular.
+export const gestionVincularActividadGet = () => gestionCall('GET', '/gestion/vincular-actividad')
+export const gestionVincularActividad    = body => gestionPost('/gestion/vincular-actividad', body)
 // Wellhub + «Bajo tarifa» en Grupos (16/11 07:35).
 export const gestionGrupoWellhubSet    = body => gestionPost('/gestion/grupos/wellhub', body)
 export const gestionGrupoWellhubChecks = body => gestionPost('/gestion/grupos/wellhub-checkins', body)
