@@ -4516,6 +4516,34 @@ function progreso_get_clases($request) {
             );
         }
         if (!empty($filas_adultos) && !in_array('Adolescentes', $edades)) $edades[] = 'Adolescentes';
+
+        // Eva/cowork, 20/11 16:50 (Anne Sophie, sub 7895): el producto de Días sueltos no tiene
+        // ninguna variación de Menores — un niño de un solo día se quedaba sin esa opción en el
+        // selector y acababa dado de alta como Adultos (74€ en vez de 47€). Solo para "single"
+        // (1 día): las clases de 2 días de Menores ya tienen su propia variación real, no hace
+        // falta ninguna fila sintética ahí.
+        $ya_tiene_menores_single = array();
+        foreach ($clases as $c) {
+            if ($c['tipo'] === 'single' && $c['edad'] === 'Menores') $ya_tiene_menores_single[$c['dia'] . '|' . $c['horario']] = true;
+        }
+        foreach ($filas_adultos as $fila) {
+            if ($fila['tipo'] !== 'single') continue;
+            $clave_dh = $fila['dia'] . '|' . $fila['horario'];
+            if (isset($ya_tiene_menores_single[$clave_dh])) continue;
+            $planes_menor = RocoMadrid_SF_Pricing::calculate_plan_prices(array(
+                'pa_dias' => $fila['dia'], 'pa_horario' => $fila['horario'], 'pa_edad' => 'Menores', 'frequency' => '1_day',
+            ));
+            $precio_menor = floatval($planes_menor['monthly']['price'] ?? 0);
+            if ($precio_menor <= 0) continue;
+            $key_menor = $clave_dh . '|Menores';
+            $clases[] = array(
+                'id' => 'menor-' . $fila['id'], 'tipo' => 'single', 'dia' => $fila['dia'], 'horario' => $fila['horario'],
+                'turno' => $fila['turno'], 'edad' => 'Menores', 'precio' => $precio_menor,
+                'stock' => $fila['stock'], 'stock_status' => $fila['stock_status'], 'sku' => $fila['sku'] . '-MENOR',
+                'status' => $fila['status'], 'alumnos' => isset($sub_counts[$key_menor]) ? $sub_counts[$key_menor] : 0,
+            );
+        }
+        if (!empty($filas_adultos) && !in_array('Menores', $edades)) $edades[] = 'Menores';
     }
 
     usort($dias_single,  $sort_by_day);
@@ -13157,7 +13185,17 @@ function blokes_buscar_variacion_clase($dia, $horario, $edad) {
     $frecuencia = (strpos($dia, '-') !== false) ? '2_days' : '1_day';
     $target_product_id = ($frecuencia === '2_days') ? $product_classes_id : $product_single_id;
     $target_taxonomy    = ($frecuencia === '2_days') ? 'pa_dias' : 'pa_dia-suelto';
-    $edad_buscar = ($edad === blokes_normalizar_edad('Adolescentes')) ? 'Adultos' : $edad;
+    $edad_buscar = $edad;
+    if ($edad === blokes_normalizar_edad('Adolescentes')) {
+        $edad_buscar = 'Adultos';
+    } elseif ($edad === blokes_normalizar_edad('Menores') && $frecuencia === '1_day') {
+        // Eva/cowork, 20/11 16:50 (Anne Sophie, sub 7895): el producto de Días sueltos no tiene
+        // ninguna variación de Menores, así que el alta de un niño de un solo día se quedaba sin
+        // opción y salía como Adultos (74€ en vez de 47€). Igual que Adolescentes: se monta
+        // sobre la variación de Adultos del mismo día/horario; el precio real de Menores se
+        // calcula aparte con RocoMadrid_SF_Pricing (sin tocar nada en WooCommerce).
+        $edad_buscar = 'Adultos';
+    }
 
     $producto = wc_get_product($target_product_id);
     if (!$producto) return null;

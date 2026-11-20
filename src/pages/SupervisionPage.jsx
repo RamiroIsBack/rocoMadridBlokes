@@ -144,6 +144,12 @@ function histByMonth(classes, mRange, key = 'nuevos') {
 function fmtEur(v) {
   return `${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €`
 }
+// 20/11 16:50 (Eva/cowork — Anne Sophie): fmtEur redondea a entero y en la simulación de "Crear
+// cliente" enseñaba "24 € ya cobrado" para un pago real de 23,50 € (el pedido se guardaba bien,
+// solo la pantalla redondeaba) — aquí sí hacen falta los céntimos.
+function fmtEurCent(v) {
+  return `${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
+}
 
 // ─── Period selector ─────────────────────────────────────────────────────────
 const PERIOD_OPTIONS = [
@@ -1710,7 +1716,10 @@ function AccionMenu({ alumno, onPick, onClose }) {
       </div>
     )
   }
-  const puedePausar   = alumno.estado === 'activo' || alumno.estado === 'pendiente_pago'
+  // 20/11 16:50 (Eva/cowork — María Clara, sub 7183): "en_espera" (on-hold por impago, sin
+  // _rm_pausa_motivo) solo ofrecía Reanudar; también se puede Pausar desde ahí (p. ej. para
+  // guardar motivo/fecha de vuelta y cancelar el pedido pendiente mientras no vuelve).
+  const puedePausar   = alumno.estado === 'activo' || alumno.estado === 'pendiente_pago' || alumno.estado === 'en_espera'
   const puedeReanudar = alumno.estado === 'en_espera' || alumno.estado === 'pausado'
   const puedeBaja     = alumno.estado !== 'baja_fin_mes'
   return (
@@ -2136,8 +2145,8 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
             <ul className="sv-grp-preview">
               <li><span>Cliente</span><span>{preview.nombre} · {preview.email || preview.telefono}</span></li>
               <li><span>Grupo/producto</span><span>{preview.producto || '—'} {preview.dia ? `· ${preview.dia} · ${preview.horario} · ${preview.edad}` : ''}</span></li>
-              <li><span>Precio catálogo</span><span>{fmtEur(preview.precioCatalogo)}</span></li>
-              <li><span>Primer pago</span><span>{preview.primerPago === 'ya_pagado' ? `${fmtEur(preview.importeFinal)} ya cobrado` : 'Enlace de pago con tarjeta'}</span></li>
+              <li><span>Precio catálogo</span><span>{fmtEurCent(preview.precioCatalogo)}</span></li>
+              <li><span>Primer pago</span><span>{preview.primerPago === 'ya_pagado' ? `${fmtEurCent(preview.importeFinal)} ya cobrado` : 'Enlace de pago con tarjeta'}</span></li>
               {preview.aviso && <li><span>Aviso</span><span>{preview.aviso}</span></li>}
             </ul>
             {preview.posibleDuplicado && (
@@ -2172,7 +2181,7 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
                 <p>⚠️ <strong>Cuidado: esta persona ya tiene una suscripción</strong>:</p>
                 <ul className="sv-aviso__lista">
                   {preview.posibleDuplicadoSub.map(s => (
-                    <li key={s.subId}>#{s.subId} · {s.dia} {s.horario}{s.edad !== 'Adultos' ? ` · ${s.edad}` : ''} · {s.estado} · {s.importe != null ? fmtEur(s.importe) : '—'}{s.proximoPago ? ` · próximo pago ${s.proximoPago}` : ''}</li>
+                    <li key={s.subId}>#{s.subId} · {s.dia} {s.horario}{s.edad !== 'Adultos' ? ` · ${s.edad}` : ''} · {s.estado} · {s.importe != null ? fmtEurCent(s.importe) : '—'}{s.proximoPago ? ` · próximo pago ${s.proximoPago}` : ''}</li>
                   ))}
                 </ul>
                 <p>¿Quieres que tenga también esta nueva o es un duplicado?</p>
@@ -2186,7 +2195,7 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
             )}
             {importeDistinto && (
               <div className="sv-grp-field sv-to-warn-txt">
-                <p>El importe ({fmtEur(Number(importe))}) no coincide con el catálogo ({fmtEur(preview.precioCatalogo)}). Elige una opción:</p>
+                <p>El importe ({fmtEurCent(Number(importe))}) no coincide con el catálogo ({fmtEurCent(preview.precioCatalogo)}). Elige una opción:</p>
                 <label className="sv-grp-field sv-grp-field--check">
                   <input type="radio" name="ajustarPrecioAlta" checked={ajustarPrecio === 'solo_este_mes'} onChange={() => setAjustarPrecio('solo_este_mes')} />
                   Cobrar este importe solo este mes
