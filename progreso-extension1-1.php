@@ -43,6 +43,7 @@ $GLOBALS['blokes_profesores_emails'] = array(
     'ana.llorenteg03@gmail.com',
     'alobo@ymail.com',
     'luciapcaas@gmail.com',
+    'maringomezeduardo@gmail.com', // Edu (equipador)
 );
 // Cuenta(s) de las tablets compartidas del gimnasio — ver Superadmin → Tablet.
 $GLOBALS['blokes_tablets_emails'] = array();
