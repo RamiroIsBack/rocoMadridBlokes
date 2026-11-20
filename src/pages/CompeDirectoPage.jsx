@@ -250,12 +250,20 @@ export default function CompeDirectoPage() {
 
   useEffect(() => {
     let activo = true
-    // Vista previa para un vídeo tutorial (Ramiro 12/11 16:15): ?previewCompe=<id> en la URL de
-    // esta misma página de la tele — el backend solo la atiende con sesión de socio.
-    const previewId = new URLSearchParams(window.location.search).get('previewCompe')
+    // Vista previa para un vídeo tutorial (Ramiro 12/11 16:15): ?previewCompeId=<id> en la URL
+    // de esta misma página de la tele — el backend solo la atiende con sesión de socio. Cowork,
+    // 20/11 09:45 punto 1: acepta también ?previewCompe= (el que de verdad escribía el 409 del
+    // propio backend al intentar encender una compe de prueba), y manda el nonce de socio —
+    // sin él, fetch() con cookies pero sin X-WP-Nonce llega como visitante anónimo y el backend
+    // devuelve activo:false aunque la sesión sí sea de socio. En la tele real, sin sesión, esto
+    // no cambia nada (clubNonce no existe, no se manda cabecera, fetch sigue siendo anónimo).
+    const qs = new URLSearchParams(window.location.search)
+    const previewId = qs.get('previewCompeId') || qs.get('previewCompe')
+    const previewHeaders = previewId && window.blokesSiteData?.clubNonce ? { 'X-WP-Nonce': window.blokesSiteData.clubNonce } : {}
+    const previewFetchOpts = previewId ? { credentials: 'include', headers: previewHeaders } : {}
     const estadoUrl = `${CLUB_URL}/wp-json/progreso/v1/compe/estado${previewId ? `?previewCompeId=${encodeURIComponent(previewId)}` : ''}`
     const cargar = () => {
-      fetch(estadoUrl)
+      fetch(estadoUrl, previewFetchOpts)
         .then(r => r.json())
         .then(j => {
           if (!activo) return
