@@ -2975,6 +2975,33 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
     }
   }
 
+  // "Simulador" (20/11 06:30, punto 3) — solo socio, solo en una compe de prueba: apunta tops
+  // falsos (el backend crea participantes de prueba la primera vez si hacen falta) para ver la
+  // animación de la tele en /blokes/compe/directo?previewCompeId=X sin ir apuntando a mano.
+  const [simulando, setSimulando] = useState(false)
+  const simularTop = async () => {
+    setSimulando(true)
+    try {
+      const res = await api('POST', '/compe/simular-top', { competitionId: comp.id })
+      showToast(`Top simulado: participante de prueba, bloque ${res.data.bloque}.`)
+    } catch (e) {
+      showToast(e.message || 'No se ha podido simular.')
+    } finally {
+      setSimulando(false)
+    }
+  }
+  const simularRafaga = async () => {
+    setSimulando(true)
+    try {
+      for (let i = 0; i < 3; i++) await api('POST', '/compe/simular-top', { competitionId: comp.id })
+      showToast('Ráfaga simulada: 3 tops.')
+    } catch (e) {
+      showToast(e.message || 'No se ha podido simular.')
+    } finally {
+      setSimulando(false)
+    }
+  }
+
   // Relleno de una vez: bloques ya colocados en el mapa de antes de este cambio, que se
   // quedaron sin subzona (Ramiro, 11/11 05:01: "los 6 bloques ya colocados sin subzona se
   // rellenan con esa misma lógica"). Solo toca los que de verdad están vacíos, nunca
@@ -3142,13 +3169,36 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
                 : `Al encenderlo se crea un bloke real (oculto) por cada uno de los ${blocks.length} bloques, y lo que se apunte en /compe cuenta como resultado de esta compe.`}
             </p>
           </div>
-          <button className="org__btn" onClick={toggleModoCompe} disabled={cambiandoModo}>
-            {cambiandoModo ? 'Cambiando...' : modoActivo ? 'Apagar modo compe' : 'Encender modo compe'}
-          </button>
+          {!comp.isTest && (
+            <button className="org__btn" onClick={toggleModoCompe} disabled={cambiandoModo}>
+              {cambiandoModo ? 'Cambiando...' : modoActivo ? 'Apagar modo compe' : 'Encender modo compe'}
+            </button>
+          )}
         </div>
       )}
-      <a className="org__link-btn" href="/blokes/compe/directo" target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginBottom: 16 }}>
-        📺 Abrir en la tele
+      {/* 20/11 06:30 (punto 3): una compe de prueba nunca se "enciende" de verdad (la verían
+          los usuarios reales) — se ve siempre con ?previewCompeId=, y aquí tiene además el
+          simulador para no tener que apuntar tops a mano uno a uno. Solo socio, nunca gestión
+          ni profesor — a diferencia del resto de esta pantalla (canManage, jefe o socio). */}
+      {comp.isTest && window.blokesSiteData?.userRole === 'socio' && (
+        <div className="org__modo-compe">
+          <div>
+            <p className="org__modo-compe__estado">🧪 Compe de prueba</p>
+            <p className="org__hint" style={{ margin: 0 }}>
+              Nunca se activa por la vía normal — pruébala en la tele con el enlace de abajo. El simulador apunta
+              tops falsos (crea participantes de prueba en las 3 categorías la primera vez, si hacen falta).
+            </p>
+          </div>
+          <button className="org__btn" onClick={simularTop} disabled={simulando}>{simulando ? '…' : 'Simular top'}</button>
+          <button className="org__btn org__btn--ghost" onClick={simularRafaga} disabled={simulando}>{simulando ? '…' : 'Ráfaga (3 tops)'}</button>
+        </div>
+      )}
+      <a
+        className="org__link-btn"
+        href={comp.isTest ? `/blokes/compe/directo?previewCompeId=${comp.id}` : '/blokes/compe/directo'}
+        target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginBottom: 16 }}
+      >
+        📺 Abrir en la tele{comp.isTest ? ' (vista previa de prueba)' : ''}
       </a>
 
       {unplaced.length > 0 && (

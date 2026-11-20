@@ -957,6 +957,11 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/compe/participante-rapido', array(
         'methods' => 'POST', 'callback' => 'progreso_compe_crear_participante_rapido', 'permission_callback' => 'is_user_logged_in',
     ));
+    // 20/11 06:30 (punto 3): "simulador" solo para socio, solo en compes de prueba — apunta
+    // tops falsos para ver la animación de la tele sin tener que ir apuntando uno a uno a mano.
+    register_rest_route('progreso/v1', '/compe/simular-top', array(
+        'methods' => 'POST', 'callback' => 'progreso_compe_simular_top', 'permission_callback' => function() { return blokes_es_socio(); },
+    ));
     // 20/11 06:30 (punto 2): categoría (masculina/femenina/infantil) de un participante en esta
     // compe — nunca inferida, siempre elegida a mano. El propio participante puede poner la
     // suya; la de cualquier otro (rápido, placeholder, o en nombre de otro usuario) la pone
@@ -17451,7 +17456,9 @@ function progreso_equip_ensure_tables() {
     // vez (Ramiro 12/11 10:45: quitar las marcas rojas de los arrastres de octubre sin borrar ni
     // completar ninguna tarea). tasks.manual (Ramiro 12/11 10:44: "+ Tarea" a mano en el plan de
     // la compe — para que "Regenerar" nunca la toque, aunque coincida tipo+fecha con el plan).
-    $version = '15';
+    // v16 (20/11 06:30): tabla comp_categorias (punto 2, masculina/femenina/infantil) y
+    // corrección del "16" hardcodeado en dos nombres de tarea ya sembrados (punto 4).
+    $version = '16';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -17755,7 +17762,7 @@ function progreso_equip_seed_comp_task_types_if_missing() {
     global $wpdb;
     $table = progreso_equip_table('task_types');
     $seed = array(
-        array('id' => 'comp_disenar_bloques', 'name' => 'Compe: diseñar los 16 bloques (zona, dificultad, presas, volúmenes)'),
+        array('id' => 'comp_disenar_bloques', 'name' => 'Compe: diseñar los bloques (zona, dificultad, presas, volúmenes)'),
         array('id' => 'comp_revisar_material', 'name' => 'Compe: revisar presas y tornillería, pedir lo que falte'),
         array('id' => 'comp_limpieza_presas', 'name' => 'Compe: limpieza de presas'),
         array('id' => 'comp_puntuacion', 'name' => 'Compe: preparar hojas de puntuación / sistema de resultados'),
@@ -17764,7 +17771,7 @@ function progreso_equip_seed_comp_task_types_if_missing() {
         array('id' => 'comp_decidir_forerunners', 'name' => 'Compe: decidir lista de forerunners'),
         array('id' => 'comp_desequipar_cueva', 'name' => 'Compe: desequipar — primero la Cueva'),
         array('id' => 'comp_desequipar_resto', 'name' => 'Compe: desequipar — resto de zonas'),
-        array('id' => 'comp_equipar_bloques', 'name' => 'Compe: equipar los 16 bloques'),
+        array('id' => 'comp_equipar_bloques', 'name' => 'Compe: equipar los bloques'),
         array('id' => 'comp_numeracion', 'name' => 'Compe: numeración y cintas'),
         array('id' => 'comp_foto_bloque', 'name' => 'Compe: foto de cada bloque'),
         array('id' => 'comp_forerunning', 'name' => 'Compe: prueba de bloques (forerunning)'),
@@ -17784,6 +17791,11 @@ function progreso_equip_seed_comp_task_types_if_missing() {
             'lead_only' => 0, 'periodicity_weeks' => 1, 'recurring' => 0, 'sort_order' => 90 + $i,
         ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d'));
     }
+    // 20/11 06:30 (punto 4): "16" hardcodeado en el nombre de estas dos tareas, ya sembradas en
+    // producción desde antes — cambiar el texto de arriba no las toca (el seed de arriba se
+    // salta todo lo que ya existe), así que se corrigen aquí a mano, siempre (idempotente).
+    $wpdb->update($table, array('name' => 'Compe: diseñar los bloques (zona, dificultad, presas, volúmenes)'), array('id' => 'comp_disenar_bloques'));
+    $wpdb->update($table, array('name' => 'Compe: equipar los bloques'), array('id' => 'comp_equipar_bloques'));
 }
 
 // Migración de una sola vez (cowork, 2/11 12:55/14:00): Ramiro (id 5), Álvaro V. (id 6) y Javi
@@ -19805,6 +19817,7 @@ function progreso_equip_delete_competition($request) {
     }
     $wpdb->delete(progreso_equip_table('comp_resultados'), array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('comp_participantes_rapidos'), array('competition_id' => $id), array('%d'));
+    $wpdb->delete(progreso_equip_table('comp_categorias'), array('competition_id' => $id), array('%d')); // 20/11 06:30 punto 2
     $wpdb->delete($tasks_table, array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('comp_blocks'), array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('competitions'), array('id' => $id), array('%d'));
@@ -20139,6 +20152,12 @@ function progreso_equip_set_modo_compe($request) {
     $simular = (bool) $request->get_param('simular');
     $comp = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $id), ARRAY_A);
     if (!$comp) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+    // 20/11 06:30 (punto 3): una compe de PRUEBA nunca debe verse por la vía normal
+    // (modo_activo), solo con ?previewCompeId= — si no, "nadie real debe verla" se rompería en
+    // cuanto alguien pulsara "Encender modo compe" sin darse cuenta de que es la de prueba.
+    if ($comp['is_test'] && $activo) {
+        return new WP_Error('es_de_prueba', 'Esta es una compe de prueba — nunca se activa así (la verían los usuarios reales). Pruébala con ?previewCompeId=' . $id . ' en la tele.', array('status' => 409));
+    }
     if ((bool) $comp['modo_activo'] === $activo) {
         return rest_ensure_response(array('success' => true, 'data' => array('modoActivo' => $activo, 'aviso' => 'Ya estaba así.')));
     }
@@ -20470,6 +20489,68 @@ function progreso_compe_crear_participante_rapido($request) {
     ));
     $id = $wpdb->insert_id;
     return rest_ensure_response(array('success' => true, 'data' => array('id' => $id, 'nombreMostrar' => $nombre . ' (sin cuenta)')));
+}
+
+// POST /progreso/v1/compe/simular-top (20/11 06:30, punto 3) — solo socio, solo compes de
+// prueba (comprobado dos veces: aquí Y dentro de progreso_compe_apuntar_resultado, que ya
+// exige is_test o modo_activo). Apunta un top real en la tabla de resultados, a un participante
+// y bloque al azar de ESTA compe — la tele y la app lo ven exactamente igual que un top de
+// verdad, que es el objetivo: probar la animación sin fabricar un camino aparte para pruebas.
+// Si la compe todavía no tiene suficientes participantes de prueba, los crea (repartidos en las
+// 3 categorías) para no obligar a darlos de alta uno a uno antes de poder usar el simulador.
+function progreso_compe_simular_top($request) {
+    global $wpdb;
+    $competition_id = intval($request->get_param('competitionId'));
+    if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT is_test FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $competition_id), ARRAY_A);
+    if (!$comp) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+    if (!$comp['is_test']) return new WP_Error('solo_prueba', 'El simulador solo funciona en una compe de prueba — nunca en una real.', array('status' => 409));
+
+    $rapidos = $wpdb->get_results($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE competition_id = %d", $competition_id
+    ), ARRAY_A);
+    if (count($rapidos) < 9) {
+        $semilla = array(
+            'masculina' => array('Prueba M1', 'Prueba M2', 'Prueba M3', 'Prueba M4', 'Prueba M5'),
+            'femenina'  => array('Prueba F1', 'Prueba F2', 'Prueba F3', 'Prueba F4', 'Prueba F5'),
+            'infantil'  => array('Prueba I1', 'Prueba I2', 'Prueba I3', 'Prueba I4'),
+        );
+        foreach ($semilla as $cat => $nombres) {
+            foreach ($nombres as $nombre) {
+                $wpdb->insert(progreso_equip_table('comp_participantes_rapidos'), array(
+                    'competition_id' => $competition_id, 'nombre' => $nombre, 'categoria' => 'General',
+                    'created_by' => 'simulador', 'created_at' => current_time('mysql'),
+                ));
+                $rid = $wpdb->insert_id;
+                $wpdb->insert(progreso_equip_table('comp_categorias'), array(
+                    'competition_id' => $competition_id, 'participante_tipo' => 'rapido', 'participante_id' => $rid,
+                    'categoria' => $cat, 'updated_at' => current_time('mysql'),
+                ));
+            }
+        }
+        $rapidos = $wpdb->get_results($wpdb->prepare(
+            "SELECT id FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE competition_id = %d", $competition_id
+        ), ARRAY_A);
+    }
+
+    $bloques = $wpdb->get_results($wpdb->prepare(
+        "SELECT id, number FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d", $competition_id
+    ), ARRAY_A);
+    if (!$bloques) return new WP_Error('sin_bloques', 'Esta compe de prueba todavía no tiene bloques.', array('status' => 409));
+
+    $rapido = $rapidos[array_rand($rapidos)];
+    $bloque = $bloques[array_rand($bloques)];
+
+    $req_resultado = new WP_REST_Request('POST', '/progreso/v1/compe/resultado');
+    $req_resultado->set_param('compBlockId', intval($bloque['id']));
+    $req_resultado->set_param('top', true);
+    $req_resultado->set_param('targetParticipanteRapidoId', intval($rapido['id']));
+    $resultado = progreso_compe_apuntar_resultado($req_resultado);
+    if (is_wp_error($resultado)) return $resultado;
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'participanteId' => intval($rapido['id']), 'bloque' => intval($bloque['number']), 'totalParticipantesPrueba' => count($rapidos),
+    )));
 }
 
 // GET /progreso/v1/compe/mis-resultados?competitionId=X — lo que YA ha apuntado el usuario (o
