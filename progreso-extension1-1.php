@@ -13622,9 +13622,12 @@ function superadmin_gestion_nombres_por_revisar($request) {
         elseif (blokes_rm_nombre_necesita_revision($first) || blokes_rm_nombre_necesita_revision($last)) $motivo = 'minuscula';
         if ($motivo === '') continue;
 
+        // Prueba de cowork (20/11 12:20, punto 4b): el nombre de facturación lo escribe el
+        // cliente en el checkout, con cualquier mayúscula/minúscula ("De las heras") — hay que
+        // capitalizarlo igual que la fuente "capitalizado", no usarlo tal cual.
         $propuesta_nombre = ''; $propuesta_apellidos = ''; $fuente = 'sin_propuesta';
         if (!empty($billing_por_uid[$uid])) {
-            $propuesta_nombre = $billing_por_uid[$uid]['nombre']; $propuesta_apellidos = $billing_por_uid[$uid]['apellidos']; $fuente = 'suscripcion';
+            $propuesta_nombre = blokes_capitalizar_simple($billing_por_uid[$uid]['nombre']); $propuesta_apellidos = blokes_capitalizar_simple($billing_por_uid[$uid]['apellidos']); $fuente = 'suscripcion';
         } elseif ($first !== '' || $last !== '') {
             $propuesta_nombre = blokes_capitalizar_simple($first); $propuesta_apellidos = blokes_capitalizar_simple($last); $fuente = 'capitalizado';
         }
