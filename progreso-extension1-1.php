@@ -12579,7 +12579,9 @@ function superadmin_gestion_congelar_mes($request) {
         return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
     }
     $sub_id  = intval($request->get_param('sub_id'));
-    $meses   = max(1, intval($request->get_param('meses')) ?: 1);
+    // 20/11 (cowork, prueba en producción): tope razonable — más de esto probablemente es un
+    // error de tecleo, no un caso real.
+    $meses   = max(1, min(6, intval($request->get_param('meses')) ?: 1));
     $nota    = sanitize_text_field((string) $request->get_param('nota'));
     $simular = (bool) $request->get_param('simular');
 
@@ -12605,14 +12607,29 @@ function superadmin_gestion_congelar_mes($request) {
     }
 
     $antes = array('proximoPago' => $next_payment_actual);
-    blokes_gestion_sin_emails(function() use ($sub, $next_payment_nueva, $meses) {
+    // 20/11 (cowork, prueba en producción): el try/catch se tragaba el rechazo de WooCommerce
+    // (p. ej. fecha inválida) y aun así escribía la nota, el log y devolvía success. Ahora se
+    // relee next_payment después de escribir y, si no cambió de verdad, no se anota ni se
+    // registra nada — se devuelve error.
+    $next_payment_real = blokes_gestion_sin_emails(function() use ($sub, $next_payment_nueva, $meses) {
         try { $sub->update_dates(array('next_payment' => $next_payment_nueva)); } catch (Exception $e) {}
-        $sub->add_order_note(sprintf('Congelado %d mes(es) vía Grupos — próximo pago movido al %s, sin cobrar.', $meses, date('d/m/Y', strtotime($next_payment_nueva))));
         $sub->save();
+        return $sub->get_date('next_payment');
     });
-    if ($nota) update_post_meta($sub_id, '_rm_nota', $nota);
+    if (!$next_payment_real || date('Y-m-d', strtotime($next_payment_real)) !== date('Y-m-d', strtotime($next_payment_nueva))) {
+        return new WP_Error('no_se_pudo_mover', 'WooCommerce no ha movido la fecha de próximo pago — no se ha escrito nota ni log. Revisa la suscripción a mano.', array('status' => 409));
+    }
+    blokes_gestion_sin_emails(function() use ($sub, $next_payment_nueva, $meses) {
+        $sub->add_order_note(sprintf('Congelado %d mes(es) vía Grupos — próximo pago movido al %s, sin cobrar.', $meses, date('d/m/Y', strtotime($next_payment_nueva))));
+    });
+    if ($nota) {
+        // 20/11 (cowork): pisaba _rm_nota si ya había una — ahora se añade a la existente.
+        $nota_actual = (string) get_post_meta($sub_id, '_rm_nota', true);
+        $nota_final = $nota_actual !== '' ? ($nota_actual . ' · ' . $nota) : $nota;
+        update_post_meta($sub_id, '_rm_nota', $nota_final);
+    }
 
-    $despues = array('proximoPago' => $next_payment_nueva, 'meses' => $meses, 'nota' => $nota);
+    $despues = array('proximoPago' => $next_payment_real, 'meses' => $meses, 'nota' => $nota);
     blokes_gestion_log($sub_id, 'congelar_mes', $antes, $despues);
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));

@@ -1118,8 +1118,14 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
   const clasesSemanales = grupos
 
   async function submit(forzarReal = false) {
-    setBusy(true); setErr(null)
     const sim = puedeSimular ? (forzarReal ? false : simular) : false
+    // 20/11 (Ramiro: "es una acción inusual, avisar a Eva si está segura porque es regalar a un
+    // usuario un mes en realidad"): confirmación aparte, solo al escribir de verdad.
+    if (tipo === 'congelar_mes' && !sim) {
+      const ok = window.confirm(`¿Seguro? Esto regala ${mesesCongelar} mes(es) gratis — ${alumno.alumno || 'esta persona'} no pagará ese tiempo y sigue viniendo igual.`)
+      if (!ok) return
+    }
+    setBusy(true); setErr(null)
     try {
       let res
       if (tipo === 'marcar_cobrado') {
@@ -1326,7 +1332,7 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
                   (para eso está "Pausar") ni manda ningún email.
                 </p>
                 <label className="sv-grp-field">Meses a congelar
-                  <input className="sv-tests-input" type="number" min="1" max="12" value={mesesCongelar} onChange={e => setMesesCongelar(e.target.value)} />
+                  <input className="sv-tests-input" type="number" min="1" max="6" value={mesesCongelar} onChange={e => setMesesCongelar(e.target.value)} />
                 </label>
                 <label className="sv-grp-field">Nota (opcional)
                   <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej. congela diciembre, vuelve en enero" />
@@ -1849,7 +1855,10 @@ function TablaAlumnos({ alumnos, meses, onWa, onMenu }) {
                   )}
                 </td>
                 <td className="sv-ot-muted">{a.telefono || '—'}</td>
-                <td>{a.dias}{a.dias === 1 && a.diaReal ? <span className="sv-ot-muted"> (solo {a.diaReal})</span> : ''}</td>
+                {/* 20/11 (cowork): en un grupo que YA es de un solo día (p. ej. Viernes), decir
+                    "(solo Viernes)" es redundante — solo tiene sentido dentro de una pareja
+                    (a.dia, que conGrupoDatos pone al día del grupo) cuando el real es distinto. */}
+                <td>{a.dias}{a.dias === 1 && a.diaReal && a.diaReal !== a.dia ? <span className="sv-ot-muted"> (solo {a.diaReal})</span> : ''}</td>
                 <td>
                   <span className={`sv-grp-estado ${est.cls}`}>{est.txt}</span>
                   {/* 19/11 21:30 (punto 3): aviso de que toca reanudar en cuanto llega la fecha
@@ -2982,7 +2991,9 @@ function GruposTab() {
   const { clases: catalogoClases } = useClases(true)
   const gruposParaSelector = useMemo(() => {
     const sueltos = catalogoClases
-      .filter(c => c.tipo === 'single' && c.dia && c.horario)
+      // 20/11 (cowork, prueba en producción): salían variaciones privadas/sin publicar (p. ej.
+      // Miércoles 09:00-10:30 y 21:00-22:30) — no son clases reales que se puedan ofrecer.
+      .filter(c => c.tipo === 'single' && c.dia && c.horario && c.status === 'publish')
       .map(c => ({
         dia: c.dia, horario: c.horario, edad: c.edad || 'Adultos',
         label: `${c.dia} · ${c.horario}${c.edad && c.edad !== 'Adultos' ? ` (${c.edad})` : ''} — solo ${c.dia}`,
