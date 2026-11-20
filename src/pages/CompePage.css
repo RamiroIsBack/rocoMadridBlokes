@@ -134,6 +134,14 @@
   cursor: pointer; padding: 0;
 }
 .compe-grp-field { display: block; margin-bottom: 10px; font-size: 0.85rem; color: var(--color-text-primary); }
+/* 20/11 06:30 (punto 2): selector de categoría de la compe — nunca inferida, siempre a mano. */
+.compe-page__categoria {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 0.85rem; color: var(--color-text-secondary);
+}
+.compe-page__categoria select, .compe-grp-field select {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--color-border);
+  background: var(--color-surface); color: var(--color-text-primary); font-size: 0.95rem;
+}
 .compe-recepcion-input {
   display: block; width: 100%; margin-top: 4px; padding: 8px 10px;
   border: 1px solid var(--color-border); border-radius: 8px; font-size: 1rem;

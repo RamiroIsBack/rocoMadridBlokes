@@ -957,6 +957,13 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/compe/participante-rapido', array(
         'methods' => 'POST', 'callback' => 'progreso_compe_crear_participante_rapido', 'permission_callback' => 'is_user_logged_in',
     ));
+    // 20/11 06:30 (punto 2): categoría (masculina/femenina/infantil) de un participante en esta
+    // compe — nunca inferida, siempre elegida a mano. El propio participante puede poner la
+    // suya; la de cualquier otro (rápido, placeholder, o en nombre de otro usuario) la pone
+    // recepción — el callback comprueba cuál de los dos casos es.
+    register_rest_route('progreso/v1', '/compe/categoria', array(
+        'methods' => 'POST', 'callback' => 'progreso_compe_categoria_set', 'permission_callback' => 'is_user_logged_in',
+    ));
 
     register_rest_route('progreso/v1', '/training/me', array(
         'methods'             => 'GET',
@@ -17628,6 +17635,23 @@ function progreso_equip_ensure_tables() {
         KEY competition_id (competition_id)
     ) {$charset};");
 
+    // 20/11 06:30 (punto 2): categoría masculina/femenina/infantil por participante y por
+    // compe — no hay sexo/fecha de nacimiento fiable en ningún perfil (ni de alumno ni de
+    // participante sin cuenta), así que es siempre manual: se elige al apuntarse (o lo pone
+    // recepción) y se puede cambiar luego. Única para los 3 tipos de participante (user/rapido/
+    // placeholder) — sustituye a la columna `categoria` de comp_participantes_rapidos (que se
+    // queda, sin usar, para no perder histórico).
+    dbDelta("CREATE TABLE " . progreso_equip_table('comp_categorias') . " (
+        id                 bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        competition_id     bigint(20) UNSIGNED NOT NULL,
+        participante_tipo  varchar(12)         NOT NULL,
+        participante_id    bigint(20) UNSIGNED NOT NULL,
+        categoria          varchar(20)         NOT NULL,
+        updated_at         datetime            NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY categoria_unica (competition_id, participante_tipo, participante_id)
+    ) {$charset};");
+
     // Catálogo de tareas en tabla propia (antes hardcoded) para que la
     // periodicidad se pueda ajustar sin tocar código: cada cuántas semanas
     // toca esa tarea, independientemente de quién la haga. `recurring = 0`
@@ -20458,6 +20482,55 @@ function progreso_compe_crear_participante_rapido($request) {
 // el primer `created_at` con top=1 — no hace falta guardar la hora de inicio aparte.
 const PROGRESO_COMPE_VENTANA_MINUTOS = 90;
 
+const PROGRESO_COMPE_CATEGORIAS = array('masculina', 'femenina', 'infantil');
+
+// 20/11 06:30 (punto 2): categoría de un participante en una compe concreta — nunca se infiere
+// de nombre, edad ni ningún otro dato, ver PROGRESO_COMPE_CATEGORIAS.
+function progreso_compe_categoria_get($competition_id, $tipo, $id) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    return $wpdb->get_var($wpdb->prepare(
+        "SELECT categoria FROM " . progreso_equip_table('comp_categorias') . "
+         WHERE competition_id = %d AND participante_tipo = %s AND participante_id = %d",
+        $competition_id, $tipo, $id
+    )) ?: '';
+}
+
+// POST /progreso/v1/compe/categoria — pone o cambia la categoría de un participante.
+// Cualquiera puede poner la SUYA propia (tipo=user, id = su propio id, o sin id = se asume el
+// suyo); cualquier otro caso (otro usuario, un rápido, un placeholder) exige recepción
+// (blokes_can_supervise) — igual que el resto de "apuntar por otra persona" de esta compe.
+function progreso_compe_categoria_set($request) {
+    $competition_id = intval($request->get_param('competitionId'));
+    $tipo = sanitize_key((string) $request->get_param('participanteTipo')) ?: 'user';
+    $id = intval($request->get_param('participanteId')) ?: get_current_user_id();
+    $categoria = sanitize_key((string) $request->get_param('categoria'));
+    if (!$competition_id || !$id) return new WP_Error('bad_request', 'Falta competitionId o participanteId.', array('status' => 400));
+    if (!in_array($categoria, PROGRESO_COMPE_CATEGORIAS, true)) {
+        return new WP_Error('categoria_no_valida', 'La categoría debe ser masculina, femenina o infantil.', array('status' => 400));
+    }
+    $es_uno_mismo = ($tipo === 'user' && $id === get_current_user_id());
+    if (!$es_uno_mismo && !blokes_can_supervise()) {
+        return new WP_Error('forbidden', 'Solo recepción puede poner la categoría de otra persona.', array('status' => 403));
+    }
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $table = progreso_equip_table('comp_categorias');
+    $existe = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM $table WHERE competition_id = %d AND participante_tipo = %s AND participante_id = %d",
+        $competition_id, $tipo, $id
+    ));
+    $datos = array('categoria' => $categoria, 'updated_at' => current_time('mysql'));
+    if ($existe) {
+        $wpdb->update($table, $datos, array('id' => intval($existe)));
+    } else {
+        $wpdb->insert($table, array_merge($datos, array(
+            'competition_id' => $competition_id, 'participante_tipo' => $tipo, 'participante_id' => $id,
+        )));
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array('categoria' => $categoria)));
+}
+
 function progreso_compe_mis_resultados($request) {
     if (!is_user_logged_in()) return new WP_Error('forbidden', 'Hace falta sesión.', array('status' => 401));
     global $wpdb;
@@ -20494,7 +20567,8 @@ function progreso_compe_mis_resultados($request) {
             'cerrada' => $ahora_ts >= $fin_ts,
         );
     }
-    return rest_ensure_response(array('success' => true, 'data' => $data, 'ventana' => $ventana));
+    $categoria_actual = progreso_compe_categoria_get($competition_id, $participante_tipo, $participante_id);
+    return rest_ensure_response(array('success' => true, 'data' => $data, 'ventana' => $ventana, 'categoria' => $categoria_actual ?: null));
 }
 
 // GET /progreso/v1/compe/clasificacion?competitionId=X — público (pantalla de la tele,
@@ -20560,6 +20634,20 @@ function progreso_compe_clasificacion($request) {
         $por_participante[$clave]['tops']++;
     }
 
+    // 20/11 06:30 (punto 2): categoría de cada participante que aparece aquí, de la tabla nueva
+    // — nunca inferida. Una sola consulta para todos a la vez.
+    $categoria_por_clave = array();
+    if ($por_participante) {
+        $claves_sql = array();
+        foreach ($por_participante as $info) $claves_sql[] = $wpdb->prepare('(%s,%d)', $info['tipo'], $info['id']);
+        $filas_cat = $wpdb->get_results(
+            "SELECT participante_tipo, participante_id, categoria FROM " . progreso_equip_table('comp_categorias') . "
+             WHERE competition_id = " . intval($competition_id) . " AND (participante_tipo, participante_id) IN (" . implode(',', $claves_sql) . ")",
+            ARRAY_A
+        );
+        foreach ($filas_cat as $fc) $categoria_por_clave[$fc['participante_tipo'] . ':' . intval($fc['participante_id'])] = $fc['categoria'];
+    }
+
     $es_multisite = is_multisite();
     if ($es_multisite) switch_to_blog(1);
     $acortar_sin_cuenta = function($nombre_completo) {
@@ -20572,38 +20660,62 @@ function progreso_compe_clasificacion($request) {
         if (isset($partes[1]) && $partes[1] !== '') $nombre_corto .= ' ' . mb_substr($partes[1], 0, 1) . '.';
         return $nombre_corto . ' (sin cuenta)';
     };
+    // 20/11 06:30 (punto 2): "Nombre I. (alias)" — nombre + inicial del primer apellido + punto,
+    // y el alias de la app entre paréntesis si lo tiene (sustituye a "Nombre (alias)" sin
+    // inicial). first_name/last_name son los que arregla el punto 1 de la misma nota.
     $nombre_de = function($tipo, $id) use ($nombres_rapidos, $nombres_placeholder, $acortar_sin_cuenta) {
         if ($tipo === 'rapido') return $acortar_sin_cuenta($nombres_rapidos[$id] ?? 'Alguien');
         if ($tipo === 'placeholder') return $acortar_sin_cuenta($nombres_placeholder[$id] ?? 'Alguien');
         $u = get_userdata($id);
         if (!$u) return 'Alguien';
         $nombre = $u->first_name ?: explode(' ', trim($u->display_name))[0];
+        $apellido = trim((string) $u->last_name);
+        if ($apellido !== '') $nombre .= ' ' . mb_strtoupper(mb_substr($apellido, 0, 1, 'UTF-8'), 'UTF-8') . '.';
         $nick = blokes_get_user_nickname($id);
         return $nick ? "{$nombre} ({$nick})" : $nombre;
     };
-    $clasificacion = array();
-    foreach ($por_participante as $info) {
-        $clasificacion[] = array(
+    $clasificacion_por_cat = array('masculina' => array(), 'femenina' => array(), 'infantil' => array(), '' => array());
+    foreach ($por_participante as $clave => $info) {
+        $cat = $categoria_por_clave[$clave] ?? '';
+        if (!isset($clasificacion_por_cat[$cat])) $cat = '';
+        $clasificacion_por_cat[$cat][] = array(
             'nombreMostrar' => $nombre_de($info['tipo'], $info['id']),
-            'categoria' => 'General', 'tops' => $info['tops'], 'primerTop' => $info['primerTop'],
+            'tops' => $info['tops'], 'primerTop' => $info['primerTop'],
         );
     }
-    usort($clasificacion, function($a, $b) {
+    $orden = function($a, $b) {
         return $b['tops'] !== $a['tops'] ? $b['tops'] <=> $a['tops'] : strcmp($a['primerTop'], $b['primerTop']);
-    });
+    };
+    $categorias_out = array();
+    foreach (array('masculina' => 'Masculina', 'femenina' => 'Femenina', 'infantil' => 'Infantil') as $key => $label) {
+        usort($clasificacion_por_cat[$key], $orden);
+        $categorias_out[] = array('id' => $key, 'nombre' => $label, 'clasificacion' => $clasificacion_por_cat[$key]);
+    }
+    // "Sin categoría" (20/11 06:30): nadie se pierde en silencio solo por no haber elegido
+    // todavía masculina/femenina/infantil — sale aparte, visible, en vez de caer en una de las
+    // tres por defecto (eso sí sería inventar un dato que no tenemos).
+    if (!empty($clasificacion_por_cat[''])) {
+        usort($clasificacion_por_cat[''], $orden);
+        $categorias_out[] = array('id' => '', 'nombre' => 'Sin categoría', 'clasificacion' => $clasificacion_por_cat['']);
+    }
 
     $ultimos = array_slice(array_reverse($filas), 0, 10);
     $ultimos_validados = array();
     foreach ($ultimos as $f) {
+        $clave = $f['participante_tipo'] . ':' . intval($f['participante_id']);
         $ultimos_validados[] = array(
+            // id estable del resultado (20/11 06:30): para que la tele sepa qué es "nuevo de
+            // verdad" entre un sondeo y el siguiente, sin adivinarlo por nombre/bloque/hace.
+            'id' => intval($f['id']),
             'nombreMostrar' => $nombre_de($f['participante_tipo'], intval($f['participante_id'])),
+            'categoria' => $categoria_por_clave[$clave] ?? '',
             'numero' => intval($f['numero']), 'color' => $f['color'], 'hace' => human_time_diff(strtotime($f['validado_at']), current_time('timestamp')),
         );
     }
     if ($es_multisite) restore_current_blog();
 
     return rest_ensure_response(array('success' => true, 'data' => array(
-        'categorias' => array(array('nombre' => 'General', 'clasificacion' => $clasificacion)),
+        'categorias' => $categorias_out,
         'ultimosValidados' => $ultimos_validados,
     )));
 }

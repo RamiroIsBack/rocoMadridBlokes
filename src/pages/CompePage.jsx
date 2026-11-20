@@ -22,6 +22,21 @@ async function api(method, path, body) {
 }
 
 const PUEDE_RECEPCION = ['profesor', 'gestion', 'socio', 'tablet']
+// 20/11 06:30 (punto 2): nunca inferida — Masculina/Femenina/Infantil, elegida a mano por quien
+// se apunta (o por recepción, apuntando por otro).
+const CATEGORIAS = [['masculina', 'Masculina'], ['femenina', 'Femenina'], ['infantil', 'Infantil']]
+
+function SelectorCategoria({ categoria, onElegir, compacto }) {
+  return (
+    <label className={compacto ? 'compe-grp-field' : 'compe-page__categoria'}>
+      {!compacto && 'Tu categoría en esta compe'}
+      <select value={categoria || ''} onChange={e => onElegir(e.target.value)}>
+        <option value="" disabled>— Elige categoría —</option>
+        {CATEGORIAS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+      </select>
+    </label>
+  )
+}
 
 function fechaRangoCompe(compDate, compEndDate) {
   const opts = { day: 'numeric', month: 'long' }
@@ -56,6 +71,7 @@ export default function CompePage() {
   const [proxima, setProxima] = useState(null)
   const [misResultados, setMisResultados] = useState({})
   const [ventana, setVentana] = useState(null)
+  const [miCategoria, setMiCategoria] = useState(null)
   const [tab, setTab] = useState(esTablet ? 'recepcion' : 'apuntar')
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
@@ -68,7 +84,7 @@ export default function CompePage() {
         setEstado(r.data)
         if (r.data?.activo && sd.isLoggedIn) {
           return api('GET', `/compe/mis-resultados?competitionId=${r.data.competitionId}`)
-            .then(rr => { setMisResultados(rr.data || {}); setVentana(rr.ventana || null) })
+            .then(rr => { setMisResultados(rr.data || {}); setVentana(rr.ventana || null); setMiCategoria(rr.categoria || null) })
         }
         // Sin compe activa: en vez de un callejón sin salida durante los días previos, se
         // enseña la próxima compe real (si hay) con fecha y cuenta atrás (cowork, 11/11 05:40).
@@ -81,6 +97,12 @@ export default function CompePage() {
   }, [sd.isLoggedIn])
 
   useEffect(() => { cargar() }, [cargar])
+
+  async function elegirMiCategoria(categoria) {
+    setMiCategoria(categoria) // optimista — es solo una etiqueta, nada que deshacer si falla
+    try { await api('POST', '/compe/categoria', { competitionId: estado.competitionId, categoria }) }
+    catch (e) { setErr(e.message) }
+  }
 
   async function guardar(compBlockId, cambios) {
     setGuardando(compBlockId)
@@ -160,7 +182,9 @@ export default function CompePage() {
       )}
 
       {tab === 'apuntar' && !esTablet && (
-        <div className="compe-page__grid">
+        <>
+          <SelectorCategoria categoria={miCategoria} onElegir={elegirMiCategoria} />
+          <div className="compe-page__grid">
           {estado.bloques.map(b => (
             <BloqueFila
               key={b.compBlockId}
@@ -171,7 +195,8 @@ export default function CompePage() {
               onGuardar={cambios => guardar(b.compBlockId, cambios)}
             />
           ))}
-        </div>
+          </div>
+        </>
       )}
       {(tab === 'recepcion' || esTablet) && puedeRecepcion && (
         <RecepcionTab bloques={estado.bloques} competitionId={estado.competitionId} />
@@ -192,6 +217,7 @@ function RecepcionTab({ bloques, competitionId }) {
   const [buscando, setBuscando] = useState(false)
   const [seleccionado, setSeleccionado] = useState(null) // { tipo, id, nombreMostrar }
   const [misResultados, setMisResultados] = useState({})
+  const [categoria, setCategoria] = useState(null)
   const [guardando, setGuardando] = useState(null)
   const [err, setErr] = useState(null)
   const [crearNombre, setCrearNombre] = useState('')
@@ -202,7 +228,7 @@ function RecepcionTab({ bloques, competitionId }) {
   const [aviso, setAviso] = useState(null)
 
   function volverABuscar() {
-    setSeleccionado(null); setMisResultados({}); setQ(''); setResultados(null)
+    setSeleccionado(null); setMisResultados({}); setCategoria(null); setQ(''); setResultados(null)
   }
 
   // Tablet de autoservicio (Ramiro, 07/11 16:35/16:36): esta misma pestaña la usa tanto
@@ -243,9 +269,20 @@ function RecepcionTab({ bloques, competitionId }) {
       const param = p.tipo === 'rapido' ? `subjectParticipanteRapidoId=${p.id}` : `subjectUserId=${p.id}`
       const r = await api('GET', `/compe/mis-resultados?competitionId=${competitionId}&${param}`)
       setMisResultados(r.data || {})
+      setCategoria(r.categoria || null)
     } catch (e) {
       setErr(e.message)
     }
+  }
+  async function elegirCategoria(cat) {
+    setCategoria(cat) // optimista — solo una etiqueta
+    try {
+      await api('POST', '/compe/categoria', {
+        competitionId, categoria: cat,
+        participanteTipo: seleccionado.tipo === 'rapido' ? 'rapido' : 'user',
+        participanteId: seleccionado.id,
+      })
+    } catch (e) { setErr(e.message) }
   }
 
   async function crearRapido() {
@@ -295,6 +332,7 @@ function RecepcionTab({ bloques, competitionId }) {
           </p>
           <button type="button" className="compe-recepcion-otra" onClick={volverABuscar}>Otra persona</button>
         </div>
+        <SelectorCategoria categoria={categoria} onElegir={elegirCategoria} compacto />
         {aviso && <p className="compe-recepcion-aviso">{aviso}</p>}
         {err && <p className="compe-page__error">{err}</p>}
         <div className="compe-page__grid">

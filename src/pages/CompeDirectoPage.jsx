@@ -2,11 +2,16 @@ import { useState, useEffect } from 'react'
 import { colorPorNumeroBloque } from '../utils/compeColorScale'
 import mapaEquipacion from '../assets/mapa-equipacion.jpg'
 import cartelCompe from '../assets/cartel-compe-1fase-26-27.jpg'
+import CompeClasificacionLive from './CompeClasificacionLive'
 import './CompeDirectoPage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
 const REFRESCO_MS = 30000 // Ramiro: "sondeo cada 30 s, nada pesado" — ver el problema de pestañas colgadas
+// 20/11 06:30 (punto 2, nota de Ramiro): "para la compe en directo bájalo a ~10s solo cuando
+// haya compe activa" — con compe activa hay que detectar un top nuevo rápido para animarlo;
+// sin compe activa (diapositivas, mapa, cuenta atrás) 30 s sigue de sobra.
+const REFRESCO_ACTIVO_MS = 10000
 const ROTACION_MS = 22000 // "Precompe" rota entre cuenta atrás+cartel y el mapa cada 20-30 s
 const LOGO_URL = 'https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png'
 // "Esta semana han subido": cuántas filas caben por página antes de pasar a repartir en varias
@@ -274,6 +279,22 @@ export default function CompeDirectoPage() {
     return () => { activo = false; clearInterval(id) }
   }, [])
 
+  // 20/11 06:30 (punto 2): con compe activa, la clasificación se sondea aparte y más rápido
+  // (10 s) que el resto (30 s) — para detectar un top nuevo y animarlo sin que se note el
+  // retraso. El efecto de arriba sigue refrescándola también cada 30 s (inofensivo, un fetch
+  // de más), este es el que de verdad marca el ritmo mientras hay compe.
+  useEffect(() => {
+    if (!estado?.activo) return
+    let activo = true
+    const id = setInterval(() => {
+      fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/clasificacion?competitionId=${estado.competitionId}`)
+        .then(r => r.json())
+        .then(jj => { if (activo) setClasif(jj.data) })
+        .catch(() => {})
+    }, REFRESCO_ACTIVO_MS)
+    return () => { activo = false; clearInterval(id) }
+  }, [estado?.activo, estado?.competitionId])
+
   const pageStyle = { '--td-escala': escala }
 
   if (!estado?.activo) {
@@ -370,8 +391,6 @@ export default function CompeDirectoPage() {
     )
   }
 
-  const general = clasif?.categorias?.[0]?.clasificacion || []
-  const ultimos = (clasif?.ultimosValidados || []).slice(0, 8)
   const cuenta = cuentaAtras(estado.compDate, estado.compEndDate)
 
   return (
@@ -383,38 +402,12 @@ export default function CompeDirectoPage() {
           <h1 className="td-live-title">{estado.nombre}</h1>
         </div>
         <div className="td-live-header-right">
-          <div className="td-muted">Clasificación provisional — General</div>
+          <div className="td-muted">Clasificación provisional · {estado.bloques?.length} bloques</div>
           {cuenta && <div className="td-cuenta">{cuenta}</div>}
         </div>
       </header>
-      <div className="td-live-body">
-        <section className="td-live-col td-live-col--clasif">
-          <h2>Clasificación</h2>
-          <ol className="td-live-list">
-            {general.slice(0, 10).map((p, i) => (
-              <li key={i} style={{
-                fontWeight: i < 3 ? 800 : 500,
-                color: i === 0 ? '#fbbf24' : i === 1 ? '#d1d5db' : i === 2 ? '#fb923c' : '#fff',
-              }}>
-                <span>{i + 1}. {p.nombreMostrar}</span>
-                <span>{p.tops} top{p.tops === 1 ? '' : 's'}</span>
-              </li>
-            ))}
-            {general.length === 0 && <li style={{ color: '#6b7280' }}>Todavía no hay tops.</li>}
-          </ol>
-        </section>
-        <section className="td-live-col td-live-col--ultimos">
-          <h2>Últimos tops</h2>
-          <ul className="td-live-list td-live-list--ultimos">
-            {ultimos.map((u, i) => (
-              <li key={i}>
-                <span className="td-dot" style={{ background: colorPorNumeroBloque(u.numero, estado.bloques?.length).bg }} />
-                <span><strong>{u.nombreMostrar}</strong> · bloque {u.numero} · hace {u.hace}</span>
-              </li>
-            ))}
-            {ultimos.length === 0 && <li style={{ color: '#6b7280' }}>Nada apuntado todavía.</li>}
-          </ul>
-        </section>
+      <div className="td-live-body-wrap">
+        <CompeClasificacionLive clasif={clasif} totalBloques={estado.bloques?.length} />
       </div>
       <footer className="td-footer">
         Apunta tus tops en la app Blokes o en recepción · Norma de honor
