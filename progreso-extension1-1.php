@@ -1184,6 +1184,18 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_editar_alumno',
         'permission_callback' => $sa_perm,
     ));
+    // 20/11 06:30 (punto 1c): listado de usuarios con el nombre mal puesto en WordPress, con una
+    // propuesta de corrección por cada uno para confirmar a mano.
+    register_rest_route('superadmin/v1', '/gestion/nombres-por-revisar', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_nombres_por_revisar',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/nombres-por-revisar/(?P<uid>\d+)/omitir', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_nombre_omitir',
+        'permission_callback' => $sa_perm,
+    ));
     // Buscar alumno (nombre, teléfono o email) en suscripciones, externos y usuarios de
     // WordPress, para el botón "Añadir alumno" de cada grupo (grupos_como_excel.md, punto 5).
     register_rest_route('superadmin/v1', '/gestion/buscar-alumno', array(
@@ -13213,50 +13225,174 @@ function superadmin_cambiar_grupo_arreglar_meta_visible($request) {
 // usuario de la cuenta de WordPress, no un nombre real. Actualiza la dirección de facturación de ESTA
 // suscripción (de donde la lee Grupos) y, si hay un usuario detrás, también su perfil, para que
 // el resto de la web (otras suscripciones suyas, WooCommerce) vea lo mismo.
+// 20/11 06:30 (Ramiro vía cowork, punto 1a/1b): antes esto solo cambiaba el billing de la
+// suscripción (sub_id obligatorio) — el usuario de WordPress (first_name/last_name/
+// display_name) se quedaba igual, así que el nombre mal puesto seguía saliendo en cualquier
+// sitio que lea el perfil directamente (tele de la compe, listados de participantes…). Ahora:
+// - sub_id sigue aceptado (sigue tocando el billing de ESA suscripción), pero ya no es
+//   obligatorio — con uid solo también vale, para gente sin ninguna clase (compe, abonos).
+// - Si hay nombre/apellidos y se resuelve un uid (del sub_id o pasado directamente), también se
+//   escribe en el usuario de WordPress de verdad (wp_update_user: first_name/last_name/
+//   display_name), no solo en billing_first_name/billing_last_name (usermeta de Woo).
+// - Simular, como el resto de acciones de Grupos — antes escribía directo.
 function superadmin_gestion_editar_alumno($request) {
-    if (!function_exists('wcs_get_subscription')) {
-        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
-    }
     $sub_id    = intval($request->get_param('sub_id'));
+    $uid_param = intval($request->get_param('uid'));
     $nombre    = sanitize_text_field((string) $request->get_param('nombre'));
     $apellidos = sanitize_text_field((string) $request->get_param('apellidos'));
     $telefono  = sanitize_text_field((string) $request->get_param('telefono'));
     $tutor_nombre   = sanitize_text_field((string) $request->get_param('tutorNombre'));
     $tutor_telefono = sanitize_text_field((string) $request->get_param('tutorTelefono'));
-    if (!$sub_id || ($nombre === '' && $apellidos === '' && $telefono === '' && $tutor_nombre === '' && $tutor_telefono === '')) {
-        return new WP_Error('bad_request', 'Falta sub_id y al menos un dato que cambiar.', array('status' => 400));
+    $simular   = (bool) $request->get_param('simular');
+    if ((!$sub_id && !$uid_param) || ($nombre === '' && $apellidos === '' && $telefono === '' && $tutor_nombre === '' && $tutor_telefono === '')) {
+        return new WP_Error('bad_request', 'Falta sub_id o uid, y al menos un dato que cambiar.', array('status' => 400));
     }
-    $sub = wcs_get_subscription($sub_id);
-    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    $sub = null;
+    if ($sub_id) {
+        if (!function_exists('wcs_get_subscription')) {
+            return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+        }
+        $sub = wcs_get_subscription($sub_id);
+        if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    }
+    $uid = $uid_param ?: ($sub_id ? intval(get_post_meta($sub_id, '_customer_user', true)) : 0);
+    $wp_user = $uid ? get_user_by('id', $uid) : null;
+    if ($uid && !$wp_user) return new WP_Error('not_found', 'Usuario de WordPress no encontrado.', array('status' => 404));
 
     $antes = array(
-        'nombre' => $sub->get_billing_first_name(), 'apellidos' => $sub->get_billing_last_name(),
-        'telefono' => $sub->get_billing_phone(),
-        'tutorNombre' => get_post_meta($sub_id, '_rm_tutor_nombre', true), 'tutorTelefono' => get_post_meta($sub_id, '_rm_tutor_telefono', true),
+        'nombre' => $sub ? $sub->get_billing_first_name() : ($wp_user->first_name ?? ''),
+        'apellidos' => $sub ? $sub->get_billing_last_name() : ($wp_user->last_name ?? ''),
+        'displayName' => $wp_user->display_name ?? null,
+        'telefono' => $sub ? $sub->get_billing_phone() : ($uid ? get_user_meta($uid, 'billing_phone', true) : ''),
+        'tutorNombre' => $sub_id ? get_post_meta($sub_id, '_rm_tutor_nombre', true) : null,
+        'tutorTelefono' => $sub_id ? get_post_meta($sub_id, '_rm_tutor_telefono', true) : null,
     );
-    if ($nombre !== '')    $sub->set_billing_first_name($nombre);
-    if ($apellidos !== '') $sub->set_billing_last_name($apellidos);
-    if ($telefono !== '')  $sub->set_billing_phone(blokes_externos_normaliza_telefono($telefono) ?: $telefono);
-    $sub->save();
 
-    $uid = intval(get_post_meta($sub_id, '_customer_user', true));
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array_merge($antes, array(
+            'nombreNuevo' => $nombre !== '' ? $nombre : $antes['nombre'],
+            'apellidosNuevo' => $apellidos !== '' ? $apellidos : $antes['apellidos'],
+            'tocaUsuarioWP' => (bool) $uid,
+            'aviso' => 'Simulación: no se ha escrito nada todavía.',
+        ))));
+    }
+
+    if ($sub) {
+        if ($nombre !== '')    $sub->set_billing_first_name($nombre);
+        if ($apellidos !== '') $sub->set_billing_last_name($apellidos);
+        if ($telefono !== '')  $sub->set_billing_phone(blokes_externos_normaliza_telefono($telefono) ?: $telefono);
+        $sub->save();
+    }
     if ($uid) {
         if ($nombre !== '')    update_user_meta($uid, 'billing_first_name', $nombre);
         if ($apellidos !== '') update_user_meta($uid, 'billing_last_name', $apellidos);
         if ($telefono !== '')  update_user_meta($uid, 'billing_phone', $telefono);
+        if ($nombre !== '' || $apellidos !== '') {
+            $nombre_wp    = $nombre !== '' ? $nombre : $wp_user->first_name;
+            $apellidos_wp = $apellidos !== '' ? $apellidos : $wp_user->last_name;
+            wp_update_user(array(
+                'ID' => $uid, 'first_name' => $nombre_wp, 'last_name' => $apellidos_wp,
+                'display_name' => trim($nombre_wp . ' ' . $apellidos_wp) ?: $wp_user->user_login,
+            ));
+            // Tocado el nombre de verdad desde Blokes (aquí o desde "Nombres por revisar") —
+            // sale de la lista de pendientes aunque la heurística lo siguiera marcando.
+            update_user_meta($uid, '_rm_nombre_revisado', 1);
+        }
     }
-    // Tutor (padre/madre de un menor): campo propio de la suscripción, no de facturación.
-    // Igual que nombre/apellidos/teléfono: deja el campo en blanco para no cambiarlo.
-    if ($tutor_nombre !== '')   update_post_meta($sub_id, '_rm_tutor_nombre', $tutor_nombre);
-    if ($tutor_telefono !== '') update_post_meta($sub_id, '_rm_tutor_telefono', blokes_externos_normaliza_telefono($tutor_telefono) ?: $tutor_telefono);
+    // Tutor (padre/madre de un menor): campo propio de la suscripción, no de facturación —
+    // solo tiene sentido si hay sub_id. Igual que el resto: deja el campo en blanco para no
+    // cambiarlo.
+    if ($sub_id && $tutor_nombre !== '')   update_post_meta($sub_id, '_rm_tutor_nombre', $tutor_nombre);
+    if ($sub_id && $tutor_telefono !== '') update_post_meta($sub_id, '_rm_tutor_telefono', blokes_externos_normaliza_telefono($tutor_telefono) ?: $tutor_telefono);
 
+    $wp_user_despues = $uid ? get_user_by('id', $uid) : null;
     $despues = array(
-        'nombre' => $sub->get_billing_first_name(), 'apellidos' => $sub->get_billing_last_name(), 'telefono' => $sub->get_billing_phone(),
-        'tutorNombre' => get_post_meta($sub_id, '_rm_tutor_nombre', true), 'tutorTelefono' => get_post_meta($sub_id, '_rm_tutor_telefono', true),
+        'nombre' => $sub ? $sub->get_billing_first_name() : ($wp_user_despues->first_name ?? ''),
+        'apellidos' => $sub ? $sub->get_billing_last_name() : ($wp_user_despues->last_name ?? ''),
+        'displayName' => $wp_user_despues->display_name ?? null,
+        'telefono' => $sub ? $sub->get_billing_phone() : ($uid ? get_user_meta($uid, 'billing_phone', true) : ''),
+        'tutorNombre' => $sub_id ? get_post_meta($sub_id, '_rm_tutor_nombre', true) : null,
+        'tutorTelefono' => $sub_id ? get_post_meta($sub_id, '_rm_tutor_telefono', true) : null,
     );
-    blokes_gestion_log($sub_id, 'editar_alumno', $antes, $despues);
+    blokes_gestion_log($sub_id ?: 0, 'editar_alumno', $antes, $despues, array('uid' => $uid ?: null));
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// Mayúscula inicial de cada palabra, el resto en minúscula — "capitalizar, NO inventar tildes"
+// (20/11 06:30, punto 1c): "garcia tomas" -> "Garcia Tomas", nunca le añade el acento que falta.
+function blokes_capitalizar_simple($s) {
+    $s = trim((string) $s);
+    if ($s === '') return '';
+    $palabras = preg_split('/\s+/', $s);
+    return implode(' ', array_map(function($w) {
+        if ($w === '') return $w;
+        return mb_strtoupper(mb_substr($w, 0, 1, 'UTF-8'), 'UTF-8') . mb_strtolower(mb_substr($w, 1, null, 'UTF-8'), 'UTF-8');
+    }, $palabras));
+}
+
+// 20/11 06:30 (punto 1c): "pantalla «Nombres por revisar» con propuesta automática a confirmar
+// uno a uno". Candidatos: sin first_name ni last_name, o con alguno empezando en minúscula.
+// Propuesta, en este orden: (1) el nombre de facturación de alguna suscripción suya si existe
+// (normalmente más fiable que el perfil); si no, (2) capitalizar lo que ya tenga el perfil (solo
+// mayúscula inicial); si no hay nada de donde sacarlo (típico de un usuario pegado tipo
+// "mariavictoriagomez", sin first_name/last_name reales), ninguna propuesta — lo escribe Eva.
+function superadmin_gestion_nombres_por_revisar($request) {
+    // Índice uid -> nombre de facturación de ALGUNA de sus suscripciones, construido una vez
+    // (en vez de volver a recorrer todas las suscripciones por cada usuario a revisar).
+    $billing_por_uid = array();
+    if (function_exists('wcs_get_subscription')) {
+        foreach (blokes_get_all_subscription_data() as $sub_row) {
+            $sid = intval($sub_row['id'] ?? 0);
+            if (!$sid) continue;
+            $sub_uid = intval(get_post_meta($sid, '_customer_user', true));
+            if (!$sub_uid || isset($billing_por_uid[$sub_uid])) continue;
+            $sub_obj = wcs_get_subscription($sid);
+            if (!$sub_obj) continue;
+            $bn = trim($sub_obj->get_billing_first_name());
+            $ba = trim($sub_obj->get_billing_last_name());
+            if ($bn === '' && $ba === '') continue;
+            $billing_por_uid[$sub_uid] = array('nombre' => $bn, 'apellidos' => $ba);
+        }
+    }
+
+    $out = array();
+    foreach (get_users(array('fields' => array('ID', 'user_login', 'display_name'))) as $u) {
+        $uid = intval($u->ID);
+        if (get_user_meta($uid, '_rm_nombre_revisado', true)) continue;
+        $first = trim((string) get_user_meta($uid, 'first_name', true));
+        $last  = trim((string) get_user_meta($uid, 'last_name', true));
+
+        $motivo = '';
+        if ($first === '' && $last === '') $motivo = 'sin_nombre';
+        elseif (preg_match('/^\p{Ll}/u', $first) || preg_match('/^\p{Ll}/u', $last)) $motivo = 'minuscula';
+        if ($motivo === '') continue;
+
+        $propuesta_nombre = ''; $propuesta_apellidos = ''; $fuente = 'sin_propuesta';
+        if (!empty($billing_por_uid[$uid])) {
+            $propuesta_nombre = $billing_por_uid[$uid]['nombre']; $propuesta_apellidos = $billing_por_uid[$uid]['apellidos']; $fuente = 'suscripcion';
+        } elseif ($first !== '' || $last !== '') {
+            $propuesta_nombre = blokes_capitalizar_simple($first); $propuesta_apellidos = blokes_capitalizar_simple($last); $fuente = 'capitalizado';
+        }
+
+        $out[] = array(
+            'uid' => $uid, 'usuario' => $u->user_login, 'displayName' => $u->display_name,
+            'nombreActual' => $first, 'apellidosActual' => $last,
+            'motivo' => $motivo, 'fuente' => $fuente,
+            'propuestaNombre' => $propuesta_nombre, 'propuestaApellidos' => $propuesta_apellidos,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// "Omitir" (20/11 06:30, punto 1c): sale de "Nombres por revisar" sin tocar el nombre — para
+// cuentas de staff/servicio o casos que Eva decide dejar tal cual a propósito.
+function superadmin_gestion_nombre_omitir($request) {
+    $uid = intval($request['uid']);
+    if (!$uid || !get_user_by('id', $uid)) return new WP_Error('not_found', 'Usuario no encontrado.', array('status' => 404));
+    update_user_meta($uid, '_rm_nombre_revisado', 1);
+    blokes_gestion_log(0, 'nombre_omitido', null, array('uid' => $uid));
+    return rest_ensure_response(array('success' => true));
 }
 
 // Buscar por nombre, teléfono o email en suscripciones (cualquier estado, para encontrar

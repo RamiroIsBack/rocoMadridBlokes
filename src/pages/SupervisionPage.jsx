@@ -24,7 +24,7 @@ function kpiColorTema(hex, oscuro) {
 }
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionCongelarMes, gestionNota, gestionDarDeBaja, gestionFusionar, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente,
+  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionCongelarMes, gestionNota, gestionDarDeBaja, gestionFusionar, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente, gestionNombresPorRevisarGet, gestionNombreOmitir,
   gestionGrupoWellhubSet, gestionGrupoWellhubChecks, gestionGrupoBajoTarifaSet,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
@@ -1920,6 +1920,32 @@ function BuscarAlumnoModal({ onClose, grupos = [] }) {
   // Simular → "Usar este cliente"), pero no se encontraba. Este botón va derecho al formulario
   // con usarClienteId ya puesto, sin el paso intermedio.
   const [clienteParaAlta, setClienteParaAlta] = useState(null)
+  // 20/11 06:30 (punto 1b): editar nombre/apellidos de cualquiera encontrado aquí, tenga o no
+  // clase — reutiliza el mismo editar-alumno (uid) que "Nombres por revisar", con Simular antes.
+  const [editandoUid, setEditandoUid] = useState(null)
+  const [editValores, setEditValores] = useState({ nombre: '', apellidos: '' })
+  const [editPreview, setEditPreview] = useState(null)
+  const [editBusy, setEditBusy] = useState(false)
+
+  function empezarEditarNombre(p) {
+    setEditandoUid(p.uid)
+    setEditValores({ nombre: (p.nombre || '').split(' ')[0] || '', apellidos: (p.nombre || '').split(' ').slice(1).join(' ') })
+    setEditPreview(null)
+  }
+  async function simularNombre() {
+    setEditBusy(true)
+    try {
+      const res = await gestionEditarAlumno({ uid: editandoUid, nombre: editValores.nombre.trim(), apellidos: editValores.apellidos.trim(), simular: true })
+      setEditPreview(res)
+    } catch (e) { setErr(e.message) } finally { setEditBusy(false) }
+  }
+  async function confirmarNombre() {
+    setEditBusy(true)
+    try {
+      await gestionEditarAlumno({ uid: editandoUid, nombre: editValores.nombre.trim(), apellidos: editValores.apellidos.trim(), simular: false })
+      setEditandoUid(null); setEditPreview(null)
+    } catch (e) { setErr(e.message) } finally { setEditBusy(false) }
+  }
 
   async function buscar() {
     if (q.trim().length < 2) { setErr('Escribe al menos 2 caracteres.'); return }
@@ -1972,6 +1998,20 @@ function BuscarAlumnoModal({ onClose, grupos = [] }) {
                   {(p.tutorNombre || p.tutorTelefono) && (
                     <span className="sv-ot-muted">👪 Tutor: {p.tutorNombre || '—'}{p.tutorTelefono ? ` · ${p.tutorTelefono}` : ''}</span>
                   )}
+                  {p.uid && (editandoUid === p.uid ? (
+                    <span className="sv-grp-field--check" style={{ gap: 6 }}>
+                      <input className="sv-tests-input" style={{ width: 120 }} type="text" value={editValores.nombre} placeholder="Nombre" onChange={e => { setEditValores(v => ({ ...v, nombre: e.target.value })); setEditPreview(null) }} />
+                      <input className="sv-tests-input" style={{ width: 140 }} type="text" value={editValores.apellidos} placeholder="Apellidos" onChange={e => { setEditValores(v => ({ ...v, apellidos: e.target.value })); setEditPreview(null) }} />
+                      {editPreview ? (
+                        <button className="sv-tests-save" disabled={editBusy} onClick={confirmarNombre}>{editBusy ? 'Guardando…' : 'Confirmar'}</button>
+                      ) : (
+                        <button className="sv-tests-select" disabled={editBusy} onClick={simularNombre}>Simular</button>
+                      )}
+                      <button className="sv-tests-select" disabled={editBusy} onClick={() => setEditandoUid(null)}>Cancelar</button>
+                    </span>
+                  ) : (
+                    <button className="sv-tests-select" onClick={() => empezarEditarNombre(p)}>✎ Editar nombre</button>
+                  ))}
                   {p.grupos.length === 0 ? (
                     <>
                       <span className="sv-to-warn-txt">Registrado en WordPress, sin ninguna clase activa ni externo.</span>
@@ -3206,6 +3246,9 @@ function GruposTab() {
           <button className={`sv-tab-mini ${vista === 'excel' ? 'is-active' : ''}`} onClick={() => setVista('excel')}>
             Cambios del Excel
           </button>
+          <button className={`sv-tab-mini ${vista === 'nombres' ? 'is-active' : ''}`} onClick={() => setVista('nombres')}>
+            Nombres por revisar
+          </button>
         </div>
         <div className="sv-controls-right">
           <span className="sv-grp-buscar-wrap">
@@ -3346,6 +3389,8 @@ function GruposTab() {
       )}
 
       {vista === 'pendientes-cobro' && <PendientesCobroTab busquedaExterna={busqueda} />}
+
+      {vista === 'nombres' && <NombresPorRevisarTab />}
 
       {vista === 'revisar-datos' && (
         <>
@@ -3711,6 +3756,119 @@ function pcWhatsappUrl(telefono, texto) {
 // espacios). No es un nombre para saludar con él.
 function pcEsUsuario(nombre) {
   return !!nombre && !nombre.includes(' ') && nombre === nombre.toLowerCase()
+}
+
+const NPR_FUENTE_LABEL = {
+  suscripcion: 'de una suscripción suya', capitalizado: 'capitalizado a partir del perfil', sin_propuesta: 'sin propuesta — escríbelo a mano',
+}
+const NPR_MOTIVO_LABEL = { sin_nombre: 'sin nombre ni apellidos', minuscula: 'en minúscula' }
+
+// 20/11 06:30 (Ramiro vía cowork, punto 1c): "Nombres por revisar" — 1211 usuarios de WordPress,
+// 75 con el nombre mal puesto (datos_privados/usuarios_wp_nombres_a_revisar_2026-11-20.csv).
+// Cada fila trae ya una propuesta (ver superadmin_gestion_nombres_por_revisar en el backend);
+// aquí solo hace falta confirmarla, editarla a mano, u omitirla. Simular primero, como el resto.
+function NombresPorRevisarTab() {
+  const [filas, setFilas] = useState(null)
+  const [error, setError] = useState(null)
+  const [edit, setEdit] = useState({}) // uid -> { nombre, apellidos }
+  const [preview, setPreview] = useState({}) // uid -> resultado de simular
+  const [busy, setBusy] = useState(null) // uid en curso
+
+  const cargar = useCallback(() => {
+    setFilas(null); setError(null)
+    gestionNombresPorRevisarGet().then(d => setFilas(Array.isArray(d) ? d : [])).catch(e => setError(e.message))
+  }, [])
+  useEffect(() => { cargar() }, [cargar])
+
+  const valores = uid => edit[uid] || {}
+  const setValor = (uid, campo, v) => setEdit(cur => ({ ...cur, [uid]: { ...cur[uid], [campo]: v } }))
+  const empezarEdicion = f => setEdit(cur => ({ ...cur, [f.uid]: { nombre: f.propuestaNombre || f.nombreActual || '', apellidos: f.propuestaApellidos || f.apellidosActual || '' } }))
+
+  async function simular(f) {
+    setBusy(f.uid)
+    try {
+      const v = valores(f.uid)
+      const res = await gestionEditarAlumno({ uid: f.uid, nombre: (v.nombre || '').trim(), apellidos: (v.apellidos || '').trim(), simular: true })
+      setPreview(cur => ({ ...cur, [f.uid]: res }))
+    } catch (e) { setError(e.message) } finally { setBusy(null) }
+  }
+  async function confirmar(f) {
+    setBusy(f.uid)
+    try {
+      const v = valores(f.uid)
+      await gestionEditarAlumno({ uid: f.uid, nombre: (v.nombre || '').trim(), apellidos: (v.apellidos || '').trim(), simular: false })
+      setFilas(cur => cur.filter(x => x.uid !== f.uid))
+      setPreview(cur => { const { [f.uid]: _omit, ...rest } = cur; return rest })
+    } catch (e) { setError(e.message) } finally { setBusy(null) }
+  }
+  async function omitir(f) {
+    setBusy(f.uid)
+    try { await gestionNombreOmitir(f.uid); setFilas(cur => cur.filter(x => x.uid !== f.uid)) }
+    catch (e) { setError(e.message) } finally { setBusy(null) }
+  }
+
+  if (filas === null) return <p className="sv-loading">Cargando…</p>
+  return (
+    <>
+      <p className="sv-note">
+        Usuarios de WordPress con el nombre sin poner o en minúscula. La propuesta sale, cuando se puede, del nombre
+        de facturación de alguna suscripción suya; si no, de capitalizar lo que ya tenga (solo mayúscula inicial, sin
+        inventar tildes). Sin ninguna de las dos, hay que escribirlo a mano. «Confirmar» también actualiza el usuario
+        de WordPress de verdad (no solo el billing), así que vale para gente sin ninguna clase.
+      </p>
+      {error && <p className="sv-to-warn-txt">{error}</p>}
+      {filas.length === 0 ? <p className="sv-empty">Nada pendiente de revisar.</p> : (
+        <div className="sv-tests-scroll">
+          <table className="sv-tests-table">
+            <thead>
+              <tr><th>Usuario</th><th>Actual</th><th>Propuesta</th><th>Nombre</th><th>Apellidos</th><th></th></tr>
+            </thead>
+            <tbody>
+              {filas.map(f => {
+                const v = edit[f.uid]
+                const p = preview[f.uid]
+                return (
+                  <tr key={f.uid}>
+                    <td className="sv-ot-muted">{f.usuario} <span title={NPR_MOTIVO_LABEL[f.motivo] || f.motivo}>({f.motivo === 'sin_nombre' ? 'sin nombre' : 'minúscula'})</span></td>
+                    <td className="sv-ot-muted">{[f.nombreActual, f.apellidosActual].filter(Boolean).join(' ') || '—'}</td>
+                    <td className="sv-ot-muted" title={NPR_FUENTE_LABEL[f.fuente]}>
+                      {f.fuente === 'sin_propuesta' ? <em>sin propuesta</em> : [f.propuestaNombre, f.propuestaApellidos].filter(Boolean).join(' ')}
+                    </td>
+                    {v ? (
+                      <>
+                        <td><input className="sv-tests-input" type="text" value={v.nombre} onChange={e => setValor(f.uid, 'nombre', e.target.value)} /></td>
+                        <td><input className="sv-tests-input" type="text" value={v.apellidos} onChange={e => setValor(f.uid, 'apellidos', e.target.value)} /></td>
+                        <td>
+                          {p ? (
+                            <>
+                              <span className="sv-ot-muted">→ {p.data?.nombreNuevo} {p.data?.apellidosNuevo}</span>{' '}
+                              <button className="sv-tests-save" disabled={busy === f.uid} onClick={() => confirmar(f)}>{busy === f.uid ? 'Guardando…' : 'Confirmar'}</button>
+                            </>
+                          ) : (
+                            <button className="sv-tests-select" disabled={busy === f.uid || (!v.nombre.trim() && !v.apellidos.trim())} onClick={() => simular(f)}>Simular</button>
+                          )}
+                          {' '}
+                          <button className="sv-tests-select" disabled={busy === f.uid} onClick={() => setEdit(cur => { const { [f.uid]: _o, ...rest } = cur; return rest })}>Cancelar</button>
+                        </td>
+                      </>
+                    ) : (
+                      <td colSpan={3}>
+                        <button className="sv-tests-select" disabled={f.fuente === 'sin_propuesta' && !f.propuestaNombre} onClick={() => empezarEdicion(f)}>
+                          {f.fuente === 'sin_propuesta' ? 'Escribir nombre' : 'Revisar propuesta'}
+                        </button>
+                        {' '}
+                        <button className="sv-tests-select" disabled={busy === f.uid} onClick={() => omitir(f)}>Omitir</button>
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )
 }
 
 function PendientesCobroTab({ busquedaExterna = '' } = {}) {

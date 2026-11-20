@@ -107,6 +107,9 @@ export const gestionExento        = body => gestionPost('/gestion/exento', body)
 export const gestionCambiarGrupo  = body => gestionPost('/gestion/cambiar-grupo', body)
 export const gestionOptinWhatsapp = body => gestionPost('/gestion/optin-whatsapp', body)
 export const gestionEditarAlumno  = body => gestionPost('/gestion/editar-alumno', body)
+// 20/11 06:30 (punto 1c): "Nombres por revisar".
+export const gestionNombresPorRevisarGet = () => gestionCall('GET', '/gestion/nombres-por-revisar')
+export const gestionNombreOmitir  = uid  => gestionPost(`/gestion/nombres-por-revisar/${uid}/omitir`)
 // Wellhub + «Bajo tarifa» en Grupos (16/11 07:35).
 export const gestionGrupoWellhubSet    = body => gestionPost('/gestion/grupos/wellhub', body)
 export const gestionGrupoWellhubChecks = body => gestionPost('/gestion/grupos/wellhub-checkins', body)
