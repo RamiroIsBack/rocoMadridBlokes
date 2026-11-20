@@ -432,6 +432,13 @@ export default function App() {
                   <NavLink to="/supervision" className="app-nav__link app-nav__link--super">Supervisión</NavLink>
                 </li>
               )}
+              {/* 20/11 12:10 (Isa): el profesor entra en la misma ruta, pero SupervisionPage le
+                  enseña solo Niños/Vincular actividad (ProfesorGruposView), nunca el resto. */}
+              {sd.userRole === 'profesor' && (
+                <li className="app-nav__item">
+                  <NavLink to="/supervision" className="app-nav__link app-nav__link--super">Grupos</NavLink>
+                </li>
+              )}
               {sd.userRole === 'socio' && (
                 <li className="app-nav__item">
                   <NavLink to="/playground" className="app-nav__link app-nav__link--super">Horarios Profes</NavLink>

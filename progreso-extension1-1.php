@@ -44,6 +44,7 @@ $GLOBALS['blokes_profesores_emails'] = array(
     'alobo@ymail.com',
     'luciapcaas@gmail.com',
     'maringomezeduardo@gmail.com', // Edu (equipador)
+    'lileyia8@gmail.com',          // Isa (Isabel Alonso Liley, uid 650) — profe de niños, 20/11 12:10
 );
 // Cuenta(s) de las tablets compartidas del gimnasio — ver Superadmin → Tablet.
 $GLOBALS['blokes_tablets_emails'] = array();
@@ -1033,6 +1034,10 @@ add_action('rest_api_init', function() {
 
     // ── Superadmin endpoints ──
     $sa_perm    = function() { return in_array(blokes_get_app_role(), array('socio', 'gestion')); };
+    // Niños/Vincular actividad (20/11 12:10, Ramiro): el rol profesor también puede entrar en
+    // estas dos pestañas de Grupos — nunca ve pagos ni importes (ninguno de estos 3 endpoints
+    // los lleva), a diferencia del resto de $sa_perm.
+    $sa_perm_con_profe = function() { return in_array(blokes_get_app_role(), array('socio', 'gestion', 'profesor')); };
     // Dinero agregado del club: solo socio, ni siquiera gestion (31/10, regla de Ramiro —
     // ver NOTAS_PARA_CODE_privacidad_dinero.md).
     $socio_perm = function() { return blokes_es_socio(); };
@@ -1214,7 +1219,15 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/ninos-asociar', array(
         'methods'             => 'POST',
         'callback'            => 'superadmin_gestion_ninos_asociar',
-        'permission_callback' => $sa_perm,
+        'permission_callback' => $sa_perm_con_profe,
+    ));
+    // Versión ligera de la pestaña Niños para el rol profesor (20/11 12:10): mismas filas que ve
+    // socio/gestion en Grupos, pero calculadas aparte, sin tocar pagos ni importes — nunca pasa
+    // por superadmin_gestion_grupos().
+    register_rest_route('superadmin/v1', '/gestion/ninos-listado', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_ninos_listado',
+        'permission_callback' => $sa_perm_con_profe,
     ));
     // 20/11 07:23: pestaña "Vincular actividad" — todos los alumnos manuales (adultos y niños)
     // sin vincular, con sus tops/mediciones; vincular a cuenta existente, crear niño y vincular,
@@ -1222,19 +1235,21 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/vincular-actividad', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_gestion_vincular_actividad_listado',
-        'permission_callback' => $sa_perm,
+        'permission_callback' => $sa_perm_con_profe,
     ));
     register_rest_route('superadmin/v1', '/gestion/vincular-actividad', array(
         'methods'             => 'POST',
         'callback'            => 'superadmin_gestion_vincular_actividad',
-        'permission_callback' => $sa_perm,
+        'permission_callback' => $sa_perm_con_profe,
     ));
     // Buscar alumno (nombre, teléfono o email) en suscripciones, externos y usuarios de
     // WordPress, para el botón "Añadir alumno" de cada grupo (grupos_como_excel.md, punto 5).
+    // También lo usan Niños/Vincular actividad (20/11 12:10) para buscar cuenta existente desde
+    // el rol profesor — no lleva ningún dato de dinero.
     register_rest_route('superadmin/v1', '/gestion/buscar-alumno', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_gestion_buscar_alumno',
-        'permission_callback' => $sa_perm,
+        'permission_callback' => $sa_perm_con_profe,
     ));
     // Crear cliente nuevo en WooCommerce desde "Añadir alumno" cuando no existe (Ramiro, 07/11
     // 08:06) — Eva (gestión) y socios, igual que el resto de Grupos.
@@ -13781,6 +13796,50 @@ function superadmin_gestion_ninos_asociar($request) {
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
+// Versión ligera de la pestaña Niños (20/11 12:10: Isa/profesores entran aquí, nunca en
+// superadmin_gestion_grupos — esa lleva pagos e importes). Mismo criterio de agrupado
+// (blokes_dia_a_pareja/blokes_horario_agrupable, igual label) pero sin ningún cálculo de pagos,
+// tarifas ni wellhub: solo identidad de la sub (quién paga, quién es el alumno, el tutor).
+function superadmin_gestion_ninos_listado($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions no disponible.', array('status' => 503));
+    }
+    $out = array();
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (empty($sub['id'])) continue;
+        $edad = $sub['edad'] ?? 'Adultos';
+        if (!in_array($edad, array('Menores (6-12 años)', 'Adolescentes (12-18 años)'), true)) continue;
+        $status = $sub['status'] ?? '';
+        if (!in_array($status, array('active', 'on-hold', 'pending'), true)) continue; // cancelled de verdad: fuera, igual que Grupos
+
+        $sub_id = intval($sub['id']);
+        $sub_obj = wcs_get_subscription($sub_id);
+        if (!$sub_obj) continue;
+        $payer_uid = intval($sub_obj->get_customer_id()) ?: intval(get_post_meta($sub_id, '_customer_user', true));
+        if (!$payer_uid) continue;
+
+        $pareja = blokes_dia_a_pareja($sub['dia'] ?? '');
+        $horario_agrupa = blokes_horario_agrupable($sub['horario'] ?? '');
+        $edad_suffix = ' · ' . (stripos($edad, 'Menores') !== false ? 'Niños' : 'Adol.');
+        $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
+
+        $alumno_nombre = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name());
+        if ($alumno_nombre === '') { $payer = get_user_by('id', $payer_uid); $alumno_nombre = $payer ? $payer->display_name : ''; }
+
+        $out[] = array(
+            'subId'        => $sub_id,
+            'grupoLabel'   => trim($pareja . ' · ' . $horario_agrupa) . $edad_suffix,
+            'enVigor'      => ($status === 'active' || $es_pending_cancel), // mismo criterio que Grupos
+            'alumno'       => $alumno_nombre,
+            'tutorNombre'   => get_post_meta($sub_id, '_rm_tutor_nombre', true) ?: '',
+            'tutorTelefono' => get_post_meta($sub_id, '_rm_tutor_telefono', true) ?: '',
+            'alumnoUserId' => intval(get_post_meta($sub_id, '_rm_alumno_user_id', true)) ?: null,
+            'ninoRevisado' => (bool) get_post_meta($sub_id, '_rm_nino_revisado', true),
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
 // Buscar por nombre, teléfono o email en suscripciones (cualquier estado, para encontrar
 // también antiguos alumnos de baja), externos y, si no aparece en ninguno de los dos, en los
 // usuarios de WordPress (registrado sin ninguna clase). Primer paso del botón "Añadir alumno"
@@ -20726,6 +20785,27 @@ function progreso_compe_proxima($request) {
     )));
 }
 
+// 20/11 12:10 (Ramiro, categoría automática de la compe, opción B): ¿tiene esta cuenta una sub
+// EN VIGOR de Menores (6-12), bien como la propia cuenta que paga, bien como el alumno (niño con
+// _rm_alumno_user_id, ver blokes_rm_alumno_uid)? Nunca Adolescentes — esos entran por "el
+// buscador" como cualquier adulto. "En vigor" = mismo criterio que Grupos/Niños (activa o de
+// baja a fin de mes, nunca pausada/pendiente de pago).
+function blokes_rm_tiene_sub_menores_en_vigor($uid) {
+    if (!$uid || !function_exists('wcs_get_subscription')) return false;
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (empty($sub['id']) || ($sub['edad'] ?? '') !== 'Menores (6-12 años)') continue;
+        $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
+        if (($sub['status'] ?? '') !== 'active' && !$es_pending_cancel) continue;
+        $sub_id = intval($sub['id']);
+        $sub_obj = wcs_get_subscription($sub_id);
+        if (!$sub_obj) continue;
+        $payer_uid = intval($sub_obj->get_customer_id()) ?: intval(get_post_meta($sub_id, '_customer_user', true));
+        if (!$payer_uid) continue;
+        if ($payer_uid === $uid || blokes_rm_alumno_uid($sub_id, $payer_uid) === $uid) return true;
+    }
+    return false;
+}
+
 // POST /progreso/v1/compe/resultado — apunta/corrige el top/zona/intentos de UN bloque. Con
 // sesión normal, siempre el propio usuario. targetUserId (como en blokes_toggle_completion) es
 // para recepción apuntando por otra persona (Ramiro, 07/11 08:46) — exige
@@ -20790,7 +20870,30 @@ function progreso_compe_apuntar_resultado($request) {
             'participante_tipo' => $participante_tipo, 'participante_id' => $participante_id, 'created_at' => $ahora,
         )));
     }
-    return rest_ensure_response(array('success' => true, 'data' => array('estado' => $datos['estado'])));
+
+    // 20/11 12:10 (categoría automática, opción B): el camino de Colección no pregunta — si al
+    // apuntar un top esta persona todavía no tiene categoría en esta compe, y es una cuenta con
+    // una sub en vigor de Menores (como alumno o como la propia cuenta), se le pone "infantil"
+    // sin preguntar. Si no aplica, se avisa al frontend (necesitaCategoria) para que el buscador
+    // pregunte una sola vez — nunca se repite una vez puesta, y recepción puede cambiarla siempre.
+    $categoria_asignada = null;
+    $tiene_categoria = (bool) progreso_compe_categoria_get($block['competition_id'], $participante_tipo, $participante_id);
+    if (!$tiene_categoria && $top && $participante_tipo === 'user' && blokes_rm_tiene_sub_menores_en_vigor($participante_id)) {
+        $categoria_asignada = 'infantil';
+        $req_cat = new WP_REST_Request('POST', '/progreso/v1/compe/categoria');
+        $req_cat->set_param('competitionId', $block['competition_id']);
+        $req_cat->set_param('participanteTipo', $participante_tipo);
+        $req_cat->set_param('participanteId', $participante_id);
+        $req_cat->set_param('categoria', $categoria_asignada);
+        progreso_compe_categoria_set($req_cat);
+        $tiene_categoria = true;
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'estado' => $datos['estado'],
+        'necesitaCategoria' => $top ? !$tiene_categoria : false,
+        'categoriaAsignada' => $categoria_asignada,
+    )));
 }
 
 // GET /progreso/v1/compe/buscar-participante?q=X&competitionId=Y — "¿quién eres?" de recepción

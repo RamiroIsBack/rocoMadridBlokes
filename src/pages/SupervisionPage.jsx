@@ -24,7 +24,7 @@ function kpiColorTema(hex, oscuro) {
 }
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionCongelarMes, gestionNota, gestionDarDeBaja, gestionFusionar, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente, gestionNombresPorRevisarGet, gestionNombreOmitir, gestionNinosAsociar, gestionVincularActividadGet, gestionVincularActividad,
+  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionCongelarMes, gestionNota, gestionDarDeBaja, gestionFusionar, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente, gestionNombresPorRevisarGet, gestionNombreOmitir, gestionNinosAsociar, gestionNinosListadoGet, gestionVincularActividadGet, gestionVincularActividad,
   gestionGrupoWellhubSet, gestionGrupoWellhubChecks, gestionGrupoBajoTarifaSet,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
@@ -3891,7 +3891,11 @@ function NombresPorRevisarTab() {
 // cada suscripción de Menores/Adolescentes y deja dicho quién es el alumno de verdad — nunca toca
 // pedidos, facturas ni precio (eso sigue siempre en la cuenta de quien paga). Usa los mismos
 // `grupos` que ya carga Grupos (pasados por props), para no duplicar la llamada ni desincronizarse.
-function NinosTab({ grupos, refetch }) {
+// `filas` (20/11 12:10): override opcional para quien no tiene acceso a la pestaña Grupos
+// completa (rol profesor) — en vez de derivar de `grupos` (que trae pagos/importes), viene ya
+// calculado de un endpoint propio sin dinero (superadmin_gestion_ninos_listado). Para
+// socio/gestion no cambia nada: siguen pasando `grupos`, que ya cargaba la pestaña Grupos.
+function NinosTab({ grupos = null, filas: filasOverride = null, refetch, cargando }) {
   const [busy, setBusy]     = useState(null) // subId en curso
   const [error, setError]   = useState(null)
   const [modo, setModo]     = useState({}) // subId -> 'buscar' | 'crear' | null
@@ -3902,8 +3906,9 @@ function NinosTab({ grupos, refetch }) {
   const [soloEnVigor, setSoloEnVigor] = useState(true)
 
   const filasTodas = useMemo(() => {
+    if (filasOverride) return filasOverride
     const out = []
-    for (const g of grupos) {
+    for (const g of grupos || []) {
       if (g.edad === 'Adultos') continue
       for (const a of g.alumnos) {
         if (a.esExterno || !a.subId) continue // sin suscripción real, todavía no se puede enlazar
@@ -3911,7 +3916,7 @@ function NinosTab({ grupos, refetch }) {
       }
     }
     return out
-  }, [grupos])
+  }, [grupos, filasOverride])
   const filas = useMemo(() => soloEnVigor ? filasTodas.filter(a => a.enVigor) : filasTodas, [filasTodas, soloEnVigor])
   const nDeBaja = filasTodas.length - filasTodas.filter(a => a.enVigor).length
   const contadores = useMemo(() => filas.reduce((c, a) => {
@@ -3957,7 +3962,8 @@ function NinosTab({ grupos, refetch }) {
     } catch (e) { setError(e.message) } finally { setBusy(null) }
   }
 
-  if (!grupos.length) return <p className="sv-loading">Cargando…</p>
+  const estaCargando = cargando ?? (grupos !== null && !grupos.length)
+  if (estaCargando) return <p className="sv-loading">Cargando…</p>
 
   return (
     <>
@@ -4534,10 +4540,42 @@ function PendientesCobroTab({ busquedaExterna = '' } = {}) {
   )
 }
 
+// Rol profesor (20/11 12:10, Isa): acceso solo a Niños y Vincular actividad, nunca al resto de
+// Grupos (KPIs, pagos, Pendientes de cobro...) — fetch propio y ligero (ninos-listado), nunca
+// superadmin_gestion_grupos() ni sus hooks (useGestionGrupos, usePendientesCobro, useClasses...).
+function ProfesorGruposView() {
+  const [vista, setVista] = useState('ninos') // 'ninos' | 'vincular'
+  const [filas, setFilas] = useState(null)
+  const [error, setError] = useState(null)
+
+  const cargar = useCallback(() => {
+    setFilas(null); setError(null)
+    gestionNinosListadoGet().then(d => setFilas(Array.isArray(d) ? d : [])).catch(e => setError(e.message))
+  }, [])
+  useEffect(() => { cargar() }, [cargar])
+
+  return (
+    <div className="sv-page">
+      <h1 className="sv-page__title">Grupos</h1>
+      <div className="sv-controls-row">
+        <div className="sv-controls-left">
+          <button className={`sv-tab-mini ${vista === 'ninos' ? 'is-active' : ''}`} onClick={() => setVista('ninos')}>Niños</button>
+          <button className={`sv-tab-mini ${vista === 'vincular' ? 'is-active' : ''}`} onClick={() => setVista('vincular')}>Vincular actividad</button>
+        </div>
+      </div>
+      {error && <p className="sv-to-warn-txt">{error}</p>}
+      {vista === 'ninos'    && <NinosTab filas={filas} refetch={cargar} cargando={filas === null} />}
+      {vista === 'vincular' && <VincularActividadTab />}
+    </div>
+  )
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function SupervisionPage() {
   const role          = window.blokesSiteData?.userRole
   const canAccess     = ['gestion', 'socio'].includes(role)
+
+  if (role === 'profesor') return <ProfesorGruposView />
 
   const TABS = [
     { id: 'excelmuerte', label: 'ExcelMuerte'   },

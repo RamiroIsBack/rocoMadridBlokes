@@ -40,6 +40,22 @@ async function apuntarCompeParaIdentidad(compBlockId, identity) {
   return json
 }
 
+// 20/11 12:10 (Ramiro, categoría automática — opción B): si el backend dice que esta persona
+// todavía no tiene categoría en esta compe (y no se la pudo poner sola, ver
+// blokes_rm_tiene_sub_menores_en_vigor), el buscador la pregunta una sola vez aquí mismo —
+// Colección en sí nunca pregunta nada, solo este prompt corto tras apuntar el top.
+async function guardarCategoriaCompe(competitionId, identity, categoria) {
+  const body = identity.kind === 'ph'
+    ? { competitionId, participanteTipo: 'placeholder', participanteId: identity.placeholder_id, categoria }
+    : { competitionId, participanteTipo: 'user', participanteId: identity.user_id, categoria }
+  const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/categoria`, {
+    method: 'POST', credentials: 'include',
+    headers: { ...getAuthHeadersCompe(), 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) { const json = await res.json().catch(() => null); throw new Error(json?.message || `Error ${res.status}`) }
+}
+
 // Modo compe (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 07/11 08:46: "Colección solo con los 16
 // bloques de la compe, sin foto") — propia e independiente de la carga normal de blokes/
 // completions: si esto falla, Colección sigue funcionando como siempre, solo no sale el aviso.
@@ -75,6 +91,9 @@ function ColeccionModoCompe({ estado }) {
   const isTablet = window.blokesSiteData?.userRole === 'tablet'
   const [pickerBloque, setPickerBloque] = useState(null)
   const [celebration, setCelebration] = useState(null)
+  // { identity } tras un top de alguien que todavía no tiene categoría en esta compe y no se le
+  // pudo poner sola — se pregunta una sola vez, aquí, nunca en el propio picker de Colección.
+  const [pidiendoCategoria, setPidiendoCategoria] = useState(null)
 
   const tocar = useCallback((e, b) => {
     if (!isTablet) return
@@ -87,12 +106,21 @@ function ColeccionModoCompe({ estado }) {
     setPickerBloque(null)
     if (!bloque) return
     try {
-      await apuntarCompeParaIdentidad(bloque.compBlockId, identity)
+      const result = await apuntarCompeParaIdentidad(bloque.compBlockId, identity)
       setCelebration({ nombre: identity.name, numero: bloque.numero })
+      if (result?.data?.necesitaCategoria) setPidiendoCategoria({ identity })
     } catch (e) {
       console.error('Tablet compe completion failed:', e)
     }
   }, [pickerBloque])
+
+  const elegirCategoriaUnaVez = useCallback(async (categoria) => {
+    const p = pidiendoCategoria
+    setPidiendoCategoria(null)
+    if (!p) return
+    try { await guardarCategoriaCompe(estado.competitionId, p.identity, categoria) }
+    catch (e) { console.error('No se pudo guardar la categoría de la compe:', e) }
+  }, [pidiendoCategoria, estado.competitionId])
 
   return (
     <main className="app-main">
@@ -119,6 +147,17 @@ function ColeccionModoCompe({ estado }) {
         }}>
           ✓ Bloque {celebration.numero} apuntado a {celebration.nombre}{' '}
           <button type="button" onClick={() => setCelebration(null)} style={{ marginLeft: 8, background: 'none', border: 'none', color: '#166534', textDecoration: 'underline', cursor: 'pointer' }}>Vale</button>
+        </div>
+      )}
+      {pidiendoCategoria && (
+        <div style={{
+          background: '#fef3c7', color: '#92400e', textAlign: 'center', fontSize: '0.9rem',
+          padding: '10px 12px', borderRadius: 10, marginBottom: 16,
+        }}>
+          ¿Categoría de {pidiendoCategoria.identity.name} en esta compe?{' '}
+          <button type="button" onClick={() => elegirCategoriaUnaVez('masculina')} style={{ marginLeft: 8, fontWeight: 600 }}>Masculina</button>{' '}
+          <button type="button" onClick={() => elegirCategoriaUnaVez('femenina')} style={{ fontWeight: 600 }}>Femenina</button>{' '}
+          <button type="button" onClick={() => elegirCategoriaUnaVez('infantil')} style={{ fontWeight: 600 }}>Infantil</button>
         </div>
       )}
       <div className="cards-grid compe-cards-grid">
