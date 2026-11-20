@@ -3137,9 +3137,10 @@ function GruposTab() {
   // alguno — el € (importeFalta) solo llega del backend si eres socio, Eva solo ve el recuento.
   const wellhubLista = useMemo(() => conGrupo.filter(a => a.wellhub && a.enVigor).filter(coincide), [conGrupo, terminoBusq, telBusq])
   // "Niños" (20/11 07:20): cuántas suscripciones de Menores/Adolescentes faltan por revisar.
+  // Solo en vigor (prueba de cowork, 20/11 09:45, punto 5a): de baja no hace falta revisarlas.
   const ninosSinRevisar = useMemo(() => grupos
     .filter(g => g.edad !== 'Adultos')
-    .reduce((n, g) => n + g.alumnos.filter(a => !a.esExterno && a.subId && !a.alumnoUserId && !a.ninoRevisado).length, 0), [grupos])
+    .reduce((n, g) => n + g.alumnos.filter(a => a.enVigor && !a.esExterno && a.subId && !a.alumnoUserId && !a.ninoRevisado).length, 0), [grupos])
 
   // Cuántos coinciden en la vista actual — Ramiro, 2/11 09:40: no sabía "dónde darle a buscar"
   // ni si el filtro seguía puesto al cambiar de pestaña; este número deja claro ambas cosas.
@@ -3896,8 +3897,11 @@ function NinosTab({ grupos, refetch }) {
   const [modo, setModo]     = useState({}) // subId -> 'buscar' | 'crear' | null
   const [form, setForm]     = useState({}) // subId -> { nombre, apellidos, q, resultados, buscando }
   const [preview, setPreview] = useState({}) // subId -> { accion, extra, data }
+  // Puntos 5a/5b de la prueba de cowork (20/11 09:45): por defecto solo en vigor (el contador
+  // de arriba incluía bajas), con filtro para ver el resto, y contador por estado.
+  const [soloEnVigor, setSoloEnVigor] = useState(true)
 
-  const filas = useMemo(() => {
+  const filasTodas = useMemo(() => {
     const out = []
     for (const g of grupos) {
       if (g.edad === 'Adultos') continue
@@ -3908,6 +3912,13 @@ function NinosTab({ grupos, refetch }) {
     }
     return out
   }, [grupos])
+  const filas = useMemo(() => soloEnVigor ? filasTodas.filter(a => a.enVigor) : filasTodas, [filasTodas, soloEnVigor])
+  const nDeBaja = filasTodas.length - filasTodas.filter(a => a.enVigor).length
+  const contadores = useMemo(() => filas.reduce((c, a) => {
+    const estado = a.alumnoUserId ? 'asociado' : (a.ninoRevisado ? 'confirmado' : 'falta')
+    c[estado]++
+    return c
+  }, { asociado: 0, confirmado: 0, falta: 0 }), [filas])
 
   const valores = subId => form[subId] || { nombre: '', apellidos: '', q: '', resultados: null, buscando: false }
   const setValor = (subId, campo, v) => setForm(cur => ({ ...cur, [subId]: { ...valores(subId), [campo]: v } }))
@@ -3958,7 +3969,18 @@ function NinosTab({ grupos, refetch }) {
         se mueve solo. Simular antes de confirmar, como el resto de esta pantalla.
       </p>
       {error && <p className="sv-to-warn-txt">{error}</p>}
-      {filas.length === 0 ? <p className="sv-empty">No hay suscripciones de Menores/Adolescentes.</p> : (
+      <p className="sv-note">
+        <strong>{contadores.asociado}</strong> asociados · <strong>{contadores.confirmado}</strong> ya son la cuenta del niño · <strong>{contadores.falta}</strong> faltan
+        {nDeBaja > 0 && (
+          <>
+            {' · '}
+            <label className="sv-ot-muted">
+              <input type="checkbox" checked={!soloEnVigor} onChange={e => setSoloEnVigor(!e.target.checked)} /> ver también {nDeBaja} de baja
+            </label>
+          </>
+        )}
+      </p>
+      {filas.length === 0 ? <p className="sv-empty">No hay suscripciones de Menores/Adolescentes{soloEnVigor ? ' en vigor' : ''}.</p> : (
         <div className="sv-tests-scroll">
           <table className="sv-tests-table">
             <thead><tr><th>Alumno (pagador)</th><th>Clase</th><th>Tutor</th><th>Estado</th><th>Acciones</th></tr></thead>

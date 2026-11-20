@@ -13532,16 +13532,39 @@ function superadmin_gestion_editar_alumno($request) {
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
+// Partículas de apellido compuesto (prueba de cowork, 20/11 09:45, punto 4b): "de", "del", "la",
+// "las", "los", "y" van en minúscula dentro de un apellido ("de las Heras", "de Pablo") — eso es
+// correcto, nunca un error a corregir ni algo que capitalizar.
+function blokes_rm_particula_apellido($palabra) {
+    return in_array(mb_strtolower($palabra, 'UTF-8'), array('de', 'del', 'la', 'las', 'los', 'y'), true);
+}
+
 // Mayúscula inicial de cada palabra, el resto en minúscula — "capitalizar, NO inventar tildes"
 // (20/11 06:30, punto 1c): "garcia tomas" -> "Garcia Tomas", nunca le añade el acento que falta.
+// Las partículas de apellido (de/del/la/las/los/y) se dejan en minúscula, nunca capitalizadas.
 function blokes_capitalizar_simple($s) {
     $s = trim((string) $s);
     if ($s === '') return '';
     $palabras = preg_split('/\s+/', $s);
     return implode(' ', array_map(function($w) {
         if ($w === '') return $w;
+        if (blokes_rm_particula_apellido($w)) return mb_strtolower($w, 'UTF-8');
         return mb_strtoupper(mb_substr($w, 0, 1, 'UTF-8'), 'UTF-8') . mb_strtolower(mb_substr($w, 1, null, 'UTF-8'), 'UTF-8');
     }, $palabras));
+}
+
+// ¿Esta palabra suelta (nombre o apellido) necesita revisión por minúscula inicial? Ignora las
+// partículas de apellido en minúscula (son correctas) — solo marca si hay alguna palabra QUE NO
+// sea una partícula empezando en minúscula (prueba de cowork, 20/11 09:45, punto 4b: "Carlos | de
+// las Heras" se marcaba como minúscula por la "d" de "de", sin serlo de verdad).
+function blokes_rm_nombre_necesita_revision($valor) {
+    $valor = trim((string) $valor);
+    if ($valor === '') return false;
+    foreach (preg_split('/\s+/', $valor) as $w) {
+        if ($w === '' || blokes_rm_particula_apellido($w)) continue;
+        if (preg_match('/^\p{Ll}/u', $w)) return true;
+    }
+    return false;
 }
 
 // 20/11 06:30 (punto 1c): "pantalla «Nombres por revisar» con propuesta automática a confirmar
@@ -13558,7 +13581,10 @@ function superadmin_gestion_nombres_por_revisar($request) {
         foreach (blokes_get_all_subscription_data() as $sub_row) {
             $sid = intval($sub_row['id'] ?? 0);
             if (!$sid) continue;
-            $sub_uid = intval(get_post_meta($sid, '_customer_user', true));
+            // Punto 4a de la prueba de cowork (20/11 09:45): leer solo el meta `_customer_user`
+            // no es fiable con HPOS (igual que ya advertía blokes_alumno_customer_id_de_sub) —
+            // por eso la fuente "suscripción" no se usaba nunca, todo salía "sin propuesta".
+            $sub_uid = blokes_alumno_customer_id_de_sub($sub_row);
             if (!$sub_uid || isset($billing_por_uid[$sub_uid])) continue;
             $sub_obj = wcs_get_subscription($sid);
             if (!$sub_obj) continue;
@@ -13578,7 +13604,7 @@ function superadmin_gestion_nombres_por_revisar($request) {
 
         $motivo = '';
         if ($first === '' && $last === '') $motivo = 'sin_nombre';
-        elseif (preg_match('/^\p{Ll}/u', $first) || preg_match('/^\p{Ll}/u', $last)) $motivo = 'minuscula';
+        elseif (blokes_rm_nombre_necesita_revision($first) || blokes_rm_nombre_necesita_revision($last)) $motivo = 'minuscula';
         if ($motivo === '') continue;
 
         $propuesta_nombre = ''; $propuesta_apellidos = ''; $fuente = 'sin_propuesta';
@@ -13667,6 +13693,18 @@ function superadmin_gestion_ninos_asociar($request) {
     }
     if ($accion === 'crear_nino' && trim($nombre) === '') {
         return new WP_Error('bad_request', 'Falta el nombre del niño.', array('status' => 400));
+    }
+
+    // Punto 5c de la prueba de cowork (20/11 09:45): esta pestaña es solo para Menores y
+    // Adolescentes — crear_nino aceptaba también una sub de Adultos (probado con la 5470 de
+    // Borja Erice). La pestaña Niños del frontend ya filtra a solo esas edades, pero el
+    // endpoint lo exige también por si se llama directo.
+    $edad_sub = '';
+    foreach (blokes_get_all_subscription_data() as $sub_row_edad) {
+        if (intval($sub_row_edad['id'] ?? 0) === $sub_id) { $edad_sub = $sub_row_edad['edad'] ?? ''; break; }
+    }
+    if (!in_array($edad_sub, array('Menores (6-12 años)', 'Adolescentes (12-18 años)'), true)) {
+        return new WP_Error('no_es_menor', 'Esta suscripción no es de Menores ni de Adolescentes — la pestaña Niños es solo para esas edades.', array('status' => 409));
     }
 
     $payer_uid = intval($sub->get_customer_id()) ?: intval(get_post_meta($sub_id, '_customer_user', true));
@@ -20844,14 +20882,27 @@ function progreso_compe_simular_top($request) {
     $rapidos = $wpdb->get_results($wpdb->prepare(
         "SELECT id FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE competition_id = %d", $competition_id
     ), ARRAY_A);
-    if (count($rapidos) < 9) {
-        $semilla = array(
-            'masculina' => array('Prueba M1', 'Prueba M2', 'Prueba M3', 'Prueba M4', 'Prueba M5'),
-            'femenina'  => array('Prueba F1', 'Prueba F2', 'Prueba F3', 'Prueba F4', 'Prueba F5'),
-            'infantil'  => array('Prueba I1', 'Prueba I2', 'Prueba I3', 'Prueba I4'),
-        );
+    // Nombres distintos (prueba de cowork, 20/11 09:45, punto 2): "Prueba M1".."Prueba M5" salían
+    // todos como "Prueba M." en la tele (nombre + inicial del "apellido"), indistinguibles entre
+    // sí — y esa colisión de texto era la causa real del número de puesto duplicado del punto 3
+    // (la animación de la tele encontraba la fila por el texto mostrado, no por un id). Ahora:
+    // nombre inventado distinto + apellido fijo "Prueba" ("Daniel Prueba" -> tele "Daniel P."),
+    // y 13 por categoría (pedido: 12-15) para ver si caben las 11 filas de la vista rotativa.
+    $semilla = array(
+        'masculina' => array('Daniel', 'Pablo', 'Alvaro', 'Sergio', 'Marcos', 'Adrian', 'Hugo', 'Javier', 'Diego', 'Mario', 'Ruben', 'Victor', 'Ismael'),
+        'femenina'  => array('Marta', 'Laura', 'Elena', 'Sara', 'Paula', 'Lucia', 'Irene', 'Alba', 'Carmen', 'Noelia', 'Cristina', 'Patricia', 'Beatriz'),
+        'infantil'  => array('Leo', 'Ana', 'Mia', 'Jan', 'Nora', 'Max', 'Vera', 'Teo', 'Lola', 'Iker', 'Nina', 'Dani', 'Eva'),
+    );
+    $total_objetivo = 0;
+    foreach ($semilla as $nombres) $total_objetivo += count($nombres);
+    if (count($rapidos) < $total_objetivo) {
+        $nombres_existentes = $wpdb->get_col($wpdb->prepare(
+            "SELECT nombre FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE competition_id = %d", $competition_id
+        ));
         foreach ($semilla as $cat => $nombres) {
-            foreach ($nombres as $nombre) {
+            foreach ($nombres as $nombre_pila) {
+                $nombre = $nombre_pila . ' Prueba';
+                if (in_array($nombre, $nombres_existentes, true)) continue; // ya sembrado, no duplicar
                 $wpdb->insert(progreso_equip_table('comp_participantes_rapidos'), array(
                     'competition_id' => $competition_id, 'nombre' => $nombre, 'categoria' => 'General',
                     'created_by' => 'simulador', 'created_at' => current_time('mysql'),
@@ -21070,11 +21121,14 @@ function progreso_compe_clasificacion($request) {
         // Público (tele/clasificación): nunca apellidos (Ramiro, punto 7) — un rápido/alumno
         // manual se escribe entero (nombre y apellidos sueltos, sin un campo separado), así que
         // aquí solo se enseña la primera palabra + la inicial de la siguiente si hay (cowork,
-        // 07/11 16:30: "Rápido P.").
+        // 07/11 16:30: "Rápido P."). Sin el sufijo "(sin cuenta)" aquí (prueba de cowork,
+        // 20/11 09:45, punto 2): eso es un detalle interno de recepción, no de la tele pública —
+        // los pickers de recepción (participante-rapido, picker de recepción) SÍ lo siguen
+        // llevando, solo se quita en esta pantalla.
         $partes = array_values(array_filter(explode(' ', trim((string) $nombre_completo))));
         $nombre_corto = $partes[0] ?? 'Alguien';
         if (isset($partes[1]) && $partes[1] !== '') $nombre_corto .= ' ' . mb_substr($partes[1], 0, 1) . '.';
-        return $nombre_corto . ' (sin cuenta)';
+        return $nombre_corto;
     };
     // 20/11 06:30 (punto 2): "Nombre I. (alias)" — nombre + inicial del primer apellido + punto,
     // y el alias de la app entre paréntesis si lo tiene (sustituye a "Nombre (alias)" sin
@@ -21095,6 +21149,11 @@ function progreso_compe_clasificacion($request) {
         $cat = $categoria_por_clave[$clave] ?? '';
         if (!isset($clasificacion_por_cat[$cat])) $cat = '';
         $clasificacion_por_cat[$cat][] = array(
+            // "clave" (20/11): identificador estable tipo:id para que la tele sepa qué fila es
+            // cuál durante la animación — nombreMostrar es solo texto y dos personas distintas
+            // pueden mostrar lo mismo (p. ej. dos "Carlos G." sin alias, o varios participantes
+            // de prueba con el mismo formato), lo que confundía qué fila mover.
+            'clave' => $clave,
             'nombreMostrar' => $nombre_de($info['tipo'], $info['id']),
             'tops' => $info['tops'], 'primerTop' => $info['primerTop'],
         );
@@ -21123,6 +21182,7 @@ function progreso_compe_clasificacion($request) {
             // id estable del resultado (20/11 06:30): para que la tele sepa qué es "nuevo de
             // verdad" entre un sondeo y el siguiente, sin adivinarlo por nombre/bloque/hace.
             'id' => intval($f['id']),
+            'clave' => $clave,
             'nombreMostrar' => $nombre_de($f['participante_tipo'], intval($f['participante_id'])),
             'categoria' => $categoria_por_clave[$clave] ?? '',
             'numero' => intval($f['numero']), 'color' => $f['color'], 'hace' => human_time_diff(strtotime($f['validado_at']), current_time('timestamp')),

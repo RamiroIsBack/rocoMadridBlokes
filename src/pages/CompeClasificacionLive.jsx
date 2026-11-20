@@ -37,7 +37,7 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
   // Estado imperativo de la animación — no re-renderiza React, solo pinta el DOM directamente.
   const st = useRef({
     cats: [], // [{id, nombre}] — de clasif.categorias, puede ser 3 o 4 (con "Sin categoría")
-    orden: {}, // catId -> array [{nombreMostrar, tops}] en el orden MOSTRADO ahora mismo
+    orden: {}, // catId -> array [{clave, nombreMostrar, tops}] en el orden MOSTRADO ahora mismo
     catIdx: 0,
     rotTimer: null,
     busy: false,
@@ -71,7 +71,7 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
   function makeRow(p, i, rowH) {
     const el = document.createElement('div')
     el.className = 'cl-row' + (i < 3 ? ` r${i + 1}` : '')
-    el.dataset.nombre = p.nombreMostrar
+    el.dataset.clave = p.clave
     el.style.top = (i * rowH) + 'px'
     el.style.setProperty('--i', i)
     el.innerHTML = `<span class="cl-pos">${i + 1}</span><span class="cl-nm">${label(p)}</span><span class="cl-tp">${p.tops}</span>`
@@ -106,7 +106,12 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
 
   const wait = ms => new Promise(r => setTimeout(r, ms))
 
-  // Una actualización animada: ev = { catId, nombreMostrar, numero, color, tops, ordenNuevo }
+  // Una actualización animada: ev = { catId, clave, nombreMostrar, numero, color, tops, ordenNuevo }
+  // "clave" (20/11, causa real del punto 3 de la prueba de cowork del 09:45: número de puesto
+  // duplicado durante la animación): identifica la fila de forma estable (tipo:id), nunca por el
+  // texto nombreMostrar — dos participantes distintos pueden mostrar el mismo texto (p. ej. dos
+  // "Carlos G." sin alias, o los participantes de prueba antes de este arreglo) y con la clave
+  // vieja (nombreMostrar) el querySelector encontraba la fila equivocada.
   async function animate(ev) {
     st.busy = true
     const ci = st.cats.findIndex(c => c.id === ev.catId)
@@ -122,10 +127,10 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
     if (!box) { st.busy = false; return next() }
 
     const ordenAntes = st.orden[ev.catId] || []
-    let before = ordenAntes.findIndex(x => x.nombreMostrar === ev.nombreMostrar)
-    let row = before >= 0 ? box.querySelector(`.cl-row[data-nombre="${CSS.escape(ev.nombreMostrar)}"]`) : null
+    let before = ordenAntes.findIndex(x => x.clave === ev.clave)
+    let row = before >= 0 ? box.querySelector(`.cl-row[data-clave="${CSS.escape(ev.clave)}"]`) : null
     if (!row) {
-      row = makeRow({ nombreMostrar: ev.nombreMostrar, tops: ev.tops - 1 }, max, rowH)
+      row = makeRow({ clave: ev.clave, nombreMostrar: ev.nombreMostrar, tops: ev.tops - 1 }, max, rowH)
       row.style.opacity = '0'
       box.appendChild(row)
       void row.offsetWidth
@@ -150,18 +155,19 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
     await wait(450)
 
     const ordenNuevo = ev.ordenNuevo
-    const after = ordenNuevo.findIndex(x => x.nombreMostrar === ev.nombreMostrar)
+    const after = ordenNuevo.findIndex(x => x.clave === ev.clave)
     const shown = after >= 0 && after < max ? after : max
     ordenNuevo.forEach((x, i) => {
-      if (i >= max && x.nombreMostrar !== ev.nombreMostrar) return
-      let el = box.querySelector(`.cl-row[data-nombre="${CSS.escape(x.nombreMostrar)}"]`)
+      if (i >= max && x.clave !== ev.clave) return
+      let el = box.querySelector(`.cl-row[data-clave="${CSS.escape(x.clave)}"]`)
       if (!el) return
-      const slot = x.nombreMostrar === ev.nombreMostrar ? shown : i
+      const esMovida = x.clave === ev.clave
+      const slot = esMovida ? shown : i
       el.style.top = (slot * rowH) + 'px'
-      el.className = 'cl-row' + (slot < 3 ? ` r${slot + 1}` : '') + (x.nombreMostrar === ev.nombreMostrar ? ' moving' : '')
+      el.className = 'cl-row' + (slot < 3 ? ` r${slot + 1}` : '') + (esMovida ? ' moving' : '')
       const posEl = el.querySelector('.cl-pos')
-      if (posEl) posEl.textContent = (x.nombreMostrar === ev.nombreMostrar && after >= max ? after + 1 : i + 1)
-      if (i >= max && x.nombreMostrar !== ev.nombreMostrar) el.style.opacity = '0'
+      if (posEl) posEl.textContent = (esMovida && after >= max ? after + 1 : i + 1)
+      if (i >= max && !esMovida) el.style.opacity = '0'
     })
     hl.style.top = (shown * rowH - 4) + 'px'
     await wait(1100 + 1400)
@@ -229,8 +235,8 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
       const nueva = (clasif.categorias || []).find(c => c.id === catId)
       if (!nueva) return
       enqueue({
-        catId, nombreMostrar: u.nombreMostrar, numero: u.numero,
-        tops: nueva.clasificacion.find(x => x.nombreMostrar === u.nombreMostrar)?.tops ?? 1,
+        catId, clave: u.clave, nombreMostrar: u.nombreMostrar, numero: u.numero,
+        tops: nueva.clasificacion.find(x => x.clave === u.clave)?.tops ?? 1,
         ordenNuevo: nueva.clasificacion.slice(),
       })
     })
