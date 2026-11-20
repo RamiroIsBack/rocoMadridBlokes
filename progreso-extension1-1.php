@@ -4804,8 +4804,8 @@ function blokes_rm_migrar_placeholder($placeholder_id, $uid, $simular) {
 
     progreso_ensure_training_table();
     blokes_ensure_placeholder_completions_table();
-    $n_tops   = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . progreso_training_table() . ' WHERE placeholder_id = %d', $placeholder_id));
-    $n_medic  = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . blokes_placeholder_completions_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+    $n_tops   = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . blokes_placeholder_completions_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+    $n_medic  = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . progreso_training_table() . ' WHERE placeholder_id = %d', $placeholder_id));
 
     if ($simular) {
         return array(
@@ -4931,8 +4931,8 @@ function superadmin_gestion_vincular_actividad($request) {
         $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_placeholder_table() . ' WHERE id = %d', $placeholder_id), ARRAY_A);
         if (!$row) return new WP_Error('not_found', 'No encontrado.', array('status' => 404));
         progreso_ensure_training_table(); blokes_ensure_placeholder_completions_table();
-        $n_tops  = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . progreso_training_table() . ' WHERE placeholder_id = %d', $placeholder_id));
-        $n_medic = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . blokes_placeholder_completions_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+        $n_tops  = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . blokes_placeholder_completions_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+        $n_medic = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . progreso_training_table() . ' WHERE placeholder_id = %d', $placeholder_id));
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'placeholder' => array('id' => $placeholder_id, 'nombre' => $row['nombre']),
             'destino' => array('uid' => null, 'nombre' => trim($nombre . ' ' . $apellidos), 'creaCuentaNueva' => true),
