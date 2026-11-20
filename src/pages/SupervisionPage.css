@@ -1033,12 +1033,15 @@
 .sv-to-warn--warn { border-color: #f5c842; color: #fde68a; }
 .sv-to-bad      { color: #f87171 !important; font-weight: 700; }
 .sv-to-warn-txt { color: #f5c842 !important; }
-/* .sv-to-bad/.sv-to-warn-txt se reutilizan en Grupos (fondo claro) y en CTRL Time Off/modales
-   oscuros (fondo oscuro, donde el color de arriba ya está bien) — NOTAS_PARA_CODE_contraste.md. */
+.sv-to-ok-txt   { color: #4ade80 !important; }
+/* .sv-to-bad/.sv-to-warn-txt/.sv-to-ok-txt se reutilizan en Grupos (fondo claro) y en CTRL Time
+   Off/modales oscuros (fondo oscuro, donde el color de arriba ya está bien) — NOTAS_PARA_CODE_contraste.md. */
 .sv-tab-panel:not(.sv-to-root) .sv-to-bad      { color: var(--state-bad) !important; }
 .sv-tab-panel:not(.sv-to-root) .sv-to-warn-txt { color: var(--state-warn) !important; }
+.sv-tab-panel:not(.sv-to-root) .sv-to-ok-txt   { color: var(--state-ok) !important; }
 .sv-tab-panel .sv-grp-modal .sv-to-bad,      .sv-tab-panel .sv-grp-menu .sv-to-bad      { color: #f87171 !important; }
 .sv-tab-panel .sv-grp-modal .sv-to-warn-txt, .sv-tab-panel .sv-grp-menu .sv-to-warn-txt { color: #f5c842 !important; }
+.sv-tab-panel .sv-grp-modal .sv-to-ok-txt,    .sv-tab-panel .sv-grp-menu .sv-to-ok-txt   { color: #4ade80 !important; }
 
 .sv-wa {
   background: none;

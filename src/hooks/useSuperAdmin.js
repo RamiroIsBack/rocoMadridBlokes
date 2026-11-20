@@ -110,6 +110,8 @@ export const gestionEditarAlumno  = body => gestionPost('/gestion/editar-alumno'
 // 20/11 06:30 (punto 1c): "Nombres por revisar".
 export const gestionNombresPorRevisarGet = () => gestionCall('GET', '/gestion/nombres-por-revisar')
 export const gestionNombreOmitir  = uid  => gestionPost(`/gestion/nombres-por-revisar/${uid}/omitir`)
+// 20/11 07:20: pestaña "Niños" — confirmar, asociar a cuenta existente o crear la del niño.
+export const gestionNinosAsociar  = body => gestionPost('/gestion/ninos-asociar', body)
 // Wellhub + «Bajo tarifa» en Grupos (16/11 07:35).
 export const gestionGrupoWellhubSet    = body => gestionPost('/gestion/grupos/wellhub', body)
 export const gestionGrupoWellhubChecks = body => gestionPost('/gestion/grupos/wellhub-checkins', body)

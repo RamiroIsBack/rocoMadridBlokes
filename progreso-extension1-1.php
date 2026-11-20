@@ -1209,6 +1209,13 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_nombre_omitir',
         'permission_callback' => $sa_perm,
     ));
+    // 20/11 07:20: pestaña "Niños" — confirmar, asociar a una cuenta existente o crear la del
+    // niño para una suscripción de Menores/Adolescentes. Nunca toca precio ni facturación.
+    register_rest_route('superadmin/v1', '/gestion/ninos-asociar', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_ninos_asociar',
+        'permission_callback' => $sa_perm,
+    ));
     // Buscar alumno (nombre, teléfono o email) en suscripciones, externos y usuarios de
     // WordPress, para el botón "Añadir alumno" de cada grupo (grupos_como_excel.md, punto 5).
     register_rest_route('superadmin/v1', '/gestion/buscar-alumno', array(
@@ -4340,6 +4347,15 @@ function progreso_get_alumnos($request) {
             $wp_user = get_user_by('email', $sub['email']);
             if ($wp_user) $uid = $wp_user->ID;
         }
+        // 20/11 07:20 ("Niños como alumnos"): quien asiste/compite puede no ser quien paga —
+        // si esta suscripción tiene un alumno distinto enlazado (_rm_alumno_user_id, puesto
+        // desde la pestaña Niños), es ESE el que tiene que salir aquí (y por tanto en "¿Quién
+        // eres?" de la tablet y en todo lo que consuma este endpoint), no el pagador.
+        $alumno_uid = $sub['id'] ? blokes_rm_alumno_uid($sub['id'], $uid) : $uid;
+        if ($alumno_uid && $alumno_uid !== $uid) {
+            $alumno_user = get_user_by('id', $alumno_uid);
+            if ($alumno_user) { $sub['cliente'] = $alumno_user->display_name; $uid = $alumno_uid; }
+        }
         $sub['user_id'] = $uid;
         // Apodo (Ramiro, 09/11 05:45: "¿quién lo ha hecho?" tiene que enseñar también el
         // nickname, hay varios "Ramiro" y con solo el nombre + clase no se sabe cuál es) —
@@ -6652,6 +6668,10 @@ function superadmin_gestion_grupos($request) {
             'sinNombre'   => $nombre_fact === '',
             'tutorNombre'   => get_post_meta($sub_obj->get_id(), '_rm_tutor_nombre', true) ?: '',
             'tutorTelefono' => get_post_meta($sub_obj->get_id(), '_rm_tutor_telefono', true) ?: '',
+            // Pestaña "Niños" (20/11 07:20): alumnoUserId solo viene puesto cuando quien asiste
+            // es distinto de quien paga esta suscripción (ver blokes_rm_alumno_uid).
+            'alumnoUserId'  => intval(get_post_meta($sub_obj->get_id(), '_rm_alumno_user_id', true)) ?: null,
+            'ninoRevisado'  => (bool) get_post_meta($sub_obj->get_id(), '_rm_nino_revisado', true),
             // Precio especial (NOTAS_PARA_CODE_pestanas_grupos.md, Ramiro 06/11 16:00): puesto
             // desde "Marcar cobrado" con la opción "y desde ahora" — para que Eva lo vea de un
             // vistazo en la ficha.
@@ -13406,6 +13426,141 @@ function superadmin_gestion_nombre_omitir($request) {
     update_user_meta($uid, '_rm_nombre_revisado', 1);
     blokes_gestion_log(0, 'nombre_omitido', null, array('uid' => $uid));
     return rest_ensure_response(array('success' => true));
+}
+
+// 20/11 07:20 (Ramiro, «Niños como alumnos en Blokes»): el que va a clase (el niño) y el que
+// paga (el tutor, con la suscripción en su cuenta) pueden ser personas distintas. Esto NUNCA
+// toca pedidos, facturas ni precios — _rm_alumno_user_id solo dice qué usuario de WordPress es
+// el que asiste/compite y aparece en tablet/tele; nada de facturación mira esta meta. Si no
+// está puesta, el alumno es quien paga (comportamiento de siempre, sin cambios).
+function blokes_rm_alumno_uid($sub_id, $payer_uid) {
+    $override = intval(get_post_meta($sub_id, '_rm_alumno_user_id', true));
+    return $override ?: intval($payer_uid);
+}
+
+// Crea la cuenta de WordPress del niño: sin email real (no lo necesita — siempre entra por
+// tablet con un targetUserId, nunca con su propia sesión), con un email técnico único que no
+// choca nunca con uno de verdad. El tutor queda enlazado para poder volver de uid a uid.
+function blokes_rm_crear_nino($nombre, $apellidos, $tutor_user_id, $tutor_nombre, $tutor_telefono) {
+    $nombre = trim((string) $nombre);
+    if ($nombre === '') return new WP_Error('bad_request', 'Falta el nombre del niño.', array('status' => 400));
+    if (!function_exists('wc_create_new_customer')) {
+        return new WP_Error('class_not_found', 'WooCommerce no disponible.', array('status' => 503));
+    }
+    do {
+        $email = 'nino-' . wp_generate_password(12, false, false) . '@sin-email.rocomadrid.local';
+    } while (email_exists($email));
+    $uid = blokes_gestion_sin_emails(function() use ($email, $nombre, $apellidos) {
+        return wc_create_new_customer($email, '', '', array('first_name' => $nombre, 'last_name' => $apellidos));
+    });
+    if (is_wp_error($uid)) return $uid;
+    wp_update_user(array('ID' => $uid, 'display_name' => trim($nombre . ' ' . $apellidos) ?: $nombre));
+    update_user_meta($uid, '_rm_es_menor', 1);
+    if ($tutor_user_id)         update_user_meta($uid, '_rm_tutor_user_id', intval($tutor_user_id));
+    if ($tutor_nombre !== '')   update_user_meta($uid, '_rm_tutor_nombre', $tutor_nombre);
+    if ($tutor_telefono !== '') update_user_meta($uid, '_rm_tutor_telefono', $tutor_telefono);
+    return intval($uid);
+}
+
+// Pestaña "Niños" en Grupos (Eva/Isa): confirma, asocia a una cuenta existente o crea la del
+// niño para una suscripción de Menores/Adolescentes. Nunca toca la suscripción salvo su propia
+// meta de enlace — pedidos, facturas y precio siguen SIEMPRE en la cuenta de quien paga.
+// Simular primero, como el resto de esta pantalla.
+function superadmin_gestion_ninos_asociar($request) {
+    $sub_id    = intval($request->get_param('sub_id'));
+    $accion    = sanitize_key((string) $request->get_param('accion')); // confirmar_pagador | usar_cuenta_existente | crear_nino
+    $uid_in    = intval($request->get_param('uid'));
+    $nombre    = sanitize_text_field((string) $request->get_param('nombre'));
+    $apellidos = sanitize_text_field((string) $request->get_param('apellidos'));
+    $simular   = (bool) $request->get_param('simular');
+
+    if (!$sub_id || !function_exists('wcs_get_subscription')) {
+        return new WP_Error('bad_request', 'Falta sub_id o WooCommerce Subscriptions no disponible.', array('status' => 400));
+    }
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    if (!in_array($accion, array('confirmar_pagador', 'usar_cuenta_existente', 'crear_nino'), true)) {
+        return new WP_Error('bad_request', 'accion debe ser confirmar_pagador, usar_cuenta_existente o crear_nino.', array('status' => 400));
+    }
+    if ($accion === 'usar_cuenta_existente' && !$uid_in) {
+        return new WP_Error('bad_request', 'Falta uid.', array('status' => 400));
+    }
+    if ($accion === 'crear_nino' && trim($nombre) === '') {
+        return new WP_Error('bad_request', 'Falta el nombre del niño.', array('status' => 400));
+    }
+
+    $payer_uid = intval($sub->get_customer_id()) ?: intval(get_post_meta($sub_id, '_customer_user', true));
+    $tutor_nombre_actual   = get_post_meta($sub_id, '_rm_tutor_nombre', true) ?: '';
+    $tutor_telefono_actual = get_post_meta($sub_id, '_rm_tutor_telefono', true) ?: '';
+    $alumno_actual_uid = blokes_rm_alumno_uid($sub_id, $payer_uid);
+    $alumno_actual = $alumno_actual_uid ? get_user_by('id', $alumno_actual_uid) : null;
+
+    $destino_existente = null;
+    if ($accion === 'usar_cuenta_existente') {
+        $destino_existente = get_user_by('id', $uid_in);
+        if (!$destino_existente) return new WP_Error('not_found', 'Ese usuario de WordPress no existe.', array('status' => 404));
+    }
+
+    // Historial (tops) que ya tenga el PAGADOR: nunca se mueve solo al niño — Eva/Isa deciden
+    // caso a caso (nota del 20/11 07:20), esto solo avisa en la simulación para que lo sepan.
+    $aviso_historial = null;
+    if ($accion !== 'confirmar_pagador' && $payer_uid && $payer_uid !== $alumno_actual_uid) {
+        // Ya había un alumno distinto al pagador puesto antes — no hay nada "nuevo" que avisar.
+    } elseif ($accion !== 'confirmar_pagador' && $payer_uid) {
+        $completados = get_user_meta($payer_uid, '_blokes_completed', true);
+        $n_tops = is_array($completados) ? count($completados) : 0;
+        if ($n_tops > 0) {
+            $aviso_historial = "La cuenta de quien paga ya tiene {$n_tops} top(s) registrados — se quedan ahí, no se mueven al niño salvo que lo hagas tú a mano.";
+        }
+    }
+
+    if ($simular) {
+        $preview = array(
+            'subId'    => $sub_id,
+            'pagador'  => array('uid' => $payer_uid, 'nombre' => trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name())),
+            'alumnoActual' => $alumno_actual ? array('uid' => $alumno_actual_uid, 'nombre' => $alumno_actual->display_name) : null,
+            'avisoHistorial' => $aviso_historial,
+            'aviso' => 'Simulación: no se ha escrito nada todavía.',
+        );
+        if ($accion === 'confirmar_pagador') {
+            $preview['alumnoNuevo'] = array('uid' => $payer_uid, 'nombre' => $preview['pagador']['nombre']);
+        } elseif ($accion === 'usar_cuenta_existente') {
+            $preview['alumnoNuevo'] = array('uid' => $uid_in, 'nombre' => $destino_existente->display_name);
+        } else {
+            $preview['alumnoNuevo'] = array('uid' => null, 'nombre' => trim($nombre . ' ' . $apellidos), 'creaCuentaNueva' => true);
+        }
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $preview));
+    }
+
+    $antes = array(
+        'alumnoUserId' => $alumno_actual_uid !== $payer_uid ? $alumno_actual_uid : null,
+        'ninoRevisado' => (bool) get_post_meta($sub_id, '_rm_nino_revisado', true),
+    );
+    $alumno_nuevo_uid = $payer_uid;
+
+    if ($accion === 'confirmar_pagador') {
+        delete_post_meta($sub_id, '_rm_alumno_user_id');
+    } elseif ($accion === 'usar_cuenta_existente') {
+        $alumno_nuevo_uid = $uid_in;
+        if ($uid_in === $payer_uid) delete_post_meta($sub_id, '_rm_alumno_user_id');
+        else update_post_meta($sub_id, '_rm_alumno_user_id', $uid_in);
+    } else { // crear_nino
+        $nuevo_uid = blokes_rm_crear_nino($nombre, $apellidos, $payer_uid, $tutor_nombre_actual, $tutor_telefono_actual);
+        if (is_wp_error($nuevo_uid)) return $nuevo_uid;
+        $alumno_nuevo_uid = $nuevo_uid;
+        update_post_meta($sub_id, '_rm_alumno_user_id', $nuevo_uid);
+    }
+    update_post_meta($sub_id, '_rm_nino_revisado', 1);
+
+    $alumno_nuevo = get_user_by('id', $alumno_nuevo_uid);
+    $despues = array(
+        'alumnoUserId' => $alumno_nuevo_uid !== $payer_uid ? $alumno_nuevo_uid : null,
+        'ninoRevisado' => true,
+        'alumnoNombre' => $alumno_nuevo ? $alumno_nuevo->display_name : null,
+    );
+    blokes_gestion_log($sub_id, 'ninos_asociar', $antes, $despues, array('accion' => $accion));
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
 // Buscar por nombre, teléfono o email en suscripciones (cualquier estado, para encontrar

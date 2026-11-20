@@ -24,7 +24,7 @@ function kpiColorTema(hex, oscuro) {
 }
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionCongelarMes, gestionNota, gestionDarDeBaja, gestionFusionar, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente, gestionNombresPorRevisarGet, gestionNombreOmitir,
+  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionCongelarMes, gestionNota, gestionDarDeBaja, gestionFusionar, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente, gestionNombresPorRevisarGet, gestionNombreOmitir, gestionNinosAsociar,
   gestionGrupoWellhubSet, gestionGrupoWellhubChecks, gestionGrupoBajoTarifaSet,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
@@ -3136,6 +3136,10 @@ function GruposTab() {
   // Wellhub (16/11 07:35 punto A.2/A.3): contador para la cabecera y recordatorio fijo si hay
   // alguno — el € (importeFalta) solo llega del backend si eres socio, Eva solo ve el recuento.
   const wellhubLista = useMemo(() => conGrupo.filter(a => a.wellhub && a.enVigor).filter(coincide), [conGrupo, terminoBusq, telBusq])
+  // "Niños" (20/11 07:20): cuántas suscripciones de Menores/Adolescentes faltan por revisar.
+  const ninosSinRevisar = useMemo(() => grupos
+    .filter(g => g.edad !== 'Adultos')
+    .reduce((n, g) => n + g.alumnos.filter(a => !a.esExterno && a.subId && !a.alumnoUserId && !a.ninoRevisado).length, 0), [grupos])
 
   // Cuántos coinciden en la vista actual — Ramiro, 2/11 09:40: no sabía "dónde darle a buscar"
   // ni si el filtro seguía puesto al cambiar de pestaña; este número deja claro ambas cosas.
@@ -3248,6 +3252,9 @@ function GruposTab() {
           </button>
           <button className={`sv-tab-mini ${vista === 'nombres' ? 'is-active' : ''}`} onClick={() => setVista('nombres')}>
             Nombres por revisar
+          </button>
+          <button className={`sv-tab-mini ${vista === 'ninos' ? 'is-active' : ''}`} onClick={() => setVista('ninos')}>
+            Niños {ninosSinRevisar > 0 ? <span className="sv-tab-mini__count">({ninosSinRevisar})</span> : ''}
           </button>
         </div>
         <div className="sv-controls-right">
@@ -3391,6 +3398,8 @@ function GruposTab() {
       {vista === 'pendientes-cobro' && <PendientesCobroTab busquedaExterna={busqueda} />}
 
       {vista === 'nombres' && <NombresPorRevisarTab />}
+
+      {vista === 'ninos' && <NinosTab grupos={grupos} refetch={refetch} />}
 
       {vista === 'revisar-datos' && (
         <>
@@ -3860,6 +3869,172 @@ function NombresPorRevisarTab() {
                         <button className="sv-tests-select" disabled={busy === f.uid} onClick={() => omitir(f)}>Omitir</button>
                       </td>
                     )}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  )
+}
+
+// 20/11 07:20 (Ramiro, «Niños como alumnos en Blokes»): quien va a clase (el niño) y quien paga
+// (el tutor, con la suscripción en su cuenta) pueden ser personas distintas. Esta pestaña repasa
+// cada suscripción de Menores/Adolescentes y deja dicho quién es el alumno de verdad — nunca toca
+// pedidos, facturas ni precio (eso sigue siempre en la cuenta de quien paga). Usa los mismos
+// `grupos` que ya carga Grupos (pasados por props), para no duplicar la llamada ni desincronizarse.
+function NinosTab({ grupos, refetch }) {
+  const [busy, setBusy]     = useState(null) // subId en curso
+  const [error, setError]   = useState(null)
+  const [modo, setModo]     = useState({}) // subId -> 'buscar' | 'crear' | null
+  const [form, setForm]     = useState({}) // subId -> { nombre, apellidos, q, resultados, buscando }
+  const [preview, setPreview] = useState({}) // subId -> { accion, extra, data }
+
+  const filas = useMemo(() => {
+    const out = []
+    for (const g of grupos) {
+      if (g.edad === 'Adultos') continue
+      for (const a of g.alumnos) {
+        if (a.esExterno || !a.subId) continue // sin suscripción real, todavía no se puede enlazar
+        out.push({ ...a, grupoLabel: g.label })
+      }
+    }
+    return out
+  }, [grupos])
+
+  const valores = subId => form[subId] || { nombre: '', apellidos: '', q: '', resultados: null, buscando: false }
+  const setValor = (subId, campo, v) => setForm(cur => ({ ...cur, [subId]: { ...valores(subId), [campo]: v } }))
+  function abrirModo(subId, m) {
+    setModo(cur => ({ ...cur, [subId]: m }))
+    setPreview(cur => { const { [subId]: _o, ...rest } = cur; return rest })
+  }
+  function cerrarModo(subId) {
+    setModo(cur => ({ ...cur, [subId]: null }))
+    setPreview(cur => { const { [subId]: _o, ...rest } = cur; return rest })
+  }
+
+  async function buscar(subId) {
+    const v = valores(subId)
+    if (v.q.trim().length < 2) return
+    setValor(subId, 'buscando', true)
+    try { setValor(subId, 'resultados', await gestionBuscarAlumno(v.q.trim())) }
+    catch (e) { setError(e.message) } finally { setValor(subId, 'buscando', false) }
+  }
+
+  async function simular(subId, accion, extra = {}) {
+    setBusy(subId); setError(null)
+    try {
+      const data = await gestionNinosAsociar({ sub_id: subId, accion, simular: true, ...extra })
+      setPreview(cur => ({ ...cur, [subId]: { accion, extra, data } }))
+    } catch (e) { setError(e.message) } finally { setBusy(null) }
+  }
+  async function confirmar(subId) {
+    const p = preview[subId]
+    if (!p) return
+    setBusy(subId); setError(null)
+    try {
+      await gestionNinosAsociar({ sub_id: subId, accion: p.accion, simular: false, ...p.extra })
+      cerrarModo(subId)
+      refetch()
+    } catch (e) { setError(e.message) } finally { setBusy(null) }
+  }
+
+  if (!grupos.length) return <p className="sv-loading">Cargando…</p>
+
+  return (
+    <>
+      <p className="sv-note">
+        Suscripciones de Menores/Adolescentes: deja dicho quién es el alumno de verdad cuando no sea quien paga.
+        «Confirmar» = ya es la cuenta del propio niño, no hace falta cambiar nada. «Asociar alumno» busca una
+        cuenta ya existente (un hermano, o un adolescente con su propio email). «Crear niño» crea su cuenta sin
+        email real — siempre entra por tablet, nunca con sesión propia. El historial (tops) de quien paga nunca
+        se mueve solo. Simular antes de confirmar, como el resto de esta pantalla.
+      </p>
+      {error && <p className="sv-to-warn-txt">{error}</p>}
+      {filas.length === 0 ? <p className="sv-empty">No hay suscripciones de Menores/Adolescentes.</p> : (
+        <div className="sv-tests-scroll">
+          <table className="sv-tests-table">
+            <thead><tr><th>Alumno (pagador)</th><th>Clase</th><th>Tutor</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {filas.map(a => {
+                const estado = a.alumnoUserId ? 'asociado' : (a.ninoRevisado ? 'confirmado' : 'falta')
+                const m = modo[a.subId]
+                const v = valores(a.subId)
+                const p = preview[a.subId]
+                return (
+                  <tr key={a.subId}>
+                    <td>{a.alumno || <span className="sv-ot-muted">—</span>}</td>
+                    <td className="sv-ot-muted">{a.grupoLabel}</td>
+                    <td className="sv-ot-muted">{a.tutorNombre || a.tutorTelefono ? `${a.tutorNombre || '—'}${a.tutorTelefono ? ` · ${a.tutorTelefono}` : ''}` : '—'}</td>
+                    <td>
+                      {estado === 'asociado'   && <span className="sv-to-ok-txt">✓ asociado a otra cuenta</span>}
+                      {estado === 'confirmado' && <span className="sv-to-ok-txt">✓ es la cuenta del niño</span>}
+                      {estado === 'falta'      && <span className="sv-to-warn-txt">🔴 falta revisar</span>}
+                    </td>
+                    <td>
+                      {!m && (
+                        <>
+                          {estado === 'falta' && (
+                            <button className="sv-tests-select" disabled={busy === a.subId} onClick={() => simular(a.subId, 'confirmar_pagador')}>Confirmar</button>
+                          )}{' '}
+                          <button className="sv-tests-select" onClick={() => abrirModo(a.subId, 'buscar')}>{estado === 'falta' ? 'Asociar alumno' : 'Cambiar — asociar'}</button>{' '}
+                          <button className="sv-tests-select" onClick={() => abrirModo(a.subId, 'crear')}>{estado === 'falta' ? 'Crear niño' : 'Cambiar — crear niño'}</button>
+                        </>
+                      )}
+                      {!m && p && p.accion === 'confirmar_pagador' && (
+                        <div className="sv-ot-muted">
+                          → alumno: {p.data?.alumnoNuevo?.nombre}
+                          {p.data?.avisoHistorial && <div className="sv-to-warn-txt">{p.data.avisoHistorial}</div>}
+                          {' '}<button className="sv-tests-save" disabled={busy === a.subId} onClick={() => confirmar(a.subId)}>{busy === a.subId ? 'Guardando…' : 'Confirmar de verdad'}</button>
+                          {' '}<button className="sv-tests-select" onClick={() => cerrarModo(a.subId)}>Cancelar</button>
+                        </div>
+                      )}
+                      {m === 'buscar' && (
+                        <div className="sv-grp-tutor">
+                          <input
+                            className="sv-tests-input" type="text" placeholder="Nombre, teléfono o email" value={v.q} autoFocus
+                            onChange={e => setValor(a.subId, 'q', e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') buscar(a.subId) }}
+                          />{' '}
+                          <button className="sv-tests-select" disabled={v.buscando} onClick={() => buscar(a.subId)}>{v.buscando ? 'Buscando…' : 'Buscar'}</button>{' '}
+                          <button className="sv-tests-select" onClick={() => cerrarModo(a.subId)}>Cancelar</button>
+                          {v.resultados && (
+                            <div className="sv-grp-tutor">
+                              {v.resultados.filter(r => r.uid).length === 0 && <p className="sv-empty">Nadie con cuenta de WordPress coincide.</p>}
+                              {v.resultados.filter(r => r.uid).map(r => (
+                                <button key={r.uid} className="sv-tests-select" onClick={() => simular(a.subId, 'usar_cuenta_existente', { uid: r.uid })}>
+                                  {r.nombre} (uid {r.uid})
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {p && p.accion === 'usar_cuenta_existente' && (
+                            <div className="sv-ot-muted">
+                              → alumno: {p.data?.alumnoNuevo?.nombre}
+                              {p.data?.avisoHistorial && <div className="sv-to-warn-txt">{p.data.avisoHistorial}</div>}
+                              {' '}<button className="sv-tests-save" disabled={busy === a.subId} onClick={() => confirmar(a.subId)}>{busy === a.subId ? 'Guardando…' : 'Confirmar de verdad'}</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {m === 'crear' && (
+                        <div className="sv-grp-tutor">
+                          <input className="sv-tests-input" type="text" placeholder="Nombre" value={v.nombre} autoFocus onChange={e => setValor(a.subId, 'nombre', e.target.value)} />{' '}
+                          <input className="sv-tests-input" type="text" placeholder="Apellidos" value={v.apellidos} onChange={e => setValor(a.subId, 'apellidos', e.target.value)} />{' '}
+                          <button className="sv-tests-select" disabled={!v.nombre.trim()} onClick={() => simular(a.subId, 'crear_nino', { nombre: v.nombre.trim(), apellidos: v.apellidos.trim() })}>Simular</button>{' '}
+                          <button className="sv-tests-select" onClick={() => cerrarModo(a.subId)}>Cancelar</button>
+                          {p && p.accion === 'crear_nino' && (
+                            <div className="sv-ot-muted">
+                              → se crea la cuenta de «{p.data?.alumnoNuevo?.nombre}», sin email real, siempre por tablet.
+                              {p.data?.avisoHistorial && <div className="sv-to-warn-txt">{p.data.avisoHistorial}</div>}
+                              {' '}<button className="sv-tests-save" disabled={busy === a.subId} onClick={() => confirmar(a.subId)}>{busy === a.subId ? 'Creando…' : 'Confirmar de verdad'}</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 )
               })}
