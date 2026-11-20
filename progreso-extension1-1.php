@@ -532,17 +532,13 @@ add_action('rest_api_init', function() {
     register_rest_route('blokes/v1', '/create', array(
         'methods'             => 'POST',
         'callback'            => 'blokes_create_with_acf',
-        // TODO: restaurar cuando /blokes use sesión WP
-        // 'permission_callback' => function() { return is_user_logged_in(); },
-        'permission_callback' => '__return_true',
+        'permission_callback' => function() { return blokes_can_supervise(); },
     ));
 
     register_rest_route('blokes/v1', '/update-acf/(?P<id>\d+)', array(
         'methods'             => 'POST',
         'callback'            => 'blokes_update_acf',
-        // TODO: restaurar cuando /blokes use sesión WP
-        // 'permission_callback' => function() { return is_user_logged_in(); },
-        'permission_callback' => '__return_true',
+        'permission_callback' => function() { return blokes_can_supervise(); },
     ));
 
     register_rest_route('blokes/v1', '/hall-of-fame', array(
@@ -599,16 +595,17 @@ add_action('rest_api_init', function() {
     register_rest_route('blokes/v1', '/delete/(?P<id>\d+)', array(
         'methods'             => 'DELETE',
         'callback'            => 'blokes_delete_with_media',
-        'permission_callback' => function() { return is_user_logged_in(); },
+        // 20/11: era solo is_user_logged_in() — cualquier usuario de WordPress (cualquier rol,
+        // no solo profesor/gestion/socio) podía borrar cualquier bloke. Igual que create/update.
+        'permission_callback' => function() { return blokes_can_supervise(); },
     ));
 
-    // Endpoint para subir imágenes sin necesidad de login WordPress
-    // TODO: restaurar cuando /blokes use sesión WP
-    // 'permission_callback' => 'is_user_logged_in',
+    // 20/11: era '__return_true' — cualquiera en internet podía subir ficheros a la Mediateca
+    // sin sesión. Igual que create/update-acf/delete.
     register_rest_route('blokes/v1', '/upload-image', array(
         'methods'             => 'POST',
         'callback'            => 'blokes_upload_image',
-        'permission_callback' => '__return_true',
+        'permission_callback' => function() { return blokes_can_supervise(); },
     ));
 
     // "Instala Blokes" (NOTAS_PARA_CODE_instalar_app.md) — para ver en Supervisión si el
