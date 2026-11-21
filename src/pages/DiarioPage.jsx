@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import {
-  useDiarioAccess, useDiarioItems, createDiarioItem, updateDiarioItem, deleteDiarioItem,
+  useDiarioAccess, useDiarioItems, createDiarioItem, updateDiarioItem, deleteDiarioItem, updateDiarioTeam,
   DIARIO_KINDS, STATUS_LABELS, isOpen,
 } from '../hooks/useDiario'
 import { useCalendar, CALENDAR_CATEGORIES } from '../hooks/useCalendar'
@@ -342,22 +342,85 @@ const GRUPOS = [
   { role: 'equipo',   title: 'Equipo' },
 ]
 
+// Alta o corrección de alguien de «Otros» (fuera de las listas de Acceso)
+function OtroForm({ initial, onClose, onSaved }) {
+  const [f, setF] = useState({ name: initial?.name || '', phone: initial?.phone || '', notes: initial?.notes || '' })
+  const [busy, setBusy]   = useState(false)
+  const [error, setError] = useState('')
+  const set = (k, v) => setF(x => ({ ...x, [k]: v }))
+  const submit = async e => {
+    e.preventDefault()
+    setBusy(true); setError('')
+    try {
+      await updateDiarioTeam(initial ? { action: 'edit_extra', uid: initial.uid, ...f } : { action: 'add_extra', ...f })
+      onSaved()
+    } catch (err) { setError(err.message); setBusy(false) }
+  }
+  return (
+    <form className="dash-form dash-team__form" onSubmit={submit}>
+      <strong>{initial ? `Datos de ${initial.name}` : 'Apuntar a otra persona'}</strong>
+      <div className="dash-form__row">
+        <label className="dash-form__lbl">Nombre
+          <input className="dash-input" required maxLength={60} autoFocus value={f.name} onChange={e => set('name', e.target.value)} />
+        </label>
+        <label className="dash-form__lbl">Teléfono
+          <input type="tel" className="dash-input" maxLength={40} value={f.phone} onChange={e => set('phone', e.target.value)} />
+        </label>
+      </div>
+      <label className="dash-form__lbl">Notas (qué hace, horario…)
+        <textarea className="dash-input" rows={2} maxLength={500} value={f.notes} onChange={e => set('notes', e.target.value)} />
+      </label>
+      <p className="dash-item__meta">El teléfono y las notas solo los ven socios y gestión.</p>
+      {error && <p className="dash-error">{error}</p>}
+      <div className="dash-form__actions">
+        <button className="dash-btn dash-btn--primary" disabled={busy}>{busy ? 'Guardando…' : 'Guardar'}</button>
+        <button type="button" className="dash-btn" onClick={onClose}>Cancelar</button>
+      </div>
+    </form>
+  )
+}
+
 function Equipo({ data, hoy, onChanged }) {
-  const [sel, setSel] = useState(null)
+  const [sel, setSel]         = useState(null)
   const [abierta, setAbierta] = useState(null)
-  const team  = data?.team ?? []
-  const items = data?.items ?? []
+  const [form, setForm]       = useState(null)    // null · 'nuevo' · persona de «Otros»
+  const [ocultos, setOcultos] = useState(false)
+  const [error, setError]     = useState('')
+  const team   = data?.team ?? []
+  const items  = data?.items ?? []
+  const manage = !!data?.me?.can_manage
   if (!team.length) return null
 
+  const visibles  = team.filter(p => !p.hidden)
+  const ocultas   = team.filter(p => p.hidden)
   const asignadas = p => items.filter(it => esPersona(it.assignee, p.name))
   const pedidas   = p => items.filter(it => esPersona(it.requester || it.created_by, p.name) && !esPersona(it.assignee, p.name))
   const persona   = team.find(p => p.uid === sel)
+
+  const accion = async body => {
+    setError('')
+    try { await updateDiarioTeam(body); onChanged(); return true } catch (err) { setError(err.message); return false }
+  }
+  const renombrar = p => {
+    const a = window.prompt(`¿Con qué nombre sale ${p.name} en el Diario? (vacío = el de su cuenta)`, p.name)
+    if (a !== null) accion({ action: 'alias', uid: p.uid, alias: a.trim() })
+  }
+  const ocultar = p => {
+    if (window.confirm(`¿Ocultar a ${p.name} del Diario? Solo deja de salir aquí; no cambia sus permisos.`)) {
+      accion({ action: 'hide', uid: p.uid }).then(ok => ok && setSel(null))
+    }
+  }
+  const quitarOtro = p => {
+    if (window.confirm(`¿Quitar a ${p.name} de «Otros»? Lo que tenga asignado se queda igual.`)) {
+      accion({ action: 'delete_extra', uid: p.uid }).then(ok => ok && setSel(null))
+    }
+  }
 
   const chip = p => {
     const n = asignadas(p).filter(isOpen).length
     return (
       <button key={p.uid} type="button" className={`dash-person${sel === p.uid ? ' dash-person--on' : ''}`}
-        onClick={() => { setSel(sel === p.uid ? null : p.uid); setAbierta(null) }}>
+        onClick={() => { setSel(sel === p.uid ? null : p.uid); setAbierta(null); setForm(null) }}>
         <span className={`dash-person__av dash-person__av--${p.role}`}>{inicial(p.name)}</span>
         {p.name} {n > 0 && <b>{n}</b>}
       </button>
@@ -384,25 +447,65 @@ function Equipo({ data, hoy, onChanged }) {
         <h2 className="dash-card__title">Equipo</h2>
         <span className="dash-team__hint">Pulsa a alguien para ver lo que tiene asignado</span>
       </div>
-      {team.some(p => p.role === 'socio') && (
+      {visibles.some(p => p.role === 'socio') && (
         <div className="dash-team__group dash-team__group--socios">
           <span className="dash-team__glbl">Socios</span>
-          {team.filter(p => p.role === 'socio').map(chip)}
+          {visibles.filter(p => p.role === 'socio').map(chip)}
         </div>
       )}
-      {GRUPOS.filter(g => team.some(p => p.role === g.role)).map(g => (
+      {GRUPOS.filter(g => visibles.some(p => p.role === g.role) || g.role === 'profesor').map(g => (
         <div key={g.role} className="dash-team__group">
           <span className="dash-team__glbl">{g.title}</span>
-          {team.filter(p => p.role === g.role).map(chip)}
+          {visibles.filter(p => p.role === g.role).map(chip)}
+          {/* «Otros»: cualquiera fuera de las listas, al final de Profes */}
+          {g.role === 'profesor' && visibles.filter(p => p.role === 'otros').map(chip)}
+          {g.role === 'profesor' && manage && (
+            <button type="button" className="dash-person dash-person--add" onClick={() => { setForm('nuevo'); setSel(null) }}>+ Otro</button>
+          )}
         </div>
       ))}
+      {manage && ocultas.length > 0 && (
+        <div className="dash-team__group dash-team__group--hidden">
+          <button type="button" className="dash-link" onClick={() => setOcultos(o => !o)}>
+            {ocultos ? 'Esconder ocultos' : `Ocultos del Diario (${ocultas.length})`}
+          </button>
+          {ocultos && ocultas.map(p => (
+            <button key={p.uid} type="button" className="dash-person dash-person--hidden" title="Volver a mostrar en el Diario"
+              onClick={() => accion({ action: 'show', uid: p.uid })}>
+              <span className={`dash-person__av dash-person__av--${p.role}`}>{inicial(p.name)}</span>{p.name} ↺
+            </button>
+          ))}
+        </div>
+      )}
+      {error && <p className="dash-error">{error}</p>}
+
+      {form === 'nuevo' && <OtroForm onClose={() => setForm(null)} onSaved={() => { setForm(null); onChanged() }} />}
+
       {persona && (
         <div className="dash-team__panel">
+          {manage && (
+            <div className="dash-team__admin">
+              {persona.role === 'otros' ? (
+                <>
+                  {persona.phone && <span>📞 {persona.phone}</span>}
+                  {persona.notes && <span className="dash-team__notes">{persona.notes}</span>}
+                  <button type="button" className="dash-btn" onClick={() => setForm(persona)}>Editar datos</button>
+                  <button type="button" className="dash-link dash-link--danger" onClick={() => quitarOtro(persona)}>Quitar</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="dash-btn" onClick={() => renombrar(persona)}>Cambiar el nombre que sale</button>
+                  <button type="button" className="dash-link dash-link--danger" onClick={() => ocultar(persona)}>Ocultar del Diario</button>
+                </>
+              )}
+            </div>
+          )}
+          {form && form !== 'nuevo' && <OtroForm initial={form} onClose={() => setForm(null)} onSaved={() => { setForm(null); onChanged() }} />}
           {lista(`Asignado a ${persona.name}`, asignadas(persona))}
           {lista(`Lo que ${persona.name} ha pedido a otros`, pedidas(persona))}
         </div>
       )}
-      {!data?.me?.can_manage && <p className="dash-team__note">Ves solo lo que te han asignado y lo que has pedido tú; socios y gestión lo ven todo.</p>}
+      {!manage && <p className="dash-team__note">Ves solo lo que te han asignado y lo que has pedido tú; socios y gestión lo ven todo.</p>}
     </section>
   )
 }
@@ -430,7 +533,7 @@ export default function DiarioPage() {
   const fecha  = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
   const ir     = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   // Nombres para «¿Quién lo pide?» y «¿Para quién?»: el equipo y los que ya se han usado
-  const nombres  = [...new Set([data?.me?.name, ...(data?.team ?? []).map(p => p.name), ...items.flatMap(it => [it.requester, it.assignee])].filter(Boolean))].sort()
+  const nombres  = [...new Set([data?.me?.name, ...(data?.team ?? []).filter(p => !p.hidden).map(p => p.name), ...items.flatMap(it => [it.requester, it.assignee])].filter(Boolean))].sort()
   const cardProps = { data, hoy, persona: null, nombres, onChanged: reload }
 
   return (

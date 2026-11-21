@@ -276,3 +276,12 @@
 .dash-team__h span { font-family: var(--font-body); font-size: 0.8rem; font-weight: 600; color: var(--color-text-secondary); margin-left: 6px; }
 .dash-team__note { font-size: 0.8rem; color: var(--color-text-secondary); margin: 10px 0 0; }
 @media (max-width: 700px) { .dash-team__glbl { width: 100%; } .dash-team__hint { margin-left: 0; } }
+
+.dash-person__av--otros { background: var(--color-text-secondary); }
+.dash-person--add { border-style: dashed; color: var(--color-text-secondary); padding-left: 14px; }
+.dash-person--hidden { opacity: 0.6; }
+.dash-team__group--hidden { border-top: 1px dashed var(--color-border); margin-top: 6px; }
+.dash-team__form { margin-top: 12px; }
+.dash-team__admin { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 0.9rem; }
+.dash-team__notes { color: var(--color-text-secondary); white-space: pre-line; }
+.dash-team__panel > .dash-form { grid-column: 1 / -1; }
