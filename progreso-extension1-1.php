@@ -55,16 +55,25 @@ $GLOBALS['blokes_admin_emails']      = array_merge(
     $GLOBALS['blokes_profesores_emails']
 );
 
-// Devuelve las listas activas: siempre desde blog 1 (fuente de verdad única en multisite)
+// Devuelve las listas activas: siempre desde blog 1 (fuente de verdad única en multisite).
+// 🔴 Cowork, 20/11 18:55: antes, en cuanto la lista guardada en Superadmin → Acceso no estaba
+// vacía, sustituía ENTERA a la del código — un alta nueva en el código (Edu 13ac732, Isa
+// e0e77db) no tenía ningún efecto porque "Profesores" ya tenía guardados otros emails desde
+// Acceso. Ahora se UNEN las dos (nunca se quita a nadie, solo se añade) — un alta en el código
+// siempre hace efecto, y Acceso sigue pudiendo añadir gente sin tocar el código.
 function blokes_get_email_lists() {
     switch_to_blog(1);
     $saved = get_option('blokes_email_lists');
     restore_current_blog();
+    $unir = function($clave) use ($saved) {
+        $guardada = (is_array($saved) && !empty($saved[$clave])) ? $saved[$clave] : array();
+        return array_values(array_unique(array_merge($GLOBALS['blokes_' . $clave . '_emails'], $guardada)));
+    };
     return array(
-        'socios'     => (is_array($saved) && !empty($saved['socios']))     ? $saved['socios']     : $GLOBALS['blokes_socios_emails'],
-        'gestion'    => (is_array($saved) && !empty($saved['gestion']))    ? $saved['gestion']    : $GLOBALS['blokes_gestion_emails'],
-        'profesores' => (is_array($saved) && !empty($saved['profesores'])) ? $saved['profesores'] : $GLOBALS['blokes_profesores_emails'],
-        'tablets'    => (is_array($saved) && !empty($saved['tablets']))    ? $saved['tablets']    : $GLOBALS['blokes_tablets_emails'],
+        'socios'     => $unir('socios'),
+        'gestion'    => $unir('gestion'),
+        'profesores' => $unir('profesores'),
+        'tablets'    => $unir('tablets'),
     );
 }
 
@@ -880,7 +889,11 @@ add_action('rest_api_init', function() {
         'methods' => 'PUT', 'callback' => 'progreso_equip_update_competition', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)', array(
-        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_competition', 'permission_callback' => $equip_perm,
+        // 21/11 (repaso de la compe de prueba): borrar una competición ENTERA (de prueba o real)
+        // es tan destructivo como borrar una semana/tarea/asignación — mismo permiso estricto que
+        // esas, no el $equip_perm general (que incluye "profesor", pensado para dar acceso de
+        // lectura/edición de bloques a los equipadores, no para borrar competiciones).
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_competition', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)', array(
         'methods' => 'PUT', 'callback' => 'progreso_equip_update_comp_block', 'permission_callback' => $equip_perm,
@@ -894,7 +907,9 @@ add_action('rest_api_init', function() {
         'methods' => 'POST', 'callback' => 'progreso_equip_add_comp_block', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)', array(
-        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_comp_block', 'permission_callback' => $equip_perm,
+        // 21/11: igual que borrar la competición entera — destructivo, mismo permiso estricto
+        // que el resto de borrados ($equip_jefe_perm), no el $equip_perm general.
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_comp_block', 'permission_callback' => $equip_jefe_perm,
     ));
     // Punto 8 (Ramiro, 11/11 05:01): "Fijar bloque" — intercambiar el número de dos bloques ya
     // puestos sin mover burbujas/fichas/resultados, que van con el id del bloque físico, no con

@@ -2499,7 +2499,7 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
 
   const chipReasignable = (b, nombreActual) => (
     <span key={b.id} className={`org__comp-plan-bloque-chip${b.tested ? ' org__comp-plan-bloque-chip--probado' : ''}`}>
-      <span className="org__comp-plan-bloque-color" style={{ background: colorPorNumeroBloque(b.number, totalBloques) }} />
+      <span className="org__comp-plan-bloque-color" style={{ background: colorPorNumeroBloque(b.number, totalBloques).bg }} />
       #{b.number}
       {canManage && (reasignando === b.id ? (
         <select autoFocus value={nombreActual} onChange={e => reasignarBloque(b.id, e.target.value)} onBlur={() => setReasignando(null)}>
