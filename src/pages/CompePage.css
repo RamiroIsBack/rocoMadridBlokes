@@ -1,0 +1,171 @@
+.compe-page {
+  /* Ramiro, 09/11 06:36: el contenedor de página a todo el ancho (sin tope pequeño) — las
+     listas de bloques/Recepción son justo lo que pedía ensanchar, no texto corrido. */
+  max-width: none;
+  margin: 0 auto;
+  padding: 16px 16px 80px;
+}
+.compe-page--loading { padding: 40px 16px; text-align: center; color: var(--color-text-secondary); }
+.compe-page h1 { font-size: 1.4rem; margin-bottom: 4px; }
+.compe-page__muted { color: var(--color-text-secondary); font-size: 0.9rem; margin-bottom: 16px; }
+.compe-page__error { color: #ef4444; font-size: 0.9rem; margin-bottom: 12px; }
+/* Ramiro, 11/11 06:48: "tiene que haber navegación para ir a todos estos sitios" — no había
+   forma de llegar a /compe/directo desde la app. */
+.compe-page__tele-link {
+  display: inline-block;
+  margin: 8px 0 16px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.compe-page__login {
+  display: inline-block; margin-top: 8px; padding: 10px 18px; border-radius: 8px;
+  background: #2a2015; color: #f5c842; text-decoration: none; font-weight: 600;
+}
+
+/* Precompe: mientras no hay compe activa pero hay una real programada (cowork, 11/11 05:40) —
+   antes esto era un callejón sin salida durante los 19 días previos. Con cartel y animación
+   (Ramiro, 11/11 05:01: "hay que mejorarla"). */
+.compe-precompe { max-width: 480px; text-align: center; }
+.compe-precompe__proximamente {
+  display: inline-block;
+  margin: 0 0 14px;
+  padding: 4px 14px;
+  border-radius: 20px;
+  background: var(--color-accent);
+  color: #1f1f1f;
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  animation: compe-precompe-pulse 2.2s ease-in-out infinite;
+}
+@keyframes compe-precompe-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.06); }
+}
+.compe-precompe__cartel {
+  width: 100%;
+  max-width: 320px;
+  border-radius: 10px;
+  margin: 0 auto 18px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+  animation: compe-precompe-cartel 0.6s ease-out;
+}
+@keyframes compe-precompe-cartel {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.compe-precompe h1 { text-align: center; }
+.compe-precompe__fechas { color: var(--color-text-secondary); font-size: 0.95rem; margin: 0 0 4px; }
+.compe-precompe__cuenta {
+  font-weight: 800;
+  color: var(--color-accent-hover);
+  font-size: 1.3rem;
+  margin: 0 0 20px;
+  animation: compe-precompe-cuenta 1.8s ease-in-out infinite;
+}
+@keyframes compe-precompe-cuenta {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.6; }
+}
+.compe-precompe__que-hacer { text-align: left; }
+.compe-precompe__que-hacer { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; padding: 14px 18px; }
+.compe-precompe__que-hacer h2 { font-size: 0.95rem; margin: 0 0 10px; }
+.compe-precompe__que-hacer ul { margin: 0; padding-left: 20px; font-size: 0.88rem; line-height: 1.6; }
+.compe-precompe__que-hacer li { margin-bottom: 6px; }
+
+/* Ramiro, 09/11 06:36: "nunca max-width pequeño para... listas" — en vez de una sola columna
+   altísima en pantalla ancha, varias columnas de bloques a la vez (se pliega a 1 sola en
+   móvil, igual que el tablero de Organización). */
+.compe-page__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; }
+
+.compe-bloque {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; padding: 10px 12px;
+}
+.compe-bloque__numero {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-weight: 700; font-size: 1.05rem;
+}
+.compe-bloque__cuerpo { flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; }
+.compe-bloque__toggles { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+.compe-toggle {
+  /* Ramiro, 09/11 07:05: los Top/Zona de Recepción salían por debajo de 36 px de alto —
+     zona táctil mínima 44 px, para pulsarlos bien con el dedo. */
+  display: inline-flex; align-items: center; gap: 6px; padding: 10px 14px; min-height: 44px;
+  border-radius: 999px; border: 1px solid var(--color-border); font-size: 0.95rem; cursor: pointer; user-select: none;
+}
+.compe-toggle--on { background: #16a34a; color: #fff; border-color: #16a34a; }
+.compe-toggle input { margin: 0; }
+
+.compe-intentos { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--color-text-primary); }
+.compe-intentos input { width: 52px; padding: 4px 6px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); color: var(--color-text-primary); }
+
+.compe-bloque__pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.compe-estado { font-size: 0.8rem; color: var(--color-text-secondary); }
+.compe-estado--validado { color: #16a34a; font-weight: 600; }
+
+.compe-bloque__guardar {
+  padding: 6px 14px; border-radius: 8px; border: none; background: #2a2015; color: #f5c842;
+  font-weight: 600; font-size: 0.85rem; cursor: pointer;
+}
+.compe-bloque__guardar:disabled { opacity: 0.6; cursor: default; }
+
+.compe-ventana { font-size: 0.85rem; color: var(--state-info); background: color-mix(in srgb, var(--state-info) 16%, transparent); border-radius: 8px; padding: 6px 10px; margin-bottom: 10px; }
+.compe-ventana--cerrada { background: color-mix(in srgb, var(--state-warn) 16%, transparent); color: var(--state-warn); }
+
+.compe-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.compe-tab {
+  padding: 6px 14px; border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-surface);
+  font-weight: 600; font-size: 0.85rem; cursor: pointer; color: var(--color-text-primary);
+}
+.compe-tab--activo { background: #2a2015; color: #f5c842; border-color: #2a2015; }
+
+.compe-intentos-link {
+  background: none; border: none; color: var(--color-text-secondary); font-size: 0.8rem; text-decoration: underline;
+  cursor: pointer; padding: 0;
+}
+.compe-grp-field { display: block; margin-bottom: 10px; font-size: 0.85rem; color: var(--color-text-primary); }
+/* 20/11 06:30 (punto 2): selector de categoría de la compe — nunca inferida, siempre a mano. */
+.compe-page__categoria {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 0.85rem; color: var(--color-text-secondary);
+}
+.compe-page__categoria select, .compe-grp-field select {
+  padding: 8px 10px; border-radius: 8px; border: 1px solid var(--color-border);
+  background: var(--color-surface); color: var(--color-text-primary); font-size: 0.95rem;
+}
+.compe-recepcion-input {
+  display: block; width: 100%; margin-top: 4px; padding: 8px 10px;
+  border: 1px solid var(--color-border); border-radius: 8px; font-size: 1rem;
+  background: var(--color-surface); color: var(--color-text-primary);
+}
+.compe-recepcion-lista { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.compe-recepcion-resultado {
+  display: block; width: 100%; text-align: left; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary); font-size: 0.95rem; cursor: pointer;
+}
+.compe-recepcion-resultado:hover { background: var(--color-border); }
+.compe-recepcion-aviso {
+  /* Flotante, no en el flujo (cowork, 09/11 06:15): si empuja la lista, en la tablet se pulsa
+     el bloque de al lado justo cuando aparece/desaparece — "marqué el 3 queriendo el 2". */
+  position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 50;
+  background: #166534; color: #fff; font-weight: 600; font-size: 0.95rem;
+  padding: 12px 16px; border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  text-align: center;
+}
+.compe-recepcion-persona {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 10px;
+}
+.compe-recepcion-otra {
+  flex: 0 0 auto; padding: 10px 18px; border-radius: 10px; border: none;
+  background: #2a2015; color: #f5c842; font-weight: 700; font-size: 0.95rem; cursor: pointer;
+}

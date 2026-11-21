@@ -1,5 +1,8 @@
 .league-page {
-  max-width: 480px;
+  /* Ramiro, 09/11 07:05: confirmó que la quiere a ancho completo igualmente — la clasificación
+     pasa a 2 columnas en pantalla ancha (ver `.league-leaderboard` más abajo) para que el
+     ancho de verdad se note en algo, no solo en márgenes más grandes. */
+  max-width: none;
   margin: 0 auto;
   padding: 16px 0 40px;
 }
@@ -25,12 +28,31 @@
   font-weight: 800;
   letter-spacing: 0.03em;
   line-height: 1.1;
+  color: var(--color-text-primary);
 }
 
+/* Auditoría de contraste (cowork, 11/11 10:05, causa 3): esta página estaba pensada para un
+   fondo siempre oscuro (grises/dorado claros), pero sigue el tema — en claro quedaba casi
+   invisible sobre crema. */
 .league-header__stats {
   font-size: 0.8rem;
-  color: #aaa;
+  color: var(--color-text-secondary);
   margin-top: 3px;
+}
+
+/* Opciones 2 y 4 de NOTAS_PARA_CODE_ligas_incentivo.md */
+.league-incentivo {
+  padding: 10px 18px;
+  margin: 0 0 20px;
+  border-radius: 8px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid var(--state-ok);
+}
+.league-incentivo__linea {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 2px 0;
 }
 
 .league-header__zone {
@@ -43,6 +65,13 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+/* Pantalla ancha (Ramiro, 09/11 07:05): 2 columnas en vez de una sola lista altísima con
+   márgenes enormes — "column" (no grid) porque reparte el número de miembros que haya sola,
+   sin saber de antemano cuántas filas caben en cada columna. */
+@media (min-width: 900px) {
+  .league-leaderboard { display: block; column-count: 2; column-gap: 24px; }
+  .league-member { break-inside: avoid-column; margin-bottom: 2px; }
 }
 
 .league-member {
@@ -62,7 +91,7 @@
 
 .league-member__rank {
   font-size: 0.72rem;
-  color: #555;
+  color: var(--color-text-secondary);
   min-width: 28px;
   font-variant-numeric: tabular-nums;
 }
@@ -79,14 +108,14 @@
 
 .league-member__pts {
   font-size: 0.78rem;
-  color: #888;
+  color: var(--color-text-secondary);
   font-variant-numeric: tabular-nums;
   min-width: 52px;
   text-align: right;
 }
 
 .league-member--me .league-member__pts {
-  color: #f5c842;
+  color: var(--color-accent-hover);
 }
 
 /* ── Zone separators ── */
@@ -109,6 +138,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
+  color: var(--color-text-secondary);
 }
 
 /* ── Empty / loading states ── */
@@ -116,20 +146,20 @@
 .league-empty {
   text-align: center;
   padding: 40px 20px;
-  color: #666;
+  color: var(--color-text-secondary);
   font-size: 0.88rem;
 }
 
 .league-empty__sub {
   font-size: 0.78rem;
-  color: #444;
+  color: var(--color-text-secondary);
   margin-top: 6px;
 }
 
 .league-login {
   text-align: center;
   padding: 40px 20px;
-  color: #888;
+  color: var(--color-text-secondary);
 }
 
 /* ── Other leagues (secondary, collapsible) ── */
@@ -144,7 +174,7 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #444;
+  color: var(--color-text-secondary);
   margin-bottom: 8px;
   padding: 0 4px;
 }
@@ -179,16 +209,17 @@
   font-size: 0.82rem;
   font-weight: 700;
   flex: 1;
+  color: var(--color-text-primary);
 }
 
 .league-other__count {
-  font-size: 0.72rem;
-  color: #555;
+  font-size: 0.8rem; /* antes 0.72rem (11.5 px) — Ramiro, 09/11 07:45 */
+  color: var(--color-text-secondary);
 }
 
 .league-other__chevron {
-  font-size: 0.5rem;
-  color: #444;
+  font-size: 0.75rem; /* antes 0.5rem (8 px) — Ramiro, 09/11 07:45 */
+  color: var(--color-text-secondary);
   margin-left: 2px;
 }
 

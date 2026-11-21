@@ -520,12 +520,32 @@ class RocoMadrid_SF_Admin_Assign {
 		$billing_period = ( 'annual' === $plan ) ? 'year' : 'month';
 		$billing_interval = ( 'quarterly' === $plan ) ? 3 : 1;
 
-		// Dirección de facturación del cliente (usa sus datos guardados si existen)
+		// Dirección de facturación del cliente (usa sus datos guardados si existen).
+		// Muchas altas manuales antiguas no tienen billing_phone/nombre reales porque se
+		// registró el teléfono como email de relleno ("6xxxxxxxx@rocomadrid.com") en vez de
+		// rellenar estos campos — si pasa, lo recuperamos aquí para que el pedido y la
+		// suscripción nuevos sí lleven un teléfono en formato +34 y un nombre usable
+		// (cowork, NOTAS_PARA_CODE_pestanas_grupos.md 3/11: 66 alumnos sin teléfono, 71 sin
+		// nombre real, todos de alta manual).
+		$billing_phone = get_user_meta( $customer_id, 'billing_phone', true );
+		if ( ! $billing_phone ) {
+			$email_local = strstr( $customer->user_email, '@', true );
+			if ( $email_local && preg_match( '/^\d{9}$/', $email_local ) ) {
+				$billing_phone = '+34' . $email_local;
+			}
+		}
+		$billing_first_name = get_user_meta( $customer_id, 'billing_first_name', true ) ?: $customer->first_name;
+		$billing_last_name  = get_user_meta( $customer_id, 'billing_last_name', true ) ?: $customer->last_name;
+		if ( ! $billing_first_name && ! $billing_last_name && $customer->display_name ) {
+			$partes = explode( ' ', trim( $customer->display_name ), 2 );
+			$billing_first_name = $partes[0];
+			$billing_last_name  = $partes[1] ?? '';
+		}
 		$billing = array(
-			'first_name' => get_user_meta( $customer_id, 'billing_first_name', true ) ?: $customer->first_name,
-			'last_name' => get_user_meta( $customer_id, 'billing_last_name', true ) ?: $customer->last_name,
+			'first_name' => $billing_first_name,
+			'last_name' => $billing_last_name,
 			'email' => $customer->user_email,
-			'phone' => get_user_meta( $customer_id, 'billing_phone', true ) ?: '',
+			'phone' => $billing_phone ?: '',
 			'address_1' => get_user_meta( $customer_id, 'billing_address_1', true ) ?: '',
 			'city' => get_user_meta( $customer_id, 'billing_city', true ) ?: '',
 			'postcode' => get_user_meta( $customer_id, 'billing_postcode', true ) ?: '',

@@ -10,15 +10,14 @@
 }
 
 /* ---- Header ---- */
-/* Fondo claro y limpio (manual de identidad): logotipo corporativo, claim
-   manuscrito con los enlaces a clases y tecnificación, y el mapa de salas. */
 
 .app-header {
   background-color: var(--color-header);
-  color: var(--color-text-primary);
-  padding: var(--spacing-lg) var(--spacing-xl) 0;
+  color: #ffffff;
+  padding: var(--spacing-lg) var(--spacing-xl);
   text-align: center;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 4px solid var(--color-accent);
+  box-shadow: 0 2px 0 #846400;   /* double-rule retro effect */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -34,73 +33,27 @@
   z-index: 1;
 }
 
-.app-header__logo-link { display: block; line-height: 0; }
-
 .app-header__logo {
-  height: auto;
-  width: 190px;
-  max-width: 60vw;
+  height: 80px;
+  width: 80px;
+  object-fit: cover;
+  border-radius: 50%;
 }
 
-/* Claim manuscrito y botones */
-.app-header__claim {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  margin-top: 6px;
+.app-header__subtitle {
+  font-size: var(--font-size-sm);
+  color: #aaaaaa;
+  margin-top: var(--spacing-xs);
 }
 
-.app-header__claim-text {
-  font-family: var(--font-hand);
-  font-size: 1.65rem;
-  font-weight: 700;
-  line-height: 1.1;
-  color: var(--color-ink);
-}
-
-.app-header__links {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.app-header__link {
-  display: inline-flex;
-  align-items: center;
-  padding: 7px 14px;
-  font-family: var(--font-heading);
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  text-decoration: none;
-  border: 2px solid var(--color-ink);
-  border-radius: 999px;
-  color: var(--color-ink);
-  background: transparent;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-}
-.app-header__link:hover { background: var(--color-ink); color: #fff; }
-
-.app-header__link--cta {
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-ink);
-}
-.app-header__link--cta:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); color: #fff; }
-
-/* Acceso y usuario */
 .app-header__login-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 6px 14px;
-  margin-top: 12px;
-  border: 1.5px solid var(--color-ink);
-  border-radius: 999px;
-  color: var(--color-ink);
+  padding: 5px 12px;
+  margin-top: 8px;
+  border: 1.5px solid var(--color-accent);
+  color: var(--color-accent);
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -109,24 +62,21 @@
   transition: background 0.15s, color 0.15s;
 }
 .app-header__login-btn:hover {
-  background: var(--color-ink);
-  color: #fff;
+  background: var(--color-accent);
+  color: #1a1412;
 }
 
 .app-header__user {
   display: flex;
   align-items: center;
   gap: 9px;
-  margin-top: 12px;
-  padding: 6px 12px 6px 6px;
-  background: var(--color-surface);
-  border-radius: 999px;
+  margin-top: 8px;
 }
 
 /* Avatar circle button */
 .app-header__avatar-btn {
   background: none;
-  border: 2px solid var(--color-accent);
+  border: 2px solid rgba(245, 200, 66, 0.35);
   padding: 0;
   border-radius: 50%;
   cursor: pointer;
@@ -135,14 +85,15 @@
   transition: border-color 0.15s;
   line-height: 0;
 }
-.app-header__avatar-btn:hover { border-color: var(--color-ink); }
+.app-header__avatar-btn:hover { border-color: rgba(245, 200, 66, 0.75); }
 
 /* Shown while the API fetch is in-flight to avoid the stale-avatar flash */
 .app-header__avatar-placeholder {
   width: 32px;
   height: 32px;
   border-radius: 50%;
-  background: var(--color-border);
+  background: #222;
+  border: 2px solid rgba(245, 200, 66, 0.15);
   flex-shrink: 0;
 }
 
@@ -150,23 +101,33 @@
 .app-header__user-info {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
   gap: 1px;
   min-width: 0;
 }
 .app-header__user-name {
-  font-size: 0.82rem;
-  font-weight: 800;
-  color: var(--color-ink);
-  letter-spacing: 0.01em;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #f5c842;
+  letter-spacing: 0.02em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Botón "⋯" (abre app-header__extra en móvil/tablet) y el propio menú plegable — Ramiro,
+   09/11 07:05. En ordenador el botón no hace falta y el menú va siempre desplegado
+   (`display: contents`: sus hijos quedan en el sitio de siempre, sin caja propia). */
+.app-header__menu-toggle {
+  display: none;
+  background: none; border: 1px solid rgba(245, 200, 66, 0.4); color: #f5c842;
+  font-size: 18px; font-weight: 700; line-height: 1; width: 44px; height: 44px; /* antes 32px — Ramiro, 09/11 07:45 */
+  border-radius: 50%; margin-left: auto; cursor: pointer; flex-shrink: 0;
+}
+.app-header__extra { display: contents; }
 .app-header__user-nick {
-  font-size: 0.7rem;
-  color: var(--color-text-secondary);
-  font-weight: 600;
+  font-size: 0.68rem;
+  color: #aaa;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -174,30 +135,46 @@
 .app-header__logout-btn {
   background: none;
   border: none;
-  color: var(--color-text-secondary);
-  font-size: 0.68rem;
-  font-weight: 700;
+  color: #b5b5b5; /* antes #555 (2,21:1 sobre la cabecera oscura) — NOTAS_PARA_CODE_contraste.md */
+  font-size: 0.64rem;
+  font-weight: 600;
   cursor: pointer;
   padding: 0;
-  margin-top: 2px;
+  margin-top: 3px;
   font-family: inherit;
   letter-spacing: 0.03em;
   text-align: left;
   transition: color 0.15s;
 }
-.app-header__logout-btn:hover { color: var(--color-ink); text-decoration: underline; }
+.app-header__logout-btn:hover { color: #ccc; }
 
 .app-header__ver-como {
-  background: var(--color-accent-soft);
-  border: 1px solid var(--color-accent);
-  color: var(--color-ink);
-  font-size: 0.66rem;
-  font-weight: 700;
+  background: #2a2015;
+  border: 1px solid #f5c842;
+  color: #f5c842;
+  font-size: 0.64rem;
+  font-weight: 600;
   padding: 2px 4px;
   margin-top: 4px;
   font-family: inherit;
   cursor: pointer;
 }
+
+/* Interruptor claro/oscuro (Ramiro, 13/11: 2 modos, un solo botón) — cabecera siempre oscura
+   fija en los dos modos, así que el botón usa su propia paleta fija, como el resto de botones
+   de aquí (.app-header__ver-como), no las variables del tema del contenido. */
+.app-header__tema-btn {
+  background: none;
+  border: 1px solid rgba(245, 200, 66, 0.4);
+  color: #f5c842;
+  font-size: 0.78rem;
+  line-height: 1;
+  padding: 3px 6px;
+  margin-top: 4px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+.app-header__tema-btn:hover { background: rgba(245, 200, 66, 0.12); }
 
 .app-ver-como-banner {
   background: #7c2d12;
@@ -220,10 +197,20 @@
   font-family: inherit;
 }
 .app-ver-como-banner button:hover { background: rgba(255,255,255,0.15); }
+
+/* Cowork, 09/11 07:45: en móvil contaba como 37 px de los ~295 antes de ningún contenido. */
+@media (max-width: 999px) {
+  /* Cowork, 09/11 08:30: el botón «Volver a Socio» salía a 18 px — dentro de un aviso tan
+     compacto no cabe un botón de 44 px entero sin volver a hacerlo alto (justo lo que se quería
+     evitar); subo algo el padding como término medio, más tocable sin que el aviso vuelva a
+     los 37 px de antes. */
+  .app-ver-como-banner { padding: 6px 10px; font-size: 0.72rem; }
+  .app-ver-como-banner button { font-size: 0.72rem; padding: 6px 10px; }
+}
 .app-header__user-x {
   background: none;
   border: none;
-  color: var(--color-text-secondary);
+  color: #555;
   cursor: pointer;
   padding: 5px;
   display: flex;
@@ -233,14 +220,14 @@
   transition: color 0.15s, background 0.15s;
   line-height: 1;
 }
-.app-header__user-x:hover { color: var(--color-ink); background: rgba(0,0,0,0.05); }
+.app-header__user-x:hover { color: #ccc; background: rgba(255,255,255,0.06); }
 
 /* Subscription row */
 .app-header__sub {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 5px;
 }
 .app-header__sub-dot {
   width: 7px;
@@ -248,20 +235,19 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
-.app-header__sub-dot--active   { background: #16a34a; }
-.app-header__sub-dot--inactive { background: #ea580c; }
+.app-header__sub-dot--active   { background: #22c55e; }
+.app-header__sub-dot--inactive { background: #f97316; }
 .app-header__sub-name {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  color: #888;
   letter-spacing: 0.02em;
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
 .app-header__sub-class {
-  font-size: 0.66rem;
-  color: var(--color-text-secondary);
+  font-size: 0.65rem;
+  color: #666;
   letter-spacing: 0.02em;
 }
 
@@ -272,17 +258,16 @@
   align-items: center;
   overflow: visible;
   padding: 2px 10px;
-  background: var(--color-accent);
+  background: rgba(245, 200, 66, 0.08);
   border: 1px solid var(--color-accent);
-  border-radius: 999px;
-  color: var(--color-ink);
+  color: var(--color-accent);
   font-size: 0.66rem;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   text-decoration: none;
 }
-.app-header__renew-btn:hover { background: var(--color-accent-hover); color: #fff; }
+.app-header__renew-btn:hover { background: rgba(245, 200, 66, 0.18); }
 .app-header__renew-star {
   position: absolute;
   font-size: 8px;
@@ -305,7 +290,7 @@
 .logout-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(29,29,27,0.45);
+  background: rgba(0,0,0,0.6);
   z-index: 9999;
   display: flex;
   align-items: center;
@@ -315,11 +300,9 @@
 @keyframes overlay-in { from { opacity: 0; } to { opacity: 1; } }
 
 .logout-dialog {
-  background: #fff;
-  border-top: 4px solid var(--color-accent);
-  border-radius: 8px;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.18);
-  padding: 28px 32px;
+  background: #1b1710;
+  border: 2px solid var(--color-accent);
+  padding: 32px 36px;
   min-width: 220px;
   text-align: center;
   animation: dialog-pop 0.2s ease;
@@ -329,11 +312,11 @@
   to   { transform: scale(1);    opacity: 1; }
 }
 .logout-dialog__title {
-  font-family: var(--font-heading);
-  font-size: 1.2rem;
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
   font-weight: 700;
-  color: var(--color-ink);
-  margin: 0 0 20px;
+  color: #f0ece0;
+  margin: 0 0 22px;
 }
 .logout-dialog__actions {
   display: flex;
@@ -343,43 +326,96 @@
 .logout-dialog__cancel {
   padding: 8px 18px;
   background: none;
-  border: 1.5px solid var(--color-border);
-  border-radius: 999px;
-  color: var(--color-text-secondary);
+  border: 1.5px solid #444;
+  color: #999;
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
   letter-spacing: 0.05em;
   font-family: inherit;
   text-transform: uppercase;
   transition: border-color 0.15s, color 0.15s;
 }
-.logout-dialog__cancel:hover { border-color: var(--color-ink); color: var(--color-ink); }
+.logout-dialog__cancel:hover { border-color: #666; color: #ccc; }
 .logout-dialog__confirm {
   display: inline-block;
   padding: 8px 18px;
   background: var(--color-accent);
   border: 1.5px solid var(--color-accent);
-  border-radius: 999px;
-  color: var(--color-ink);
+  color: #1a1412;
   font-size: 0.8rem;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
   letter-spacing: 0.05em;
   text-decoration: none;
   text-transform: uppercase;
   transition: background 0.15s;
 }
-.logout-dialog__confirm:hover { background: var(--color-accent-hover); color: #fff; }
+.logout-dialog__confirm:hover { background: #e6b800; }
 
-/* Mapa de salas con las burbujas de blokes por color */
+.app-header__links {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-sm);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.app-header__link {
+  display: inline-block;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  text-decoration: none;
+  border: 2px solid #555;
+  color: #cccccc;
+  border-radius: 2px;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.app-header__link:hover {
+  border-color: var(--color-accent);
+  color: #ffffff;
+}
+
+.app-header__link--cta {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.app-header__link--cta:hover {
+  background: var(--color-accent);
+  color: #1a1412;
+}
+
+.app-header__link-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.app-header__link--small {
+  padding: 2px 8px;
+  font-size: 9px;
+}
+
+.app-header__link-hint {
+  font-size: 9px;
+  color: #b5b5b5; /* antes #777 (3,68:1 sobre la cabecera oscura) — NOTAS_PARA_CODE_contraste.md */
+  letter-spacing: 0.04em;
+  text-transform: none;
+  text-align: center;
+}
+
 .app-header__salas-wrap {
   position: relative;
   flex: 1;
   width: 100%;
   display: flex;
   align-items: center;
-  margin-top: var(--spacing-md);
 }
 
 .app-header__salas {
@@ -387,6 +423,18 @@
   width: 100%;
   max-width: none;
   object-fit: contain;
+}
+
+/* Mapa plegable (Ramiro, 09/11 06:26: en móvil/tablet se pliega por defecto). En ordenador
+   sigue abierto por defecto (cowork, 09/11: "el contenido empieza a 402 px por el mapa, creo
+   que es a propósito") — decisión de Code, 09/11 09:00: se deja abierto por defecto (tiene
+   información real, un monitor sobra de alto de sobra para eso) pero el botón para plegarlo
+   ahora se ve también en ordenador, por si alguien prefiere ganar esa pantalla. */
+.app-header__mapa-toggle {
+  display: inline-block;
+  background: none; border: 1px solid rgba(245, 200, 66, 0.4); color: #f5c842;
+  font-size: 14px; font-weight: 600; padding: 12px 14px; min-height: 44px; /* antes 31 px — Ramiro, 09/11 07:45 */
+  border-radius: 6px; margin: 4px auto; cursor: pointer; font-family: inherit;
 }
 
 .map-bubble-group {
@@ -405,22 +453,35 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.5);
   line-height: 1;
-  border: 2px solid rgba(255,255,255,0.85);
+  border: 2px solid rgba(255,255,255,0.65);
+}
+
+/* "Dónde está cada bloque" en Colección modo compe (Ramiro, 09/11): resalta la subzona al
+   tocarla en la tarjeta. */
+.map-bubble-group--resaltada { animation: subsala-pulso 1s ease-in-out 3; }
+.map-bubble--marcador {
+  width: 26px; height: 26px; background: #fbbf24; border-color: #fff;
+}
+@keyframes subsala-pulso {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.35); }
 }
 
 @media (min-width: 1125px) {
-  /* Más protagonismo al plano: más grande, misma proporción (4:1) para que las burbujas no se muevan */
   .app-header__salas-wrap {
-    max-width: 960px;
-  }
-  .app-header__salas {
-    height: 240px;
+    max-width: 800px;
   }
 }
 
-/* Pantallas grandes: logo y claim a la izquierda, salas a la derecha */
+
+/* Remove old title style */
+.app-header__title {
+  display: none;
+}
+
+/* Responsive: larger screens - salas on the right */
 @media (min-width: 1000px) {
   .app-header {
     flex-direction: row;
@@ -429,23 +490,46 @@
     align-items: center;
   }
 
+  /* Cowork, 09/11 09:05: plegar el mapa no ganaba nada de pantalla — el alto real lo marcaba
+     logo-section (339 px), una columna con logo/subtítulo/usuario/⋯/Apúntate/Tecnificación/
+     mapa uno debajo de otro, sin relación con el mapa. En fila: logo + subtítulo + usuario a
+     la izquierda, el resto (apodo, Log out, Ver como, suscripción, los 2 CTA, el botón del
+     mapa) a la derecha, todo en una sola fila que envuelve si no cabe. El "⋯" ya no hace
+     falta aquí (en fila ya se ve todo siempre), así que se oculta. */
   .app-header__logo-section {
     flex-shrink: 0;
     width: auto;
-    max-width: 380px;
-    align-items: flex-start;   /* logo, claim, botones y usuario alineados a la izquierda */
-    text-align: left;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
   }
-  .app-header__claim { align-items: flex-start; }
-  .app-header__links { justify-content: flex-start; }
+  .app-header__logo { height: 48px; width: 48px; }
+  .app-header__subtitle { margin: 0; }
+  .app-header__user { margin-top: 0; width: auto; }
+  .app-header__menu-toggle { display: none; }
+  .app-header__extra {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+  }
+  .app-header__links { margin-top: 0; }
 
   .app-header__salas-wrap {
-    margin: 0 0 0 var(--spacing-md);
+    margin-left: var(--spacing-md);
     width: auto;
+  }
+
+  .app-header__salas {
+    height: 200px;
   }
 
   .app-nav {
     width: 100%;
+    margin-top: var(--spacing-md);
   }
 }
 
@@ -454,33 +538,13 @@
 .app-nav {
   margin-top: var(--spacing-md);
   width: 100%;
-  border-top: 1px solid var(--color-border);
 }
-
-/* Botón del menú: solo en el móvil */
-.app-nav__toggle {
-  display: none;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 48px;
-  background: none;
-  border: none;
-  color: var(--color-ink);
-  font-family: var(--font-heading);
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.app-nav__toggle-icon { font-size: 1.2rem; line-height: 1; }
 
 .app-nav__list {
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 0 2px;
+  gap: 2px var(--spacing-md);
   list-style: none;
   padding: 0 var(--spacing-sm);
   margin: 0;
@@ -493,48 +557,42 @@
 .app-nav__link {
   display: inline-flex;
   align-items: center;
-  padding: 12px 10px 9px;
-  min-height: 48px;
+  padding: 11px 14px;
+  min-height: 44px;
   background-color: transparent;
-  color: var(--color-text-secondary);
+  color: #cccccc;
   text-decoration: none;
-  border-bottom: 3px solid transparent;
-  font-family: var(--font-heading);
-  font-size: 0.92rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  border-bottom: 2px solid transparent;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   white-space: nowrap;
   transition: color 0.2s, border-color 0.2s;
 }
 
-/* Sin el recuadro del navegador al pulsar con el ratón; con el teclado,
-   un marco mostaza suave (accesibilidad) */
-.app-nav__link:focus { outline: none; }
-.app-nav__link:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
-  border-radius: 6px;
+.app-nav__link:hover {
+  color: #ffffff;
+  border-bottom-color: var(--color-accent);
 }
 
-.app-nav__link:hover {
-  color: var(--color-ink);
-  border-bottom-color: var(--color-border);
+.app-nav__link:active {
+  color: var(--color-accent);
 }
 
 /* Active link styling */
 .app-nav__link.active {
-  color: var(--color-ink);
+  color: var(--color-accent);
   border-bottom-color: var(--color-accent);
 }
 
-/* Secciones de gestión: en peacock (secundario del manual) */
 .app-nav__link--super {
-  color: var(--brand-peacock);
+  color: #a78bfa;
+  border-bottom-color: transparent;
 }
 .app-nav__link--super:hover, .app-nav__link--super.active {
-  color: var(--brand-firefly);
-  border-bottom-color: var(--brand-peacock);
+  color: #c4b5fd;
+  border-bottom-color: #c4b5fd;
 }
 
 /* Floating nav — fixed at top, slides in on scroll-up */
@@ -545,9 +603,8 @@
   right: 0;
   z-index: 200;
   background: var(--color-header);
-  border-top: none;
   border-bottom: 3px solid var(--color-accent);
-  box-shadow: 0 3px 16px rgba(0,0,0,0.12);
+  box-shadow: 0 3px 16px rgba(0,0,0,0.5);
   margin-top: 0;
   width: 100%;
   box-sizing: border-box;
@@ -559,97 +616,84 @@
   transform: translateY(0);
 }
 
-/* Móvil y tablet pequeña: menú plegado tras el botón «Menú», en columna y ordenado */
-@media (max-width: 760px) {
-  .app-header {
-    padding: var(--spacing-md) var(--spacing-md) 0;
-  }
-  .app-nav__toggle {
-    display: flex;
-  }
-  .app-nav__list {
+/* Móvil/tablet (< 1000 px, Ramiro 09/11 06:26, medido con la app real): la cabecera ocupaba
+   toda la primera pantalla antes de ningún contenido (779/844 en móvil, 686/1180 en tablet) —
+   logo más pequeño, sin subtítulo, mapa plegado por defecto (botón de arriba), menú en una
+   sola fila con scroll horizontal en vez de envolver en 3-5 filas. */
+@media (max-width: 999px) {
+  .app-header { padding: 10px 14px; }
+  /* Una sola fila arriba (Ramiro, 09/11 07:05): logo pequeño a la izquierda, nombre, avatar a
+     la derecha — logo y .app-header__user son hijos directos de logo-section, así que para
+     que compartan fila sin tocar el resto del orden, logo-section pasa a fila con wrap y los
+     bloques que van DEBAJO (extra, links) se fuerzan a su propia línea con flex-basis: 100%. */
+  .app-header__logo-section { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .app-header__logo-section > a { flex: 0 0 auto; }
+  .app-header__logo { height: 36px; width: 36px; }
+  .app-header__subtitle { display: none; }
+  .app-header__user { margin-top: 0; width: auto; flex: 1 1 auto; min-width: 0; }
+  .app-header__menu-toggle { display: inline-flex; align-items: center; justify-content: center; }
+  /* Cerrado por defecto: ni apodo, ni Log out, ni "Ver como", ni suscripción — con eso era
+     buena parte de la cabecera (Ramiro, 09/11 07:05). Se abre con el botón "⋯" de arriba. */
+  .app-header__extra {
     display: none;
     flex-direction: column;
-    padding: 0 0 var(--spacing-sm);
-    gap: 0;
+    align-items: center;
+    flex-basis: 100%;
+    gap: 6px;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.08);
   }
-  .app-nav__list--open {
-    display: flex;
+  .app-header__extra--abierto { display: flex; }
+  .app-header__links { margin-top: 6px; flex-basis: 100%; }
+  .app-header__link { font-size: 13px; padding: 5px 10px; }
+  .app-header__link-hint { display: none; } /* texto largo de promo, prescindible aquí */
+  .app-header__mapa-toggle { display: block; }
+  .app-header__salas-wrap { justify-content: center; }
+  .app-header__salas { height: 140px; }
+
+  .app-nav__list {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
-  .app-nav__item {
-    border-top: 1px solid var(--color-border);
+  .app-nav__list::-webkit-scrollbar { display: none; }
+  .app-nav__item { flex: 0 0 auto; }
+
+  /* Letra mínima 14 px / botones 16 px donde es sencillo subirla sin rehacer el diseño
+     (Ramiro, 09/11 06:26, "21 textos < 12 px") — el resto de la app se revisa aparte según lo
+     que se vea mal en la prueba, no se puede auditar a ciegas sin ver la pantalla. */
+  .app-header__user-name { font-size: 14px; }
+  .app-header__user-nick { font-size: 13px; }
+  .app-header__logout-btn { font-size: 13px; padding: 4px 0; }
+  .app-header__ver-como { font-size: 13px; padding: 6px 8px; }
+  .app-header__sub-name { font-size: 13px; }
+  .app-header__sub-class { font-size: 12px; }
+}
+
+/* Mobile: reduce header padding */
+@media (max-width: 640px) {
+  .app-header {
+    padding: var(--spacing-md) var(--spacing-md);
   }
   .app-nav__link {
-    width: 100%;
-    justify-content: center;
-    border-bottom: none;
-    border-left: 4px solid transparent;
-    padding: 12px 16px;
-  }
-  .app-nav__link.active {
-    background: var(--color-accent-soft);
-    border-left-color: var(--color-accent);
-  }
-  .app-nav--floating .app-nav__list--open {
-    max-height: calc(100dvh - 60px);
-    overflow-y: auto;
-  }
-  .app-header__salas {
-    height: 150px;
+    font-size: 13px;
+    padding: 11px 10px;
+    letter-spacing: 0.05em;
   }
 }
 
 /* ---- Main ---- */
 
-/* Secciones de gestión a lo ancho de la pantalla, como Los blokes (tienen tablas) */
-.app-main .org,
-.app-main .entrena,
-.app-main .stats-page,
-.app-main .sa-page,
-.app-main .sv-page,
-.app-main .tablet-yo {
-  max-width: none;
-}
-
-/* Progreso y Ligas: columna centrada y un dibujo de línea en mostaza asomando por
-   la izquierda, como en la web del club. Los PNG son blancos: se usan como máscara
-   y se pintan del color que queramos. Solo en pantallas anchas (en el móvil no cabe). */
-.app-main .progreso,
-.app-main .user-stats,
-.app-main .mi-clase,
-.app-main .league-page {
-  max-width: 720px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
-/* El dibujo va en el margen izquierdo (fuera de la columna de 720 px, así nunca
-   tapa el texto) y se repite uno debajo de otro a lo largo de toda la página. */
-@media (min-width: 1180px) {
-  .app-main:has(.progreso-idx)::before,
-  .app-main:has(.league-page)::before {
-    content: '';
-    position: absolute;
-    top: var(--spacing-lg);
-    bottom: 0;
-    left: var(--spacing-md);
-    width: calc((100% - 720px) / 2 - 40px);
-    background-color: var(--color-accent);
-    opacity: 0.45;
-    -webkit-mask: url('./assets/brand/linea-escalador-cuerda.png') repeat-y left top / 100% auto;
-            mask: url('./assets/brand/linea-escalador-cuerda.png') repeat-y left top / 100% auto;
-    pointer-events: none;
-  }
-  .app-main:has(.league-page)::before {
-    -webkit-mask-image: url('./assets/brand/linea-grupo-saltando.png');
-            mask-image: url('./assets/brand/linea-grupo-saltando.png');
-  }
-}
-
 .app-main {
   flex: 1;
-  padding: var(--spacing-lg) var(--spacing-md);
-  max-width: 1280px;
+  /* Ramiro, 09/11 06:26: "en el ordenador no ocupa todo el ancho" — en una pantalla de 1920 px
+     quedaban ~320 px vacíos a cada lado. El límite de cada página sigue siendo el suyo (cada
+     .css de página tiene el suyo, revisados aparte); este es solo el límite exterior. */
+  padding: var(--spacing-lg) clamp(12px, 2vw, 32px);
+  max-width: 2400px;
   margin: 0 auto;
   width: 100%;
   position: relative;
@@ -658,14 +702,14 @@
 /* ---- Footer ---- */
 
 .app-footer {
-  background-color: var(--color-bg);
-  color: var(--color-text-secondary);
+  background-color: var(--color-header);
+  color: #888880;
   text-align: center;
   padding: var(--spacing-md);
   font-size: 12px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  border-top: 1px solid var(--color-border);
+  border-top: 3px solid var(--color-accent);
   margin-top: auto;
 }
 
@@ -763,7 +807,10 @@
 
 .filter-bar__sort-btn--active {
   border-color: var(--color-accent);
-  background: var(--color-accent-soft);
+  /* Ramiro, 13/11: fondo crema fijo (#fffbe6) con el texto ya en var(--color-text-primary) —
+     invisible en oscuro (1,1). Dorado traslúcido en vez de otro color fijo: funciona como
+     resalte en los dos modos, el texto sigue la variable. */
+  background: rgba(245, 200, 66, 0.18);
   color: var(--color-text-primary);
   filter: grayscale(0);
 }
@@ -774,10 +821,32 @@
 
 .cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  /* Ramiro, 09/11 06:26: más columnas en pantallas anchas (antes 280px mínimo dejaba la
+     cuadrícula de Colección en ~1000 px aunque hubiera sitio para más). */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: var(--spacing-lg);
   position: relative;
 }
+
+/* Tarjetas de la compe en Colección (Ramiro, 09/11 06:26): número y zona tienen que llenar la
+   tarjeta, con un tamaño relativo al ANCHO DE LA TARJETA (no del viewport, que en una
+   cuadrícula de varias columnas sería demasiado grande) — de ahí container queries (`cqw`).
+   `container-type: inline-size` convierte cada tarjeta en su propio contenedor de medida. */
+.compe-card {
+  container-type: inline-size;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  aspect-ratio: 1; border-radius: 16px; gap: 4%;
+}
+.compe-card__numero {
+  font-size: clamp(2.5rem, 46cqw, 9rem);
+  font-weight: 800; line-height: 1;
+}
+.compe-card__zona {
+  font-size: clamp(0.75rem, 11cqw, 1.6rem);
+  font-weight: 700; text-align: center; line-height: 1.15; padding: 0 6%;
+}
+/* Navegadores sin container queries: se queda en el tamaño mínimo del clamp (legible, aunque
+   no llene la tarjeta) en vez de romperse — degradación aceptable. */
 
 /* ============================================
    EVENT CARD
@@ -785,14 +854,27 @@
 
 .event-card {
   background-color: var(--color-surface);
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid var(--color-border);
-  box-shadow: 0 1px 3px rgba(29,29,27,0.06);
+  /* Ramiro, 13/11 05:30: era una sombra beige fija (#c4b99a), pensada para el modo claro que ya
+     no existe — invisible/rara sobre el fondo oscuro de la card. */
+  box-shadow: 3px 4px 0 rgba(0, 0, 0, 0.4);
   overflow: visible;
   display: flex;
   flex-direction: column;
   transition: box-shadow 0.15s ease, transform 0.15s ease;
   position: relative;
+}
+
+/* Inner frame line */
+.event-card::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  pointer-events: none;
+  z-index: 0;
 }
 
 .event-card > * {
@@ -801,9 +883,8 @@
 }
 
 .event-card:hover {
-  box-shadow: 0 8px 22px rgba(29,29,27,0.12);
-  border-color: var(--color-accent);
-  transform: translateY(-2px);
+  box-shadow: 5px 6px 0 #b8ae94;
+  transform: translateY(-2px) translateX(-1px);
 }
 
 .event-card__body {
@@ -813,7 +894,6 @@
   gap: var(--spacing-sm);
   flex: 1;
   background-color: var(--color-surface);
-  border-radius: 0 0 10px 10px;
 }
 
 .event-card__header {
@@ -875,7 +955,7 @@
 
 .gallery {
   position: relative;
-  background-color: #e8e8e8;
+  background-color: var(--color-surface);
   width: 100%;
   aspect-ratio: 4 / 3;
   overflow: hidden;
@@ -911,33 +991,9 @@
   gap: var(--spacing-sm);
 }
 
-.gallery__btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: none;
-  background-color: rgba(0, 0, 0, 0.50);
-  color: #ffffff;
-  font-size: 20px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background-color 0.15s ease;
-}
-
-.gallery__btn:hover {
-  background-color: rgba(0, 0, 0, 0.80);
-}
-
-.gallery__counter {
-  color: #ffffff;
-  font-size: 12px;
-  font-weight: 600;
-  background-color: rgba(0, 0, 0, 0.50);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-}
+/* .gallery__btn / .gallery__counter: estaban duplicados aquí y en ImageGallery.css con
+   colores distintos (cuál ganaba dependía del orden de import) — unificados en una sola
+   definición, en ImageGallery.css, el fichero del componente al que pertenecen. */
 
 /* ---- Dot Indicators ---- */
 
@@ -1001,11 +1057,11 @@
    ============================================ */
 
 .error-message {
-  background-color: #fdecea;
-  border: 1px solid #f5c6c2;
+  background-color: color-mix(in srgb, var(--state-bad) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-bad) 40%, transparent);
   border-radius: var(--radius-md);
   padding: var(--spacing-md);
-  color: #922b21;
+  color: var(--state-bad);
   text-align: center;
   margin: var(--spacing-lg) 0;
 }
@@ -1031,6 +1087,12 @@
 
   .cards-grid {
     grid-template-columns: 1fr;
+  }
+  /* Tarjetas de la compe (Ramiro, 09/11 07:05): "1 por fila, 16 bloques = 6 pantallas de
+     scroll" — 2 columnas en móvil (más específico que `.cards-grid` de arriba, así que gana
+     sin depender del orden). */
+  .cards-grid.compe-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .filter-bar {
@@ -1058,4 +1120,238 @@
     padding: 0 6px;
   }
 
+  /* Cowork, 09/11 07:05: esta regla (sin tocar desde entonces) ponía `flex-wrap: wrap` y, al
+     venir DESPUÉS en el archivo que el `nowrap` de la media query de 999px, ganaba en móvil y
+     dejaba el menú partido en varias filas otra vez — de ahí "sigue partido en 5 filas" aunque
+     el nowrap ya estuviera puesto en el sitio correcto (`.app-nav__list`, no en `.app-nav`).
+     Sin `flex-wrap` aquí, manda la regla de scroll horizontal de la media query de 999px. */
+  .app-nav__list {
+    gap: var(--spacing-sm);
+    justify-content: flex-start;
+  }
+
+  .app-nav__link {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    font-size: 13px;
+  }
+}
+/* =====================================================================
+   IMAGEN CORPORATIVA (rediseño, 21/11/2026)
+   Va al final para mandar sobre lo de arriba sin tocar cómo funciona la cabecera
+   (estructura de Ramiro del 09/11: fila compacta en móvil, «⋯», mapa plegable).
+   Todo con variables de index.css: sirve igual en modo claro y en modo oscuro.
+   ===================================================================== */
+
+.app-header {
+  color: var(--color-text-primary);
+  padding: var(--spacing-lg) var(--spacing-xl) 0;
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: none;
+}
+
+/* Logotipo del manual: claro u oscuro según el modo; el isotipo solo en móvil */
+.app-header__logo-link { display: block; line-height: 0; }
+.app-header__logo {
+  height: auto;
+  width: 190px;
+  max-width: 60vw;
+  border-radius: 0;
+  object-fit: contain;
+}
+.app-header__logo--oscuro,
+.app-header__logo--iso { display: none; }
+:root[data-theme="dark"] .app-header__logo--claro { display: none; }
+:root[data-theme="dark"] .app-header__logo--oscuro { display: block; }
+
+/* Claim manuscrito */
+.app-header__subtitle {
+  font-family: var(--font-hand);
+  font-size: 1.65rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--color-ink);
+  margin-top: 6px;
+}
+
+/* Botones de la cabecera: píldoras con el negro de la marca y CTA en mostaza */
+.app-header__links { gap: 8px; }
+.app-header__link-wrap { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.app-header__link,
+.app-header__link--small {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  font-family: var(--font-heading);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  color: var(--color-ink);
+  background: transparent;
+}
+.app-header__link:hover { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-on-ink); }
+.app-header__link--cta { background: var(--color-accent); border-color: var(--color-accent); color: #1d1d1b; }
+.app-header__link--cta:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); color: #1d1d1b; }
+
+.app-header__login-btn {
+  padding: 6px 14px;
+  margin-top: 12px;
+  border: 1.5px solid var(--color-ink);
+  border-radius: 999px;
+  color: var(--color-ink);
+}
+.app-header__login-btn:hover { background: var(--color-ink); color: var(--color-on-ink); }
+
+/* Usuario */
+.app-header__user {
+  background: var(--color-surface);
+  border-radius: 999px;
+  padding: 6px 12px 6px 6px;
+}
+.app-header__avatar-btn { border-color: var(--color-accent); }
+.app-header__avatar-placeholder { background: var(--color-border); border-color: var(--color-border); }
+.app-header__user-name { color: var(--color-text-primary); }
+.app-header__user-nick,
+.app-header__sub-name,
+.app-header__sub-class { color: var(--color-text-secondary); }
+.app-header__logout-btn { color: var(--color-text-secondary); }
+.app-header__logout-btn:hover { color: var(--color-text-primary); }
+.app-header__user-x { color: var(--color-text-secondary); }
+.app-header__user-x:hover { color: var(--color-text-primary); background: var(--color-accent-soft); }
+.app-header__renew-btn { color: var(--color-accent-text); border-color: var(--color-accent); }
+.app-header__renew-star { color: var(--color-accent); }
+
+.app-header__ver-como,
+.app-header__tema-btn,
+.app-header__menu-toggle,
+.app-header__mapa-toggle {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  border-radius: 999px;
+}
+.app-header__ver-como { border-radius: 6px; }
+.app-header__tema-btn:hover,
+.app-header__mapa-toggle:hover,
+.app-header__menu-toggle:hover { border-color: var(--color-accent); }
+
+/* Menú */
+.app-nav { border-top: 1px solid var(--color-border); }
+.app-nav__link {
+  color: var(--color-text-secondary);
+  font-family: var(--font-heading);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-bottom: 3px solid transparent;
+}
+.app-nav__link:hover { color: var(--color-text-primary); border-bottom-color: var(--color-border); }
+.app-nav__link:active,
+.app-nav__link.active { color: var(--color-text-primary); border-bottom-color: var(--color-accent); }
+.app-nav__link:focus { outline: none; }
+.app-nav__link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: 6px; }
+/* Gestión en peacock (secundario del manual); más claro en oscuro para que se lea */
+.app-nav__link--super { color: var(--brand-peacock); }
+.app-nav__link--super:hover,
+.app-nav__link--super.active { color: var(--brand-firefly); border-bottom-color: var(--brand-peacock); }
+:root[data-theme="dark"] .app-nav__link--super { color: #5fb4d6; }
+:root[data-theme="dark"] .app-nav__link--super:hover,
+:root[data-theme="dark"] .app-nav__link--super.active { color: #9fd3e8; border-bottom-color: #5fb4d6; }
+.app-nav--floating {
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 3px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* Ventana de cerrar sesión */
+.logout-dialog { background: var(--color-surface); color: var(--color-text-primary); border-color: var(--color-border); }
+.logout-dialog__title { color: var(--color-text-primary); }
+.logout-dialog__cancel { border-color: var(--color-border); color: var(--color-text-secondary); }
+.logout-dialog__cancel:hover { border-color: var(--color-text-secondary); color: var(--color-text-primary); }
+.logout-dialog__confirm { background: var(--color-accent); color: #1d1d1b; }
+.logout-dialog__confirm:hover { background: var(--color-accent-hover); }
+
+/* Tarjetas de bloke: limpias, sin marco interior */
+.event-card {
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(29, 29, 27, 0.06);
+}
+.event-card::before { display: none; }
+
+/* Pie */
+.app-footer { color: var(--color-text-secondary); border-top: 1px solid var(--color-border); }
+
+/* Ordenador: logo, claim, botones y usuario en columna a la izquierda; el plano a la derecha */
+@media (min-width: 1000px) {
+  .app-header__logo-section {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    text-align: left;
+    gap: 8px;
+    max-width: 440px;
+  }
+  .app-header__logo { height: auto; width: 190px; }
+  .app-header__extra { margin-left: 0; justify-content: flex-start; }
+  .app-header__link-wrap { justify-content: flex-start; }
+  .app-header__mapa-toggle { margin: 0; padding: 6px 14px; min-height: 0; font-size: 0.8rem; }
+}
+@media (min-width: 1125px) {
+  /* Más protagonismo al plano: más grande, misma proporción (4:1) para que las burbujas no se muevan */
+  .app-header__salas-wrap { max-width: 960px; }
+  .app-header__salas { height: 240px; }
+}
+
+/* Móvil y tablet: misma fila compacta de Ramiro, con el isotipo redondo */
+@media (max-width: 999px) {
+  .app-header { padding: 10px 14px 0; }
+  .app-header__logo--claro,
+  .app-header__logo--oscuro { display: none !important; }
+  .app-header__logo--iso { display: block; width: 40px; height: 40px; }
+  .app-header__extra { border-top-color: var(--color-border); }
+  .app-header__link,
+  .app-header__link--small { font-size: 0.8rem; padding: 6px 12px; }
+}
+
+/* Secciones de gestión a lo ancho de la pantalla, como Los blokes (tienen tablas) */
+.app-main .org,
+.app-main .entrena,
+.app-main .stats-page,
+.app-main .sa-page,
+.app-main .sv-page,
+.app-main .tablet-yo {
+  max-width: none;
+}
+
+/* Progreso y Ligas: columna centrada y un dibujo de línea en mostaza en el margen
+   izquierdo, como en la web del club. Los PNG son blancos: se usan como máscara y se
+   pintan del color que queramos. Solo en pantallas anchas (en el móvil no cabe). */
+.app-main .progreso,
+.app-main .user-stats,
+.app-main .mi-clase,
+.app-main .league-page {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+@media (min-width: 1180px) {
+  .app-main:has(.progreso-idx)::before,
+  .app-main:has(.league-page)::before {
+    content: '';
+    position: absolute;
+    top: var(--spacing-lg);
+    bottom: 0;
+    left: var(--spacing-md);
+    width: calc((100% - 720px) / 2 - 40px);
+    max-width: 520px;
+    background-color: var(--color-accent);
+    opacity: 0.45;
+    -webkit-mask: url('./assets/brand/linea-escalador-cuerda.png') repeat-y left top / 100% auto;
+            mask: url('./assets/brand/linea-escalador-cuerda.png') repeat-y left top / 100% auto;
+    pointer-events: none;
+  }
+  .app-main:has(.league-page)::before {
+    -webkit-mask-image: url('./assets/brand/linea-grupo-saltando.png');
+            mask-image: url('./assets/brand/linea-grupo-saltando.png');
+  }
 }

@@ -1,10 +1,17 @@
 /* ============================================
-   GOOGLE FONTS — manual de identidad de RocoMadrid
-   Avenir Next (texto) y DIN Pro (titulares) son de pago: en la web se
-   usan Nunito Sans y Barlow Semi Condensed, que se les parecen mucho.
-   Caveat: letra manuscrita para el claim de la cabecera.
+   FUENTES — autoalojadas vía @fontsource-variable (19/11, encargo de cookies/LSSI:
+   antes se pedían a fonts.googleapis.com/fonts.gstatic.com en cada visita, lo que
+   manda la IP a Google sin consentimiento — Jairo Ochoa/dixitalmedia, correo 18/11).
+   Mismo resultado visual que rocomadrid.com (misma fuente de origen, Google Fonts),
+   pero empaquetadas con el build, nunca una petición a terceros.
+   Imagen corporativa (manual de RocoMadrid): Avenir Next (texto) y DIN Pro (titulares)
+   son de pago; en la web se usan Nunito Sans y Barlow Semi Condensed, que se les parecen.
+   Caveat: letra manuscrita del claim de la cabecera.
    ============================================ */
-@import url('https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700;800&family=Barlow+Semi+Condensed:wght@600;700&family=Caveat:wght@600;700&display=swap');
+@import '@fontsource-variable/nunito-sans/wght.css';
+@import '@fontsource/barlow-semi-condensed/600.css';
+@import '@fontsource/barlow-semi-condensed/700.css';
+@import '@fontsource-variable/caveat/wght.css';
 
 /* ============================================
    GLOBAL RESET & DESIGN TOKENS
@@ -19,19 +26,20 @@
 }
 
 :root {
-  /* Colores del manual de identidad: mostaza y negro como principales, fondos
-     claros (blancos y grises) y los secundarios solo para detalles. */
+  /* Colores del manual de identidad (modo claro): mostaza y negro como principales,
+     fondos claros (blancos y grises) y los secundarios solo para detalles. */
   --color-bg: #f5f4f0;            /* gris muy claro, cálido */
   --color-surface: #ffffff;
-  --color-header: #e9eef6; /* gris azulado claro de la franja superior */
-  --color-text-primary: #1d1d1b;  /* negro de la marca, suavizado para texto */
+  --color-header: #e9eef6;        /* gris azulado claro de la franja superior */
+  --color-text-primary: #1d1d1b;  /* negro de la marca */
   --color-text-secondary: #5c5b57;
   --color-border: #dddbd3;
   --color-accent: #d09c01;        /* MOSTAZA · Pantone 606 CP */
   --color-accent-hover: #a87e00;
-  --color-accent-text: #bc8c00;   /* mostaza intermedio para texto sobre claro */
+  --color-accent-text: #bc8c00;   /* mostaza para texto sobre claro */
   --color-accent-soft: #fbf3d9;   /* fondo mostaza muy claro (activos, avisos) */
-  --color-ink: #1d1d1b;           /* NEGRO de la marca */
+  --color-ink: #1d1d1b;           /* NEGRO de la marca (bordes de botones, títulos) */
+  --color-on-ink: #ffffff;        /* texto sobre un fondo --color-ink */
 
   /* Secundarios del manual (detalles, nunca dominantes) */
   --brand-peacock: #006b92;
@@ -60,6 +68,26 @@
   --color-entrenamiento: #27ae60;
   --color-coordinacion: #e67e22;
 
+  /* Chips de color de presa y de sala (EventCard) — fondo translúcido + texto del mismo tono,
+     con su propia pareja para cada modo (el texto claro del modo oscuro no se lee sobre fondo
+     claro, y al revés). Valores de claro oscurecidos con el mismo criterio que --state-*. */
+  --chip-azules-bg: rgba(37, 99, 235, 0.14);           --chip-azules-text: #1d4ed8;
+  --chip-blancas-bg: rgba(107, 114, 128, 0.12);        --chip-blancas-text: #4b5563;
+  --chip-negras-bg: rgba(31, 41, 55, 0.12);            --chip-negras-text: #1f2937;
+  --chip-rojas-bg: rgba(220, 38, 38, 0.14);            --chip-rojas-text: #b91c1c;
+  --chip-amarillas-bg: rgba(217, 119, 6, 0.16);        --chip-amarillas-text: #92400e;
+  --chip-verdes-bg: rgba(5, 150, 105, 0.14);           --chip-verdes-text: #047857;
+  --chip-moradas-bg: rgba(109, 40, 217, 0.14);         --chip-moradas-text: #6d28d9;
+  --chip-rosas-bg: rgba(219, 39, 119, 0.14);           --chip-rosas-text: #9d174d;
+  --chip-grises-bg: rgba(107, 114, 128, 0.16);         --chip-grises-text: #374151;
+  --chip-turquesa-bg: rgba(13, 148, 136, 0.14);        --chip-turquesa-text: #0f766e;
+  --chip-amarillo-fluor-bg: rgba(101, 163, 13, 0.16);  --chip-amarillo-fluor-text: #3f6212;
+  --chip-naranja-bg: rgba(194, 65, 12, 0.14);          --chip-naranja-text: #9a3412;
+  --chip-color-raro-bg: rgba(107, 114, 128, 0.1);      --chip-color-raro-text: #57534e;
+  --sala-entrada-bg: rgba(37, 99, 235, 0.14);          --sala-entrada-text: #1d4ed8;
+  --sala-grande-bg: rgba(217, 119, 6, 0.16);           --sala-grande-text: #92400e;
+  --sala-cueva-bg: rgba(109, 40, 217, 0.14);           --sala-cueva-text: #6d28d9;
+
   /* Spacing */
   --spacing-xs: 4px;
   --spacing-sm: 8px;
@@ -67,11 +95,12 @@
   --spacing-lg: 24px;
   --spacing-xl: 40px;
 
-  /* Typography */
-  --font-body: 'Nunito Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  /* Typography — nombre "Variable" primero (el que trae @fontsource-variable), con el
+     nombre normal como respaldo por si alguna vez se cargara el estático por otro lado. */
+  --font-body: 'Nunito Sans Variable', 'Nunito Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-heading: 'Barlow Semi Condensed', 'Segoe UI', system-ui, sans-serif;
   --font-serif: 'Barlow Semi Condensed', 'Segoe UI', system-ui, sans-serif;   /* antes Playfair (retro) */
-  --font-hand: 'Caveat', 'Segoe Print', cursive;
+  --font-hand: 'Caveat Variable', 'Caveat', 'Segoe Print', cursive;
   --font-size-sm: 14px;
   --font-size-base: 16px;
   --font-size-lg: 20px;
@@ -85,6 +114,104 @@
   /* Shadows — subtler, more matte */
   --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--color-border);
   --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.12), 0 0 0 1px #bfb89e;
+}
+
+/* ============================================
+   MODO OSCURO (Ramiro, 11/11 05:08 → 13/11 05:30 "quita el modo claro" → 13/11 06:55 "quiero
+   solo 2 modos, dark and light, el automático era el que sobraba")
+   2 modos: claro (variables de :root arriba) y oscuro (override de aquí abajo). Sin tercer
+   modo "automático": el usuario elige explícitamente con el botón ☀️/🌙 de la cabecera
+   (src/utils/theme.js, App.jsx), se guarda en localStorage de ese dispositivo y se fija en
+   <html data-theme> desde el primer pintado (index.html / la plantilla PHP del shell), para
+   que no haya parpadeo. Quien nunca ha elegido se queda en oscuro por defecto.
+   La regla `@media (prefers-color-scheme: dark)` de aquí abajo es solo un colchón para el
+   primerísimo instante de carga en quien tenga JS desactivado o antes de que el script del
+   <head> corra — en la práctica siempre gana `[data-theme]`, puesto explícitamente por encima
+   según lo guardado. Los --state-* vuelven aquí a los tonos claros originales — son justo los
+   "pensados para fondo oscuro" que NOTAS_PARA_CODE_contraste.md tuvo que oscurecer para el modo
+   claro; aquí sobre fondo oscuro ya cumplen contraste tal cual.
+   La tele (/compe/directo) se queda oscura igual que siempre, pintada entera con estilos en
+   línea propios, sin depender de estas variables.
+   ============================================ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-bg: #1d1d1b;            /* NEGRO de la marca */
+    --color-surface: #282826;
+    --color-header: #2c2d30;        /* gris carbón, un punto azulado como el claro */
+    --color-text-primary: #f2f0ea;
+    --color-text-secondary: #b6b3aa;
+    --color-border: #3d3c38;
+    --color-accent: #d09c01;
+    --color-accent-hover: #e8b51a;
+    --color-accent-text: #e3b33a;
+    --color-accent-soft: rgba(208, 156, 1, 0.16);
+    --color-ink: #f2f0ea;
+    --color-on-ink: #1d1d1b;
+    --state-ok:      #34d399;
+    --state-good:    #34d399;
+    --state-warn:    #f5c842;
+    --state-info:    #60a5fa;
+    --state-purple:  #a78bfa;
+    --state-bad:     #f87171;
+    --state-orange:  #fb923c;
+    --chip-azules-bg: rgba(59, 130, 246, 0.16);           --chip-azules-text: #93c5fd;
+    --chip-blancas-bg: rgba(255, 255, 255, 0.08);         --chip-blancas-text: #e5e7eb;
+    --chip-negras-bg: rgba(255, 255, 255, 0.06);          --chip-negras-text: #d1d5db;
+    --chip-rojas-bg: rgba(239, 68, 68, 0.18);             --chip-rojas-text: #fca5a5;
+    --chip-amarillas-bg: rgba(217, 119, 6, 0.2);          --chip-amarillas-text: #fbbf24;
+    --chip-verdes-bg: rgba(34, 197, 94, 0.18);            --chip-verdes-text: #86efac;
+    --chip-moradas-bg: rgba(124, 58, 237, 0.2);           --chip-moradas-text: #c4b5fd;
+    --chip-rosas-bg: rgba(219, 39, 119, 0.2);             --chip-rosas-text: #f9a8d4;
+    --chip-grises-bg: rgba(156, 163, 175, 0.18);          --chip-grises-text: #d1d5db;
+    --chip-turquesa-bg: rgba(13, 148, 136, 0.2);          --chip-turquesa-text: #5eead4;
+    --chip-amarillo-fluor-bg: rgba(101, 163, 13, 0.2);    --chip-amarillo-fluor-text: #bef264;
+    --chip-naranja-bg: rgba(234, 88, 12, 0.2);            --chip-naranja-text: #fdba74;
+    --chip-color-raro-bg: rgba(156, 163, 175, 0.14);      --chip-color-raro-text: #9ca3af;
+    --sala-entrada-bg: rgba(59, 130, 246, 0.18);          --sala-entrada-text: #93c5fd;
+    --sala-grande-bg: rgba(217, 119, 6, 0.2);             --sala-grande-text: #fbbf24;
+    --sala-cueva-bg: rgba(124, 58, 237, 0.2);             --sala-cueva-text: #c4b5fd;
+    --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--color-border);
+    --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 0 1px #5a543d;
+  }
+}
+:root[data-theme="dark"] {
+  --color-bg: #1d1d1b;            /* NEGRO de la marca */
+  --color-surface: #282826;
+  --color-header: #2c2d30;        /* gris carbón, un punto azulado como el claro */
+  --color-text-primary: #f2f0ea;
+  --color-text-secondary: #b6b3aa;
+  --color-border: #3d3c38;
+  --color-accent: #d09c01;
+  --color-accent-hover: #e8b51a;
+  --color-accent-text: #e3b33a;
+  --color-accent-soft: rgba(208, 156, 1, 0.16);
+  --color-ink: #f2f0ea;
+  --color-on-ink: #1d1d1b;
+  --state-ok:      #34d399;
+  --state-good:    #34d399;
+  --state-warn:    #f5c842;
+  --state-info:    #60a5fa;
+  --state-purple:  #a78bfa;
+  --state-bad:     #f87171;
+  --state-orange:  #fb923c;
+  --chip-azules-bg: rgba(59, 130, 246, 0.16);           --chip-azules-text: #93c5fd;
+  --chip-blancas-bg: rgba(255, 255, 255, 0.08);         --chip-blancas-text: #e5e7eb;
+  --chip-negras-bg: rgba(255, 255, 255, 0.06);          --chip-negras-text: #d1d5db;
+  --chip-rojas-bg: rgba(239, 68, 68, 0.18);             --chip-rojas-text: #fca5a5;
+  --chip-amarillas-bg: rgba(217, 119, 6, 0.2);          --chip-amarillas-text: #fbbf24;
+  --chip-verdes-bg: rgba(34, 197, 94, 0.18);            --chip-verdes-text: #86efac;
+  --chip-moradas-bg: rgba(124, 58, 237, 0.2);           --chip-moradas-text: #c4b5fd;
+  --chip-rosas-bg: rgba(219, 39, 119, 0.2);             --chip-rosas-text: #f9a8d4;
+  --chip-grises-bg: rgba(156, 163, 175, 0.18);          --chip-grises-text: #d1d5db;
+  --chip-turquesa-bg: rgba(13, 148, 136, 0.2);          --chip-turquesa-text: #5eead4;
+  --chip-amarillo-fluor-bg: rgba(101, 163, 13, 0.2);    --chip-amarillo-fluor-text: #bef264;
+  --chip-naranja-bg: rgba(234, 88, 12, 0.2);            --chip-naranja-text: #fdba74;
+  --chip-color-raro-bg: rgba(156, 163, 175, 0.14);      --chip-color-raro-text: #9ca3af;
+  --sala-entrada-bg: rgba(59, 130, 246, 0.18);          --sala-entrada-text: #93c5fd;
+  --sala-grande-bg: rgba(217, 119, 6, 0.2);             --sala-grande-text: #fbbf24;
+  --sala-cueva-bg: rgba(124, 58, 237, 0.2);             --sala-cueva-text: #c4b5fd;
+  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--color-border);
+  --shadow-card-hover: 0 4px 14px rgba(0, 0, 0, 0.4), 0 0 0 1px #5a543d;
 }
 
 html {

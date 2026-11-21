@@ -1,15 +1,24 @@
 .sa-page {
-  max-width: 900px;
+  /* Ramiro, 09/11 06:36: tiene rejillas propias con auto-fill — a todo el ancho se reparten
+     solas en más columnas, no hace falta un tope aquí. */
+  max-width: none;
   margin: 0 auto;
   padding: 28px 16px 60px;
-  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
+/* Cowork 11/11 15:00: Recharts pinta el texto de la leyenda del mismo color que la serie
+   (vivo, pensado para fondo oscuro) — en claro falla igual que los ejes. El color de la serie
+   ya lo lleva el cuadradito de al lado; el texto pasa a uno solo, de tema. */
+.recharts-legend-item-text { color: var(--color-text-primary) !important; }
+
 .sa-page__title {
-  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 1.5rem;
   font-weight: 800;
-  color: #a78bfa;
+  /* Cowork 11/11 13:55: #a78bfa es justo el morado "para fondo oscuro" (dark --state-purple) —
+     fallaba en claro (2.4:1). La variable ya está oscurecida para claro y vivaz para oscuro. */
+  color: var(--state-purple);
   margin: 0 0 28px;
   letter-spacing: -0.02em;
 }
@@ -26,8 +35,12 @@
 /* ── Section ── */
 .sa-section {
   margin-bottom: 48px;
-  background: #100e09;
-  border: 1px solid #2a2015;
+  /* Cowork 11/11 14:30: este panel tenía fondo negro FIJO (nunca seguía el tema), pero dentro
+     ya había pasado mucho texto a la variable de tema — en claro quedaba texto oscuro sobre
+     este negro de siempre (372 fallos). El panel pasa también a variable: así todo lo de
+     dentro (KPIs, tablas, título) vuelve a tener sentido en los dos modos. */
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 20px 20px 24px;
   border-radius: 2px;
 }
@@ -53,7 +66,7 @@
   padding: 4px 12px;
   background: none;
   border: 1px solid #3a3020;
-  color: #666;
+  color: var(--color-text-secondary);
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -84,16 +97,16 @@
 }
 
 .sa-section-title {
-  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 1.0rem;
   font-weight: 700;
-  color: #f0ece0;
+  color: var(--color-text-primary);
   margin: 0;
   letter-spacing: 0.01em;
 }
 
 /* ── Loading / Error ── */
-.sa-loading { color: #666; font-style: italic; padding: 24px 0; text-align: center; font-size: 0.85rem; }
+.sa-loading { color: var(--color-text-secondary); font-style: italic; padding: 24px 0; text-align: center; font-size: 0.85rem; }
 .sa-error   { color: #f97316; padding: 12px 0; font-size: 0.82rem; }
 
 /* ── Period selector ── */
@@ -102,7 +115,7 @@
   padding: 4px 12px;
   background: none;
   border: 1px solid #3a3020;
-  color: #888;
+  color: var(--color-text-secondary);
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -110,7 +123,7 @@
   font-family: inherit;
   transition: background 0.15s, color 0.15s;
 }
-.sa-period__btn:hover { color: #ccc; border-color: #555; }
+.sa-period__btn:hover { color: var(--color-text-secondary); border-color: #555; }
 .sa-period__btn--active { background: #2a2015; color: #f5c842; border-color: #f5c842; }
 
 /* ── KPI cards ── */
@@ -129,7 +142,7 @@
 }
 .sa-kpi__value {
   display: block;
-  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 1.4rem;
   font-weight: 700;
   color: var(--kpi-color, #f5c842);
@@ -143,7 +156,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #666;
+  color: var(--color-text-secondary);
   margin-top: 5px;
 }
 
@@ -152,8 +165,8 @@
 .sa-filter-btn {
   padding: 4px 12px;
   background: none;
-  border: 1px solid #3a3020;
-  color: #888;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
   font-size: 0.72rem;
   font-weight: 600;
   cursor: pointer;
@@ -161,7 +174,7 @@
   border-radius: 20px;
   transition: background 0.15s, color 0.15s;
 }
-.sa-filter-btn:hover { color: #ccc; }
+.sa-filter-btn:hover { color: var(--color-text-secondary); }
 .sa-filter-btn--active { background: #2a2015; color: #f5c842; border-color: #f5c842; }
 
 /* ── Products layout ── */
@@ -184,9 +197,9 @@
 .sa-product-row:hover { background: rgba(255,255,255,0.03); }
 .sa-product-row--active { background: rgba(245, 200, 66, 0.07) !important; border: 1px solid rgba(245,200,66,0.2); }
 
-.sa-product-row__pos  { font-size: 0.65rem; color: #555; width: 22px; flex-shrink: 0; text-align: right; }
-.sa-product-row__name { font-size: 0.78rem; color: #ccc; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-product-row__store{ font-size: 0.65rem; color: #555; flex-shrink: 0; }
+.sa-product-row__pos  { font-size: 0.65rem; color: var(--color-text-secondary); width: 22px; flex-shrink: 0; text-align: right; }
+.sa-product-row__name { font-size: 0.78rem; color: var(--color-text-secondary); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-product-row__store{ font-size: 0.65rem; color: var(--color-text-secondary); flex-shrink: 0; }
 .sa-product-row__bar-wrap { width: 70px; height: 6px; background: #1e1a12; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
 .sa-product-row__bar  { height: 100%; background: #f5c842; border-radius: 3px; }
 .sa-product-row__rev  { font-size: 0.78rem; font-weight: 700; color: #f5c842; width: 68px; text-align: right; flex-shrink: 0; }
@@ -229,16 +242,16 @@
 .sa-class-row:hover { background: rgba(255,255,255,0.03); }
 .sa-class-row--active { background: rgba(245,200,66,0.07) !important; border: 1px solid rgba(245,200,66,0.2); }
 
-.sa-class-row__pos    { font-size: 0.65rem; color: #555; width: 22px; flex-shrink: 0; text-align: right; }
-.sa-class-row__label  { font-size: 0.78rem; color: #ccc; width: 150px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-class-row__pos    { font-size: 0.65rem; color: var(--color-text-secondary); width: 22px; flex-shrink: 0; text-align: right; }
+.sa-class-row__label  { font-size: 0.78rem; color: var(--color-text-secondary); width: 150px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sa-class-row__bar-wrap { flex: 1; height: 6px; background: #1e1a12; border-radius: 3px; overflow: hidden; }
 .sa-class-row__bar    { height: 100%; background: #f5c842; border-radius: 3px; }
-.sa-class-row__count  { font-size: 0.72rem; font-weight: 600; color: #aaa; width: 70px; text-align: right; flex-shrink: 0; }
+.sa-class-row__count  { font-size: 0.72rem; font-weight: 600; color: var(--color-text-secondary); width: 70px; text-align: right; flex-shrink: 0; }
 .sa-class-row__rev    { font-size: 0.78rem; font-weight: 700; color: #34d399; width: 76px; text-align: right; flex-shrink: 0; }
 
 .sa-pending-note {
   font-size: 0.72rem;
-  color: #555;
+  color: var(--color-text-secondary);
   font-style: italic;
   margin-top: 12px;
   padding: 8px 10px;
@@ -248,7 +261,8 @@
   font-size: 0.7rem;
   background: #1a1710;
   padding: 1px 4px;
-  color: #888;
+  /* Fondo propio fijo siempre oscuro — mismo caso que .sa-cat-count. */
+  color: #a3a3a3;
   border-radius: 2px;
 }
 
@@ -278,10 +292,10 @@
 .sa-collapsible__summary:hover { background: rgba(255,255,255,0.02); }
 
 .sa-collapsible__title {
-  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, sans-serif;
   font-size: 1.0rem;
   font-weight: 700;
-  color: #f0ece0;
+  color: var(--color-text-primary);
   letter-spacing: 0.01em;
 }
 
@@ -308,7 +322,7 @@ details[open] .sa-collapsible__arrow {
 /* ── Listas de acceso ── */
 .sa-lists-note {
   font-size: 0.72rem;
-  color: #555;
+  color: var(--color-text-secondary);
   margin: 0 0 16px;
   font-style: italic;
 }
@@ -336,7 +350,7 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-list-group__acceso {
   font-size: 0.68rem;
-  color: #555;
+  color: var(--color-text-secondary);
   font-weight: 500;
 }
 .sa-list-group__emails {
@@ -348,14 +362,14 @@ details[open] .sa-collapsible__arrow {
   font-size: 0.72rem;
   background: rgba(255,255,255,0.03);
   border: 1px solid #2a2015;
-  color: #aaa;
+  color: var(--color-text-secondary);
   padding: 3px 8px;
   border-radius: 3px;
   font-variant-numeric: tabular-nums;
 }
 .sa-list-empty {
   font-size: 0.72rem;
-  color: #444;
+  color: var(--color-text-secondary);
   font-style: italic;
 }
 
@@ -368,7 +382,7 @@ details[open] .sa-collapsible__arrow {
 .sa-list-email__remove {
   background: none;
   border: none;
-  color: #555;
+  color: var(--color-text-secondary);
   cursor: pointer;
   font-size: 0.8rem;
   line-height: 1;
@@ -401,7 +415,7 @@ details[open] .sa-collapsible__arrow {
 .sa-list-add__btn {
   background: none;
   border: 1px solid #3a3020;
-  color: #888;
+  color: var(--color-text-secondary);
   font-size: 1rem;
   line-height: 1;
   width: 28px;
@@ -417,7 +431,7 @@ details[open] .sa-collapsible__arrow {
   padding: 4px 14px;
   background: none;
   border: 1px solid #3a3020;
-  color: #888;
+  color: var(--color-text-secondary);
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -462,12 +476,15 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-cat-header:hover   { background: rgba(255,255,255,0.025); }
 .sa-cat-header--open   { background: rgba(245,200,66,0.04); }
-.sa-cat-arrow { font-size: 0.6rem; color: #555; flex-shrink: 0; width: 10px; }
-.sa-cat-name  { font-size: 0.82rem; font-weight: 700; color: #f0ece0; flex: 1; text-align: left; }
+.sa-cat-arrow { font-size: 0.6rem; color: var(--color-text-secondary); flex-shrink: 0; width: 10px; }
+.sa-cat-name  { font-size: 0.82rem; font-weight: 700; color: var(--color-text-primary); flex: 1; text-align: left; }
 .sa-cat-count {
   font-size: 0.62rem;
   font-weight: 700;
-  color: #888;
+  /* Este chip tiene su propio fondo oscuro fijo (como .sa-cat-name, en claro/oscuro) — con la
+     variable de tema, en claro se volvía oscuro-sobre-oscuro (2.2:1). Gris claro fijo, como el
+     resto de esta fila. */
+  color: #a3a3a3;
   background: #2a2015;
   padding: 1px 7px;
   border-radius: 10px;
@@ -476,7 +493,7 @@ details[open] .sa-collapsible__arrow {
 .sa-cat-rev {
   font-size: 0.78rem;
   font-weight: 700;
-  color: #f5c842;
+  color: var(--color-accent-hover);
   flex-shrink: 0;
   min-width: 72px;
   text-align: right;
@@ -494,12 +511,12 @@ details[open] .sa-collapsible__arrow {
   gap: 8px;
   padding: 5px 14px 5px 28px;
 }
-.sa-product-inner__pos   { font-size: 0.6rem; color: #444; width: 20px; text-align: right; flex-shrink: 0; }
+.sa-product-inner__pos   { font-size: 0.6rem; color: var(--color-text-secondary); width: 20px; text-align: right; flex-shrink: 0; }
 .sa-product-inner__name  { font-size: 0.76rem; color: #bbb; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-product-inner__store { font-size: 0.62rem; color: #555; flex-shrink: 0; }
+.sa-product-inner__store { font-size: 0.62rem; color: var(--color-text-secondary); flex-shrink: 0; }
 .sa-product-inner__bar-wrap { width: 60px; height: 4px; background: #1e1a12; border-radius: 2px; overflow: hidden; flex-shrink: 0; }
 .sa-product-inner__bar   { height: 100%; background: #f5c842; border-radius: 2px; opacity: 0.6; }
-.sa-product-inner__units { font-size: 0.62rem; color: #555; flex-shrink: 0; width: 42px; text-align: right; }
+.sa-product-inner__units { font-size: 0.62rem; color: var(--color-text-secondary); flex-shrink: 0; width: 42px; text-align: right; }
 .sa-product-inner__rev   { font-size: 0.72rem; font-weight: 700; color: #c8a830; flex-shrink: 0; min-width: 60px; text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ── Product trend chart ── */
@@ -540,7 +557,7 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #888;
+  color: var(--color-text-secondary);
   margin: 0 0 12px;
 }
 .sa-margin-table-wrap { overflow-x: auto; }
@@ -553,19 +570,19 @@ details[open] .sa-collapsible__arrow {
 .sa-margin-table th {
   padding: 6px 8px;
   text-align: right;
-  font-size: 0.62rem;
+  font-size: 0.69rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #555;
+  color: var(--color-text-secondary);
   border-bottom: 1px solid #2a2015;
 }
 .sa-margin-table th:first-child { text-align: left; }
 .sa-margin-table tbody tr { border-bottom: 1px solid rgba(42,32,21,0.5); }
 .sa-margin-table tbody tr:last-child { border-bottom: none; }
 
-.sa-mt__name  { padding: 7px 8px; color: #ccc; text-align: left; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-mt__num   { padding: 7px 8px; text-align: right; color: #888; font-variant-numeric: tabular-nums; }
+.sa-mt__name  { padding: 7px 8px; color: var(--color-text-secondary); text-align: left; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-mt__num   { padding: 7px 8px; text-align: right; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .sa-mt__cost  { padding: 4px 8px; text-align: right; }
 .sa-margin-input {
   width: 68px;
@@ -579,16 +596,16 @@ details[open] .sa-collapsible__arrow {
   text-align: right;
 }
 .sa-margin-input:focus { outline: none; border-color: #f5c842; color: #f5c842; }
-.sa-mt__profit { padding: 7px 8px; text-align: right; font-weight: 700; color: #555; font-variant-numeric: tabular-nums; }
+.sa-mt__profit { padding: 7px 8px; text-align: right; font-weight: 700; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 .sa-mt__profit--pos { color: #34d399; }
 .sa-mt__profit--neg { color: #f87171; }
-.sa-mt__pct   { padding: 7px 8px; text-align: right; color: #555; font-weight: 700; }
+.sa-mt__pct   { padding: 7px 8px; text-align: right; color: var(--color-text-secondary); font-weight: 700; }
 .sa-mt__pct--hi  { color: #34d399; }
 .sa-mt__pct--mid { color: #f5c842; }
 .sa-mt__pct--lo  { color: #f97316; }
 
 .sa-margin-table tfoot td { padding: 8px 8px; border-top: 1px solid #2a2015; }
-.sa-mt__total-lbl { text-align: left; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #555; }
+.sa-mt__total-lbl { text-align: left; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-secondary); }
 .sa-mt__total     { text-align: right; font-size: 0.88rem; font-weight: 800; color: #34d399; font-variant-numeric: tabular-nums; }
 .sa-mt__total--neg { color: #f87171; }
 
@@ -603,11 +620,11 @@ details[open] .sa-collapsible__arrow {
 .sa-profit-table th {
   padding: 6px 10px;
   text-align: right;
-  font-size: 0.62rem;
+  font-size: 0.69rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #555;
+  color: var(--color-text-secondary);
   border-bottom: 1px solid #2a2015;
   white-space: nowrap;
 }
@@ -617,16 +634,30 @@ details[open] .sa-collapsible__arrow {
 .sa-profit-table tbody tr:hover { background: rgba(255,255,255,0.02); }
 .sa-profit-row--loss { background: rgba(248,113,113,0.03); }
 
-.sa-profit__label { padding: 7px 10px; color: #bbb; text-align: left; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sa-profit__prof  { padding: 7px 10px; text-align: left; font-weight: 700; font-size: 0.72rem; white-space: nowrap; }
-.sa-profit__num   { padding: 7px 10px; text-align: right; color: #888; font-variant-numeric: tabular-nums; }
-.sa-profit__ben   { padding: 7px 10px; text-align: right; font-weight: 700; color: #666; font-variant-numeric: tabular-nums; }
-.sa-profit__ben--pos { color: #34d399; }
-.sa-profit__ben--neg { color: #f87171; }
+.sa-profit__label { padding: 7px 10px; color: var(--color-text-secondary); text-align: left; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sa-profit__prof  { padding: 7px 10px; text-align: left; font-weight: 700; font-size: 0.72rem; white-space: nowrap; color: var(--color-text-primary); }
+.sa-profit__num   { padding: 7px 10px; text-align: right; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.sa-profit__ben   { padding: 7px 10px; text-align: right; font-weight: 700; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.sa-profit__ben--pos { color: var(--state-ok); }
+.sa-profit__ben--neg { color: var(--state-bad); }
+
+.sa-subtitle { margin: 20px 0 8px; font-size: 0.95rem; }
+.sa-link { background: none; border: none; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
+.sa-semaforo { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.sa-semaforo--ok   { background: var(--state-ok); }
+.sa-semaforo--warn { background: var(--state-warn); }
+.sa-semaforo--bad  { background: var(--state-bad); }
+
+/* Retención por clase/profe (15/11 16:40): 🟢 ≥80% a 3 meses, 🟡 60-79%, 🔴 <60%, gris si N<5 */
+.sa-ret--verde    { color: var(--state-ok); font-weight: 700; }
+.sa-ret--amarillo { color: var(--state-warn); font-weight: 700; }
+.sa-ret--rojo     { color: var(--state-bad); font-weight: 700; }
+.sa-ret--pocos    { color: var(--color-text-secondary); font-style: italic; }
+.sa-profit-table tr.sa-ret-row--pocos { opacity: 0.55; }
 
 .sa-profit-note {
   font-size: 0.65rem;
-  color: #444;
+  color: var(--color-text-secondary);
   margin-top: 12px;
   font-style: italic;
   line-height: 1.5;
@@ -635,7 +666,7 @@ details[open] .sa-collapsible__arrow {
 /* ── Section legend / explanation text ── */
 .sa-legend {
   font-size: 0.7rem;
-  color: #555;
+  color: var(--color-text-secondary);
   font-style: italic;
   line-height: 1.55;
   margin: -6px 0 16px;
@@ -649,11 +680,11 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-profit__sub-label {
   padding: 4px 10px 4px 26px;
-  color: #666;
+  color: var(--color-text-secondary);
   text-align: left;
 }
 .sa-profit__num--dim {
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
 @media (max-width: 600px) {
@@ -664,6 +695,14 @@ details[open] .sa-collapsible__arrow {
   .sa-pl-acc-pills { display: none; }
   .sa-prod-chart__filters { flex-direction: column; }
   .sa-chart-select { min-width: unset; width: 100%; }
+  /* Ramiro, 09/11 08:30: .sa-filter-btn a 24 px y .sa-pay-action a 23 px — mínimo táctil 44 px. */
+  .sa-filter-btn { padding: 12px 16px; font-size: 0.8rem; min-height: 44px; }
+  .sa-pay-action { padding: 11px 14px; font-size: 0.8rem; min-height: 44px; }
+  /* Cowork, 09/11 09:05: sueltos, fuera de rejilla — .sa-period__btn 24 px, .sa-list-save__btn
+     24 px, .sa-cat-header 34 px. */
+  .sa-period__btn    { padding: 12px 14px; font-size: 0.78rem; min-height: 44px; }
+  .sa-list-save__btn { padding: 12px 16px; font-size: 0.78rem; min-height: 44px; }
+  .sa-cat-header     { padding: 13px 12px; min-height: 44px; }
 }
 
 /* ── Main tab nav ── */
@@ -680,7 +719,7 @@ details[open] .sa-collapsible__arrow {
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
-  color: #666;
+  color: var(--color-text-secondary);
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
@@ -690,8 +729,8 @@ details[open] .sa-collapsible__arrow {
   margin-bottom: -1px;
   transition: color 0.15s, border-color 0.15s;
 }
-.sa-main-tab:hover { color: #aaa; }
-.sa-main-tab--active { color: #a78bfa; border-bottom-color: #a78bfa; }
+.sa-main-tab:hover { color: var(--color-text-secondary); }
+.sa-main-tab--active { color: var(--state-purple); border-bottom-color: var(--state-purple); }
 
 /* ── P&L metric tabs ── */
 .sa-pl-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -699,7 +738,7 @@ details[open] .sa-collapsible__arrow {
   padding: 5px 14px;
   background: none;
   border: 1px solid #3a3020;
-  color: #666;
+  color: var(--color-text-secondary);
   font-size: 0.72rem;
   font-weight: 600;
   cursor: pointer;
@@ -708,7 +747,7 @@ details[open] .sa-collapsible__arrow {
   letter-spacing: 0.04em;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.sa-pl-tab:hover { color: #aaa; }
+.sa-pl-tab:hover { color: var(--color-text-secondary); }
 .sa-pl-tab--active { background: #2a2015; color: #a78bfa; border-color: #a78bfa; }
 
 /* ── P&L accordion ── */
@@ -717,7 +756,7 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: #666;
+  color: var(--color-text-secondary);
   margin: 28px 0 12px;
   padding-bottom: 8px;
   border-bottom: 1px solid #2a2015;
@@ -732,7 +771,7 @@ details[open] .sa-collapsible__arrow {
   background: none;
   border: none;
   cursor: pointer;
-  color: #f0ece0;
+  color: var(--color-text-primary);
   font-family: inherit;
   gap: 10px;
   transition: background 0.12s;
@@ -745,25 +784,25 @@ details[open] .sa-collapsible__arrow {
 .sa-pl-pill { font-size: 0.65rem; font-weight: 700; padding: 2px 7px; border-radius: 3px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sa-pl-pill--25 { background: rgba(96,165,250,0.12); color: #60a5fa; }
 .sa-pl-pill--26 { background: rgba(52,211,153,0.1);  color: #34d399; }
-.sa-pl-acc-chevron { color: #666; font-size: 0.7rem; transition: transform 0.2s; flex-shrink: 0; }
+.sa-pl-acc-chevron { color: var(--color-text-secondary); font-size: 0.7rem; transition: transform 0.2s; flex-shrink: 0; }
 .sa-pl-acc-chevron--open { transform: rotate(180deg); }
 .sa-pl-acc-body { padding: 0 14px 12px; }
 .sa-pl-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
 .sa-pl-table th {
   padding: 5px 8px;
   text-align: right;
-  font-size: 0.62rem;
+  font-size: 0.69rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.07em;
-  color: #666;
+  color: var(--color-text-secondary);
   border-bottom: 1px solid #2a2015;
 }
 .sa-pl-table th:first-child { text-align: left; }
-.sa-pl-table__metric { padding: 5px 8px; text-align: left; color: #aaa; font-size: 0.7rem; border-bottom: 1px solid rgba(42,32,21,0.5); }
-.sa-pl-table__val { padding: 5px 8px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: #f0ece0; border-bottom: 1px solid rgba(42,32,21,0.5); }
+.sa-pl-table__metric { padding: 5px 8px; text-align: left; color: var(--color-text-secondary); font-size: 0.7rem; border-bottom: 1px solid rgba(42,32,21,0.5); }
+.sa-pl-table__val { padding: 5px 8px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--color-text-primary); border-bottom: 1px solid rgba(42,32,21,0.5); }
 .sa-pl-table__val--26 { color: #34d399; }
-.sa-pl-table__delta { padding: 5px 8px; text-align: right; font-weight: 700; color: #666; border-bottom: 1px solid rgba(42,32,21,0.5); }
+.sa-pl-table__delta { padding: 5px 8px; text-align: right; font-weight: 700; color: var(--color-text-secondary); border-bottom: 1px solid rgba(42,32,21,0.5); }
 .sa-pl-table__delta--pos { color: #34d399; }
 .sa-pl-table__delta--neg { color: #f87171; }
 
@@ -773,19 +812,19 @@ details[open] .sa-collapsible__arrow {
   text-align: center;
   font-size: 0.88rem;
   font-weight: 700;
-  color: #f0ece0;
+  color: var(--color-text-primary);
 }
 .sa-pay-subtitle {
   font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #888;
+  color: var(--color-text-secondary);
   margin: 24px 0 10px;
 }
 .sa-pay-note {
   font-size: 0.7rem;
-  color: #555;
+  color: var(--color-text-secondary);
   font-style: italic;
   line-height: 1.55;
   margin: 10px 0 0;
@@ -802,34 +841,34 @@ details[open] .sa-collapsible__arrow {
 .sa-pay-table th {
   text-align: left;
   padding: 6px 10px;
-  font-size: 0.66rem;
+  font-size: 0.69rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #666;
+  color: var(--color-text-secondary);
   border-bottom: 1px solid #2a2015;
   white-space: nowrap;
 }
 .sa-pay-table td {
   padding: 6px 10px;
   border-bottom: 1px solid #1a1710;
-  color: #ccc;
+  color: var(--color-text-secondary);
   vertical-align: middle;
 }
 .sa-pay-table tbody tr:hover td { background: rgba(255,255,255,0.02); }
 
 .sa-pay-num    { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sa-pay-nowrap { white-space: nowrap; }
-.sa-pay-strong { font-weight: 700; color: #f0ece0 !important; }
-.sa-pay-muted  { color: #555 !important; }
-.sa-pay-reason { min-width: 180px; color: #aaa !important; }
+.sa-pay-strong { font-weight: 700; color: var(--color-text-primary) !important; }
+.sa-pay-muted  { color: var(--color-text-secondary) !important; }
+.sa-pay-reason { min-width: 180px; color: var(--color-text-secondary) !important; }
 .sa-pay-warn   { color: #f97316; font-weight: 700; }
 
 .sa-pay-total td {
   border-top: 2px solid #2a2015;
   border-bottom: none;
   font-weight: 700;
-  color: #f0ece0;
+  color: var(--color-text-primary);
   padding-top: 9px;
 }
 
@@ -843,7 +882,7 @@ details[open] .sa-collapsible__arrow {
 }
 .sa-pay-tag {
   font-size: 0.62rem;
-  color: #888;
+  color: var(--color-text-secondary);
   border: 1px solid #333;
   border-radius: 10px;
   padding: 1px 6px;
@@ -867,8 +906,8 @@ details[open] .sa-collapsible__arrow {
 
 .sa-pay-action {
   background: none;
-  border: 1px solid #333;
-  color: #999;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
   border-radius: 4px;
   font-size: 0.72rem;
   padding: 3px 9px;
@@ -876,7 +915,7 @@ details[open] .sa-collapsible__arrow {
   font-family: inherit;
   white-space: nowrap;
 }
-.sa-pay-action:hover:not(:disabled) { border-color: #34d399; color: #34d399; }
+.sa-pay-action:hover:not(:disabled) { border-color: var(--state-ok); color: var(--state-ok); }
 .sa-pay-action:disabled { opacity: 0.4; cursor: default; }
 
 .sa-pay-input {
@@ -908,7 +947,7 @@ details[open] .sa-collapsible__arrow {
   resize: vertical;
 }
 .sa-pay-textarea:focus { outline: none; border-color: #f5c842; }
-.sa-pay-info { color: #666; cursor: help; font-size: 0.72rem; }
+.sa-pay-info { color: var(--color-text-secondary); cursor: help; font-size: 0.72rem; }
 
 /* ── Nóminas: fichas ── */
 .sa-pay-print { margin-right: 8px; }
@@ -921,18 +960,18 @@ details[open] .sa-collapsible__arrow {
   background: rgba(255,255,255,0.02);
   border: 1px solid #2a2015;
   border-radius: 16px;
-  color: #ccc;
+  color: var(--color-text-secondary);
   font-size: 0.8rem;
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.sa-pay-chip:hover { background: rgba(255,255,255,0.05); color: #f0ece0; }
+.sa-pay-chip:hover { background: rgba(255,255,255,0.05); color: var(--color-text-primary); }
 .sa-pay-chip--active {
   border-color: var(--card-color, #f5c842);
   background: rgba(245,200,66,0.07);
-  color: #f0ece0;
+  color: var(--color-text-primary);
 }
 .sa-pay-chip--inactive { opacity: 0.55; }
 
@@ -944,9 +983,9 @@ details[open] .sa-collapsible__arrow {
   background: rgba(255,255,255,0.02);
 }
 .sa-pay-file__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-.sa-pay-file__title { margin: 0; font-size: 0.92rem; font-weight: 700; color: #f0ece0; }
-.sa-pay-file__meta  { margin: 3px 0 0; font-size: 0.74rem; color: #888; }
-.sa-pay-file__meta strong { color: #ddd; font-variant-numeric: tabular-nums; }
+.sa-pay-file__title { margin: 0; font-size: 0.92rem; font-weight: 700; color: var(--color-text-primary); }
+.sa-pay-file__meta  { margin: 3px 0 0; font-size: 0.74rem; color: var(--color-text-secondary); }
+.sa-pay-file__meta strong { color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
 .sa-pay-file__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
@@ -960,10 +999,10 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #666;
+  color: var(--color-text-secondary);
   margin-bottom: 3px;
 }
-.sa-pay-file__item dd { margin: 0; font-size: 0.84rem; color: #ddd; word-break: break-word; }
+.sa-pay-file__item dd { margin: 0; font-size: 0.84rem; color: var(--color-text-primary); word-break: break-word; }
 .sa-pay-file__input {
   width: 100%;
   box-sizing: border-box;
@@ -982,7 +1021,7 @@ details[open] .sa-collapsible__arrow {
 .sa-pay-filter__clear {
   background: none;
   border: none;
-  color: #888;
+  color: var(--color-text-secondary);
   cursor: pointer;
   font-size: 0.75rem;
   padding: 0 2px;
@@ -1006,7 +1045,7 @@ details[open] .sa-collapsible__arrow {
   --pr-muted: #6b645c;
   --pr-line: #ddd6c8;
   --pr-soft: #f6f2e8;
-  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-family: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, sans-serif;
   color: var(--pr-ink);
   font-size: 9.5pt;
   line-height: 1.45;
@@ -1153,15 +1192,15 @@ details[open] .sa-collapsible__arrow {
 
 /* ── Nóminas: sin asistencia ── */
 .sa-pay-tag--absent { color: #f97316; border-color: #5a2e0f; }
-.sa-pay-struck      { color: #666; text-decoration: line-through; }
+.sa-pay-struck      { color: var(--color-text-secondary); text-decoration: line-through; }
 .sa-pay-row-actions { display: flex; gap: 6px; }
 .sa-pay-action--on  { border-color: #f97316; color: #f97316; }
 
 /* ── Nóminas: pago y remesa ── */
-.sa-pay-paid { font-size: 0.72rem; color: #888; }
+.sa-pay-paid { font-size: 0.72rem; color: var(--color-text-secondary); }
 .sa-remesa { margin: 0 0 18px; }
-.sa-remesa__file { margin: 4px 0 10px; color: #aaa; font-size: 0.8rem; }
-.sa-remesa__summary { display: flex; gap: 14px; font-size: 0.82rem; color: #ddd; margin-bottom: 8px; }
+.sa-remesa__file { margin: 4px 0 10px; color: var(--color-text-secondary); font-size: 0.8rem; }
+.sa-remesa__summary { display: flex; gap: 14px; font-size: 0.82rem; color: var(--color-text-primary); margin-bottom: 8px; }
 .sa-remesa__ok { color: #34d399; }
 .sa-remesa__row--warn td { background: rgba(249,115,22,0.07); }
 .sa-remesa__select {
@@ -1182,7 +1221,7 @@ details[open] .sa-collapsible__arrow {
 .sa-partial__note { display: block; margin-top: 10px; }
 .sa-pay-partial { margin-top: 3px; font-size: 0.72rem; color: #bbb; white-space: nowrap; }
 .sa-pay-partial__note {
-  color: #888;
+  color: var(--color-text-secondary);
   display: inline-block;
   max-width: 180px;
   overflow: hidden;
@@ -1214,7 +1253,7 @@ details[open] .sa-collapsible__arrow {
   border: 1px solid #2a2015;
   background: rgba(255,255,255,0.02);
 }
-.sa-pay-person-pay__title { margin: 0 0 8px; font-size: 0.8rem; font-weight: 700; color: #f0ece0; }
+.sa-pay-person-pay__title { margin: 0 0 8px; font-size: 0.8rem; font-weight: 700; color: var(--color-text-primary); }
 .sa-pay-person-pay__grid { display: flex; flex-wrap: wrap; gap: 10px 28px; }
 .sa-pay-person-pay__label {
   display: block;
@@ -1222,10 +1261,10 @@ details[open] .sa-collapsible__arrow {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #666;
+  color: var(--color-text-secondary);
   margin-bottom: 4px;
 }
-.sa-pay-person-pay__list { list-style: none; margin: 10px 0 0; padding: 0; font-size: 0.76rem; color: #ccc; }
+.sa-pay-person-pay__list { list-style: none; margin: 10px 0 0; padding: 0; font-size: 0.76rem; color: var(--color-text-secondary); }
 .sa-pay-person-pay__list li { padding: 3px 0; }
 .sa-pay-person-pay .sa-pay-warn { font-size: 0.72rem; font-weight: 600; }
 /* Tabla de nóminas: más compacta para que quepan detalle + pagos */
@@ -1250,8 +1289,8 @@ details[open] .sa-collapsible__arrow {
 .bud-select:focus { outline: none; border-color: #f5c842; }
 .bud-month-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .bud-row { cursor: pointer; }
-.bud-caret { display: inline-block; width: 14px; color: #888; }
-.bud-lines { font-size: 0.66rem; color: #888; margin: 2px 0 0 14px; }
+.bud-caret { display: inline-block; width: 14px; color: var(--color-text-secondary); }
+.bud-lines { font-size: 0.66rem; color: var(--color-text-secondary); margin: 2px 0 0 14px; }
 .bud-detail > td { background: #0c0a06; padding: 6px 10px 12px 24px !important; }
 .bud-items { font-size: 0.75rem; }
 .bud-pos { color: #34d399 !important; }
@@ -1264,32 +1303,32 @@ details[open] .sa-collapsible__arrow {
 .bud-status--sobrecoste     { color: #f87171; }
 .bud-status--imprevisto     { color: #f97316; }
 .bud-status--sin-movimiento { color: #f5c842; }
-.bud-status--sin-datos      { color: #888; }
+.bud-status--sin-datos      { color: var(--color-text-secondary); }
 /* Matriz partidas × meses */
 .bud-mx-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
 .bud-mx-bar .bud-mx-modes { margin: 0; }
 .bud-matrix td, .bud-matrix th { padding: 5px 7px; font-size: 0.74rem; white-space: nowrap; }
-.bud-matrix .bud-mx-name { position: sticky; left: 0; z-index: 1; background: #100e09; min-width: 170px; white-space: normal; }
-.bud-matrix thead .bud-mx-name, .bud-matrix tfoot .bud-mx-name { background: #15110b; }
+.bud-matrix .bud-mx-name { position: sticky; left: 0; z-index: 1; background: var(--color-surface); min-width: 170px; white-space: normal; }
+.bud-matrix thead .bud-mx-name, .bud-matrix tfoot .bud-mx-name { background: var(--color-surface); }
 .bud-mx-both span { display: block; line-height: 1.25; }
-.bud-mx-b { color: #888; font-size: 0.68rem; }
+.bud-mx-b { color: var(--color-text-secondary); font-size: 0.68rem; }
 .bud-mx-r { font-weight: 600; }
 .bud-mx-extra td { font-style: italic; }
-.bud-mx-shared { margin-left: 5px; color: #888; cursor: help; }
-.bud-mx-diff td { border-top: 1px solid #2a2015; font-weight: 700; }
-.bud-mx-section td { font-size: 0.66rem !important; text-transform: uppercase; letter-spacing: 0.08em; color: #f5c842; padding-top: 12px !important; font-weight: 700; }
+.bud-mx-shared { margin-left: 5px; color: var(--color-text-secondary); cursor: help; }
+.bud-mx-diff td { border-top: 1px solid var(--color-border); font-weight: 700; }
+.bud-mx-section td { font-size: 0.66rem !important; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-accent-text); padding-top: 12px !important; font-weight: 700; }
 .bud-mx-sec { position: sticky; left: 7px; }
 .bud-mx-income td { background: rgba(52, 211, 153, 0.04); }
-.bud-mx-income .bud-mx-name { background: #111209; }
-.bud-mx-result td { border-top: 2px solid #f5c842; }
+.bud-mx-income .bud-mx-name { background: var(--color-surface); }
+.bud-mx-result td { border-top: 2px solid var(--color-accent-text); }
 /* Grupo de gasto: cabecera con el subtotal del grupo; sus partidas van sangradas debajo */
 .bud-mx-group td, .bud-group-row td { border-top: 1px solid rgba(245, 200, 66, 0.35); font-weight: 700; background: rgba(245, 200, 66, 0.04); }
-.bud-mx-group .bud-mx-name { background: #17130b; color: #f5c842; }
-.bud-group-row td:first-child { color: #f5c842; }
+.bud-mx-group .bud-mx-name { background: var(--color-surface); color: var(--color-accent-text); }
+.bud-group-row td:first-child { color: var(--color-accent-text); }
 .bud-mx-indent .bud-mx-name, .bud-indent > td:first-child { padding-left: 20px !important; }
-.bud-mx-goal td { background: rgba(245, 200, 66, 0.05); color: #f5c842; }
-.bud-mx-goal .bud-mx-name { background: #17130a; font-weight: 700; }
-.bud-rules { margin-top: 28px; border-top: 1px solid #2a2015; padding-top: 14px; }
+.bud-mx-goal td { background: rgba(245, 200, 66, 0.05); color: var(--color-accent-text); }
+.bud-mx-goal .bud-mx-name { background: var(--color-surface); font-weight: 700; }
+.bud-rules { margin-top: 28px; border-top: 1px solid var(--color-border); padding-top: 14px; }
 .bud-rules .sa-pay-table { margin-top: 8px; }
 
 /* ── Subpestañas de cada apartado (Tesorería, Gestión) ── */

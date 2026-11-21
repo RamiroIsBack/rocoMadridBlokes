@@ -5,8 +5,11 @@
     width: 100%;
     overflow: hidden;
     border-radius: 7px 7px 0 0;
+    /* Ramiro, 13/11 05:30: fondo crema fijo ("borde de foto de polaroid" pensado para el modo
+       claro que ya no existe) — gris/crema claro suelto detrás de la foto, con las flechas y
+       el contador encima perdiendo contraste. */
     background-color: var(--color-surface);
-    padding: 6px 6px 0 6px; /* white photo-print border on 3 sides */
+    padding: 6px 6px 0 6px;
 }
 
 .gallery--empty {
@@ -17,7 +20,7 @@
 }
 
 .gallery__placeholder {
-    color: #666;
+    color: var(--color-text-secondary);
     font-size: 14px;
 }
 
@@ -97,13 +100,17 @@
     opacity: 1;
 }
 
+/* Flotan sobre la foto (no sobre el fondo de la página) — círculo oscuro traslúcido + icono
+   claro, igual que .lightbox__nav/.lightbox__close de aquí mismo. Antes había una SEGUNDA
+   definición distinta (clara, con icono #333) duplicada en App.css: cuál ganaba dependía del
+   orden de import, por eso se veía distinto según la pantalla — unificado en una sola, aquí. */
 .gallery__btn {
     width: 36px;
     height: 36px;
     border: none;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.9);
-    color: #333;
+    background: rgba(0, 0, 0, 0.5);
+    color: #fff;
     font-size: 20px;
     cursor: pointer;
     display: flex;
@@ -113,12 +120,12 @@
 }
 
 .gallery__btn:hover {
-    background: white;
+    background: rgba(0, 0, 0, 0.8);
     transform: scale(1.1);
 }
 
 .gallery__counter {
-    color: white;
+    color: #fff;
     font-size: 14px;
     background: rgba(0, 0, 0, 0.6);
     padding: 4px 12px;

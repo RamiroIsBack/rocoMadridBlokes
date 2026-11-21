@@ -43,6 +43,8 @@ $GLOBALS['blokes_profesores_emails'] = array(
     'ana.llorenteg03@gmail.com',
     'alobo@ymail.com',
     'luciapcaas@gmail.com',
+    'maringomezeduardo@gmail.com', // Edu (equipador)
+    'lileyia8@gmail.com',          // Isa (Isabel Alonso Liley, uid 650) — profe de niños, 20/11 12:10
 );
 // Cuenta(s) de las tablets compartidas del gimnasio — ver Superadmin → Tablet.
 $GLOBALS['blokes_tablets_emails'] = array();
@@ -93,20 +95,30 @@ function blokes_get_app_role_real() {
 // profesor de verdad — también lo que responde el servidor (p. ej. la privacidad del dinero),
 // no solo lo que se pinta. Solo restringe, nunca amplía: la cabecera solo se respeta si el rol
 // REAL es socio; para cualquier otro rol se ignora sin más, así que no sirve para ganar acceso.
+// "Ver como: Tablet" (Ramiro, 08/11 21:19, corrige el "modo tablet" anterior) es DISTINTO:
+// "es para que los profes puedan loguear los tops de los usuarios, simplemente tiene que
+// simular como cuando estás logueado como si fueses el usuario tablet" — así que, a diferencia
+// de gestion/profesor (solo socio, solo lectura), esto SÍ deja escribir y lo pueden simular los
+// 3 roles que ya pueden actuar en nombre de otro (blokes_can_supervise): socio, profesor y
+// gestion. Quién lo apunta de verdad (get_current_user_id(), nunca tocado por esta cabecera)
+// sigue siendo la sesión real, así que queda registrado igual que si no hubiera "ver como".
 function blokes_get_app_role() {
     $real = blokes_get_app_role_real();
-    if ($real === 'socio') {
-        $ver_como = isset($_SERVER['HTTP_X_BLOKES_VER_COMO']) ? sanitize_key($_SERVER['HTTP_X_BLOKES_VER_COMO']) : '';
-        if (in_array($ver_como, array('gestion', 'profesor'), true)) {
-            // Respaldo del filtro rest_pre_dispatch: en algunos namespaces (progreso/v1) no
-            // corta la escritura a tiempo, así que lo repetimos aquí dentro, que se llama
-            // desde todos los permission_callback de todos los namespaces sin excepción.
-            $metodo = isset($_SERVER['REQUEST_METHOD']) ? strtoupper($_SERVER['REQUEST_METHOD']) : 'GET';
-            if (in_array($metodo, array('POST', 'PUT', 'PATCH', 'DELETE'), true) && defined('REST_REQUEST') && REST_REQUEST) {
-                wp_send_json(array('code' => 'ver_como_solo_lectura', 'message' => 'Estás en modo "Ver como": vuelve a Socio para cambiar cosas.'), 403);
-            }
-            return $ver_como;
+    $ver_como = isset($_SERVER['HTTP_X_BLOKES_VER_COMO']) ? sanitize_key($_SERVER['HTTP_X_BLOKES_VER_COMO']) : '';
+    if ($ver_como === 'tablet' && in_array($real, array('socio', 'profesor', 'gestion'), true)) {
+        return 'tablet';
+    }
+    // "member" = "Usuario" en el selector (Ramiro, 11/11 05:01: para que el socio vea lo que ve
+    // la gente normal, sin ningún rol especial).
+    if ($real === 'socio' && in_array($ver_como, array('gestion', 'profesor', 'member'), true)) {
+        // Respaldo del filtro rest_pre_dispatch: en algunos namespaces (progreso/v1) no
+        // corta la escritura a tiempo, así que lo repetimos aquí dentro, que se llama
+        // desde todos los permission_callback de todos los namespaces sin excepción.
+        $metodo = isset($_SERVER['REQUEST_METHOD']) ? strtoupper($_SERVER['REQUEST_METHOD']) : 'GET';
+        if (in_array($metodo, array('POST', 'PUT', 'PATCH', 'DELETE'), true) && defined('REST_REQUEST') && REST_REQUEST) {
+            wp_send_json(array('code' => 'ver_como_solo_lectura', 'message' => 'Estás en modo "Ver como": vuelve a Socio para cambiar cosas.'), 403);
         }
+        return $ver_como;
     }
     return $real;
 }
@@ -133,7 +145,7 @@ function blokes_es_socio() {
 add_filter('rest_pre_dispatch', function($result, $server, $request) {
     if (!in_array($request->get_method(), array('POST', 'PUT', 'PATCH', 'DELETE'), true)) return $result;
     $ver_como = isset($_SERVER['HTTP_X_BLOKES_VER_COMO']) ? sanitize_key($_SERVER['HTTP_X_BLOKES_VER_COMO']) : '';
-    if (!in_array($ver_como, array('gestion', 'profesor'), true)) return $result;
+    if (!in_array($ver_como, array('gestion', 'profesor', 'member'), true)) return $result;
     if (blokes_get_app_role_real() !== 'socio') return $result; // la cabecera no sirve para nadie más
     return new WP_Error('ver_como_solo_lectura', 'Estás en modo "Ver como": vuelve a Socio para cambiar cosas.', array('status' => 403));
 }, 10, 3);
@@ -170,6 +182,99 @@ add_filter('show_admin_bar', function($show) {
     if (is_page($GLOBALS['blokes_app_slugs'])) return false;
     return $show;
 });
+
+// ============================================================
+//  "Instala Blokes" — /app es SOLO para la vista previa de WhatsApp
+//  (NOTAS_PARA_CODE_instalar_app.md). El crawler de WhatsApp no ejecuta JS, así
+//  que las etiquetas og:* tienen que estar en el HTML que devuelve el
+//  servidor a la primera — por eso esto sigue siendo PHP suelto y no la SPA.
+//  Para una persona de carne y hueso, esta página solo hace una cosa: mandarla
+//  a /blokes/instalar (ESA sí es una ruta de React, dentro del scope del
+//  manifest/service worker — ahí es donde puede instalarse de verdad; ver
+//  InstalarPage.jsx. Ramiro, 09/11 11:53: el botón de aquí no podía instalar
+//  nada porque /app está fuera de ese scope).
+// ============================================================
+
+// Priority 0: tiene que ganar a la SPA de abajo (prioridad 1).
+add_action('template_redirect', function() {
+    $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+    if ($path !== 'app') return;
+
+    // WP ya marcó esta URL como 404 en parse_request (no hay página "app"), así que sin esto
+    // el navegador y los crawlers (WhatsApp incluido) verían un 404 aunque el HTML sea bueno.
+    status_header(200);
+    nocache_headers();
+
+    // Fecha de la próxima compe real (no de prueba) para la descripción que ve WhatsApp.
+    $compe = null;
+    switch_to_blog(3);
+    global $wpdb;
+    $row = $wpdb->get_row(
+        "SELECT name, comp_date, comp_end_date FROM " . progreso_equip_table('competitions') . "
+         WHERE is_test = 0 AND comp_date >= CURDATE() ORDER BY comp_date ASC LIMIT 1", ARRAY_A
+    );
+    if ($row) $compe = $row;
+    restore_current_blog();
+
+    $app_url      = home_url('/app');
+    // Los utm_source/utm_campaign que añade /c/{token} llegan aquí en la query de /app — si no
+    // se pasan a /blokes/instalar se pierden (cowork, 11/11 07:30).
+    $query_utm = isset($_GET) ? array_intersect_key($_GET, array_flip(array('utm_source', 'utm_campaign', 'utm_medium'))) : array();
+    $instalar_url = home_url('/blokes/instalar') . ($query_utm ? '?' . http_build_query($query_utm) : '');
+    $icon_url     = home_url('/blokes/icons/icon-512.png');
+    // Vídeo tutorial (Ramiro, 12/11 16:40): portada como og:image (es vertical, 1080×1920 —
+    // distinto del 1200×630 habitual, pero es lo que pidió: "imagen = la portada") y og:video
+    // con el propio mp4, para que WhatsApp/Facebook tengan de dónde sacar una vista previa.
+    $video_poster_url = home_url('/blokes/media/Blokes_tutorial_poster.jpg');
+    $video_url        = home_url('/blokes/media/Blokes_tutorial_Roco.mp4');
+
+    $og_desc = $compe
+        ? "Instálala en el móvil antes de la compe del " . date_i18n('j \d\e F', strtotime($compe['comp_date'])) . ": apunta tus tops en segundos."
+        : 'La app de Rocoteca Madrid para apuntar tus tops de búlder.';
+
+    header('Content-Type: text/html; charset=UTF-8');
+    ?><!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instala Blokes — Rocoteca Madrid</title>
+<meta name="description" content="<?php echo esc_attr($og_desc); ?>">
+<meta property="og:title" content="Blokes, la app del Roco — mira cómo funciona">
+<meta property="og:description" content="<?php echo esc_attr($og_desc); ?>">
+<meta property="og:image" content="<?php echo esc_url($video_poster_url); ?>">
+<meta property="og:image:width" content="1080">
+<meta property="og:image:height" content="1920">
+<meta property="og:video" content="<?php echo esc_url($video_url); ?>">
+<meta property="og:video:type" content="video/mp4">
+<meta property="og:video:width" content="1080">
+<meta property="og:video:height" content="1920">
+<meta property="og:type" content="website">
+<meta property="og:url" content="<?php echo esc_url($app_url); ?>">
+<link rel="icon" href="<?php echo esc_url($icon_url); ?>">
+<meta http-equiv="refresh" content="0;url=<?php echo esc_url($instalar_url); ?>">
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#1f1f1f;color:#f4f0e4;font-family:system-ui,sans-serif;text-align:center;padding:16px}
+a{color:#D0962B;font-weight:700}</style>
+</head>
+<body>
+<div><p>Abriendo Blokes…</p><p><a href="<?php echo esc_url($instalar_url); ?>">Toca aquí si no pasa nada</a></p></div>
+<script>location.replace(<?php echo wp_json_encode($instalar_url); ?>);</script>
+</body>
+</html>
+    <?php
+    exit;
+}, 0);
+
+// Atajo corto para la tele física del Roco — fácil de teclear con el mando del Chromecast/TV
+// (NOTAS_PARA_CODE_tele_roco.md, Ramiro 13/11 07:06: "mejor una corta y fácil de teclear con el
+// mando: rocomadrid.com/tele"). Redirige a la pantalla real de la tele.
+add_action('template_redirect', function() {
+    $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+    if ($path === 'tele') {
+        wp_safe_redirect(home_url('/blokes/compe/directo'), 302);
+        exit;
+    }
+}, 0);
 
 // Priority 1: runs before WordPress's redirect_canonical (priority 10).
 // Catches both the exact slug (/blokes-dev/) and any subroute (/blokes-dev/superadmin).
@@ -209,6 +314,21 @@ add_action('template_redirect', function() {
 <meta charset="<?php bloginfo('charset'); ?>">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
+<?php /* Ramiro, 13/11: 2 modos (claro/oscuro, sin automático) — se fija el data-theme aquí,
+         antes del CSS, para que no haya parpadeo claro al cargar en quien tiene oscuro
+         guardado (o no ha elegido nunca: por defecto oscuro, igual que hasta ahora). Este
+         <html> es el que de verdad sirve /blokes y /club (no dist/index.html), así que
+         necesita el mismo script que index.html. */ ?>
+<script>
+(function () {
+  try {
+    var t = localStorage.getItem('blokes_tema')
+    document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark')
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'dark')
+  }
+})()
+</script>
 <?php if ($css_url): ?>
 <link rel="stylesheet" href="<?php echo esc_url($css_url); ?>">
 <?php endif; ?>
@@ -226,31 +346,15 @@ add_action('template_redirect', function() {
 }, 1);
 
 // ============================================================
-//  Legacy /blokes support — operaciones sin login WordPress
-//  Cubre: validación de credenciales, subida de medios y creación de posts
-//  TODO: eliminar cuando /blokes use sesión WP
+//  19/11: quitado el shim legacy "/blokes sin login WordPress" que había aquí.
+//  Suplantaba al primer administrador del sitio (wp_set_current_user) para
+//  CUALQUIER petición sin sesión a /wp/v2/users/me, POST /wp/v2/media, POST
+//  /blokes/v1/create|update-acf y DELETE /blokes/v1/delete/* — confirmado en vivo
+//  (un curl anónimo a /wp/v2/users/me devolvía 200 con los datos reales del admin).
+//  Ramiro, 19/11: no le ve utilidad (no es el modo tablet, que ya usa sesión real
+//  + header "ver como" — ver blokes_get_app_role más arriba), así que se quita.
+//  Las rutas de creación/edición/borrado de blokes pasan a exigir sesión real.
 // ============================================================
-add_filter('rest_pre_dispatch', function($result, $server, $request) {
-    if (is_user_logged_in()) return $result;
-
-    $route  = $request->get_route();
-    $method = $request->get_method();
-
-    $needs_user =
-        ($route === '/wp/v2/users/me')                                          ||  // validación de credenciales
-        ($route === '/wp/v2/media'             && $method === 'POST')           ||  // subida de imágenes
-        (preg_match('#^/blokes/v1/(create|update-acf)#', $route) && $method === 'POST')  ||  // crear/editar bloke
-        (preg_match('#^/blokes/v1/delete/#', $route)             && $method === 'DELETE'); // eliminar bloke
-
-    if ($needs_user) {
-        $admins = get_users(array('role' => 'administrator', 'number' => 1, 'fields' => 'ID'));
-        if (!empty($admins)) {
-            wp_set_current_user((int) $admins[0]);
-        }
-    }
-
-    return $result;
-}, 10, 3);
 
 // ============================================================
 //  REST API — inject extra fields into blokes responses
@@ -430,17 +534,13 @@ add_action('rest_api_init', function() {
     register_rest_route('blokes/v1', '/create', array(
         'methods'             => 'POST',
         'callback'            => 'blokes_create_with_acf',
-        // TODO: restaurar cuando /blokes use sesión WP
-        // 'permission_callback' => function() { return is_user_logged_in(); },
-        'permission_callback' => '__return_true',
+        'permission_callback' => function() { return blokes_can_supervise(); },
     ));
 
     register_rest_route('blokes/v1', '/update-acf/(?P<id>\d+)', array(
         'methods'             => 'POST',
         'callback'            => 'blokes_update_acf',
-        // TODO: restaurar cuando /blokes use sesión WP
-        // 'permission_callback' => function() { return is_user_logged_in(); },
-        'permission_callback' => '__return_true',
+        'permission_callback' => function() { return blokes_can_supervise(); },
     ));
 
     register_rest_route('blokes/v1', '/hall-of-fame', array(
@@ -497,15 +597,24 @@ add_action('rest_api_init', function() {
     register_rest_route('blokes/v1', '/delete/(?P<id>\d+)', array(
         'methods'             => 'DELETE',
         'callback'            => 'blokes_delete_with_media',
-        'permission_callback' => function() { return is_user_logged_in(); },
+        // 20/11: era solo is_user_logged_in() — cualquier usuario de WordPress (cualquier rol,
+        // no solo profesor/gestion/socio) podía borrar cualquier bloke. Igual que create/update.
+        'permission_callback' => function() { return blokes_can_supervise(); },
     ));
 
-    // Endpoint para subir imágenes sin necesidad de login WordPress
-    // TODO: restaurar cuando /blokes use sesión WP
-    // 'permission_callback' => 'is_user_logged_in',
+    // 20/11: era '__return_true' — cualquiera en internet podía subir ficheros a la Mediateca
+    // sin sesión. Igual que create/update-acf/delete.
     register_rest_route('blokes/v1', '/upload-image', array(
         'methods'             => 'POST',
         'callback'            => 'blokes_upload_image',
+        'permission_callback' => function() { return blokes_can_supervise(); },
+    ));
+
+    // "Instala Blokes" (NOTAS_PARA_CODE_instalar_app.md) — para ver en Supervisión si el
+    // gancho funciona. Público porque appinstalled puede dispararse sin sesión iniciada.
+    register_rest_route('blokes/v1', '/install-event', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_registrar_install_event',
         'permission_callback' => '__return_true',
     ));
 
@@ -620,6 +729,11 @@ add_action('rest_api_init', function() {
     // ── Organización (equipación / route-setting) ── visible solo a
     // profesor/gestión/socio, igual que el resto de "Tareas y setter".
     $equip_perm = function() { return in_array(blokes_get_app_role(), array('profesor', 'gestion', 'socio')); };
+    // Ramiro 12/11 11:35: "no pueden editar alguien que no sea Álvaro o los socios las tareas,
+    // ni Ana ni Edu ni Sara" — ni ocultando botones basta ("no basta con ocultar los botones"),
+    // tiene que devolver 403 también si llega directo a la API. progreso_equip_es_jefe_o_socio()
+    // está en progreso_equip_ensure_tables()/zona de funciones de abajo.
+    $equip_jefe_perm = function() { return progreso_equip_es_jefe_o_socio(); };
 
     register_rest_route('progreso/v1', '/equipacion/config', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_config', 'permission_callback' => $equip_perm,
@@ -637,7 +751,7 @@ add_action('rest_api_init', function() {
         'methods' => 'DELETE', 'callback' => 'progreso_equip_deactivate_task_type', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/tasks', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_create_loose_task', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_loose_task', 'permission_callback' => $equip_jefe_perm,
     ));
 
     register_rest_route('progreso/v1', '/equipacion/workers', array(
@@ -651,6 +765,15 @@ add_action('rest_api_init', function() {
     ));
     register_rest_route('progreso/v1', '/equipacion/workers/(?P<id>\d+)', array(
         'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_worker', 'permission_callback' => $equip_perm,
+    ));
+    // 19/11 (Ramiro: "todos nos logueamos con nuestro email, ya sabes quién está editando") —
+    // en vez de pedir que alguien escriba a mano el email de un worker en un formulario, la
+    // propia persona (logueada con su cuenta real de WordPress) vincula su fila de un clic; el
+    // servidor usa el email de su sesión, nunca uno que mande el cliente. Solo mientras la fila
+    // siga sin email (no se puede robar una ya vinculada) — un socio puede desvincularla con el
+    // PUT normal (email: '') si hiciera falta corregirlo.
+    register_rest_route('progreso/v1', '/equipacion/workers/(?P<id>\d+)/vincular-mi-email', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_vincular_mi_email', 'permission_callback' => $equip_perm,
     ));
 
     register_rest_route('progreso/v1', '/equipacion/holdsets', array(
@@ -667,37 +790,71 @@ add_action('rest_api_init', function() {
         'methods' => 'GET', 'callback' => 'progreso_equip_get_weeks', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_create_week', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_create_week', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_week_detail', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
-        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_week', 'permission_callback' => $equip_perm,
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_week', 'permission_callback' => $equip_jefe_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)', array(
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_week', 'permission_callback' => $equip_jefe_perm,
+    ));
+    // Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31/09:35/09:37).
+    register_rest_route('progreso/v1', '/equipacion/zonas', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_zonas', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/zonas', array(
+        'methods' => 'PUT', 'callback' => 'progreso_equip_update_zonas', 'permission_callback' => $equip_jefe_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/zonas/arranque', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_set_zona_arranque', 'permission_callback' => $equip_jefe_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/zonas/sugerida', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_zona_sugerida', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)/limpiar-retrasadas-falsas', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_limpiar_retrasadas_falsas', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_limpiar_retrasadas_falsas', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/(?P<id>\d+)/assignments', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_week_add_assignment', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_week_add_assignment', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/assignments/(?P<id>\d+)', array(
-        array('methods' => 'PUT',    'callback' => 'progreso_equip_update_assignment', 'permission_callback' => $equip_perm),
-        array('methods' => 'DELETE', 'callback' => 'progreso_equip_delete_assignment',  'permission_callback' => $equip_perm),
+        array('methods' => 'PUT',    'callback' => 'progreso_equip_update_assignment', 'permission_callback' => $equip_jefe_perm),
+        array('methods' => 'DELETE', 'callback' => 'progreso_equip_delete_assignment',  'permission_callback' => $equip_jefe_perm),
     ));
 
     register_rest_route('progreso/v1', '/equipacion/today', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_today', 'permission_callback' => $equip_perm,
     ));
 
+    // PUT se queda en $equip_perm (cualquier equipador puede marcar su propia tarea como
+    // hecha) — progreso_equip_update_task() comprueba por dentro si lo que llega es algo MÁS
+    // que "done" (fecha, persona, texto, notas, subzona) y ahí sí exige jefe_o_socio.
     register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)', array(
-        'methods' => 'PUT', 'callback' => 'progreso_equip_update_task', 'permission_callback' => $equip_perm,
+        array('methods' => 'PUT',    'callback' => 'progreso_equip_update_task', 'permission_callback' => $equip_perm),
+        array('methods' => 'DELETE', 'callback' => 'progreso_equip_delete_task',  'permission_callback' => $equip_jefe_perm),
     ));
     register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)/postpone', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_postpone_task', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_postpone_task', 'permission_callback' => $equip_jefe_perm,
+    ));
+    // "⧉ Duplicar a..." (Ramiro 12/11 11:40).
+    register_rest_route('progreso/v1', '/equipacion/tasks/(?P<id>\d+)/duplicar', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_duplicar_tarea', 'permission_callback' => $equip_jefe_perm,
+    ));
+    // "Dar por cerradas las arrastradas de antes de..." (cowork, 17/11 10:40, urgente).
+    register_rest_route('progreso/v1', '/equipacion/tasks/cerrar-arrastradas', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_cerrar_arrastradas', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/weeks/historico', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_weeks_historico', 'permission_callback' => $equip_perm,
+    ));
+    // Migración puntual del lío de los dos sitios (NOTAS_PARA_CODE_equipacion.md, 3/11 12:00) —
+    // solo socio, nunca el gate normal de equipación.
+    register_rest_route('progreso/v1', '/equipacion/migrar-principal-a-club', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_migrar_principal_a_club',
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
     ));
 
     register_rest_route('progreso/v1', '/equipacion/blocks', array(
@@ -731,11 +888,87 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)/photo', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_upload_comp_block_photo', 'permission_callback' => $equip_perm,
     ));
+    // "Vamos bien de tiempo, añadir el 17 y 18" (Ramiro, 11/11 05:01) — nunca dar por hecho que
+    // una compe tiene 16 bloques fijos.
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/comp-blocks', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_add_comp_block', 'permission_callback' => $equip_perm,
+    ));
+    register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)', array(
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_comp_block', 'permission_callback' => $equip_perm,
+    ));
+    // Punto 8 (Ramiro, 11/11 05:01): "Fijar bloque" — intercambiar el número de dos bloques ya
+    // puestos sin mover burbujas/fichas/resultados, que van con el id del bloque físico, no con
+    // el número.
+    register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)/intercambiar-numero', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_intercambiar_numero_comp_block', 'permission_callback' => $equip_perm,
+    ));
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/generate-plan', array(
-        'methods' => 'POST', 'callback' => 'progreso_equip_competition_generate_plan', 'permission_callback' => $equip_perm,
+        'methods' => 'POST', 'callback' => 'progreso_equip_competition_generate_plan', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/plan', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_competition_plan', 'permission_callback' => $equip_perm,
+    ));
+    // "+ Tarea" a mano en una columna del plan (Ramiro 12/11 10:44).
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/tasks', array(
+        'methods' => 'POST', 'callback' => 'progreso_equip_competition_add_task', 'permission_callback' => $equip_jefe_perm,
+    ));
+
+    // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 7/11). Encender/apagar el
+    // modo compe es solo de un socio; estado es público (lo lee el móvil sin login para saber si
+    // hay compe activa, y más adelante la pantalla de la tele); apuntar/leer resultado necesita
+    // sesión normal.
+    register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/modo-compe', array(
+        // Inline (no $socio_perm compartido en este cierre): progreso_equip_set_modo_compe()
+        // ya comprueba blokes_es_socio() otra vez por dentro, esto es solo para que el error
+        // salga como 403 normal de WP REST en vez de dentro de la respuesta.
+        'methods' => 'POST', 'callback' => 'progreso_equip_set_modo_compe', 'permission_callback' => function() { return blokes_es_socio(); },
+    ));
+    register_rest_route('progreso/v1', '/compe/estado', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_estado', 'permission_callback' => '__return_true',
+    ));
+    // Para la página "Instala Blokes" (/blokes/instalar) — la próxima compe real
+    // (is_test=0), aunque todavía no esté en modo_activo (eso solo se activa el día de la
+    // compe; el gancho de la instaladora tiene que verse desde días antes).
+    register_rest_route('progreso/v1', '/compe/proxima', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_proxima', 'permission_callback' => '__return_true',
+    ));
+    // Tele del Roco: lectura pública de las diapositivas activas, para la tele (sin login).
+    register_rest_route('progreso/v1', '/tele/diapositivas', array(
+        'methods' => 'GET', 'callback' => 'progreso_tele_diapositivas', 'permission_callback' => '__return_true',
+    ));
+    // Mantenimiento: limpia blokes de compe de prueba que quedaron en la papelera de rondas
+    // anteriores (cowork, 08/11 11:15) — solo socio.
+    register_rest_route('progreso/v1', '/compe/limpiar-blokes-prueba-antiguos', array(
+        'methods' => 'POST', 'callback' => 'progreso_compe_limpiar_blokes_prueba_antiguos', 'permission_callback' => function() { return blokes_es_socio(); },
+    ));
+    register_rest_route('progreso/v1', '/compe/resultado', array(
+        'methods' => 'POST', 'callback' => 'progreso_compe_apuntar_resultado', 'permission_callback' => 'is_user_logged_in',
+    ));
+    register_rest_route('progreso/v1', '/compe/mis-resultados', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_mis_resultados', 'permission_callback' => 'is_user_logged_in',
+    ));
+    // Pantalla de la tele: público, sin login (Ramiro, punto 5).
+    register_rest_route('progreso/v1', '/compe/clasificacion', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_clasificacion', 'permission_callback' => '__return_true',
+    ));
+    // Recepción (Ramiro, punto 6): "¿quién eres?" + participante rápido sin cuenta.
+    register_rest_route('progreso/v1', '/compe/buscar-participante', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_buscar_participante', 'permission_callback' => 'is_user_logged_in',
+    ));
+    register_rest_route('progreso/v1', '/compe/participante-rapido', array(
+        'methods' => 'POST', 'callback' => 'progreso_compe_crear_participante_rapido', 'permission_callback' => 'is_user_logged_in',
+    ));
+    // 20/11 06:30 (punto 3): "simulador" solo para socio, solo en compes de prueba — apunta
+    // tops falsos para ver la animación de la tele sin tener que ir apuntando uno a uno a mano.
+    register_rest_route('progreso/v1', '/compe/simular-top', array(
+        'methods' => 'POST', 'callback' => 'progreso_compe_simular_top', 'permission_callback' => function() { return blokes_es_socio(); },
+    ));
+    // 20/11 06:30 (punto 2): categoría (masculina/femenina/infantil) de un participante en esta
+    // compe — nunca inferida, siempre elegida a mano. El propio participante puede poner la
+    // suya; la de cualquier otro (rápido, placeholder, o en nombre de otro usuario) la pone
+    // recepción — el callback comprueba cuál de los dos casos es.
+    register_rest_route('progreso/v1', '/compe/categoria', array(
+        'methods' => 'POST', 'callback' => 'progreso_compe_categoria_set', 'permission_callback' => 'is_user_logged_in',
     ));
 
     register_rest_route('progreso/v1', '/training/me', array(
@@ -801,6 +1034,10 @@ add_action('rest_api_init', function() {
 
     // ── Superadmin endpoints ──
     $sa_perm    = function() { return in_array(blokes_get_app_role(), array('socio', 'gestion')); };
+    // Niños/Vincular actividad (20/11 12:10, Ramiro): el rol profesor también puede entrar en
+    // estas dos pestañas de Grupos — nunca ve pagos ni importes (ninguno de estos 3 endpoints
+    // los lleva), a diferencia del resto de $sa_perm.
+    $sa_perm_con_profe = function() { return in_array(blokes_get_app_role(), array('socio', 'gestion', 'profesor')); };
     // Dinero agregado del club: solo socio, ni siquiera gestion (31/10, regla de Ramiro —
     // ver NOTAS_PARA_CODE_privacidad_dinero.md).
     $socio_perm = function() { return blokes_es_socio(); };
@@ -816,6 +1053,19 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_products',
         'permission_callback' => $socio_perm,
         'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
+    ));
+    // "Desglose de ingresos" (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02) — dinero
+    // agregado del club: solo socio.
+    register_rest_route('superadmin/v1', '/ingresos/desglose', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_ingresos_desglose',
+        'permission_callback' => $socio_perm,
+        'args'                => array('months' => array('type' => 'integer', 'default' => 12)),
+    ));
+    register_rest_route('superadmin/v1', '/ingresos/familia', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_ingresos_familia_set',
+        'permission_callback' => $socio_perm,
     ));
     register_rest_route('superadmin/v1', '/people-summary', array(
         'methods'             => 'GET',
@@ -834,9 +1084,43 @@ add_action('rest_api_init', function() {
         'permission_callback' => $sa_perm,
         'args'                => array('months' => array('type' => 'integer', 'default' => 4)),
     ));
+    // 16/11 07:35 (Ramiro): Wellhub + «Bajo tarifa» en Grupos.
+    register_rest_route('superadmin/v1', '/gestion/grupos/wellhub', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_grupos_wellhub',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/grupos/wellhub-checkins', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_grupos_wellhub_checkins',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/grupos/bajo-tarifa', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_grupos_bajo_tarifa',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/marcar-cobrado', array(
         'methods'             => 'POST',
         'callback'            => 'superadmin_gestion_marcar_cobrado',
+        'permission_callback' => $sa_perm,
+    ));
+    // "Vuelve tras lesión/ausencia" (17/11 19:10, Ramiro) — anula los pedidos de los meses que
+    // no vino, cobra el actual con el importe/método que diga Eva y reactiva, todo en la misma
+    // suscripción.
+    register_rest_route('superadmin/v1', '/gestion/vuelve-tras-lesion', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_vuelve_tras_lesion',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/facturas-pendientes', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_facturas_pendientes',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/facturas-pendientes/(?P<id>\d+)/completar', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_facturas_pendientes_completar',
         'permission_callback' => $sa_perm,
     ));
     register_rest_route('superadmin/v1', '/gestion/adelantados', array(
@@ -859,6 +1143,13 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_reanudar',
         'permission_callback' => $sa_perm,
     ));
+    // 19/11 21:30 (Eva/cowork, punto 2 — Borja Erice): congelar uno o varios meses de un
+    // trimestral sin pausarlo ni cobrarle, moviendo next_payment hacia delante.
+    register_rest_route('superadmin/v1', '/gestion/congelar-mes', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_congelar_mes',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/log', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_gestion_log_get',
@@ -879,6 +1170,12 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_fusionar',
         'permission_callback' => $sa_perm,
     ));
+    // 19/11 (cowork §06:25 punto 4): lo que rol gestión usa en vez de cancelar un duplicado.
+    register_rest_route('superadmin/v1', '/gestion/avisar-duplicado', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_avisar_duplicado',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/exento', array(
         'methods'             => 'POST',
         'callback'            => 'superadmin_gestion_exento',
@@ -889,6 +1186,14 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_cambiar_grupo',
         'permission_callback' => $sa_perm,
     ));
+    // Migración de una vez (cowork, 07/11 08:15): corrige la meta visible de día/horario/edad en
+    // las suscripciones que ya se cambiaron de grupo antes de este arreglo. Idempotente — se
+    // puede llamar más de una vez sin riesgo, solo vuelve a poner el mismo valor correcto.
+    register_rest_route('superadmin/v1', '/gestion/cambiar-grupo/arreglar-meta-visible', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_cambiar_grupo_arreglar_meta_visible',
+        'permission_callback' => $sa_perm,
+    ));
     // Nombre real y teléfono del alumno, editables desde Grupos sin tocar wp-admin (31/10,
     // NOTAS_PARA_CODE_grupos_como_excel.md) — para cuando la suscripción se dio de alta sin
     // dirección de facturación y solo se ve el usuario de la cuenta de WordPress, no un nombre real.
@@ -897,11 +1202,60 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_editar_alumno',
         'permission_callback' => $sa_perm,
     ));
+    // 20/11 06:30 (punto 1c): listado de usuarios con el nombre mal puesto en WordPress, con una
+    // propuesta de corrección por cada uno para confirmar a mano.
+    register_rest_route('superadmin/v1', '/gestion/nombres-por-revisar', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_nombres_por_revisar',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/nombres-por-revisar/(?P<uid>\d+)/omitir', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_nombre_omitir',
+        'permission_callback' => $sa_perm,
+    ));
+    // 20/11 07:20: pestaña "Niños" — confirmar, asociar a una cuenta existente o crear la del
+    // niño para una suscripción de Menores/Adolescentes. Nunca toca precio ni facturación.
+    register_rest_route('superadmin/v1', '/gestion/ninos-asociar', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_ninos_asociar',
+        'permission_callback' => $sa_perm_con_profe,
+    ));
+    // Versión ligera de la pestaña Niños para el rol profesor (20/11 12:10): mismas filas que ve
+    // socio/gestion en Grupos, pero calculadas aparte, sin tocar pagos ni importes — nunca pasa
+    // por superadmin_gestion_grupos().
+    register_rest_route('superadmin/v1', '/gestion/ninos-listado', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_ninos_listado',
+        'permission_callback' => $sa_perm_con_profe,
+    ));
+    // 20/11 07:23: pestaña "Vincular actividad" — todos los alumnos manuales (adultos y niños)
+    // sin vincular, con sus tops/mediciones; vincular a cuenta existente, crear niño y vincular,
+    // o borrar. Generaliza /alumnos/manual/{id}/link (solo email exacto) con Simular y uid.
+    register_rest_route('superadmin/v1', '/gestion/vincular-actividad', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_gestion_vincular_actividad_listado',
+        'permission_callback' => $sa_perm_con_profe,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/vincular-actividad', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_vincular_actividad',
+        'permission_callback' => $sa_perm_con_profe,
+    ));
     // Buscar alumno (nombre, teléfono o email) en suscripciones, externos y usuarios de
     // WordPress, para el botón "Añadir alumno" de cada grupo (grupos_como_excel.md, punto 5).
+    // También lo usan Niños/Vincular actividad (20/11 12:10) para buscar cuenta existente desde
+    // el rol profesor — no lleva ningún dato de dinero.
     register_rest_route('superadmin/v1', '/gestion/buscar-alumno', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_gestion_buscar_alumno',
+        'permission_callback' => $sa_perm_con_profe,
+    ));
+    // Crear cliente nuevo en WooCommerce desde "Añadir alumno" cuando no existe (Ramiro, 07/11
+    // 08:06) — Eva (gestión) y socios, igual que el resto de Grupos.
+    register_rest_route('superadmin/v1', '/gestion/alta-cliente', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_alta_cliente',
         'permission_callback' => $sa_perm,
     ));
     register_rest_route('superadmin/v1', '/gestion/externos', array(
@@ -935,6 +1289,13 @@ add_action('rest_api_init', function() {
         array('methods' => 'DELETE', 'callback' => 'superadmin_gestion_lista_espera_borrar',      'permission_callback' => $sa_perm),
     ));
 
+    // POST público (sin login) para el selector de Dixitalmedia — Ramiro, 15/11 19:40. Contrato
+    // en media_para_code/contrato_lista_espera_dixitalmedia.md. Antispam dentro de la propia
+    // función (honeypot + límite por IP), no en el permission_callback.
+    register_rest_route('blokes/v1', '/lista-espera', array(
+        'methods' => 'POST', 'callback' => 'blokes_lista_espera_publica_crear', 'permission_callback' => '__return_true',
+    ));
+
     // Sincronización Grupos ⇄ Google Sheets (NOTAS_PARA_CODE_sync_grupos.md) — de momento solo
     // configuración y una prueba de conexión de solo lectura contra la Hoja de PRUEBA.
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/config', array(
@@ -962,6 +1323,70 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/cambios/(?P<id>\d+)/descartar', array(
         'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_cambio_descartar', 'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/reintentar-cobro', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_reintentar_cobro', 'permission_callback' => $sa_perm,
+    ));
+    // Limpieza única (17/11 16:20, cowork): descarta las propuestas pendientes de pestañas
+    // Balance y los "pago nuevo" de meses viejos que ya estaban colgando ANTES de 589ab3a.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/limpiar-pendientes-589ab3a', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_limpiar_pendientes_589ab3a', 'permission_callback' => $sa_perm,
+    ));
+    // 17/11 18:15 (cowork): reintenta de golpe los "Cobro web sin fila" pendientes con la
+    // búsqueda por teléfono en otras pestañas (9efad0e), que esos pendientes viejos no tuvieron.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/reevaluar-sin-fila', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_reevaluar_sin_fila', 'permission_callback' => $sa_perm,
+    ));
+    // 18/11 (cowork): corrige el método guardado en los "pago nuevo" pendientes de antes del
+    // arreglo de "TA"=tarjeta (792f28b), releyendo la fila de verdad en el Excel.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/reevaluar-metodo-pago', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_reevaluar_metodo_pago_nuevo', 'permission_callback' => $sa_perm,
+    ));
+    // 18/11 (cowork, GRAVE: 499 "pago nuevo" viejos desde el sync del 17/11 19:05): muestra, para
+    // una muestra de ellos, qué hay de verdad en la foto (snapshot) de esa fila — para localizar
+    // la causa real en vez de adivinarla.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/diagnostico-pago-viejo', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_diagnostico_pago_viejo', 'permission_callback' => $sa_perm,
+    ));
+    // 18/11 (arreglado tras el aviso de cowork 09:30): descarta de golpe los "pago nuevo"
+    // pendientes que YA estén cobrados de verdad en la web para ese mes (nunca contra la foto).
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/limpiar-pago-nuevo-mismo-importe', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe', 'permission_callback' => $sa_perm,
+    ));
+    // 19/11 (cowork §06:25 punto 2): limpieza única de "pago_nuevo" duplicados (mismo
+    // teléfono+mes+importe, Anne Sophie Onadeko) que se crearon antes del arreglo en upsert_cambio.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/limpiar-pago-nuevo-duplicados', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_limpiar_pago_nuevo_duplicados', 'permission_callback' => $sa_perm,
+    ));
+    // 18/11 09:30 (cowork, GRAVE): deshace la limpieza rota que comparaba contra la foto —
+    // reabre todo lo descartado por ese motivo y lo reevalúa ya contra la web de verdad.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/deshacer-limpieza-mismo-importe', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_deshacer_limpieza_mismo_importe', 'permission_callback' => $sa_perm,
+    ));
+    // 18/11 10:45 (cowork, URGENTE — GRAVE): lista todo lo que el auto-aplicado (ya desactivado)
+    // llegó a escribir de verdad en WooCommerce, para revisar con la asesoría si hay que rectificar.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/informe-autoaplicados', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_informe_autoaplicados', 'permission_callback' => $sa_perm,
+    ));
+    // 18/11 (Ramiro): celdas "TA 17/11/2026" que la propia sincronización escribió en el Excel
+    // de Eva por error — informe (solo lee) y limpieza (deja la celda vacía, nunca inventa un dato).
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/informe-celdas-escritas', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_informe_celdas_escritas', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/limpiar-celdas-escritas', array(
+        'methods' => 'POST', 'callback' => 'superadmin_sync_grupos_limpiar_celdas_escritas', 'permission_callback' => $sa_perm,
+    ));
+    // WP-Cron no corre de fiar con poco tráfico (pseudo-cron: solo se dispara si entra una
+    // visita después de la hora programada) — Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05:
+    // "esto tiene que pasar automático". Ruta pública protegida por secreto (como el webhook de
+    // 9to5) para que un cron de verdad del hosting la llame cada 10-15 min.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/cron-tick', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_cron_tick', 'permission_callback' => '__return_true',
+    ));
+    // Para que cowork/Ramiro recuperen la URL exacta (con el secreto) y la peguen en el panel
+    // de SiteGround — con sesión, nunca a ciegas por curl sin credenciales.
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/cron-url', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_cron_url', 'permission_callback' => $sa_perm,
+    ));
 
     // Calendario de días especiales del club (NOTAS_PARA_CODE_calendario.md): festivos, cierres
     // y horarios especiales, con una decisión por día. Ver y listar: cualquiera con acceso a
@@ -974,6 +1399,14 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/club-days/(?P<id>\d+)', array(
         array('methods' => 'PUT',    'callback' => 'superadmin_club_days_editar', 'permission_callback' => $socio_perm),
         array('methods' => 'DELETE', 'callback' => 'superadmin_club_days_borrar', 'permission_callback' => $socio_perm),
+    ));
+
+    // Abonos anual/trimestral de escalada libre, derivados de los mensuales (5114/5115) sin
+    // tocarlos — Ramiro, NOTAS_PARA_CODE_abono_anual.md 06/11. Crea productos nuevos (duplicando
+    // el mensual correspondiente), nunca convierte ni toca los suscriptores actuales. Solo socio:
+    // crea productos/precios reales.
+    register_rest_route('superadmin/v1', '/gestion/abonos/crear-periodicidad', array(
+        'methods' => 'POST', 'callback' => 'superadmin_abonos_crear_periodicidad', 'permission_callback' => $socio_perm,
     ));
 
     // Histórico de pagos importado (HV Control de Clientes, NOTAS_PARA_CODE_hv_control_clientes.md)
@@ -1018,6 +1451,22 @@ add_action('rest_api_init', function() {
         ),
     ));
 
+    // Saldo de apertura del Club a 1/1 de un año, editable (NOTAS_PARA_CODE_gastos_banco.md,
+    // 15/11 11:15 punto 4): el cuadre de saldo lo necesita como punto de partida fijo.
+    register_rest_route('superadmin/v1', '/expenses/apertura', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'superadmin_expenses_apertura_get',
+            'permission_callback' => $socio_perm,
+            'args'                => array('year' => array('type' => 'integer')),
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'superadmin_expenses_apertura_set',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+
     // Remitentes de transferencias ya clasificados a mano (Clases/Eventos/...), compartido
     // entre Eva y Ramiro (antes vivía solo en el navegador de quien lo clasificó).
     register_rest_route('superadmin/v1', '/expenses/senders', array(
@@ -1029,6 +1478,20 @@ add_action('rest_api_init', function() {
         array(
             'methods'             => 'POST',
             'callback'            => 'superadmin_save_expense_sender',
+            'permission_callback' => $socio_perm,
+        ),
+    ));
+
+    // Notas de "Variaciones a revisar", compartidas en servidor (gastos_banco.md punto 8).
+    register_rest_route('superadmin/v1', '/expenses/variaciones', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'superadmin_get_expense_variaciones',
+            'permission_callback' => $socio_perm,
+        ),
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'superadmin_save_expense_variacion',
             'permission_callback' => $socio_perm,
         ),
     ));
@@ -1073,9 +1536,21 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_campanas_importar_contactos',
         'permission_callback' => $sa_perm,
     ));
+    // Ramiro 12/11 15:52: "menor" por el alumno (grupo niños/adolescentes), no por de quién es
+    // el teléfono.
+    register_rest_route('superadmin/v1', '/campanas/contactos/reclasificar-tipo', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_campanas_reclasificar_tipo',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/campanas/contactos', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_campanas_listar_contactos',
+        'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/campanas/contactos/(?P<id>\d+)', array(
+        'methods'             => 'DELETE',
+        'callback'            => 'superadmin_campanas_borrar_contacto',
         'permission_callback' => $sa_perm,
     ));
     register_rest_route('superadmin/v1', '/campanas/envios-hoy', array(
@@ -1110,6 +1585,90 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_campanas_marcar_accion',
         'permission_callback' => $sa_perm,
     ));
+    register_rest_route('superadmin/v1', '/campanas/(?P<id>\d+)/deshacer-enviados', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_campanas_deshacer_enviados',
+        'permission_callback' => $sa_perm,
+    ));
+    // Parte C de la trazabilidad (Ramiro, 11/11 05:35): cruce indirecto por teléfono, para lo ya
+    // enviado sin enlace y para quien no hace clic pero vuelve igual.
+    register_rest_route('superadmin/v1', '/campanas/(?P<id>\d+)/recalcular-indirectas', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_campanas_recalcular_indirectas',
+        'permission_callback' => $sa_perm,
+    ));
+
+    // Tele del Roco (NOTAS_PARA_CODE_tele_roco.md) — gestión de diapositivas, solo socio/gestión.
+    register_rest_route('superadmin/v1', '/tele-slides', array(
+        'methods' => 'GET', 'callback' => 'superadmin_tele_slides_listar', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/tele-slides', array(
+        'methods' => 'POST', 'callback' => 'superadmin_tele_slides_crear', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/tele-slides/(?P<id>\d+)', array(
+        'methods' => 'PUT', 'callback' => 'superadmin_tele_slides_editar', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/tele-slides/(?P<id>\d+)', array(
+        'methods' => 'DELETE', 'callback' => 'superadmin_tele_slides_borrar', 'permission_callback' => $sa_perm,
+    ));
+
+    // NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, Fase 0 — solo lectura: listan para que
+    // Ramiro dé el OK antes de tocar nada, no cambian ningún dato.
+    register_rest_route('superadmin/v1', '/alumnos/onhold-diagnostico', array(
+        'methods' => 'GET', 'callback' => 'superadmin_alumnos_onhold_diagnostico', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/alumnos/edad-diagnostico', array(
+        'methods' => 'GET', 'callback' => 'superadmin_alumnos_edad_diagnostico', 'permission_callback' => $sa_perm,
+    ));
+    // Corrige la edad SIN tocar producto/precio (alumnos_clases 07:50/09:00, 14:00 punto 5) --
+    // solo socio, nunca automático: hay que confirmar antes cada franja/caso con el diagnóstico
+    // de arriba (Júlia Onetti #7721 queda fuera a propósito, necesita que Ramiro decida primero
+    // entre corregir solo la edad o crear la variación "niños 1 día", PENDIENTES_MAESTRO 18).
+    register_rest_route('superadmin/v1', '/alumnos/edad-corregir', array(
+        'methods' => 'POST', 'callback' => 'superadmin_alumnos_edad_corregir', 'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/alumnos/sin-telefono-diagnostico', array(
+        'methods' => 'GET', 'callback' => 'superadmin_alumnos_sin_telefono_diagnostico', 'permission_callback' => $sa_perm,
+    ));
+
+    // «Pendientes de cobro» (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 14/11 18:05/
+    // 18:10/18:12) — una fila por pedido de renovación "Pendiente de pago" de verdad, para que
+    // Eva lo gestione desde Supervisión → Grupos sin mirar el Excel ni WooCommerce a mano.
+    register_rest_route('superadmin/v1', '/alumnos/pendientes-cobro', array(
+        'methods' => 'GET', 'callback' => 'superadmin_alumnos_pendientes_cobro', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/alumnos/pendientes-cobro/viene', array(
+        'methods' => 'POST', 'callback' => 'superadmin_pendientes_cobro_viene', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/alumnos/pendientes-cobro/recordado', array(
+        'methods' => 'POST', 'callback' => 'superadmin_pendientes_cobro_recordado', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/profes-telefonos', array(
+        'methods' => 'GET', 'callback' => 'superadmin_profes_telefonos_get', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/profes-telefonos', array(
+        'methods' => 'POST', 'callback' => 'superadmin_profes_telefono_set', 'permission_callback' => $sa_perm,
+    ));
+    // Pestaña "Bajas" de Grupos (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 15/11 08:45).
+    register_rest_route('superadmin/v1', '/gestion/bajas', array(
+        'methods' => 'GET', 'callback' => 'superadmin_gestion_bajas', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/bajas/motivo', array(
+        'methods' => 'POST', 'callback' => 'superadmin_gestion_bajas_motivo_set', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/bajas/contacto', array(
+        'methods' => 'POST', 'callback' => 'superadmin_gestion_bajas_contacto', 'permission_callback' => $sa_perm,
+    ));
+    // Pestaña Superadmin › Clases: retención por clase/profe (15/11 08:45 punto D) — solo
+    // socios, como el resto de dinero/estadísticas agregadas del club.
+    register_rest_route('superadmin/v1', '/clases-retencion', array(
+        'methods' => 'GET', 'callback' => 'superadmin_clases_retencion', 'permission_callback' => $socio_perm,
+    ));
+    // "Alumnos con pago en curso" (Ramiro, 15/11 16:30) — sustituye a la tabla "Por mes".
+    register_rest_route('superadmin/v1', '/clases-pago-en-curso', array(
+        'methods' => 'GET', 'callback' => 'superadmin_clases_pago_en_curso', 'permission_callback' => $socio_perm,
+        'args' => array('categoria' => array('type' => 'string', 'default' => 'todos')),
+    ));
 });
 
 // ============================================================
@@ -1122,6 +1681,66 @@ function blokes_exp_load_month($month, $entity) {
     $raw   = get_option(blokes_exp_option_key($month, $entity));
     $saved = $raw ? json_decode($raw, true) : null;
     return (is_array($saved) && is_array($saved['items'] ?? null)) ? $saved['items'] : array();
+}
+
+// Coste real de empresa por profe, de un mes concreto — Ramiro, 15/11 10:25 punto A: "nada de
+// ×1,43 ni de usar la nómina de noviembre". Nómina bruta real (ya incluye efectivo cuando el
+// pago es mixto, payroll_compute_month lo calcula así) + Seguridad Social real (prorrateada
+// según la nómina bruta de cada uno: el cargo del banco es un único pago para todos, no viene
+// desglosado por persona) + gastos de voluntarios/colaboradores del banco, atribuidos por
+// nombre. Para que cuadre con el "gasto de personal" de Gastos banco, usa las MISMAS fuentes
+// (Nóminas + categoría 'ss'/'gastos_voluntarios' del banco del Club), nunca una estimación.
+function blokes_normaliza_nombre_profe($nombre) {
+    $n = function_exists('iconv') ? iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', (string) $nombre) : (string) $nombre;
+    return strtolower(trim($n));
+}
+function blokes_gastos_banco_items_categoria_mes($month, $entity, $categoria) {
+    return array_values(array_filter(blokes_exp_load_month($month, $entity), function($it) use ($categoria) {
+        return ($it['category'] ?? '') === $categoria;
+    }));
+}
+// Devuelve ('costes' => nombre => coste total del mes, 'fuentes' => nombre => true si hay fila
+// de nómina real de ESE mes, false si no (p. ej. no se ha cargado Nóminas de ese mes todavía) —
+// el frontend lo enseña en el ⓘ («nómina <mes> + SS banco» / «ficha, sin nómina de <mes>») para
+// ver en vivo si cae al plan B sin depender del error_log del servidor (cowork, 15/11 11:15).
+function blokes_coste_real_profe_mes($month) {
+    $out = array(); $fuentes = array();
+    if (!function_exists('overtime_get_people') || !function_exists('payroll_compute_month')) return array('costes' => $out, 'fuentes' => $fuentes);
+    try {
+        $people  = overtime_get_people();
+        $entries = overtime_get_entries();
+        $base    = payroll_get_base();
+        $rates   = overtime_get_rates();
+        $r = payroll_compute_month($month, $people, $entries, $base, $rates);
+        $total_bruto = 0.0;
+        foreach (($r['rows'] ?? array()) as $row) {
+            $nombre = blokes_normaliza_nombre_profe($row['name'] ?? '');
+            if (!$nombre) continue;
+            $bruto = floatval($row['total'] ?? 0);
+            $out[$nombre] = ($out[$nombre] ?? 0) + $bruto;
+            $fuentes[$nombre] = true; // tiene fila de nómina de este mes, aunque sea 0
+            $total_bruto += $bruto;
+        }
+        $ss_total = 0.0;
+        foreach (blokes_gastos_banco_items_categoria_mes($month, 'club', 'ss') as $it) $ss_total += abs(floatval($it['importe'] ?? 0));
+        if ($ss_total > 0 && $total_bruto > 0) {
+            foreach ($out as $nombre => $bruto) $out[$nombre] += $ss_total * ($bruto / $total_bruto);
+        }
+    } catch (\Throwable $e) {
+        error_log('Blokes blokes_coste_real_profe_mes: fallo en nóminas/SS de ' . $month . ': ' . $e->getMessage());
+    }
+    try {
+        $candidatos = array('sigurd', 'carolina', 'ana', 'isa', 'rafa', 'alvaro', 'eva', 'lucia', 'sara', 'edu');
+        foreach (blokes_gastos_banco_items_categoria_mes($month, 'club', 'gastos_voluntarios') as $item) {
+            $c = blokes_normaliza_nombre_profe($item['concepto'] ?? '');
+            foreach ($candidatos as $nombre) {
+                if (strpos($c, $nombre) !== false) { $out[$nombre] = ($out[$nombre] ?? 0) + abs(floatval($item['importe'] ?? 0)); break; }
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('Blokes blokes_coste_real_profe_mes: fallo en gastos de voluntarios de ' . $month . ': ' . $e->getMessage());
+    }
+    return array('costes' => $out, 'fuentes' => $fuentes);
 }
 
 // Clave de un movimiento para no duplicarlo: fecha de operación (no fecha valor — esa falta en
@@ -1199,6 +1818,101 @@ function superadmin_save_expenses($request) {
 // compara como texto (los meses se guardan como 'YYYY-MM', que ordena igual como string que
 // como fecha) en vez de restar meses a una fecha, que con createFromFormat('Y-m', …) arrastra
 // el día de hoy y se desborda de mes en los días 29-31 de meses cortos.
+// Saldo de apertura del Club a 1/1 de un año — editable por socio (NOTAS_PARA_CODE_gastos_banco.md,
+// 15/11 11:15): no se puede "adivinar" del primer movimiento CON saldo guardado (eso dio un
+// ancla equivocada, un movimiento de octubre, porque los CSV más antiguos no siempre traen
+// saldo). Semilla conocida para 2026: CSV "movimientosCuenta (club 1-4 2026).csv", primer
+// movimiento 05/01 TOTAL TARJETAS +475,60 con saldo posterior 515,28 → apertura 515,28 − 475,60 = 39,68 €.
+function blokes_expenses_apertura_get($year, $entity = 'club') {
+    $entity = sanitize_key($entity) ?: 'club';
+    $saved = get_option('blokes_apertura_' . $entity . '_' . intval($year), '');
+    if ($saved !== '') {
+        $d = json_decode($saved, true);
+        if (is_array($d) && isset($d['saldo'])) return $d;
+    }
+    // Semilla conocida solo para el Club 2026 (ver abajo) — la Rocoteca no tiene una por ahora
+    // (cowork, 15/11 11:45: "falta el saldo a 1/1 de su cuenta principal (Kutxa)"), hay que
+    // meterla a mano con POST /expenses/apertura.
+    if ($entity === 'club' && intval($year) === 2026) return array('saldo' => 39.68, 'fecha' => '2026-01-01', 'semilla' => true);
+    return array('saldo' => null, 'fecha' => $year . '-01-01', 'semilla' => false);
+}
+function blokes_expenses_apertura_set($year, $entity, $saldo) {
+    $entity = sanitize_key($entity) ?: 'club';
+    update_option('blokes_apertura_' . $entity . '_' . intval($year), wp_json_encode(array(
+        'saldo' => floatval($saldo), 'fecha' => intval($year) . '-01-01', 'semilla' => false,
+    )), false);
+}
+function superadmin_expenses_apertura_get($request) {
+    $year   = intval($request->get_param('year') ?: (new DateTime())->format('Y'));
+    $entity = sanitize_key($request->get_param('entity') ?: 'club');
+    return rest_ensure_response(blokes_expenses_apertura_get($year, $entity));
+}
+function superadmin_expenses_apertura_set($request) {
+    $year   = intval($request->get_param('year'));
+    $entity = sanitize_key($request->get_param('entity') ?: 'club');
+    $saldo  = $request->get_param('saldo');
+    if (!$year || $saldo === null || $saldo === '') {
+        return new WP_Error('bad_request', 'Falta year o saldo.', array('status' => 400));
+    }
+    blokes_expenses_apertura_set($year, $entity, $saldo);
+    return rest_ensure_response(blokes_expenses_apertura_get($year, $entity));
+}
+
+// Cuadre saldo↔resultado de una entidad, por AÑO (NOTAS_PARA_CODE_gastos_banco.md, 15/11
+// 11:00/11:15, corrige el 10:55 que Ramiro anuló; generalizado a Rocoteca en 11:45): apertura del
+// año + ingresos − gastos (SIN "Uso de Rocódromo", que no es gasto/ingreso real — los gastos de
+// la Rocoteca con ese dinero ya se contabilizan en la Rocoteca) ± traspasos de "Uso de
+// Rocódromo" (línea aparte, informativa — SALE del Club, ENTRA en la Rocoteca) = saldo de hoy.
+// Solo sobre el año en curso (no todo el histórico — usar todo el histórico fue el bug del
+// 10:55/11:15: ancla mal el saldo inicial).
+function blokes_expenses_cuadre($year = null, $entity = 'club') {
+    $year   = $year ?: intval((new DateTime())->format('Y'));
+    $entity = sanitize_key($entity) ?: 'club';
+    global $wpdb;
+    $like = $wpdb->esc_like('blokes_exp_' . $year . '_') . '%_' . $wpdb->esc_like($entity);
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s", $like
+    ), ARRAY_A);
+    $resultado = 0.0; $traspasos_salida = 0.0; $traspasos_entrada = 0.0;
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!$saved || !is_array($saved['items'] ?? null)) continue;
+        foreach ($saved['items'] as $item) {
+            $concepto_norm = function_exists('iconv')
+                ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
+                : strtolower($item['concepto'] ?? '');
+            $amt = abs(floatval($item['importe'] ?? 0));
+            // "Uso de Rocódromo": sale de la cuenta del Club y entra en la de la Rocoteca, pero
+            // NO es gasto del Club ni ingreso de la Rocoteca (Ramiro, 15/11 11:00: los gastos de
+            // la Rocoteca con ese dinero ya se contabilizan ahí) — se aparta en su propia línea
+            // para el cuadre de saldo de cada entidad, nunca en "gastos"/"ingresos".
+            if (strpos($concepto_norm, 'rocodromo') !== false) {
+                $seccion = $item['section'] ?? 'costes';
+                if ($seccion === 'costes') $traspasos_salida += $amt; else $traspasos_entrada += $amt;
+                continue;
+            }
+            $es_interno = strpos($concepto_norm, 'transferencia entre cuentas') !== false || $item['excluded'];
+            if ($es_interno) continue;
+            if (($item['section'] ?? 'costes') === 'costes') $resultado -= $amt; else $resultado += $amt;
+        }
+    }
+    $apertura       = blokes_expenses_apertura_get($year, $entity);
+    $saldo_hoy_data = blokes_expenses_saldo_real($entity);
+    $saldo_hoy      = $saldo_hoy_data['saldo'];
+    $traspasos_neto = $traspasos_entrada - $traspasos_salida; // Club: negativo (sale); Rocoteca: positivo (entra)
+    $saldo_esperado = ($apertura['saldo'] !== null) ? round($apertura['saldo'] + $resultado + $traspasos_neto, 2) : null;
+    $diferencia     = ($saldo_esperado !== null && $saldo_hoy !== null) ? round($saldo_esperado - $saldo_hoy, 2) : null;
+    return array(
+        'entity' => $entity, 'year' => $year,
+        'apertura' => $apertura['saldo'], 'fechaApertura' => $apertura['fecha'], 'aperturaEsSemilla' => !empty($apertura['semilla']),
+        'resultado' => round($resultado, 2),
+        'traspasosRocodromo' => round($traspasos_neto, 2),
+        'saldoEsperado' => $saldo_esperado,
+        'saldoHoy' => $saldo_hoy, 'fechaHoy' => $saldo_hoy_data['fecha'],
+        'diferencia' => $diferencia,
+    );
+}
+
 function superadmin_get_expenses($request) {
     $from             = sanitize_text_field($request->get_param('from') ?: '');
     $entity_filter    = sanitize_text_field($request->get_param('entity') ?: 'all');
@@ -1211,6 +1925,32 @@ function superadmin_get_expenses($request) {
         ARRAY_A
     );
 
+    // IVA repercutido real (de WooCommerce, no estimado del banco) y nóminas reales (de
+    // Superadmin › Nóminas, no re-adivinadas del concepto del banco) — 15/11 09:18 puntos 3 y 5.
+    $iva_real_map = blokes_expenses_iva_repercutido_real($from);
+    $nominas_real_cache = array(); // month => $totals['bank'] de payroll_compute_month
+    $nominas_people = null; $nominas_entries = null; $nominas_base = null; $nominas_rates = null;
+    // Nunca puede tirar /expenses entero si algo de Nóminas falla — es un cruce informativo,
+    // no el dato principal (mismo cuidado que con los reembolsos de WooCommerce, que sí
+    // tiraron /revenue en producción el 15/11).
+    $nominas_real_de_mes = function($month) use (&$nominas_real_cache, &$nominas_people, &$nominas_entries, &$nominas_base, &$nominas_rates) {
+        if (isset($nominas_real_cache[$month])) return $nominas_real_cache[$month];
+        if (!function_exists('overtime_get_people') || !function_exists('payroll_compute_month')) return null;
+        try {
+            if ($nominas_people === null) {
+                $nominas_people  = overtime_get_people();
+                $nominas_entries = overtime_get_entries();
+                $nominas_base    = payroll_get_base();
+                $nominas_rates   = overtime_get_rates();
+            }
+            $r = payroll_compute_month($month, $nominas_people, $nominas_entries, $nominas_base, $nominas_rates);
+            return $nominas_real_cache[$month] = floatval($r['totals']['bank'] ?? 0);
+        } catch (\Throwable $e) {
+            error_log('Blokes superadmin_get_expenses: cruce de nominas fallo para ' . $month . ': ' . $e->getMessage());
+            return $nominas_real_cache[$month] = null;
+        }
+    };
+
     $data = array();
 
     foreach ($rows as $row) {
@@ -1222,26 +1962,45 @@ function superadmin_get_expenses($request) {
         if (!preg_match('/^\d{4}-\d{2}$/', $saved['month'])) continue;
         if ($from !== '' && $saved['month'] < $from) continue;
 
-        $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0;
+        $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0; $nom_con_voluntarios = 0;
         $row_concepto  = array(); // expense concept totals for this entity-month
         $row_ingresos  = array(); // income items for this entity-month
         foreach ($saved['items'] as $item) {
             $concepto_norm = function_exists('iconv')
                 ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
                 : strtolower($item['concepto'] ?? '');
-            // Internal: flagged at upload time OR matches key patterns (catches accent variants)
+            // "Uso de Rocódromo" (Club → Rocoteca) NUNCA es gasto/ingreso real, en ninguna vista
+            // (Ramiro, 15/11 11:00, anula el 10:55: los gastos de la Rocoteca de ese dinero YA
+            // se contabilizan en la Rocoteca — contarlo también como gasto del Club sería
+            // contarlo dos veces). Solo se ve aparte, como traspaso, en el cuadre de saldo del
+            // Club (blokes_expenses_cuadre_club), nunca aquí en "gastos".
             $is_internal = $item['excluded']
                 || strpos($concepto_norm, 'rocodromo') !== false
                 || strpos($concepto_norm, 'transferencia entre cuentas') !== false;
             if ($exclude_internal && $is_internal) continue;
             $amt  = abs(floatval($item['importe']));
-            $rate = ($row_entity !== 'club') ? floatval($item['iva']) / 100 : 0;
+            // 15/11 09:18 punto 3: antes el Club siempre daba IVA 0 pasara lo que pasara — desde
+            // julio casi toda la actividad está en el Club, así que el soportado salía ~0 y el
+            // "a devolver" real del trimestre no se veía. El tipo guardado por categoría
+            // (CATEGORY_IVA) vale igual en las dos entidades.
+            $rate = floatval($item['iva']) / 100;
             $iva  = $rate > 0 ? $amt * $rate / (1 + $rate) : 0;
-            $is_nomina = strpos($concepto_norm, 'nomina') !== false;
+            // 15/11 09:18 punto 5: desde agosto se paga por "REMESA DE TRANSFERENCIAS", no
+            // "NOMINA…" — el strpos de antes daba 0€ de nóminas desde agosto. La categoría ya
+            // lo clasifica bien (expensesParser.js), hay que usarla en vez de re-adivinarlo aquí.
+            $is_nomina = ($item['category'] ?? '') === 'nominas';
+            // Cowork, 15/11 18:00: el aviso "la remesa no cuadra" salía en 9 de 11 meses porque
+            // $nom solo contaba la categoría "nominas" del banco, sin los pagos a voluntarios y
+            // a Sigurd ("CAROLINA/ANA/ISA/RAFA MATERIALES/VARIOS", "TRABAJOS SIGURD" —
+            // categoría 'gastos_voluntarios' en expensesParser.js) que Ramiro confirmó (09:25)
+            // que SÍ son gasto de personal. Solo se suman aparte para esta comparación — el
+            // total "nominas" que se muestra en Gastos por categoría se deja igual que antes.
+            $es_gasto_personal_voluntario = ($item['category'] ?? '') === 'gastos_voluntarios';
 
             if ($item['section'] === 'costes') {
                 $tc    += $amt;
                 $iva_s += $iva;
+                if ($is_nomina || $es_gasto_personal_voluntario) $nom_con_voluntarios += $amt;
                 if ($is_nomina) {
                     $nom += $amt;
                 } else {
@@ -1258,6 +2017,7 @@ function superadmin_get_expenses($request) {
             }
         }
         arsort($row_concepto);
+        $nominas_real = $row_entity === 'club' ? $nominas_real_de_mes($saved['month']) : null;
         $data[] = array(
             'month'           => $saved['month'],
             'entity'          => $row_entity,
@@ -1265,14 +2025,33 @@ function superadmin_get_expenses($request) {
             'total_ingresos'  => round($ti,    2),
             'iva_soportado'   => round($iva_s, 2),
             'iva_repercutido' => round($iva_r, 2),
+            // Real, de WooCommerce/FactuPress — el "iva_repercutido" de arriba (estimado del
+            // banco) se mantiene para no romper lo que ya lo usaba, pero ya no hace falta.
+            'iva_repercutido_real' => round($iva_real_map[$saved['month'] . '|' . $row_entity] ?? 0, 2),
             'nominas'         => round($nom,   2),
+            'nominas_real'    => $nominas_real !== null ? round($nominas_real, 2) : null,
+            // Umbral fijo de 50 € (sin el 5% de antes, que con nóminas grandes dejaba pasar
+            // diferencias mayores sin avisar) y comparado contra nóminas + gastos de voluntarios
+            // juntos — ver $nom_con_voluntarios arriba.
+            'nominas_descuadre' => ($nominas_real !== null && $nom_con_voluntarios > 0)
+                ? (abs($nom_con_voluntarios - $nominas_real) > 50) : false,
             'by_concepto'     => $row_concepto,
             'ingresos_items'  => $row_ingresos,
         );
     }
 
     usort($data, function($a, $b) { return strcmp($a['month'], $b['month']); });
-    return rest_ensure_response(array('data' => $data));
+    // Saldo en banco real (solo Club, Ramiro 15/11 09:25) — el "acumulado" del frontend es un
+    // resultado operativo, NUNCA el saldo del banco: no se puede reconstruir sin un saldo de
+    // apertura, así que se manda aparte, directo del "Saldo Posterior" del CSV.
+    return rest_ensure_response(array(
+        'data' => $data,
+        'saldoReal' => blokes_expenses_saldo_real('club'),
+        // El P&L (15/11 11:45) quiere las dos entidades a la vez para cuadrar la variación de
+        // saldo consolidada, no solo el Club.
+        'cuadre' => blokes_expenses_cuadre(),
+        'cuadreRocoteca' => blokes_expenses_cuadre(null, 'rocoteca'),
+    ));
 }
 
 function superadmin_delete_expenses($request) {
@@ -1334,6 +2113,32 @@ function superadmin_save_expense_sender($request) {
     else $map[$sender] = $category;
 
     update_option(BLOKES_EXP_SENDERS_OPTION, wp_json_encode($map), false);
+    return rest_ensure_response(array('success' => true, 'data' => $map));
+}
+
+// Notas de "Variaciones a revisar" — compartidas entre Eva y Ramiro, no solo en el navegador de
+// quien la escribió (NOTAS_PARA_CODE_gastos_banco.md punto 8, "guardadas en servidor"). Misma
+// forma que los remitentes de arriba: mapa clave (categoría+mes) => texto.
+const BLOKES_EXP_VARIACIONES_OPTION = 'blokes_exp_variaciones_notas';
+function superadmin_get_expense_variaciones($request) {
+    $raw = get_option(BLOKES_EXP_VARIACIONES_OPTION);
+    $map = $raw ? json_decode($raw, true) : array();
+    return rest_ensure_response(array('success' => true, 'data' => is_array($map) ? $map : array()));
+}
+function superadmin_save_expense_variacion($request) {
+    $body = $request->get_json_params();
+    $key  = sanitize_text_field((string) ($body['key'] ?? ''));
+    $nota = sanitize_text_field((string) ($body['nota'] ?? ''));
+    if ($key === '') return new WP_Error('bad_request', 'Falta la clave de la variación.', array('status' => 400));
+
+    $raw = get_option(BLOKES_EXP_VARIACIONES_OPTION);
+    $map = $raw ? json_decode($raw, true) : array();
+    if (!is_array($map)) $map = array();
+
+    if ($nota === '') unset($map[$key]);
+    else $map[$key] = $nota;
+
+    update_option(BLOKES_EXP_VARIACIONES_OPTION, wp_json_encode($map), false);
     return rest_ensure_response(array('success' => true, 'data' => $map));
 }
 
@@ -1979,6 +2784,1216 @@ function blokes_upload_image($request) {
     ));
 }
 
+// Tele del Roco (NOTAS_PARA_CODE_tele_roco.md, Ramiro 11/11 05:39): diapositivas de la tele
+// fija cuando no hay compe activa — gestionadas a mano desde Superadmin → Tele por ahora
+// (primera versión; las automáticas de cada actividad/evento quedan para una ronda aparte).
+// Vive en el blog del Club (igual que Superadmin/Campañas), con lectura pública para que la
+// tele (que corre en el blog de Blokes) pueda leerlas sin sesión.
+function blokes_tele_slides_table() { global $wpdb; return $wpdb->prefix . 'blokes_tele_slides'; }
+function blokes_tele_ensure_table() {
+    global $wpdb;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE " . blokes_tele_slides_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        titulo      varchar(190) NOT NULL DEFAULT '',
+        imagen_url  varchar(500) NOT NULL DEFAULT '',
+        texto       text         NOT NULL,
+        qr_url      varchar(500) NOT NULL DEFAULT '',
+        fecha_inicio date        NULL,
+        fecha_fin    date        NULL,
+        duracion_seg tinyint(3) UNSIGNED NOT NULL DEFAULT 12,
+        orden        int(10)     NOT NULL DEFAULT 0,
+        activo       tinyint(1)  NOT NULL DEFAULT 1,
+        created_at   datetime    NOT NULL,
+        PRIMARY KEY (id)
+    ) {$charset};");
+
+    // Precarga (Ramiro, 11/11 05:39: "precarga ya el cartel de la compe, la promo del 10 %
+    // trimestral y el Instala Blokes") — una sola vez, para que la tele tenga algo desde el
+    // primer momento sin que Ramiro tenga que crearlo a mano.
+    if (!get_option('blokes_tele_precarga')) {
+        $wpdb->insert(blokes_tele_slides_table(), array(
+            'titulo' => 'Compe RocoMadrid', 'texto' => '30 de noviembre – 4 de diciembre. Instala Blokes y apúntate.',
+            'qr_url' => 'https://rocomadrid.com/app', 'fecha_fin' => '2026-12-04', 'duracion_seg' => 14, 'orden' => 1,
+            'activo' => 1, 'created_at' => current_time('mysql'),
+        ));
+        $wpdb->insert(blokes_tele_slides_table(), array(
+            'titulo' => '10 % en el primer trimestre', 'texto' => 'Pagando trimestral, hasta el 31 de diciembre. 2 días/semana de tarde: 232 € en vez de 258 €.',
+            'qr_url' => 'https://rocomadrid.com/club', 'fecha_fin' => '2026-12-31', 'duracion_seg' => 12, 'orden' => 2,
+            'activo' => 1, 'created_at' => current_time('mysql'),
+        ));
+        $wpdb->insert(blokes_tele_slides_table(), array(
+            'titulo' => 'Instala Blokes', 'texto' => 'Apunta tus tops desde el móvil.',
+            'qr_url' => 'https://rocomadrid.com/app', 'fecha_fin' => null, 'duracion_seg' => 10, 'orden' => 3,
+            'activo' => 1, 'created_at' => current_time('mysql'),
+        ));
+        update_option('blokes_tele_precarga', 1, false);
+    }
+}
+
+function blokes_tele_slide_fila($r) {
+    return array(
+        'id' => intval($r['id']), 'titulo' => $r['titulo'], 'imagenUrl' => $r['imagen_url'],
+        'texto' => $r['texto'], 'qrUrl' => $r['qr_url'],
+        'fechaInicio' => $r['fecha_inicio'], 'fechaFin' => $r['fecha_fin'],
+        'duracionSeg' => intval($r['duracion_seg']), 'orden' => intval($r['orden']), 'activo' => (bool) $r['activo'],
+    );
+}
+
+// GET /superadmin/v1/tele-slides — todas (activas e inactivas), para gestionarlas.
+function superadmin_tele_slides_listar($request) {
+    blokes_tele_ensure_table();
+    global $wpdb;
+    $rows = $wpdb->get_results("SELECT * FROM " . blokes_tele_slides_table() . " ORDER BY orden ASC, id ASC", ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array_map('blokes_tele_slide_fila', $rows)));
+}
+
+function superadmin_tele_slides_crear($request) {
+    blokes_tele_ensure_table();
+    global $wpdb;
+    $body = $request->get_json_params();
+    if (trim((string) ($body['titulo'] ?? '')) === '') return new WP_Error('bad_request', 'Falta el título.', array('status' => 400));
+    $wpdb->insert(blokes_tele_slides_table(), array(
+        'titulo'       => sanitize_text_field((string) $body['titulo']),
+        'imagen_url'   => esc_url_raw((string) ($body['imagenUrl'] ?? '')),
+        'texto'        => sanitize_textarea_field((string) ($body['texto'] ?? '')),
+        'qr_url'       => esc_url_raw((string) ($body['qrUrl'] ?? '')),
+        'fecha_inicio' => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fechaInicio'] ?? '')) ? $body['fechaInicio'] : null,
+        'fecha_fin'    => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fechaFin'] ?? '')) ? $body['fechaFin'] : null,
+        'duracion_seg' => max(5, min(60, intval($body['duracionSeg'] ?? 12))),
+        'orden'        => intval($body['orden'] ?? 0),
+        'activo'       => 1, 'created_at' => current_time('mysql'),
+    ));
+    return rest_ensure_response(array('success' => true, 'data' => array('id' => $wpdb->insert_id)));
+}
+
+function superadmin_tele_slides_editar($request) {
+    blokes_tele_ensure_table();
+    global $wpdb;
+    $id = intval($request['id']);
+    $actual = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . blokes_tele_slides_table() . " WHERE id = %d", $id));
+    if (!$actual) return new WP_Error('not_found', 'Diapositiva no encontrada.', array('status' => 404));
+    $body = $request->get_json_params();
+    $campos = array();
+    if (isset($body['titulo']))      $campos['titulo']     = sanitize_text_field((string) $body['titulo']);
+    if (isset($body['imagenUrl']))   $campos['imagen_url'] = esc_url_raw((string) $body['imagenUrl']);
+    if (isset($body['texto']))       $campos['texto']      = sanitize_textarea_field((string) $body['texto']);
+    if (isset($body['qrUrl']))       $campos['qr_url']     = esc_url_raw((string) $body['qrUrl']);
+    if (array_key_exists('fechaInicio', $body)) $campos['fecha_inicio'] = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['fechaInicio']) ? $body['fechaInicio'] : null;
+    if (array_key_exists('fechaFin', $body))    $campos['fecha_fin']    = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $body['fechaFin']) ? $body['fechaFin'] : null;
+    if (isset($body['duracionSeg']))  $campos['duracion_seg'] = max(5, min(60, intval($body['duracionSeg'])));
+    if (isset($body['orden']))        $campos['orden']        = intval($body['orden']);
+    if (isset($body['activo']))       $campos['activo']       = !empty($body['activo']) ? 1 : 0;
+    if (empty($campos)) return new WP_Error('bad_request', 'Nada que actualizar.', array('status' => 400));
+    $wpdb->update(blokes_tele_slides_table(), $campos, array('id' => $id));
+    return rest_ensure_response(array('success' => true));
+}
+
+function superadmin_tele_slides_borrar($request) {
+    blokes_tele_ensure_table();
+    global $wpdb;
+    $wpdb->delete(blokes_tele_slides_table(), array('id' => intval($request['id'])));
+    return rest_ensure_response(array('success' => true));
+}
+
+// Todas las filas de todas las pestañas de la Hoja activa, en un solo array plano — usado por
+// los diagnósticos de solo lectura de Fase 0 (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md)
+// para cruzar con las suscripciones sin tener que repetir la lectura de la Hoja en cada uno.
+// Devuelve array vacío (no un error) si no hay Hoja configurada o falla la llamada — más cauto
+// marcar de más para revisar a mano que romper el diagnóstico entero por un fallo de red.
+// $error_out (opcional, por referencia): si viene no-null al terminar, algo falló al leer la
+// Hoja (sin Hoja configurada, fallo de red/cuota de Google) y el array vacío devuelto NO
+// significa "nadie pagó" — para que los diagnósticos que cruzan con el Excel puedan avisarlo
+// en vez de enseñar 0 coincidencias en silencio (cowork, 13/11 11:15: el cruce con el Excel se
+// fue a 0 sin que se pudiera saber si era un fallo de lectura o un bug real de comparación).
+function blokes_sync_grupos_todas_las_filas(&$error_out = null) {
+    $error_out = null;
+    $activa = blokes_sync_grupos_sheet_activa();
+    if (!$activa['id']) { $error_out = 'Sin Hoja de Grupos configurada.'; return array(); }
+    $meta = blokes_sync_grupos_get($activa['id'], '?fields=sheets.properties.title');
+    if (is_wp_error($meta)) { $error_out = 'Error leyendo pestañas: ' . $meta->get_error_message(); return array(); }
+    $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
+    if (!$pestanas) { $error_out = 'La Hoja no tiene pestañas.'; return array(); }
+    $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($activa['id'], $pestanas);
+    if (is_wp_error($valores_por_pestana)) { $error_out = 'Error leyendo valores: ' . $valores_por_pestana->get_error_message(); return array(); }
+    $todas = array();
+    foreach ($pestanas as $tab) {
+        $r = blokes_sync_grupos_leer_pestana_filas($valores_por_pestana[$tab] ?? array());
+        foreach ($r['filas'] as $f) { $f['_pestana'] = $tab; $todas[] = $f; }
+    }
+    return $todas;
+}
+
+// Suscripción "de verdad" (objeto WC_Subscription) para un alumno de Fase 0, cargada UNA sola
+// vez y reutilizada por las 3 funciones de abajo — antes cada una llamaba a wcs_get_subscription()
+// por su cuenta (hasta 3 veces por fila de on-hold), el doble de trabajo de lo necesario y, con
+// muchas filas, more probable que la sincronización con el Excel se quede sin tiempo (cowork,
+// 13/11 11:15: el cruce con el Excel se fue a 0 justo al añadir estos 3 ayudantes).
+function blokes_alumno_sub_obj($s) {
+    $sub_id = intval($s['id'] ?? 0);
+    return ($sub_id && function_exists('wcs_get_subscription')) ? wcs_get_subscription($sub_id) : null;
+}
+// Nombre/teléfono/cliente "de verdad" de una suscripción — cadena de respaldo compartida por
+// los 3 diagnósticos de Fase 0. Cowork, 13/11 10:15: el nombre de facturación puede venir
+// vacío aunque exista suscripción — antes eso caía siempre a $s['cliente'] solo si $sub_obj
+// era null, nunca si el nombre de facturación estaba vacío.
+function blokes_alumno_nombre_de_sub($s, $uid = null, $sub_obj = false) {
+    if ($sub_obj === false) $sub_obj = blokes_alumno_sub_obj($s);
+    $nombre = $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : '';
+    if ($nombre === '') $nombre = trim((string) ($s['cliente'] ?? ''));
+    if ($nombre === '') {
+        if ($uid === null) $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
+        if ($uid) {
+            $u = get_userdata($uid);
+            if ($u && $u->display_name) $nombre = $u->display_name;
+        }
+    }
+    return $nombre;
+}
+function blokes_alumno_telefono_de_sub($s, $uid = null, $sub_obj = false) {
+    if ($sub_obj === false) $sub_obj = blokes_alumno_sub_obj($s);
+    $tel = $sub_obj ? blokes_externos_normaliza_telefono($sub_obj->get_billing_phone()) : '';
+    if ($tel === '') $tel = blokes_externos_normaliza_telefono((string) ($s['telefono'] ?? ''));
+    if ($tel === '') $tel = blokes_externos_normaliza_telefono(blokes_telefono_de_email($s['email'] ?? ''));
+    if ($tel === '') {
+        if ($uid === null) $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
+        if ($uid) $tel = blokes_externos_normaliza_telefono(get_user_meta($uid, 'billing_phone', true));
+    }
+    return $tel;
+}
+// Cowork, 13/11 11:15: 27 de 31 "revisar" tenían en realidad el MISMO cliente que su activa
+// (comprobado con /wc/v3/subscriptions) — leer solo el meta `_customer_user` directo no es
+// fiable con HPOS (igual que ya advertía el comentario de la línea ~9820, "preferir el id de
+// cliente de la API de Woo, fiable con HPOS"); aquí se usaba SOLO el meta, nunca el objeto.
+// Ahora: meta primero (rápido, vale para la mayoría) y, si da 0, el id de verdad de la
+// suscripción — así no se paga el coste de cargar el objeto en el camino normal.
+function blokes_alumno_customer_id_de_sub($s, $sub_obj = false) {
+    $sub_id = intval($s['id'] ?? 0);
+    $uid = intval(get_post_meta($sub_id, '_customer_user', true));
+    if ($uid) return $uid;
+    if ($sub_obj === false) $sub_obj = blokes_alumno_sub_obj($s);
+    return $sub_obj ? intval($sub_obj->get_customer_id()) : 0;
+}
+
+// Suscripciones activas/en espera/pendientes de una persona, para el aviso de duplicados antes
+// de crear una nueva o marcar cobrada otra (Ramiro, 15/11 08:35: "¿también esta nueva o es un
+// duplicado?"). Si se pasa $clase_objetivo (dia ya como pareja/horario/edad), cada suscripción
+// lleva 'mismaClase' (true/false) para que el frontend pinte rojo/amarillo sin repetir la
+// comparación; con $solo_misma_clase=true solo se devuelven las de esa misma clase (lo que
+// necesita "Marcar cobrado": ahí solo importa si hay otra de la MISMA clase).
+function blokes_subs_en_vigor_de_persona($uid, $excluir_sub_id = null, $clase_objetivo = null, $solo_misma_clase = false) {
+    if (!$uid) return array();
+    $out = array();
+    foreach (blokes_get_all_subscription_data() as $s) {
+        if (!in_array($s['status'] ?? '', array('active', 'on-hold', 'pending'), true)) continue;
+        $sub_id = intval($s['id'] ?? 0);
+        if (!$sub_id || ($excluir_sub_id && $sub_id === intval($excluir_sub_id))) continue;
+        $sub_obj = blokes_alumno_sub_obj($s);
+        if (blokes_alumno_customer_id_de_sub($s, $sub_obj) !== intval($uid)) continue;
+        $edad = $s['edad'] ?: 'Adultos';
+        $dia_pareja = blokes_dia_a_pareja($s['dia'] ?? '');
+        $misma_clase = $clase_objetivo
+            ? ($dia_pareja === $clase_objetivo['dia'] && ($s['horario'] ?? '') === $clase_objetivo['horario'] && $edad === $clase_objetivo['edad'])
+            : null;
+        if ($solo_misma_clase && !$misma_clase) continue;
+        $next_payment = ($sub_obj && $s['status'] === 'active' && method_exists($sub_obj, 'get_date')) ? $sub_obj->get_date('next_payment') : '';
+        // 19/11 (cowork §06:25, punto 4 — "que enseñe las dos (alta, último pago, pedidos
+        // pendientes), recomiende cuál quedarse"): antes el aviso de duplicado solo decía que
+        // existía otra — ahora trae lo que de verdad hace falta para decidir sin tener que abrir
+        // cada suscripción aparte.
+        $alta_fecha = null; $ultimo_pago = null; $pedidos_pendientes = 0;
+        if ($sub_obj) {
+            $fecha_inicio = method_exists($sub_obj, 'get_date') ? $sub_obj->get_date('date_created') : '';
+            if ($fecha_inicio) $alta_fecha = date('Y-m-d', strtotime($fecha_inicio));
+            $order_ids_s = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
+            $mejor_fecha = null;
+            foreach ($order_ids_s as $oid_s) {
+                $o_s = wc_get_order($oid_s);
+                if (!$o_s) continue;
+                if (in_array($o_s->get_status(), array('pending', 'on-hold', 'failed'), true)) { $pedidos_pendientes++; continue; }
+                if (!in_array($o_s->get_status(), array('completed', 'processing'), true)) continue;
+                $f_s = $o_s->get_date_created() ?: $o_s->get_date_paid();
+                if ($f_s && (!$mejor_fecha || $f_s->getTimestamp() > $mejor_fecha->getTimestamp())) $mejor_fecha = $f_s;
+            }
+            if ($mejor_fecha) $ultimo_pago = $mejor_fecha->date('Y-m-d');
+        }
+        $out[] = array(
+            'subId' => $sub_id, 'dia' => $dia_pareja, 'horario' => $s['horario'] ?? '', 'edad' => $edad,
+            'estado' => $s['status'], 'mismaClase' => $misma_clase,
+            'importe' => $sub_obj ? floatval($sub_obj->get_total()) : null,
+            'proximoPago' => $next_payment ? date('Y-m-d', strtotime($next_payment)) : null,
+            'altaFecha' => $alta_fecha, 'ultimoPago' => $ultimo_pago, 'pedidosPendientes' => $pedidos_pendientes,
+        );
+    }
+    return $out;
+}
+
+// 19/11 (cowork §06:25, punto 4): recomendación simple y transparente de cuál de las dos
+// suscripciones duplicadas conservar — nunca decide sola, solo sugiere con el motivo a la
+// vista, para que quien decide (Ramiro) lo confirme. Orden de criterios: (1) "active" gana a
+// "on-hold"/"pending" (es la que de verdad sigue viniendo); (2) entre dos activas, la que pagó
+// más recientemente; (3) si sigue sin desempatar, la de alta más reciente (probablemente la de
+// verdad, si la vieja es un resto sin cancelar).
+function blokes_sync_grupos_recomendar_duplicado($esta, $otras) {
+    $candidatas = array_filter(array_merge(array($esta), $otras));
+    if (count($candidatas) < 2) return null;
+    $prioridad_estado = array('active' => 2, 'on-hold' => 1, 'pending' => 0);
+    usort($candidatas, function($a, $b) use ($prioridad_estado) {
+        $pa = $prioridad_estado[$a['estado']] ?? -1; $pb = $prioridad_estado[$b['estado']] ?? -1;
+        if ($pa !== $pb) return $pb - $pa;
+        $ua = $a['ultimoPago'] ?? ''; $ub = $b['ultimoPago'] ?? '';
+        if ($ua !== $ub) return strcmp($ub, $ua);
+        return strcmp((string) ($b['altaFecha'] ?? ''), (string) ($a['altaFecha'] ?? ''));
+    });
+    $mejor = $candidatas[0];
+    $motivo = ($prioridad_estado[$mejor['estado']] ?? -1) > ($prioridad_estado[$candidatas[1]['estado']] ?? -1)
+        ? 'Está activa y la otra no.'
+        : ($mejor['ultimoPago'] ? 'Pagó más recientemente (' . $mejor['ultimoPago'] . ').' : 'Es la de alta más reciente.');
+    return array('subIdRecomendada' => $mejor['subId'], 'motivo' => $motivo);
+}
+
+// Pedido con la factura anulada en VeriFactu (FactuPress → Registros → «Anular»): el pedido
+// sigue en estado "Completado" en WooCommerce (Ramiro no lo toca para no disparar nada más),
+// pero Ramiro decidió el 15/11 08:30 que no debe contar como cobrado en ningún sitio de Blokes
+// (son facturas duplicadas anuladas a mano, no reembolsos reales — 5 pedidos, 367 €).
+function blokes_pedido_factura_anulada($order) {
+    return $order && $order->get_meta('_aeat_cancelled_invoice');
+}
+
+// 18/11 21:10 (cowork, GRAVE/URGENTE): firma exacta de las celdas que el bug del auto-aplicado
+// (17/11 22:00-23:05, ya desactivado) escribió por error en 22 alumnos: método "tarjeta" (la
+// propia sincronización, nunca Eva, usó siempre tarjeta) y fecha EXACTAMENTE el día del bug.
+// Cualquier pago real de verdad con esa combinación concreta (tarjeta + ese día exacto) sería
+// una coincidencia tan improbable que no hace falta pedir también el importe para confiar en
+// esto — y pedirlo aquí exigiría tener ya el importe del pedido a mano, que esta función no
+// tiene. Usada tanto para que "Pendientes de cobro" deje de contarlas como pago real, como por
+// el informe/limpieza de celdas (más abajo), que ya no depende de encontrar el log exacto del
+// momento en que se escribieron (ese log no estaba donde se esperaba — "no cuenta sola" es más
+// fiable que "la encontré en el log").
+function blokes_sync_grupos_pago_parece_bug_1711($pago) {
+    return is_array($pago) && ($pago['metodo'] ?? '') === 'tarjeta' && ($pago['fecha'] ?? '') === '17/11/2026';
+}
+
+// 19/11 05:50 (cowork): dos cosas arregladas sobre la versión de 18/11 21:10 —
+// (a) ya no dependía del log (eso ya estaba arreglado), pero SÍ dependía de que
+// blokes_sync_grupos_leer_pago() hubiera conseguido parsear el importe como número — a Víctor
+// Agüí y Marta Verdú, Google Sheets les convirtió el importe (86) en una fecha de serie
+// ("26/03/1900") al leer la celda, así que es_numero() lo rechazaba y la fila entera se perdía
+// de $f['pagos'], nunca llegaba a compararse. Ahora se mira el valor EN BRUTO de las celdas de
+// método y fecha directamente (antes de que nadie intente parsear el importe), así que no
+// importa si el importe viene roto — la firma del bug está en método+fecha, no en el importe.
+// (b) la firma "tarjeta + 17/11/2026" también atrapa pagos REALES hechos ese mismo día (Gema
+// Herrero, Sergi Escribano, Alicia Escudero, Sergio Díaz-noviembre) — cowork los identificó a
+// mano cruzando con WooCommerce; blokes_sync_grupos_celdas_bug_1711() ya no puede distinguirlos
+// por sí sola (de ahí que superadmin_sync_grupos_limpiar_celdas_escritas() exija ahora una lista
+// explícita en vez de actuar sobre todo lo que salga aquí).
+function blokes_sync_grupos_celdas_bug_1711() {
+    $subs_por_tel = blokes_sync_grupos_subs_por_telefono();
+    $externos_por_tel = blokes_campanas_externos_por_telefono();
+    $activa = blokes_sync_grupos_sheet_activa();
+    if (!$activa['id']) return array();
+    $meta = blokes_sync_grupos_get($activa['id'], '?fields=sheets.properties.title');
+    if (is_wp_error($meta)) return array();
+    $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
+    $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($activa['id'], $pestanas);
+    if (is_wp_error($valores_por_pestana)) return array();
+    $celdas = array();
+    foreach ($pestanas as $tab) {
+        $valores = $valores_por_pestana[$tab] ?? array();
+        $r = blokes_sync_grupos_leer_pestana_filas($valores);
+        if (!$r['filas']) continue;
+        foreach ($r['filas'] as $f) {
+            $row = intval($f['_row']);
+            foreach ($r['bloquesLayout'] as $b) {
+                if ($b['layout']['kind'] !== 'cantidad') continue; // "TA" solo existe como texto en este formato
+                $met_raw = $valores[$row][$b['layout']['metodo']] ?? null;
+                if (!is_string($met_raw) || mb_strtoupper(trim($met_raw)) !== 'TA') continue;
+                $fec_raw = $valores[$row][$b['layout']['fecha']] ?? null;
+                $fec_norm = is_string($fec_raw) ? blokes_sync_grupos_normalizar_fecha($fec_raw) : null;
+                if ($fec_norm !== '17/11/2026') continue;
+                $match = blokes_sync_grupos_emparejar($f['telefono'], $f['nombre'], $subs_por_tel, $externos_por_tel);
+                $celdas[] = array(
+                    'pestana' => $tab, 'fila' => $row + 1, 'mes' => $b['ym'],
+                    'nombre' => $f['nombre'], 'telefono' => $f['telefono'],
+                    'importe' => $valores[$row][$b['layout']['importe']] ?? null, 'metodo' => 'tarjeta', 'fecha' => $fec_norm,
+                    'matchTipo' => $match['tipo'] ?? null, 'subId' => ($match['tipo'] ?? null) === 'sub' ? intval($match['id']) : null,
+                    'matchLabel' => $match['label'] ?? null,
+                );
+            }
+        }
+    }
+    return $celdas;
+}
+
+// Meses (sep/oct/nov 2026) con pago o exención de un alumno en el Excel, por teléfono o nombre.
+function blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel, $nombre) {
+    $fila = ($tel && isset($excel_por_tel[$tel])) ? $excel_por_tel[$tel]
+        : ($excel_por_nombre[blokes_sync_grupos_normalizar_nombre($nombre)] ?? null);
+    return $fila; // null, o array('meses' => ['09','10',...], 'pestana' => '...')
+}
+
+// GET /superadmin/v1/alumnos/onhold-diagnostico — Fase 0 punto 1 de
+// NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md. SOLO LEE — no cambia ni un estado.
+// Cowork, 13/11 10:15 (revisión de la primera versión, 28 de 50 "duplicados" eran de verdad):
+// - "duplicados" de verdad = mismo CLIENTE (customer_id) y misma CLASE (día+horario+edad) con
+//   otra suscripción activa → candidata a cancelar, con `activaId` de la que se queda.
+// - "revisar" = parece relacionado (mismo teléfono con otra activa en otra clase — hermano/a
+//   con el móvil de un adulto, o la misma persona en 2 clases; o misma clase con otro cliente
+//   — hermanos en el mismo grupo) pero NO es un duplicado real, no cancelar sin mirarlo.
+// - "pagaronNoviembre" = sin ser duplicado/revisar, el Excel tiene pago o exención de **noviembre**
+//   2026 → candidata a "Marcar cobrado". "pagaronSoloOctubre" = pagó octubre pero no noviembre
+//   (probablemente se fue) → decidir baja o recordatorio, NO marcar cobrado directamente.
+// - "sinPago" = nada de lo anterior → candidata a baja (la 7092, de pruebas de Ramiro, sale
+//   marcada `esPrueba` y no debe entrar en ninguna baja real).
+function superadmin_alumnos_onhold_diagnostico($request) {
+    return rest_ensure_response(array('success' => true, 'data' => blokes_onhold_diagnostico_calcular()));
+}
+
+// El cálculo de verdad, separado de la respuesta REST — lo reutiliza también
+// superadmin_alumnos_pendientes_cobro() (14/11 18:05) para no repetir las mismas ~130 líneas de
+// clasificación. Devuelve el array "data" tal cual, nunca una WP_REST_Response.
+function blokes_onhold_diagnostico_calcular() {
+    $todas = blokes_get_all_subscription_data();
+    $on_hold = array_values(array_filter($todas, function($s) { return ($s['status'] ?? '') === 'on-hold'; }));
+    $vacio = array('duplicados' => array(), 'revisar' => array(), 'duplicadosEnEspera' => array(), 'pagaronNoviembre' => array(), 'pagaronSoloOctubre' => array(), 'sinPago' => array(), 'pruebas' => array(), 'total' => 0, 'avisoExcel' => null);
+    if (!$on_hold) return $vacio;
+
+    // Cruce con el Excel, por MES (no "oct o nov" mezclados) — primero de todo, antes de cargar
+    // objetos de suscripción de Woo para las activas (cowork, 13/11 11:15: el cruce se fue a 0
+    // justo cuando esta parte pasó a ir DETRÁS de ese trabajo; `$excel_error` dice si de verdad
+    // falló la lectura de la Hoja en vez de limitarse a no encontrar coincidencias).
+    $excel_error = null;
+    $excel_por_tel = array(); $excel_por_nombre = array();
+    foreach (blokes_sync_grupos_todas_las_filas($excel_error) as $f) {
+        $meses = array();
+        // Cowork, 14/11 17:25: "10" y "11" como claves de array literal se castean a INT en PHP
+        // (claves numéricas canónicas) mientras que "09" se queda como string (el cero a la
+        // izquierda no es canónico) — $meses salía mixto (['09', 10, 11]) y los in_array(...,
+        // true) de abajo, en modo estricto, nunca encontraban '10'/'11' (string) contra 10/11
+        // (int). De ahí el 0 en pagaronNoviembre/pagaronSoloOctubre aunque el Excel sí tuviera
+        // el pago. Forzamos (string) para que $meses sea siempre ['09','10','11'], nunca mixto.
+        foreach (array('09' => '2026-09', '10' => '2026-10', '11' => '2026-11') as $mm => $ym) {
+            // 18/11 21:10: una celda con la firma exacta del bug del auto-aplicado (tarjeta +
+            // 17/11/2026) nunca cuenta como pago real — si no, "Pendientes de cobro" sigue
+            // mandando a Eva a cobrar (otra vez) algo que ya se anuló a propósito.
+            if (blokes_sync_grupos_pago_parece_bug_1711($f['pagos'][$ym] ?? null)) continue;
+            if (!empty($f['pagos'][$ym]) || in_array($ym, $f['exentoMeses'], true)) $meses[] = (string) $mm;
+        }
+        if (!$meses) continue;
+        $valor = array('meses' => $meses, 'pestana' => $f['_pestana']);
+        if ($f['telefono']) $excel_por_tel[$f['telefono']] = $valor;
+        $clave = blokes_sync_grupos_normalizar_nombre($f['nombre']);
+        if ($clave !== '') $excel_por_nombre[$clave] = $valor;
+    }
+
+    // Activas agrupadas por cliente (customer_id) — criterio principal de duplicado.
+    $activas_por_customer = array();
+    foreach ($todas as $s) {
+        if (($s['status'] ?? '') !== 'active') continue;
+        $uid = blokes_alumno_customer_id_de_sub($s);
+        if ($uid) $activas_por_customer[$uid][] = $s;
+    }
+    // Activas por teléfono — para detectar "mismo teléfono, misma clase, otro cliente"
+    // (hermanos en el mismo grupo) sin confundirlo con un duplicado de verdad.
+    $por_tel = blokes_sync_grupos_subs_por_telefono();
+
+    // Precálculo de cada on-hold (una vez) + agrupación entre ELLAS MISMAS por cliente/teléfono
+    // + clase — cowork, 14/11 17:55: las 3 Cendejas salían dos veces cada una en
+    // pagaronNoviembre (una suscripción con nombre de facturación, otra solo con el usuario) —
+    // como ninguna de las dos está activa, el duplicado por activa no las pillaba, y "Marcar
+    // cobrado" en las dos habría cobrado dos veces a la misma persona. Aquí se agrupan primero,
+    // antes de clasificar por Excel, y solo SIGUE a la clasificación normal una de cada grupo.
+    $pruebas = array();
+    $info_por_sub = array(); // sub_id => info ya calculada (para no repetir el trabajo)
+    $grupos_en_espera = array(); // clave cliente/teléfono+clase => [sub_id, ...]
+    foreach ($on_hold as $s) {
+        $sub_id = intval($s['id'] ?? 0);
+        // Suscripción de pruebas de Ramiro — fuera de cualquier lista que proponga baja o cobro,
+        // en su propia lista aparte (cowork, 14/11 17:25: seguía entrando en sinPago).
+        if ($sub_id === 7092) { $pruebas[] = array('subId' => $sub_id); continue; }
+        $sub_obj = blokes_alumno_sub_obj($s);
+        $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
+        $tel = blokes_alumno_telefono_de_sub($s, $uid, $sub_obj);
+        $nombre = blokes_alumno_nombre_de_sub($s, $uid, $sub_obj);
+        $dia = $s['dia'] ?? ''; $horario = $s['horario'] ?? ''; $edad = $s['edad'] ?? 'Adultos';
+        $tiene_nombre_facturacion = $sub_obj && trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) !== '';
+
+        $info_por_sub[$sub_id] = array(
+            'subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad,
+            'uid' => $uid, 'tieneNombreFacturacion' => $tiene_nombre_facturacion,
+        );
+        // 17/11 18:15/19:10/19:45 (cowork): agrupar por teléfono sin más es el caso de una
+        // familia que comparte móvil — nunca debe bastar por sí solo. Pero Sergi Escribano/
+        // Sandra Álvarez SON la misma persona sin cuenta de WordPress propia (sin uid), y ahí SÍ
+        // hace falta agrupar por teléfono para no perderlos de "duplicado en espera" — la
+        // diferencia real es si el NOMBRE de facturación también coincide (se revisa más abajo,
+        // tras construir $grupos_en_espera). Una clase sin día/horario (abono, bono
+        // familiar...) nunca es "la misma clase" que otra por casualidad de que las dos estén
+        // vacías.
+        $clave_persona = ($dia !== '' && $horario !== '') ? ($uid ? 'u' . $uid : ($tel ? 't' . $tel : null)) : null;
+        $clave = $clave_persona !== null ? $clave_persona . '|' . $dia . '|' . $horario . '|' . $edad : ('s' . $sub_id);
+        $grupos_en_espera[$clave][] = $sub_id;
+    }
+    // Deshace cualquier grupo (tanto por teléfono como por cliente real) cuyos nombres de
+    // facturación no confirmen que es la MISMA persona. 17/11 19:45 (cowork, Alvaro Fernandez
+    // Alvarez/Carlota, los Frachini): un mismo customer_id ('u...') NO siempre es una sola
+    // persona real — una cuenta de WordPress familiar puede llevar las suscripciones de varios
+    // hermanos o de un padre y su hijo, así que fiarse solo del uid (como se hacía hasta ahora)
+    // también mezclaba a familiares. Y un nombre vacío o sin espacio (solo el usuario, p. ej.
+    // "nicolafrachini") nunca confirma nada por sí solo — "nombre desconocido" cuenta como que
+    // NO se parece a nadie, nunca como una coincidencia válida.
+    foreach (array_keys($grupos_en_espera) as $clave) {
+        if ($clave[0] === 's' || count($grupos_en_espera[$clave]) < 2) continue;
+        $grupo = $grupos_en_espera[$clave];
+        $nombre_base = null; $todas_parecidas = true;
+        foreach ($grupo as $sid) {
+            $n = blokes_externos_normaliza_nombre($info_por_sub[$sid]['nombre'] ?? '');
+            // Un nombre sin espacio (solo el usuario de la cuenta, sin apellido real) no es un
+            // dato de fiar para confirmar que es la misma persona — nunca cuenta como coincidencia.
+            if ($n === '' || strpos($n, ' ') === false) { $todas_parecidas = false; break; }
+            if ($nombre_base === null) { $nombre_base = $n; continue; }
+            if (!blokes_externos_nombres_parecidos($nombre_base, $n)) { $todas_parecidas = false; break; }
+        }
+        if (!$todas_parecidas) {
+            foreach ($grupo as $sid) $grupos_en_espera['s' . $sid] = array($sid);
+            unset($grupos_en_espera[$clave]);
+        }
+    }
+
+    $duplicados_en_espera = array();
+    $en_grupo_resuelto = array(); // sub_id (de las que se CANCELAN) => true, se saltan de la clasificación normal
+    $grupo_de_cobrar = array(); // sub_id (la que se COBRA) => índice en $duplicados_en_espera
+    foreach ($grupos_en_espera as $grupo) {
+        if (count($grupo) < 2) continue;
+        // De cada grupo se cobra UNA (la que tenga nombre de facturación real; si ninguna o las
+        // dos, la de id más alto = más reciente) y se cancelan las demás — nunca "Marcar
+        // cobrado" en más de una suscripción en espera de la misma persona y clase.
+        usort($grupo, function($a, $b) use ($info_por_sub) {
+            $na = $info_por_sub[$a]['tieneNombreFacturacion'] ? 1 : 0;
+            $nb = $info_por_sub[$b]['tieneNombreFacturacion'] ? 1 : 0;
+            if ($na !== $nb) return $nb - $na;
+            return $b - $a;
+        });
+        $cobrar = $grupo[0];
+        $cancelar = array_slice($grupo, 1);
+        $grupo_de_cobrar[$cobrar] = count($duplicados_en_espera);
+        $duplicados_en_espera[] = array(
+            'cobrar' => $info_por_sub[$cobrar],
+            // Cowork, 14/11 19:00 punto 1: la que se queda sigue con su propia situación (pagó
+            // según el Excel, le falta noviembre, sin pago…) — se rellena más abajo, cuando esa
+            // suscripción pase por la clasificación normal, en vez de perderla aquí.
+            'cobrarEtiqueta' => null, 'cobrarInfo' => null,
+            'cancelar' => array_map(function($id) use ($info_por_sub) { return $info_por_sub[$id]; }, $cancelar),
+            'motivo' => 'Dos (o más) suscripciones en espera de la misma persona y clase — ninguna está activa, así que no salían como duplicado. Cobrar una sola, cancelar el resto.',
+        );
+        foreach ($cancelar as $id) $en_grupo_resuelto[$id] = true;
+    }
+
+    $duplicados = array(); $revisar = array(); $pagaron_nov = array(); $pagaron_solo_oct = array(); $sin_pago = array();
+    // Cowork, 14/11 19:00 punto 1: la suscripción que se COBRA de un grupo en espera sigue
+    // teniendo su propia situación (pagó según el Excel, sin pago…) — en vez de perderla al
+    // sacarla de la clasificación normal, se guarda en el grupo (cobrarEtiqueta/cobrarInfo) y
+    // NO se duplica además como fila suelta en duplicados/revisar/pagaron*/sinPago.
+    $asignar = function($bucket, $info) use (&$duplicados, &$revisar, &$pagaron_nov, &$pagaron_solo_oct, &$sin_pago, &$duplicados_en_espera, $grupo_de_cobrar) {
+        $sub_id = $info['subId'];
+        if (isset($grupo_de_cobrar[$sub_id])) {
+            $gi = $grupo_de_cobrar[$sub_id];
+            $duplicados_en_espera[$gi]['cobrarEtiqueta'] = $bucket;
+            $duplicados_en_espera[$gi]['cobrarInfo'] = $info;
+            return;
+        }
+        switch ($bucket) {
+            case 'duplicado': $duplicados[] = $info; break;
+            case 'revisar': $revisar[] = $info; break;
+            case 'pagaronNoviembre': $pagaron_nov[] = $info; break;
+            case 'pagaronSoloOctubre': $pagaron_solo_oct[] = $info; break;
+            default: $sin_pago[] = $info;
+        }
+    };
+    foreach ($on_hold as $s) {
+        $sub_id = intval($s['id'] ?? 0);
+        if ($sub_id === 7092 || isset($en_grupo_resuelto[$sub_id])) continue;
+        $datos = $info_por_sub[$sub_id];
+        $uid = $datos['uid']; $tel = $datos['telefono']; $nombre = $datos['nombre'];
+        $dia = $datos['dia']; $horario = $datos['horario']; $edad = $datos['edad'];
+
+        $info = array('subId' => $sub_id, 'nombre' => $nombre, 'telefono' => $tel, 'dia' => $dia, 'horario' => $horario, 'edad' => $edad, 'uid' => $uid);
+
+        $activa_misma_clase = null; $activa_otra_clase = null; $activa_misma_clase_sin_confirmar = null;
+        if ($uid && !empty($activas_por_customer[$uid])) {
+            foreach ($activas_por_customer[$uid] as $otra) {
+                // 17/11 18:15: una clase sin día/horario (abono, bono familiar...) nunca es "la
+                // misma clase" que otra por coincidir las dos en vacío.
+                $misma_clase = $dia !== '' && $horario !== '' && ($otra['dia'] ?? '') === $dia && ($otra['horario'] ?? '') === $horario && ($otra['edad'] ?? 'Adultos') === $edad;
+                if ($misma_clase) {
+                    // 17/11 19:45 (cowork, Alvaro Fernandez Alvarez/Carlota): mismo customer_id
+                    // NO siempre es la misma persona — una cuenta de WordPress familiar puede
+                    // llevar las suscripciones de un padre y su hijo/a, o de varios hermanos.
+                    // Antes de dar por "duplicado" de verdad, confirma que el nombre de
+                    // facturación también coincide (nunca con un nombre vacío o sin espacio —
+                    // solo el usuario de la cuenta — que no confirma nada por sí solo).
+                    $otra_sub_obj = blokes_alumno_sub_obj($otra);
+                    $otra_nombre = blokes_alumno_nombre_de_sub($otra, $uid, $otra_sub_obj);
+                    $n_esta = blokes_externos_normaliza_nombre($nombre);
+                    $n_otra = blokes_externos_normaliza_nombre($otra_nombre);
+                    $nombres_confirman = $n_esta !== '' && strpos($n_esta, ' ') !== false
+                        && $n_otra !== '' && strpos($n_otra, ' ') !== false
+                        && blokes_externos_nombres_parecidos($n_esta, $n_otra);
+                    if ($nombres_confirman) { $activa_misma_clase = $otra; break; }
+                    if (!$activa_misma_clase_sin_confirmar) $activa_misma_clase_sin_confirmar = $otra;
+                    continue;
+                }
+                if (!$activa_otra_clase) $activa_otra_clase = $otra;
+            }
+        }
+        if ($activa_misma_clase) {
+            $info['activaId'] = intval($activa_misma_clase['id'] ?? 0);
+            $info['motivo'] = 'Mismo cliente y misma clase con otra suscripción activa.';
+            $asignar('duplicado', $info);
+            continue;
+        }
+        if ($activa_misma_clase_sin_confirmar) {
+            $info['activaId'] = intval($activa_misma_clase_sin_confirmar['id'] ?? 0);
+            $info['motivo'] = 'Misma cuenta de WordPress y misma clase con otra suscripción activa, pero el nombre de facturación no coincide (o no se puede confirmar) — probablemente una cuenta familiar compartida, no cancelar sin mirarlo.';
+            $asignar('revisar', $info);
+            continue;
+        }
+
+        $activa_mismo_tel_otro_cliente = null;
+        if ($tel && !empty($por_tel[$tel])) {
+            foreach ($por_tel[$tel] as $otra) {
+                if (($otra['status'] ?? '') !== 'active' || intval($otra['id'] ?? 0) === $sub_id) continue;
+                if (($otra['dia'] ?? '') === $dia && ($otra['horario'] ?? '') === $horario && ($otra['edad'] ?? 'Adultos') === $edad) {
+                    $activa_mismo_tel_otro_cliente = $otra; break;
+                }
+            }
+        }
+        if ($activa_mismo_tel_otro_cliente) {
+            $info['activaId'] = intval($activa_mismo_tel_otro_cliente['id'] ?? 0);
+            $info['motivo'] = 'Mismo teléfono y misma clase, pero cliente distinto — probablemente hermanos en el mismo grupo, no cancelar sin mirarlo.';
+            $asignar('revisar', $info);
+            continue;
+        }
+        if ($activa_otra_clase) {
+            $info['activaId'] = intval($activa_otra_clase['id'] ?? 0);
+            $info['motivo'] = 'El mismo cliente tiene otra activa, pero en otra clase — puede ir a dos clases, o ser el teléfono de un familiar. No es duplicado.';
+            $asignar('revisar', $info);
+            continue;
+        }
+
+        $excel = blokes_excel_meses_pagados_2026($excel_por_tel, $excel_por_nombre, $tel, $nombre);
+        if ($excel && in_array('11', $excel['meses'], true)) {
+            $info['mesesPagados'] = $excel['meses']; $info['pestanaExcel'] = $excel['pestana'];
+            $asignar('pagaronNoviembre', $info);
+            continue;
+        }
+        if ($excel && in_array('10', $excel['meses'], true)) {
+            $info['mesesPagados'] = $excel['meses']; $info['pestanaExcel'] = $excel['pestana'];
+            $asignar('pagaronSoloOctubre', $info);
+            continue;
+        }
+
+        $asignar('sinPago', $info);
+    }
+
+    return array(
+        'duplicados' => $duplicados, 'revisar' => $revisar,
+        'duplicadosEnEspera' => $duplicados_en_espera,
+        'pagaronNoviembre' => $pagaron_nov, 'pagaronSoloOctubre' => $pagaron_solo_oct,
+        'sinPago' => $sin_pago, 'pruebas' => $pruebas, 'total' => count($on_hold),
+        // Si no es null, la Hoja no se pudo leer y "sinPago" está inflado de más — no significa
+        // que de verdad nadie pagó (cowork, 13/11 11:15).
+        'avisoExcel' => $excel_error,
+    );
+}
+
+// ============================================================
+//  «Pendientes de cobro» (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 14/11 18:05)
+// ============================================================
+
+function blokes_pendientes_cobro_estado_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_pendientes_cobro_estado';
+}
+// Una fila por suscripción: estado de "¿Viene a clase?" (puesto a mano por Eva tras preguntar
+// al profe por WhatsApp — opción 2, la caja del profe en Blokes, NO se hace por ahora, Ramiro
+// 14/11 18:12) y la última vez que se le recordó el pago por WhatsApp (para el "no two veces en
+// menos de 3 días" de la nota de las 18:10).
+function blokes_ensure_pendientes_cobro_estado_table() {
+    global $wpdb;
+    $table = blokes_pendientes_cobro_estado_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        sub_id          bigint(20) UNSIGNED NOT NULL,
+        viene_estado    varchar(20)         NOT NULL DEFAULT '',
+        viene_por       varchar(100)        NOT NULL DEFAULT '',
+        viene_fecha     datetime            NULL,
+        recordado_por   varchar(100)        NOT NULL DEFAULT '',
+        recordado_fecha datetime            NULL,
+        PRIMARY KEY (sub_id)
+    ) {$charset};";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+function blokes_pendientes_cobro_estado_get_todos() {
+    global $wpdb;
+    blokes_ensure_pendientes_cobro_estado_table();
+    $rows = $wpdb->get_results('SELECT * FROM ' . blokes_pendientes_cobro_estado_table(), ARRAY_A);
+    $out = array();
+    foreach ($rows as $r) $out[intval($r['sub_id'])] = $r;
+    return $out;
+}
+function blokes_pendientes_cobro_estado_upsert($sub_id, $campos) {
+    global $wpdb;
+    blokes_ensure_pendientes_cobro_estado_table();
+    $table = blokes_pendientes_cobro_estado_table();
+    $existe = $wpdb->get_var($wpdb->prepare("SELECT sub_id FROM {$table} WHERE sub_id = %d", $sub_id));
+    if ($existe !== null) $wpdb->update($table, $campos, array('sub_id' => intval($sub_id)));
+    else $wpdb->insert($table, array_merge(array('sub_id' => intval($sub_id)), $campos));
+}
+
+// ─── 08:45 punto B: flujo de baja — registro de cada contacto (WhatsApp) con quien se va ──────
+function blokes_bajas_contactos_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_bajas_contactos';
+}
+// Una fila por CADA vez que se contacta a alguien que se va (puede ser más de una) — a
+// diferencia de _rm_baja_categoria/_rm_baja_motivo (el motivo en sí, uno solo, en postmeta,
+// reutilizado tal cual), esto es una lista y necesita tabla propia.
+function blokes_ensure_bajas_contactos_table() {
+    global $wpdb;
+    $table = blokes_bajas_contactos_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        id             bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        sub_id         bigint(20) UNSIGNED NOT NULL,
+        fecha          datetime             NOT NULL,
+        user_login     varchar(100)         NOT NULL DEFAULT '',
+        respuesta      text                 NULL,
+        acepta_promos  tinyint(1)           NULL,
+        PRIMARY KEY (id),
+        KEY sub_id (sub_id)
+    ) {$charset};";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+function blokes_bajas_contactos_de($sub_id) {
+    global $wpdb;
+    blokes_ensure_bajas_contactos_table();
+    return $wpdb->get_results($wpdb->prepare(
+        'SELECT fecha, user_login, respuesta, acepta_promos FROM ' . blokes_bajas_contactos_table() . ' WHERE sub_id = %d ORDER BY fecha DESC',
+        intval($sub_id)
+    ), ARRAY_A);
+}
+function blokes_bajas_contactos_de_varios($sub_ids) {
+    global $wpdb;
+    if (empty($sub_ids)) return array();
+    blokes_ensure_bajas_contactos_table();
+    $placeholders = implode(',', array_fill(0, count($sub_ids), '%d'));
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT sub_id, fecha, user_login, respuesta, acepta_promos FROM " . blokes_bajas_contactos_table() . " WHERE sub_id IN ({$placeholders}) ORDER BY fecha DESC",
+        $sub_ids
+    ), ARRAY_A);
+    $out = array();
+    foreach ($rows as $r) $out[intval($r['sub_id'])][] = $r;
+    return $out;
+}
+
+// POST /gestion/bajas/contacto — registra un intento de contacto (normalmente tras abrir el
+// WhatsApp de "¿por qué lo has dejado?") con la respuesta y si acepta promos, para campañas.
+function superadmin_gestion_bajas_contacto($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    $respuesta = sanitize_textarea_field((string) $request->get_param('respuesta'));
+    $acepta_promos_raw = $request->get_param('aceptaPromos');
+    $acepta_promos = $acepta_promos_raw === null ? null : ((bool) $acepta_promos_raw ? 1 : 0);
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    blokes_ensure_bajas_contactos_table();
+    global $wpdb;
+    $user = wp_get_current_user();
+    $wpdb->insert(blokes_bajas_contactos_table(), array(
+        'sub_id' => $sub_id, 'fecha' => current_time('mysql'),
+        'user_login' => $user ? $user->user_login : '', 'respuesta' => $respuesta, 'acepta_promos' => $acepta_promos,
+    ));
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /gestion/bajas/motivo — categoría + texto del motivo de baja. A diferencia de
+// dar_de_baja (que lo escribe solo cuando se ejecuta la baja de verdad), esto vale también para
+// quien se marcó "No viene" sin cancelar aún la suscripción en WooCommerce (08:45 punto B.1) —
+// mismo postmeta, para que /gestion/bajas-motivo siga funcionando igual.
+function superadmin_gestion_bajas_motivo_set($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    $categoria = sanitize_key((string) $request->get_param('categoria'));
+    $texto = sanitize_textarea_field((string) $request->get_param('texto'));
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    if ($categoria !== '' && !in_array($categoria, BLOKES_BAJA_MOTIVOS, true)) {
+        return new WP_Error('bad_request', 'Categoría no reconocida.', array('status' => 400));
+    }
+    if ($categoria !== '') update_post_meta($sub_id, '_rm_baja_categoria', $categoria);
+    update_post_meta($sub_id, '_rm_baja_motivo', $texto);
+    blokes_gestion_log($sub_id, 'bajas_motivo', null, array('categoria' => $categoria, 'texto' => $texto));
+    return rest_ensure_response(array('success' => true));
+}
+
+// GET /gestion/bajas — pestaña "Bajas" de Grupos (08:45): junta las bajas REALES (ya canceladas
+// en WooCommerce, de blokes_altas_bajas_calcular()) con quien Eva marcó "No viene" en Pendientes
+// de cobro pero todavía no se ha cancelado en WooCommerce — para que no haya que esperar a que
+// WooCommerce lo refleje para empezar a hacerle seguimiento (motivo, WhatsApp...).
+function superadmin_gestion_bajas($request) {
+    $calculo = blokes_altas_bajas_calcular(2);
+    $filas = array();
+    $vistos = array(); // subId => true, para no repetir si por lo que sea aparece en los dos sitios
+    foreach ($calculo['data'] as $c) {
+        foreach ($c['members_lost'] as $m) {
+            if (isset($vistos[$m['subId']])) continue;
+            $vistos[$m['subId']] = true;
+            $filas[] = array(
+                'subId' => $m['subId'], 'nombre' => $m['name'], 'telefono' => $m['phone'],
+                'dia' => $c['dia'], 'horario' => $c['horario'], 'edad' => $c['edad'],
+                'fecha' => $m['fecha'], 'origen' => $m['motivoCategoria'] ? 'cancelo' : 'impago',
+                'motivoCategoria' => $m['motivoCategoria'], 'motivoTexto' => $m['motivoTexto'],
+                // 17/11 16:20 (cowork, Fernando Heras Díez): sigue pagando por fuera (Excel/hist-
+                // pagos) después del mes de la baja — probablemente solo falta reactivar su
+                // suscripción, no es una baja real.
+                'pagoFueraTrasBaja' => $m['pagoFueraTrasBaja'] ?? null,
+            );
+        }
+    }
+    // "No viene" sin cancelar aún: cualquier sub_id con viene_estado=no_viene que no esté ya listado.
+    $estados = blokes_pendientes_cobro_estado_get_todos();
+    $no_viene_ids = array();
+    foreach ($estados as $sub_id => $e) {
+        if (($e['viene_estado'] ?? '') === 'no_viene' && !isset($vistos[$sub_id])) $no_viene_ids[] = $sub_id;
+    }
+    if ($no_viene_ids && function_exists('wcs_get_subscription')) {
+        foreach (blokes_get_all_subscription_data() as $s) {
+            $sid = intval($s['id'] ?? 0);
+            if (!$sid || !in_array($sid, $no_viene_ids, true) || isset($vistos[$sid])) continue;
+            $vistos[$sid] = true;
+            $filas[] = array(
+                'subId' => $sid, 'nombre' => $s['cliente'] ?? '', 'telefono' => $s['telefono'] ?? '',
+                'dia' => blokes_dia_a_pareja($s['dia'] ?? ''), 'horario' => $s['horario'] ?? '', 'edad' => $s['edad'] ?: 'Adultos',
+                'fecha' => isset($estados[$sid]['viene_fecha']) ? substr($estados[$sid]['viene_fecha'], 0, 7) : null,
+                'origen' => 'no_viene',
+                'motivoCategoria' => get_post_meta($sid, '_rm_baja_categoria', true) ?: null,
+                'motivoTexto' => get_post_meta($sid, '_rm_baja_motivo', true) ?: null,
+            );
+        }
+    }
+    // 17/11 16:20 (cowork, punto 8): la misma persona con varias suscripciones canceladas (una
+    // por clase a la que estuvo, o una vieja colgando) salía como varias bajas distintas (Sandra
+    // Álvarez ×2 en octubre, Marta Marcos/Ángel Lumbreras en octubre Y septiembre). Se agrupa por
+    // persona (teléfono normalizado, o el nombre si no hay teléfono) y se deja solo la fila con
+    // la fecha más reciente — igual que ya se agrupa en otros sitios de Grupos. Sin teléfono ni
+    // nombre no hay por dónde agrupar: esas se quedan tal cual, sin tocar.
+    $por_persona = array();
+    $sin_clave = array();
+    foreach ($filas as $f) {
+        $tel_norm = blokes_externos_normaliza_telefono((string) ($f['telefono'] ?: ''));
+        $nombre_norm = blokes_sync_grupos_normalizar_nombre((string) ($f['nombre'] ?: ''));
+        if ($tel_norm === '' && $nombre_norm === '') { $sin_clave[] = $f; continue; }
+        $clave = $tel_norm ?: ('n' . $nombre_norm);
+        if (!isset($por_persona[$clave])) {
+            $por_persona[$clave] = $f;
+        } else {
+            $actual = $por_persona[$clave];
+            $mas_reciente = strcmp((string) $f['fecha'], (string) $actual['fecha']) > 0 ? $f : $actual;
+            // Nunca se pierde el aviso de "pagó por fuera tras la baja" aunque viva en la fila
+            // más vieja de las dos.
+            $mas_reciente['pagoFueraTrasBaja'] = ($f['pagoFueraTrasBaja'] ?? null) ?: ($actual['pagoFueraTrasBaja'] ?? null);
+            $por_persona[$clave] = $mas_reciente;
+        }
+    }
+    $filas = array_merge(array_values($por_persona), $sin_clave);
+
+    // El profe se calcula en el frontend (profesoresDeGrupo(), staffSchedule.js + la regla de
+    // Isa/Eva en niños/adolescentes) — no hay un equivalente en PHP, igual que en Pendientes de
+    // cobro: aquí solo se manda dia/horario/edad.
+    $sub_ids = array_map(function($f) { return $f['subId']; }, $filas);
+    $contactos = blokes_bajas_contactos_de_varios($sub_ids);
+    foreach ($filas as &$f) {
+        $f['contactos'] = $contactos[$f['subId']] ?? array();
+    }
+    usort($filas, function($a, $b) { return strcmp($b['fecha'] ?? '', $a['fecha'] ?? ''); });
+    return rest_ensure_response(array('success' => true, 'data' => $filas));
+}
+
+// POST /superadmin/v1/alumnos/pendientes-cobro/viene — Eva pone a mano ✅/❌/❓ tras preguntar
+// al profe por WhatsApp (la opción 1 de la nota; la 2, que el profe lo confirme él mismo en
+// Blokes, queda para más adelante — Ramiro, 14/11 18:12). Guarda quién y cuándo.
+function superadmin_pendientes_cobro_viene($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    $estado = sanitize_text_field((string) $request->get_param('estado'));
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    if (!in_array($estado, array('viene', 'no_viene', 'sin_confirmar'), true)) {
+        return new WP_Error('bad_request', 'estado tiene que ser viene, no_viene o sin_confirmar.', array('status' => 400));
+    }
+    $user = wp_get_current_user();
+    blokes_pendientes_cobro_estado_upsert($sub_id, array(
+        'viene_estado' => $estado, 'viene_por' => $user ? $user->user_login : '', 'viene_fecha' => current_time('mysql'),
+    ));
+    blokes_gestion_log($sub_id, 'pendiente_cobro_viene', null, array('estado' => $estado));
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /superadmin/v1/alumnos/pendientes-cobro/recordado — se llama justo después de abrir
+// WhatsApp Web (igual que "✓ Enviado" en Campañas: abrir no marca nada solo, hace falta mandarlo
+// de verdad). 409 si ya se recordó a esta suscripción en los últimos 3 días (nota 18:10: "que no
+// deje recordar a la misma persona dos veces en menos de 3 días").
+function superadmin_pendientes_cobro_recordado($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    $estados = blokes_pendientes_cobro_estado_get_todos();
+    $anterior = $estados[$sub_id]['recordado_fecha'] ?? null;
+    if ($anterior && (current_time('timestamp') - strtotime($anterior)) < 3 * DAY_IN_SECONDS) {
+        return new WP_Error('recordado_reciente', 'Ya se le recordó hace menos de 3 días (' . substr($anterior, 0, 10) . ').', array('status' => 409));
+    }
+    $user = wp_get_current_user();
+    blokes_pendientes_cobro_estado_upsert($sub_id, array(
+        'recordado_por' => $user ? $user->user_login : '', 'recordado_fecha' => current_time('mysql'),
+    ));
+    return rest_ensure_response(array('success' => true));
+}
+
+// Teléfonos de los profes para "Preguntar a [profe]" por WhatsApp — NO van en ningún fichero
+// del bundle público (son datos personales), se guardan en wp_options y solo los lee/escribe
+// quien tenga sesión de gestión/socio, igual que el resto de "Pendientes de cobro".
+function blokes_profes_telefonos_get() {
+    $v = get_option('blokes_profes_telefonos', array());
+    return is_array($v) ? $v : array();
+}
+function superadmin_profes_telefonos_get($request) {
+    return rest_ensure_response(array('success' => true, 'data' => blokes_profes_telefonos_get()));
+}
+function superadmin_profes_telefono_set($request) {
+    $nombre = sanitize_text_field((string) $request->get_param('nombre'));
+    $telefono = blokes_externos_normaliza_telefono((string) $request->get_param('telefono'));
+    if (!$nombre) return new WP_Error('bad_request', 'Falta nombre.', array('status' => 400));
+    $telefonos = blokes_profes_telefonos_get();
+    if ($telefono) $telefonos[$nombre] = $telefono; else unset($telefonos[$nombre]);
+    update_option('blokes_profes_telefonos', $telefonos, false);
+    return rest_ensure_response(array('success' => true, 'data' => $telefonos));
+}
+
+// "🧗 activo en la app (fecha)" — pista automática (opción 3, Ramiro 14/11 18:12): si el alumno
+// ha apuntado algún top en las últimas 2 semanas, es que sigue viniendo aunque no haya pagado
+// todavía. No cambia ningún estado solo, es solo información para que Eva decida.
+function blokes_alumno_activo_en_app($uid) {
+    if (!$uid) return null;
+    $log = get_user_meta($uid, '_blokes_completion_log', true);
+    if (!is_array($log) || !$log) return null;
+    $ultimo = null;
+    foreach ($log as $entrada) {
+        $t = isset($entrada['timestamp']) ? strtotime($entrada['timestamp']) : null;
+        if ($t && (!$ultimo || $t > $ultimo)) $ultimo = $t;
+    }
+    if (!$ultimo || (current_time('timestamp') - $ultimo) > 14 * DAY_IN_SECONDS) return null;
+    return date('Y-m-d', $ultimo);
+}
+
+// Pedidos de renovación en estado "Pendiente de pago" (wc-pending) de verdad ligados a una
+// suscripción — los "74 pedidos, 5.102€" que Ramiro veía en WooCommerce pero Eva no en ningún
+// sitio de Blokes. Un pedido pendiente que NO es de ninguna suscripción (alta nueva sin pagar,
+// por ejemplo) se descarta aquí: esta vista es solo de renovaciones.
+function blokes_pedidos_renovacion_pendientes() {
+    if (!function_exists('wc_get_orders') || !function_exists('wcs_get_subscriptions_for_order')) return array();
+    $orders = wc_get_orders(array('status' => 'pending', 'limit' => -1, 'return' => 'objects'));
+    $out = array();
+    foreach ($orders as $order) {
+        $subs = wcs_get_subscriptions_for_order($order, array('order_type' => 'any'));
+        if (!$subs) continue;
+        $sub = reset($subs);
+        $out[] = array(
+            'orderId' => $order->get_id(), 'subId' => $sub->get_id(),
+            'importe' => floatval($order->get_total()),
+            'mesPedido' => $order->get_date_created() ? $order->get_date_created()->date('Y-m') : '',
+            // Cowork, 14/11 19:00 punto 2: el recordatorio por WhatsApp tiene que llevar un
+            // enlace de pago de verdad, no solo pedirlo de palabra.
+            'pagoUrl' => $order->needs_payment() ? $order->get_checkout_payment_url() : '',
+        );
+    }
+    return $out;
+}
+
+// Construye una fila de "Pendientes de cobro" a partir de la info ya calculada por
+// blokes_onhold_diagnostico_calcular() (duplicados/revisar/pagaron*/sinPago) + el pedido
+// pendiente real que la originó + el estado guardado de "¿Viene?"/recordatorio.
+function blokes_pendiente_cobro_fila($info, $etiqueta, $pedido, $estados, $cancelar = null, $cobrar_situacion = null) {
+    $sub_id = intval($info['subId']);
+    $estado = $estados[$sub_id] ?? null;
+    $fila = array(
+        'subId' => $sub_id, 'orderId' => intval($pedido['orderId']),
+        'nombre' => $info['nombre'], 'telefono' => $info['telefono'],
+        'dia' => $info['dia'], 'horario' => $info['horario'], 'edad' => $info['edad'],
+        'etiqueta' => $etiqueta, 'motivo' => $info['motivo'] ?? null,
+        'activaId' => $info['activaId'] ?? null,
+        'importe' => $pedido['importe'], 'mesPedido' => $pedido['mesPedido'], 'pagoUrl' => $pedido['pagoUrl'] ?? '',
+        'mesesPagadosExcel' => $info['mesesPagados'] ?? null, 'pestanaExcel' => $info['pestanaExcel'] ?? null,
+        'vieneEstado' => $estado['viene_estado'] ?? '', 'vienePor' => $estado['viene_por'] ?? null, 'vieneFecha' => $estado['viene_fecha'] ?? null,
+        'recordadoPor' => $estado['recordado_por'] ?? null, 'recordadoFecha' => $estado['recordado_fecha'] ?? null,
+        'activoApp' => blokes_alumno_activo_en_app($info['uid'] ?? null),
+    );
+    if ($cancelar) $fila['cancelar'] = $cancelar;
+    // Cowork, 14/11 19:00 punto 1: en "duplicado en espera", $info YA es la de la suscripción
+    // que se QUEDA (con su mesesPagadosExcel/activaId/motivo normales, de arriba) — lo único
+    // que falta es SABER qué botones de acción le tocan (pago_excel/pago_parcial/sin_pago/
+    // revisar/duplicado), porque la "etiqueta" visible de la fila sigue siendo "duplicado en
+    // espera" para no confundir a Eva sobre qué es lo urgente (cancelar la vieja).
+    if ($cobrar_situacion) $fila['cobrarEtiqueta'] = $cobrar_situacion['etiqueta'];
+    return $fila;
+}
+
+// GET /superadmin/v1/alumnos/pendientes-cobro — ver notas 18:05/18:10/18:12. Cruza los pedidos
+// de renovación pendientes de verdad con el diagnóstico de on-hold ya existente, para que cada
+// fila lleve ya puesta la etiqueta y la acción sugerida — Eva no tiene que interpretar nada.
+function superadmin_alumnos_pendientes_cobro($request) {
+    $diag = blokes_onhold_diagnostico_calcular();
+    $indice = array(); // subId => ['bucket' => ..., 'info' => ...]
+    foreach ($diag['duplicados'] as $f) $indice[$f['subId']] = array('bucket' => 'duplicado', 'info' => $f);
+    foreach ($diag['revisar'] as $f) $indice[$f['subId']] = array('bucket' => 'revisar', 'info' => $f);
+    foreach ($diag['pagaronNoviembre'] as $f) $indice[$f['subId']] = array('bucket' => 'pago_excel', 'info' => $f);
+    foreach ($diag['pagaronSoloOctubre'] as $f) $indice[$f['subId']] = array('bucket' => 'pago_parcial', 'info' => $f);
+    foreach ($diag['sinPago'] as $f) $indice[$f['subId']] = array('bucket' => 'sin_pago', 'info' => $f);
+    foreach ($diag['pruebas'] as $f) $indice[$f['subId']] = array('bucket' => 'prueba', 'info' => $f);
+
+    // Que se agrupen los duplicados en espera de la misma persona en una sola fila (nota 18:05).
+    $grupo_de_sub = array();
+    foreach ($diag['duplicadosEnEspera'] as $gi => $grupo) {
+        $grupo_de_sub[$grupo['cobrar']['subId']] = $gi;
+        foreach ($grupo['cancelar'] as $c) $grupo_de_sub[$c['subId']] = $gi;
+    }
+
+    $estados = blokes_pendientes_cobro_estado_get_todos();
+
+    $filas = array(); $vistos_grupo = array(); $sin_match = 0;
+    foreach (blokes_pedidos_renovacion_pendientes() as $pedido) {
+        $sub_id = $pedido['subId'];
+        if (isset($grupo_de_sub[$sub_id])) {
+            $gi = $grupo_de_sub[$sub_id];
+            if (isset($vistos_grupo[$gi])) continue; // ya se metió la fila agrupada de este grupo
+            $vistos_grupo[$gi] = true;
+            $grupo = $diag['duplicadosEnEspera'][$gi];
+            $cobrar_info = $grupo['cobrarInfo'] ?? $grupo['cobrar'];
+            // $grupo['cobrarEtiqueta'] trae el nombre crudo del bucket del diagnóstico
+            // (pagaronNoviembre/pagaronSoloOctubre/sinPago/duplicado/revisar) — hay que
+            // traducirlo a la etiqueta que entiende el frontend (igual que $indice arriba),
+            // si no los botones de la fila "cobrar" no aparecen (cowork, 14/11 20:10).
+            $bucket_a_etiqueta_frontend = array(
+                'pagaronNoviembre' => 'pago_excel', 'pagaronSoloOctubre' => 'pago_parcial', 'sinPago' => 'sin_pago',
+                'duplicado' => 'duplicado', 'revisar' => 'revisar',
+            );
+            $cobrar_etiqueta_frontend = $bucket_a_etiqueta_frontend[$grupo['cobrarEtiqueta']] ?? $grupo['cobrarEtiqueta'];
+            $cobrar_situacion = $grupo['cobrarEtiqueta'] ? array('etiqueta' => $cobrar_etiqueta_frontend) : null;
+            $filas[] = blokes_pendiente_cobro_fila($cobrar_info, 'duplicado_en_espera', $pedido, $estados, $grupo['cancelar'], $cobrar_situacion);
+            continue;
+        }
+        if (!isset($indice[$sub_id])) { $sin_match++; continue; } // pedido pendiente sin suscripción on-hold reconocible — revisar a mano
+        $entrada = $indice[$sub_id];
+        if ($entrada['bucket'] === 'prueba') continue; // la 7092 no es un caso real de cobro
+        $filas[] = blokes_pendiente_cobro_fila($entrada['info'], $entrada['bucket'], $pedido, $estados);
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'filas' => $filas, 'sinMatch' => $sin_match,
+        // Si no es null, el cruce con el Excel de esta tanda no es de fiar (mismo aviso que
+        // onhold-diagnostico).
+        'avisoExcel' => $diag['avisoExcel'],
+    )));
+}
+
+// GET /superadmin/v1/alumnos/edad-diagnostico — Fase 0 punto 2 (primera mitad). Cowork,
+// 13/11 10:15: la primera versión devolvía 194 filas (todo Martes/M-J/Viernes "Adultos") — hace
+// falta solo las 3 franjas que Ramiro confirmó de niños/adolescentes: Viernes 18:00-19:00,
+// Martes 17:30-18:30 y Martes-Jueves 18:30-20:00 ("M-J 18.30 MEDIANOS"). Si el horario
+// guardado no coincide exactamente con estas cadenas, decídmelo con el valor real que veáis en
+// la lista para ajustar el filtro.
+function superadmin_alumnos_edad_diagnostico($request) {
+    $franjas = array(
+        array('dia' => 'Viernes', 'horario' => '18:00-19:00'),
+        array('dia' => 'Martes', 'horario' => '17:30-18:30'),
+        array('dia' => 'Martes-Jueves', 'horario' => '18:30-20:00'),
+    );
+    $todas = blokes_get_all_subscription_data();
+    $candidatas = array_values(array_filter($todas, function($s) use ($franjas) {
+        if (!in_array($s['status'] ?? '', array('active', 'on-hold'), true)) return false;
+        if (($s['edad'] ?? 'Adultos') !== 'Adultos') return false;
+        foreach ($franjas as $f) {
+            if (($s['dia'] ?? '') === $f['dia'] && ($s['horario'] ?? '') === $f['horario']) return true;
+        }
+        return false;
+    }));
+    $out = array_map(function($s) {
+        $sub_obj = blokes_alumno_sub_obj($s);
+        $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
+        return array(
+            'subId' => intval($s['id'] ?? 0),
+            'nombre' => blokes_alumno_nombre_de_sub($s, $uid, $sub_obj),
+            'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '', 'edadActual' => $s['edad'] ?? 'Adultos', 'status' => $s['status'] ?? '',
+        );
+    }, $candidatas);
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// POST /superadmin/v1/alumnos/edad-corregir — corrige la edad guardada de verdad para
+// RocoMadrid_SF_Stats::get_all_subscription_data() (la que lee este plugin, no la variación de
+// WooCommerce): `_step_form_selections['pa_edad']` (clases normales) o ['edad_addon'] (día
+// suelto), en el ITEM de la suscripción, SIN tocar producto_id/variation_id/precio — exactamente
+// lo que pide la nota ("corregir edad sin cambiar producto/precio o crear variación"). Nunca se
+// llama en automático: alguien con acceso socio tiene que pasar los subIds confirmados a mano
+// contra el diagnóstico de arriba.
+function superadmin_alumnos_edad_corregir($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('not_available', 'WooCommerce Subscriptions no disponible.', array('status' => 503));
+    }
+    $sub_ids = $request->get_param('subIds');
+    $edad    = sanitize_text_field((string) $request->get_param('edad'));
+    // Mismas 3 etiquetas que reconoce RocoMadrid_SF_Stats::normalizar_edad() -- nunca un valor
+    // libre, para no dejar una edad que esa función no sepa interpretar (volvería a "Adultos").
+    $permitidas = array('Menores (6-12 años)', 'Adolescentes (12-18 años)', 'Adultos');
+    if (!in_array($edad, $permitidas, true)) {
+        return new WP_Error('edad_invalida', 'Edad no reconocida. Usa: ' . implode(', ', $permitidas), array('status' => 400));
+    }
+    if (!is_array($sub_ids) || !$sub_ids) {
+        return new WP_Error('bad_request', 'Falta subIds (lista de IDs de suscripción).', array('status' => 400));
+    }
+    $resultados = array();
+    foreach ($sub_ids as $sub_id) {
+        $sub_id = intval($sub_id);
+        $sub = wcs_get_subscription($sub_id);
+        if (!$sub) { $resultados[] = array('subId' => $sub_id, 'ok' => false, 'motivo' => 'suscripción no encontrada'); continue; }
+        $corregido = false;
+        foreach ($sub->get_items() as $item) {
+            $sel = $item->get_meta('_step_form_selections', true);
+            if (!is_array($sel)) continue;
+            if (array_key_exists('pa_edad', $sel)) { $sel['pa_edad'] = $edad; }
+            elseif (array_key_exists('edad_addon', $sel)) { $sel['edad_addon'] = $edad; }
+            else continue;
+            $item->update_meta_data('_step_form_selections', $sel);
+            $item->save();
+            $corregido = true;
+        }
+        if ($corregido) {
+            blokes_gestion_log($sub_id, 'edad_corregida', null, array('edad' => $edad), 'Edad corregida a mano (Fase 0) -- sin cambiar producto ni precio.');
+        }
+        $resultados[] = array('subId' => $sub_id, 'ok' => $corregido, 'motivo' => $corregido ? null : 'sin _step_form_selections con edad en ningún item');
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $resultados));
+}
+
+// GET /superadmin/v1/alumnos/sin-telefono-diagnostico — Fase 0 punto 3. Cowork, 13/11 10:15:
+// la primera versión (solo activas/on-hold) daba 7, la auditoría original encontró 23 — amplía
+// a CUALQUIER estado de suscripción, una fila por CLIENTE (no por suscripción, para no contar
+// 2 veces a quien tiene dos suscripciones) y con la misma cadena de respaldo de teléfono que
+// usa el resto de la sincronización (factura → `telefono` → email → user meta). Cruza por
+// NOMBRE con el Excel (no hay teléfono con que cruzar, por definición) — el emparejamiento es
+// más flojo que el de los otros diagnósticos; confirmad cada uno antes de escribirlo.
+function superadmin_alumnos_sin_telefono_diagnostico($request) {
+    $todas = blokes_get_all_subscription_data();
+    $vistos = array();
+    $sin_tel = array();
+    foreach ($todas as $s) {
+        $sub_id = intval($s['id'] ?? 0);
+        $sub_obj = blokes_alumno_sub_obj($s);
+        $uid = blokes_alumno_customer_id_de_sub($s, $sub_obj);
+        $clave_persona = $uid ? ('u' . $uid) : ('s' . $sub_id);
+        if (isset($vistos[$clave_persona])) continue;
+        $vistos[$clave_persona] = true;
+
+        $tel = blokes_alumno_telefono_de_sub($s, $uid, $sub_obj);
+        if ($tel !== '') continue;
+        $nombre = blokes_alumno_nombre_de_sub($s, $uid, $sub_obj);
+        if (trim($nombre) === '') continue;
+        $sin_tel[] = array('subId' => $sub_id, 'userId' => $uid ?: null, 'nombre' => $nombre, 'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '', 'status' => $s['status'] ?? '');
+    }
+    if (!$sin_tel) return rest_ensure_response(array('success' => true, 'data' => array()));
+
+    // No se cambia la forma de "data" (sigue siendo la lista plana que cowork ya confirmó, 35
+    // filas) — el aviso, si lo hay, va como cabecera HTTP para no romper lo que ya está bien.
+    $excel_error = null;
+    $tel_por_nombre_excel = array(); $pestana_por_nombre_excel = array();
+    foreach (blokes_sync_grupos_todas_las_filas($excel_error) as $f) {
+        if (!$f['telefono']) continue;
+        $clave = blokes_sync_grupos_normalizar_nombre($f['nombre']);
+        if ($clave === '') continue;
+        $tel_por_nombre_excel[$clave] = $f['telefono'];
+        $pestana_por_nombre_excel[$clave] = $f['_pestana'];
+    }
+
+    $out = array_map(function($s) use ($tel_por_nombre_excel, $pestana_por_nombre_excel) {
+        $clave = blokes_sync_grupos_normalizar_nombre($s['nombre']);
+        $s['telefonoEnExcel'] = $tel_por_nombre_excel[$clave] ?? null;
+        $s['pestanaExcel']    = $pestana_por_nombre_excel[$clave] ?? null;
+        return $s;
+    }, $sin_tel);
+
+    $respuesta = rest_ensure_response(array('success' => true, 'data' => $out));
+    if ($excel_error) $respuesta->header('X-Blokes-Aviso-Excel', $excel_error);
+    return $respuesta;
+}
+
+// GET /progreso/v1/tele/diapositivas — público: solo las activas y dentro de su rango de
+// fechas (si tienen), para que la tele del Roco rote entre ellas sin sesión.
+function progreso_tele_diapositivas($request) {
+    blokes_tele_ensure_table();
+    global $wpdb;
+    $rows = $wpdb->get_results(
+        "SELECT * FROM " . blokes_tele_slides_table() . "
+         WHERE activo = 1
+           AND (fecha_inicio IS NULL OR fecha_inicio <= CURDATE())
+           AND (fecha_fin    IS NULL OR fecha_fin    >= CURDATE())
+         ORDER BY orden ASC, id ASC", ARRAY_A
+    );
+    return rest_ensure_response(array('success' => true, 'data' => array_map('blokes_tele_slide_fila', $rows)));
+}
+
+// "Instala Blokes" — tabla propia (no progreso_equip_table: esto vive en el blog
+// 1, donde corre /app, no en el 3 de Equipación) para poder enseñarlo en
+// Supervisión más adelante si Ramiro lo pide.
+function blokes_install_events_ensure_table() {
+    global $wpdb;
+    $charset = $wpdb->get_charset_collate();
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE {$wpdb->prefix}blokes_install_events (
+        id         bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        tipo       varchar(30)         NOT NULL,
+        user_id    bigint(20) UNSIGNED NULL,
+        created_at datetime            NOT NULL,
+        PRIMARY KEY (id)
+    ) {$charset};");
+}
+
+function blokes_registrar_install_event($request) {
+    $tipo = sanitize_key((string) $request->get_param('tipo'));
+    if (!in_array($tipo, array('appinstalled', 'standalone_open', 'instalar_click', 'prompt_fail'), true)) {
+        return new WP_Error('tipo_invalido', 'Tipo no reconocido.', array('status' => 400));
+    }
+    blokes_install_events_ensure_table();
+    global $wpdb;
+    $wpdb->insert($wpdb->prefix . 'blokes_install_events', array(
+        'tipo'       => $tipo,
+        'user_id'    => is_user_logged_in() ? get_current_user_id() : null,
+        'created_at' => current_time('mysql'),
+    ));
+    // Parte B de la trazabilidad (Ramiro, 11/11 05:35): instalación real de la app con la
+    // cookie de una campaña puesta (p. ej. la de la compe) cuenta como conversión directa. Esta
+    // ruta vive en el blog 1 (donde está Blokes), pero las tablas de campañas son del Club
+    // (blog 3) — switch_to_blog, igual que en /c/{token}.
+    if ($tipo === 'appinstalled' && !empty($_COOKIE['roco_cmp'])) {
+        $token = sanitize_text_field($_COOKIE['roco_cmp']);
+        switch_to_blog(3);
+        blokes_ensure_campanas_tables();
+        $enlace = blokes_campana_enlace_por_token($token);
+        if ($enlace) {
+            blokes_campana_registrar_conversion(intval($enlace['campana_id']), intval($enlace['contacto_id']), 'instalacion', 'directa');
+        }
+        restore_current_blog();
+    }
+    return rest_ensure_response(array('success' => true));
+}
+
 // ============================================================
 //  progreso/v1 callbacks  (new)
 // ============================================================
@@ -2046,6 +4061,27 @@ function blokes_normalizar_edad($edad) {
     );
     $edad_lower = strtolower($edad);
     return isset($map[$edad_lower]) ? $map[$edad_lower] : ucfirst($edad);
+}
+
+// Edad TAL CUAL la metió la familia en el formulario (_step_form_selections['pa_edad'] o
+// ['edad_addon'], según el producto) — SIN pasar por la variación de WooCommerce ni por la
+// corrección de franja de blokes_corrige_edad_por_franja(). Ramiro, 15/11 16:55 (repaso
+// ExcelMuerte › Personas con cowork): para el reparto adultos/niños de esa pantalla, el dato
+// del formulario es más de fiar que la variación — con él salen 49 niños en vez de 38 (los ~11
+// que faltan son clases de un día sin atributo Edad en WooCommerce, mismo fallo que la Fase 0 de
+// las 16:20, pero esta vez el formulario SÍ tiene el dato bien). Devuelve null si no hay ningún
+// _step_form_selections con edad en ningún item (para que el que llama caiga a su propio valor).
+function blokes_edad_formulario_de_sub($sub_id) {
+    if (!function_exists('wcs_get_subscription')) return null;
+    $sub = wcs_get_subscription(intval($sub_id));
+    if (!$sub) return null;
+    foreach ($sub->get_items() as $item) {
+        $sel = $item->get_meta('_step_form_selections', true);
+        if (!is_array($sel)) continue;
+        $edad = $sel['pa_edad'] ?? ($sel['edad_addon'] ?? '');
+        if ($edad !== '') return blokes_normalizar_edad($edad);
+    }
+    return null;
 }
 
 function blokes_get_pending_cancel_alumnos() {
@@ -2152,6 +4188,67 @@ function blokes_get_pending_cancel_alumnos() {
 }
 
 /**
+ * Abonos de escalada libre (sin clases): mensuales (5114/5115, ya existían) + los nuevos
+ * anual/trimestral creados el 06/11 (NOTAS_PARA_CODE_abono_anual.md) — 7753-7756. No los conoce
+ * RocoMadrid_SF_Stats (son productos simples de WooCommerce, no del step form), así que se leen
+ * aquí aparte y se les da 'producto' => 'Abono' para que Grupos/Supervisión los distinga de una
+ * clase — nunca "no como clase" (no tienen día de la semana: es acceso libre).
+ */
+function blokes_get_abono_subscripciones() {
+    if (!function_exists('wcs_get_subscriptions')) return array();
+
+    // id => [franja mostrada, turno]. Si se crean más abonos (otro precio/periodo), añadir aquí.
+    $abono_ids = array(
+        5115 => array('franja' => 'Todo el día', 'turno' => 'Afternoon'),
+        5114 => array('franja' => 'Mañana',      'turno' => 'Morning'),
+        7753 => array('franja' => 'Todo el día', 'turno' => 'Afternoon'),
+        7754 => array('franja' => 'Mañana',      'turno' => 'Morning'),
+        7755 => array('franja' => 'Todo el día', 'turno' => 'Afternoon'),
+        7756 => array('franja' => 'Mañana',      'turno' => 'Morning'),
+    );
+
+    $subscriptions = wcs_get_subscriptions(array(
+        'subscriptions_per_page' => -1,
+        'subscription_status'    => array('active', 'pending', 'on-hold', 'cancelled', 'pending-cancel'),
+    ));
+
+    $data = array();
+    foreach ($subscriptions as $subscription) {
+        $producto_id = 0;
+        foreach ($subscription->get_items() as $item) {
+            $pid = intval($item->get_product_id());
+            if (isset($abono_ids[$pid])) { $producto_id = $pid; break; }
+        }
+        if (!$producto_id) continue;
+
+        $raw_status = $subscription->get_status();
+        $customer   = $subscription->get_user();
+        $start_date = $subscription->get_date('date_created');
+
+        $data[] = array(
+            'id'           => $subscription->get_id(),
+            'status'       => ($raw_status === 'pending-cancel') ? 'active' : $raw_status,
+            'status_raw'   => $raw_status,
+            'cliente'      => $customer ? $customer->display_name : 'N/A',
+            'email'        => $customer ? $customer->user_email : 'N/A',
+            'telefono'     => $subscription->get_billing_phone(),
+            'producto'     => 'Abono',
+            'producto_id'  => $producto_id,
+            'dia'          => '',
+            'horario'      => $abono_ids[$producto_id]['franja'],
+            'edad'         => 'Adultos',
+            'turno'        => $abono_ids[$producto_id]['turno'],
+            'plan'         => 'monthly',
+            'total'        => floatval($subscription->get_total()),
+            'period'       => $subscription->get_billing_period(),
+            'interval'     => $subscription->get_billing_interval(),
+            'fecha_inicio' => $start_date ? date_i18n('d/m/Y', strtotime($start_date)) : 'N/A',
+        );
+    }
+    return $data;
+}
+
+/**
  * Wrapper sobre RocoMadrid_SF_Stats::get_all_subscription_data() (plugin de
  * terceros) que además incluye las suscripciones pending-cancel, leídas
  * directamente de WooCommerce. Usar esta función en vez de llamar al plugin
@@ -2159,7 +4256,80 @@ function blokes_get_pending_cancel_alumnos() {
  */
 function blokes_get_all_subscription_data() {
     $base = class_exists('RocoMadrid_SF_Stats') ? RocoMadrid_SF_Stats::get_all_subscription_data() : array();
-    return array_merge($base, blokes_get_pending_cancel_alumnos());
+    $base = array_map('blokes_corrige_medianos_huerfanos', $base);
+    $base = array_map('blokes_corrige_edad_por_franja', $base);
+    return array_merge($base, blokes_get_pending_cancel_alumnos(), blokes_get_abono_subscripciones());
+}
+
+// CIERRE 15/11 18:05 + 17:25 (Ramiro + selector, corrige lo dicho a las 17:30/17:45 sobre esta
+// misma franja): la variación huérfana "Martes-Jueves 18:30-20:00" (20 suscripciones, 1 y 2
+// días, compradas con el suplemento "Adolescentes" del formulario porque era la única forma de
+// pagarla) SON la clase de Medianos — para Blokes esta franja siempre es "Medianos M-J
+// 18:30-19:30, Isa", fusionada con el slot oficial del selector. Edad = Adolescentes (15/11
+// 17:25 punto A: Ramiro confirmó que son adolescentes, no menores de 6-12 — la variación nueva
+// #7837 que ya existe en el catálogo para este slot oficial es justamente para adolescentes;
+// antes, tras el cierre de las 18:05, esto decía por error "Menores (6-12 años)"). No toca
+// ninguna suscripción real, su precio ni el día que tenga guardado (1 o 2 días) — solo
+// normaliza cómo Blokes la MUESTRA y la cuenta, y asegura que sigan contando en la MISMA clase
+// cuando se muevan de verdad a #7837/la variación oficial de #4516 (esa migración ya vendrá con
+// edad=Adolescentes de su propia variación/formulario, así que no hay salto de clase al mover).
+// Tiene que correr ANTES de blokes_corrige_edad_por_franja() para que esa franja ya no se
+// procese por su cuenta.
+function blokes_corrige_medianos_huerfanos($sub) {
+    if (blokes_dia_a_pareja($sub['dia'] ?? '') === 'Martes-Jueves' && ($sub['horario'] ?? '') === '18:30-20:00') {
+        $sub['horario'] = '18:30-19:30';
+        $sub['edad']    = 'Adolescentes (12-18 años)';
+    }
+    return $sub;
+}
+
+// Ramiro, 15/11 16:20 (Fase 0 edad, "sube de prioridad"): el producto "Clases de escalada un
+// día" (#4516, día suelto) no tiene atributo Edad -- un niño que va un solo día sale "Adultos"
+// en la variación de WooCommerce (RocoMadrid_SF_Stats ya mira primero la variación, luego el
+// age_addon/pa_edad del formulario) y se le asigna el profe de adultos de esa franja (Sigurd,
+// Eva…), inflando filas falsas en Superadmin › Clases y metiendo niños en el aforo de adultos
+// de Grupos. Regla pedida: si DESPUÉS de esos dos intentos sigue saliendo "Adultos", mirar la
+// franja (día ya emparejado + horario) -- estas franjas no tienen ninguna clase de adultos a esa
+// hora, así que SIEMPRE son niños/adolescentes. Nunca pisa una edad que ya viniera bien puesta
+// (Woo o el formulario). M-J 19:30-21:00 NO entra aquí a propósito: el selector del formulario
+// («RocoMadrid steps») ya tiene un slot propio de adolescentes ahí y el age_addon es de fiar.
+// 15/11 17:30/18:05 (cowork, "zanjar esto bien" — cruce del selector de RocoMadrid steps +
+// variaciones de Woo + Excel de Grupos, sustituye la tabla de las 16:20): el selector oficial de
+// "medianos" M-J es 18:30-19:30. La variación vieja y huérfana "Martes-Jueves · Adultos ·
+// 18:30-20:00" (20 suscripciones) se funde con esa misma clase de medianos ANTES de llegar aquí,
+// en blokes_corrige_medianos_huerfanos() — por eso ya no hace falta (ni aparece) una entrada para
+// 18:30-20:00 en esta tabla. También se añade Viernes 19:00-20:00 (adolescentes, "V. Inf. 19.00"
+// en el Excel), que antes no estaba cubierta.
+function blokes_corrige_edad_por_franja($sub) {
+    if (($sub['edad'] ?? 'Adultos') !== 'Adultos') return $sub;
+    $franjas_sin_adultos = array(
+        'Martes-Jueves|17:30-18:30'   => 'Menores (6-12 años)',
+        'Martes-Jueves|18:30-19:30'   => 'Menores (6-12 años)', // "medianos", slot oficial del selector
+        'Lunes-Miércoles|17:30-18:30' => 'Menores (6-12 años)',
+        'Viernes|18:00-19:00'         => 'Menores (6-12 años)',
+        'Viernes|19:00-20:00'         => 'Adolescentes (12-18 años)',
+    );
+    $clave = blokes_dia_a_pareja($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '');
+    if (isset($franjas_sin_adultos[$clave])) $sub['edad'] = $franjas_sin_adultos[$clave];
+    return $sub;
+}
+
+// Ramiro, 15/11 18:00: estas franjas "ya no existen" — Blokes no debe mostrarlas como clases
+// activas ni contarlas en los cuadros de clases (Superadmin › Clases, Horario por día, Grupos).
+// Usa el PREFIJO de la hora de inicio, no el rango completo, porque la nota solo da la hora de
+// inicio (no tengo la de fin exacta y no quiero inventarla): L-X 09:00 y 10:30, M-J 07:00.
+// Viernes 19:00-21:00 "Adultos" sí lleva el rango completo porque el Curso de Tecnificación que
+// ocupaba ese hueco lo vende Amelia aparte, fuera de WooCommerce — 0 suscripciones reales hoy,
+// pero por si alguna cayera ahí por error de selector. Ojo: esto NO toca el dinero ni "Personas"
+// (quien ya paga en una de estas franjas sigue contando ahí) — solo oculta la FRANJA como clase,
+// que es lo que pedía la nota ("que no salga en los cuadros").
+function blokes_franja_clase_descontinuada($dia, $horario) {
+    $pareja = blokes_dia_a_pareja($dia);
+    $horario = (string) $horario;
+    if ($pareja === 'Lunes-Miércoles' && (strpos($horario, '09:00') === 0 || strpos($horario, '10:30') === 0)) return true;
+    if ($pareja === 'Martes-Jueves' && strpos($horario, '07:00') === 0) return true;
+    if ($pareja === 'Viernes' && $horario === '19:00-21:00') return true;
+    return false;
 }
 
 function progreso_get_alumnos($request) {
@@ -2205,7 +4375,20 @@ function progreso_get_alumnos($request) {
             $wp_user = get_user_by('email', $sub['email']);
             if ($wp_user) $uid = $wp_user->ID;
         }
+        // 20/11 07:20 ("Niños como alumnos"): quien asiste/compite puede no ser quien paga —
+        // si esta suscripción tiene un alumno distinto enlazado (_rm_alumno_user_id, puesto
+        // desde la pestaña Niños), es ESE el que tiene que salir aquí (y por tanto en "¿Quién
+        // eres?" de la tablet y en todo lo que consuma este endpoint), no el pagador.
+        $alumno_uid = $sub['id'] ? blokes_rm_alumno_uid($sub['id'], $uid) : $uid;
+        if ($alumno_uid && $alumno_uid !== $uid) {
+            $alumno_user = get_user_by('id', $alumno_uid);
+            if ($alumno_user) { $sub['cliente'] = $alumno_user->display_name; $uid = $alumno_uid; }
+        }
         $sub['user_id'] = $uid;
+        // Apodo (Ramiro, 09/11 05:45: "¿quién lo ha hecho?" tiene que enseñar también el
+        // nickname, hay varios "Ramiro" y con solo el nombre + clase no se sabe cuál es) —
+        // usermeta es global de la red, se puede leer desde el Club sin cambiar de blog.
+        $sub['nickname'] = $uid ? blokes_get_user_nickname($uid) : '';
         return $sub;
     }, $filtered);
 
@@ -2308,6 +4491,59 @@ function progreso_get_clases($request) {
             if ($horario && !in_array($horario, $horarios)) $horarios[] = $horario;
             if ($edad    && !in_array($edad,    $edades))   $edades[]   = $edad;
         }
+    }
+
+    // Adolescentes no es un término pa_edad real en el catálogo (hoy se monta sobre la variación
+    // de Adultos del mismo día/horario, con el precio ajustado por un addon en el alta normal —
+    // ver NOTAS_PARA_CODE_sync_grupos.md, Ramiro 06/11). Para que "Cambiar de grupo" pueda
+    // ofrecer y mover a un grupo de Adolescentes, añadimos aquí una fila sintética por cada fila
+    // real de Adultos, con el precio real de Adolescentes (misma fórmula que usa el alta).
+    if (class_exists('RocoMadrid_SF_Pricing')) {
+        $filas_adultos = array_filter($clases, function($c) { return $c['edad'] === 'Adultos'; });
+        foreach ($filas_adultos as $fila) {
+            $frequency = ($fila['tipo'] === 'classes') ? '2_days' : '1_day';
+            $planes_adol = RocoMadrid_SF_Pricing::calculate_plan_prices(array(
+                'pa_dias' => $fila['dia'], 'pa_horario' => $fila['horario'], 'pa_edad' => 'Adolescentes', 'frequency' => $frequency,
+            ));
+            $precio_adol = floatval($planes_adol['monthly']['price'] ?? 0);
+            if ($precio_adol <= 0) continue;
+            $key_adol = $fila['dia'] . '|' . $fila['horario'] . '|Adolescentes';
+            $clases[] = array(
+                'id' => 'adol-' . $fila['id'], 'tipo' => $fila['tipo'], 'dia' => $fila['dia'], 'horario' => $fila['horario'],
+                'turno' => $fila['turno'], 'edad' => 'Adolescentes', 'precio' => $precio_adol,
+                'stock' => $fila['stock'], 'stock_status' => $fila['stock_status'], 'sku' => $fila['sku'] . '-ADOL',
+                'status' => $fila['status'], 'alumnos' => isset($sub_counts[$key_adol]) ? $sub_counts[$key_adol] : 0,
+            );
+        }
+        if (!empty($filas_adultos) && !in_array('Adolescentes', $edades)) $edades[] = 'Adolescentes';
+
+        // Eva/cowork, 20/11 16:50 (Anne Sophie, sub 7895): el producto de Días sueltos no tiene
+        // ninguna variación de Menores — un niño de un solo día se quedaba sin esa opción en el
+        // selector y acababa dado de alta como Adultos (74€ en vez de 47€). Solo para "single"
+        // (1 día): las clases de 2 días de Menores ya tienen su propia variación real, no hace
+        // falta ninguna fila sintética ahí.
+        $ya_tiene_menores_single = array();
+        foreach ($clases as $c) {
+            if ($c['tipo'] === 'single' && $c['edad'] === 'Menores') $ya_tiene_menores_single[$c['dia'] . '|' . $c['horario']] = true;
+        }
+        foreach ($filas_adultos as $fila) {
+            if ($fila['tipo'] !== 'single') continue;
+            $clave_dh = $fila['dia'] . '|' . $fila['horario'];
+            if (isset($ya_tiene_menores_single[$clave_dh])) continue;
+            $planes_menor = RocoMadrid_SF_Pricing::calculate_plan_prices(array(
+                'pa_dias' => $fila['dia'], 'pa_horario' => $fila['horario'], 'pa_edad' => 'Menores', 'frequency' => '1_day',
+            ));
+            $precio_menor = floatval($planes_menor['monthly']['price'] ?? 0);
+            if ($precio_menor <= 0) continue;
+            $key_menor = $clave_dh . '|Menores';
+            $clases[] = array(
+                'id' => 'menor-' . $fila['id'], 'tipo' => 'single', 'dia' => $fila['dia'], 'horario' => $fila['horario'],
+                'turno' => $fila['turno'], 'edad' => 'Menores', 'precio' => $precio_menor,
+                'stock' => $fila['stock'], 'stock_status' => $fila['stock_status'], 'sku' => $fila['sku'] . '-MENOR',
+                'status' => $fila['status'], 'alumnos' => isset($sub_counts[$key_menor]) ? $sub_counts[$key_menor] : 0,
+            );
+        }
+        if (!empty($filas_adultos) && !in_array('Menores', $edades)) $edades[] = 'Menores';
     }
 
     usort($dias_single,  $sort_by_day);
@@ -2593,6 +4829,173 @@ function progreso_link_alumno_manual($request) {
     ), array('id' => $id), array('%s', '%d', '%s'), array('%d'));
 
     return rest_ensure_response(array('success' => true, 'user_id' => $user->ID));
+}
+
+// 20/11 07:23 (Ramiro, pestaña «Vincular actividad»): mismo traspaso de tops/mediciones que
+// progreso_link_alumno_manual() (que se deja intacta, la usa el "Vincular" de Entrenamientos
+// por email exacto), pero por uid (buscador por nombre/teléfono/email) y con Simular antes de
+// escribir — devuelve el array de datos en vez de una respuesta REST, para poder envolverlo en
+// 'simulado' desde el endpoint que llama a esto.
+function blokes_rm_migrar_placeholder($placeholder_id, $uid, $simular) {
+    global $wpdb;
+    blokes_ensure_placeholder_table();
+    $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_placeholder_table() . ' WHERE id = %d', $placeholder_id), ARRAY_A);
+    if (!$row) return new WP_Error('not_found', 'No encontrado.', array('status' => 404));
+    if ($row['status'] !== 'pending') return new WP_Error('already_linked', 'Ya estaba vinculado.', array('status' => 400));
+    $user = get_user_by('id', $uid);
+    if (!$user) return new WP_Error('user_not_found', 'Ese usuario de WordPress no existe.', array('status' => 404));
+
+    progreso_ensure_training_table();
+    blokes_ensure_placeholder_completions_table();
+    $n_tops   = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . blokes_placeholder_completions_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+    $n_medic  = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . progreso_training_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+
+    if ($simular) {
+        return array(
+            'placeholder' => array('id' => $placeholder_id, 'nombre' => $row['nombre']),
+            'destino'     => array('uid' => $uid, 'nombre' => $user->display_name),
+            'nTops' => $n_tops, 'nMediciones' => $n_medic,
+            'aviso' => 'Simulación: no se ha escrito nada todavía.',
+        );
+    }
+
+    $wpdb->update(progreso_training_table(), array('user_id' => $user->ID, 'placeholder_id' => 0), array('placeholder_id' => $placeholder_id), array('%d', '%d'), array('%d'));
+
+    $pc_table = blokes_placeholder_completions_table();
+    $ph_completions = $wpdb->get_results($wpdb->prepare(
+        "SELECT post_id, color, sala, completed_at FROM {$pc_table} WHERE placeholder_id = %d ORDER BY completed_at ASC", $placeholder_id
+    ), ARRAY_A);
+    if ($ph_completions) {
+        $completed_ids = get_user_meta($user->ID, '_blokes_completed', true);
+        $completed_ids = is_array($completed_ids) ? array_map('intval', $completed_ids) : array();
+        $log = get_user_meta($user->ID, '_blokes_completion_log', true);
+        $log = is_array($log) ? $log : array();
+        $newly_completed = array();
+        foreach ($ph_completions as $pc_row) {
+            $pid = intval($pc_row['post_id']);
+            if (in_array($pid, $completed_ids, true)) continue; // ya lo tenía de verdad, no duplicar
+            $completed_ids[] = $pid;
+            $log[] = array('postId' => $pid, 'color' => $pc_row['color'], 'sala' => $pc_row['sala'], 'timestamp' => date('c', strtotime($pc_row['completed_at'])));
+            $newly_completed[] = $pid;
+        }
+        update_user_meta($user->ID, '_blokes_completed', $completed_ids);
+        update_user_meta($user->ID, '_blokes_completion_log', $log);
+        foreach ($newly_completed as $pid) blokes_register_top_for_leagues($user->ID, $pid);
+        $wpdb->delete($pc_table, array('placeholder_id' => $placeholder_id), array('%d'));
+    }
+
+    $wpdb->update(blokes_placeholder_table(), array(
+        'status' => 'linked', 'linked_user_id' => $user->ID, 'linked_at' => current_time('mysql'),
+    ), array('id' => $placeholder_id), array('%s', '%d', '%s'), array('%d'));
+
+    return array(
+        'placeholder' => array('id' => $placeholder_id, 'nombre' => $row['nombre']),
+        'destino'     => array('uid' => $user->ID, 'nombre' => $user->display_name),
+        'nTops' => $n_tops, 'nMediciones' => $n_medic,
+    );
+}
+
+// Listado de la pestaña "Vincular actividad": todos los alumnos manuales (adultos y niños) sin
+// vincular todavía, con cuántos tops/mediciones tienen ya apuntados y quién los creó.
+function superadmin_gestion_vincular_actividad_listado($request) {
+    global $wpdb;
+    blokes_ensure_placeholder_table();
+    progreso_ensure_training_table();
+    blokes_ensure_placeholder_completions_table();
+
+    $tops_map = array();
+    foreach ($wpdb->get_results("SELECT placeholder_id, COUNT(*) n FROM " . blokes_placeholder_completions_table() . " GROUP BY placeholder_id", ARRAY_A) as $r) {
+        $tops_map[intval($r['placeholder_id'])] = intval($r['n']);
+    }
+    $medic_map = array();
+    foreach ($wpdb->get_results("SELECT placeholder_id, COUNT(*) n FROM " . progreso_training_table() . " WHERE placeholder_id > 0 GROUP BY placeholder_id", ARRAY_A) as $r) {
+        $medic_map[intval($r['placeholder_id'])] = intval($r['n']);
+    }
+
+    $out = array();
+    $rows = $wpdb->get_results("SELECT * FROM " . blokes_placeholder_table() . " WHERE status = 'pending' ORDER BY created_at DESC", ARRAY_A);
+    foreach ($rows as $row) {
+        $id = intval($row['id']);
+        $creador_id = intval($row['created_by']);
+        $creador = $creador_id ? get_user_by('id', $creador_id) : null;
+        $out[] = array(
+            'id' => $id, 'nombre' => $row['nombre'],
+            'dia' => $row['dia'], 'horario' => $row['horario'], 'edad' => $row['edad'] ?: '',
+            'createdAt' => $row['created_at'], 'creadoPor' => $creador ? $creador->display_name : '',
+            'nTops' => $tops_map[$id] ?? 0, 'nMediciones' => $medic_map[$id] ?? 0,
+            // Pista, no certeza: un día/horario de Menores/Adolescentes suele ser un niño, pero
+            // sin clase guardada (creado desde la tablet sin franja) no hay forma de saberlo.
+            'pareceMenor' => ($row['edad'] !== '' && $row['edad'] !== 'Adultos'),
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// Acciones de "Vincular actividad": vincular a una cuenta existente (buscador, no solo email
+// exacto), crear la cuenta del niño y vincular, o borrar el provisional. Simular primero, igual
+// que el resto de Grupos.
+function superadmin_gestion_vincular_actividad($request) {
+    global $wpdb;
+    $placeholder_id = intval($request->get_param('placeholder_id'));
+    $accion    = sanitize_key((string) $request->get_param('accion')); // vincular_existente | crear_nino | borrar
+    $uid_in    = intval($request->get_param('uid'));
+    $nombre    = sanitize_text_field((string) $request->get_param('nombre'));
+    $apellidos = sanitize_text_field((string) $request->get_param('apellidos'));
+    $tutor_telefono = sanitize_text_field((string) $request->get_param('tutorTelefono'));
+    $simular   = (bool) $request->get_param('simular');
+
+    if (!$placeholder_id) return new WP_Error('bad_request', 'Falta placeholder_id.', array('status' => 400));
+    if (!in_array($accion, array('vincular_existente', 'crear_nino', 'borrar'), true)) {
+        return new WP_Error('bad_request', 'accion debe ser vincular_existente, crear_nino o borrar.', array('status' => 400));
+    }
+
+    if ($accion === 'borrar') {
+        blokes_ensure_placeholder_table();
+        $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_placeholder_table() . ' WHERE id = %d', $placeholder_id), ARRAY_A);
+        if (!$row) return new WP_Error('not_found', 'No encontrado.', array('status' => 404));
+        if ($row['status'] !== 'pending') return new WP_Error('already_linked', 'Ya está vinculado, no se puede borrar.', array('status' => 400));
+        if ($simular) {
+            return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array('placeholder' => array('id' => $placeholder_id, 'nombre' => $row['nombre']), 'aviso' => 'Simulación: no se ha borrado nada todavía.')));
+        }
+        progreso_ensure_training_table();
+        $wpdb->delete(progreso_training_table(), array('placeholder_id' => $placeholder_id), array('%d'));
+        $wpdb->delete(blokes_placeholder_table(), array('id' => $placeholder_id), array('%d'));
+        blokes_gestion_log(0, 'vincular_actividad_borrar', null, array('placeholderId' => $placeholder_id, 'nombre' => $row['nombre']));
+        return rest_ensure_response(array('success' => true, 'data' => array('borrado' => true)));
+    }
+
+    if ($accion === 'vincular_existente' && !$uid_in) return new WP_Error('bad_request', 'Falta uid.', array('status' => 400));
+    if ($accion === 'crear_nino' && trim($nombre) === '') return new WP_Error('bad_request', 'Falta el nombre del niño.', array('status' => 400));
+
+    // "crear_nino" simulado: no se crea ninguna cuenta todavía, solo se enseña qué pasaría —
+    // blokes_rm_migrar_placeholder() necesita un uid real, así que aquí se corta antes.
+    if ($accion === 'crear_nino' && $simular) {
+        blokes_ensure_placeholder_table();
+        $row = $wpdb->get_row($wpdb->prepare('SELECT * FROM ' . blokes_placeholder_table() . ' WHERE id = %d', $placeholder_id), ARRAY_A);
+        if (!$row) return new WP_Error('not_found', 'No encontrado.', array('status' => 404));
+        progreso_ensure_training_table(); blokes_ensure_placeholder_completions_table();
+        $n_tops  = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . blokes_placeholder_completions_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+        $n_medic = (int) $wpdb->get_var($wpdb->prepare('SELECT COUNT(*) FROM ' . progreso_training_table() . ' WHERE placeholder_id = %d', $placeholder_id));
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'placeholder' => array('id' => $placeholder_id, 'nombre' => $row['nombre']),
+            'destino' => array('uid' => null, 'nombre' => trim($nombre . ' ' . $apellidos), 'creaCuentaNueva' => true),
+            'nTops' => $n_tops, 'nMediciones' => $n_medic,
+            'aviso' => 'Simulación: no se ha creado ni escrito nada todavía.',
+        )));
+    }
+
+    $uid = $uid_in;
+    if ($accion === 'crear_nino') { // aquí ya nunca es simulación (cortada arriba)
+        $nuevo = blokes_rm_crear_nino($nombre, $apellidos, 0, '', $tutor_telefono);
+        if (is_wp_error($nuevo)) return $nuevo;
+        $uid = $nuevo;
+    }
+
+    $res = blokes_rm_migrar_placeholder($placeholder_id, $uid, $simular);
+    if (is_wp_error($res)) return $res;
+    if ($simular) return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $res));
+    blokes_gestion_log(0, 'vincular_actividad', null, $res, array('accion' => $accion, 'placeholderId' => $placeholder_id));
+    return rest_ensure_response(array('success' => true, 'data' => $res));
 }
 
 // ============================================================
@@ -3454,33 +5857,113 @@ function _superadmin_orders_for_blog($start_date) {
     $cat_cache = array();
     $rows = array();
     foreach ($ids as $oid) {
-        $order = wc_get_order($oid);
-        if (!$order) continue;
-        $dt = $order->get_date_created();
-        if (!$dt) continue;
-        $month = $dt->format('Y-m');
-        $row   = array('month' => $month, 'total' => floatval($order->get_total()), 'tax' => floatval($order->get_total_tax()), 'items' => array());
-        foreach ($order->get_items() as $item) {
-            $cat     = '';
-            $product = $item->get_product();
-            if ($product) {
-                $pid = $product->get_parent_id() ?: $product->get_id();
-                if (!array_key_exists($pid, $cat_cache)) {
-                    $terms = get_the_terms($pid, 'product_cat');
-                    $cat_cache[$pid] = ($terms && !is_wp_error($terms)) ? $terms[0]->name : '';
-                }
-                $cat = $cat_cache[$pid];
-            }
-            $row['items'][] = array(
-                'name'     => $item->get_name(),
-                'qty'      => intval($item->get_quantity()),
-                'revenue'  => floatval($item->get_subtotal()),
-                'category' => $cat,
+        // Un pedido raro (datos corruptos, producto borrado...) no puede tirar la pestaña
+        // entera — con 'limit' => -1 son potencialmente miles de pedidos, y Superadmin ›
+        // Ingresos es la que más se mira (cowork, 15/11 09:55: HTTP 500 tras el cambio de
+        // reembolsos/fecha de pago).
+        try {
+            $order = wc_get_order($oid);
+            if (!$order) continue;
+            // a) Facturas anuladas en VeriFactu: no cuentan como cobrado (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02).
+            if (blokes_pedido_factura_anulada($order)) continue;
+            // c) Mes por fecha de pago, no de creación — una renovación de octubre pagada en
+            // noviembre caía en octubre.
+            $dt = $order->get_date_paid() ?: $order->get_date_created();
+            if (!$dt) continue;
+            $month = $dt->format('Y-m');
+            // b) Reembolsos: se restan del total y de cada línea (antes no se veían las devoluciones).
+            $reembolsado_total = floatval($order->get_total_refunded());
+            $row   = array(
+                'month' => $month, 'tax' => floatval($order->get_total_tax()), 'items' => array(),
             );
+            // Solo mirar el reembolso POR LÍNEA si de verdad hay algún reembolso en este pedido
+            // — get_total_refunded_for_item() hace una consulta aparte por cada línea, y la
+            // inmensa mayoría de pedidos no tienen reembolsos: con 'limit' => -1 recorriendo
+            // meses de pedidos, eso eran miles de consultas de más — la causa más probable del
+            // 500 (timeout/memoria), no un fallo de sintaxis.
+            $tiene_reembolso = $reembolsado_total > 0.0;
+            foreach ($order->get_items() as $item_id => $item) {
+                $cat     = '';
+                $product = $item->get_product();
+                if ($product) {
+                    $pid = $product->get_parent_id() ?: $product->get_id();
+                    if (!array_key_exists($pid, $cat_cache)) {
+                        $terms = get_the_terms($pid, 'product_cat');
+                        $cat_cache[$pid] = ($terms && !is_wp_error($terms)) ? $terms[0]->name : '';
+                    }
+                    $cat = $cat_cache[$pid];
+                }
+                $reembolsado_item = ($tiene_reembolso && method_exists($order, 'get_total_refunded_for_item'))
+                    ? floatval($order->get_total_refunded_for_item($item_id)) : 0.0;
+                // get_total() (después de descuentos/cupones), no get_subtotal() (antes) — si no,
+                // la suma de líneas (Desglose) sale por encima de la gráfica (cowork, 15/11 10:15).
+                // Las dos ya son netas de IVA en WooCommerce (el IVA se trata aparte, 'tax').
+                $row['items'][] = array(
+                    'name'     => $item->get_name(),
+                    'qty'      => intval($item->get_quantity()),
+                    'revenue'  => floatval($item->get_total()) - $reembolsado_item,
+                    'category' => $cat,
+                );
+            }
+            // El total del pedido es la suma de SUS LÍNEAS, no $order->get_total() (que incluye
+            // IVA y envío/gastos aparte) — así la gráfica (superadmin_revenue) y el Desglose
+            // (blokes_productos_calcular) cuadran por construcción, al salir del mismo dato.
+            $row['total'] = array_sum(array_column($row['items'], 'revenue'));
+            $rows[] = $row;
+        } catch (\Throwable $e) {
+            error_log('Blokes _superadmin_orders_for_blog: pedido ' . $oid . ' fallo: ' . $e->getMessage());
+            continue;
         }
-        $rows[] = $row;
     }
     return $rows;
+}
+
+// IVA repercutido REAL por mes y entidad (NOTAS_PARA_CODE_gastos_banco.md, 15/11 09:18 punto 3):
+// de las facturas de verdad (get_total_tax() de pedidos completed/processing, sin anuladas —
+// ya lo hace _superadmin_orders_for_blog()), no estimado desde el banco. blog_id 1 = Rocoteca
+// (Principal), 3 = Club — mismo mapeo que superadmin_revenue()/superadmin_products().
+function blokes_expenses_iva_repercutido_real($from) {
+    $start_date = $from ? ($from . '-01') : (new DateTime('-12 months'))->format('Y-m-d');
+    $out = array(); // 'YYYY-MM|entity' => iva
+    foreach (array(1 => 'rocoteca', 3 => 'club') as $blog_id => $entity) {
+        switch_to_blog($blog_id);
+        $orders = _superadmin_orders_for_blog($start_date);
+        restore_current_blog();
+        foreach ($orders as $row) {
+            $key = $row['month'] . '|' . $entity;
+            $out[$key] = ($out[$key] ?? 0) + $row['tax'];
+        }
+    }
+    return $out;
+}
+
+// Saldo en banco real (NOTAS_PARA_CODE_gastos_banco.md, 15/11 09:18 punto 4 + respuesta de
+// Ramiro 09:25): el "Saldo Posterior" del movimiento más reciente de la entidad — no un
+// acumulado de ingresos−gastos reconstruido desde el primer mes (eso nunca va a cuadrar con el
+// banco de verdad). Solo tiene sentido para el Club (la única cuenta que importa, según Ramiro).
+function blokes_expenses_saldo_real($entity) {
+    global $wpdb;
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
+        'blokes_exp_%_' . $entity
+    ), ARRAY_A);
+    $mejor_ts = -1; $saldo = null; $fecha_txt = '';
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!$saved || !is_array($saved['items'] ?? null)) continue;
+        foreach ($saved['items'] as $item) {
+            $saldo_raw = (string) ($item['saldo'] ?? '');
+            if ($saldo_raw === '') continue;
+            $fecha = $item['fechaValor'] ?? $item['fecha'] ?? '';
+            if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
+            $ts = mktime(0, 0, 0, intval($m[2]), intval($m[1]), intval($m[3]));
+            if ($ts < $mejor_ts) continue; // a igual fecha, el último del CSV (orden del banco) gana
+            $mejor_ts = $ts;
+            $saldo = floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', $saldo_raw)));
+            $fecha_txt = date('Y-m-d', $ts);
+        }
+    }
+    return array('saldo' => $saldo, 'fecha' => $fecha_txt);
 }
 
 function superadmin_revenue($request) {
@@ -3533,27 +6016,92 @@ function superadmin_revenue($request) {
     return rest_ensure_response(array('data' => $data));
 }
 
-function superadmin_products($request) {
-    $months     = max(1, min(60, intval($request->get_param('months'))));
+// ─── Familias de ingresos (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02) ───────────────
+// Mapa propio de Blokes, no las categorías de WooCommerce (están mezcladas: "Servicios y
+// productos" junta entradas+recauchutes+cumpleaños, "Sin categoría" tiene Uso de Rocódromo y
+// eventos, "Clases" incluye "Entrada para grupos"...). 'overrides' (wp_option) deja que un socio
+// reclasifique un producto sin tocar código — nombre normalizado (sin tildes, minúsculas) => {familia, sub}.
+function blokes_ingresos_normaliza_nombre($s) {
+    $s = function_exists('iconv') ? iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', (string) $s) : (string) $s;
+    return trim(strtolower($s));
+}
+function blokes_ingresos_familia_overrides_get() {
+    return get_option('blokes_ingresos_familias', array());
+}
+function blokes_ingresos_familia_override_set($nombre, $familia, $sub = null) {
+    $overrides = blokes_ingresos_familia_overrides_get();
+    $overrides[blokes_ingresos_normaliza_nombre($nombre)] = array('familia' => $familia, 'sub' => $sub);
+    update_option('blokes_ingresos_familias', $overrides, false);
+}
+const BLOKES_INGRESOS_FAMILIAS = array('Clases', 'Eventos y grupos', 'Consumibles', 'Acceso al rocódromo', 'Otros');
+const BLOKES_INGRESOS_CONSUMIBLES_SUB = array('Bar', 'Tienda', 'Recauchutes');
+
+// Clasificación por palabras clave sobre el nombre de la línea del pedido — vista en los
+// productos reales de jul→nov (ver la nota). Lo que no encaje sale "Sin clasificar" para que
+// alguien lo asigne a mano (se queda guardado, no hay que repetirlo cada vez).
+function blokes_ingresos_clasificar($nombre) {
+    $n = blokes_ingresos_normaliza_nombre($nombre);
+    $overrides = blokes_ingresos_familia_overrides_get();
+    if (isset($overrides[$n])) return $overrides[$n];
+
+    $contiene = function($needles) use ($n) {
+        foreach ($needles as $x) if (strpos($n, $x) !== false) return true;
+        return false;
+    };
+
+    if ($contiene(array('clases rocomadrid', 'clases de escalada', 'clases yoga', 'clase de yoga', 'clase semanal', 'dia suelto', 'dias sueltos'))) {
+        return array('familia' => 'Clases', 'sub' => null);
+    }
+    if ($contiene(array('cumpleanos', 'entrada para grupos', 'taller', 'actividad con peques', ' ies ', 'compe', 'colegio', 'escolar', 'evento'))) {
+        return array('familia' => 'Eventos y grupos', 'sub' => null);
+    }
+    if ($contiene(array('cerveza', 'hamburguesa', 'refresco', 'agua', 'aquarius', 'monster', 'bodyarmor', 'palestine cola', 'bebida', 'pincho', 'bocadillo', 'cafe', 'coca cola'))) {
+        return array('familia' => 'Consumibles', 'sub' => 'Bar');
+    }
+    if ($contiene(array('magnesio', 'mojo stick', 'camiseta', 'sudadera', 'gorra', 'cepillo'))) {
+        return array('familia' => 'Consumibles', 'sub' => 'Tienda');
+    }
+    if ($contiene(array('recauchut', 'vibram', 'noedge', 'puntera'))) {
+        return array('familia' => 'Consumibles', 'sub' => 'Recauchutes');
+    }
+    if ($contiene(array('entrada de todo el dia', 'entrada de manana', 'pase tarde', 'pase manana', 'entrada y pies de gato', 'bono 10', 'bono de 10', 'bono mensual', 'pies de gato'))) {
+        return array('familia' => 'Acceso al rocódromo', 'sub' => null);
+    }
+    if ($contiene(array('uso de rocodromo', 'cita', 'prueba'))) {
+        return array('familia' => 'Otros', 'sub' => null);
+    }
+    return array('familia' => 'Sin clasificar', 'sub' => null);
+}
+
+// Productos reales, fusionando las dos tiendas (Ramiro 15/11 09:02: hoy salen dos líneas del
+// mismo producto — Entrada de todo el día, Magnesio, Cerveza...).  Único sitio que recorre los
+// pedidos de las dos tiendas para esto — tanto /products como /ingresos/desglose lo reutilizan.
+function blokes_productos_calcular($months, $exclude_transfer = false) {
+    $months     = max(1, min(60, intval($months)));
     $start_date = (new DateTime("first day of this month -{$months} months"))->format('Y-m-d');
 
-    $products = array(); // "blog_id|name" => [name, store, units, revenue, history]
-
-    foreach (array(1 => 'Principal', 3 => 'Club') as $blog_id => $store_label) {
+    $products = array(); // nombre normalizado => [name, units, revenue, history, familia, sub]
+    foreach (array(1, 3) as $blog_id) {
         switch_to_blog($blog_id);
         $orders = _superadmin_orders_for_blog($start_date);
         restore_current_blog();
         foreach ($orders as $row) {
             foreach ($row['items'] as $item) {
-                $key = $blog_id . '|' . $item['name'];
+                // «Sin uso Rocódromo», mismo botón que la gráfica (cowork, 15/11 10:15): la
+                // factura de arrendamiento inter-empresa Club → Rocoteca no es ingreso real.
+                if ($exclude_transfer) {
+                    $name_ascii = function_exists('iconv')
+                        ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['name']))
+                        : strtolower($item['name']);
+                    if (strpos($name_ascii, 'rocodromo') !== false) continue;
+                }
+                $key = blokes_ingresos_normaliza_nombre($item['name']);
                 if (!isset($products[$key])) {
+                    $clasif = blokes_ingresos_clasificar($item['name']);
                     $products[$key] = array(
-                        'name'     => $item['name'],
-                        'store'    => $store_label,
-                        'category' => $item['category'] ?? '',
-                        'units'    => 0,
-                        'revenue'  => 0.0,
-                        'history'  => array(),
+                        'name' => $item['name'], 'category' => $item['category'] ?? '',
+                        'familia' => $clasif['familia'], 'sub' => $clasif['sub'],
+                        'units' => 0, 'revenue' => 0.0, 'history' => array(),
                     );
                 }
                 $products[$key]['units']   += $item['qty'];
@@ -3575,8 +6123,81 @@ function superadmin_products($request) {
         $p['revenue'] = round($p['revenue'], 2);
     }
     usort($data, function($a, $b) { return $b['revenue'] <=> $a['revenue']; });
+    return $data;
+}
 
-    return rest_ensure_response(array('data' => $data));
+// POST /ingresos/familia — reclasificar un producto a mano (09:02: "editable por socio").
+function superadmin_ingresos_familia_set($request) {
+    $nombre = sanitize_text_field((string) $request->get_param('nombre'));
+    $familia = sanitize_text_field((string) $request->get_param('familia'));
+    $sub = $request->get_param('sub');
+    $sub = $sub ? sanitize_text_field((string) $sub) : null;
+    if (!$nombre || !in_array($familia, BLOKES_INGRESOS_FAMILIAS, true)) {
+        return new WP_Error('bad_request', 'Falta nombre o la familia no es una de las reconocidas.', array('status' => 400));
+    }
+    if ($familia === 'Consumibles' && !in_array($sub, BLOKES_INGRESOS_CONSUMIBLES_SUB, true)) $sub = 'Bar';
+    blokes_ingresos_familia_override_set($nombre, $familia, $sub);
+    return rest_ensure_response(array('success' => true));
+}
+
+// GET /ingresos/desglose — "Desglose de ingresos" (sustituye a "Productos y suscripciones",
+// mezclado y mal categorizado). Por familia (Consumibles con Bar/Tienda/Recauchutes dentro) +
+// serie mensual para la barra apilada. NO incluye el módulo Eventos (reservas aparte de
+// WooCommerce) — pendiente de que Ramiro confirme si una reserva de Eventos puede tener TAMBIÉN
+// un pedido de Woo (para no contar dos veces el mismo dinero) antes de juntarlas aquí.
+function superadmin_ingresos_desglose($request) {
+    $months = max(1, min(60, intval($request->get_param('months') ?: 12)));
+    $exclude_transfer = (bool) $request->get_param('exclude_transfer');
+    $productos = blokes_productos_calcular($months, $exclude_transfer);
+
+    $familias = array();
+    foreach ($productos as $p) {
+        $fam = $p['familia'];
+        if (!isset($familias[$fam])) {
+            $familias[$fam] = array('familia' => $fam, 'importe' => 0.0, 'porMes' => array(), 'productos' => array(), 'subs' => array());
+        }
+        $familias[$fam]['importe'] += $p['revenue'];
+        foreach ($p['history'] as $h) {
+            $familias[$fam]['porMes'][$h['month']] = ($familias[$fam]['porMes'][$h['month']] ?? 0) + $h['revenue'];
+        }
+        if ($fam === 'Consumibles') {
+            $sub = $p['sub'] ?: 'Otros';
+            if (!isset($familias[$fam]['subs'][$sub])) $familias[$fam]['subs'][$sub] = array('sub' => $sub, 'importe' => 0.0, 'productos' => array());
+            $familias[$fam]['subs'][$sub]['importe'] += $p['revenue'];
+            $familias[$fam]['subs'][$sub]['productos'][] = $p;
+        } else {
+            $familias[$fam]['productos'][] = $p;
+        }
+    }
+
+    $total = array_sum(array_column($productos, 'revenue'));
+    $out = array();
+    // Orden fijo (09:02), "Sin clasificar" siempre arriba si hay algo sin asignar.
+    $orden = array_merge(isset($familias['Sin clasificar']) ? array('Sin clasificar') : array(), BLOKES_INGRESOS_FAMILIAS);
+    foreach ($orden as $fam) {
+        if (!isset($familias[$fam])) continue;
+        $f = $familias[$fam];
+        ksort($f['porMes']);
+        $f['porMes'] = array_map(function($mes, $imp) { return array('mes' => $mes, 'importe' => round($imp, 2)); }, array_keys($f['porMes']), array_values($f['porMes']));
+        $f['importe'] = round($f['importe'], 2);
+        $f['pct'] = $total > 0 ? round($f['importe'] / $total * 100, 1) : 0;
+        if ($fam === 'Consumibles') $f['subs'] = array_values(array_map(function($s) { $s['importe'] = round($s['importe'], 2); return $s; }, $f['subs']));
+        else unset($f['subs']);
+        $out[] = $f;
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array('familias' => $out, 'total' => round($total, 2))));
+}
+
+// GET /products — envoltorio fino de blokes_productos_calcular() (09:02: ya sin el desglose por
+// tienda, un producto = una línea aunque se venda en las dos).
+function superadmin_products($request) {
+    $months = max(1, min(60, intval($request->get_param('months'))));
+    // Cowork, 15/11 14:00 punto 8: con exclude_transfer=1 seguía devolviendo "Otros › Uso de
+    // Rocódromo" (la UI lo filtraba a mano) — ahora lo quita el propio endpoint, igual que ya
+    // hace /ingresos/desglose.
+    $exclude_transfer = (bool) $request->get_param('exclude_transfer');
+    return rest_ensure_response(array('data' => blokes_productos_calcular($months, $exclude_transfer)));
 }
 
 // Cuenta PERSONAS (cuentas de facturación), no suscripciones: una suscripción Martes-Jueves
@@ -3584,7 +6205,15 @@ function superadmin_products($request) {
 // Aviso: hoy la cuenta es la unidad real (no hay un campo "alumno" en la suscripción, distinto
 // del pagador — lo añadirá la migración de la sección 8), así que una cuenta con varios
 // alumnos (p. ej. hermanos) cuenta aquí como 1. "En vigor" incluye pending-cancel (todavía
-// viene, aunque no se renueve), igual que el resto de ExcelMuerte.
+// viene, aunque no se renueve), igual que el resto de ExcelMuerte. 15/11 16:55: adultos/niños
+// usa la edad del formulario (más de fiar que la variación de WooCommerce), Pilates/Yoga cuenta
+// como mínimo 1 día. 15/11 17:50: "cuentasConFuera" (el total de "163 web + N fuera = total")
+// es ahora la MISMA cifra que la gráfica "Alumnos con pago en curso" (blokes_clases_personas_por_mes),
+// para que las dos pantallas no descuadren entre sí — "cuentasFuera" es solo la diferencia con
+// cuentas_total, no un recuento propio. 15/11 19:25 (Ramiro, con el caso real de Marta Melcón,
+// #6682 Yoga + #6681 clases): una cuenta mixta (clase normal + Pilates/Yoga) cuenta en LOS DOS
+// grupos ("va a dos actividades distintas"), ya no solo en el que no es pilates_yoga — y se
+// suman los externos del Excel de Pilates/Yoga (18+14 filas) que no tienen cuenta web.
 function superadmin_people_summary($request) {
     if (!class_exists('RocoMadrid_SF_Stats')) {
         return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats not available. Call this endpoint on the club subsite.', array('status' => 503));
@@ -3593,11 +6222,14 @@ function superadmin_people_summary($request) {
     $all = blokes_get_all_subscription_data();
     $vigentes = array_values(array_filter($all, function($s) { return ($s['status'] ?? '') === 'active'; }));
 
-    $cuentas = array();
+    $cuentas = array(); // cuenta_key => { porBucket: { bucket => [dia=>true,...] }, nombre, ingresoMes }
     // Sesiones/semana = plazas por sesión sumadas (una Martes-Jueves cuenta en los dos días),
     // igual criterio que la columna Total de "Horario por día".
     $sesiones_semana = 0;
     $ingreso_mes_total = 0;
+    // Identidad (teléfono/nombre compacto) de cada cuenta web, para no duplicar un externo de
+    // Pilates/Yoga que en realidad ya tiene cuenta (aunque sea de otra clase).
+    $claves_web = array();
 
     foreach ($vigentes as $sub) {
         if (empty($sub['id'])) continue;
@@ -3609,25 +6241,33 @@ function superadmin_people_summary($request) {
         $cuenta_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : "s{$sub['id']}");
 
         $producto        = $sub['producto'] ?? '';
-        $edad            = $sub['edad'] ?? 'Adultos';
+        // Edad del FORMULARIO antes que la que ya trae $sub (16:55: "usa la edad del
+        // formulario" — con la variación de WooCommerce salían 38 niños, con el formulario 49).
+        $edad            = blokes_edad_formulario_de_sub($sub['id']) ?? ($sub['edad'] ?? 'Adultos');
         $es_pilates_yoga = in_array($producto, array('Pilates', 'Yoga'), true);
         $es_menor        = $edad !== 'Adultos';
         $bucket          = $es_pilates_yoga ? 'pilates_yoga' : ($es_menor ? 'ninos_adolescentes' : 'adultos_grupo');
 
         $dia      = $sub['dia'] ?? '';
         $dias_sub = $dia ? explode('-', $dia) : array();
+        // Pilates/Yoga no tiene atributo "Días" (pa_dias) como las clases normales — sin esto
+        // contaba 0 días y desaparecía de la tabla como "sin datos" (16:55: Marta Melcon, Yoga
+        // activa, debía salir "1 × 1 día"). Una suscripción de Pilates/Yoga es, como mínimo, 1 día.
+        if ($es_pilates_yoga && !$dias_sub) $dias_sub = array('pilates_yoga_sin_dia_' . $sub['id']);
 
         if (!isset($cuentas[$cuenta_key])) {
-            $cuentas[$cuenta_key] = array('dias' => array(), 'bucket' => $bucket, 'nombre' => $sub['cliente'] ?? '', 'ingresoMes' => 0);
+            $cuentas[$cuenta_key] = array('porBucket' => array(), 'nombre' => $sub['cliente'] ?? '', 'ingresoMes' => 0);
         }
+        if (!isset($cuentas[$cuenta_key]['porBucket'][$bucket])) $cuentas[$cuenta_key]['porBucket'][$bucket] = array();
         foreach ($dias_sub as $d) {
-            $cuentas[$cuenta_key]['dias'][$d] = true;
+            $cuentas[$cuenta_key]['porBucket'][$bucket][$d] = true;
             $sesiones_semana++;
         }
-        // Si una cuenta mezcla Pilates/Yoga con un grupo normal, que cuente como el grupo normal
-        if ($cuentas[$cuenta_key]['bucket'] === 'pilates_yoga' && $bucket !== 'pilates_yoga') {
-            $cuentas[$cuenta_key]['bucket'] = $bucket;
-        }
+
+        $tel_cuenta = blokes_externos_normaliza_telefono($sub['telefono'] ?? '');
+        if ($tel_cuenta) $claves_web['t' . $tel_cuenta] = true;
+        $nomc_cuenta = blokes_externos_normaliza_nombre_compacto($sub['cliente'] ?? '');
+        if ($nomc_cuenta) $claves_web['n' . $nomc_cuenta] = true;
 
         if (function_exists('wcs_get_subscription')) {
             $sub_obj = wcs_get_subscription(intval($sub['id']));
@@ -3651,14 +6291,49 @@ function superadmin_people_summary($request) {
         'pilates_yoga'       => array('1' => 0, '2' => 0, '3+' => 0),
     );
     foreach ($cuentas as $c) {
-        $n = count($c['dias']);
-        $clave = $n >= 3 ? '3+' : (string) $n;
-        $por_dias[$c['bucket']][$clave]++;
+        foreach ($c['porBucket'] as $bucket => $dias) {
+            $n = count($dias);
+            $clave = $n >= 3 ? '3+' : (string) $n;
+            $por_dias[$bucket][$clave]++;
+        }
     }
+
+    // Externos de Pilates/Yoga (Ramiro, 15/11 19:25: "hay 18 filas en Pilates y 14 en Yoga del
+    // Excel que no cuentan" — mismo criterio que "cuentasFuera": mes en curso pagado, sin cuenta
+    // web ya contada arriba (por teléfono o nombre compacto).
+    $mes_actual_py = date('Y-m');
+    $externos_pilates_yoga = array();
+    foreach (blokes_grupos_excel_filas_crudas() as $f) {
+        if (blokes_grupos_excel_categoria_pestana($f['pestana']) !== 'pilates_yoga') continue;
+        if (!in_array($mes_actual_py, $f['pagos'], true)) continue;
+        $tel = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
+        $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
+        $key = $tel ? ('t' . $tel) : ($nomc ? ('n' . $nomc) : null);
+        if (!$key || isset($claves_web[$key])) continue;
+        $externos_pilates_yoga[$key] = true;
+    }
+    if ($externos_pilates_yoga) $por_dias['pilates_yoga']['1'] += count($externos_pilates_yoga);
+
+    // Cowork, 15/11 17:50 punto 2/11: esto daba "164 web + 131 fuera = 295", muy por encima de
+    // la gráfica "Alumnos con pago en curso" (203/193) y de Grupos (167) — las tres preguntan
+    // "cuántas personas tienen clase en vigor ahora" y tenían que dar la misma cifra. La causa:
+    // el teléfono de cada cuenta web se leía de $sub['telefono'] a secas, sin el resto de la
+    // cadena de respaldo (campo propio → email → meta de usuario) que sí usa
+    // blokes_altas_bajas_calcular() — muchas cuentas con teléfono vacío aquí (pero resuelto
+    // allí) se contaban como "fuera" aunque YA estuvieran en la web.
+    // Solución: el total es la MISMA función que ya usa la gráfica (misma identidad por
+    // teléfono/nombre, un solo cálculo) — "cuentasFuera" es solo la diferencia con cuentas_total
+    // para seguir mostrando "163 web + N fuera", pero el total ya no puede descuadrar con la
+    // gráfica porque es literalmente el mismo número.
+    $total_fusionado = blokes_clases_personas_por_mes('todos')[date('Y-m')] ?? count($cuentas);
+    $cuentas_fuera = max(0, $total_fusionado - count($cuentas));
 
     $data = array(
         'cuentas_total'      => count($cuentas),
+        'cuentasFuera'       => $cuentas_fuera,
+        'cuentasConFuera'    => $total_fusionado,
         'por_dias'           => $por_dias,
+        'pilatesYogaFuera'   => count($externos_pilates_yoga),
         'sesiones_semana'    => $sesiones_semana,
     );
     // Dinero agregado del club: solo socio (31/10, regla de Ramiro).
@@ -3694,6 +6369,199 @@ function blokes_horario_agrupable($horario) {
     return preg_replace('/\s+/', ' ', $h);
 }
 
+// ─── Wellhub + «Bajo tarifa» en Grupos (Ramiro, 16/11 07:35) ──────────────────────────────
+define('BLOKES_TARIFA_MENORES_2D', 57.0);
+define('BLOKES_TARIFA_MENORES_1D', 47.0);
+define('BLOKES_TARIFA_ADOL_2D', 65.0);
+define('BLOKES_TARIFA_ADOL_1D', 55.0);
+define('BLOKES_TARIFA_YOGA', 30.0);
+define('BLOKES_WELLHUB_POR_CHECKIN', 4.88);
+
+// menor | adolescente | adulto, a partir del texto de "edad" (del formulario de la web o de la
+// pestaña del Excel — KIDS/V. Inf = menor, ADOL/MEDIANOS = adolescente, ya normalizados a algo
+// con "Menores"/"Adolescentes" antes de llegar aquí).
+function blokes_tarifa_categoria_edad($edad) {
+    $e = blokes_externos_normaliza_nombre((string) $edad);
+    if (strpos($e, 'adolescente') !== false) return 'adolescente';
+    if (strpos($e, 'menor') !== false || strpos($e, 'infantil') !== false) return 'menor';
+    return 'adulto';
+}
+
+// 16/11 09:30 (Cowork, Luis Corregidor/Álvaro Herrero): dos externos de la pestaña "M-J 19.30
+// ADOL" tenían la edad heredada mal (de un hermano/vecino de franja adulto, por el mecanismo
+// VIEJO de autocrear externos — blokes_sync_grupos_grupo_de_pestana() — que saca la edad de una
+// suscripción web cualquiera de esa franja, no de la pestaña). Sus notas SÍ llevan el nombre de
+// la pestaña real ("...pestaña M-J 19.30 ADOL...", puesto por blokes_sync_grupos_autocrear_alumno_nuevo()
+// — y ahora también llega a cualquier fila fusionada, ver el punto de más abajo) — si la edad no
+// basta, esas palabras clave de la pestaña (las mismas que ya usa blokes_grupos_excel_categoria_pestana())
+// valen más que una edad mal heredada. Nunca al revés: una edad que YA diga menor/adolescente no
+// se pisa por lo que digan las notas.
+function blokes_tarifa_categoria($edad, $notas) {
+    $cat = blokes_tarifa_categoria_edad($edad);
+    if ($cat !== 'adulto') return $cat;
+    // Ojo: NO blokes_externos_normaliza_nombre() aquí — esa función borra el contenido entre
+    // paréntesis (pensada para nombres como "Juan (16 años)"), y la nota que pone
+    // blokes_sync_grupos_autocrear_alumno_nuevo() lleva el nombre real de la pestaña DENTRO de
+    // un paréntesis ("...(sincronización automática, pestaña M-J 19.30 ADOL)."), que es
+    // justo el dato que se necesita leer aquí.
+    $n = mb_strtolower(remove_accents((string) $notas));
+    if ($n === '') return 'adulto';
+    if (preg_match('/\badol\b/', $n)) return 'adolescente';
+    if (preg_match('/\b(kids?|infantil|inf|medianos?|nino|chiqui)\b/', $n)) return 'menor';
+    return 'adulto';
+}
+
+// 16/11 07:35 punto B.1 + 16/11 09:30 punto 1: "si la nota dice «solo un día», «solo lunes»,
+// etc., la tarifa es la de 1 día" aunque la clase/pestaña sea de 2 días — para no poner en rojo
+// a quien de verdad solo va 1 día de una clase Martes-Jueves/Lunes-Miércoles.
+function blokes_tarifa_nota_fuerza_1dia($notas) {
+    $n = blokes_externos_normaliza_nombre((string) $notas);
+    if ($n === '') return false;
+    if (preg_match('/\bsolo (lunes|martes|miercoles|jueves|viernes)\b/', $n)) return true;
+    if (preg_match('/\b(1|un) dia\b/', $n)) return true;
+    return false;
+}
+
+// 16/11 09:30 punto 1 (Cowork, probado en vivo): comparar a alguien de 1 día con el precio de la
+// variación de 2 días inflaba "bajo tarifa" con 29 falsos positivos (74€ reales vs 86€
+// esperados). Adultos de 1 día compran la variación de "Clases de escalada un día" (#4516), que
+// Ramiro dio ya con sus 3 precios reales por franja — fijos, no dinámicos, porque esa variación
+// no se presta al mismo "precio de catálogo por franja" que la de 2 días (varias franjas de 1
+// día comparten el mismo precio por turno, no por día+hora exactos).
+function blokes_tarifa_adultos_1dia($dia, $horario) {
+    if (trim((string) $dia) === 'Viernes') return 78.0;
+    $inicio = (int) explode(':', trim((string) explode('-', (string) $horario)[0]))[0];
+    return $inicio < 16 ? 68.0 : 74.0;
+}
+
+// Precio real de catálogo de la variación de una suscripción de adultos de 2 DÍAS — "Adultos =
+// precio de la variación" (16/11 07:35): más fiable que fijar un número a mano para esas
+// variaciones combinadas (se autoactualiza si cambia el catálogo). Los de 1 día tienen su propia
+// tarifa fija aparte (blokes_tarifa_adultos_1dia) desde el 09:30 — ver el porqué ahí.
+function blokes_tarifa_adulto_variacion($sub_obj) {
+    foreach ($sub_obj->get_items() as $item) {
+        $vid = method_exists($item, 'get_variation_id') ? $item->get_variation_id() : 0;
+        if (!$vid) continue;
+        $v = wc_get_product($vid);
+        if ($v) return floatval($v->get_price());
+    }
+    return null;
+}
+
+// Mapa "día pareja|horario agrupado" => precio de catálogo de adultos de 2 días, calculado UNA
+// vez a partir de las suscripciones web de 2 días activas de adultos — para dar tarifa también a
+// los externos adultos de 2 días (que no tienen variación propia) de la MISMA franja real. Solo
+// suscripciones de 2 días (16/11 09:30 punto 1): mezclar aquí precios de 1 y 2 días fue lo que
+// hizo que los de 1 día salieran comparados contra 86€/77€ en vez de su propia tarifa fija. Si
+// una franja no tiene ninguna referencia de 2 días en la web (p. ej. Pilates, sin tarifa fija
+// dada), se queda sin tarifa a propósito — nunca se inventa un número.
+function blokes_tarifa_adultos_por_franja($all_subs) {
+    $out = array();
+    foreach ($all_subs as $s) {
+        if (($s['edad'] ?? 'Adultos') !== 'Adultos') continue;
+        if (empty($s['id']) || empty($s['dia']) || empty($s['horario'])) continue;
+        if (strpos($s['dia'], '-') === false) continue; // solo combos de 2 días
+        $clave = blokes_dia_a_pareja($s['dia']) . '|' . blokes_horario_agrupable($s['horario']);
+        if (isset($out[$clave])) continue;
+        $sub_obj = wcs_get_subscription(intval($s['id']));
+        if (!$sub_obj) continue;
+        $precio = blokes_tarifa_adulto_variacion($sub_obj);
+        if ($precio !== null) $out[$clave] = $precio;
+    }
+    return $out;
+}
+
+// Tarifa MENSUAL que le toca a un alumno. null = no se puede calcular con garantías (adulto de 2
+// días sin ninguna referencia de precio real en la web para esa franja) — nunca se adivina un
+// número.
+function blokes_tarifa_mensual_esperada($edad, $notas, $dia, $horario, $es_2dias, $es_yoga, $precios_adultos_por_franja) {
+    if ($es_yoga) return BLOKES_TARIFA_YOGA;
+    $cat = blokes_tarifa_categoria($edad, $notas);
+    if ($cat === 'menor') return $es_2dias ? BLOKES_TARIFA_MENORES_2D : BLOKES_TARIFA_MENORES_1D;
+    if ($cat === 'adolescente') return $es_2dias ? BLOKES_TARIFA_ADOL_2D : BLOKES_TARIFA_ADOL_1D;
+    if (!$es_2dias) return blokes_tarifa_adultos_1dia($dia, $horario);
+    $clave = blokes_dia_a_pareja($dia) . '|' . blokes_horario_agrupable($horario);
+    return $precios_adultos_por_franja[$clave] ?? null;
+}
+
+// Compara lo que alguien paga de verdad (en su propio periodo de facturación) contra su tarifa
+// esperada, con el margen de 2 € de redondeo que pidió Ramiro. $meses_ciclo: 1 = mensual, 3 =
+// trimestral, 12 = anual (los dos con el 10% de descuento, igual que aplica el catálogo —
+// 17/11 11:50, cowork: Franc Beltrán con anual 799€ salía "bajo tarifa" sin el descuento, cuando
+// 799 = 74 × 12 × 0,9 está bien pagado), cualquier otro nº de meses que cubra el pago sin
+// descuento.
+function blokes_tarifa_comparar($tarifa_mensual, $pago_periodo, $meses_ciclo) {
+    if ($tarifa_mensual === null || $meses_ciclo < 1 || $pago_periodo === null) {
+        return array('tarifa' => $tarifa_mensual !== null ? round($tarifa_mensual, 2) : null, 'diferenciaMensual' => null, 'bajoTarifa' => false);
+    }
+    $tarifa_periodo = in_array($meses_ciclo, array(3, 12), true) ? ($tarifa_mensual * $meses_ciclo * 0.9) : ($tarifa_mensual * $meses_ciclo);
+    $diferencia_mensual = ($pago_periodo - $tarifa_periodo) / $meses_ciclo;
+    return array(
+        'tarifa' => round($tarifa_mensual, 2),
+        'diferenciaMensual' => round($diferencia_mensual, 2),
+        'bajoTarifa' => $diferencia_mensual < -2,
+    );
+}
+
+// 17/11 11:50 (cowork): varios niños en «Bajo tarifa» pagaban 37,60 € = 47 € (menores 1 día) ×
+// 0,8 — un 20% menos, sin ningún motivo apuntado. Nunca se inventa que es descuento de hermanos:
+// si el pedido lleva un cupón de verdad, ESE es el motivo real; si no hay cupón pero el importe
+// casa justo con el 80% de la tarifa de menores, se sugiere "¿Hermanos? (20%)" como pregunta
+// para que Eva lo confirme (o lo descarte) desde "Bajo tarifa" — nunca se marca como resuelto
+// solo, sigue en rojo hasta que ella lo revise.
+function blokes_tarifa_motivo_sugerido($categoria, $bajo_tarifa, $tarifa_mensual, $pago_mensual_equiv, $coupon_codes) {
+    if (!$bajo_tarifa) return '';
+    if (!empty($coupon_codes)) return 'Cupón: ' . implode(', ', $coupon_codes);
+    if ($categoria === 'menor' && $tarifa_mensual !== null && $pago_mensual_equiv !== null
+        && abs($pago_mensual_equiv - $tarifa_mensual * 0.8) < 2) {
+        return '¿Hermanos? (20%)';
+    }
+    return '';
+}
+
+// 16/11 09:30 punto 2 (Cowork, probado en vivo): comparar con importeCatalogo (el total
+// CONFIGURADO de la suscripción) en vez de con lo que de verdad ha pagado deja fuera a quien
+// tiene un precio real distinto del de catálogo (altas manuales con precio pactado aparte, por
+// ejemplo Irene 23,50€/Viviana 47€ con importeCatalogo 86€ los dos). Busca hacia atrás en los
+// meses ya cargados el último pago real (completado/procesando o un adelantado guardado — nunca
+// uno "cubierto", que es solo la copia de display de un trimestral/anual, no un cobro nuevo) y
+// usa ESE importe; si no hay ninguno en la ventana, cae al total configurado de la suscripción
+// (mejor approximación que nada, nunca peor que lo que ya hacíamos).
+function blokes_tarifa_pago_real_reciente($pagos, $meses) {
+    foreach (array_reverse($meses) as $ym) {
+        $p = $pagos[$ym] ?? null;
+        if (!$p || !empty($p['cubierto'])) continue;
+        if (!in_array($p['estadoPedido'] ?? '', array('completed', 'processing', 'adelantado'), true)) continue;
+        return floatval($p['importe'] ?? 0);
+    }
+    return null;
+}
+
+// Versión standalone de blokes_tarifa_pago_real_reciente() para el endpoint de "marcar revisado"
+// (superadmin_gestion_grupos_bajo_tarifa()), que no tiene a mano los $pagos/$meses ya construidos
+// de superadmin_gestion_grupos() — reconstruye lo mismo a partir de la propia suscripción (cobro
+// manual del mes en curso o el anterior, si lo hay, si no el pedido completado/procesando más
+// reciente), para que el importe de referencia que se guarda sea el mismo que se comparará la
+// próxima vez y el revisado no se vea "caducado" sin que nadie haya cambiado nada de verdad.
+function blokes_tarifa_pago_real_sub_actual($sub_obj) {
+    $cobros = blokes_cobros_manuales_todos();
+    $hoy_ym = date('Y-m');
+    foreach (array($hoy_ym, blokes_mes_mas($hoy_ym, -1)) as $ym) {
+        if (isset($cobros[$sub_obj->get_id() . '|' . $ym])) return floatval($cobros[$sub_obj->get_id() . '|' . $ym]['importe']);
+    }
+    $order_ids = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
+    $mejor = null; $mejor_ts = -1;
+    foreach ($order_ids as $oid) {
+        $order = wc_get_order($oid);
+        if (!$order || !in_array($order->get_status(), array('completed', 'processing'), true)) continue;
+        if (blokes_pedido_factura_anulada($order)) continue;
+        $fecha = $order->get_date_created();
+        if (!$fecha) continue;
+        if ($fecha->getTimestamp() > $mejor_ts) { $mejor_ts = $fecha->getTimestamp(); $mejor = floatval($order->get_total()); }
+    }
+    return $mejor ?? floatval($sub_obj->get_total());
+}
+
 function superadmin_gestion_grupos($request) {
     if (!class_exists('RocoMadrid_SF_Stats') || !function_exists('wcs_get_subscription')) {
         return new WP_Error('class_not_found', 'RocoMadrid_SF_Stats/WooCommerce Subscriptions not available. Call this endpoint on the club subsite.', array('status' => 503));
@@ -3713,6 +6581,10 @@ function superadmin_gestion_grupos($request) {
     $cobros_manuales = blokes_cobros_manuales_todos(); // efectivo apuntado desde "Marcar cobrado", sin WooCommerce
     $optin_por_tel = blokes_optin_por_telefono(); // marca (WA) junto al nombre
     $hoy_ym = date('Y-m');
+    // Wellhub + «Bajo tarifa» (16/11 07:35): precio real de catálogo por franja de adultos,
+    // calculado una vez para toda la respuesta — ver blokes_tarifa_adultos_por_franja().
+    $precios_adultos_por_franja = blokes_tarifa_adultos_por_franja($all);
+    $es_socio_bt = blokes_get_app_role() === 'socio';
 
     // Pagos adelantados sin aplicar todavía (Ramiro, 1/11 18:55): si ya hay uno guardado para
     // esta suscripción, "Cobrar este mes" no debe parecer que nadie se ha ocupado — se marca
@@ -3729,6 +6601,16 @@ function superadmin_gestion_grupos($request) {
         if (!isset($adelantados_por_sub[$sid])) $adelantados_por_sub[$sid] = $ad;
     }
 
+    // Cowork, 14/11 18:40 punto 4: para saber si la suscripción en espera de alguien tiene otra
+    // activa EN OTRA CLASE (no solo en la misma, que ya lo resuelve la fusión de más abajo) —
+    // mismo cliente, cualquier clase, usado al construir "Revisar datos" en el frontend.
+    $uid_por_sub = array(); $activas_por_uid = array();
+    // Para fusionar un "externo" (8.4) con su cuenta web cuando son la misma persona (cowork,
+    // 15/11 11:45/12:30: "Francisco Márquez · Fuera de la web" y "franciscomarquez · Activo"
+    // salen en dos filas con el mismo pago" → fusionar) — por grupo (mismo día/horario/edad),
+    // teléfono normalizado y nombre compacto (sin espacios) → persona_key de WooCommerce.
+    $telefono_a_pk_por_grupo = array(); $nombre_compacto_a_pk_por_grupo = array();
+
     foreach ($all as $sub) {
         if (empty($sub['id'])) continue;
         $status = $sub['status'] ?? '';
@@ -3737,6 +6619,7 @@ function superadmin_gestion_grupos($request) {
         $dia = $sub['dia'] ?? ''; $horario = $sub['horario'] ?? ''; $edad = $sub['edad'] ?? 'Adultos';
         $producto = $sub['producto'] ?? '';
         $es_pilates_yoga = in_array($producto, array('Pilates', 'Yoga'), true);
+        $es_abono = ($producto === 'Abono');
         if (!$dia && !$horario && !$es_pilates_yoga) continue;
 
         $sub_obj = wcs_get_subscription(intval($sub['id']));
@@ -3745,8 +6628,10 @@ function superadmin_gestion_grupos($request) {
         // Agrupar por franja como en el Excel de Eva (M-J 20:30 junta a los de 2 días y a los
         // sueltos de solo martes o solo jueves), no por cada combinación exacta de día. El
         // horario se normaliza aparte para agrupar (espacios/guiones distintos de las altas
-        // hechas desde admin no deben partir el mismo grupo en dos).
-        $pareja         = $es_pilates_yoga ? $producto : blokes_dia_a_pareja($dia);
+        // hechas desde admin no deben partir el mismo grupo en dos). Abono (escalada libre, sin
+        // día fijo) se agrupa por su franja ("Todo el día"/"Mañana"), no por día — igual que
+        // Pilates/Yoga, pero sin perder esa franja en el label (ver abajo).
+        $pareja         = ($es_pilates_yoga || $es_abono) ? $producto : blokes_dia_a_pareja($dia);
         $horario_agrupa = blokes_horario_agrupable($horario);
         $gkey   = $pareja . '|' . $horario_agrupa . '|' . $edad;
         if (!isset($grupos[$gkey])) {
@@ -3787,6 +6672,7 @@ function superadmin_gestion_grupos($request) {
         foreach ($order_ids as $oid) {
             $order = wc_get_order($oid);
             if (!$order) continue;
+            if (blokes_pedido_factura_anulada($order)) continue; // 15/11 08:30: no cuenta como cobrado
             $fecha = $order->get_date_paid() ?: $order->get_date_created();
             if (!$fecha) continue;
             $o_status = $order->get_status();
@@ -3805,7 +6691,14 @@ function superadmin_gestion_grupos($request) {
                     );
                 }
             }
-            $ym = $fecha->date('Y-m');
+            // A qué mes pertenece este pago: por cuándo WooCommerce generó la renovación
+            // (date_created), no por cuándo se marcó pagada — un adelantado (ver
+            // blokes_aplicar_adelantado_si_hay) deja la suscripción con la fecha REAL del banco,
+            // que puede caer en el mes anterior al que de verdad cubre, y el pago se colaba en el
+            // cubo equivocado (cowork, 3/11-4/11: pedido 7546, date_created 02/11 pero date_paid
+            // 29/10 — confirmado con el date_created real antes de aplicar esto).
+            $fecha_mes = $order->get_date_created() ?: $fecha;
+            $ym = $fecha_mes->date('Y-m');
             if (!isset($meses_set[$ym])) continue;
             $metodo = $order->get_payment_method_title();
             if (!$metodo && in_array($o_status, array('completed', 'processing'), true)) $metodo = 'Manual';
@@ -3815,6 +6708,15 @@ function superadmin_gestion_grupos($request) {
                 'fecha'   => $fecha->date('d/m/Y'),
                 'estadoPedido' => $o_status,
             );
+        }
+        // Un pedido viejo sin pagar (de un mes anterior, ya cancelado o simplemente colgando)
+        // no debe seguir marcando "pendiente" si el mes EN CURSO ya tiene un pedido de verdad
+        // completed/processing — antes se quedaba el pendiente más reciente encontrado aunque
+        // hubiera un pago posterior que lo dejara obsoleto (cowork, 3/11 18:40: dos alumnos que
+        // ya habían pagado noviembre seguían saliendo en "Pendientes de cobrar" con una fecha de
+        // vencimiento vieja, de un pedido de octubre).
+        if ($pendiente && !empty($pagos[$hoy_ym]) && in_array($pagos[$hoy_ym]['estadoPedido'] ?? '', array('completed', 'processing'), true)) {
+            $pendiente = null;
         }
         if ($pendiente) unset($pendiente['ts']);
 
@@ -3884,8 +6786,11 @@ function superadmin_gestion_grupos($request) {
             }
         }
 
-        $uid = intval(get_post_meta($sub_obj->get_id(), '_customer_user', true));
+        // Fiable con HPOS (ver blokes_alumno_customer_id_de_sub): antes solo leía el meta directo.
+        $uid = blokes_alumno_customer_id_de_sub($sub, $sub_obj);
         $persona_key = $uid ? "u{$uid}" : (!empty($sub['email']) ? 'e' . strtolower($sub['email']) : ('n' . strtolower(trim($sub['cliente'] ?? ''))));
+        $uid_por_sub[intval($sub['id'])] = $uid;
+        if ($en_vigor && $uid) $activas_por_uid[$uid][] = array('subId' => intval($sub['id']), 'dia' => $pareja, 'horario' => $horario_agrupa, 'edad' => $edad);
 
         // El teléfono/nombre de la propia suscripción (su copia de la dirección de
         // facturación) es más de fiar que el del plugin de terceros o el de la cuenta: para
@@ -3909,52 +6814,196 @@ function superadmin_gestion_grupos($request) {
         }
         $alumno_nombre = $nombre_fact !== '' ? $nombre_fact : ($sub['cliente'] ?? '');
 
+        // Wellhub + «Bajo tarifa» (16/11 07:35, corregido 16/11 09:30) — ver las funciones
+        // blokes_tarifa_*() de arriba.
+        $notas_sub = get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '';
+        $es_yoga_bt = ($producto === 'Yoga');
+        $es_2dias_bt = count($dias_sub) > 1 && !blokes_tarifa_nota_fuerza_1dia($notas_sub);
+        $tarifa_mensual_bt = blokes_tarifa_mensual_esperada($edad, $notas_sub, $dia, $horario, $es_2dias_bt, $es_yoga_bt, $precios_adultos_por_franja);
+        // 09:30 punto 2: comparar con lo que de verdad ha pagado hace poco, no con el total
+        // configurado de la suscripción (que puede no reflejar un precio pactado aparte).
+        $pago_real_bt = blokes_tarifa_pago_real_reciente($pagos, $meses) ?? floatval($sub_obj->get_total());
+        $comp_bt = blokes_tarifa_comparar($tarifa_mensual_bt, $pago_real_bt, $meses_por_ciclo);
+        $motivo_sugerido_bt = blokes_tarifa_motivo_sugerido(
+            blokes_tarifa_categoria($edad, $notas_sub), $comp_bt['bajoTarifa'], $tarifa_mensual_bt,
+            $pago_real_bt / max(1, $meses_por_ciclo), $sub_obj->get_used_coupons()
+        );
+        // Revisado por Eva vigente solo si lo que paga no ha cambiado desde que lo revisó — si
+        // cambia, se quita solo (16/11 07:35 punto B.4), sin tener que borrar nada a mano.
+        $bt_motivo_eva    = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_motivo', true) ?: '';
+        $bt_revisado_por  = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_por', true) ?: '';
+        $bt_revisado_en   = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_en', true) ?: '';
+        $bt_importe_rev   = get_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_importe_revisado', true);
+        $bt_vigente = $bt_revisado_por !== '' && $bt_importe_rev !== '' && abs(floatval($bt_importe_rev) - $pago_real_bt) < 0.01;
+        // Wellhub: "wellhub" en las notas como punto de partida; si Eva lo ha marcado/desmarcado
+        // a mano (meta no vacía), gana su decisión explícita sobre la detección automática.
+        $wh_meta_bt = get_post_meta($sub_obj->get_id(), '_rm_wellhub', true);
+        $wellhub_bt = $wh_meta_bt !== '' ? (bool) intval($wh_meta_bt) : (stripos($notas_sub, 'wellhub') !== false);
+        $wellhub_checkins_bt = null; $wellhub_falta_bt = null;
+        if ($wellhub_bt && $tarifa_mensual_bt !== null) {
+            $pago_mensual_equiv_bt = $pago_real_bt / max(1, $meses_por_ciclo);
+            $wellhub_falta_bt = round($tarifa_mensual_bt - $pago_mensual_equiv_bt, 2);
+            $wellhub_checkins_bt = $wellhub_falta_bt > 0 ? (int) ceil($wellhub_falta_bt / BLOKES_WELLHUB_POR_CHECKIN) : 0;
+        }
+
         $fila = array(
             'subId'       => intval($sub['id']),
+            'wellhub'       => $wellhub_bt,
+            'wellhubCheckinsFaltan' => $wellhub_checkins_bt,
+            // Dinero del Wellhub: solo socios (16/11 07:35 punto A) — se quita al final de la
+            // función para quien no sea socio, igual que el resto de dinero de esta pantalla.
+            'wellhubImporteFalta' => $wellhub_falta_bt,
+            'wellhubPorCheckin'   => BLOKES_WELLHUB_POR_CHECKIN,
+            'tarifaEsperada'      => $comp_bt['tarifa'],
+            'diferenciaMensual'   => $comp_bt['diferenciaMensual'],
+            'bajoTarifa'          => $comp_bt['bajoTarifa'],
+            'bajoTarifaMotivoSugerido' => $motivo_sugerido_bt,
+            'bajoTarifaRevisado'  => $bt_vigente,
+            'bajoTarifaMotivoEva' => $bt_vigente ? $bt_motivo_eva : '',
+            'bajoTarifaRevisadoPor' => $bt_vigente ? $bt_revisado_por : '',
+            'bajoTarifaRevisadoEn'  => $bt_vigente ? $bt_revisado_en : '',
             'alumno'      => $alumno_nombre,
             'telefono'    => $telefono,
             'optinWhatsapp' => $telefono ? ($optin_por_tel[blokes_externos_normaliza_telefono($telefono)] ?? null) : null,
             'dias'        => count($dias_sub) ?: 1,
+            // 19/11 21:30 (Eva/cowork, punto 1 — Rita Acero): el grupo se agrupa por la pareja
+            // (Lunes-Miércoles), así que "dias"=1 ya dice que viene un solo día, pero no CUÁL —
+            // esto deja ver "(solo Miércoles)" en vez de solo el número.
+            'diaReal'     => $dia,
             'estado'      => $estado,
             'enVigor'     => $en_vigor,
             'pausaMotivo' => $pausa_motivo ?: '',
             'pausaHasta'  => $pausa_hasta ?: '',
             'manual'      => method_exists($sub_obj, 'is_manual') ? $sub_obj->is_manual() : true,
+            // "Altas manuales" (NOTAS_PARA_CODE_pestanas_grupos.md): creada desde el panel
+            // (admin_assign), no por el checkout de la web — distinto de "manual" (que es el
+            // método de cobro, bacs/tarjeta a mano, y que un alumno normal también puede tener
+            // si eligió transferencia al suscribirse él mismo).
+            'altaManual'  => method_exists($sub_obj, 'get_created_via') ? ($sub_obj->get_created_via() === 'admin_assign') : false,
             'importeCatalogo' => floatval($sub_obj->get_total()),
             'exento'      => (bool) get_post_meta($sub_obj->get_id(), '_rm_exento', true),
             'pagos'       => $pagos,
             'pendiente'   => $pendiente,
             'tieneAdelantado' => (bool) $tiene_adelantado,
-            'notas'       => get_post_meta($sub_obj->get_id(), '_rm_nota', true) ?: '',
+            'notas'       => $notas_sub,
             // Sin nombre de facturación ni en el perfil de WordPress: lo que se ve es el
             // nombre de usuario de la cuenta, no un nombre real.
             'sinNombre'   => $nombre_fact === '',
             'tutorNombre'   => get_post_meta($sub_obj->get_id(), '_rm_tutor_nombre', true) ?: '',
             'tutorTelefono' => get_post_meta($sub_obj->get_id(), '_rm_tutor_telefono', true) ?: '',
+            // Pestaña "Niños" (20/11 07:20): alumnoUserId solo viene puesto cuando quien asiste
+            // es distinto de quien paga esta suscripción (ver blokes_rm_alumno_uid).
+            'alumnoUserId'  => intval(get_post_meta($sub_obj->get_id(), '_rm_alumno_user_id', true)) ?: null,
+            'ninoRevisado'  => (bool) get_post_meta($sub_obj->get_id(), '_rm_nino_revisado', true),
+            // Precio especial (NOTAS_PARA_CODE_pestanas_grupos.md, Ramiro 06/11 16:00): puesto
+            // desde "Marcar cobrado" con la opción "y desde ahora" — para que Eva lo vea de un
+            // vistazo en la ficha.
+            'precioEspecial' => get_post_meta($sub_obj->get_id(), '_rm_precio_especial', true) !== '' ? array(
+                'importe' => floatval(get_post_meta($sub_obj->get_id(), '_rm_precio_especial', true)),
+                'motivo'  => get_post_meta($sub_obj->get_id(), '_rm_precio_especial_motivo', true) ?: '',
+                'desde'   => get_post_meta($sub_obj->get_id(), '_rm_precio_especial_desde', true) ?: '',
+                'por'     => get_post_meta($sub_obj->get_id(), '_rm_precio_especial_por', true) ?: '',
+            ) : null,
         );
 
         if (!isset($grupos[$gkey]['personas'][$persona_key])) $grupos[$gkey]['personas'][$persona_key] = array();
         $grupos[$gkey]['personas'][$persona_key][] = $fila;
+
+        $tel_norm = $telefono ? blokes_externos_normaliza_telefono($telefono) : '';
+        if ($tel_norm) $telefono_a_pk_por_grupo[$gkey][$tel_norm] = $persona_key;
+        $nombre_compacto = $alumno_nombre ? blokes_externos_normaliza_nombre_compacto($alumno_nombre) : '';
+        if ($nombre_compacto) $nombre_compacto_a_pk_por_grupo[$gkey][$nombre_compacto] = $persona_key;
     }
 
     // Alumnos "externos" (8.4: pagan fuera de la web, no tienen suscripción) — una fila más por
     // grupo, con el mismo aspecto que las de WooCommerce para que las bandejas y bandejas de la
     // 8.3 los traten igual. Sin pedido real, así que nunca tienen "pendiente" calculado (se ve
     // en la columna del mes si falta el pago, no en la bandeja "Cobrar este mes").
-    foreach (blokes_externos_todos() as $ext) {
+    // Cowork, 15/11 13:20: el Excel de Eva a veces tiene a la MISMA persona en dos filas (una
+    // sin teléfono, otra con) — se procesan primero los externos CON teléfono para que sean
+    // ellos quienes queden como "canónicos" si hay que fusionar por nombre con otro externo sin
+    // teléfono de la misma pestaña/grupo.
+    $externos_todos = blokes_externos_todos();
+    usort($externos_todos, function($a, $b) { return (empty($a['telefono']) ? 1 : 0) <=> (empty($b['telefono']) ? 1 : 0); });
+    foreach ($externos_todos as $ext) {
         $dia_ext = $ext['dia']; $horario_ext = $ext['horario']; $edad_ext = $ext['edad'] ?: 'Adultos';
         $es_py_ext = in_array($dia_ext, array('Pilates', 'Yoga'), true);
         $pareja_ext = $es_py_ext ? $dia_ext : blokes_dia_a_pareja($dia_ext);
         $horario_agrupa_ext = blokes_horario_agrupable($horario_ext);
-        $gkey_ext = $pareja_ext . '|' . $horario_agrupa_ext . '|' . $edad_ext;
+        // 17/11 11:50 (cowork, Luis Corregidor/Álvaro Herrero): el gkey (a qué fila/grupo cae)
+        // se calculaba con el edad del Excel SIN corregir por las notas — así, un externo de la
+        // pestaña "M-J 19.30 ADOL" con el campo edad mal puesto a "Adultos" caía agrupado en
+        // "M-J 19:30 Adultos" (huérfano, sin fusionarse con nadie) aunque blokes_tarifa_categoria()
+        // ya sabía por las notas que era adolescente — de ahí la fila duplicada: esa huérfana en
+        // el grupo equivocado + la fila de verdad, ya bien fusionada, en "M-J 18:30-19:30
+        // Adolescentes". Mismo criterio que ya usa la tarifa (nunca al revés de lo que ya diga un
+        // edad que YA sea menor/adolescente), solo que aplicado también al agrupar, no solo al
+        // calcular el precio esperado. `externoEdad` (lo que ve/edita Eva) se queda con el
+        // original, sin tocar.
+        $edad_ext_grupo = $edad_ext;
+        $categoria_ext_notas = blokes_tarifa_categoria($edad_ext, $ext['notas']);
+        if (blokes_tarifa_categoria_edad($edad_ext) === 'adulto') {
+            if ($categoria_ext_notas === 'adolescente') $edad_ext_grupo = 'Adolescentes';
+            elseif ($categoria_ext_notas === 'menor') $edad_ext_grupo = 'Menores';
+        }
+        $gkey_ext = $pareja_ext . '|' . $horario_agrupa_ext . '|' . $edad_ext_grupo;
         if (!isset($grupos[$gkey_ext])) {
-            $edad_suffix = (!$es_py_ext && $edad_ext !== 'Adultos') ? ' · ' . (stripos($edad_ext, 'Menores') !== false ? 'Niños' : (stripos($edad_ext, 'Adolescentes') !== false ? 'Adol.' : $edad_ext)) : '';
+            $edad_suffix = (!$es_py_ext && $edad_ext_grupo !== 'Adultos') ? ' · ' . (stripos($edad_ext_grupo, 'Menores') !== false ? 'Niños' : (stripos($edad_ext_grupo, 'Adolescentes') !== false ? 'Adol.' : $edad_ext_grupo)) : '';
             $label_ext = $es_py_ext ? $dia_ext : (trim($pareja_ext . ' · ' . $horario_agrupa_ext) . $edad_suffix);
-            $grupos[$gkey_ext] = array('label' => $label_ext, 'dia' => $pareja_ext, 'horario' => $horario_agrupa_ext, 'edad' => $edad_ext, 'personas' => array());
+            $grupos[$gkey_ext] = array('label' => $label_ext, 'dia' => $pareja_ext, 'horario' => $horario_agrupa_ext, 'edad' => $edad_ext_grupo, 'personas' => array());
         }
         $pagos_ext = array_fill_keys($meses, null);
         foreach ($ext['pagos'] as $ym => $p) if (isset($meses_set[$ym])) $pagos_ext[$ym] = array_merge($p, array('estadoPedido' => 'completed'));
-        $persona_key_ext = 'ext' . $ext['id'];
+        // Fusionar con la cuenta web del mismo grupo si el teléfono o el nombre (sin espacios)
+        // casan — así no sale como fila aparte "Fuera de la web" cuando ya migró a WooCommerce.
+        $tel_ext_norm = $ext['telefono'] ? blokes_externos_normaliza_telefono($ext['telefono']) : '';
+        $nombre_ext_compacto = $ext['nombre'] ? blokes_externos_normaliza_nombre_compacto($ext['nombre']) : '';
+        $persona_key_ext = ($tel_ext_norm && isset($telefono_a_pk_por_grupo[$gkey_ext][$tel_ext_norm]))
+            ? $telefono_a_pk_por_grupo[$gkey_ext][$tel_ext_norm]
+            : (($nombre_ext_compacto && isset($nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto]))
+                ? $nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto]
+                : 'ext' . $ext['id']);
+        // Este externo también cuenta para fusionar al SIGUIENTE (otro externo duplicado de la
+        // misma persona en el Excel, p. ej. una fila sin teléfono y otra con — 15/11 13:20).
+        if ($tel_ext_norm && !isset($telefono_a_pk_por_grupo[$gkey_ext][$tel_ext_norm])) $telefono_a_pk_por_grupo[$gkey_ext][$tel_ext_norm] = $persona_key_ext;
+        if ($nombre_ext_compacto && !isset($nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto])) $nombre_compacto_a_pk_por_grupo[$gkey_ext][$nombre_ext_compacto] = $persona_key_ext;
+
+        // Wellhub + «Bajo tarifa» para externos (16/11 07:35) — mismas funciones que los de la
+        // web, usando el dia/horario/edad ya guardados en su fila (no se re-deriva de la pestaña
+        // del Excel: ese campo ya viene de ahí al crearse el externo, y Eva puede corregirlo a
+        // mano si hiciera falta). "Lo que paga" = su pago más reciente dentro de la ventana,
+        // mensualizado si cubre varios meses (trimestral/anual) — si no hay ningún pago en la
+        // ventana, no se puede comparar y no entra en "Bajo tarifa".
+        $pago_mensual_ext_bt = null;
+        foreach (array_reverse($meses) as $ym_chk) {
+            if (empty($pagos_ext[$ym_chk])) continue;
+            $p_chk = $pagos_ext[$ym_chk];
+            $divisor_chk = (($p_chk['tipo'] ?? null) === 'TRI') ? 3 : ((($p_chk['tipo'] ?? null) === 'ANUAL') ? 12 : 1);
+            $pago_mensual_ext_bt = floatval($p_chk['importe'] ?? 0) / $divisor_chk;
+            break;
+        }
+        $es_2dias_ext_bt = !$es_py_ext && strpos($dia_ext, '-') !== false && !blokes_tarifa_nota_fuerza_1dia($ext['notas']);
+        $es_yoga_ext_bt = ($dia_ext === 'Yoga');
+        $tarifa_mensual_ext_bt = blokes_tarifa_mensual_esperada($edad_ext, $ext['notas'], $dia_ext, $horario_ext, $es_2dias_ext_bt, $es_yoga_ext_bt, $precios_adultos_por_franja);
+        $comp_ext_bt = ($pago_mensual_ext_bt !== null)
+            ? blokes_tarifa_comparar($tarifa_mensual_ext_bt, $pago_mensual_ext_bt, 1)
+            : array('tarifa' => $tarifa_mensual_ext_bt !== null ? round($tarifa_mensual_ext_bt, 2) : null, 'diferenciaMensual' => null, 'bajoTarifa' => false);
+        $bt_revisado_por_ext = $ext['bajo_tarifa_revisado_por'] ?: '';
+        $bt_importe_rev_ext  = $ext['bajo_tarifa_importe_revisado'];
+        $bt_vigente_ext = $bt_revisado_por_ext !== '' && $bt_importe_rev_ext !== null && $pago_mensual_ext_bt !== null
+            && abs(floatval($bt_importe_rev_ext) - $pago_mensual_ext_bt) < 0.01;
+        $wellhub_ext_bt = $ext['wellhub'] !== null ? (bool) intval($ext['wellhub']) : (stripos($ext['notas'], 'wellhub') !== false);
+        $wellhub_checkins_ext_bt = null; $wellhub_falta_ext_bt = null;
+        if ($wellhub_ext_bt && $comp_ext_bt['tarifa'] !== null && $pago_mensual_ext_bt !== null) {
+            $wellhub_falta_ext_bt = round($comp_ext_bt['tarifa'] - $pago_mensual_ext_bt, 2);
+            $wellhub_checkins_ext_bt = $wellhub_falta_ext_bt > 0 ? (int) ceil($wellhub_falta_ext_bt / BLOKES_WELLHUB_POR_CHECKIN) : 0;
+        }
+        // Un externo no tiene pedido de WooCommerce con cupón que comprobar — solo queda la
+        // sugerencia de "¿Hermanos?" si el importe casa con el 80% de la tarifa de menores.
+        $motivo_sugerido_ext_bt = blokes_tarifa_motivo_sugerido(
+            blokes_tarifa_categoria($edad_ext, $ext['notas']), $comp_ext_bt['bajoTarifa'], $tarifa_mensual_ext_bt, $pago_mensual_ext_bt, array()
+        );
+
         $grupos[$gkey_ext]['personas'][$persona_key_ext][] = array(
             'subId' => 'ext-' . $ext['id'], 'alumno' => $ext['nombre'], 'telefono' => $ext['telefono'],
             'optinWhatsapp' => $ext['telefono'] ? ($optin_por_tel[blokes_externos_normaliza_telefono($ext['telefono'])] ?? null) : null,
@@ -3963,6 +7012,18 @@ function superadmin_gestion_grupos($request) {
             'pendiente' => null, 'notas' => $ext['notas'], 'sinNombre' => false, 'esExterno' => true,
             'externoId' => intval($ext['id']), 'externoDia' => $dia_ext, 'externoHorario' => $horario_ext, 'externoEdad' => $edad_ext,
             'tutorNombre' => $ext['tutor_nombre'] ?: '', 'tutorTelefono' => $ext['tutor_telefono'] ?: '',
+            'wellhub' => $wellhub_ext_bt,
+            'wellhubCheckinsFaltan' => $wellhub_checkins_ext_bt,
+            'wellhubImporteFalta'   => $wellhub_falta_ext_bt,
+            'wellhubPorCheckin'     => BLOKES_WELLHUB_POR_CHECKIN,
+            'tarifaEsperada'        => $comp_ext_bt['tarifa'],
+            'diferenciaMensual'     => $comp_ext_bt['diferenciaMensual'],
+            'bajoTarifa'            => $comp_ext_bt['bajoTarifa'],
+            'bajoTarifaMotivoSugerido' => $motivo_sugerido_ext_bt,
+            'bajoTarifaRevisado'    => $bt_vigente_ext,
+            'bajoTarifaMotivoEva'   => $bt_vigente_ext ? ($ext['bajo_tarifa_motivo'] ?: '') : '',
+            'bajoTarifaRevisadoPor' => $bt_vigente_ext ? $bt_revisado_por_ext : '',
+            'bajoTarifaRevisadoEn'  => $bt_vigente_ext ? ($ext['bajo_tarifa_revisado_en'] ?: '') : '',
         );
     }
 
@@ -3984,14 +7045,57 @@ function superadmin_gestion_grupos($request) {
                     if ($p && empty($principal['pagos'][$ym])) $principal['pagos'][$ym] = $p;
                 }
                 // No colgarle el pendiente de una suscripción vieja/duplicada a quien ya tiene
-                // un pago adelantado guardado en la suya — si no, parece que le queda algo por
-                // cobrar cuando en realidad ya está resuelto (cowork, 2/11 09:40/10:08).
-                if (!$principal['pendiente'] && !$principal['tieneAdelantado'] && $otra['pendiente']) $principal['pendiente'] = $otra['pendiente'];
+                // un pago adelantado guardado en la suya, o a quien ya tiene un pedido
+                // completed/processing de ESTE mes en la suya (su pago real llegó por su propia
+                // suscripción, la duplicada vieja solo arrastra un pedido impagado antiguo) — si
+                // no, parece que le queda algo por cobrar cuando en realidad ya está resuelto
+                // (cowork, 2/11 09:40/10:08 para el adelantado; 3/11 20:05 para este otro caso:
+                // el pago llegaba por la principal, pero la fusión colgaba igual el pendiente
+                // viejo de la duplicada en espera).
+                $principal_cobrado_este_mes = !empty($principal['pagos'][$hoy_ym])
+                    && in_array($principal['pagos'][$hoy_ym]['estadoPedido'] ?? '', array('completed', 'processing'), true);
+                if (!$principal['pendiente'] && !$principal['tieneAdelantado'] && !$principal_cobrado_este_mes && $otra['pendiente']) $principal['pendiente'] = $otra['pendiente'];
                 if ($otra['exento']) $principal['exento'] = true;
+                // 16/11 09:30 punto 3 (Cowork, probado en vivo): las notas de Eva vivían en el
+                // externo fusionado (p. ej. Irene/Adrián/Viviana, con "wellhub" apuntado ahí) y
+                // nunca llegaban a la fila fusionada (la suscripción web, que no tenía su propia
+                // nota) — wellhubTotal salía 0 y los motivos de «Bajo tarifa» vacíos. Se propaga
+                // el texto (si la principal no tiene ya el suyo) y el booleano de Wellhub ya
+                // calculado en esa otra fila (no hace falta recalcularlo: si la otra fila tenía
+                // "wellhub" en sus notas, su propio wellhub ya salió true).
+                if (empty($principal['notas']) && !empty($otra['notas'])) $principal['notas'] = $otra['notas'];
+                if (!empty($otra['wellhub'])) $principal['wellhub'] = true;
+                if (empty($principal['bajoTarifaMotivoEva']) && !empty($otra['bajoTarifaMotivoEva'])) $principal['bajoTarifaMotivoEva'] = $otra['bajoTarifaMotivoEva'];
+                if (empty($principal['bajoTarifaMotivoSugerido']) && !empty($otra['bajoTarifaMotivoSugerido'])) $principal['bajoTarifaMotivoSugerido'] = $otra['bajoTarifaMotivoSugerido'];
             }
-            if ($otras) {
-                $principal['otrasSubs'] = array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $otras);
-                $duplicados[] = array('alumno' => $principal['alumno'], 'subs' => array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $subs));
+            // El booleano de Wellhub puede haber cambiado de false a true por la fusión de arriba
+            // — si antes no tenía check-ins calculados (porque entonces no hacía falta), se
+            // derivan ahora de tarifaEsperada/diferenciaMensual, ya calculados con el pago real.
+            if ($principal['wellhub'] && $principal['wellhubCheckinsFaltan'] === null && $principal['diferenciaMensual'] !== null) {
+                $falta_wh = round(-$principal['diferenciaMensual'], 2);
+                $principal['wellhubImporteFalta']   = $falta_wh > 0 ? $falta_wh : 0;
+                $principal['wellhubCheckinsFaltan'] = $falta_wh > 0 ? (int) ceil($falta_wh / BLOKES_WELLHUB_POR_CHECKIN) : 0;
+            }
+            // Un "externo" fusionado aquí (misma persona, ya migró a WooCommerce — 15/11
+            // 11:45/12:30) no es un duplicado de verdad: no tiene un subId real, así que no
+            // puede entrar en "Fusionar"/"Revisar datos" (fallaría contra un ID falso) ni
+            // inflar el recuento de duplicados. Su historial de pagos ya se fusionó arriba.
+            $otras_reales = array_values(array_filter($otras, function($s) { return empty($s['esExterno']); }));
+            if (count($otras) > count($otras_reales)) $principal['fusionadoExterno'] = true; // aviso suave en el frontend, no es duplicado
+            if ($otras_reales) {
+                $principal['otrasSubs'] = array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $otras_reales);
+                $subs_reales = array_values(array_filter($subs, function($s) { return empty($s['esExterno']); }));
+                $duplicados[] = array('alumno' => $principal['alumno'], 'subs' => array_map(function($s) { return array('subId' => $s['subId'], 'estado' => $s['estado']); }, $subs_reales));
+            } elseif (!$principal['enVigor']) {
+                // Sin duplicado EN ESTE grupo, pero puede tener otra activa en OTRO (se cambió de
+                // clase y la vieja se quedó en espera, cowork 14/11 18:40 punto 4) — para la
+                // "Revisar datos" del frontend, que ya no tiene que adivinarlo ella sola.
+                $uid_principal = $uid_por_sub[$principal['subId']] ?? 0;
+                foreach (($uid_principal ? ($activas_por_uid[$uid_principal] ?? array()) : array()) as $otra_activa) {
+                    if ($otra_activa['dia'] === $g['dia'] && $otra_activa['horario'] === $g['horario'] && $otra_activa['edad'] === $g['edad']) continue;
+                    $principal['otraActivaFuera'] = $otra_activa;
+                    break;
+                }
             }
             $alumnos[] = $principal;
         }
@@ -4000,10 +7104,219 @@ function superadmin_gestion_grupos($request) {
     }
     usort($data, function($a, $b) { return count($b['alumnos']) <=> count($a['alumnos']); });
 
-    return rest_ensure_response(array('success' => true, 'data' => array('meses' => $meses, 'grupos' => $data)));
+    // Wellhub + «Bajo tarifa» (16/11 07:35): recuentos para la cabecera de Grupos y el filtro
+    // «Bajo tarifa (N)». El dinero (importeFalta/porCheckin) es solo para socios — Eva ve el
+    // recuento de check-ins y la diferencia, nunca esos dos campos (punto A: "Eva... sin
+    // importes" — el resto de "Bajo tarifa" sí es suyo, solo el € de Wellhub se le quita).
+    $wellhub_total = 0; $bajo_tarifa_total = 0;
+    foreach ($data as &$grupo_bt) {
+        foreach ($grupo_bt['alumnos'] as &$alumno_bt) {
+            if ($alumno_bt['enVigor'] ?? true) {
+                if (!empty($alumno_bt['wellhub'])) $wellhub_total++;
+                if (!empty($alumno_bt['bajoTarifa'])) $bajo_tarifa_total++;
+            }
+            if (!$es_socio_bt) { unset($alumno_bt['wellhubImporteFalta']); unset($alumno_bt['wellhubPorCheckin']); }
+        }
+    }
+    unset($grupo_bt, $alumno_bt);
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'meses' => $meses, 'grupos' => $data,
+        'wellhubTotal' => $wellhub_total, 'bajoTarifaTotal' => $bajo_tarifa_total,
+    )));
+}
+
+// "subId" de Grupos tal como lo manda el frontend: numérico para una suscripción web, "ext-123"
+// para un externo. null si no se reconoce ninguna de las dos formas.
+function blokes_grupos_persona_parse($subId) {
+    $s = (string) $subId;
+    if (preg_match('/^ext-(\d+)$/', $s, $m)) return array('tipo' => 'externo', 'id' => intval($m[1]));
+    if (preg_match('/^\d+$/', $s)) return array('tipo' => 'sub', 'id' => intval($s));
+    return null;
+}
+
+// POST /gestion/grupos/wellhub — { subId, wellhub: true|false|null }. null = quita la decisión
+// manual de Eva y vuelve a la detección automática por las notas (16/11 07:35 punto A.1).
+function superadmin_gestion_grupos_wellhub($request) {
+    $body = $request->get_json_params();
+    $persona = blokes_grupos_persona_parse($body['subId'] ?? '');
+    if (!$persona) return new WP_Error('bad_request', 'Falta subId.', array('status' => 400));
+    $valor = array_key_exists('wellhub', $body) ? $body['wellhub'] : null;
+
+    if ($persona['tipo'] === 'sub') {
+        if (!function_exists('wcs_get_subscription')) return new WP_Error('no_disponible', 'WooCommerce Subscriptions no disponible.', array('status' => 503));
+        $sub_obj = wcs_get_subscription($persona['id']);
+        if (!$sub_obj) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+        if ($valor === null) delete_post_meta($sub_obj->get_id(), '_rm_wellhub');
+        else update_post_meta($sub_obj->get_id(), '_rm_wellhub', $valor ? '1' : '0');
+    } else {
+        global $wpdb;
+        blokes_ensure_externos_tables();
+        $wpdb->update(blokes_externos_table(), array('wellhub' => $valor === null ? null : ($valor ? 1 : 0)), array('id' => $persona['id']));
+    }
+    blokes_gestion_log(0, 'grupos_wellhub', null, array('subId' => $body['subId'] ?? '', 'wellhub' => $valor), 'Marca de Wellhub cambiada a mano en Grupos.');
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /gestion/grupos/wellhub-checkins — { subId, periodo (YYYY-MM), checkins } — lo que Eva ve
+// en el portal de Wellhub, apuntado a mano (16/11 07:35 punto A.4: "sin conexión con Wellhub, es
+// a mano").
+function superadmin_gestion_grupos_wellhub_checkins($request) {
+    $body = $request->get_json_params();
+    $persona = blokes_grupos_persona_parse($body['subId'] ?? '');
+    $periodo = sanitize_text_field((string) ($body['periodo'] ?? ''));
+    if (!$persona || !preg_match('/^\d{4}-\d{2}$/', $periodo)) return new WP_Error('bad_request', 'Faltan subId o periodo (YYYY-MM).', array('status' => 400));
+    $checkins = max(0, intval($body['checkins'] ?? 0));
+    global $wpdb;
+    blokes_ensure_externos_tables(); // crea también blokes_wellhub_checkins_table()
+    $ahora = current_time('mysql');
+    $wpdb->query($wpdb->prepare(
+        "INSERT INTO " . blokes_wellhub_checkins_table() . " (persona_tipo, persona_id, periodo, checkins, updated_at) VALUES (%s,%d,%s,%d,%s)
+         ON DUPLICATE KEY UPDATE checkins = %d, updated_at = %s",
+        $persona['tipo'], $persona['id'], $periodo, $checkins, $ahora, $checkins, $ahora
+    ));
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /gestion/grupos/bajo-tarifa — { subId, accion: 'marcar'|'quitar', motivo } — Eva escribe
+// el porqué y marca revisado (16/11 07:35 punto B.4); se guarda también lo que paga AHORA, para
+// que la fila vuelva sola a rojo si cambia más adelante (superadmin_gestion_grupos() ya lo
+// comprueba en cada carga, aquí solo se guarda el valor de referencia).
+function superadmin_gestion_grupos_bajo_tarifa($request) {
+    $body = $request->get_json_params();
+    $persona = blokes_grupos_persona_parse($body['subId'] ?? '');
+    if (!$persona) return new WP_Error('bad_request', 'Falta subId.', array('status' => 400));
+    $accion = sanitize_key((string) ($body['accion'] ?? 'marcar'));
+    $motivo = mb_substr(sanitize_text_field((string) ($body['motivo'] ?? '')), 0, 300);
+    $u = wp_get_current_user();
+    $ahora = current_time('mysql');
+
+    if ($persona['tipo'] === 'sub') {
+        if (!function_exists('wcs_get_subscription')) return new WP_Error('no_disponible', 'WooCommerce Subscriptions no disponible.', array('status' => 503));
+        $sub_obj = wcs_get_subscription($persona['id']);
+        if (!$sub_obj) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+        if ($accion === 'quitar') {
+            delete_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_motivo');
+            delete_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_por');
+            delete_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_en');
+            delete_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_importe_revisado');
+        } else {
+            if ($motivo === '') return new WP_Error('bad_request', 'Falta el motivo.', array('status' => 400));
+            update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_motivo', $motivo);
+            update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_por', $u ? $u->user_login : '');
+            update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_revisado_en', $ahora);
+            // 16/11 09:30 punto 2: el mismo "pago real reciente" que usa superadmin_gestion_grupos()
+            // para decidir "bajo tarifa" — si se guardara aquí el total configurado de la
+            // suscripción en vez de esto, el revisado se vería "caducado" la próxima carga aunque
+            // nadie hubiera cambiado nada.
+            update_post_meta($sub_obj->get_id(), '_rm_bajo_tarifa_importe_revisado', blokes_tarifa_pago_real_sub_actual($sub_obj));
+        }
+    } else {
+        global $wpdb;
+        blokes_ensure_externos_tables();
+        $ext = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_externos_table() . " WHERE id = %d", $persona['id']), ARRAY_A);
+        if (!$ext) return new WP_Error('not_found', 'Externo no encontrado.', array('status' => 404));
+        if ($accion === 'quitar') {
+            $wpdb->update(blokes_externos_table(), array(
+                'bajo_tarifa_motivo' => '', 'bajo_tarifa_revisado_por' => '', 'bajo_tarifa_revisado_en' => null, 'bajo_tarifa_importe_revisado' => null,
+            ), array('id' => $persona['id']));
+        } else {
+            if ($motivo === '') return new WP_Error('bad_request', 'Falta el motivo.', array('status' => 400));
+            // "Lo que paga" ahora mismo, como referencia — si cambia más adelante, la próxima
+            // carga de Grupos ya no da por vigente este revisado (comparación en el propio
+            // superadmin_gestion_grupos()).
+            $pago_mensual = null;
+            foreach (blokes_externos_todos() as $e2) {
+                if (intval($e2['id']) !== $persona['id']) continue;
+                $yms = array_keys($e2['pagos']);
+                rsort($yms);
+                foreach ($yms as $ym_chk) {
+                    $p_chk = $e2['pagos'][$ym_chk];
+                    $divisor_chk = (($p_chk['tipo'] ?? null) === 'TRI') ? 3 : ((($p_chk['tipo'] ?? null) === 'ANUAL') ? 12 : 1);
+                    $pago_mensual = floatval($p_chk['importe'] ?? 0) / $divisor_chk;
+                    break;
+                }
+                break;
+            }
+            $wpdb->update(blokes_externos_table(), array(
+                'bajo_tarifa_motivo' => $motivo, 'bajo_tarifa_revisado_por' => $u ? $u->user_login : '',
+                'bajo_tarifa_revisado_en' => $ahora, 'bajo_tarifa_importe_revisado' => $pago_mensual,
+            ), array('id' => $persona['id']));
+        }
+    }
+    blokes_gestion_log(0, 'grupos_bajo_tarifa', null, array('subId' => $body['subId'] ?? '', 'accion' => $accion, 'motivo' => $motivo), 'Bajo tarifa revisado en Grupos.');
+    return rest_ensure_response(array('success' => true));
 }
 
 // ─── Sección 8.2: acciones de ExcelMuerte sobre WooCommerce (quedan registradas) ──────────
+
+// Actualiza las metas VISIBLES de un item de pedido/suscripción (las que WooCommerce rellena
+// solas al comprar desde el step-form: "Días"/"Día", "Horario" y "Edad del alumno") — distintas
+// de `_step_form_selections` (meta técnica interna). Cowork, 07/11 08:15: superadmin_gestion_
+// cambiar_grupo() solo cambiaba la variación y `_step_form_selections`, así que la línea seguía
+// ENSEÑANDO el horario viejo (y esa es la meta que se copia a cada renovación, así que también
+// salía mal en la factura).
+// WooCommerce guarda los atributos de la variación con el SLUG del atributo como clave y el
+// slug del término como valor (`pa_horario` = `1930-2100`) y él mismo pone la etiqueta «Horario»
+// al enseñarlos. La versión de 2baec8d escribía con la etiqueta como clave («Día», «Horario») y
+// la línea salía con el horario viejo Y el nuevo (cowork, 07/11): aquí se borran esas claves
+// sueltas y los `pa_*` se copian de la variación que YA tiene el item — así que hay que llamarla
+// después de set_variation_id(). También rehace `_step_form_display` desde `_step_form_selections`.
+function blokes_gestion_actualizar_meta_visible_grupo($item, $edad_nuevo, $billing_period = null, $billing_interval = null) {
+    $taxonomias = array('pa_dias', 'pa_dia-suelto', 'pa_horario', 'pa_edad');
+    foreach ($taxonomias as $tax) {
+        $label = wc_attribute_label($tax);
+        if ($label !== $tax) $item->delete_meta_data($label);
+    }
+    $edad_variacion = '';
+    $variacion = wc_get_product($item->get_variation_id());
+    if ($variacion) {
+        $attrs = $variacion->get_attributes();
+        foreach ($taxonomias as $tax) {
+            if (!array_key_exists($tax, $attrs)) $item->delete_meta_data($tax);           // p. ej. pa_dias al pasar a 1 día
+            elseif ((string) $attrs[$tax] !== '') $item->update_meta_data($tax, $attrs[$tax]); // '' = «cualquiera»: se deja lo que hubiera
+        }
+        if (!empty($attrs['pa_edad'])) {
+            $edad_term = get_term_by('slug', $attrs['pa_edad'], 'pa_edad');
+            $edad_variacion = blokes_normalizar_edad($edad_term ? $edad_term->name : $attrs['pa_edad']);
+        }
+    }
+    // "Edad del alumno" (meta técnica aparte de pa_edad) solo hace falta cuando la edad real no
+    // coincide con la que ya enseña la propia variación (Adolescentes se compra sobre la
+    // variación de Adultos, ver blokes_buscar_variacion_clase()) — si coinciden (caso normal), una
+    // compra real desde la web solo enseña "Edad" una vez; no la dupliques (cowork, 07/11 10:10).
+    $etiqueta_edad = __('Student age', 'neve-child');
+    if ($edad_nuevo && $edad_nuevo !== $edad_variacion) {
+        $item->update_meta_data($etiqueta_edad, $edad_nuevo);
+    } else {
+        $item->delete_meta_data($etiqueta_edad);
+    }
+
+    // "Plan de pago": el step-form real la pone al pasar por el carrito (class-cart.php), pero el
+    // alta y "Cambiar de grupo" crean la línea directamente en WooCommerce sin carrito, así que
+    // no salía (cowork, 07/11 10:10) — mismas etiquetas que usa el step-form real.
+    if ($billing_period !== null) {
+        $interval_norm = max(1, intval($billing_interval ?: 1));
+        $plan_key = ($billing_period === 'year') ? 'annual' : (($interval_norm >= 3) ? 'quarterly' : 'monthly');
+        $plan_labels = array(
+            'monthly'   => __('Monthly', 'neve-child'),
+            'quarterly' => __('Quarterly', 'neve-child'),
+            'annual'    => __('Annual', 'neve-child'),
+        );
+        $item->update_meta_data(__('Payment plan', 'neve-child'), $plan_labels[$plan_key]);
+    }
+
+    $selecciones = $item->get_meta('_step_form_selections', true);
+    if (is_string($selecciones)) $selecciones = json_decode($selecciones, true); // asignador viejo de wp-admin
+    if (is_array($selecciones) && $selecciones && class_exists('RocoMadrid_SF_Ajax')) {
+        // format_selections_for_display() etiqueta "Age" tanto age_addon/age_addon_2days (del
+        // alta original) como pa_edad (el que de verdad mantenemos al día aquí) — si quedan los
+        // dos, "Age: ..." sale dos veces (cowork, 07/11 10:05). pa_edad manda.
+        $para_mostrar = $selecciones;
+        unset($para_mostrar['age_addon'], $para_mostrar['age_addon_2days']);
+        $item->update_meta_data('_step_form_display', RocoMadrid_SF_Ajax::format_selections_for_display($para_mostrar));
+    }
+}
 
 function blokes_gestion_log_table() {
     global $wpdb;
@@ -4070,6 +7383,23 @@ function blokes_gestion_metodo_label($metodo) {
         'tarjeta' => 'Tarjeta (TPV roco)', 'wellhub' => 'Wellhub', 'bizum' => 'Bizum',
     );
     return $map[$metodo] ?? ucfirst($metodo);
+}
+
+// Cambia el precio de la ÚNICA línea de producto de un pedido o de una suscripción (ambos son
+// WC_Abstract_Order) y recalcula impuestos/totales — mismo patrón que ya usa
+// superadmin_gestion_cambiar_grupo() para la suscripción. Solo cuando hay exactamente 1 línea:
+// con más de una no se adivina cuál ajustar (NOTAS_PARA_CODE_pestanas_grupos.md, Ramiro 06/11
+// 16:00 — "excepción de precio" en Marcar cobrado).
+function blokes_gestion_ajustar_precio_linea($pedido_o_sub, $importe_nuevo) {
+    $items = $pedido_o_sub->get_items();
+    if (count($items) !== 1) return false;
+    $item = reset($items);
+    $item->set_subtotal($importe_nuevo);
+    $item->set_total($importe_nuevo);
+    $item->save();
+    $pedido_o_sub->calculate_taxes();
+    $pedido_o_sub->calculate_totals(false);
+    return true;
 }
 
 function blokes_cobros_manuales_table() {
@@ -4264,6 +7594,11 @@ function blokes_ensure_externos_tables() {
         user_login  varchar(100)        NOT NULL DEFAULT '',
         created_at  datetime            NOT NULL,
         updated_at  datetime            NOT NULL,
+        wellhub                   tinyint(1) NULL,
+        bajo_tarifa_motivo        varchar(300) NOT NULL DEFAULT '',
+        bajo_tarifa_revisado_por  varchar(100) NOT NULL DEFAULT '',
+        bajo_tarifa_revisado_en   datetime NULL,
+        bajo_tarifa_importe_revisado decimal(10,2) NULL,
         PRIMARY KEY (id)
     ) {$charset};");
     dbDelta("CREATE TABLE " . blokes_externos_pagos_table() . " (
@@ -4277,7 +7612,20 @@ function blokes_ensure_externos_tables() {
         PRIMARY KEY (id),
         UNIQUE KEY externo_periodo (externo_id, periodo)
     ) {$charset};");
+    // Wellhub (16/11 07:35 punto A.4): check-ins que Eva ve en el portal, apuntados a mano (sin
+    // conexión con la API de Wellhub) — un número por persona (sub web o externo) y mes.
+    dbDelta("CREATE TABLE " . blokes_wellhub_checkins_table() . " (
+        id            bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        persona_tipo  varchar(10)   NOT NULL,
+        persona_id    bigint(20) UNSIGNED NOT NULL,
+        periodo       varchar(7)    NOT NULL,
+        checkins      smallint UNSIGNED NOT NULL DEFAULT 0,
+        updated_at    datetime      NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY persona_periodo (persona_tipo, persona_id, periodo)
+    ) {$charset};");
 }
+function blokes_wellhub_checkins_table() { global $wpdb; return $wpdb->prefix . 'blokes_wellhub_checkins'; }
 
 function blokes_externos_normaliza_telefono($t) {
     $d = preg_replace('/\D/', '', (string) $t);
@@ -4463,7 +7811,15 @@ function blokes_externos_limpia($body, $defaults = array()) {
 function superadmin_gestion_externos_crear($request) {
     blokes_ensure_externos_tables();
     global $wpdb;
+    // get_json_params() solo ve un BODY json real (lo que manda el frontend) — una llamada
+    // interna construida con WP_REST_Request + set_param() (como el alta automática de Sync
+    // Grupos) no lo rellena y siempre llegaba vacía aquí, así que "Falta el nombre" saltaba
+    // SIEMPRE y la autocreación fallaba en silencio (cowork, 4/11 04:30: un alta nueva nunca se
+    // creaba sola a pesar del alias de pestaña ya resuelto). Con get_params() como respaldo
+    // seguimos leyendo el JSON real del frontend cuando lo hay, y el resto de parámetros
+    // (incluidos los puestos con set_param()) cuando no.
     $body = $request->get_json_params();
+    if (!$body) $body = $request->get_params();
     $f = blokes_externos_limpia($body);
     if ($f['nombre'] === '') return new WP_Error('bad_request', 'Falta el nombre.', array('status' => 400));
     if (!$f['dia'] && !$f['horario']) return new WP_Error('bad_request', 'Falta el grupo (día/horario).', array('status' => 400));
@@ -4505,11 +7861,17 @@ function superadmin_gestion_externos_pago($request) {
     blokes_ensure_externos_tables();
     global $wpdb;
     $id = intval($request['id']);
+    // Mismo bug que en superadmin_gestion_externos_crear: get_json_params() se queda vacío para
+    // una llamada interna construida con set_param() (el auto-aplicar de Sync Grupos a un
+    // externo) — con get_params() de respaldo seguimos leyendo el JSON real del frontend cuando
+    // lo hay (4/11, mismo hallazgo que el de la autocreación de alumno nuevo).
     $body = $request->get_json_params();
+    if (!$body) $body = $request->get_params();
     $periodo = (string) ($body['periodo'] ?? '');
     if (!preg_match('/^\d{4}-\d{2}$/', $periodo)) return new WP_Error('bad_request', 'Periodo no válido (YYYY-MM).', array('status' => 400));
     $importe = floatval($body['importe'] ?? 0);
-    $metodo  = blokes_gestion_metodo_label(sanitize_text_field((string) ($body['metodo'] ?? '')));
+    $metodo_raw = sanitize_text_field((string) ($body['metodo'] ?? ''));
+    $metodo  = blokes_gestion_metodo_label($metodo_raw);
     $fecha   = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fecha'] ?? '')) ? $body['fecha'] : current_time('Y-m-d');
     // "Cubre hasta" (trimestral/anual): cuántos meses cubre este pago, empezando por $periodo.
     $cubre_meses = intval($body['cubreMeses'] ?? 1);
@@ -4520,6 +7882,11 @@ function superadmin_gestion_externos_pago($request) {
         $id, $periodo, $importe, $metodo, $fecha, $cubre_meses, $importe, $metodo, $fecha, $cubre_meses
     ));
     blokes_gestion_log($id, 'externo_pago', null, array('periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo, 'cubreMeses' => $cubre_meses));
+    // Web → Excel (NOTAS_PARA_CODE_sync_grupos.md): igual que con un cobro de suscripción.
+    $ext = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_externos_table() . " WHERE id = %d", $id), ARRAY_A);
+    if ($ext) {
+        blokes_sync_grupos_escribir_cobro($ext['dia'], $ext['horario'], $ext['telefono'], $ext['nombre'], $periodo, $importe, $metodo_raw, date_i18n('d/m/Y', strtotime($fecha)));
+    }
     return rest_ensure_response(array('success' => true));
 }
 
@@ -4536,18 +7903,26 @@ function blokes_ensure_lista_espera_table() {
     global $wpdb;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    // 15/11 19:40 (Ramiro, contrato con Dixitalmedia): columnas nuevas para las altas públicas
+    // desde el selector — dbDelta es aditivo (compara contra lo que ya exista y solo añade lo
+    // que falte), nunca borra filas ni columnas ya creadas.
     dbDelta("CREATE TABLE " . blokes_lista_espera_table() . " (
-        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-        dia         varchar(60)         NOT NULL DEFAULT '',
-        horario     varchar(60)         NOT NULL DEFAULT '',
-        edad        varchar(60)         NOT NULL DEFAULT 'Adultos',
-        nombre      varchar(190)        NOT NULL DEFAULT '',
-        telefono    varchar(30)         NOT NULL DEFAULT '',
-        notas       varchar(500)        NOT NULL DEFAULT '',
-        atendido    tinyint(1)          NOT NULL DEFAULT 0,
-        user_login  varchar(100)        NOT NULL DEFAULT '',
-        created_at  datetime            NOT NULL,
-        updated_at  datetime            NOT NULL,
+        id           bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        dia          varchar(60)         NOT NULL DEFAULT '',
+        horario      varchar(60)         NOT NULL DEFAULT '',
+        edad         varchar(60)         NOT NULL DEFAULT 'Adultos',
+        nombre       varchar(190)        NOT NULL DEFAULT '',
+        telefono     varchar(30)         NOT NULL DEFAULT '',
+        email        varchar(190)        NOT NULL DEFAULT '',
+        whatsapp_ok  tinyint(1)          NOT NULL DEFAULT 0,
+        edad_alumno  smallint            NULL,
+        variacion_id bigint(20) UNSIGNED NULL,
+        origen       varchar(30)         NOT NULL DEFAULT '',
+        notas        varchar(500)        NOT NULL DEFAULT '',
+        atendido     tinyint(1)          NOT NULL DEFAULT 0,
+        user_login   varchar(100)        NOT NULL DEFAULT '',
+        created_at   datetime            NOT NULL,
+        updated_at   datetime            NOT NULL,
         PRIMARY KEY (id)
     ) {$charset};");
 }
@@ -4556,6 +7931,20 @@ function superadmin_gestion_lista_espera_get() {
     blokes_ensure_lista_espera_table();
     global $wpdb;
     $filas = $wpdb->get_results("SELECT * FROM " . blokes_lista_espera_table() . " ORDER BY atendido ASC, created_at ASC", ARRAY_A);
+    // Ramiro, 15/11 19:40 punto final: "cuando quede una plaza libre en esa clase, aviso en
+    // Lista de espera" — se calcula aquí (no se manda nada automático al cliente, solo el aviso
+    // para que Eva lo vea y decida). Solo las filas con variacion_id (de momento, las que vienen
+    // del selector público de Dixitalmedia la llevan; las de alta manual, no).
+    if (function_exists('wc_get_product')) {
+        foreach ($filas as &$f) {
+            $f['plazaLibre'] = false;
+            if (!empty($f['variacion_id'])) {
+                $var = wc_get_product(intval($f['variacion_id']));
+                if ($var && $var->is_in_stock()) $f['plazaLibre'] = true;
+            }
+        }
+        unset($f);
+    }
     return rest_ensure_response(array('success' => true, 'data' => $filas));
 }
 
@@ -4568,6 +7957,74 @@ function blokes_lista_espera_limpia($body, $defaults = array()) {
         'telefono' => blokes_externos_normaliza_telefono($body['telefono'] ?? ''),
         'notas'    => mb_substr(sanitize_text_field((string) ($body['notas'] ?? '')), 0, 500),
     );
+}
+
+// ─── Alta pública en lista de espera (Ramiro, 15/11 19:40 — contrato con Dixitalmedia) ────
+// El selector público de Dixitalmedia (tema, fuera de este plugin) llama a esto cuando una
+// franja está completa y alguien se apunta a la lista de espera — mismo WordPress, dos formas
+// de llamarlo: la función directa (si su PHP puede ver funciones globales de este plugin) o el
+// hook `do_action('blokes_lista_espera_agregar', $datos)` (más desacoplado, pero una action no
+// devuelve nada — si necesitan el id de vuelta, tienen que usar el endpoint REST).
+// $datos: dia, horario, edad, nombre, telefono, email, whatsapp_ok, edad_alumno, variacion_id,
+// origen. Documentado en media_para_code/contrato_lista_espera_dixitalmedia.md.
+function blokes_lista_espera_agregar($datos) {
+    blokes_ensure_lista_espera_table();
+    global $wpdb;
+    $telefono = blokes_externos_normaliza_telefono((string) ($datos['telefono'] ?? ''));
+    $email    = sanitize_email((string) ($datos['email'] ?? ''));
+    if (!$telefono && !$email) {
+        return new WP_Error('falta_contacto', 'Falta un teléfono o un email de contacto.', array('status' => 400));
+    }
+    $nombre = mb_substr(sanitize_text_field((string) ($datos['nombre'] ?? '')), 0, 190);
+    if ($nombre === '') {
+        return new WP_Error('falta_nombre', 'Falta el nombre.', array('status' => 400));
+    }
+    $edad_alumno_raw = $datos['edad_alumno'] ?? null;
+    $fila = array(
+        'dia'          => mb_substr(sanitize_text_field((string) ($datos['dia'] ?? '')), 0, 60),
+        'horario'      => mb_substr(sanitize_text_field((string) ($datos['horario'] ?? '')), 0, 60),
+        'edad'         => blokes_normalizar_edad(sanitize_text_field((string) ($datos['edad'] ?? 'Adultos'))) ?: 'Adultos',
+        'nombre'       => $nombre,
+        'telefono'     => $telefono,
+        'email'        => $email,
+        'whatsapp_ok'  => !empty($datos['whatsapp_ok']) ? 1 : 0,
+        'edad_alumno'  => ($edad_alumno_raw !== null && $edad_alumno_raw !== '') ? intval($edad_alumno_raw) : null,
+        'variacion_id' => !empty($datos['variacion_id']) ? intval($datos['variacion_id']) : null,
+        'origen'       => mb_substr(sanitize_text_field((string) ($datos['origen'] ?? '')), 0, 30),
+        'notas'        => '',
+        'atendido'     => 0,
+        'user_login'   => '',
+        'created_at'   => current_time('mysql'),
+        'updated_at'   => current_time('mysql'),
+    );
+    $ok = $wpdb->insert(blokes_lista_espera_table(), $fila);
+    if (!$ok) {
+        return new WP_Error('db_error', 'No se pudo guardar en la lista de espera.', array('status' => 500));
+    }
+    $id = $wpdb->insert_id;
+    blokes_gestion_log($id, 'lista_espera_agregar_publica', null, $fila, 'Alta pública en lista de espera (' . ($fila['origen'] ?: 'origen desconocido') . ')');
+    return $id;
+}
+add_action('blokes_lista_espera_agregar', 'blokes_lista_espera_agregar');
+
+// POST /blokes/v1/lista-espera — público, sin login (lo llama el selector de Dixitalmedia).
+// Antispam: honeypot "web" (si llega relleno, se finge éxito sin guardar nada — no le decimos a
+// un bot que ha fallado) y límite de 5 envíos por IP y hora.
+function blokes_lista_espera_publica_crear($request) {
+    $body = $request->get_json_params();
+    if (!empty($body['web'])) {
+        return rest_ensure_response(array('success' => true, 'data' => array('id' => 0)));
+    }
+    $ip = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field(wp_unslash($_SERVER['REMOTE_ADDR'])) : 'sin-ip';
+    $clave_limite = 'blokes_le_rate_' . md5($ip);
+    $envios = (int) get_transient($clave_limite);
+    if ($envios >= 5) {
+        return new WP_Error('demasiados_envios', 'Demasiados envíos desde esta conexión — inténtalo más tarde.', array('status' => 429));
+    }
+    set_transient($clave_limite, $envios + 1, HOUR_IN_SECONDS);
+    $resultado = blokes_lista_espera_agregar($body);
+    if (is_wp_error($resultado)) return $resultado;
+    return rest_ensure_response(array('success' => true, 'data' => array('id' => $resultado)));
 }
 
 function superadmin_gestion_lista_espera_crear($request) {
@@ -4690,12 +8147,347 @@ function blokes_sync_grupos_get($sheet_id, $path) {
     return $body;
 }
 
+// Llamada de escritura a la Sheets API v4 (values:batchUpdate) — el token ya tiene permiso de
+// escritura (scope "spreadsheets" completo, no "readonly"). USER_ENTERED para que Google
+// interprete números/fechas como si Eva los hubiera tecleado a mano, no como texto literal.
+// 19/11 (cowork §06:25, punto 5): "Read requests per minute" (429) de Google Sheets ya se veía
+// en el log (`sync_grupos_escribir_error`) sin que nadie se enterara en el momento — Eva podía
+// pensar que el cobro no se había hecho de verdad. Reintenta con espera (1s, 3s, 6s) antes de
+// rendirse — la cuota de Sheets es POR MINUTO, así que unos segundos de espera suelen bastar
+// para que la siguiente llamada ya entre bien. Si sigue fallando tras los reintentos, el que
+// llama (blokes_sync_grupos_escribir_cobro) lo deja en la cola de "sin apuntar en el Excel".
+function blokes_sync_grupos_escribir_valores($sheet_id, $data) {
+    $token = blokes_sync_grupos_access_token();
+    if (is_wp_error($token)) return $token;
+    $url = 'https://sheets.googleapis.com/v4/spreadsheets/' . rawurlencode($sheet_id) . '/values:batchUpdate';
+    $esperas = array(1, 3, 6);
+    $intento = 0;
+    while (true) {
+        $res = wp_remote_request($url, array(
+            'method' => 'POST', 'timeout' => 20,
+            'headers' => array('Authorization' => 'Bearer ' . $token, 'Content-Type' => 'application/json'),
+            'body' => wp_json_encode(array('valueInputOption' => 'USER_ENTERED', 'data' => $data)),
+        ));
+        if (is_wp_error($res)) return $res;
+        $code = wp_remote_retrieve_response_code($res);
+        $body = json_decode(wp_remote_retrieve_body($res), true);
+        if ($code < 300) return $body;
+        $es_cuota = $code === 429 || $code === 503;
+        if (!$es_cuota || !isset($esperas[$intento])) {
+            return new WP_Error('sheets_api_error', 'Google Sheets API devolvió ' . $code . ': ' . ($body['error']['message'] ?? wp_remote_retrieve_body($res)));
+        }
+        sleep($esperas[$intento]);
+        $intento++;
+    }
+}
+
+function blokes_sync_grupos_col_letra($idx0) {
+    $n = $idx0 + 1; $letra = '';
+    while ($n > 0) {
+        $rem = ($n - 1) % 26;
+        $letra = chr(65 + $rem) . $letra;
+        $n = intdiv($n - 1, 26);
+    }
+    return $letra;
+}
+
+// Encuentra el nombre REAL de la pestaña que corresponde a un grupo de la web (día+horario),
+// comparando normalizado (sin tildes/mayúsculas/separadores — los nombres de pestaña no son
+// idénticos al xlsx original: "V 9:00" en la web es "V 900" en la Hoja, espacios de más, etc.,
+// cowork 1/11). Si hay más de una coincidencia o ninguna, no se escribe nada — mejor no escribir
+// que escribir en la pestaña equivocada del documento de Eva.
+function blokes_sync_grupos_normalizar_nombre($s) {
+    $s = remove_accents((string) $s);
+    $s = mb_strtolower(trim($s));
+    $s = str_replace(array(':', '.', ','), '', $s);
+    $s = preg_replace('/\s+/', ' ', $s);
+    return trim($s);
+}
+// Pestañas reales de Eva van abreviadas ("L-X 19.00", "M-J 20.30"), no con el nombre completo
+// del día que usa Grupos ("Lunes-Miércoles") — cowork, 3/11 12:29 (prueba real: llegaba
+// "Miércoles" suelto, ni siquiera la pareja completa, y tampoco habría bastado por la abreviatura).
+function blokes_sync_grupos_dia_abrev($dia) {
+    $map = array('Lunes-Miércoles' => 'L-X', 'Martes-Jueves' => 'M-J', 'Viernes' => 'V', 'Sábado' => 'S');
+    return $map[$dia] ?? $dia;
+}
+function blokes_sync_grupos_pestana_de_grupo($pestanas_reales, $dia, $horario) {
+    // Varias formas de nombrar el mismo grupo: completa ("Lunes-Miércoles 19:00-20:30") y
+    // abreviada como en el Excel ("L-X 19.00") — la primera que dé una única coincidencia gana;
+    // nunca se mezclan candidatas de las dos formas a la vez (evita un falso "ambiguo" si una
+    // forma encaja con una pestaña y la otra con otra distinta por casualidad).
+    $formas = array_unique(array_filter(array($dia . ' ' . $horario, blokes_sync_grupos_dia_abrev($dia) . ' ' . $horario)));
+    foreach ($formas as $forma) {
+        $buscado = blokes_sync_grupos_normalizar_nombre($forma);
+        if ($buscado === '') continue;
+        $candidatas = array();
+        foreach ($pestanas_reales as $p) {
+            $pn = blokes_sync_grupos_normalizar_nombre($p);
+            if ($pn === $buscado || strpos($pn, $buscado) === 0 || strpos($buscado, $pn) === 0) $candidatas[] = $p;
+        }
+        if (count($candidatas) === 1) return $candidatas[0];
+    }
+    return null;
+}
+
+// Candidatas de clase real (día+horario+edad) para UNA pestaña del Excel, comparando solo por
+// la hora de INICIO (Eva no guarda la hora de fin en el nombre: "M-J 19.30 ADOL", "M-J 18.30
+// MEDIANOS", "L-X 17.30 KIDS" — nunca "19:30-21:00"). Ramiro, 15/11 19:25/19:50: empezó siendo
+// "para cada clase, su única pestaña" (al revés de blokes_sync_grupos_pestana_de_grupo(), que
+// usa el rango completo y ya escribe cobros reales en producción — no se toca), pero eso fallaba
+// cuando DOS pestañas reales comparten el mismo "día hora-inicio" con distinto sufijo ("M-J
+// 19.30" adultos y "M-J 19.30 ADOL" adolescentes a la vez): la exigencia de una única pestaña
+// por clase hacía que ninguna de las dos casara. Ahora se busca al revés, por pestaña: cada
+// pestaña compara su propio nombre contra TODAS las clases conocidas (con la pareja completa de
+// día también, para que un 1 día como "Jueves" case con "M-J") y devuelve las que encajan —
+// puede haber más de una, y quien llama decide cómo desempatar (edad que sugiere el propio
+// nombre de la pestaña, clase combinada sobre suelta, más alumnos web).
+function blokes_grupos_excel_clases_candidatas_para_pestana($pestana, $clases_catalogo) {
+    $pn = blokes_sync_grupos_normalizar_nombre($pestana);
+    if ($pn === '') return array();
+    $candidatas = array();
+    foreach ($clases_catalogo as $c) {
+        $inicio = trim((string) explode('-', (string) $c['horario'])[0]);
+        if ($inicio === '') continue;
+        $inicio_punto = str_replace(':', '.', $inicio); // la Hoja usa "19.30", no "19:30"
+        $pareja = blokes_dia_a_pareja($c['dia']);
+        $formas = array_unique(array_filter(array(
+            $c['dia'] . ' ' . $inicio_punto,
+            blokes_sync_grupos_dia_abrev($c['dia']) . ' ' . $inicio_punto,
+            $pareja . ' ' . $inicio_punto,
+            blokes_sync_grupos_dia_abrev($pareja) . ' ' . $inicio_punto,
+        )));
+        foreach ($formas as $forma) {
+            $buscado = blokes_sync_grupos_normalizar_nombre($forma);
+            if ($buscado !== '' && strpos($pn, $buscado) === 0) {
+                $candidatas[] = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
+                break;
+            }
+        }
+    }
+    return array_values(array_unique($candidatas));
+}
+
+// Método tal y como lo escribe Eva en el Excel, a partir del método de WooCommerce — mapeo
+// razonable a falta de confirmar con ella el formato exacto que usa.
+function blokes_sync_grupos_metodo_a_excel($metodo) {
+    $map = array('transferencia' => 'TR', 'efectivo' => 'EF', 'tarjeta' => 'TA', 'bizum' => 'Bizum', 'wellhub' => 'Wellhub', 'web' => 'WEB');
+    return $map[$metodo] ?? ucfirst($metodo);
+}
+
+// Web → Excel, sección 1 de NOTAS_PARA_CODE_sync_grupos.md: escribe el cobro (importe, método,
+// fecha) en la celda del mes de la fila de esta persona en la Hoja activa (prueba o real, según
+// el interruptor). Nunca bloquea ni falla la acción principal que la llama (Marcar
+// cobrado/externo ya se ha hecho en WooCommerce antes de llegar aquí) — si no encuentra la
+// pestaña o el bloque del mes todavía no existe en la Hoja (mes nuevo sin columnas creadas),
+// simplemente no escribe nada y lo deja registrado en el log de gestión para revisar a mano. Si
+// no encuentra la FILA (persona nueva que todavía no está en el Excel de Eva), en vez de
+// perderlo deja un pendiente «Web→Excel sin fila» en Cambios del Excel (Ramiro, 6/11 16:04).
+// Nunca reescribe un mes que ya tiene algo apuntado (`$ym` con pago ya puesto): sin duplicados,
+// aunque esta función se llame más de una vez para el mismo cobro — $subId (opcional) solo sirve
+// para poder reintentar luego desde el pendiente, no cambia nada de la lógica de escritura.
+// Devuelve true si ya quedó escrito (o ya estaba, nada que hacer), false si se quedó pendiente.
+function blokes_sync_grupos_escribir_cobro($dia, $horario, $telefono, $nombre, $ym, $importe, $metodo, $fecha, $sub_id = null) {
+    try {
+        $activa = blokes_sync_grupos_sheet_activa();
+        if (!$activa['id']) return false;
+        $meta = blokes_sync_grupos_get($activa['id'], '?fields=sheets.properties.title');
+        if (is_wp_error($meta)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'listar pestañas', 'error' => $meta->get_error_message())); return false; }
+        $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
+        $pestana = blokes_sync_grupos_pestana_de_grupo($pestanas, $dia, $horario);
+        if (!$pestana) { blokes_gestion_log(0, 'sync_grupos_pestana_no_encontrada', null, array('dia' => $dia, 'horario' => $horario, 'hoja' => $activa['cual'])); return false; }
+
+        $valores = blokes_sync_grupos_leer_valores($activa['id'], $pestana);
+        if (is_wp_error($valores)) { blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'leer pestaña', 'pestana' => $pestana, 'error' => $valores->get_error_message())); return false; }
+        $r = blokes_sync_grupos_leer_pestana_filas($valores);
+
+        $tel_norm = blokes_externos_normaliza_telefono((string) $telefono);
+        $fila_encontrada = null;
+        if ($tel_norm) {
+            foreach ($r['filas'] as $f) { if ($f['telefono'] === $tel_norm) { $fila_encontrada = $f; break; } }
+        }
+        if (!$fila_encontrada && $nombre) {
+            $nombre_norm = mb_strtolower(trim((string) $nombre));
+            foreach ($r['filas'] as $f) { if (mb_strtolower(trim($f['nombre'])) === $nombre_norm) { $fila_encontrada = $f; break; } }
+        }
+        // 17/11 16:20 (cowork, Raúl Bañez/Sandra Balaguera/Pablo Casals/Raul García Cordero): el
+        // teléfono ya normaliza bien (+34 fuera) — el problema real es que un mismo grupo tiene
+        // DOS pestañas en el Excel para la misma franja ("V 19.00" adultos y "V. Inf. 19.00"
+        // infantil/adolescente, misma hora), y pestana_de_grupo() con el día/horario de la
+        // suscripción solo encuentra UNA. Antes de rendirse, busca por teléfono en TODAS las
+        // demás pestañas (por nombre no: dos clases distintas pueden compartir nombre de sobra).
+        $pestana_original = $pestana;
+        if (!$fila_encontrada && $tel_norm) {
+            foreach ($pestanas as $otra_pestana) {
+                if ($otra_pestana === $pestana_original) continue;
+                $valores_otra = blokes_sync_grupos_leer_valores($activa['id'], $otra_pestana);
+                if (is_wp_error($valores_otra)) continue;
+                $r_otra = blokes_sync_grupos_leer_pestana_filas($valores_otra);
+                foreach ($r_otra['filas'] as $f) {
+                    if ($f['telefono'] === $tel_norm) { $fila_encontrada = $f; $pestana = $otra_pestana; $r = $r_otra; break 2; }
+                }
+            }
+            if ($fila_encontrada) {
+                blokes_gestion_log(0, 'sync_grupos_fila_en_otra_pestana', null, array(
+                    'pestanaEsperada' => $pestana_original, 'pestanaReal' => $pestana, 'telefono' => $tel_norm, 'nombre' => $nombre,
+                ));
+            }
+        }
+        if (!$fila_encontrada) {
+            blokes_gestion_log(0, 'sync_grupos_fila_no_encontrada', null, array('pestana' => $pestana_original, 'telefono' => $tel_norm, 'nombre' => $nombre));
+            blokes_sync_grupos_pendiente_sin_fila($pestana_original, $nombre, $telefono, $ym, $importe, $metodo, $fecha, $dia, $horario, $sub_id);
+            return false;
+        }
+
+        // Sin duplicados: si ese mes ya tiene algo apuntado, no se reescribe (Ramiro, 6/11
+        // 16:04) — tanto si ya lo puso esta misma función antes como si lo apuntó Eva a mano.
+        if (!empty($fila_encontrada['pagos'][$ym])) {
+            blokes_gestion_log(0, 'sync_grupos_cobro_ya_apuntado', null, array('pestana' => $pestana, 'mes' => $ym, 'nombre' => $nombre));
+            return true;
+        }
+
+        $bloque = null;
+        foreach ($r['bloquesLayout'] as $b) { if ($b['ym'] === $ym) { $bloque = $b; break; } }
+        if (!$bloque) { blokes_gestion_log(0, 'sync_grupos_mes_no_encontrado', null, array('pestana' => $pestana, 'mes' => $ym)); return false; }
+
+        $fila_sheet = intval($fila_encontrada['_row']) + 1; // A1 es 1-based
+        $metodo_excel = blokes_sync_grupos_metodo_a_excel($metodo);
+        $prefijo = blokes_sync_grupos_a1_pestana($pestana) . '!';
+        $data = array();
+        if ($bloque['layout']['kind'] === 'cantidad') {
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['importe']) . $fila_sheet, 'values' => array(array($importe)));
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['metodo']) . $fila_sheet, 'values' => array(array($metodo_excel)));
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['fecha']) . $fila_sheet, 'values' => array(array($fecha)));
+        } else {
+            $col = ($metodo === 'efectivo') ? $bloque['layout']['efectivo'] : $bloque['layout']['transf'];
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($col) . $fila_sheet, 'values' => array(array($importe)));
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['fecha']) . $fila_sheet, 'values' => array(array($fecha)));
+        }
+        $res = blokes_sync_grupos_escribir_valores($activa['id'], $data);
+        if (is_wp_error($res)) {
+            blokes_gestion_log(0, 'sync_grupos_escribir_error', null, array('paso' => 'escribir', 'pestana' => $pestana, 'error' => $res->get_error_message()));
+            // 19/11 (cowork §06:25, punto 5): aquí SÍ hay fila (a diferencia del caso de arriba)
+            // — la escritura falló de verdad (cuota agotada incluso tras los reintentos de
+            // blokes_sync_grupos_escribir_valores) y no debe perderse en silencio: queda visible
+            // en "Cambios del Excel" con todo lo necesario para reintentarla con "Aplicar"/
+            // "Reevaluar sin fila", en vez de que solo quede un log que nadie mira a tiempo.
+            blokes_sync_grupos_pendiente_sin_fila($pestana, $nombre, $telefono, $ym, $importe, $metodo, $fecha, $dia, $horario, $sub_id, 'fallo_escritura');
+            return false;
+        }
+        blokes_gestion_log(0, 'sync_grupos_cobro_escrito', null, array('pestana' => $pestana, 'fila' => $fila_sheet, 'mes' => $ym, 'hoja' => $activa['cual']));
+        return true;
+    } catch (\Throwable $e) {
+        blokes_gestion_log(0, 'sync_grupos_escribir_excepcion', null, array('error' => $e->getMessage()));
+        return false;
+    }
+}
+
+// Pendiente «Web→Excel sin fila» (Ramiro, 6/11 16:04, punto 3): se cobró de verdad en la web
+// pero esta persona todavía no tiene fila en el Excel de Eva — en vez de perder el dato, se deja
+// en Cambios del Excel con todo lo necesario para que, en cuanto Eva añada la fila, "Aplicar"
+// reintente la misma escritura sin que nadie tenga que volver a teclear nada.
+// 19/11 (cowork §06:25, punto 5): mismo mecanismo, reutilizado para cuando SÍ hay fila pero la
+// escritura falló de verdad (cuota de Sheets agotada incluso tras los reintentos) — $motivo
+// distingue los dos casos para que el panel no diga "sin fila" cuando la fila existe.
+function blokes_sync_grupos_pendiente_sin_fila($pestana, $nombre, $telefono, $ym, $importe, $metodo, $fecha, $dia, $horario, $sub_id, $motivo = 'sin_fila') {
+    blokes_sync_grupos_ensure_tables();
+    $clave = blokes_sync_grupos_clave($nombre, $telefono);
+    blokes_sync_grupos_upsert_cambio($pestana, $clave, $nombre, $telefono, 'web_sin_fila', $ym, array(
+        'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha, 'dia' => $dia, 'horario' => $horario, 'subId' => $sub_id, 'motivo' => $motivo,
+    ), null);
+}
+
+// Punto 2 de NOTAS_PARA_CODE_pestanas_grupos.md (Ramiro, 6/11 16:04 — "hazlo ya lo de mejor
+// aún"): TODO cobro de la web va solo al Excel, sin que nadie pulse nada — no solo "Marcar
+// cobrado". A qué mes pertenece, mismo criterio que Grupos (date_created, no date_paid, por los
+// adelantados). El propio blokes_sync_grupos_escribir_cobro ya evita duplicados (no reescribe un
+// mes que ya tiene algo apuntado), así que no pasa nada si este gancho se dispara más de una vez
+// para el mismo pedido.
+function blokes_sync_grupos_auto_escribir_cobro($sub, $order) {
+    if (!$sub || !$order) return;
+    $dh = blokes_sync_grupos_dia_horario_de_sub($sub->get_id());
+    if (!$dh['dia'] || !$dh['horario']) return; // no es una clase/pilates/yoga del club: nada que apuntar
+    $fecha_mes = $order->get_date_created() ?: $order->get_date_paid();
+    if (!$fecha_mes) return;
+    $importe = floatval($order->get_total());
+    if ($importe <= 0) return;
+    $fecha_pago = $order->get_date_paid() ?: $fecha_mes;
+    blokes_sync_grupos_escribir_cobro(
+        $dh['dia'], $dh['horario'], $sub->get_billing_phone(),
+        trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()),
+        $fecha_mes->date('Y-m'), $importe, 'tarjeta', $fecha_pago->date('d/m/Y'), $sub->get_id()
+    );
+}
+// Renovación que se cobra sola con tarjeta (Redsys) — WCS dispara esto al confirmar el pago de
+// una renovación, con el pedido de esa renovación como segundo argumento.
+add_action('woocommerce_subscription_renewal_payment_complete', function($subscription, $last_order = null) {
+    if (!$last_order) {
+        // Respaldo si el hook no trae el pedido (versión antigua de WCS): el de renovación más
+        // reciente, mismo patrón que ya usa el resto de este fichero (get_related_orders).
+        $ids = $subscription->get_related_orders('ids', 'renewal');
+        $last_order = $ids ? wc_get_order(max($ids)) : null;
+    }
+    blokes_sync_grupos_auto_escribir_cobro($subscription, $last_order);
+}, 20, 2);
+// Alta nueva (el pedido inicial que crea la suscripción) cobrada con tarjeta — las renovaciones
+// ya las cubre el gancho de arriba; este solo mira pedidos "parent" para no procesar el mismo
+// pedido dos veces.
+add_action('woocommerce_payment_complete', function($order_id) {
+    if (!function_exists('wcs_get_subscriptions_for_order')) return;
+    $order = wc_get_order($order_id);
+    if (!$order) return;
+    foreach (wcs_get_subscriptions_for_order($order, array('order_type' => 'parent')) as $sub) {
+        blokes_sync_grupos_auto_escribir_cobro($sub, $order);
+    }
+}, 20);
+
+// Localiza día/horario de una suscripción (para saber qué pestaña del Excel le toca) a partir
+// de blokes_get_all_subscription_data(), que ya los trae calculados de la variación del producto.
+function blokes_sync_grupos_dia_horario_de_sub($sub_id) {
+    foreach (blokes_get_all_subscription_data() as $s) {
+        // El día de la suscripción es un día suelto ("Miércoles"), pero el grupo (y la pestaña
+        // de Eva) es la pareja completa ("Lunes-Miércoles") — mismo criterio que Grupos (cowork,
+        // 3/11 12:29: le llegaba el día suelto y la escritura nunca encontraba su pestaña).
+        if (intval($s['id'] ?? 0) === intval($sub_id)) return array('dia' => blokes_dia_a_pareja($s['dia'] ?? ''), 'horario' => $s['horario'] ?? '', 'edad' => $s['edad'] ?: 'Adultos');
+    }
+    return array('dia' => '', 'horario' => '', 'edad' => '');
+}
+
+// POST /gestion/sync-grupos/reintentar-cobro — reescribir a mano UN cobro concreto en el Excel
+// (NOTAS_PARA_CODE_sync_grupos.md, 3/11 12:29): para pagos que fallaron al escribir antes del
+// arreglo de la pestaña, o que nunca pasaron por este camino (ya estaban completados en
+// WooCommerce antes de que existiera esta escritura automática). Nunca toca WooCommerce — solo
+// repite blokes_sync_grupos_escribir_cobro con teléfono/nombre de la suscripción.
+function superadmin_sync_grupos_reintentar_cobro($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id  = intval($request->get_param('subId'));
+    $ym      = sanitize_text_field((string) $request->get_param('ym'));
+    $importe = floatval($request->get_param('importe'));
+    $metodo  = sanitize_text_field((string) $request->get_param('metodo'));
+    $fecha   = sanitize_text_field((string) $request->get_param('fecha'));
+    if (!$sub_id || !preg_match('/^\d{4}-\d{2}$/', $ym) || $importe <= 0 || !$metodo || !$fecha) {
+        return new WP_Error('invalid_data', 'Faltan datos o están mal formados (subId, ym AAAA-MM, importe, metodo, fecha dd/mm/aaaa).', array('status' => 400));
+    }
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    $dh = blokes_sync_grupos_dia_horario_de_sub($sub_id);
+    blokes_sync_grupos_escribir_cobro(
+        $dh['dia'], $dh['horario'], $sub->get_billing_phone(),
+        trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()),
+        $ym, $importe, $metodo, $fecha
+    );
+    blokes_gestion_log(0, 'sync_grupos_reintentar_cobro', null, array('subId' => $sub_id, 'ym' => $ym, 'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha));
+    return rest_ensure_response(array('success' => true));
+}
+
 function superadmin_sync_grupos_config_get() {
     return rest_ensure_response(array('success' => true, 'data' => array(
         'sheetPruebaId' => get_option('blokes_sync_grupos_sheet_prueba_id', ''),
         'sheetRealId'   => get_option('blokes_sync_grupos_sheet_real_id', ''),
         'usarReal'      => (bool) get_option('blokes_sync_grupos_usar_real', false),
         'credencialesConfiguradas' => (bool) blokes_sync_grupos_credenciales(),
+        'ultimaSincronizacion' => get_option('blokes_sync_grupos_ultima_sincronizacion', null),
     )));
 }
 
@@ -4703,7 +8495,20 @@ function superadmin_sync_grupos_config_get() {
 // `test`/`resumen`/`pestana` ignoraban el interruptor y siempre leían la de PRUEBA (cowork,
 // 1/11 19:00: puse usarReal=true y siguieron leyendo la de prueba). También dice cuál usó,
 // para que la respuesta deje claro contra qué Hoja se ha leído.
+// Activa la Hoja real de una vez (Ramiro, 3/11): ya está probado el paso 2 (Excel→Web) contra
+// la copia y confirmado que la cuenta de servicio tiene acceso a la real — a partir de ahora se
+// lee y se escribe en la Hoja de verdad, no en la copia de prueba. Si quieres volver a la copia,
+// usa POST /gestion/sync-grupos/config con usarReal:false.
+function blokes_sync_grupos_activar_real_ramiro_1() {
+    if (get_option('blokes_sync_grupos_activado_real_ramiro_1')) return;
+    if (get_option('blokes_sync_grupos_sheet_real_id', '')) {
+        update_option('blokes_sync_grupos_usar_real', true, false);
+    }
+    update_option('blokes_sync_grupos_activado_real_ramiro_1', 1, false);
+}
+
 function blokes_sync_grupos_sheet_activa() {
+    blokes_sync_grupos_activar_real_ramiro_1();
     $usar_real = (bool) get_option('blokes_sync_grupos_usar_real', false);
     $id = $usar_real
         ? get_option('blokes_sync_grupos_sheet_real_id', '')
@@ -4881,6 +8686,53 @@ function blokes_sync_grupos_detectar_columnas($valores, $primer_mes_col) {
     return array('tel' => $tel_col, 'notas' => $notas_col, 'email' => $email_col);
 }
 
+// Ramiro, 16/11 07:00: ninguna clase ha cobrado nunca más de unos pocos cientos de euros (ni
+// trimestral/anual prorrateado) — un importe por encima de 1.000 € es casi con toda seguridad
+// una celda rota (el caso real: una fecha de Excel, que como número de serie siempre cae muy
+// por encima de 40.000, metida por error en la columna de importe).
+function blokes_sync_grupos_importe_sospechoso($importe) {
+    return floatval($importe) > 1000;
+}
+
+// 18/11 (Ramiro, relayando cowork §07:50): la fecha de un pago puede venir de Google Sheets en
+// más de un formato ("1/6/26", "01/06/2026", "2026-06-01"...) según cómo tenga la celda Eva —
+// nunca se comparaba (así que no causó la tormenta de TA→tarjeta: solo importe/método entran en
+// $igual), pero guardar siempre el mismo formato evita que dos sincronizaciones del MISMO pago
+// parezcan distintas si algún día la fecha sí entra en una comparación, y se ve más limpio en
+// el detalle. Siempre devuelve 'd/m/Y' (día y mes sin cero por delante, año de 4 cifras); si no
+// se reconoce el formato, se deja tal cual en vez de inventar una fecha.
+function blokes_sync_grupos_normalizar_fecha($fec) {
+    if (!is_string($fec)) return $fec;
+    $fec = trim($fec);
+    if ($fec === '') return $fec;
+    if (preg_match('/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2}|\d{4})$/', $fec, $m)) {
+        $d = intval($m[1]); $mo = intval($m[2]); $y = intval($m[3]);
+        if ($y < 100) $y += 2000; // "26" → 2026, mismo criterio que el resto de Sync Grupos (temporadas actuales)
+        if ($d >= 1 && $d <= 31 && $mo >= 1 && $mo <= 12) return "{$d}/{$mo}/{$y}";
+    }
+    if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})$/', $fec, $m)) {
+        return intval($m[3]) . '/' . intval($m[2]) . '/' . intval($m[1]);
+    }
+    return $fec; // formato no reconocido — se deja tal cual, nunca se inventa una fecha
+}
+
+// 19/11 (cowork §06:25, punto 1): blokes_sync_grupos_aplicar_efecto() solo aceptaba la fecha del
+// Excel si ya venía en ISO ('YYYY-MM-DD') — pero el Excel (y blokes_sync_grupos_normalizar_fecha)
+// la guardan como 'd/m/Y' ("3/11/2026"), así que esa comprobación NUNCA coincidía y "Aplicar"
+// siempre acababa usando la fecha de HOY en vez de la real del Excel. Convierte 'd/m/Y' (o
+// 'd/m/y') a ISO de verdad; null si no se reconoce el formato — nunca se inventa una fecha.
+function blokes_sync_grupos_fecha_excel_a_iso($fec) {
+    if (!is_string($fec)) return null;
+    $fec = trim($fec);
+    if (preg_match('/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/', $fec, $m)) {
+        $d = intval($m[1]); $mo = intval($m[2]); $y = intval($m[3]);
+        if ($y < 100) $y += 2000;
+        if ($d >= 1 && $d <= 31 && $mo >= 1 && $mo <= 12) return sprintf('%04d-%02d-%02d', $y, $mo, $d);
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $fec)) return $fec; // ya estaba en ISO
+    return null;
+}
+
 // Pago de un mes en una fila: [pago|null, exento_bool]. Mismas reglas que _parse.py: "*"
 // marca exento, "web"/"bizum" sin importe numérico cuenta igual como pago con importe 0, y
 // 0/vacío/texto no numérico es "sin pago ese mes".
@@ -4908,18 +8760,22 @@ function blokes_sync_grupos_leer_pago($valores, $row, $layout) {
     }
     if ($metodo_sin_importe !== null && !blokes_sync_grupos_es_numero($cant)) {
         $pago = array('importe' => 0, 'metodo' => $metodo_sin_importe);
-        if (is_string($fec) && $fec !== '') $pago['fecha'] = $fec;
+        if (is_string($fec) && $fec !== '') $pago['fecha'] = blokes_sync_grupos_normalizar_fecha($fec);
         return array($pago, false);
     }
 
     if (!blokes_sync_grupos_es_numero($cant) || floatval($cant) == 0) return array(null, false);
 
     $metodo_raw = is_string($met) ? mb_strtolower(trim($met)) : '';
-    $map = array('ta' => 'transferencia', 'tr' => 'transferencia', 'ana' => 'transferencia', 'ef' => 'efectivo', 'bizum' => 'bizum');
+    // 17/11 19:10 (cowork, confirmado por Ramiro): "TA" en el Excel de Eva es TARJETA, no
+    // transferencia — iba al revés del sentido (TA/TR son letras distintas a propósito). Mismo
+    // criterio que ya usa blokes_sync_grupos_metodo_a_excel() al escribir ('tarjeta' => 'TA'),
+    // antes solo iba bien en ese sentido y mal al leer de vuelta.
+    $map = array('ta' => 'tarjeta', 'tr' => 'transferencia', 'ana' => 'transferencia', 'ef' => 'efectivo', 'bizum' => 'bizum');
     $metodo = $map[$metodo_raw] ?? $metodo_raw;
 
     $pago = array('importe' => round(floatval($cant), 2), 'metodo' => $metodo);
-    if (is_string($fec) && $fec !== '') $pago['fecha'] = $fec;
+    if (is_string($fec) && $fec !== '') $pago['fecha'] = blokes_sync_grupos_normalizar_fecha($fec);
     return array($pago, false);
 }
 
@@ -4951,15 +8807,25 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
 
     $filas = array();
     $r = 3; // fila 4 de Excel
+    $huecos_seguidos = 0;
     while (true) {
         if ($total_row !== null && $r >= $total_row) break;
         if ($r > 600) break;
         $nombre_cell = $valores[$r][2] ?? null;
         if ($nombre_cell === null || trim((string) $nombre_cell) === '') {
-            if ($total_row === null && $filas) break; // sin fila TOTAL: para en el primer hueco tras ver nombres
+            $huecos_seguidos++;
+            // Sin fila TOTAL: antes se paraba en el PRIMER hueco tras ver algún nombre, y se
+            // perdían alumnos reales debajo de una fila vacía usada como separador visual
+            // (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, cowork 12-13/11: "M-J 19.30
+            // ADOL pierde a Lucía Santos, fila 11"). Ahora tolera varios huecos seguidos antes
+            // de darse por vencido, para no perder nombres reales ni leer cientos de filas
+            // vacías de una pestaña larga sin fila TOTAL.
+            if ($total_row === null && $filas && $huecos_seguidos >= 8) break;
             $r++;
             continue;
         }
+        $tras_hueco = $huecos_seguidos > 0;
+        $huecos_seguidos = 0;
         $nombre = trim((string) $nombre_cell);
         if (mb_strtoupper($nombre) === 'TOTAL') break;
 
@@ -4973,17 +8839,42 @@ function blokes_sync_grupos_leer_pestana_filas($valores) {
             }
         }
 
-        $fila = array('nombre' => $nombre, 'telefono' => $tel, 'notas' => $notas, 'exento' => false, 'exentoMeses' => array(), 'pagos' => array());
+        // "_row" (0-based en $valores, fila de verdad = _row+1 en A1) y los layouts de columna
+        // (cols/bloques) se guardan también en la propia fila — hacen falta para escribir
+        // Web→Excel (NOTAS_PARA_CODE_sync_grupos.md, sección 1) sin tener que volver a detectar
+        // el layout de la pestaña cada vez que se escribe una celda.
+        $fila = array(
+            'nombre' => $nombre, 'telefono' => $tel, 'notas' => $notas, 'exento' => false, 'exentoMeses' => array(), 'pagos' => array(),
+            // Ramiro, 16/11 07:00 (dato roto en el Excel: fila Fintan, L-X 20.30, mar-26 = 46733
+            // — una fecha de Excel metida por error en la celda de importe, nunca un cobro real)
+            // — importes claramente imposibles para una clase (blokes_sync_grupos_importe_sospechoso)
+            // se guardan aparte y NUNCA entran en 'pagos': ningún sitio que lea esta función los
+            // suma ni los cuenta como mes pagado. blokes_sync_grupos_sincronizar() los avisa en
+            // "Cambios del Excel" para que alguien corrija la celda.
+            'pagosSospechosos' => array(),
+            '_row' => $r,
+            // true si justo antes había una fila vacía (posible lista de espera/reserva bajo un
+            // separador, no necesariamente un alumno activo normal) — se marca para revisar a
+            // mano en vez de adivinar, no se descarta ni se cuenta como alumno normal sin más.
+            'trasHueco' => $tras_hueco,
+        );
         foreach ($bloques as $b) {
             list($pago, $exento) = blokes_sync_grupos_leer_pago($valores, $r, $b['layout']);
             if ($exento) { $fila['exento'] = true; $fila['exentoMeses'][] = $b['ym']; }
-            if ($pago) $fila['pagos'][$b['ym']] = $pago; // 'YYYY-MM' real, no solo el nombre del mes (se repite cada temporada)
+            if ($pago && blokes_sync_grupos_importe_sospechoso($pago['importe'])) {
+                $fila['pagosSospechosos'][$b['ym']] = $pago;
+            } elseif ($pago) {
+                $fila['pagos'][$b['ym']] = $pago; // 'YYYY-MM' real, no solo el nombre del mes (se repite cada temporada)
+            }
         }
         $filas[] = $fila;
         $r++;
     }
 
-    return array('filas' => $filas, 'bloques' => array_map(function($b) { return $b['ym']; }, $bloques));
+    return array(
+        'filas' => $filas, 'bloques' => array_map(function($b) { return $b['ym']; }, $bloques),
+        'bloquesLayout' => $bloques, 'cols' => $cols, 'totalRow' => $total_row,
+    );
 }
 
 // Resumen de TODAS las pestañas de la Hoja de PRUEBA: filas, con pago y exentos por pestaña,
@@ -5163,14 +9054,71 @@ function blokes_sync_grupos_clave($nombre, $telefono) {
 }
 
 // Encuentra con quién de la web emparejar un teléfono del Excel: primero una suscripción de
-// WooCommerce en vigor, si no, un externo. No se fía del nombre (demasiados homónimos/apodos),
-// solo del teléfono, que es lo que de verdad identifica a la persona en ambos sitios.
-function blokes_sync_grupos_emparejar($telefono, $subs_por_tel, $externos_por_tel) {
+// WooCommerce en vigor, si no, un externo. No se fía del nombre para el emparejamiento en sí
+// (demasiados homónimos/apodos), solo del teléfono — PERO cuando ese teléfono tiene más de una
+// suscripción (familia/hermanos con el mismo número, cowork 06/11 15:55: el pago de un hermano
+// se aplicaba a la suscripción del otro), el teléfono solo no basta para decidir CUÁL de ellas
+// es. En ese caso sí se mira el nombre, solo para desambiguar entre los candidatos que YA
+// comparten teléfono — nunca para encontrar un match nuevo. Si no hay una coincidencia clara de
+// nombre (o coincide con más de uno, p. ej. dos hermanos con nombres parecidos o una
+// suscripción duplicada de la misma persona), no se adivina: se queda sin match, a la bandeja.
+function blokes_sync_grupos_emparejar($telefono, $nombre_fila, $subs_por_tel, $externos_por_tel) {
     $tel = blokes_externos_normaliza_telefono((string) $telefono);
     if ($tel === '') return null;
-    if (isset($subs_por_tel[$tel])) {
-        $s = $subs_por_tel[$tel];
-        return array('tipo' => 'sub', 'id' => intval($s['id']), 'label' => ($s['nombre'] ?? $s['alumno'] ?? ('Suscripción #' . $s['id'])));
+    $candidatos = $subs_por_tel[$tel] ?? array();
+    if (count($candidatos) > 1) {
+        // Antes de mirar el nombre, quedarse solo con los de mayor prioridad (en vigor > de baja
+        // a fin de mes > cancelada) — si alguien tiene una suscripción activa y otra vieja
+        // cancelada con el mismo teléfono, sigue ganando la activa sin hacer falta el nombre,
+        // igual que antes. El nombre solo desempata cuando de verdad hay varias EN EL MISMO nivel
+        // (dos hermanos, dos altas activas de la misma persona).
+        $max_p = max(array_column($candidatos, '_prioridad'));
+        $candidatos = array_values(array_filter($candidatos, function($s) use ($max_p) { return $s['_prioridad'] === $max_p; }));
+    }
+    if (count($candidatos) === 1) {
+        $s = $candidatos[0];
+        return array('tipo' => 'sub', 'id' => intval($s['id']), 'label' => ($s['_nombre_fact'] ?: ('Suscripción #' . $s['id'])));
+    }
+    if (count($candidatos) > 1) {
+        // Desambiguar por el primer nombre (de pila) ya normalizado — los apellidos no sirven
+        // aquí porque los hermanos casi siempre los comparten.
+        $buscado = explode(' ', blokes_externos_normaliza_nombre((string) $nombre_fila));
+        $buscado_primer = $buscado[0] ?? '';
+        $coincide = array();
+        foreach ($candidatos as $s) {
+            $cand = explode(' ', blokes_externos_normaliza_nombre((string) ($s['_nombre_fact'] ?? '')));
+            $cand_primer = $cand[0] ?? '';
+            if ($buscado_primer !== '' && $cand_primer !== '' && $buscado_primer === $cand_primer) {
+                $coincide[] = $s;
+            }
+        }
+        if (count($coincide) === 1) {
+            $s = $coincide[0];
+            return array('tipo' => 'sub', 'id' => intval($s['id']), 'label' => ($s['_nombre_fact'] ?: ('Suscripción #' . $s['id'])));
+        }
+        // 17/11 19:10 (cowork, Sergi Escribano): seguían empatadas en prioridad y en el primer
+        // nombre — exactamente el caso de la MISMA persona con dos suscripciones duplicadas
+        // (#6614 y #6240) de la misma clase, nunca dos hermanos de verdad (esos tendrían
+        // apellidos o nombre completo distintos). Si el nombre COMPLETO de todas las que
+        // coinciden se parece entre sí, da igual a cuál de las dos se apunte el pago — son la
+        // misma persona — se elige la de id más alto (la más reciente, mismo criterio de
+        // "más reciente gana" que ya usa el resto de este fichero). Si de verdad hay nombres
+        // distintos detrás (hermanos con el mismo nombre de pila), se sigue sin resolver solo.
+        if (count($coincide) > 1) {
+            $nombres_completos = array_values(array_filter(array_map(function($s) {
+                return blokes_externos_normaliza_nombre((string) ($s['_nombre_fact'] ?? ''));
+            }, $coincide)));
+            $todas_parecidas = count($nombres_completos) > 0;
+            foreach ($nombres_completos as $n) {
+                if (!blokes_externos_nombres_parecidos($nombres_completos[0], $n)) { $todas_parecidas = false; break; }
+            }
+            if ($todas_parecidas) {
+                usort($coincide, function($a, $b) { return intval($b['id']) - intval($a['id']); });
+                $s = $coincide[0];
+                return array('tipo' => 'sub', 'id' => intval($s['id']), 'label' => ($s['_nombre_fact'] ?: ('Suscripción #' . $s['id'])));
+            }
+        }
+        return null;
     }
     if (isset($externos_por_tel[$tel])) {
         $e = $externos_por_tel[$tel];
@@ -5179,13 +9127,72 @@ function blokes_sync_grupos_emparejar($telefono, $subs_por_tel, $externos_por_te
     return null;
 }
 
+// 17/11 12:18 (cowork, Irene Pérez de Ciriza/Viviana Aragundi/Adrián Mendoza): la nota del Excel
+// solo se propagaba cuando CAMBIABA respecto a la foto anterior (blokes_sync_grupos_sincronizar(),
+// más abajo) — si la nota de Eva ya estaba puesta la primera vez que esa fila se fotografió (antes
+// de que existiera Wellhub/Bajo tarifa), nunca "cambia" y se queda para siempre solo en el Excel,
+// aunque la persona ya tenga una suscripción real emparejada. Para saber si de verdad hace falta
+// propagarla (y no limitarse a "¿cambió?"), hay que mirar si el DESTINO (la suscripción o el
+// externo ya emparejados) todavía no tiene ninguna nota — nunca se sobrescribe una que ya exista.
+function blokes_sync_grupos_notas_destino($match) {
+    if (empty($match['tipo']) || empty($match['id'])) return null; // sin match: no se puede comprobar
+    if ($match['tipo'] === 'sub') return trim((string) get_post_meta(intval($match['id']), '_rm_nota', true));
+    global $wpdb;
+    return trim((string) $wpdb->get_var($wpdb->prepare(
+        "SELECT notas FROM " . blokes_externos_table() . " WHERE id = %d", intval($match['id'])
+    )));
+}
+
 // El método tal y como lo escribe Eva en el Excel ('ta'/'tr'/'ef'/'bizum'/'web'…) ya llega
-// traducido a transferencia/efectivo/bizum/web por blokes_sync_grupos_leer_pago(); aquí solo
-// falta encajarlo en los 5 métodos que acepta Marcar cobrado — "web" (pago con tarjeta en la
-// web, sin Redsys automático detrás) se trata como tarjeta a mano, igual que un TPV.
+// traducido a tarjeta/transferencia/efectivo/bizum/web por blokes_sync_grupos_leer_pago(); aquí
+// solo falta encajarlo en los 5 métodos que acepta Marcar cobrado — "web" (pago con tarjeta en
+// la web, sin Redsys automático detrás) se trata como tarjeta a mano, igual que un TPV.
 function blokes_sync_grupos_metodo_a_cobrado($metodo) {
-    $map = array('web' => 'tarjeta', 'transferencia' => 'transferencia', 'efectivo' => 'efectivo', 'bizum' => 'bizum', 'ana' => 'transferencia');
+    // 17/11 19:10: 'tarjeta' (de "TA", confirmado por Ramiro) caía al "transferencia" por
+    // defecto de aquí abajo — no estaba en este mapa, aunque leer_pago() ya la produjera bien.
+    $map = array('web' => 'tarjeta', 'tarjeta' => 'tarjeta', 'transferencia' => 'transferencia', 'efectivo' => 'efectivo', 'bizum' => 'bizum', 'ana' => 'transferencia');
     return $map[$metodo] ?? 'transferencia';
+}
+
+// Reintenta el auto-aplicar sobre cambios "pendiente" que YA existían de antes (incluso de
+// antes de tener esta lógica, o que no encajaron la primera vez porque entonces no había
+// match): se vuelve a probar en CADA sincronización con los datos más frescos, no solo al
+// crearse (cowork, 3/11 18:xx: un alta nueva se quedó pendiente para siempre porque se creó
+// antes del auto-aplicar y nadie volvía a mirarla). Mismo criterio "seguro" que al crearse —
+// nunca inventa un match ni un grupo nuevo, solo reintenta con lo que ya hay.
+function blokes_sync_grupos_reintentar_pendientes($pestanas, $subs_por_tel, $externos_por_tel) {
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo IN (%s, %s, %s)",
+        'alumno_nuevo', 'pago_nuevo', 'nota'
+    ), ARRAY_A);
+    foreach ($pendientes as $cambio) {
+        $match = blokes_sync_grupos_emparejar($cambio['telefono'], $cambio['nombre'], $subs_por_tel, $externos_por_tel);
+        if ($match) {
+            $wpdb->update($tabla, array(
+                'match_tipo' => $match['tipo'], 'match_id' => $match['id'], 'match_label' => $match['label'],
+            ), array('id' => intval($cambio['id'])));
+        }
+        if ($cambio['tipo'] === 'alumno_nuevo') {
+            if (!$match) blokes_sync_grupos_autocrear_alumno_nuevo(intval($cambio['id']), $cambio['pestana'], $pestanas, $cambio['nombre'], $cambio['telefono']);
+            else blokes_sync_grupos_resolver_alumno_nuevo_ya_existe(intval($cambio['id']), $match);
+        } else {
+            blokes_sync_grupos_autoaplicar_si_seguro(intval($cambio['id']), $cambio['tipo'], $match);
+        }
+    }
+}
+
+// "alumno_nuevo" CON match: esta fila del Excel es de alguien que ya existe en la web
+// (identificado por teléfono) — no hay nada que crear, solo se marca vista para que no se quede
+// pendiente para siempre sin necesidad (cowork, 4/11 04:30: un alta con match a una suscripción
+// real nunca se resolvía porque solo el caso "sin match" tenía una acción definida).
+function blokes_sync_grupos_resolver_alumno_nuevo_ya_existe($cambio_id, $match) {
+    if (empty($match['tipo']) || empty($match['id'])) return;
+    global $wpdb;
+    $wpdb->update(blokes_sync_grupos_cambios_table(), array(
+        'estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => 'auto (ya existe en la web)',
+    ), array('id' => intval($cambio_id), 'estado' => 'pendiente'));
 }
 
 // Crea o refresca un cambio pendiente para (pestana, clave, tipo, mes) — si ya hay uno
@@ -5198,23 +9205,152 @@ function blokes_sync_grupos_upsert_cambio($pestana, $clave, $nombre, $telefono, 
         "SELECT id FROM {$tabla} WHERE pestana = %s AND clave = %s AND tipo = %s AND estado = 'pendiente' AND " . ($mes ? "mes = %s" : "mes IS NULL"),
         ...array_filter(array($pestana, $clave, $tipo, $mes), function($v) { return $v !== null; })
     ));
+    // 19/11 (cowork §06:25, punto 2 — Anne Sophie Onadeko salía dos veces, ids 1967/1973, misma
+    // pestaña/mes/importe): la clave de arriba (pestana+clave+tipo+mes) no basta para un
+    // "pago_nuevo" cuando la misma fila genera dos claves distintas (p. ej. una errata de
+    // teléfono entre una sincronización y la siguiente) — se duplicaba en vez de actualizarse.
+    // Para "pago_nuevo" se comprueba TAMBIÉN por teléfono+mes+importe, sin mirar la clave, antes
+    // de dar por hecho que es una propuesta nueva.
+    if (!$existente && $tipo === 'pago_nuevo' && $telefono) {
+        $tel_norm = blokes_externos_normaliza_telefono((string) $telefono);
+        $importe = floatval($datos['importe'] ?? 0);
+        if ($tel_norm) {
+            $candidatos = $wpdb->get_results($wpdb->prepare(
+                "SELECT id, datos_json FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes = %s AND telefono = %s", $mes, $tel_norm
+            ), ARRAY_A);
+            foreach ($candidatos as $cand) {
+                $datos_cand = json_decode($cand['datos_json'], true) ?: array();
+                if (abs(floatval($datos_cand['importe'] ?? 0) - $importe) < 0.01) { $existente = $cand['id']; break; }
+            }
+        }
+    }
     $campos = array(
         'nombre' => $nombre, 'telefono' => $telefono, 'datos_json' => wp_json_encode($datos),
         'match_tipo' => $match['tipo'] ?? null, 'match_id' => $match['id'] ?? null, 'match_label' => $match['label'] ?? '',
     );
     if ($existente) {
         $wpdb->update($tabla, $campos, array('id' => intval($existente)));
-    } else {
-        $wpdb->insert($tabla, array_merge($campos, array(
-            'pestana' => $pestana, 'clave' => $clave, 'tipo' => $tipo, 'mes' => $mes, 'estado' => 'pendiente', 'creado_at' => current_time('mysql'),
-        )));
+        return intval($existente);
     }
+    $wpdb->insert($tabla, array_merge($campos, array(
+        'pestana' => $pestana, 'clave' => $clave, 'tipo' => $tipo, 'mes' => $mes, 'estado' => 'pendiente', 'creado_at' => current_time('mysql'),
+    )));
+    return $wpdb->insert_id;
+}
+
+// 19/11 (cowork §06:25, punto 3): cuando una alta nueva ("+ Añadir alumno") marca "ya pagado" un
+// mes que el Excel ya tenía apuntado, el "pago nuevo" que la sincronización había creado antes
+// (sin emparejar, porque todavía no existía ninguna suscripción) se cierra solo — ya está
+// cobrado de verdad en esta misma alta, no hace falta que nadie pulse "Aplicar" encima. Solo si
+// el importe coincide (si no, puede ser un pago distinto de la misma persona/mes, y se deja para
+// que alguien lo mire a mano, nunca se da por resuelto a ciegas).
+function blokes_sync_grupos_resolver_pago_nuevo_tras_alta($telefono, $ym, $importe, $sub_id) {
+    global $wpdb;
+    blokes_sync_grupos_ensure_tables();
+    $tel_norm = blokes_externos_normaliza_telefono((string) $telefono);
+    if (!$tel_norm) return;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes = %s AND telefono = %s", $ym, $tel_norm
+    ), ARRAY_A);
+    foreach ($pendientes as $p) {
+        $datos = json_decode($p['datos_json'], true) ?: array();
+        if (abs(floatval($datos['importe'] ?? 0) - floatval($importe)) > 0.01) continue;
+        $wpdb->update($tabla, array(
+            'estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => 'auto (alta nueva ya cobrada)',
+            'match_tipo' => 'sub', 'match_id' => intval($sub_id),
+        ), array('id' => intval($p['id'])));
+    }
+}
+
+// 18/11 10:45 (cowork, URGENTE — GRAVE): DESACTIVADO. Esto auto-aplicaba un "pago nuevo"
+// emparejado sin ambigüedad desde 3/11 (Ramiro: "esto tiene que pasar automático" para lo
+// claro). El 17/11 entre 22:00 y 23:05, al corregir TA→tarjeta (792f28b), esto escribió 32
+// pedidos reales por WooCommerce como "Tarjeta (TPV roco)" (2.253 €, con factura Verifactu
+// enviada a la AEAT y correo al cliente) para pagos históricos que en realidad eran de otros
+// métodos y fechas — la remesa real de tarjeta de ese día en el banco fue de solo 262,50 €.
+// Nunca más se escribe nada solo: toda propuesta ("pago nuevo" y "nota") se queda SIEMPRE
+// pendiente en "Cambios del Excel" para que alguien la revise y pulse "Aplicar" a mano — "que
+// solo proponga", como pedía la propia pestaña y como de verdad hace falta ahora. Para volver a
+// activar un auto-aplicado de verdad (solo si Ramiro decide que hace falta, y nunca para
+// "pago_nuevo" sin que alguien vea antes fecha/método/importe), habría que rehacer esta función
+// desde cero con esa decisión explícita — no basta con deshacer este commit.
+function blokes_sync_grupos_autoaplicar_si_seguro($cambio_id, $tipo, $match) {
+    return;
+}
+
+// Dado el nombre real de una pestaña ("M-J 17.30"), busca entre los grupos que YA existen de
+// verdad (por suscripción) cuál combinación día/horario/edad produce esa misma pestaña —
+// blokes_sync_grupos_pestana_de_grupo() pero al revés, nunca un formato de horario inventado.
+// Si hay más de una combinación que encaje, o ninguna (Pilates/Yoga/Kids con nombres sueltos,
+// p. ej.), no se puede fiar: mejor la bandeja que crear un grupo fantasma con el horario mal.
+// Pestañas que el matcher automático no puede desambiguar por sí solo (coinciden con MÁS de un
+// grupo real por la hora de inicio) pero que Ramiro/Eva ya han confirmado a mano con una persona
+// real de por medio — nunca se adivina en código, solo se documenta aquí la respuesta ya dada.
+// Se consulta ANTES del emparejamiento automático; si la pestaña no está aquí, sigue intentándolo
+// solo como siempre.
+function blokes_sync_grupos_alias_pestana($pestana_real) {
+    $alias = array(
+        // Ramiro/Eva, 3/11 20:05 (NOTAS_PARA_CODE_sync_grupos.md): "M-J 17.30" son los adultos
+        // (17:30-19:00, 86 €), no los niños (17:30-18:30) — ambos arrancan a la misma hora y el
+        // matcher por franja de inicio no puede distinguirlos sin esta confirmación.
+        'M-J 17.30' => array('dia' => 'Martes-Jueves', 'horario' => '17:30-19:00', 'edad' => 'Adultos'),
+    );
+    return $alias[$pestana_real] ?? null;
+}
+
+function blokes_sync_grupos_grupo_de_pestana($pestana_real, $pestanas_reales) {
+    $alias = blokes_sync_grupos_alias_pestana($pestana_real);
+    if ($alias) return $alias;
+    $vistos = array();
+    $candidatos = array();
+    foreach (blokes_get_all_subscription_data() as $s) {
+        $dia = blokes_dia_a_pareja($s['dia'] ?? '');
+        $horario = $s['horario'] ?? '';
+        $edad = $s['edad'] ?? 'Adultos';
+        if ($dia === '' || $horario === '') continue;
+        $clave = $dia . '|' . $horario . '|' . $edad;
+        if (isset($vistos[$clave])) continue;
+        $vistos[$clave] = true;
+        if (blokes_sync_grupos_pestana_de_grupo($pestanas_reales, $dia, $horario) === $pestana_real) {
+            $candidatos[$clave] = array('dia' => $dia, 'horario' => $horario, 'edad' => $edad);
+        }
+    }
+    return count($candidatos) === 1 ? reset($candidatos) : null;
+}
+
+// "alumno_nuevo" sin match (nadie con ese teléfono en WooCommerce ni en externos): si la
+// pestaña se puede traducir sin ambigüedad a día/horario/edad reales, se crea de alta externa
+// — igual que si Eva lo hubiera añadido a mano desde "+ Alta externa", sin teléfono si no lo
+// trae el Excel (sale en "Revisar datos" hasta que alguien lo rellene). Si no se puede traducir
+// la pestaña con seguridad, se queda en la bandeja para decidir a mano.
+function blokes_sync_grupos_autocrear_alumno_nuevo($cambio_id, $tab, $pestanas_reales, $nombre, $telefono) {
+    global $wpdb;
+    $grupo = blokes_sync_grupos_grupo_de_pestana($tab, $pestanas_reales);
+    if (!$grupo) return;
+    $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/externos');
+    $req->set_param('nombre', $nombre);
+    $req->set_param('telefono', $telefono);
+    $req->set_param('dia', $grupo['dia']);
+    $req->set_param('horario', $grupo['horario']);
+    $req->set_param('edad', $grupo['edad']);
+    $req->set_param('notas', 'Detectado en el Excel de Eva (sincronización automática, pestaña ' . $tab . ').');
+    $resultado = superadmin_gestion_externos_crear($req);
+    if (is_wp_error($resultado)) return;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => 'auto (sincronización)'), array('id' => $cambio_id));
 }
 
 // El corazón del paso 2: lee TODAS las pestañas de la Hoja activa, las compara con la
 // instantánea guardada y deja en la bandeja solo lo que cambió. Lo usan tanto el cron (cada
 // hora) como el botón "Sincronizar ahora".
 function blokes_sync_grupos_sincronizar() {
+    // 18/11 (cowork §09:50: "sigue abierta la causa de los 499→1233") — hipótesis sin confirmar:
+    // varias sincronizaciones seguidas en poco tiempo, cada una tardando cerca del límite de
+    // tiempo de PHP de SiteGround, podrían cortar la ejecución a medias y dejar cada intento
+    // corrigiendo solo un subconjunto de pestañas. Guarda cuánto tarda y cuántas pestañas se
+    // procesan de verdad, para poder confirmar (o descartar) esto la próxima vez sin adivinar.
+    $t0 = microtime(true);
     blokes_sync_grupos_ensure_tables();
     global $wpdb;
     $activa = blokes_sync_grupos_sheet_activa();
@@ -5228,13 +9364,22 @@ function blokes_sync_grupos_sincronizar() {
     $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($activa['id'], $pestanas);
     if (is_wp_error($valores_por_pestana)) return $valores_por_pestana;
 
-    $subs_por_tel     = blokes_campanas_subs_por_telefono();
+    $subs_por_tel     = blokes_sync_grupos_subs_por_telefono();
     $externos_por_tel = blokes_campanas_externos_por_telefono();
+    // 17/11 15:50 (Ramiro/cowork, prioridad 3): un pago antiguo que aparece de golpe porque su
+    // FILA es nueva en una pestaña que ya existía (p. ej. alguien cambió de pestaña — Tomás
+    // Gasca, ADOL → MEDIANOS) no debe tratarse como "pago nuevo" mes a mes hasta 2025-09 — eso
+    // dispararía un aviso (y un auto-aplicar) por cada mes antiguo. Solo los meses recientes
+    // cuentan como "nuevo" de verdad; los más viejos se absorben en la foto sin avisar.
+    $mes_pago_reciente_desde = blokes_mes_mas(date('Y-m'), -2);
 
     $resumen = array('hojaUsada' => $activa['cual'], 'pestanas' => array(), 'cambiosNuevos' => 0, 'fotoInicial' => array());
     foreach ($pestanas as $tab) {
+        // 17/11 15:50 punto 5 (Ramiro/cowork): las pestañas "Balance..." no son una clase con
+        // alumnos — se leían como si lo fueran (filas repetidas, importes enormes sospechosos).
+        if (stripos($tab, 'balance') !== false) continue;
         $r = blokes_sync_grupos_leer_pestana_filas($valores_por_pestana[$tab] ?? array());
-        if (!$r['filas'] && !$r['bloques']) continue; // pestaña sin formato de clase (Balance, Bonos de 10…)
+        if (!$r['filas'] && !$r['bloques']) continue; // pestaña sin formato de clase (Bonos de 10…)
 
         $tabla_snap = blokes_sync_grupos_snapshot_table();
         $es_foto_inicial = !$wpdb->get_var($wpdb->prepare("SELECT id FROM {$tabla_snap} WHERE pestana = %s LIMIT 1", $tab));
@@ -5242,24 +9387,58 @@ function blokes_sync_grupos_sincronizar() {
 
         $claves_vistas = array();
         $cambios_pestana = 0;
+        // Fila repetida en la MISMA pestaña del Excel (cowork, 15/11 13:20: "Olga González
+        // Arribas en 3 filas" — el Excel de Eva la tenía dos veces, una sin teléfono) — distinto
+        // de "alumno_nuevo"/"fila_borrada" (eso compara con la foto de la sincronización
+        // anterior; esto compara filas ENTRE SÍ dentro de la misma pestaña, ahora mismo).
+        $nombres_vistos = array(); // nombreCompacto => [clave, ...]
         foreach ($r['filas'] as $fila) {
             $clave = blokes_sync_grupos_clave($fila['nombre'], $fila['telefono']);
             $claves_vistas[$clave] = true;
+            $nombre_compacto_fila = blokes_externos_normaliza_nombre_compacto($fila['nombre'] ?? '');
+            if ($nombre_compacto_fila) $nombres_vistos[$nombre_compacto_fila][] = array('clave' => $clave, 'nombre' => $fila['nombre'], 'telefono' => $fila['telefono']);
             $anterior = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla_snap} WHERE pestana = %s AND clave = %s", $tab, $clave), ARRAY_A);
             $pagos_anteriores = $anterior ? (json_decode($anterior['pagos_json'], true) ?: array()) : array();
 
-            if (!$es_foto_inicial) {
-                $match = blokes_sync_grupos_emparejar($fila['telefono'], $subs_por_tel, $externos_por_tel);
+            if ($es_foto_inicial) {
+                // 17/11 12:18 (cowork): en la foto inicial de una pestaña no se avisa de nada —
+                // es solo la primera vez que se ve, no "un cambio". Pero si la fila YA trae una
+                // nota de Eva y encaja con un sub/externo que todavía no tiene ninguna (p. ej.
+                // Wellhub se puso en el Excel antes de que existiera esta sincronización), hay
+                // que propagarla ya mismo — si no, se queda para siempre sin llegar, igual que el
+                // caso de "nunca cambia respecto a la foto anterior" de más abajo.
+                $fila_nota_inicial = trim((string) $fila['notas']);
+                if ($fila_nota_inicial !== '') {
+                    $match_inicial = blokes_sync_grupos_emparejar($fila['telefono'], $fila['nombre'], $subs_por_tel, $externos_por_tel);
+                    if (blokes_sync_grupos_notas_destino($match_inicial) === '') {
+                        $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'nota', null, array(
+                            'notaAntes' => '', 'notaDespues' => $fila['notas'],
+                        ), $match_inicial);
+                        blokes_sync_grupos_autoaplicar_si_seguro($cid, 'nota', $match_inicial);
+                        $cambios_pestana++;
+                    }
+                }
+            } else {
+                $match = blokes_sync_grupos_emparejar($fila['telefono'], $fila['nombre'], $subs_por_tel, $externos_por_tel);
                 if (!$anterior) {
-                    blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'alumno_nuevo', null, array(
+                    $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'alumno_nuevo', null, array(
                         'nombre' => $fila['nombre'], 'telefono' => $fila['telefono'],
                     ), $match);
+                    if (!$match) blokes_sync_grupos_autocrear_alumno_nuevo($cid, $tab, $pestanas, $fila['nombre'], $fila['telefono']);
+                    else blokes_sync_grupos_resolver_alumno_nuevo_ya_existe($cid, $match);
                     $cambios_pestana++;
                 } else {
-                    if (trim($anterior['notas']) !== trim($fila['notas']) && $fila['notas'] !== '') {
-                        blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'nota', null, array(
+                    // 17/11 12:18 (cowork): no basta con "¿cambió respecto a la última foto?" —
+                    // una nota que ya estaba puesta desde antes de que existiera esta detección
+                    // nunca "cambia" y se queda solo en el Excel. También se propaga si el
+                    // destino emparejado (sub o externo) todavía no tiene ninguna nota —
+                    // blokes_sync_grupos_notas_destino() nunca sobrescribe una que ya exista.
+                    $fila_nota_trim = trim((string) $fila['notas']);
+                    if ($fila_nota_trim !== '' && (trim($anterior['notas']) !== $fila_nota_trim || blokes_sync_grupos_notas_destino($match) === '')) {
+                        $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'nota', null, array(
                             'notaAntes' => $anterior['notas'], 'notaDespues' => $fila['notas'],
                         ), $match);
+                        blokes_sync_grupos_autoaplicar_si_seguro($cid, 'nota', $match);
                         $cambios_pestana++;
                     }
                     $tel_norm_antes = blokes_externos_normaliza_telefono($anterior['telefono']);
@@ -5272,14 +9451,49 @@ function blokes_sync_grupos_sincronizar() {
                     }
                 }
                 foreach ($fila['pagos'] as $ym => $pago) {
+                    // 17/11 15:50 punto 3: sin $anterior (fila nueva en esta pestaña), TODOS sus
+                    // pagos históricos parecerían "nuevos" a la vez (Tomás Gasca, 9 pagos desde
+                    // 2025-09) — solo los de los últimos meses merecen un aviso/auto-aplicar; los
+                    // más viejos se guardan en la foto sin generar ruido ni reescribir nada en
+                    // WooCommerce por un cobro de hace más de un año.
+                    if (!$anterior && $ym < $mes_pago_reciente_desde) continue;
                     $antes = $pagos_anteriores[$ym] ?? null;
-                    $igual = $antes && floatval($antes['importe'] ?? 0) === floatval($pago['importe'] ?? 0) && ($antes['metodo'] ?? '') === ($pago['metodo'] ?? '');
-                    if (!$igual) {
-                        blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'pago_nuevo', $ym, array(
+                    $mismo_importe = $antes && floatval($antes['importe'] ?? 0) === floatval($pago['importe'] ?? 0);
+                    $igual = $mismo_importe && ($antes['metodo'] ?? '') === ($pago['metodo'] ?? '');
+                    // 18/11 (cowork, GRAVE: 499→1233 "pago nuevo" de 2024-03 a 2026-11, todos con
+                    // el mismo importe que ya había en la foto) — un mes que YA tenía ese importe
+                    // guardado y solo cambia de MÉTODO (o de formato de fecha) no es dinero nuevo
+                    // que haga falta cobrar: es justo lo que pasó al arreglar "TA"=tarjeta
+                    // (792f28b) — cada fila con un TA histórico guardado como "transferencia" (el
+                    // mapeo viejo, roto) se relee ahora como "tarjeta" y antes se disparaba como
+                    // "pago nuevo" entero, con el riesgo de que alguien le diera a "Aplicar" a un
+                    // cobro que ya estaba hecho. Si el importe coincide, se corrige el método en
+                    // la foto sin avisar ni auto-aplicar nada — solo un importe distinto es de
+                    // verdad "dinero nuevo".
+                    if (!$igual && $mismo_importe) {
+                        // no-op: la foto se actualiza igual al final del bucle de la fila: con
+                        // el método/fecha ya corregidos, sin generar ruido.
+                    } elseif (!$igual) {
+                        $cid = blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'pago_nuevo', $ym, array(
                             'importe' => $pago['importe'], 'metodo' => $pago['metodo'], 'fecha' => $pago['fecha'] ?? null,
                         ), $match);
+                        blokes_sync_grupos_autoaplicar_si_seguro($cid, 'pago_nuevo', $match);
                         $cambios_pestana++;
                     }
+                }
+            }
+            // 16/11 07:00: avisa SIEMPRE (incluso en la foto inicial de la pestaña — un dato roto
+            // no es "un cambio desde la última vez", es un problema de la celda ahora mismo) de
+            // cualquier importe sospechoso que haya quedado fuera de 'pagos'. upsert_cambio ya
+            // refresca el mismo pendiente en vez de duplicarlo mientras nadie lo resuelve. Nunca
+            // se autoaplica: hay que corregir la celda del Excel primero.
+            if (!empty($fila['pagosSospechosos'])) {
+                $match_sosp = $es_foto_inicial ? blokes_sync_grupos_emparejar($fila['telefono'], $fila['nombre'], $subs_por_tel, $externos_por_tel) : $match;
+                foreach ($fila['pagosSospechosos'] as $ym => $pago) {
+                    blokes_sync_grupos_upsert_cambio($tab, $clave, $fila['nombre'], $fila['telefono'], 'importe_sospechoso', $ym, array(
+                        'importe' => $pago['importe'], 'metodo' => $pago['metodo'], 'fecha' => $pago['fecha'] ?? null,
+                    ), $match_sosp);
+                    $cambios_pestana++;
                 }
             }
 
@@ -5289,6 +9503,19 @@ function blokes_sync_grupos_sincronizar() {
                 $tab, $clave, $fila['nombre'], $fila['telefono'], $fila['notas'], $fila['exento'] ? 1 : 0, wp_json_encode($fila['pagos']), current_time('mysql'),
                 $fila['nombre'], $fila['telefono'], $fila['notas'], $fila['exento'] ? 1 : 0, wp_json_encode($fila['pagos']), current_time('mysql')
             ));
+        }
+
+        // Dos o más filas con el mismo nombre (sin espacios) en la misma pestaña: aviso aparte,
+        // nunca se autoaplica ni se borra nada — es Eva quien tiene que quitar la fila de más en
+        // el Excel real (Blokes no escribe ahí). Se guarda bajo la PRIMERA clave vista, para no
+        // duplicar el aviso en cada sincronización mientras nadie lo resuelve.
+        foreach ($nombres_vistos as $nombre_compacto_dup => $vistas_dup) {
+            $claves_dup = array_values(array_unique(array_column($vistas_dup, 'clave')));
+            if (count($claves_dup) < 2) continue;
+            blokes_sync_grupos_upsert_cambio($tab, $claves_dup[0], $vistas_dup[0]['nombre'], $vistas_dup[0]['telefono'] ?: '', 'fila_duplicada_excel', null, array(
+                'claves' => $claves_dup, 'telefonos' => array_values(array_unique(array_column($vistas_dup, 'telefono'))),
+            ), null);
+            $cambios_pestana++;
         }
 
         // Filas que estaban en la instantánea y ya no aparecen en el Excel: se avisa, nunca se
@@ -5310,8 +9537,44 @@ function blokes_sync_grupos_sincronizar() {
         $resumen['cambiosNuevos'] += $es_foto_inicial ? 0 : $cambios_pestana;
     }
 
+    blokes_sync_grupos_reintentar_pendientes($pestanas, $subs_por_tel, $externos_por_tel);
+
+    $resumen['duracionSeg'] = round(microtime(true) - $t0, 1);
+    $resumen['pestanasProcesadas'] = count($pestanas);
     update_option('blokes_sync_grupos_ultima_sincronizacion', current_time('mysql'), false);
+    update_option('blokes_sync_grupos_ultima_duracion', $resumen['duracionSeg'], false);
     return $resumen;
+}
+
+// Secreto de un solo uso para /cron-tick — se genera y se guarda la primera vez que se pide
+// (nunca hardcodeado, nunca en el código del repo público). Mismo patrón que el webhook de 9to5.
+function blokes_sync_grupos_cron_secreto() {
+    $s = get_option('blokes_sync_grupos_cron_secreto', '');
+    if ($s === '') {
+        $s = wp_generate_password(32, false);
+        update_option('blokes_sync_grupos_cron_secreto', $s, false);
+    }
+    return $s;
+}
+// GET /gestion/sync-grupos/cron-tick?secret=... — para un cron real del hosting (SiteGround:
+// panel → Herramientas de desarrollo → Cron Jobs, URL cada 10-15 min). Ruta pública (sin sesión
+// de WordPress) pero inútil sin el secreto exacto, y no hace nada si no hay Hoja configurada.
+function superadmin_sync_grupos_cron_tick($request) {
+    $secret = (string) $request->get_param('secret');
+    if (!hash_equals(blokes_sync_grupos_cron_secreto(), $secret)) {
+        return new WP_Error('secreto_invalido', 'Secreto no válido.', array('status' => 403));
+    }
+    if (!get_option('blokes_sync_grupos_sheet_prueba_id', '') && !get_option('blokes_sync_grupos_sheet_real_id', '')) {
+        return rest_ensure_response(array('success' => true, 'data' => array('omitido' => true)));
+    }
+    $r = blokes_sync_grupos_sincronizar();
+    if (is_wp_error($r)) return new WP_Error($r->get_error_code(), $r->get_error_message(), array('status' => 502));
+    return rest_ensure_response(array('success' => true, 'data' => $r));
+}
+
+function superadmin_sync_grupos_cron_url($request) {
+    $url = rest_url('superadmin/v1/gestion/sync-grupos/cron-tick') . '?secret=' . blokes_sync_grupos_cron_secreto();
+    return rest_ensure_response(array('success' => true, 'data' => array('url' => $url)));
 }
 
 function superadmin_sync_grupos_sincronizar_ahora() {
@@ -5334,12 +9597,140 @@ function superadmin_sync_grupos_cambios_listar($request) {
     )));
 }
 
-// Aplicar: para "pago_nuevo" con una persona emparejada de verdad, reutiliza EXACTAMENTE el
-// mismo camino que "Marcar cobrado" a mano (con su protección de pagos adelantados incluida) o
-// el cobro de un externo — nunca lógica nueva para tocar dinero. El resto de tipos (nota,
-// teléfono, alumno nuevo, fila borrada) de momento solo se marca "aplicado" como aviso visto;
-// escribirlos solos en el perfil del alumno queda para una siguiente ronda (Ramiro: "se puede
-// valorar autoaplicar más adelante").
+// ¿Esta suscripción ya tiene un pedido completed/processing de ese mes? Mismo criterio de "a qué
+// mes pertenece" que usa Grupos (date_created, no date_paid — un adelantado deja la fecha real
+// del banco, que puede caer en el mes anterior al que de verdad cubre).
+// 18/11 (cowork §09:50, Samuel González #7394 — "47 = 47 pero no cierra"): un cobro en EFECTIVO
+// nunca pasa por WooCommerce ("Ramiro, 29/10: sin WooCommerce y sin factura"), vive solo en
+// blokes_cobros_manuales_table() — esta función solo miraba pedidos de WooCommerce, así que un
+// mes cobrado en efectivo (el caso real de Samuel) nunca contaba como "ya cobrado". Esto afecta
+// también a blokes_sync_grupos_aplicar_efecto(), que usa este mismo criterio para no duplicar un
+// cobro ya hecho: sin este arreglo, un "Aplicar" sobre un mes ya pagado en efectivo habría
+// intentado cobrarlo también por WooCommerce.
+function blokes_sync_grupos_sub_ya_cobrado_mes($sub_id, $ym) {
+    if ($ym === '') return false;
+    global $wpdb;
+    $en_efectivo = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . blokes_cobros_manuales_table() . " WHERE sub_id = %d AND periodo = %s LIMIT 1", intval($sub_id), $ym
+    ));
+    if ($en_efectivo) return true;
+    if (!function_exists('wcs_get_subscription')) return false;
+    $sub = wcs_get_subscription(intval($sub_id));
+    if (!$sub) return false;
+    $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
+    foreach ($order_ids as $oid) {
+        $order = wc_get_order($oid);
+        if (!$order || !in_array($order->get_status(), array('completed', 'processing'), true)) continue;
+        $fecha = $order->get_date_created() ?: $order->get_date_paid();
+        if ($fecha && $fecha->date('Y-m') === $ym) return true;
+    }
+    return false;
+}
+
+// Efecto real de un cambio: "pago_nuevo" reutiliza EXACTAMENTE el mismo camino que "Marcar
+// cobrado" a mano (con su protección de pagos adelantados incluida) o el cobro de un externo —
+// nunca lógica nueva para tocar dinero. "nota" copia el texto al perfil (post meta de la
+// suscripción, o el campo notas del externo). El resto de tipos (teléfono, alumno nuevo, fila
+// borrada) sigue sin tener efecto propio — ambiguos a propósito, se quedan en la bandeja para
+// que alguien decida a mano (Ramiro, NOTAS_PARA_CODE_sync_grupos.md 3/11 17:05: solo lo
+// claramente seguro se aplica solo; lo dudoso sigue pasando por la bandeja).
+function blokes_sync_grupos_aplicar_efecto($cambio, $datos, $simular = false, $confirmar = array()) {
+    if ($cambio['tipo'] === 'pago_nuevo') {
+        if (!$cambio['match_tipo'] || !$cambio['match_id']) {
+            return new WP_Error('sin_match', 'No hay nadie emparejado por teléfono para este pago — apúntalo a mano en Grupos.', array('status' => 409));
+        }
+        // 19/11 (cowork §06:25, punto 1): esta comprobación nunca podía ser cierta — la fecha del
+        // Excel se guarda como 'd/m/Y' ("3/11/2026"), nunca como ISO — así que "Aplicar" SIEMPRE
+        // acababa usando la fecha de HOY en vez de la real del Excel. Arreglado con un conversor
+        // de verdad; solo si el Excel no trae ninguna fecha reconocible se usa la de hoy.
+        $fecha = blokes_sync_grupos_fecha_excel_a_iso((string) ($datos['fecha'] ?? '')) ?: current_time('Y-m-d');
+        if ($cambio['match_tipo'] === 'sub') {
+            // Si la web ya tiene un pedido completed/processing de ESE mes (p. ej. cobro
+            // automático por Redsys que ya pasó solo, o un pago ya marcado por otro camino), el
+            // pago del Excel no añade nada nuevo — intentar "Marcar cobrado" encima fallaría
+            // además con "cobro automático" si la suscripción cobra sola, dejando el cambio
+            // pendiente para siempre sin motivo real (cowork, 4/11 04:30: un pago ya cobrado en
+            // la web se quedaba pendiente en Sync Grupos indefinidamente).
+            if (!$simular && blokes_sync_grupos_sub_ya_cobrado_mes(intval($cambio['match_id']), (string) $cambio['mes'])) {
+                return rest_ensure_response(array('success' => true, 'yaCobrado' => true));
+            }
+            $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
+            $req->set_param('sub_id', intval($cambio['match_id']));
+            $req->set_param('importe', floatval($datos['importe'] ?? 0));
+            $req->set_param('metodo', blokes_sync_grupos_metodo_a_cobrado($datos['metodo'] ?? ''));
+            $req->set_param('fecha', $fecha);
+            $req->set_param('nota', 'Detectado en el Excel de Eva (sincronización automática, pestaña ' . $cambio['pestana'] . ').');
+            $req->set_param('simular', $simular);
+            // 19/11 (cowork §06:25, punto 1 — "que se bloquee igual que Marcar cobrado si tiene
+            // otra suscripción de la misma clase, o si es uno de los 22"): antes esto confirmaba
+            // el duplicado a ciegas ("el Excel ya está revisado, no hace falta volver a
+            // preguntar") — pero eso es justo lo que no queremos para "Aplicar" ahora que Eva
+            // trabaja solo con Blokes. Ya no se confirma nada por defecto; solo si el frontend lo
+            // manda explícito (tras enseñar el aviso, igual que en "Marcar cobrado").
+            if (!empty($confirmar['confirmarDuplicado'])) $req->set_param('confirmarDuplicado', true);
+            if (!empty($confirmar['confirmarRevisionBug1711'])) $req->set_param('confirmarRevisionBug1711', true);
+            return superadmin_gestion_marcar_cobrado($req);
+        }
+        // 19/11 (cowork §06:25, punto 1): un externo no tiene ni duplicado de clase ni el bug de
+        // los 22 (no pasa por WooCommerce) — simular aquí solo enseña lo que se escribiría, sin
+        // llamar nunca a superadmin_gestion_externos_pago() de verdad.
+        if ($simular) {
+            return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+                'tipo' => 'externo', 'externoId' => intval($cambio['match_id']), 'periodo' => (string) $cambio['mes'],
+                'importe' => floatval($datos['importe'] ?? 0), 'metodo' => $datos['metodo'] ?? 'efectivo', 'fecha' => $fecha,
+                'aviso' => 'Simulación: no se ha escrito nada. Los externos no pasan por WooCommerce, no hay factura ni duplicado de clase que comprobar.',
+            )));
+        }
+        $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/externos/' . intval($cambio['match_id']) . '/pago');
+        $req->set_param('id', intval($cambio['match_id']));
+        $req->set_param('periodo', (string) $cambio['mes']);
+        $req->set_param('importe', floatval($datos['importe'] ?? 0));
+        $req->set_param('metodo', $datos['metodo'] ?? 'efectivo');
+        $req->set_param('fecha', $fecha);
+        return superadmin_gestion_externos_pago($req);
+    }
+    if ($cambio['tipo'] === 'nota') {
+        if (!$cambio['match_tipo'] || !$cambio['match_id']) {
+            return new WP_Error('sin_match', 'No hay nadie emparejado por teléfono para esta nota — apúntala a mano en Grupos.', array('status' => 409));
+        }
+        $nota = (string) ($datos['notaDespues'] ?? '');
+        if ($cambio['match_tipo'] === 'sub') {
+            $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/nota');
+            $req->set_param('sub_id', intval($cambio['match_id']));
+            $req->set_param('nota', $nota);
+            return superadmin_gestion_nota($req);
+        }
+        global $wpdb;
+        $wpdb->update(blokes_externos_table(), array(
+            'notas' => mb_substr(sanitize_text_field($nota), 0, 500), 'updated_at' => current_time('mysql'),
+        ), array('id' => intval($cambio['match_id'])));
+        blokes_gestion_log(intval($cambio['match_id']), 'externo_actualizar', null, array('notas' => $nota), 'Nota detectada en el Excel de Eva (sincronización).');
+        return rest_ensure_response(array('success' => true));
+    }
+    if ($cambio['tipo'] === 'web_sin_fila') {
+        // Reintenta exactamente la misma escritura que falló por no encontrar la fila — en
+        // cuanto Eva añada a la persona al Excel, "Aplicar" la escribe sola sin volver a teclear
+        // nada (Ramiro, 6/11 16:04). Si todavía no está, se queda pendiente (nunca se marca
+        // resuelto sin haber escrito el dato de verdad).
+        $escrito = blokes_sync_grupos_escribir_cobro(
+            $datos['dia'] ?? '', $datos['horario'] ?? '', $cambio['telefono'], $cambio['nombre'],
+            (string) $cambio['mes'], floatval($datos['importe'] ?? 0), (string) ($datos['metodo'] ?? ''),
+            (string) ($datos['fecha'] ?? ''), $datos['subId'] ?? null
+        );
+        if (!$escrito) {
+            // 19/11 (cowork §06:25, punto 5): si el motivo real es "fallo_escritura" (cuota de
+            // Sheets), la fila SÍ existe — decirle a Eva que "añada a la persona" no tiene
+            // sentido y la confundiría más que ayudarla.
+            $msg_sin_fila = ($datos['motivo'] ?? 'sin_fila') === 'fallo_escritura'
+                ? 'No se pudo escribir en el Excel (la Hoja de Google no respondió — probablemente cuota agotada). Vuelve a pulsar Aplicar en un minuto.'
+                : 'Todavía no se encuentra esta fila en el Excel — añade a la persona y vuelve a pulsar Aplicar.';
+            return new WP_Error('sin_fila', $msg_sin_fila, array('status' => 409));
+        }
+        return rest_ensure_response(array('success' => true));
+    }
+    return null; // resto de tipos: sin efecto todavía, solo queda visto en la bandeja
+}
+
 function superadmin_sync_grupos_cambio_aplicar($request) {
     blokes_sync_grupos_ensure_tables();
     global $wpdb;
@@ -5348,39 +9739,121 @@ function superadmin_sync_grupos_cambio_aplicar($request) {
     $cambio = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla} WHERE id = %d", $id), ARRAY_A);
     if (!$cambio) return new WP_Error('not_found', 'Cambio no encontrado.', array('status' => 404));
     if ($cambio['estado'] !== 'pendiente') return new WP_Error('ya_resuelto', 'Este cambio ya estaba resuelto.', array('status' => 409));
+    // 19/11 (cowork §06:25, punto 1): "Aplicar" ya tiene su propia simulación, como "Marcar
+    // cobrado" — solo para "pago_nuevo" (nota/teléfono/etc. no tocan dinero, siguen aplicándose
+    // de un clic). Nunca escribe nada mientras $simular sea true.
+    $simular = $cambio['tipo'] === 'pago_nuevo' && (bool) $request->get_param('simular');
+    // 18/11 (cowork, URGENTE: 499 "pago nuevo" de 2024-03 a 2026-11 colándose como pendientes) —
+    // "Aplicar" nunca debe poder escribir un cobro/factura de un mes de hace más de 2 meses sin
+    // que alguien lo confirme a propósito, pase lo que pase con la detección de arriba. Se salta
+    // en modo simulación — ahí el aviso se enseña como dato, nunca como bloqueo duro.
+    $mes_corte_aplicar = blokes_mes_mas(date('Y-m'), -2);
+    $es_mes_antiguo = $cambio['tipo'] === 'pago_nuevo' && $cambio['mes'] && $cambio['mes'] < $mes_corte_aplicar;
+    if (!$simular && $es_mes_antiguo && !$request->get_param('confirmarMesAntiguo')) {
+        return new WP_Error('mes_antiguo', 'Este pago es de ' . $cambio['mes'] . ', de hace más de 2 meses — revísalo antes de aplicarlo (podría ser un dato viejo que no hace falta cobrar ya). Si de verdad quieres aplicarlo, marca "Confirmo que es de verdad este mes" y vuelve a pulsar Aplicar.', array('status' => 409));
+    }
     $datos = json_decode($cambio['datos_json'], true) ?: array();
+    $confirmar = array(
+        'confirmarDuplicado' => (bool) $request->get_param('confirmarDuplicado'),
+        'confirmarRevisionBug1711' => (bool) $request->get_param('confirmarRevisionBug1711'),
+    );
 
-    $resultado = null;
-    if ($cambio['tipo'] === 'pago_nuevo') {
-        if (!$cambio['match_tipo'] || !$cambio['match_id']) {
-            return new WP_Error('sin_match', 'No hay nadie emparejado por teléfono para este pago — apúntalo a mano en Grupos.', array('status' => 409));
-        }
-        $fecha = (string) ($datos['fecha'] ?? '');
-        $fecha = preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha) ? $fecha : current_time('Y-m-d');
-        if ($cambio['match_tipo'] === 'sub') {
-            $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
-            $req->set_param('sub_id', intval($cambio['match_id']));
-            $req->set_param('importe', floatval($datos['importe'] ?? 0));
-            $req->set_param('metodo', blokes_sync_grupos_metodo_a_cobrado($datos['metodo'] ?? ''));
-            $req->set_param('fecha', $fecha);
-            $req->set_param('nota', 'Detectado en el Excel de Eva (sincronización automática, pestaña ' . $cambio['pestana'] . ').');
-            $req->set_param('simular', false);
-            $resultado = superadmin_gestion_marcar_cobrado($req);
-        } else {
-            $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/externos/' . intval($cambio['match_id']) . '/pago');
-            $req->set_param('id', intval($cambio['match_id']));
-            $req->set_param('periodo', (string) $cambio['mes']);
-            $req->set_param('importe', floatval($datos['importe'] ?? 0));
-            $req->set_param('metodo', $datos['metodo'] ?? 'efectivo');
-            $req->set_param('fecha', $fecha);
-            $resultado = superadmin_gestion_externos_pago($req);
-        }
-        if (is_wp_error($resultado)) return new WP_Error($resultado->get_error_code(), $resultado->get_error_message(), array('status' => 409));
+    $resultado = blokes_sync_grupos_aplicar_efecto($cambio, $datos, $simular, $confirmar);
+    if (is_wp_error($resultado)) return new WP_Error($resultado->get_error_code(), $resultado->get_error_message(), array('status' => 409));
+
+    if ($simular) {
+        $data_sim = $resultado ? $resultado->get_data() : null;
+        if (is_array($data_sim) && is_array($data_sim['data'] ?? null)) $data_sim['data']['mesAntiguo'] = $es_mes_antiguo;
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $data_sim['data'] ?? null));
     }
 
     $u = wp_get_current_user();
     $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => $u ? $u->user_login : ''), array('id' => $id));
     return rest_ensure_response(array('success' => true, 'data' => $resultado ? $resultado->get_data() : null));
+}
+
+// 17/11 18:15 (cowork): "Cobro web sin fila" viejos (Raúl Bañez y los demás de «V 19.00») se
+// quedaron pendientes de ANTES del arreglo de la búsqueda por teléfono en otras pestañas
+// (9efad0e) — reintenta cada uno de golpe con la misma lógica de "Aplicar" de uno en uno;
+// los que ya encuentren su fila quedan aplicados, los que sigan sin encontrarla se quedan
+// pendientes igual (nunca se pierden ni se descartan solos).
+function superadmin_sync_grupos_reevaluar_sin_fila($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = %s", 'web_sin_fila'
+    ), ARRAY_A);
+    $aplicados = 0; $siguen_pendientes = 0;
+    $u = wp_get_current_user();
+    // 18/11 (cowork, los 4 de «V 19.00» que siguen sin encontrarse): devuelve el detalle de
+    // cada uno (pestaña buscada, teléfono usado, si al final se encontró) para poder ver DÓNDE
+    // falla sin tener que ir al log de gestión aparte.
+    $detalle = array();
+    foreach ($pendientes as $cambio) {
+        $datos = json_decode($cambio['datos_json'], true) ?: array();
+        $resultado = blokes_sync_grupos_aplicar_efecto($cambio, $datos);
+        $encontrado = !is_wp_error($resultado);
+        $detalle[] = array(
+            'id' => intval($cambio['id']), 'nombre' => $cambio['nombre'], 'telefono' => $cambio['telefono'],
+            'pestanaBuscada' => $cambio['pestana'], 'mes' => $cambio['mes'],
+            'dia' => $datos['dia'] ?? null, 'horario' => $datos['horario'] ?? null,
+            'motivo' => $datos['motivo'] ?? 'sin_fila',
+            'encontrado' => $encontrado, 'error' => $encontrado ? null : $resultado->get_error_message(),
+        );
+        if (!$encontrado) { $siguen_pendientes++; continue; }
+        $wpdb->update($tabla, array('estado' => 'aplicado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => ($u ? $u->user_login : '') . ' · reevaluado'), array('id' => intval($cambio['id'])));
+        $aplicados++;
+    }
+    return rest_ensure_response(array('success' => true, 'aplicados' => $aplicados, 'siguenPendientes' => $siguen_pendientes, 'detalle' => $detalle));
+}
+
+// 18/11 (cowork, pestanas_grupos §19:45): las propuestas de "pago nuevo" que ya estaban
+// pendientes de ANTES del arreglo de "TA"=tarjeta (792f28b) se quedaron con el método
+// equivocado guardado en su propio datos_json — nunca se corrigen solas, porque el arreglo solo
+// cambia cómo se LEE el Excel a partir de ahora, no lo que ya se guardó. Esto relee la fila de
+// verdad en el Excel y corrige el método guardado en cada pendiente de 'pago_nuevo' si ha
+// cambiado — sin aplicar nada en WooCommerce todavía, solo corrige la PROPUESTA para que al
+// pulsar "Aplicar" ya salga con el método bueno.
+function superadmin_sync_grupos_reevaluar_metodo_pago_nuevo($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $activa = blokes_sync_grupos_sheet_activa();
+    if (!$activa['id']) return new WP_Error('falta_config', 'No hay Hoja configurada.', array('status' => 400));
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = %s", 'pago_nuevo'
+    ), ARRAY_A);
+    $cache_pestanas = array(); // pestana => filas ya leídas, para no releer la misma pestaña una vez por fila
+    $corregidos = 0; $sin_cambio = 0; $sin_fila = 0;
+    foreach ($pendientes as $cambio) {
+        $pestana = $cambio['pestana'];
+        if (!array_key_exists($pestana, $cache_pestanas)) {
+            $valores = blokes_sync_grupos_leer_valores($activa['id'], $pestana);
+            $cache_pestanas[$pestana] = is_wp_error($valores) ? null : blokes_sync_grupos_leer_pestana_filas($valores);
+        }
+        $r = $cache_pestanas[$pestana];
+        if (!$r) { $sin_fila++; continue; }
+        $tel_norm = blokes_externos_normaliza_telefono((string) $cambio['telefono']);
+        $fila_actual = null;
+        if ($tel_norm) {
+            foreach ($r['filas'] as $f) { if ($f['telefono'] === $tel_norm) { $fila_actual = $f; break; } }
+        }
+        if (!$fila_actual && $cambio['nombre']) {
+            $nombre_norm = mb_strtolower(trim((string) $cambio['nombre']));
+            foreach ($r['filas'] as $f) { if (mb_strtolower(trim($f['nombre'])) === $nombre_norm) { $fila_actual = $f; break; } }
+        }
+        if (!$fila_actual) { $sin_fila++; continue; }
+        $pago_actual = $fila_actual['pagos'][$cambio['mes']] ?? null;
+        if (!$pago_actual) { $sin_fila++; continue; }
+        $datos = json_decode($cambio['datos_json'], true) ?: array();
+        $metodo_nuevo = $pago_actual['metodo'] ?? null;
+        if ($metodo_nuevo === null || $metodo_nuevo === ($datos['metodo'] ?? null)) { $sin_cambio++; continue; }
+        $datos['metodo'] = $metodo_nuevo;
+        $wpdb->update($tabla, array('datos_json' => wp_json_encode($datos)), array('id' => intval($cambio['id'])));
+        $corregidos++;
+    }
+    return rest_ensure_response(array('success' => true, 'corregidos' => $corregidos, 'sinCambio' => $sin_cambio, 'sinFila' => $sin_fila));
 }
 
 function superadmin_sync_grupos_cambio_descartar($request) {
@@ -5394,6 +9867,424 @@ function superadmin_sync_grupos_cambio_descartar($request) {
     $u = wp_get_current_user();
     $wpdb->update($tabla, array('estado' => 'descartado', 'resuelto_at' => current_time('mysql'), 'resuelto_por' => $u ? $u->user_login : ''), array('id' => $id));
     return rest_ensure_response(array('success' => true));
+}
+
+// Limpieza única (cowork, 17/11 16:20, tras probar 589ab3a; reutilizada el 18/11 para los 499
+// "pago nuevo" de 2024-03 a 2026-11 que aparecieron con el sync del 17/11 19:05): descarta de
+// golpe las propuestas pendientes de pestañas Balance y CUALQUIER "pago nuevo" de hace más de 2
+// meses, sea de donde sea que venga el motivo real — nunca se borra nada, solo se marca
+// 'descartado' con quién y por qué, igual que "descartar" de una en una. Si de verdad hiciera
+// falta cobrar alguno de esos meses, "Aplicar" sigue pidiendo confirmación aparte
+// (confirmarMesAntiguo) antes de escribir nada en WooCommerce.
+function superadmin_sync_grupos_limpiar_pendientes_589ab3a($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $mes_corte = blokes_mes_mas(date('Y-m'), -2);
+    $pendientes = $wpdb->get_results("SELECT id, pestana, tipo, mes FROM {$tabla} WHERE estado = 'pendiente'", ARRAY_A);
+    $ids = array();
+    foreach ($pendientes as $p) {
+        $es_balance = stripos($p['pestana'], 'balance') !== false;
+        $es_pago_viejo = $p['tipo'] === 'pago_nuevo' && $p['mes'] !== null && $p['mes'] < $mes_corte;
+        if ($es_balance || $es_pago_viejo) $ids[] = intval($p['id']);
+    }
+    if ($ids) {
+        $u = wp_get_current_user();
+        $ph = implode(',', array_fill(0, count($ids), '%d'));
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$tabla} SET estado = 'descartado', resuelto_at = %s,
+             resuelto_por = %s WHERE id IN ($ph)",
+            current_time('mysql'), ($u ? $u->user_login : '') . ' · pago de hace más de 2 meses, descartado en limpieza (revisar a mano si de verdad falta cobrarlo)', ...$ids
+        ));
+    }
+    return rest_ensure_response(array('success' => true, 'descartados' => count($ids)));
+}
+
+// Diagnóstico (18/11, GRAVE: 499 "pago nuevo" de 2024-03 a 2026-11 desde el sync del 17/11
+// 19:05, 12 con método "(Paco)") — antes de adivinar la causa sin verla, esto enseña para una
+// muestra de los "pago nuevo" viejos pendientes qué hay de verdad en la FOTO (snapshot) de esa
+// fila: si existe, cuántos meses tiene guardados, y si el mes en cuestión está ahí o no — para
+// distinguir entre "la foto no tiene ese mes guardado" (bug real en el snapshot) y "la fila no
+// emparejó con ninguna foto" (clave distinta de la que se guardó antes).
+function superadmin_sync_grupos_diagnostico_pago_viejo($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $limit = max(1, min(100, intval($request->get_param('limit')) ?: 15));
+    $tabla = blokes_sync_grupos_cambios_table();
+    $tabla_snap = blokes_sync_grupos_snapshot_table();
+    $mes_corte = blokes_mes_mas(date('Y-m'), -2);
+    $pendientes = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL AND mes < %s ORDER BY id DESC LIMIT %d",
+        $mes_corte, $limit
+    ), ARRAY_A);
+    $muestra = array();
+    foreach ($pendientes as $c) {
+        $clave = blokes_sync_grupos_clave($c['nombre'], $c['telefono']);
+        $snap = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$tabla_snap} WHERE pestana = %s AND clave = %s", $c['pestana'], $clave), ARRAY_A);
+        $pagos_snap = $snap ? (json_decode($snap['pagos_json'], true) ?: array()) : array();
+        $datos = json_decode($c['datos_json'], true) ?: array();
+        $muestra[] = array(
+            'id' => intval($c['id']), 'pestana' => $c['pestana'], 'nombre' => $c['nombre'], 'telefono' => $c['telefono'],
+            'clave' => $clave, 'mes' => $c['mes'], 'importePropuesto' => $datos['importe'] ?? null, 'metodoPropuesto' => $datos['metodo'] ?? null,
+            'matchTipo' => $c['match_tipo'], 'matchLabel' => $c['match_label'],
+            'snapshotExiste' => (bool) $snap, 'snapshotMesesGuardados' => count($pagos_snap),
+            'snapshotTieneEseMes' => isset($pagos_snap[$c['mes']]),
+            'snapshotPagoEseMes' => $pagos_snap[$c['mes']] ?? null,
+            'snapshotActualizadoAt' => $snap['updated_at'] ?? null,
+        );
+    }
+    $total_viejos = intval($wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL AND mes < %s", $mes_corte
+    )));
+    // Cowork, 18/11 07:10: "casi todos sin emparejar" e "incluye las pestañas de Yoga" — este
+    // desglose por pestaña y por si tiene match o no deja ver de un vistazo si el problema está
+    // concentrado en unas pocas pestañas concretas (p. ej. Yoga) en vez de repartido por todas.
+    $por_pestana = $wpdb->get_results($wpdb->prepare(
+        "SELECT pestana, COUNT(*) as total, SUM(match_tipo IS NULL OR match_tipo = '') as sinEmparejar
+         FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL AND mes < %s
+         GROUP BY pestana ORDER BY total DESC", $mes_corte
+    ), ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'totalPendientesViejos' => $total_viejos, 'porPestana' => $por_pestana, 'muestra' => $muestra));
+}
+
+// 18/11 (Ramiro, relayando cowork §07:50: "cierra solas las propuestas que ya coinciden con lo
+// guardado") — misma comprobación que el arreglo de blokes_sync_grupos_sincronizar() (importe
+// igual al de la foto = no es dinero nuevo) — GRAVE, roto (cowork, 18/11 09:30): comparar contra
+// la FOTO (snapshot) nunca sirve para saber si un pago "ya está resuelto", porque la foto ES el
+// propio Excel (se sobreescribe con la misma lectura que crea la propuesta) — importe y foto
+// coinciden SIEMPRE, así que esto descartaba también pagos reales que Eva acababa de apuntar y
+// que todavía no habían llegado a la web (17 de octubre/noviembre: Ruano, Aguí, Torres,
+// Silvestre, Corregidor, Heras, Irurozki, Yoga...). Reescrito para comparar contra la WEB de
+// verdad: un "pago nuevo" solo se cierra solo si YA hay un cobro real para ese mes — un pedido
+// completed/processing de esa suscripción (mismo criterio que ya usa
+// blokes_sync_grupos_sub_ya_cobrado_mes(), el que ya protege "Aplicar" de un cobro duplicado) o
+// una fila en la tabla de pagos de externos para ese periodo. Si no hay match, o el match no
+// tiene nada cobrado todavía en la web, se deja pendiente — nunca se descarta a ciegas.
+function blokes_sync_grupos_cerrar_pago_nuevo_resueltos($motivo) {
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL", ARRAY_A
+    );
+    $ids = array(); $revisados = 0;
+    foreach ($pendientes as $c) {
+        $revisados++;
+        if (!$c['match_tipo'] || !$c['match_id']) continue; // sin emparejar: nunca se puede saber si ya está cobrado
+        // 18/11 (cowork §09:50, Cecilia DI Zeo — Yoga): blokes_sync_grupos_emparejar() solo mira
+        // el teléfono cuando hay un único candidato, SIN comprobar el nombre — si ese teléfono es
+        // en realidad de otra persona (familia), el match_tipo/match_id de esta propuesta
+        // apuntaría a la suscripción/externo de otra persona. Está bien para muchos usos (es solo
+        // una propuesta que alguien revisa antes de Aplicar), pero aquí decide si se CIERRA SOLA
+        // una propuesta — así que antes de cerrar, confirma que el nombre de la fila del Excel se
+        // parece al nombre real del match; si no se parece (o cualquiera de los dos nombres está
+        // vacío o es solo un apodo sin espacio), nunca cierra solo, se queda pendiente para que
+        // alguien lo mire a mano.
+        $nombre_fila_norm = blokes_externos_normaliza_nombre((string) $c['nombre']);
+        if ($c['match_tipo'] === 'sub') {
+            if (function_exists('wcs_get_subscription')) {
+                $sub_match = wcs_get_subscription(intval($c['match_id']));
+                $nombre_sub_norm = $sub_match ? blokes_externos_normaliza_nombre(trim($sub_match->get_billing_first_name() . ' ' . $sub_match->get_billing_last_name())) : '';
+            } else { $nombre_sub_norm = ''; }
+            $nombres_confirman = $nombre_fila_norm !== '' && strpos($nombre_fila_norm, ' ') !== false
+                && $nombre_sub_norm !== '' && strpos($nombre_sub_norm, ' ') !== false
+                && blokes_externos_nombres_parecidos($nombre_fila_norm, $nombre_sub_norm);
+            if (!$nombres_confirman) continue;
+            if (blokes_sync_grupos_sub_ya_cobrado_mes(intval($c['match_id']), (string) $c['mes'])) $ids[] = intval($c['id']);
+            continue;
+        }
+        if ($c['match_tipo'] === 'externo') {
+            $externo_match = $wpdb->get_row($wpdb->prepare("SELECT nombre FROM " . blokes_externos_table() . " WHERE id = %d", intval($c['match_id'])), ARRAY_A);
+            $nombre_externo_norm = $externo_match ? blokes_externos_normaliza_nombre($externo_match['nombre']) : '';
+            $nombres_confirman = $nombre_fila_norm !== '' && strpos($nombre_fila_norm, ' ') !== false
+                && $nombre_externo_norm !== '' && strpos($nombre_externo_norm, ' ') !== false
+                && blokes_externos_nombres_parecidos($nombre_fila_norm, $nombre_externo_norm);
+            if (!$nombres_confirman) continue;
+            $tabla_ext_pagos = blokes_externos_pagos_table();
+            $pago_externo = $wpdb->get_row($wpdb->prepare(
+                "SELECT importe FROM {$tabla_ext_pagos} WHERE externo_id = %d AND periodo = %s", intval($c['match_id']), (string) $c['mes']
+            ), ARRAY_A);
+            if ($pago_externo) {
+                $datos = json_decode($c['datos_json'], true) ?: array();
+                if (floatval($pago_externo['importe']) === floatval($datos['importe'] ?? 0)) $ids[] = intval($c['id']);
+            }
+        }
+    }
+    if ($ids) {
+        $ph = implode(',', array_fill(0, count($ids), '%d'));
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$tabla} SET estado = 'descartado', resuelto_at = %s, resuelto_por = %s WHERE id IN ($ph)",
+            current_time('mysql'), $motivo, ...$ids
+        ));
+    }
+    return array('revisados' => $revisados, 'descartados' => count($ids));
+}
+
+function superadmin_sync_grupos_limpiar_pago_nuevo_mismo_importe($request) {
+    blokes_sync_grupos_ensure_tables();
+    $u = wp_get_current_user();
+    $r = blokes_sync_grupos_cerrar_pago_nuevo_resueltos(($u ? $u->user_login : '') . ' · ya cobrado de verdad en la web para ese mes');
+    return rest_ensure_response(array('success' => true, 'revisados' => $r['revisados'], 'descartados' => $r['descartados']));
+}
+
+// 19/11 (cowork §06:25, punto 2): limpieza única de los "pago_nuevo" que ya estaban duplicados
+// de ANTES del arreglo en blokes_sync_grupos_upsert_cambio() (Anne Sophie Onadeko, ids 1967 y
+// 1973 — mismo teléfono+mes+importe, pestaña L-X 17.30 KIDS). Agrupa los pendientes por
+// teléfono+mes+importe, se queda con el más reciente (id más alto) y descarta el resto —
+// nunca borra. El arreglo de upsert_cambio ya evita que se creen más duplicados nuevos.
+function superadmin_sync_grupos_limpiar_pago_nuevo_duplicados($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $pendientes = $wpdb->get_results(
+        "SELECT * FROM {$tabla} WHERE estado = 'pendiente' AND tipo = 'pago_nuevo' AND mes IS NOT NULL ORDER BY id ASC", ARRAY_A
+    );
+    $grupos = array();
+    foreach ($pendientes as $p) {
+        $tel_norm = blokes_externos_normaliza_telefono((string) $p['telefono']);
+        if (!$tel_norm) continue;
+        $datos = json_decode($p['datos_json'], true) ?: array();
+        $importe_redondeado = round(floatval($datos['importe'] ?? 0), 2);
+        $clave = $tel_norm . '|' . $p['mes'] . '|' . $importe_redondeado;
+        $grupos[$clave][] = intval($p['id']);
+    }
+    $ids_descartar = array();
+    foreach ($grupos as $ids) {
+        if (count($ids) < 2) continue;
+        sort($ids);
+        array_pop($ids); // el más reciente (id más alto) se queda; el resto se descarta
+        foreach ($ids as $id) $ids_descartar[] = $id;
+    }
+    if ($ids_descartar) {
+        $u = wp_get_current_user();
+        $ph = implode(',', array_fill(0, count($ids_descartar), '%d'));
+        $wpdb->query($wpdb->prepare(
+            "UPDATE {$tabla} SET estado = 'descartado', resuelto_at = %s, resuelto_por = %s WHERE id IN ($ph)",
+            current_time('mysql'), ($u ? $u->user_login : '') . ' · propuesta duplicada (mismo teléfono+mes+importe), se queda la más reciente', ...$ids_descartar
+        ));
+    }
+    return rest_ensure_response(array('success' => true, 'descartados' => count($ids_descartar)));
+}
+
+// Deshacer (18/11 09:30, cowork): la limpieza "mismo importe ya en la foto" (4f12088/b3767f5)
+// comparaba contra el propio Excel y descartó también pagos reales (17 de octubre/noviembre:
+// Ruano, Aguí, Torres, Silvestre, Corregidor, Heras, Irurozki, Yoga...) que todavía no habían
+// llegado a la web. Esto vuelve a poner en 'pendiente' TODO lo que se descartó por ese motivo
+// (tanto el botón manual como el cierre automático de b3767f5 usaban el mismo texto), y acto
+// seguido reevalúa cada uno con la comprobación ya arreglada (contra la web de verdad, nunca
+// contra la foto) — así solo quedan descartados los que de verdad ya estén cobrados; el resto
+// vuelve a "Cambios del Excel" pendiente, visible para Aplicar.
+function superadmin_sync_grupos_deshacer_limpieza_mismo_importe($request) {
+    blokes_sync_grupos_ensure_tables();
+    global $wpdb;
+    $tabla = blokes_sync_grupos_cambios_table();
+    $u = wp_get_current_user();
+    $reabiertos = $wpdb->query($wpdb->prepare(
+        "UPDATE {$tabla} SET estado = 'pendiente', resuelto_at = NULL, resuelto_por = %s
+         WHERE estado = 'descartado' AND tipo = 'pago_nuevo' AND resuelto_por LIKE %s",
+        ($u ? $u->user_login : '') . ' · reabierto (la limpieza comparaba contra el Excel, nunca contra la web)', '%mismo importe ya en la foto%'
+    ));
+    $r = blokes_sync_grupos_cerrar_pago_nuevo_resueltos(($u ? $u->user_login : '') . ' · reevaluado tras deshacer: ya cobrado de verdad en la web para ese mes');
+    return rest_ensure_response(array('success' => true, 'reabiertos' => intval($reabiertos), 'siguenPendientes' => intval($reabiertos) - $r['descartados'], 'vueltosACerrarConfirmados' => $r['descartados']));
+}
+
+// 18/11 10:45 (cowork, URGENTE — GRAVE): informe de TODO lo que escribió de verdad en
+// WooCommerce el auto-aplicado de Sync Grupos (ahora desactivado, ver
+// blokes_sync_grupos_autoaplicar_si_seguro() más arriba) desde que existe — para que Ramiro
+// decida con la asesoría si hace falta rectificar algo con la AEAT. Nunca toca nada, solo lista:
+// cada fila de blokes_gestion_log con accion marcar_cobrado/marcar_cobrado_adelantado y
+// user_id = 0 — la marca de que fue el cron (/cron-tick, sin sesión de WordPress) quien disparó
+// la sincronización, nunca una persona con sesión abierta — junto con el pedido real de
+// WooCommerce (estado actual, total, método de pago) para poder cruzarlo con el banco y con
+// Verifactu. Si alguna vez se disparó también desde un "Sincronizar ahora" con sesión (poco
+// probable a las horas que vio cowork, pero posible), esa fila quedaría con el user_id de quien
+// pulsó el botón, no con 0 — este informe no la vería; dilo si hace falta ampliarlo a eso.
+function superadmin_sync_grupos_informe_autoaplicados($request) {
+    global $wpdb;
+    blokes_ensure_gestion_log_table();
+    $tabla_log = blokes_gestion_log_table();
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$tabla_log} WHERE user_id = 0 AND accion IN (%s, %s) ORDER BY id ASC",
+        'marcar_cobrado', 'marcar_cobrado_adelantado'
+    ), ARRAY_A);
+    $informe = array();
+    $total_importe = 0;
+    foreach ($rows as $r) {
+        $detalle = json_decode($r['detalle'], true) ?: array();
+        $despues = json_decode($r['despues'], true) ?: array();
+        $order_id = intval($despues['order_id'] ?? 0);
+        $order_estado = null; $order_total = null; $order_metodo_real = null; $factura_meta = null;
+        if ($order_id && function_exists('wc_get_order')) {
+            $order = wc_get_order($order_id);
+            if ($order) {
+                $order_estado = $order->get_status();
+                $order_total = $order->get_total();
+                $order_metodo_real = $order->get_payment_method_title();
+                // 18/11 (Ramiro: "nº de factura") — no sé con qué plugin se emite la factura
+                // real a la AEAT (Verifactu) ni la clave exacta donde guarda el número, así que
+                // en vez de adivinar una, busco entre TODOS los metadatos del pedido cualquier
+                // clave que suene a factura/invoice/verifactu y la enseño tal cual (clave +
+                // valor) — confírmame cuál es la de verdad y la dejo fija la próxima vez.
+                foreach ($order->get_meta_data() as $meta) {
+                    $k = $meta->key;
+                    if (stripos($k, 'factura') !== false || stripos($k, 'invoice') !== false || stripos($k, 'verifactu') !== false) {
+                        $v = $meta->value;
+                        if ($v !== '' && $v !== null && !is_array($v)) { $factura_meta = $k . ': ' . $v; break; }
+                    }
+                }
+            }
+        }
+        $sub = (function_exists('wcs_get_subscription')) ? wcs_get_subscription(intval($r['sub_id'])) : null;
+        $importe = floatval($detalle['importe'] ?? 0);
+        $total_importe += $importe;
+        $informe[] = array(
+            'logId' => intval($r['id']), 'subId' => intval($r['sub_id']),
+            'nombre' => $sub ? trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()) : null,
+            'accion' => $r['accion'], 'fechaRegistrado' => $r['created_at'],
+            'importe' => $importe, 'metodo' => $detalle['metodo'] ?? null, 'fechaDelExcel' => $detalle['fecha'] ?? null,
+            'orderId' => $order_id ?: null, 'orderEstado' => $order_estado, 'orderTotal' => $order_total, 'orderMetodoReal' => $order_metodo_real,
+            'facturaMeta' => $factura_meta,
+            'nota' => $detalle['nota'] ?? null,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'total' => count($informe), 'importeTotal' => round($total_importe, 2), 'filas' => $informe));
+}
+
+// 18/11 21:10 (cowork, GRAVE): esto dependía del log ('sync_grupos_cobro_escrito' cruzado con
+// 'marcar_cobrado', ambos user_id=0) para saber qué subId estaban afectados — ese cruce no
+// encontraba nada aunque las celdas seguían en el Excel, así que el bloqueo de abajo podía dejar
+// de proteger sin que nadie lo notara. Reescrita para usar blokes_sync_grupos_celdas_bug_1711()
+// (relee la Hoja de verdad, busca la firma en el contenido) — nunca depende del log.
+function blokes_sync_grupos_subs_afectadas_bug_1711() {
+    $subs = array();
+    foreach (blokes_sync_grupos_celdas_bug_1711() as $c) {
+        if ($c['subId']) $subs[] = intval($c['subId']);
+    }
+    return array_values(array_unique($subs));
+}
+function blokes_sync_grupos_sub_afectada_bug_1711($sub_id) {
+    static $cache = null;
+    if ($cache === null) $cache = blokes_sync_grupos_subs_afectadas_bug_1711();
+    return in_array(intval($sub_id), $cache, true);
+}
+
+// 18/11 (Ramiro/cowork): el auto-aplicado (ya desactivado) escribió celdas "TA 17/11/2026" en 22
+// alumnos cuyo mes todavía estaba vacío en el Excel, al completar su pedido de renovación
+// pendiente con fecha/método de la sincronización en vez de los reales. Informe de solo lectura
+// (blokes_sync_grupos_celdas_bug_1711() relee la Hoja y busca la firma en el contenido, nunca en
+// un log) + una simulación real (simular=true, nunca escribe nada) de qué pasaría si se cobrara
+// ahora ese mismo pedido, para responder "¿se emitiría una factura nueva?" con un dato real del
+// propio sistema en vez de una suposición.
+function superadmin_sync_grupos_informe_celdas_escritas($request) {
+    $celdas = blokes_sync_grupos_celdas_bug_1711();
+    $informe = array();
+    foreach ($celdas as $c) {
+        $simulacion = null;
+        if ($c['subId'] && function_exists('wcs_get_subscription')) {
+            $sub_sim = wcs_get_subscription($c['subId']);
+            if ($sub_sim) {
+                $req_sim = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
+                $req_sim->set_param('sub_id', $c['subId']);
+                $req_sim->set_param('importe', floatval($sub_sim->get_total()));
+                $req_sim->set_param('metodo', 'tarjeta');
+                $req_sim->set_param('simular', true);
+                $resp_sim = superadmin_gestion_marcar_cobrado($req_sim);
+                if (!is_wp_error($resp_sim)) {
+                    $data_sim = $resp_sim->get_data();
+                    $simulacion = array(
+                        'completariaPedidoYaExistente' => $data_sim['data']['completaraPedidoExistente'] ?? null,
+                        'seGuardariaComoAdelantadoSinFactura' => $data_sim['data']['seGuardaraComoAdelantado'] ?? null,
+                        'aviso' => $data_sim['data']['aviso'] ?? null,
+                    );
+                }
+            }
+        }
+        $informe[] = array(
+            'pestana' => $c['pestana'], 'fila' => $c['fila'], 'mes' => $c['mes'],
+            'nombre' => $c['nombre'], 'telefono' => $c['telefono'],
+            'importeActual' => $c['importe'], 'metodoActual' => $c['metodo'], 'fechaActual' => $c['fecha'],
+            'matchLabel' => $c['matchLabel'], 'subId' => $c['subId'], 'simulacionCobrarAhora' => $simulacion,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'total' => count($informe), 'filas' => $informe));
+}
+
+// 19/11 05:50 (cowork, GRAVE): la firma "tarjeta + 17/11/2026" también atrapa pagos REALES
+// hechos ese mismo día (Gema Herrero #7467, Sergi Escribano #6614, Alicia Escudero #6868, y la
+// fila de noviembre de Sergio Díaz #6526 — su fila de octubre sí es del bug) — no hay forma de
+// distinguirlos solo por el contenido de la celda, hace falta mirar el pedido real en
+// WooCommerce, como ya hizo cowork a mano. Por eso esto YA NO actúa sobre todo lo que detecte
+// blokes_sync_grupos_celdas_bug_1711() — exige la lista exacta de celdas a limpiar
+// (`celdas: [{pestana, fila, mes}, ...]`, los mismos campos que ya devuelve el informe), y
+// vuelve a comprobar cada una contra la detección de verdad justo antes de escribir — si alguna
+// de la lista ya no coincide con la firma (alguien la corrigió, o nunca lo era), se salta sin
+// tocarla. Borra (deja la celda vacía, nunca escribe un dato inventado) las 3 celdas (importe,
+// método, fecha). `simular=true` (Ramiro, 19/11: "con simulación primero") hace exactamente la
+// misma comprobación fila a fila, pero nunca llama a blokes_sync_grupos_escribir_valores() — en
+// vez de limpiadas/saltadas, devuelve el detalle de qué pasaría con cada celda de la lista.
+function superadmin_sync_grupos_limpiar_celdas_escritas($request) {
+    $simular = (bool) $request->get_param('simular');
+    $celdas_pedidas = $request->get_param('celdas');
+    if (!is_array($celdas_pedidas) || !$celdas_pedidas) {
+        return new WP_Error('falta_lista', 'Pasa "celdas": [{pestana, fila, mes}, ...] — la firma "tarjeta + 17/11/2026" también atrapa pagos reales de ese mismo día, así que ya no se limpia todo a ciegas. Usa las filas del informe que de verdad quieras borrar.', array('status' => 400));
+    }
+    $detectadas = blokes_sync_grupos_celdas_bug_1711();
+    $celdas = array();
+    $detalle_simulado = array();
+    foreach ($celdas_pedidas as $pedida) {
+        $encontrada = null;
+        foreach ($detectadas as $d) {
+            if ($d['pestana'] === ($pedida['pestana'] ?? null) && $d['fila'] === intval($pedida['fila'] ?? 0) && $d['mes'] === ($pedida['mes'] ?? null)) {
+                $encontrada = $d;
+                break;
+            }
+        }
+        if ($encontrada) $celdas[] = $encontrada;
+        if ($simular) {
+            $detalle_simulado[] = array(
+                'pestana' => $pedida['pestana'] ?? null, 'fila' => intval($pedida['fila'] ?? 0), 'mes' => $pedida['mes'] ?? null,
+                'seLimpiaria' => (bool) $encontrada,
+                'motivo' => $encontrada ? 'Coincide con la firma del bug ahora mismo — se dejarían vacías importe/método/fecha.' : 'Ya no coincide con la firma (alguien la corrigió, o nunca lo era) — no se tocaría.',
+                'importeActual' => $encontrada['importe'] ?? null, 'metodoActual' => $encontrada['metodo'] ?? null, 'fechaActual' => $encontrada['fecha'] ?? null,
+            );
+        }
+    }
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'seLimpiarian' => count($celdas), 'noSeTocarian' => count($celdas_pedidas) - count($celdas), 'detalle' => $detalle_simulado,
+        )));
+    }
+    $activa = blokes_sync_grupos_sheet_activa();
+    if (!$activa['id']) return new WP_Error('falta_config', 'No hay Hoja configurada.', array('status' => 400));
+    $cache_pestanas = array();
+    $limpiadas = 0; $saltadas = count($celdas_pedidas) - count($celdas);
+    foreach ($celdas as $c) {
+        $pestana = $c['pestana']; $fila_sheet = $c['fila']; $mes = $c['mes'];
+        if (!array_key_exists($pestana, $cache_pestanas)) {
+            $valores = blokes_sync_grupos_leer_valores($activa['id'], $pestana);
+            $cache_pestanas[$pestana] = is_wp_error($valores) ? null : blokes_sync_grupos_leer_pestana_filas($valores);
+        }
+        $rp = $cache_pestanas[$pestana];
+        if (!$rp) { $saltadas++; continue; }
+        $bloque = null;
+        foreach ($rp['bloquesLayout'] as $b) { if ($b['ym'] === $mes) { $bloque = $b; break; } }
+        if (!$bloque) { $saltadas++; continue; }
+        $prefijo = blokes_sync_grupos_a1_pestana($pestana) . '!';
+        $data = array();
+        if ($bloque['layout']['kind'] === 'cantidad') {
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['importe']) . $fila_sheet, 'values' => array(array('')));
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['metodo']) . $fila_sheet, 'values' => array(array('')));
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['fecha']) . $fila_sheet, 'values' => array(array('')));
+        } else {
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['transf']) . $fila_sheet, 'values' => array(array('')));
+            $data[] = array('range' => $prefijo . blokes_sync_grupos_col_letra($bloque['layout']['fecha']) . $fila_sheet, 'values' => array(array('')));
+        }
+        $res = blokes_sync_grupos_escribir_valores($activa['id'], $data);
+        if (is_wp_error($res)) { $saltadas++; continue; }
+        $u = wp_get_current_user();
+        blokes_gestion_log(0, 'sync_grupos_celda_limpiada', array('pestana' => $pestana, 'fila' => $fila_sheet, 'mes' => $mes, 'antes' => array('importe' => $c['importe'], 'metodo' => $c['metodo'], 'fecha' => $c['fecha'])), null, array('por' => $u ? $u->user_login : ''));
+        $limpiadas++;
+    }
+    return rest_ensure_response(array('success' => true, 'limpiadas' => $limpiadas, 'saltadas' => $saltadas));
 }
 
 // ============================================================
@@ -5497,6 +10388,44 @@ function blokes_ensure_club_days_table() {
         ));
         update_option('blokes_club_days_evento_ace', 1, false);
     }
+
+    // Decisión de Ramiro (4/11 06:27): 24 y 31 de diciembre 2026 (jueves) cierran de verdad este
+    // año — pero a diferencia del resto de festivos, SÍ gastan vacaciones de quien trabajaría ese
+    // día (Eva: "nunca se ha abierto" esos días; Ramiro: "quiero que sí les cuente como
+    // vacaciones"). Pasa esos dos días de `abre` (la regla general de "víspera = abre" que no
+    // aplica aquí) a `cierra_vacaciones`, y genera la solicitud de vacaciones aprobada para cada
+    // persona que trabaja los jueves — Alvaro, Sigurd, Sara y Eva; Lucía y Ana no tienen horario
+    // ese día (src/data/staffSchedule.js) — como "cierre colectivo", sin que cada uno tenga que
+    // pedirlo. Migración de una sola vez; de ahora en adelante el botón "Cierra (vacaciones)" de
+    // CTRL Time Off hace esto mismo para cualquier cierre nuevo parecido.
+    if (!get_option('blokes_club_days_cierre_vacaciones_dic_2026')) {
+        $ahora = current_time('mysql');
+        foreach (array('2026-12-24', '2026-12-31') as $fecha) {
+            $wpdb->update(blokes_club_days_table(), array(
+                'decision' => 'cierra_vacaciones', 'decidido_por' => 'ramiro', 'fecha_decision' => $ahora, 'updated_at' => $ahora,
+            ), array('fecha' => $fecha));
+        }
+        $trabajan_jueves = array('Alvaro', 'Sigurd', 'Sara', 'Eva');
+        $requests = get_option('blokes_timeoff_requests', array());
+        if (!is_array($requests)) $requests = array();
+        foreach (array('2026-12-24', '2026-12-31') as $fecha) {
+            foreach ($trabajan_jueves as $persona) {
+                $ya = false;
+                foreach ($requests as $r) {
+                    if (mb_strtolower($r['person'] ?? '') === mb_strtolower($persona) && ($r['from'] ?? '') === $fecha && ($r['to'] ?? '') === $fecha) { $ya = true; break; }
+                }
+                if ($ya) continue;
+                $requests[] = array(
+                    'id' => wp_generate_uuid4(), 'person' => $persona, 'from' => $fecha, 'to' => $fecha,
+                    'status' => 'aprobada', 'canal' => 'otro',
+                    'nota' => 'Cierre Nochebuena/Nochevieja — vacaciones para todos',
+                    'created_at' => $ahora, 'by' => 'ramiro (migración)',
+                );
+            }
+        }
+        update_option('blokes_timeoff_requests', $requests, false);
+        update_option('blokes_club_days_cierre_vacaciones_dic_2026', 1, false);
+    }
 }
 
 // GET /gestion/club-days?desde&hasta — lista ordenada por fecha, opcionalmente filtrada.
@@ -5522,14 +10451,16 @@ function blokes_club_day_fila($r) {
     );
 }
 
-// Fechas (YYYY-MM-DD → true) marcadas "cierra" en el calendario del club dentro de [desde,
-// hasta] (inclusive) — las usa Organización (Equipación) para no repartir tareas esos días,
-// igual que ya pasa con el fin de semana (NOTAS_PARA_CODE_calendario.md, 1/11).
+// Fechas (YYYY-MM-DD → true) marcadas "cierra" o "cierra_vacaciones" en el calendario del club
+// dentro de [desde, hasta] (inclusive) — las usa Organización (Equipación) para no repartir
+// tareas esos días, igual que ya pasa con el fin de semana (NOTAS_PARA_CODE_calendario.md, 1/11).
+// La sala está cerrada en los dos casos; que además cuente como vacaciones (cierra_vacaciones) no
+// cambia que no haya nadie para equipar.
 function blokes_club_days_cerrados($desde, $hasta) {
     global $wpdb;
     blokes_ensure_club_days_table();
     $fechas = $wpdb->get_col($wpdb->prepare(
-        "SELECT fecha FROM " . blokes_club_days_table() . " WHERE decision = 'cierra' AND fecha BETWEEN %s AND %s",
+        "SELECT fecha FROM " . blokes_club_days_table() . " WHERE decision IN ('cierra', 'cierra_vacaciones') AND fecha BETWEEN %s AND %s",
         $desde, $hasta
     ));
     return array_flip($fechas);
@@ -5570,7 +10501,11 @@ function superadmin_club_days_editar($request) {
     blokes_ensure_club_days_table();
     global $wpdb;
     $tipos = array('festivo_nacional', 'festivo_madrid', 'festivo_local', 'cierre', 'horario_especial', 'evento');
-    $decisiones = array('pendiente', 'abre', 'abre_horario_especial', 'cierra');
+    // "cierra_vacaciones" (Ramiro, 4/11 06:27): cierra, pero a diferencia de "cierra" SÍ gasta
+    // vacaciones de quien trabajaría ese día — para cierres como Nochebuena/Nochevieja que no son
+    // festivo oficial. El reparto real (quién tiene vacaciones ese día) lo decide el frontend
+    // (TimeOffTab.jsx) generando solicitudes aprobadas, no esta tabla.
+    $decisiones = array('pendiente', 'abre', 'abre_horario_especial', 'cierra', 'cierra_vacaciones');
     $id = intval($request['id']);
     $antes = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_club_days_table() . " WHERE id = %d", $id), ARRAY_A);
     if (!$antes) return new WP_Error('not_found', 'Día no encontrado.', array('status' => 404));
@@ -5580,7 +10515,7 @@ function superadmin_club_days_editar($request) {
     if (isset($body['decision'])) {
         $decision = sanitize_key($body['decision']);
         if (!in_array($decision, $decisiones, true)) {
-            return new WP_Error('bad_request', 'decision debe ser pendiente, abre, abre_horario_especial o cierra.', array('status' => 400));
+            return new WP_Error('bad_request', 'decision debe ser pendiente, abre, abre_horario_especial, cierra o cierra_vacaciones.', array('status' => 400));
         }
         $campos['decision'] = $decision;
         $u = wp_get_current_user();
@@ -5612,6 +10547,88 @@ function superadmin_club_days_borrar($request) {
     $wpdb->delete(blokes_club_days_table(), array('id' => $id));
     blokes_gestion_log(0, 'club_day_borrar', $fila, null, 'Borrado del calendario del club');
     return rest_ensure_response(array('success' => true));
+}
+
+/**
+ * Crea UN producto de abono nuevo duplicando $source_id (el mensual correspondiente, 5114/5115)
+ * — copia título, imagen, categorías, descripción, impuestos, stock, etc. tal cual, y solo
+ * cambia nombre/precio/periodicidad. El mensual de origen no se toca para nada, así que sus
+ * suscriptores actuales siguen intactos (NOTAS_PARA_CODE_abono_anual.md, Ramiro 06/11).
+ * Idempotente: si ya existe un producto con ese título exacto, devuelve su id sin crear otro.
+ *
+ * @param int    $source_id Id del producto mensual del que se parte (5114 o 5115).
+ * @param string $titulo    Título del abono nuevo.
+ * @param float  $precio    Precio del periodo completo (p.ej. 749 para el anual).
+ * @param string $period    'month' o 'year' (periodo de WooCommerce Subscriptions).
+ * @param int    $interval  Cada cuántos $period se renueva (3 para trimestral, 1 para anual).
+ * @return int|WP_Error Id del producto (nuevo o ya existente) o error.
+ */
+function blokes_crear_producto_abono_periodicidad($source_id, $titulo, $precio, $period, $interval) {
+    if (!function_exists('wc_get_product')) {
+        return new WP_Error('no_woocommerce', 'WooCommerce no está activo.', array('status' => 500));
+    }
+    $existente = get_page_by_title($titulo, OBJECT, 'product');
+    if ($existente) {
+        return (int) $existente->ID;
+    }
+    $source = wc_get_product($source_id);
+    if (!$source) {
+        return new WP_Error('origen_no_encontrado', 'No existe el producto de origen ' . $source_id . '.', array('status' => 404));
+    }
+    $data = $source->get_data();
+    unset($data['id'], $data['sku'], $data['slug'], $data['date_created'], $data['date_modified'], $data['name'], $data['meta_data']);
+
+    $nuevo = new WC_Product_Subscription();
+    $nuevo->set_props($data);
+    $nuevo->set_name($titulo);
+    $nuevo->set_regular_price((string) $precio);
+    $nuevo->set_sale_price('');
+    $nuevo->set_status('publish');
+    $nuevo->set_subscription_period($period);
+    $nuevo->set_subscription_period_interval((string) $interval);
+    $nuevo->set_subscription_price((string) $precio);
+    $nuevo->save();
+
+    $nuevo_id = $nuevo->get_id();
+    update_post_meta($nuevo_id, '_blokes_abono_generado_desde', $source_id);
+    $nuevo = wc_get_product($nuevo_id);
+    $sku_base = 'abono-' . sanitize_title($titulo);
+    $sku = $sku_base;
+    $i = 2;
+    while (wc_get_product_id_by_sku($sku) && wc_get_product_id_by_sku($sku) !== $nuevo_id) {
+        $sku = $sku_base . '-' . $i;
+        $i++;
+    }
+    $nuevo->set_sku($sku);
+    $nuevo->save();
+
+    blokes_gestion_log(0, 'abono_periodicidad_crear', null, array(
+        'id' => $nuevo_id, 'titulo' => $titulo, 'precio' => $precio, 'period' => $period, 'interval' => $interval, 'desde' => $source_id,
+    ), 'Alta de abono ' . $titulo . ' (duplicado de ' . $source_id . ')');
+
+    return $nuevo_id;
+}
+
+// POST /gestion/abonos/crear-periodicidad — crea los 4 abonos pedidos por Ramiro (anual y
+// trimestral, todo el día y mañana), duplicando 5115 y 5114 respectivamente. Se puede llamar
+// varias veces sin riesgo: los que ya existen (por título) no se vuelven a crear.
+function superadmin_abonos_crear_periodicidad($request) {
+    $pedidos = array(
+        array('source' => 5115, 'titulo' => 'Abono anual todo el día',      'precio' => 749, 'period' => 'year',  'interval' => 1),
+        array('source' => 5114, 'titulo' => 'Abono anual mañana',          'precio' => 629, 'period' => 'year',  'interval' => 1),
+        array('source' => 5115, 'titulo' => 'Abono trimestral todo el día', 'precio' => 195, 'period' => 'month', 'interval' => 3),
+        array('source' => 5114, 'titulo' => 'Abono trimestral mañana',     'precio' => 165, 'period' => 'month', 'interval' => 3),
+    );
+    $resultado = array();
+    foreach ($pedidos as $p) {
+        $id = blokes_crear_producto_abono_periodicidad($p['source'], $p['titulo'], $p['precio'], $p['period'], $p['interval']);
+        if (is_wp_error($id)) {
+            $resultado[] = array('titulo' => $p['titulo'], 'error' => $id->get_error_message());
+        } else {
+            $resultado[] = array('titulo' => $p['titulo'], 'id' => $id, 'url_editar' => admin_url('post.php?post=' . $id . '&action=edit'));
+        }
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $resultado));
 }
 
 /**
@@ -6047,6 +11064,9 @@ function superadmin_hist_pagos_estadisticas($request) {
 function blokes_contactos_table()      { global $wpdb; return $wpdb->prefix . 'blokes_contactos'; }
 function blokes_campanas_table()       { global $wpdb; return $wpdb->prefix . 'blokes_campanas'; }
 function blokes_campana_envios_table() { global $wpdb; return $wpdb->prefix . 'blokes_campana_envios'; }
+function blokes_campana_enlaces_table() { global $wpdb; return $wpdb->prefix . 'blokes_campana_enlaces'; }
+function blokes_campana_clics_table()   { global $wpdb; return $wpdb->prefix . 'blokes_campana_clics'; }
+function blokes_campana_conversiones_table() { global $wpdb; return $wpdb->prefix . 'blokes_campana_conversiones'; }
 
 function blokes_ensure_campanas_tables() {
     global $wpdb;
@@ -6093,6 +11113,7 @@ function blokes_ensure_campanas_tables() {
         listas            varchar(100) NOT NULL DEFAULT '',
         fecha_fin         date         NULL,
         activa            tinyint(1)   NOT NULL DEFAULT 1,
+        destino_enlace    varchar(255) NOT NULL DEFAULT '',
         created_at        datetime     NOT NULL,
         created_by        varchar(100) NOT NULL DEFAULT '',
         PRIMARY KEY (id)
@@ -6139,21 +11160,270 @@ function blokes_ensure_campanas_tables() {
         }
         update_option('blokes_campanas_utf8mb4', 1, false);
     }
+
+    // Trazabilidad de campañas (Ramiro, 11/11 05:35, prioridad 1: "lo hacemos a partir de
+    // ahora" — lo ya enviado sin enlace no se puede medir). Un token por campaña+contacto; el
+    // destino vive en la campaña (destino_enlace), no aquí, para que si se corrige se arregle
+    // también en los enlaces ya generados.
+    dbDelta("CREATE TABLE " . blokes_campana_enlaces_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        token       varchar(10)  NOT NULL DEFAULT '',
+        campana_id  bigint(20) UNSIGNED NOT NULL,
+        contacto_id bigint(20) UNSIGNED NOT NULL,
+        created_at  datetime     NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY token (token),
+        UNIQUE KEY campana_contacto (campana_id, contacto_id)
+    ) {$charset};");
+    // Log de clics (no cuenta a los bots de vista previa de WhatsApp/Facebook, que abren el
+    // enlace solos para hacer la tarjeta) — pensado para el embudo de Superadmin más adelante.
+    dbDelta("CREATE TABLE " . blokes_campana_clics_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        token       varchar(10)  NOT NULL DEFAULT '',
+        dispositivo varchar(20)  NOT NULL DEFAULT '',
+        repetido    tinyint(1)   NOT NULL DEFAULT 0,
+        created_at  datetime     NOT NULL,
+        PRIMARY KEY (id),
+        KEY token (token)
+    ) {$charset};");
+    // Conversiones (partes B/C de la nota de trazabilidad): alta/pedido tras un clic con
+    // cookie ("directa"), o mismo teléfono/email con alta nueva sin haber hecho clic
+    // ("indirecta"); e instalación de la app para la campaña de la compe.
+    dbDelta("CREATE TABLE " . blokes_campana_conversiones_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        campana_id  bigint(20) UNSIGNED NOT NULL,
+        contacto_id bigint(20) UNSIGNED NOT NULL,
+        tipo        varchar(20)  NOT NULL DEFAULT '',
+        atribucion  varchar(10)  NOT NULL DEFAULT '',
+        detalle     varchar(190) NOT NULL DEFAULT '',
+        created_at  datetime     NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY campana_contacto_tipo (campana_id, contacto_id, tipo)
+    ) {$charset};");
+
+    // Destinos conocidos de hoy (Ramiro, 11/11 05:35) — solo rellena las campañas que ya
+    // existen y todavía no tienen destino puesto, nunca sobreescribe uno editado a mano.
+    if (!get_option('blokes_campanas_destinos_iniciales')) {
+        global $wpdb;
+        $wpdb->query("UPDATE " . blokes_campanas_table() . " SET destino_enlace = 'https://rocomadrid.com/club/actividades-para-socios/' WHERE id = 1 AND destino_enlace = ''");
+        $wpdb->query("UPDATE " . blokes_campanas_table() . " SET destino_enlace = 'https://rocomadrid.com/app' WHERE id = 2 AND destino_enlace = ''");
+        update_option('blokes_campanas_destinos_iniciales', 1, false);
+    }
 }
+
+// Marca como "menor" cualquier contacto que hoy esté como "adulto" pero cuyo teléfono
+// pertenezca (también) a un alumno en un grupo de niños o adolescentes (edad != 'Adultos') —
+// Ramiro 12/11 15:52: el teléfono suele ser el del padre o la madre, pero la plantilla tiene
+// que ser la de familias según el alumno, no según de quién es el número. Devuelve la lista de
+// contactos cambiados (para el recuento que pide Ramiro). No se dispara sola: la llama a mano
+// quien tenga el permiso, desde Contactos → "Reclasificar por edad".
+function blokes_campanas_reclasificar_tipo_por_edad() {
+    global $wpdb;
+    $subs_por_tel = blokes_sync_grupos_subs_por_telefono();
+    $contactos = $wpdb->get_results(
+        "SELECT id, telefono, nombres FROM " . blokes_contactos_table() . " WHERE tipo = 'adulto'", ARRAY_A
+    );
+    $cambiados = array();
+    foreach ($contactos as $c) {
+        $tel = blokes_externos_normaliza_telefono($c['telefono']);
+        $subs = $subs_por_tel[$tel] ?? array();
+        $tiene_menor = false;
+        foreach ($subs as $s) {
+            if (($s['edad'] ?? 'Adultos') !== 'Adultos') { $tiene_menor = true; break; }
+        }
+        if (!$tiene_menor) continue;
+        $wpdb->update(blokes_contactos_table(), array('tipo' => 'menor', 'updated_at' => current_time('mysql')), array('id' => intval($c['id'])));
+        $cambiados[] = array('id' => intval($c['id']), 'telefono' => $tel, 'nombres' => json_decode($c['nombres'], true) ?: array());
+    }
+    return $cambiados;
+}
+
+// POST /campanas/contactos/reclasificar-tipo — botón "Reclasificar por edad" en Contactos.
+function superadmin_campanas_reclasificar_tipo($request) {
+    blokes_ensure_campanas_tables();
+    $cambiados = blokes_campanas_reclasificar_tipo_por_edad();
+    return rest_ensure_response(array('success' => true, 'data' => array('cambiados' => count($cambiados), 'detalle' => $cambiados)));
+}
+
+// Token de 6-8 caracteres para /c/{token} — uno por campaña+contacto, reutilizable (si ya
+// existe, se devuelve el mismo en vez de crear otro).
+function blokes_campana_enlace_token($campana_id, $contacto_id) {
+    global $wpdb;
+    $existente = $wpdb->get_var($wpdb->prepare(
+        "SELECT token FROM " . blokes_campana_enlaces_table() . " WHERE campana_id = %d AND contacto_id = %d",
+        $campana_id, $contacto_id
+    ));
+    if ($existente) return $existente;
+    $alfabeto = 'abcdefghijkmnpqrstuvwxyz23456789'; // sin 0/o/1/l/i, para que no se confundan al teclearlo a mano
+    do {
+        $token = '';
+        for ($i = 0; $i < 7; $i++) $token .= $alfabeto[random_int(0, strlen($alfabeto) - 1)];
+        $ya_existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . blokes_campana_enlaces_table() . " WHERE token = %s", $token));
+    } while ($ya_existe);
+    $wpdb->insert(blokes_campana_enlaces_table(), array(
+        'token' => $token, 'campana_id' => $campana_id, 'contacto_id' => $contacto_id, 'created_at' => current_time('mysql'),
+    ));
+    return $token;
+}
+
+// Busca campaña+contacto a partir de un token — lo usan /c/{token}, el checkout de WooCommerce
+// y la instalación de la app. Asume que ya se está en el blog del Club (donde viven las tablas
+// de campañas) cuando se llama.
+function blokes_campana_enlace_por_token($token) {
+    global $wpdb;
+    return $wpdb->get_row($wpdb->prepare(
+        "SELECT campana_id, contacto_id FROM " . blokes_campana_enlaces_table() . " WHERE token = %s", $token
+    ), ARRAY_A);
+}
+
+// Registra una conversión una sola vez por campaña+contacto+tipo — la clave única de la tabla
+// hace de guarda, así que llamarlo dos veces para lo mismo no duplica nada.
+function blokes_campana_registrar_conversion($campana_id, $contacto_id, $tipo, $atribucion, $detalle = '') {
+    global $wpdb;
+    $wpdb->query($wpdb->prepare(
+        "INSERT IGNORE INTO " . blokes_campana_conversiones_table() . " (campana_id, contacto_id, tipo, atribucion, detalle, created_at)
+         VALUES (%d, %d, %s, %s, %s, %s)",
+        $campana_id, $contacto_id, $tipo, $atribucion, $detalle, current_time('mysql')
+    ));
+}
+
+// Parte B de la trazabilidad (Ramiro, 11/11 05:35): si quien acaba de pagar llegó con la
+// cookie de una campaña, se registra como conversión "directa" de tipo "pedido". El checkout
+// vive en el Club (blog 3), igual que las tablas de campañas — no hace falta switch_to_blog.
+add_action('woocommerce_checkout_order_processed', function($order_id, $posted_data, $order) {
+    if (empty($_COOKIE['roco_cmp'])) return;
+    $token = sanitize_text_field($_COOKIE['roco_cmp']);
+    blokes_ensure_campanas_tables();
+    $enlace = blokes_campana_enlace_por_token($token);
+    if (!$enlace) return;
+    blokes_campana_registrar_conversion(
+        intval($enlace['campana_id']), intval($enlace['contacto_id']), 'pedido', 'directa', 'pedido #' . $order_id
+    );
+}, 30, 3);
+
+// /c/{token} — público, sin login: registra el clic (salvo que sea el bot de vista previa de
+// WhatsApp/Facebook, que abre el enlace solo para construir la tarjeta del mensaje) y redirige
+// al destino de la campaña con utm_source/utm_campaign. Prioridad 0, igual que /app — sin esto
+// WordPress marca la URL como 404 en parse_request y el redirect no llega a dispararse.
+add_action('template_redirect', function() {
+    $path = trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/');
+    if (!preg_match('#^c/([A-Za-z0-9]{6,8})$#', $path, $m)) return;
+    $token = $m[1];
+
+    // /c/ vive en el sitio Principal (blog 1, para que el enlace sea corto), pero las tablas
+    // de campañas son del Club (blog 3) — todo lo que las llama viene siempre de
+    // /club/wp-json/... (cowork, 11/11 06:55: sin este switch_to_blog, aquí se consultaban las
+    // tablas del blog 1, que están vacías, y el token "nunca se encontraba").
+    switch_to_blog(3);
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $enlace = $wpdb->get_row($wpdb->prepare(
+        "SELECT campana_id FROM " . blokes_campana_enlaces_table() . " WHERE token = %s", $token
+    ), ARRAY_A);
+    if (!$enlace) {
+        restore_current_blog();
+        wp_safe_redirect(home_url('/'), 302);
+        exit;
+    }
+
+    $campana = $wpdb->get_row($wpdb->prepare(
+        "SELECT nombre, destino_enlace FROM " . blokes_campanas_table() . " WHERE id = %d", intval($enlace['campana_id'])
+    ), ARRAY_A);
+    $destino = ($campana && $campana['destino_enlace']) ? $campana['destino_enlace'] : get_home_url(1, '/');
+
+    $ua = isset($_SERVER['HTTP_USER_AGENT']) ? $_SERVER['HTTP_USER_AGENT'] : '';
+    $es_bot_vista_previa = (bool) preg_match('#WhatsApp|facebookexternalhit|Facebot|Twitterbot|TelegramBot#i', $ua);
+    if (!$es_bot_vista_previa) {
+        $repetido = isset($_COOKIE['roco_cmp']) ? 1 : 0;
+        // 19/11 (Jairo Ochoa/dixitalmedia, correo 18/11 — LSSI art. 22.2): roco_cmp es una
+        // cookie de seguimiento (liga el clic a un contacto, 60 días, se usa para atribuir
+        // instalaciones/pedidos a la campaña) — antes se ponía siempre, también a quien había
+        // rechazado las cookies. Ahora solo se pone si ya hay consentimiento de estadísticas
+        // (el sitio principal, donde vive /c/, usa el prefijo cmplz_rt_; el club usa cmplz_).
+        // El registro del clic en la tabla se queda igual, nunca depende de la cookie — lo que
+        // se pierde sin consentimiento es poder atribuir la instalación o el pedido de esa visita.
+        $consiente = (isset($_COOKIE['cmplz_rt_statistics']) && 'allow' === $_COOKIE['cmplz_rt_statistics'])
+                  || (isset($_COOKIE['cmplz_statistics'])    && 'allow' === $_COOKIE['cmplz_statistics']);
+        if ($consiente) {
+            setcookie('roco_cmp', $token, time() + 60 * DAY_IN_SECONDS, '/', '', is_ssl(), true);
+        }
+        $dispositivo = preg_match('#Mobi|Android|iPhone|iPad#i', $ua) ? 'movil' : 'escritorio';
+        $wpdb->insert(blokes_campana_clics_table(), array(
+            'token' => $token, 'dispositivo' => $dispositivo, 'repetido' => $repetido, 'created_at' => current_time('mysql'),
+        ));
+    }
+    restore_current_blog();
+
+    $slug = $campana ? sanitize_title($campana['nombre']) : 'campana';
+    $sep  = (strpos($destino, '?') !== false) ? '&' : '?';
+    wp_safe_redirect($destino . $sep . 'utm_source=whatsapp&utm_campaign=' . $slug, 302);
+    exit;
+}, 0);
 
 // Última suscripción relevante de cada teléfono: gana la más "fuerte" (en vigor > de baja a
 // fin de mes > cancelada), para no clasificar mal a quien tiene varias suscripciones viejas.
+// `$s['telefono']` de blokes_get_all_subscription_data() es solo `get_billing_phone()` — vacío en
+// altas manuales con el teléfono metido en el email de relleno ("6xxxxxxxx@rocomadrid.com") en
+// vez de en el campo de verdad (NOTAS_PARA_CODE_whatsapp.md, 3/11 16:10: 7 alumnos actuales no se
+// detectaban como "ya en vigor" en una campaña de "antiguos", y les habría llegado ese mensaje).
+// Mismo fallback que ya usa Grupos: email de relleno → teléfono del perfil de WordPress.
 function blokes_campanas_subs_por_telefono() {
     $prioridad = array('active' => 3, 'on-hold' => 3, 'pending' => 3, 'pending-cancel' => 2, 'cancelled' => 1);
     $por_tel = array();
     foreach (blokes_get_all_subscription_data() as $s) {
-        $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        // El array de blokes_get_all_subscription_data() trae 'telefono' de
+        // RocoMadrid_SF_Stats (plugin de terceros), que lo deja vacío para la mayoría de altas
+        // aunque la propia suscripción SÍ tenga billing_phone (cowork, 3/11 18:50: de 388 solo 1
+        // "directo"). El resto del código (Grupos, blokes_gestion_grupos) ya resuelve esto
+        // llamando a wcs_get_subscription()->get_billing_phone() en vez de fiarse de ese campo
+        // cacheado — mismo camino aquí, con el mismo orden de respaldo que allí.
+        $tel = '';
+        if (function_exists('wcs_get_subscription')) {
+            $sub_obj = wcs_get_subscription(intval($s['id'] ?? 0));
+            if ($sub_obj) $tel = blokes_externos_normaliza_telefono($sub_obj->get_billing_phone());
+        }
+        if ($tel === '') {
+            $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        }
+        if ($tel === '') {
+            $tel = blokes_externos_normaliza_telefono(blokes_telefono_de_email($s['email'] ?? ''));
+        }
+        if ($tel === '') {
+            $uid = intval(get_post_meta(intval($s['id'] ?? 0), '_customer_user', true));
+            if ($uid) $tel = blokes_externos_normaliza_telefono(get_user_meta($uid, 'billing_phone', true));
+        }
         if ($tel === '') continue;
         $p = $prioridad[$s['status'] ?? ''] ?? 0;
         if (!isset($por_tel[$tel]) || $p > $por_tel[$tel]['_prioridad']) {
             $s['_prioridad'] = $p;
             $por_tel[$tel] = $s;
         }
+    }
+    return $por_tel;
+}
+
+// Igual que blokes_campanas_subs_por_telefono() (mismo criterio de teléfono/prioridad) pero
+// guarda TODOS los candidatos de cada teléfono, no solo "el mejor" — Sync Grupos necesita verlos
+// todos para poder desambiguar por nombre cuando una familia comparte número
+// (blokes_sync_grupos_emparejar(), cowork 06/11 15:55). También guarda el nombre de facturación
+// real de cada suscripción (más de fiar que el nombre de la cuenta — mismo criterio que Grupos).
+function blokes_sync_grupos_subs_por_telefono() {
+    $prioridad = array('active' => 3, 'on-hold' => 3, 'pending' => 3, 'pending-cancel' => 2, 'cancelled' => 1);
+    $por_tel = array();
+    foreach (blokes_get_all_subscription_data() as $s) {
+        $sub_obj = function_exists('wcs_get_subscription') ? wcs_get_subscription(intval($s['id'] ?? 0)) : null;
+        $tel = $sub_obj ? blokes_externos_normaliza_telefono($sub_obj->get_billing_phone()) : '';
+        if ($tel === '') $tel = blokes_externos_normaliza_telefono($s['telefono'] ?? '');
+        if ($tel === '') $tel = blokes_externos_normaliza_telefono(blokes_telefono_de_email($s['email'] ?? ''));
+        if ($tel === '') {
+            $uid = intval(get_post_meta(intval($s['id'] ?? 0), '_customer_user', true));
+            if ($uid) $tel = blokes_externos_normaliza_telefono(get_user_meta($uid, 'billing_phone', true));
+        }
+        if ($tel === '') continue;
+        $nombre_fact = $sub_obj ? trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()) : '';
+        $s['_nombre_fact'] = $nombre_fact !== '' ? $nombre_fact : ($s['cliente'] ?? '');
+        $s['_prioridad'] = $prioridad[$s['status'] ?? ''] ?? 0;
+        $por_tel[$tel][] = $s;
     }
     return $por_tel;
 }
@@ -6296,12 +11566,16 @@ function blokes_campanas_clasificar($telefono, $subs_por_tel, $externos_por_tel,
         $sub_obj = !empty($sub['id']) ? wcs_get_subscription(intval($sub['id'])) : null;
 
         // "on-hold" en esta web es casi siempre impago, no una pausa de verdad (esa guarda
-        // _rm_pausa_motivo aparte — mismo criterio que el estado "en_espera" de Grupos). Sin
-        // motivo de pausa, solo cuenta como en vigor si el impago es reciente (~45 días);
-        // si no, ya se fue de verdad y pasa a antiguos.
+        // _rm_pausa_motivo aparte — mismo criterio que el estado "en_espera" de Grupos). Siempre
+        // "en_espera" mientras siga on-hold sin cancelar, sin importar cuánto lleve impagado —
+        // antes, a partir de 45 días pasaba a "antiguos", pero más abajo (destinatarios) a esta
+        // misma persona ya se la contaba "yaEnVigor" por seguir on-hold, así que quedaba
+        // "antiguos" + "yaEnVigor" a la vez: en una campaña de antiguos no se le mandaba nada (el
+        // filtro de yaEnVigor ya la tapaba) pero tampoco entraba en una campaña de en_espera,
+        // donde Ramiro SÍ la quiere (cowork, 09/11 11:40 — 16 alumnos de Grupos en impago largo,
+        // "los quiere dentro" de la campaña #2). Si de verdad se cancela, pasa a 'cancelled' o
+        // 'pending-cancel' más abajo y ahí sí es "antiguos".
         if ($sub['status'] === 'on-hold' && $sub_obj && !get_post_meta($sub_obj->get_id(), '_rm_pausa_motivo', true)) {
-            $dias_impago = ($t = blokes_campanas_ultimo_pago_ts($sub_obj)) ? (time() - $t) / DAY_IN_SECONDS : 9999;
-            if ($dias_impago > 45) return 'antiguos';
             return 'en_espera';
         }
 
@@ -6435,6 +11709,17 @@ function superadmin_campanas_listar_contactos($request) {
     return rest_ensure_response(array('success' => true, 'data' => array('contactos' => $out, 'resumen' => $resumen, 'resumenOptin' => $resumenOptin)));
 }
 
+// DELETE /campanas/contactos/{id} — quitar un contacto de verdad (p. ej. uno de prueba que se
+// coló en una importación real, NOTAS_PARA_CODE_whatsapp.md 3/11 16:10). Borra también sus
+// envíos de campañas para no dejar filas huérfanas.
+function superadmin_campanas_borrar_contacto($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $wpdb->delete(blokes_campana_envios_table(), array('contacto_id' => $id), array('%d'));
+    $wpdb->delete(blokes_contactos_table(), array('id' => $id), array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
 // GET /campanas/envios-hoy — para el aviso de ritmo (WhatsApp bloquea números que mandan
 // cientos de golpe): cuenta los "enviado" de hoy, de cualquier campaña.
 function superadmin_campanas_envios_hoy($request) {
@@ -6457,13 +11742,32 @@ function superadmin_campanas_listar($request) {
             "SELECT COUNT(*) total, SUM(enviado_at IS NOT NULL) enviados, SUM(respondio) respondidos, SUM(baja) bajas, SUM(apuntado) apuntados
              FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d", $r['id']
         ), ARRAY_A);
+        // Mínimo pedido por cowork (11/11 07:30) antes de montar el embudo completo (partes
+        // B-D): clics únicos, para ver hoy mismo si los envíos de las 10:00 se abren. "Único" =
+        // destinatarios distintos que han hecho clic al menos una vez, no clics totales.
+        $clics_unicos = intval($wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(DISTINCT cl.token) FROM " . blokes_campana_clics_table() . " cl
+             JOIN " . blokes_campana_enlaces_table() . " en ON en.token = cl.token
+             WHERE en.campana_id = %d", $r['id']
+        )));
+        // Parte D (mínima): conversiones directas + indirectas, por destinatario distinto
+        // (partes B/C). Recuentos, nunca importes en euros (cowork, 11/11 05:35).
+        $conversiones = $wpdb->get_row($wpdb->prepare(
+            "SELECT COUNT(*) total, SUM(atribucion = 'directa') directas, SUM(atribucion = 'indirecta') indirectas
+             FROM " . blokes_campana_conversiones_table() . " WHERE campana_id = %d", $r['id']
+        ), ARRAY_A);
         $out[] = array(
             'id' => intval($r['id']), 'nombre' => $r['nombre'],
             'plantillaAdulto' => $r['plantilla_adulto'], 'plantillaMenor' => $r['plantilla_menor'],
             'remitente' => $r['remitente'], 'listas' => array_filter(explode(',', $r['listas'])),
+            'destinoEnlace' => $r['destino_enlace'] ?: '',
             'fechaFin' => $r['fecha_fin'], 'activa' => (bool) $r['activa'], 'createdAt' => $r['created_at'],
             'enviados' => intval($stats['enviados'] ?? 0), 'respondidos' => intval($stats['respondidos'] ?? 0),
             'bajas' => intval($stats['bajas'] ?? 0), 'apuntados' => intval($stats['apuntados'] ?? 0),
+            'clicsUnicos' => $clics_unicos,
+            'conversiones' => intval($conversiones['total'] ?? 0),
+            'conversionesDirectas' => intval($conversiones['directas'] ?? 0),
+            'conversionesIndirectas' => intval($conversiones['indirectas'] ?? 0),
         );
     }
     return rest_ensure_response(array('success' => true, 'data' => $out));
@@ -6486,6 +11790,7 @@ function superadmin_campanas_crear($request) {
         'remitente' => sanitize_text_field((string) ($body['remitente'] ?? '')),
         'listas' => implode(',', $listas),
         'fecha_fin' => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) ($body['fechaFin'] ?? '')) ? $body['fechaFin'] : null,
+        'destino_enlace' => esc_url_raw((string) ($body['destinoEnlace'] ?? '')),
         'activa' => 1, 'created_at' => current_time('mysql'), 'created_by' => $u ? $u->user_login : '',
     ));
     return rest_ensure_response(array('success' => true, 'data' => array('id' => $wpdb->insert_id)));
@@ -6506,6 +11811,7 @@ function superadmin_campanas_editar($request) {
     if (isset($body['plantillaAdulto'])) $campos['plantilla_adulto'] = sanitize_textarea_field((string) $body['plantillaAdulto']);
     if (isset($body['plantillaMenor']))  $campos['plantilla_menor']  = sanitize_textarea_field((string) $body['plantillaMenor']);
     if (isset($body['remitente'])) $campos['remitente'] = sanitize_text_field((string) $body['remitente']);
+    if (isset($body['destinoEnlace'])) $campos['destino_enlace'] = esc_url_raw((string) $body['destinoEnlace']);
     if (isset($body['listas'])) {
         $listas = is_array($body['listas']) ? array_intersect($body['listas'], array('actuales', 'nuevos', 'en_espera', 'antiguos')) : array();
         if (empty($listas)) return new WP_Error('bad_request', 'Elige al menos una lista.', array('status' => 400));
@@ -6521,13 +11827,75 @@ function superadmin_campanas_editar($request) {
     return rest_ensure_response(array('success' => true));
 }
 
+// Ramiro 12/11 12:40/12:47 — BUG: un mismo teléfono con "Carlos Rodriguez" y "Carlos" (el
+// nombre completo del Excel y el nombre de pila de otro registro de LA MISMA persona, no un
+// hermano) salía como "¡Hola Carlos Rodriguez y Carlos!". Mismo lío con un alias de WhatsApp
+// junto al nombre real ("daniferro" + "Álvaro"). Si los dos nombres son la misma persona,
+// devuelve el "bueno" a usar en el saludo (el nombre de pila, o el que no sea un alias); si
+// parecen dos personas de verdad (hermanos), devuelve null.
+function blokes_campanas_mismo_nombre($a, $b) {
+    $na = mb_strtolower(remove_accents(trim($a)));
+    $nb = mb_strtolower(remove_accents(trim($b)));
+    if ($na === '' || $nb === '') return $na === '' ? $b : $a;
+    if ($na === $nb) return $a;
+
+    $palabras_a = preg_split('/\s+/', trim($a));
+    $palabras_b = preg_split('/\s+/', trim($b));
+    $primera_a = mb_strtolower(remove_accents($palabras_a[0]));
+    $primera_b = mb_strtolower(remove_accents($palabras_b[0]));
+    // Mismo nombre de pila: uno es "Nombre Apellido(s)" del Excel y el otro, de otro registro
+    // del mismo teléfono, solo "Nombre" — el "bueno" para el saludo es el de una sola palabra.
+    if ($primera_a === $primera_b) {
+        if (count($palabras_a) === 1 && count($palabras_b) > 1) return $a;
+        if (count($palabras_b) === 1 && count($palabras_a) > 1) return $b;
+        return $a;
+    }
+    // Alias de WhatsApp (todo en minúsculas, sin espacios — "daniferro") junto al nombre real
+    // del mismo teléfono: el "bueno" es el que no parece un alias.
+    $es_alias = function($s) { $s = trim($s); return $s !== '' && $s === mb_strtolower($s) && strpos($s, ' ') === false; };
+    if ($es_alias($a) && !$es_alias($b)) return $b;
+    if ($es_alias($b) && !$es_alias($a)) return $a;
+    return null; // no hay indicio de que sean la misma persona — hermanos de verdad
+}
+
+// Reduce la lista de nombres de un teléfono a la que de verdad hace falta para el saludo,
+// fusionando los que blokes_campanas_mismo_nombre() reconoce como la misma persona (puede haber
+// más de un registro duplicado, no solo dos) antes de juntar con " y " a los hermanos que de
+// verdad lo son.
+function blokes_campanas_nombre_saludo($nombres) {
+    $nombres = array_values(array_filter(array_map('trim', (array) $nombres), function($n) { return $n !== ''; }));
+    if (count($nombres) <= 1) return $nombres[0] ?? '';
+
+    $reducido = array($nombres[0]);
+    for ($i = 1; $i < count($nombres); $i++) {
+        $actual = $nombres[$i];
+        $fusionado = false;
+        foreach ($reducido as $j => $existente) {
+            $mejor = blokes_campanas_mismo_nombre($existente, $actual);
+            if ($mejor !== null) { $reducido[$j] = $mejor; $fusionado = true; break; }
+        }
+        if (!$fusionado) $reducido[] = $actual;
+    }
+    return count($reducido) > 1 ? implode(' y ', array_slice($reducido, 0, 2)) : $reducido[0];
+}
+
 // El saludo (nombre de pila elegido a mano, p. ej. de la carga inicial del xlsx) tiene
 // preferencia sobre el nombre completo del Excel para el "Hola {nombre}!" — es el que se usa
 // de verdad en los mensajes que ya escribió Ramiro.
-function blokes_campanas_personalizar($plantilla, $nombres, $remitente, $saludo = '') {
-    $nombre = $saludo ?: (count($nombres) > 1 ? implode(' y ', array_slice($nombres, 0, 2)) : ($nombres[0] ?? ''));
+function blokes_campanas_personalizar($plantilla, $nombres, $remitente, $saludo = '', $campana_id = 0, $contacto_id = 0) {
+    $nombre = $saludo ?: blokes_campanas_nombre_saludo($nombres);
     $txt = str_replace('{nombre}', $nombre, $plantilla);
     $txt = str_replace('{remitente}', $remitente, $txt);
+    // {enlace}: enlace propio por destinatario para medir clics (Ramiro, 11/11 05:35) — solo
+    // se gasta un token si la plantilla de verdad lo usa.
+    if ($campana_id && $contacto_id && strpos($txt, '{enlace}') !== false) {
+        $token = blokes_campana_enlace_token($campana_id, $contacto_id);
+        // Esto se llama siempre desde una petición que llegó por /club/wp-json/... (blog 3), así
+        // que home_url() aquí da "rocomadrid.com/club" — el enlace corto tiene que ser del sitio
+        // Principal (blog 1), no del Club (cowork, 11/11 06:55: salía "/club/c/XXXXX" y daba
+        // 404). get_home_url(1, ...) fuerza el dominio del blog 1 sin cambiar de blog de verdad.
+        $txt = str_replace('{enlace}', get_home_url(1, '/c/' . $token), $txt);
+    }
     return $txt;
 }
 
@@ -6542,6 +11910,11 @@ function superadmin_campanas_destinatarios($request) {
     $campana = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . blokes_campanas_table() . " WHERE id = %d", $id), ARRAY_A);
     if (!$campana) return new WP_Error('not_found', 'Campaña no encontrada.', array('status' => 404));
     $listas = array_filter(explode(',', $campana['listas']));
+    // La "conversión automática" de abajo (apuntado solo al estar ya en vigor) tiene sentido
+    // en una campaña de antiguos ("volvió"), pero no en una de actuales/nuevos/en_espera: ahí
+    // casi todos YA están en vigor antes de mandarles nada, y salían "Se apuntaron" sin haber
+    // hecho nada (cowork, 10/11 13:10 — campaña #2, 10 de 12 enviados marcados así de golpe).
+    $es_campana_vigentes = (bool) array_intersect($listas, array('actuales', 'nuevos', 'en_espera'));
 
     $subs_por_tel     = blokes_campanas_subs_por_telefono();
     $externos_por_tel = blokes_campanas_externos_por_telefono();
@@ -6572,8 +11945,9 @@ function superadmin_campanas_destinatarios($request) {
         $plantilla = $c['tipo'] === 'menor' ? $campana['plantilla_menor'] : $campana['plantilla_adulto'];
 
         // Conversión automática: si ya está en vigor y se le había enviado algo, se marca
-        // apuntado solo (aunque nadie haya pulsado el botón a mano).
-        if ($ya_en_vigor && $envio && !empty($envio['enviado_at']) && !$envio['apuntado']) {
+        // apuntado solo (aunque nadie haya pulsado el botón a mano) — solo en campañas de
+        // antiguos, donde "ya en vigor" de verdad significa que volvió.
+        if (!$es_campana_vigentes && $ya_en_vigor && $envio && !empty($envio['enviado_at']) && !$envio['apuntado']) {
             $wpdb->update(blokes_campana_envios_table(), array('apuntado' => 1, 'apuntado_at' => current_time('mysql'), 'updated_at' => current_time('mysql')), array('id' => $envio['id']));
             $envio['apuntado'] = 1;
             $envio['apuntado_at'] = current_time('mysql');
@@ -6581,7 +11955,7 @@ function superadmin_campanas_destinatarios($request) {
 
         $out[] = array(
             'contactoId' => intval($c['id']), 'telefono' => $tel, 'nombres' => $nombres, 'tipo' => $c['tipo'],
-            'mensaje' => blokes_campanas_personalizar($plantilla, $nombres, $campana['remitente'], $c['saludo'] ?? ''),
+            'mensaje' => blokes_campanas_personalizar($plantilla, $nombres, $campana['remitente'], $c['saludo'] ?? '', $id, intval($c['id'])),
             'yaEnVigor' => (bool) $ya_en_vigor, 'optinWhatsapp' => $c['optin_whatsapp'] ?: null,
             'enviado' => $envio && !empty($envio['enviado_at']) ? array('fecha' => $envio['enviado_at'], 'por' => $envio['enviado_por']) : null,
             'respondio' => $envio && $envio['respondio'] ? array('fecha' => $envio['respondio_at'], 'por' => $envio['respondio_por']) : false,
@@ -6605,8 +11979,8 @@ function superadmin_campanas_marcar_accion($request) {
     $campana_id  = intval($request['id']);
     $contacto_id = intval($request['contacto_id']);
     $accion = sanitize_key($request->get_param('accion'));
-    if (!in_array($accion, array('enviado', 'respondio', 'baja', 'baja_deshacer', 'apuntado'), true)) {
-        return new WP_Error('bad_request', 'Acción no reconocida. Usa enviado, respondio, baja, baja_deshacer o apuntado.', array('status' => 400));
+    if (!in_array($accion, array('enviado', 'enviado_deshacer', 'respondio', 'respondio_deshacer', 'baja', 'baja_deshacer', 'apuntado', 'apuntado_deshacer'), true)) {
+        return new WP_Error('bad_request', 'Acción no reconocida.', array('status' => 400));
     }
     $u = wp_get_current_user();
     $quien = $u ? $u->user_login : '';
@@ -6622,6 +11996,14 @@ function superadmin_campanas_marcar_accion($request) {
     // Deshacer BAJA: se queda el histórico de quién/cuándo la marcó al principio (por si hace
     // falta reconstruirlo), solo se apaga el flag — así vuelve a entrar en campañas futuras.
     if ($accion === 'baja_deshacer') $campos['baja'] = 0;
+    // Deshacer Respondió/Se apuntó (Ramiro 12/11 11:20 y cowork 10/11 13:10: un clic mal dado,
+    // o los "Se apuntaron" falsos que dejó el bug de conversión automática antes de arreglarlo).
+    if ($accion === 'respondio_deshacer') { $campos['respondio'] = 0; $campos['respondio_at'] = null; }
+    if ($accion === 'apuntado_deshacer')  { $campos['apuntado']  = 0; $campos['apuntado_at']  = null; }
+    // Deshacer enviado, por destinatario (cowork 12/11 13:00: "Abrir WhatsApp" marcó enviado a
+    // Cristina pero el mensaje nunca se mandó — el dato era de otra persona). Antes solo existía
+    // el "deshacer enviados" de toda la campaña de golpe (superadmin_campanas_deshacer_enviados).
+    if ($accion === 'enviado_deshacer') { $campos['enviado_at'] = null; $campos['enviado_por'] = null; }
 
     if ($existente) {
         $wpdb->update(blokes_campana_envios_table(), $campos, array('id' => $existente['id']));
@@ -6657,6 +12039,63 @@ function superadmin_campanas_marcar_accion($request) {
         }
     }
     return rest_ensure_response(array('success' => true));
+}
+
+// POST /campanas/{id}/deshacer-enviados — Ramiro, 3/11 12:10: en la campaña de antiguos alumnos
+// algunos contactos quedaron marcados "enviado" por pruebas, sin haberse mandado nada de verdad.
+// Quita el "enviado" de TODOS los de esta campaña de golpe (nunca toca respondio/baja/apuntado,
+// que son señales reales aparte) para que vuelvan a salir como pendientes.
+function superadmin_campanas_deshacer_enviados($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $campana_id = intval($request['id']);
+    $n = $wpdb->update(
+        blokes_campana_envios_table(),
+        array('enviado_at' => null, 'enviado_por' => '', 'updated_at' => current_time('mysql')),
+        array('campana_id' => $campana_id)
+    );
+    blokes_gestion_log(0, 'campana_deshacer_enviados', array(), array('campanaId' => $campana_id, 'filas' => $n));
+    return rest_ensure_response(array('success' => true, 'data' => array('filas' => intval($n))));
+}
+
+// POST /campanas/{id}/recalcular-indirectas — parte C de la trazabilidad: para quien no hizo
+// clic (o se le envió antes de que existiera el enlace), busca si su teléfono tiene ahora una
+// suscripción en vigor dada de alta DESPUÉS del envío — si la hay, cuenta como conversión
+// "indirecta". Se puede llamar las veces que haga falta sin duplicar (clave única de la tabla).
+function superadmin_campanas_recalcular_indirectas($request) {
+    blokes_ensure_campanas_tables();
+    global $wpdb;
+    $id = intval($request['id']);
+    $campana = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . blokes_campanas_table() . " WHERE id = %d", $id), ARRAY_A);
+    if (!$campana) return new WP_Error('not_found', 'Campaña no encontrada.', array('status' => 404));
+
+    $envios = $wpdb->get_results($wpdb->prepare(
+        "SELECT contacto_id, enviado_at FROM " . blokes_campana_envios_table() . " WHERE campana_id = %d AND enviado_at IS NOT NULL", $id
+    ), ARRAY_A);
+    if (!$envios) return rest_ensure_response(array('success' => true, 'data' => array('revisados' => 0, 'nuevas' => 0)));
+
+    $subs_por_tel = blokes_campanas_subs_por_telefono();
+    $nuevas = 0;
+    foreach ($envios as $e) {
+        $contacto_id = intval($e['contacto_id']);
+        $ya = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM " . blokes_campana_conversiones_table() . " WHERE campana_id = %d AND contacto_id = %d AND tipo = 'pedido'", $id, $contacto_id
+        ));
+        if ($ya) continue; // ya contada (directa o una indirecta de antes) — no hace falta repetir
+        $contacto = $wpdb->get_row($wpdb->prepare("SELECT telefono FROM " . blokes_contactos_table() . " WHERE id = %d", $contacto_id), ARRAY_A);
+        if (!$contacto) continue;
+        $tel = blokes_externos_normaliza_telefono($contacto['telefono']);
+        $sub = $subs_por_tel[$tel] ?? null;
+        if (!$sub || !in_array($sub['status'], array('active', 'on-hold', 'pending'), true)) continue;
+        $sub_obj  = (!empty($sub['id']) && function_exists('wcs_get_subscription')) ? wcs_get_subscription(intval($sub['id'])) : null;
+        $alta_iso = $sub_obj ? $sub_obj->get_date('date_created') : null;
+        $alta_ts  = $alta_iso ? strtotime($alta_iso) : 0;
+        $envio_ts = strtotime($e['enviado_at']);
+        if (!$alta_ts || $alta_ts < $envio_ts) continue; // la alta tiene que ser DESPUÉS del envío, si no, no la provocó la campaña
+        blokes_campana_registrar_conversion($id, $contacto_id, 'pedido', 'indirecta', 'sub #' . intval($sub['id'] ?? 0));
+        $nuevas++;
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array('revisados' => count($envios), 'nuevas' => $nuevas)));
 }
 
 // GET /gestion/bajas-motivo — bajas de clases por mes y por motivo, para ver si una campaña de
@@ -6726,6 +12165,15 @@ function superadmin_gestion_marcar_cobrado($request) {
     $mantener_pausa = $mantener_pausa === null ? true : (bool) $mantener_pausa;
     $simular  = (bool) $request->get_param('simular');
     $es_efectivo = $metodo === 'efectivo';
+    // Excepción de precio (NOTAS_PARA_CODE_pestanas_grupos.md, Ramiro 06/11 16:00): cuando el
+    // importe escrito no es el total del pedido/catálogo. 'solo_este_mes' ajusta solo este
+    // cobro; 'desde_ahora' además cambia el precio recurrente de la suscripción. Si no se manda
+    // (p. ej. llamadas automáticas como Sync Grupos), el comportamiento es EXACTAMENTE el de
+    // antes: el importe distinto queda solo como nota, sin tocar el pedido ni la suscripción —
+    // así no se cambia nada para quien ya llama a este endpoint sin pasar por el diálogo nuevo.
+    $ajustar_precio = sanitize_key((string) $request->get_param('ajustarPrecio'));
+    if (!in_array($ajustar_precio, array('', 'solo_este_mes', 'desde_ahora'), true)) $ajustar_precio = '';
+    $motivo_excepcion = sanitize_text_field((string) $request->get_param('motivoExcepcion'));
 
     if (!$sub_id || $importe <= 0 || !$metodo) {
         return new WP_Error('bad_request', 'Faltan sub_id, importe o metodo.', array('status' => 400));
@@ -6733,13 +12181,51 @@ function superadmin_gestion_marcar_cobrado($request) {
     if (!in_array($metodo, array('transferencia', 'tarjeta', 'efectivo', 'wellhub', 'bizum'), true)) {
         return new WP_Error('bad_request', 'Método no reconocido. Usa transferencia, tarjeta, efectivo, bizum o wellhub.', array('status' => 400));
     }
+    if ($ajustar_precio !== '' && $motivo_excepcion === '') {
+        return new WP_Error('falta_motivo', 'El motivo de la excepción de precio es obligatorio.', array('status' => 400));
+    }
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    // 18/11 (Ramiro, URGENTE): "hasta que Code lo confirme, mejor que Eva no cobre ninguno de
+    // esos 22" — el auto-aplicado (ya desactivado) completó el pedido pendiente real de estas 22
+    // suscripciones con fecha/método de la sincronización en vez de los reales. Bloquea un cobro
+    // de verdad sobre ellas (nunca la simulación, que es justo la herramienta para comprobar qué
+    // pasaría) hasta que alguien confirme a propósito — ver NOTAS_PARA_CODE_pestanas_grupos.md
+    // §18/11 y el botón "Informe celdas escritas por error" (trae la simulación ya hecha).
+    // 18/11 21:10 (cowork, GRAVE): calculado SIEMPRE, incluso simulando — así la propia
+    // simulación (la que ve "Pendientes de cobro" antes de dejar confirmar) ya puede avisar y
+    // desactivar "Confirmar de verdad" en el frontend, en vez de que la persona se entere del
+    // bloqueo solo al chocar contra el 409 con el botón ya habilitado.
+    $bloqueado_bug_1711 = blokes_sync_grupos_sub_afectada_bug_1711($sub_id);
+    if (!$simular && $bloqueado_bug_1711 && !$request->get_param('confirmarRevisionBug1711')) {
+        return new WP_Error('revisar_antes_1711', 'Esta suscripción fue completada por el bug del auto-aplicado (17/11) — antes de cobrarla de verdad, mira la simulación en "Informe celdas escritas por error" o confirma a propósito (confirmarRevisionBug1711).', array('status' => 409));
+    }
 
     $fecha_ts  = $fecha ? strtotime($fecha . ' 12:00:00') : time();
     $fecha_txt = date_i18n('d/m/Y', $fecha_ts);
     $metodo_label = blokes_gestion_metodo_label($metodo);
     $antes = array('status' => $sub->get_status());
+
+    // Ramiro, 15/11 08:35 (tras el incidente del 15/11 08:15, #7545/#7546/#7547 cobradas por
+    // error porque la persona tenía dos suscripciones activas de la misma clase): si tiene OTRA
+    // en vigor de la MISMA clase, avisar antes de marcar cobrada esta.
+    $confirmar_duplicado_sub = (bool) $request->get_param('confirmarDuplicado');
+    $uid_marcar_cobrado = blokes_alumno_customer_id_de_sub(array('id' => $sub_id), $sub);
+    $dh_marcar_cobrado = blokes_sync_grupos_dia_horario_de_sub($sub_id);
+    $subs_en_vigor = blokes_subs_en_vigor_de_persona($uid_marcar_cobrado, $sub_id, $dh_marcar_cobrado, true);
+    // 19/11 (cowork §06:25, punto 4): "que enseñe las dos... y recomiende cuál quedarse" — sin
+    // excluir esta suscripción, para poder compararla con la(s) otra(s) con los mismos datos.
+    $esta_sub_info = null; $recomendacion = null;
+    if (!empty($subs_en_vigor)) {
+        $todas_misma_clase = blokes_subs_en_vigor_de_persona($uid_marcar_cobrado, null, $dh_marcar_cobrado, true);
+        foreach ($todas_misma_clase as $info) { if ($info['subId'] === $sub_id) { $esta_sub_info = $info; break; } }
+        $recomendacion = blokes_sync_grupos_recomendar_duplicado($esta_sub_info, $subs_en_vigor);
+    }
+    $hay_duplicado_sub_sin_resolver = !empty($subs_en_vigor) && !$confirmar_duplicado_sub;
+    if ($hay_duplicado_sub_sin_resolver && !$simular) {
+        return new WP_Error('duplicado_suscripcion', 'Esta persona tiene otra suscripción en vigor de la misma clase — confirma cuál es la que se cobra (confirmarDuplicado).', array('status' => 409));
+    }
 
     // ── Efectivo: nada de WooCommerce, nada de factura ──
     if ($es_efectivo) {
@@ -6758,8 +12244,18 @@ function superadmin_gestion_marcar_cobrado($request) {
                 'subId' => $sub_id, 'periodo' => $periodo, 'importe' => $importe, 'metodo' => $metodo_label,
                 'fecha' => $fecha_txt, 'parcial' => $parcial, 'reactivaLaSuscripcion' => $reactivaria,
                 'pedidosACancelar' => $pedidos_a_cancelar,
-                'aviso' => 'Simulación: no se escribiría nada todavía. El efectivo no toca WooCommerce ni genera factura, solo queda apuntado en Grupos.',
+                'posibleDuplicadoSub' => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+                'estaSub' => $esta_sub_info, 'recomendacionDuplicado' => $recomendacion,
+                'bloqueadoBug1711' => $bloqueado_bug_1711,
+                'aviso' => $hay_duplicado_sub_sin_resolver
+                    ? 'Esta persona tiene otra suscripción en vigor de la misma clase — confirma cuál es la que se cobra.'
+                    : 'Simulación: no se escribiría nada todavía. El efectivo no toca WooCommerce ni genera factura, solo queda apuntado en Grupos.',
             )));
+        }
+        // Repetida a propósito (ya se comprobó arriba, antes de saber si era efectivo o no) —
+        // nunca está de más que la guarda de dinero se vuelva a mirar justo antes de escribir.
+        if ($bloqueado_bug_1711 && !$request->get_param('confirmarRevisionBug1711')) {
+            return new WP_Error('revisar_antes_1711', 'Esta suscripción fue completada por el bug del auto-aplicado (17/11) — antes de cobrarla de verdad, mira la simulación en "Informe celdas escritas por error" o confirma a propósito (confirmarRevisionBug1711).', array('status' => 409));
         }
         blokes_ensure_cobros_manuales_table();
         global $wpdb;
@@ -6780,6 +12276,10 @@ function superadmin_gestion_marcar_cobrado($request) {
         $pedidos_cancelados = blokes_cancelar_pedidos_impagados($sub, false);
         $despues = array('periodo' => $periodo, 'importe' => $importe, 'metodo' => 'efectivo', 'reactivada' => $reactivaria, 'pedidosCancelados' => $pedidos_cancelados);
         blokes_gestion_log($sub_id, 'marcar_cobrado_efectivo', $antes, $despues, array('fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota));
+        // Web → Excel (NOTAS_PARA_CODE_sync_grupos.md): el cobro también se apunta en la Hoja de
+        // Eva, si se encuentra la pestaña/fila/mes de verdad — nunca bloquea esta respuesta.
+        $dh = blokes_sync_grupos_dia_horario_de_sub($sub_id);
+        blokes_sync_grupos_escribir_cobro($dh['dia'], $dh['horario'], $sub->get_billing_phone(), trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()), $periodo, $importe, 'efectivo', date('d/m/Y', $fecha_ts));
         return rest_ensure_response(array('success' => true, 'data' => $despues));
     }
 
@@ -6806,7 +12306,21 @@ function superadmin_gestion_marcar_cobrado($request) {
     // (blokes_aplicar_adelantado_si_hay), para no arriesgar un pedido/factura doble.
     $next_payment_mysql = method_exists($sub, 'get_date') ? $sub->get_date('next_payment') : '';
     $next_payment_ts = $next_payment_mysql ? strtotime($next_payment_mysql) : null;
-    $periodo_cubre = $next_payment_ts ? date('Y-m', $next_payment_ts) : date('Y-m');
+    // 19/11 (cowork §06:25, punto 6 — Sergi Escribano #6614: su único pago de verdad quedó
+    // escrito en octubre Y noviembre de la Hoja): `next_payment` mira hacia DELANTE y
+    // WooCommerce Subscriptions lo adelanta al generar la renovación, siga pagada o no — si el
+    // pedido pendiente que se está completando ahora es viejo (p. ej. octubre, sin pagar
+    // semanas), `next_payment` ya puede estar en noviembre o más allá, y el Excel se escribía en
+    // el mes equivocado. Cuando YA existe un pedido pendiente de verdad, el mes que cubre el
+    // pago es el de ESE pedido — mismo criterio de "a qué mes pertenece un pedido" que ya usa
+    // blokes_sync_grupos_sub_ya_cobrado_mes() (date_created, no date_paid). `next_payment` solo
+    // sirve para el caso adelantado (sin pedido todavía, hay que mirar hacia delante de verdad).
+    if ($order) {
+        $fecha_pedido = $order->get_date_created() ?: $order->get_date_paid();
+        $periodo_cubre = $fecha_pedido ? $fecha_pedido->date('Y-m') : ($next_payment_ts ? date('Y-m', $next_payment_ts) : date('Y-m'));
+    } else {
+        $periodo_cubre = $next_payment_ts ? date('Y-m', $next_payment_ts) : date('Y-m');
+    }
 
     // Ya hay un adelantado guardado para este mismo mes de esta suscripción: avisar en la
     // simulación y no dejar duplicarlo al confirmar (cowork, 2/11 09:42, punto 3) — anúlalo
@@ -6817,6 +12331,12 @@ function superadmin_gestion_marcar_cobrado($request) {
         "SELECT * FROM " . blokes_adelantados_table() . " WHERE sub_id = %d AND periodo = %s AND aplicado_at IS NULL ORDER BY id DESC LIMIT 1",
         $sub_id, $periodo_cubre
     ), ARRAY_A);
+
+    // ¿El importe escrito es distinto del total del pedido/suscripción? (excepción de precio —
+    // Ramiro 06/11 16:00). No aplica a "efectivo" (ahí nunca hay pedido ni factura) ni a
+    // "parcial" (eso ya es su propio camino: pedido a medias, sin factura completa).
+    $total_referencia = $order ? floatval($order->get_total()) : floatval($sub->get_total());
+    $importe_distinto = !$es_efectivo && !$parcial && abs($importe - $total_referencia) > 0.009;
 
     // Modo simulación: ni crea ni completa ningún pedido, ni toca la suscripción — para poder
     // probar contra un caso real (secciones 6b/7) viendo qué pasaría, sin generar factura/AEAT
@@ -6837,15 +12357,60 @@ function superadmin_gestion_marcar_cobrado($request) {
             'pasaAActiva'     => !($estaba_pausada && $mantener_pausa),
             'mantienePausa'   => $estaba_pausada && $mantener_pausa,
             'importe'         => $importe, 'metodo' => $metodo_label, 'fecha' => $fecha_txt, 'parcial' => $parcial,
+            // Excepción de precio: lo que vería el diálogo para ofrecer las 2 opciones de
+            // Ramiro. totalPedidoAntes/Despues y totalFacturaDespues dejan claro qué cambia en
+            // cada una antes de confirmar.
+            'importeDistinto'      => $importe_distinto,
+            'totalActual'          => $total_referencia,
+            'ajustarPrecio'        => $ajustar_precio ?: null,
+            'posibleDuplicadoSub'  => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+            'estaSub' => $esta_sub_info, 'recomendacionDuplicado' => $recomendacion,
+            'bloqueadoBug1711'     => $bloqueado_bug_1711,
+            'opciones' => !$importe_distinto ? null : array(
+                'solo_este_mes' => array(
+                    'disponible' => (bool) $order,
+                    'totalPedidoAntes' => $total_referencia, 'totalPedidoDespues' => $importe, 'totalFactura' => $importe,
+                    'aviso' => $order ? null : 'Todavía no existe el pedido de esta renovación — no se puede ajustar solo este mes hasta que exista (usa "y desde ahora" o espera a que se genere).',
+                ),
+                'desde_ahora' => array(
+                    'disponible' => true,
+                    'totalPedidoAntes' => $total_referencia, 'totalPedidoDespues' => $importe, 'totalFactura' => $importe,
+                    'cambiaRenovaciones' => true, 'precioRecurrenteDespues' => $importe,
+                ),
+            ),
             'aviso'           => $adelantado_existente
                 ? sprintf('Ya hay un pago adelantado de %s € guardado el %s por %s para este mes — confirmar crearía otro. Anúlalo primero si quieres cambiarlo.',
                     number_format(floatval($adelantado_existente['importe']), 2, ',', '.'), date_i18n('d/m/Y', strtotime($adelantado_existente['created_at'])), $adelantado_existente['user_login'])
-                : ($order
-                    ? 'Simulación: no se ha escrito nada en WooCommerce. De confirmarlo, SE EMITIRÁ FACTURA y se enviará a Hacienda (Verifactu).'
-                    : 'Simulación: todavía no existe el pedido de renovación. De confirmarlo, se guardará como "pagado por adelantado" (sin factura) y se aplicará solo cuando WooCommerce genere esa renovación.'),
+                : ($importe_distinto
+                    ? sprintf('El importe (%s €) no coincide con el total actual (%s €) — elige si es solo este mes o también desde ahora antes de confirmar.',
+                        number_format($importe, 2, ',', '.'), number_format($total_referencia, 2, ',', '.'))
+                    : ($order
+                        ? 'Simulación: no se ha escrito nada en WooCommerce. De confirmarlo, SE EMITIRÁ FACTURA y se enviará a Hacienda (Verifactu).'
+                        : 'Simulación: todavía no existe el pedido de renovación. De confirmarlo, se guardará como "pagado por adelantado" (sin factura) y se aplicará solo cuando WooCommerce genere esa renovación.')),
         );
         blokes_gestion_log($sub_id, 'marcar_cobrado_simulado', $antes, null, $preview);
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $preview));
+    }
+
+    if ($importe_distinto && $ajustar_precio === 'solo_este_mes' && !$order) {
+        return new WP_Error('sin_pedido', 'Todavía no existe el pedido de esta renovación — no se puede ajustar el precio solo este mes hasta que exista. Usa "y desde ahora" o espera a que se genere.', array('status' => 409));
+    }
+
+    // "desde_ahora" cambia el precio recurrente de la suscripción YA (antes de completar el
+    // pedido si existe, o aunque todavía no exista — así, si se guarda como adelantado, la
+    // próxima renovación que genere WooCommerce nacerá ya con el precio nuevo y el adelantado
+    // coincidirá solo con comprobarlo, sin tocar blokes_aplicar_adelantado_si_hay).
+    if ($importe_distinto && $ajustar_precio === 'desde_ahora') {
+        $ok_sub = blokes_gestion_ajustar_precio_linea($sub, $importe);
+        if (!$ok_sub) {
+            return new WP_Error('varias_lineas', 'Esta suscripción tiene más de una línea de producto — no se puede ajustar el precio recurrente a ciegas. Dímelo y lo reviso a mano.', array('status' => 409));
+        }
+        $user = wp_get_current_user();
+        update_post_meta($sub_id, '_rm_precio_especial', $importe);
+        update_post_meta($sub_id, '_rm_precio_especial_motivo', $motivo_excepcion);
+        update_post_meta($sub_id, '_rm_precio_especial_desde', $fecha_txt);
+        update_post_meta($sub_id, '_rm_precio_especial_por', $user ? $user->user_login : '');
+        blokes_gestion_log($sub_id, 'precio_especial', array('total' => $total_referencia), array('total' => $importe, 'motivo' => $motivo_excepcion));
     }
 
     if (!$order) {
@@ -6870,9 +12435,28 @@ function superadmin_gestion_marcar_cobrado($request) {
         ))));
     }
 
-    blokes_gestion_sin_emails(function() use ($order, $metodo_label, $importe, $fecha_ts, $fecha_txt, $parcial, $nota) {
+    // Excepción de precio sobre el pedido ya existente — "solo este mes" (y también
+    // "desde ahora", que además de cambiar la suscripción arriba, este cobro concreto se
+    // factura por lo cobrado): ajusta la línea del pedido ANTES de completarlo, para que la
+    // factura/Verifactu salga por el importe real.
+    if ($importe_distinto && in_array($ajustar_precio, array('solo_este_mes', 'desde_ahora'), true)) {
+        $ok_pedido = blokes_gestion_ajustar_precio_linea($order, $importe);
+        if (!$ok_pedido) {
+            return new WP_Error('varias_lineas', 'Este pedido tiene más de una línea de producto — no se puede ajustar el precio a ciegas. Dímelo y lo reviso a mano.', array('status' => 409));
+        }
+    }
+
+    blokes_gestion_sin_emails(function() use ($order, $metodo_label, $importe, $fecha_ts, $fecha_txt, $parcial, $nota, $importe_distinto, $ajustar_precio, $motivo_excepcion, $total_referencia) {
         $order->set_payment_method_title($metodo_label);
         $nota_txt = sprintf('ExcelMuerte: cobrado %s € (%s) el %s.', number_format($importe, 2, ',', '.'), $metodo_label, $fecha_txt);
+        if ($importe_distinto && $ajustar_precio) {
+            $nota_txt .= sprintf(
+                ' PRECIO ESPECIAL (antes %s €, %s) — %s.',
+                number_format($total_referencia, 2, ',', '.'),
+                $ajustar_precio === 'desde_ahora' ? 'también desde ahora' : 'solo este mes',
+                $motivo_excepcion
+            );
+        }
         if ($parcial) $nota_txt .= ' PAGO PARCIAL' . ($nota ? ' — ' . $nota : '') . '.';
         elseif ($nota) $nota_txt .= ' ' . $nota;
         $order->add_order_note($nota_txt);
@@ -6880,6 +12464,16 @@ function superadmin_gestion_marcar_cobrado($request) {
         update_post_meta($order->get_id(), '_rm_importe_cobrado', $importe);
         update_post_meta($order->get_id(), '_rm_metodo_cobro', $metodo);
         if ($parcial) update_post_meta($order->get_id(), '_rm_pago_parcial', $nota ?: '1');
+        // 18/11 (cowork §11:00, pedido 3 de la limpieza del bug del auto-aplicado): este pedido
+        // puede llegar aquí con `_aeat_cancelled_invoice` de una anulación anterior (los 22 del
+        // 17/11, vueltos a "pending" a propósito para que se pudieran cobrar de verdad) — si lo
+        // estamos completando AHORA, de verdad, es que hay una factura nueva de camino (o ya
+        // hecha) para este cobro; blokes_pedido_factura_anulada() nunca debe seguir excluyéndolo
+        // de los ingresos para siempre solo por una anulación vieja que ya quedó resuelta.
+        if ($order->get_meta('_aeat_cancelled_invoice')) {
+            $order->delete_meta_data('_aeat_cancelled_invoice');
+            $order->save();
+        }
         $order->payment_complete();
         // payment_complete() deja "processing" (el producto no es virtual/descargable):
         // aquí se considera cobrado de verdad, así que pasa a "completado" — esto emite la
@@ -6909,9 +12503,228 @@ function superadmin_gestion_marcar_cobrado($request) {
     blokes_gestion_log($sub_id, 'marcar_cobrado', $antes, $despues, array(
         'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota,
         'mantuvo_pausa' => $estaba_pausada && $mantener_pausa,
+        'precioEspecial' => ($importe_distinto && $ajustar_precio) ? array('totalAntes' => $total_referencia, 'modo' => $ajustar_precio, 'motivo' => $motivo_excepcion) : null,
     ));
+    // Web → Excel (NOTAS_PARA_CODE_sync_grupos.md): el cobro también se apunta en la Hoja de
+    // Eva, si se encuentra la pestaña/fila/mes de verdad — nunca bloquea esta respuesta (el
+    // cobro y la factura ya están hechos en WooCommerce antes de llegar aquí).
+    $dh = blokes_sync_grupos_dia_horario_de_sub($sub_id);
+    blokes_sync_grupos_escribir_cobro($dh['dia'], $dh['horario'], $sub ? $sub->get_billing_phone() : '', $sub ? trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()) : '', $periodo_cubre, $importe, $metodo, $fecha_txt);
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// "Vuelve tras lesión/ausencia" (Ramiro, 17/11 19:10, confirmado tras el caso de Sergi Escribano
+// #6614 — NOTAS_PARA_CODE_pestanas_grupos.md §18:30/§19:10): reproduce exactamente los pasos que
+// hizo cowork a mano, en la misma suscripción, sin crear otra:
+// (a) anula sin factura los pedidos pendientes de los meses que no vino (motivo "lesión");
+// (b) el pedido que SÍ se cobra se redata a hoy (o a la fecha que diga Eva) — si no, el pago
+//     queda archivado en el mes del pedido viejo, no en el de ahora (confirmado a mano);
+// (c) llama al mismo superadmin_gestion_marcar_cobrado() de siempre, con el importe/método de
+//     Eva y ajustarPrecio=solo_este_mes (para el pago a mitad de mes, p. ej. 43€ en vez de los
+//     86€ del catálogo) — ese endpoint ya reactiva la suscripción sola y deja el siguiente
+//     cobro el día 3 del mes que viene (lo hace WooCommerce Subscriptions al completar el
+//     pedido, no hace falta tocarlo aparte).
+function superadmin_gestion_vuelve_tras_lesion($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id  = intval($request->get_param('sub_id'));
+    $importe = floatval($request->get_param('importe'));
+    $metodo  = sanitize_key($request->get_param('metodo'));
+    $motivo  = sanitize_text_field((string) $request->get_param('motivo'));
+    if ($motivo === '') $motivo = 'Vuelve tras lesión/ausencia';
+    $fecha   = sanitize_text_field((string) $request->get_param('fecha')); // Y-m-d, opcional: hoy por defecto
+    $simular = (bool) $request->get_param('simular');
+    // Pedidos que Eva quiere anular sin cobrar (los meses que no vino) — si no dice cuáles,
+    // se anulan solos todos los pendientes salvo el que se va a cobrar (nunca se quedan
+    // colgando generando otro aviso de impago).
+    $anular_pedidos_param = $request->get_param('anularPedidos');
+    $anular_pedidos_param = is_array($anular_pedidos_param) ? array_map('intval', $anular_pedidos_param) : null;
+
+    if (!$sub_id || $importe <= 0 || !$metodo) {
+        return new WP_Error('bad_request', 'Faltan sub_id, importe o metodo.', array('status' => 400));
+    }
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
+    $pendientes = array();
+    foreach (array_reverse($order_ids) as $oid) {
+        $o = wc_get_order($oid);
+        if ($o && in_array($o->get_status(), array('pending', 'on-hold', 'failed'), true)) $pendientes[] = $o;
+    }
+    if (!$pendientes) {
+        return new WP_Error('sin_pedido', 'Esta suscripción no tiene ningún pedido pendiente de pago — usa "Marcar cobrado" normal.', array('status' => 409));
+    }
+    // El más reciente es el que se cobra; el resto (u otros si Eva los elige a mano) se anulan.
+    $order_a_cobrar = $pendientes[0];
+    $ids_a_anular = $anular_pedidos_param !== null
+        ? array_values(array_filter($anular_pedidos_param, function($id) use ($order_a_cobrar) { return $id !== $order_a_cobrar->get_id(); }))
+        : array_values(array_slice(array_map(function($o) { return $o->get_id(); }, $pendientes), 1));
+
+    $fecha_ts = $fecha ? strtotime($fecha . ' 12:00:00') : time();
+    $fecha_ymd = date('Y-m-d', $fecha_ts);
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'subId' => $sub_id, 'pedidoACobrar' => $order_a_cobrar->get_id(), 'pedidosAAnular' => $ids_a_anular,
+            'importe' => $importe, 'metodo' => $metodo, 'motivo' => $motivo, 'fecha' => $fecha_ymd,
+            'aviso' => sprintf(
+                'Simulación: no se ha escrito nada. Se anularían %d pedido(s) sin factura, se redataría el pedido #%d a %s y se marcaría cobrado (%s €, %s, ajustarPrecio=solo_este_mes si el importe no es el del catálogo).',
+                count($ids_a_anular), $order_a_cobrar->get_id(), date_i18n('d/m/Y', $fecha_ts), number_format($importe, 2, ',', '.'), $metodo
+            ),
+        )));
+    }
+
+    $antes = array('status' => $sub->get_status());
+    foreach ($ids_a_anular as $oid) {
+        $o = wc_get_order($oid);
+        if (!$o) continue;
+        $o->add_order_note('Vuelve tras lesión/ausencia: pedido anulado, no se cobra — ' . $motivo . '.');
+        $o->update_status('cancelled', 'Vuelve tras lesión/ausencia.');
+    }
+
+    $order_a_cobrar->set_date_created($fecha_ts);
+    $order_a_cobrar->save();
+
+    $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
+    $req->set_param('sub_id', $sub_id);
+    $req->set_param('importe', $importe);
+    $req->set_param('metodo', $metodo);
+    $req->set_param('fecha', $fecha_ymd);
+    $req->set_param('nota', $motivo);
+    $req->set_param('ajustarPrecio', 'solo_este_mes');
+    $req->set_param('motivoExcepcion', $motivo);
+    $req->set_param('confirmarDuplicado', true);
+    $req->set_param('simular', false);
+    $resultado = superadmin_gestion_marcar_cobrado($req);
+    if (is_wp_error($resultado)) return $resultado;
+
+    blokes_gestion_log($sub_id, 'vuelve_tras_lesion', $antes, array('pedidoCobrado' => $order_a_cobrar->get_id(), 'pedidosAnulados' => $ids_a_anular), array('motivo' => $motivo, 'importe' => $importe, 'metodo' => $metodo));
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'subId' => $sub_id, 'pedidoCobrado' => $order_a_cobrar->get_id(), 'pedidosAnulados' => $ids_a_anular,
+        'marcarCobrado' => $resultado->get_data(),
+    )));
+}
+
+// "Mandar factura" (NOTAS_PARA_CODE_pestanas_grupos.md, pestaña 3): pedidos de renovación de
+// tarjeta ya cobrados de verdad por el banco (Redsys/la pasarela confirmó la transacción) pero
+// que WooCommerce dejó en "processing" en vez de "completed" — así nunca sale la factura
+// Verifactu ni el email al cliente. El plugin de Redsys no rellena `transaction_id` en las
+// renovaciones (cowork, prueba 3/11 06:00), así que un pedido cuenta como "cobro confirmado" si
+// tiene `date_paid` puesto Y además un código de autorización o el flag de Redsys hecho —
+// nunca por estar "processing" sin más, que podría no ser un cobro real.
+function blokes_gestion_pedido_cobro_confirmado($order) {
+    if (!$order->get_date_paid()) return false;
+    if ($order->get_transaction_id()) return true;
+    if ($order->get_meta('_authorisation_code_redsys')) return true;
+    if ($order->get_meta('_redsys_done')) return true;
+    return false;
+}
+
+// Ramiro, 15/11 10:25 punto B (OK dado): "Mandar factura" deja de ser una tarea manual de
+// Eva — los pedidos que cumplen el criterio seguro de arriba se completan solos (factura,
+// correo al cliente y Excel, como si WooCommerce los hubiera dejado bien desde el principio).
+// A diferencia del resto de acciones de ExcelMuerte, aquí SÍ se deja el email normal de
+// WooCommerce (no se envuelve en blokes_gestion_sin_emails): es justo lo que habría pasado
+// solo si el pedido no se hubiera quedado atascado en "processing".
+function blokes_auto_factura_candidatos() {
+    if (!function_exists('wcs_get_subscription')) return array();
+    $out = array();
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (empty($sub['id'])) continue;
+        $sub_obj = wcs_get_subscription(intval($sub['id']));
+        if (!$sub_obj) continue;
+        $order_ids = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
+        foreach ($order_ids as $oid) {
+            $order = wc_get_order($oid);
+            if (!$order || $order->get_status() !== 'processing') continue;
+            $out[] = array('orderId' => intval($oid), 'subId' => intval($sub['id']), 'confirmado' => blokes_gestion_pedido_cobro_confirmado($order));
+        }
+    }
+    return $out;
+}
+
+function blokes_auto_factura_ejecutar() {
+    $completados = array();
+    foreach (blokes_auto_factura_candidatos() as $c) {
+        if (!$c['confirmado']) continue;
+        $order = wc_get_order($c['orderId']);
+        if (!$order || $order->get_status() !== 'processing') continue;
+        if (!blokes_gestion_pedido_cobro_confirmado($order)) continue; // doble check, por si cambió entre listar y completar
+        $order->update_status('completed', 'ExcelMuerte: auto-factura (pago de tarjeta confirmado por la pasarela, completado automáticamente — Ramiro, 15/11 10:25).');
+        blokes_gestion_log(0, 'auto_factura', array('status' => 'processing'), array('status' => 'completed', 'orderId' => $c['orderId']));
+        if (function_exists('wcs_get_subscriptions_for_order')) {
+            foreach (wcs_get_subscriptions_for_order($order, array('order_type' => 'any')) as $sub) {
+                blokes_sync_grupos_auto_escribir_cobro($sub, $order);
+            }
+        }
+        $completados[] = $c['orderId'];
+    }
+    return $completados;
+}
+add_action('blokes_auto_factura_cron', 'blokes_auto_factura_ejecutar');
+add_action('plugins_loaded', function() {
+    if (!wp_next_scheduled('blokes_auto_factura_cron')) wp_schedule_event(time(), 'hourly', 'blokes_auto_factura_cron');
+});
+
+// GET /gestion/facturas-pendientes — ya NO es la lista a procesar a mano (eso es automático,
+// arriba): es solo el aviso amarillo de los pedidos "processing" que NO cumplen el criterio
+// seguro y de verdad necesitan que alguien los mire en WooCommerce.
+function superadmin_gestion_facturas_pendientes($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $out = array();
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (empty($sub['id'])) continue;
+        $sub_obj = wcs_get_subscription(intval($sub['id']));
+        if (!$sub_obj) continue;
+        $order_ids = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
+        foreach ($order_ids as $oid) {
+            $order = wc_get_order($oid);
+            if (!$order || $order->get_status() !== 'processing') continue;
+            if (blokes_gestion_pedido_cobro_confirmado($order)) continue; // este se autocompleta solo
+            $nombre_fact = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+            $out[] = array(
+                'orderId' => intval($oid), 'subId' => intval($sub['id']),
+                'alumno' => $nombre_fact !== '' ? $nombre_fact : ($sub['cliente'] ?? ''),
+                'importe' => floatval($order->get_total()), 'metodo' => $order->get_payment_method_title(),
+                'fecha' => ($order->get_date_paid() ?: $order->get_date_created())->date('d/m/Y'),
+            );
+        }
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// Completa UN pedido ya confirmado por `facturas_pendientes` (misma comprobación de cobro real).
+// "Mandar todas" en el frontend llama a esto uno por uno y cuenta aciertos/errores — nunca una
+// escritura en bloque de una sola vez.
+function superadmin_gestion_facturas_pendientes_completar($request) {
+    $order_id = intval($request['id']);
+    $order = wc_get_order($order_id);
+    if (!$order) return new WP_Error('not_found', 'Pedido no encontrado.', array('status' => 404));
+    if ($order->get_status() !== 'processing') {
+        return new WP_Error('invalid_state', 'Este pedido ya no está en "processing" — probablemente ya se completó.', array('status' => 409));
+    }
+    if (!blokes_gestion_pedido_cobro_confirmado($order)) {
+        return new WP_Error('sin_confirmar', 'Este pedido no tiene un cobro confirmado por la pasarela.', array('status' => 409));
+    }
+    blokes_gestion_sin_emails(function() use ($order) {
+        $order->update_status('completed', 'ExcelMuerte: factura enviada desde "Mandar factura" (pago de tarjeta ya confirmado).');
+    });
+    blokes_gestion_log(0, 'factura_pendiente_completada', array('status' => 'processing'), array('status' => 'completed', 'orderId' => $order_id));
+    // Web → Excel (Ramiro, 6/11 16:04, punto 1): completar desde "Mandar factura" no dispara
+    // `woocommerce_payment_complete` de nuevo (el cobro ya se confirmó antes, esto solo cambia
+    // "processing" a "completed") — se escribe aparte, explícito, para no depender de un hook
+    // que aquí no llega a saltar.
+    if (function_exists('wcs_get_subscriptions_for_order')) {
+        foreach (wcs_get_subscriptions_for_order($order, array('order_type' => 'any')) as $sub) {
+            blokes_sync_grupos_auto_escribir_cobro($sub, $order);
+        }
+    }
+    return rest_ensure_response(array('success' => true));
 }
 
 // Lista de adelantados sin aplicar (pendientes de que WooCommerce genere la renovación) y los
@@ -6957,15 +12770,21 @@ function superadmin_gestion_pausar($request) {
     $motivo       = sanitize_text_field($request->get_param('motivo'));
     $fecha_vuelta = sanitize_text_field($request->get_param('fecha_vuelta')); // 'Y-m-d', opcional
     $simular      = (bool) $request->get_param('simular');
+    // 19/11 21:30 (Eva/cowork, punto 3 — María Clara Garrido): al pausar con un pedido del mes
+    // en curso sin pagar, ofrecer cancelarlo (sin factura, nunca se llegó a generar una) para
+    // que deje de salir en Pendientes mientras está en pausa.
+    $cancelar_pendientes = (bool) $request->get_param('cancelarPedidosPendientes');
 
     if (!$sub_id || !$motivo) return new WP_Error('bad_request', 'Faltan sub_id o motivo.', array('status' => 400));
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
 
     if ($simular) {
+        $pedidos_pendientes = blokes_cancelar_pedidos_impagados($sub, true);
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'subId' => $sub_id, 'estadoAntes' => $sub->get_status(), 'estadoDespues' => 'on-hold',
             'motivo' => $motivo, 'fecha_vuelta' => $fecha_vuelta,
+            'pedidosPendientes' => $pedidos_pendientes ?: null,
             'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
         )));
     }
@@ -6978,7 +12797,9 @@ function superadmin_gestion_pausar($request) {
     if ($fecha_vuelta) update_post_meta($sub_id, '_rm_pausa_hasta', $fecha_vuelta);
     else delete_post_meta($sub_id, '_rm_pausa_hasta');
 
-    $despues = array('status' => 'on-hold', 'motivo' => $motivo, 'fecha_vuelta' => $fecha_vuelta);
+    $pedidos_cancelados = $cancelar_pendientes ? blokes_cancelar_pedidos_impagados($sub, false) : array();
+
+    $despues = array('status' => 'on-hold', 'motivo' => $motivo, 'fecha_vuelta' => $fecha_vuelta, 'pedidosCancelados' => $pedidos_cancelados ?: null);
     blokes_gestion_log($sub_id, 'pausar', $antes, $despues);
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
@@ -7015,11 +12836,88 @@ function superadmin_gestion_reanudar($request) {
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
+// "Congelar mes(es)" (19/11 21:30, Eva/cowork, punto 2 — Borja Erice, trimestral que congela
+// diciembre y vuelve en enero): a diferencia de "Pausar" (que pone on-hold y no mueve ninguna
+// fecha, pensado para quien deja de venir un tiempo indefinido y hay que avisar cuando vuelva),
+// esto es para quien SIGUE siendo alumno activo pero no cuenta ese mes — mueve next_payment
+// hacia delante los meses que haga falta, sin tocar el estado (se queda "active") y sin cobrar
+// ni mandar ningún email. Deja nota en la sub y log en gestión, igual que el resto de acciones.
+function superadmin_gestion_congelar_mes($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id  = intval($request->get_param('sub_id'));
+    // 20/11 (cowork, prueba en producción): tope razonable — más de esto probablemente es un
+    // error de tecleo, no un caso real.
+    $meses   = max(1, min(6, intval($request->get_param('meses')) ?: 1));
+    $nota    = sanitize_text_field((string) $request->get_param('nota'));
+    $simular = (bool) $request->get_param('simular');
+
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    if ($sub->get_status() !== 'active') {
+        return new WP_Error('estado_no_valido', 'Solo se puede congelar una suscripción activa — si ya está pausada, usa "Pausar"/"Reanudar".', array('status' => 409));
+    }
+    $next_payment_actual = $sub->get_date('next_payment');
+    if (!$next_payment_actual) {
+        return new WP_Error('sin_next_payment', 'Esta suscripción no tiene próximo pago programado — no hay fecha que mover.', array('status' => 409));
+    }
+    $next_payment_nueva = gmdate('Y-m-d H:i:s', strtotime("+{$meses} months", strtotime($next_payment_actual)));
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'subId' => $sub_id, 'meses' => $meses,
+            'proximoPagoAntes' => date('Y-m-d', strtotime($next_payment_actual)),
+            'proximoPagoDespues' => date('Y-m-d', strtotime($next_payment_nueva)),
+            'aviso' => 'Simulación: no se ha escrito nada en WooCommerce. No se cobra nada ni se manda ningún email.',
+        )));
+    }
+
+    $antes = array('proximoPago' => $next_payment_actual);
+    // 20/11 (cowork, prueba en producción): el try/catch se tragaba el rechazo de WooCommerce
+    // (p. ej. fecha inválida) y aun así escribía la nota, el log y devolvía success. Ahora se
+    // relee next_payment después de escribir y, si no cambió de verdad, no se anota ni se
+    // registra nada — se devuelve error.
+    $next_payment_real = blokes_gestion_sin_emails(function() use ($sub, $next_payment_nueva, $meses) {
+        try { $sub->update_dates(array('next_payment' => $next_payment_nueva)); } catch (Exception $e) {}
+        $sub->save();
+        return $sub->get_date('next_payment');
+    });
+    if (!$next_payment_real || date('Y-m-d', strtotime($next_payment_real)) !== date('Y-m-d', strtotime($next_payment_nueva))) {
+        return new WP_Error('no_se_pudo_mover', 'WooCommerce no ha movido la fecha de próximo pago — no se ha escrito nota ni log. Revisa la suscripción a mano.', array('status' => 409));
+    }
+    blokes_gestion_sin_emails(function() use ($sub, $next_payment_nueva, $meses) {
+        $sub->add_order_note(sprintf('Congelado %d mes(es) vía Grupos — próximo pago movido al %s, sin cobrar.', $meses, date('d/m/Y', strtotime($next_payment_nueva))));
+    });
+    if ($nota) {
+        // 20/11 (cowork): pisaba _rm_nota si ya había una — ahora se añade a la existente.
+        $nota_actual = (string) get_post_meta($sub_id, '_rm_nota', true);
+        $nota_final = $nota_actual !== '' ? ($nota_actual . ' · ' . $nota) : $nota;
+        update_post_meta($sub_id, '_rm_nota', $nota_final);
+    }
+
+    $despues = array('proximoPago' => $next_payment_real, 'meses' => $meses, 'nota' => $nota);
+    blokes_gestion_log($sub_id, 'congelar_mes', $antes, $despues);
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
 // Motivo de baja de clases (fijo, para poder agrupar bajas por motivo — campañas de WhatsApp,
 // 31/10) + un detalle libre opcional (sobre todo para "otro").
-const BLOKES_BAJA_MOTIVOS = array('precio', 'horario', 'lesion', 'mudanza', 'otro');
+// 'duplicado' (cowork/Ramiro, 15/11 08:15): no es una baja real — la persona sigue viniendo,
+// solo se cancela la suscripción vieja que quedó colgando. Excluida de members_lost en
+// superadmin_classes() y de cualquier campaña de "ya no viene" (31/10).
+// Ampliado 15/11 08:45 punto B.2 (Ramiro): lista más fina para el motivo de baja de verdad
+// (antes solo tenía las 4 + duplicado/otro de "Dar de baja"). 'duplicado' sigue existiendo y
+// excluida de members_lost (15/11 08:15) — no es una baja real.
+const BLOKES_BAJA_MOTIVOS = array('precio', 'horario', 'falta_tiempo', 'mudanza', 'otro_rocodromo', 'clase_profe', 'lesion', 'temporal_vuelve', 'duplicado', 'otro');
 function blokes_baja_motivo_label($cat) {
-    $map = array('precio' => 'Precio', 'horario' => 'Horario', 'lesion' => 'Lesión', 'mudanza' => 'Mudanza', 'otro' => 'Otro');
+    $map = array(
+        'precio' => 'Precio', 'horario' => 'Horario', 'falta_tiempo' => 'Falta de tiempo', 'mudanza' => 'Mudanza',
+        'otro_rocodromo' => 'Se va a otro rocódromo', 'clase_profe' => 'La clase o el profe', 'lesion' => 'Lesión',
+        'temporal_vuelve' => 'Temporal, dice que vuelve', 'duplicado' => 'Duplicado (no es baja real)', 'otro' => 'Otro',
+    );
     return $map[$cat] ?? '';
 }
 
@@ -7081,35 +12979,70 @@ function superadmin_gestion_dar_de_baja($request) {
 // Busca si existe otra suscripción del mismo cliente, misma clase (día+horario+edad) y más
 // reciente, en vigor (activa o de baja a fin de mes) — la "nueva" de la que $sub_id_viejo sería
 // el duplicado colgando. Devuelve su fila de blokes_get_all_subscription_data() o null.
+// Cowork, 14/11 18:40 punto 4: antes solo miraba la MISMA clase (horario/edad/día) — la
+// suscripción vieja en espera de quien se cambió de clase (Luis Corregidor, Aurelio Gualo,
+// Tomás Gasca…) se quedaba sin match porque su activa está en OTRA clase. Ahora, si no hay
+// ninguna en la misma clase, acepta cualquier activa del mismo cliente en otra clase — sigue
+// siendo "mismo cliente de verdad" (customer_id fiable con HPOS, ver blokes_alumno_customer_id_de_sub),
+// nunca "cualquier activa a secas".
 function blokes_buscar_sub_mas_nueva($sub_id_viejo) {
     $all = blokes_get_all_subscription_data();
     $viejo = null;
     foreach ($all as $s) { if (intval($s['id']) === $sub_id_viejo) { $viejo = $s; break; } }
     if (!$viejo) return null;
 
-    $uid_viejo = intval(get_post_meta($sub_id_viejo, '_customer_user', true));
+    $uid_viejo = blokes_alumno_customer_id_de_sub($viejo);
+    $misma_clase = null; $otra_clase = null;
     foreach ($all as $s) {
         if (intval($s['id']) === $sub_id_viejo) continue;
         $en_vigor = ($s['status'] ?? '') === 'active'; // ya incluye pending-cancel con status forzado a 'active'
         if (!$en_vigor) continue;
-        $mismo_cliente = $uid_viejo && intval(get_post_meta(intval($s['id']), '_customer_user', true)) === $uid_viejo;
+        $mismo_cliente = $uid_viejo && blokes_alumno_customer_id_de_sub($s) === $uid_viejo;
         if (!$mismo_cliente) $mismo_cliente = !empty($viejo['email']) && !empty($s['email']) && strcasecmp($s['email'], $viejo['email']) === 0;
         if (!$mismo_cliente) continue;
-        if (($s['horario'] ?? '') !== ($viejo['horario'] ?? '')) continue;
-        if (($s['edad'] ?? 'Adultos') !== ($viejo['edad'] ?? 'Adultos')) continue;
-        if (blokes_dia_a_pareja($s['dia'] ?? '') !== blokes_dia_a_pareja($viejo['dia'] ?? '')) continue;
-        return $s;
+        $misma_horario_edad_dia = ($s['horario'] ?? '') === ($viejo['horario'] ?? '')
+            && ($s['edad'] ?? 'Adultos') === ($viejo['edad'] ?? 'Adultos')
+            && blokes_dia_a_pareja($s['dia'] ?? '') === blokes_dia_a_pareja($viejo['dia'] ?? '');
+        if ($misma_horario_edad_dia) { $misma_clase = $s; break; }
+        if (!$otra_clase) $otra_clase = $s;
+    }
+    return $misma_clase ?: $otra_clase;
+}
+
+// Dos suscripciones ACTIVAS duplicadas de la misma clase y cliente (cowork 15/11 08:15, el caso
+// real de octubre: Eva creaba una nueva en vez de marcar pagada la renovación). A diferencia de
+// blokes_buscar_sub_mas_nueva(): aquí SOLO vale la MISMA clase (otra clase sería una membresía
+// legítima aparte, no un duplicado) y SOLO si es estrictamente más nueva (subId mayor) que la
+// vieja — nunca al revés, para no arriesgarse a cancelar por error la que se debe quedar.
+function blokes_buscar_sub_misma_clase_mas_nueva_activa($sub_id_viejo) {
+    $all = blokes_get_all_subscription_data();
+    $viejo = null;
+    foreach ($all as $s) { if (intval($s['id']) === $sub_id_viejo) { $viejo = $s; break; } }
+    if (!$viejo) return null;
+    $uid_viejo = blokes_alumno_customer_id_de_sub($viejo);
+    foreach ($all as $s) {
+        $sid = intval($s['id']);
+        if ($sid <= $sub_id_viejo) continue;
+        if (($s['status'] ?? '') !== 'active') continue;
+        $mismo_cliente = $uid_viejo && blokes_alumno_customer_id_de_sub($s) === $uid_viejo;
+        if (!$mismo_cliente) $mismo_cliente = !empty($viejo['email']) && !empty($s['email']) && strcasecmp($s['email'], $viejo['email']) === 0;
+        if (!$mismo_cliente) continue;
+        $misma_clase = ($s['horario'] ?? '') === ($viejo['horario'] ?? '')
+            && ($s['edad'] ?? 'Adultos') === ($viejo['edad'] ?? 'Adultos')
+            && blokes_dia_a_pareja($s['dia'] ?? '') === blokes_dia_a_pareja($viejo['dia'] ?? '');
+        if ($misma_clase) return $s;
     }
     return null;
 }
 
 /**
  * Fusionar duplicados: cancela la suscripción vieja que se quedó colgando en espera/pendiente
- * cuando el alumno se volvió a apuntar con una nueva (los 19 casos de octubre) — pero solo si
- * de verdad hay una suscripción más nueva en vigor del mismo cliente y la misma clase; si no,
- * 409 (para no poder cancelar por error a alguien que solo debe un mes, no es un duplicado). No
- * toca la suscripción nueva, ni genera pedido, factura o email, y cancela también los pedidos
- * sin pagar de la vieja.
+ * cuando el alumno se volvió a apuntar con una nueva (los 19 casos de octubre) o se cambió de
+ * clase y le quedó la vieja en espera (cowork, 14/11 18:40 punto 4) — pero solo si de verdad hay
+ * una suscripción más nueva en vigor del mismo cliente (misma clase o, si no la hay, cualquier
+ * otra); si no, 409 (para no poder cancelar por error a alguien que solo debe un mes, no es un
+ * duplicado). No toca la suscripción nueva, ni genera pedido, factura o email, y cancela
+ * también los pedidos sin pagar de la vieja.
  */
 function superadmin_gestion_fusionar($request) {
     if (!function_exists('wcs_get_subscription')) {
@@ -7121,16 +13054,31 @@ function superadmin_gestion_fusionar($request) {
     if (!$sub_id_viejo) return new WP_Error('bad_request', 'Falta sub_id_viejo.', array('status' => 400));
     $sub = wcs_get_subscription($sub_id_viejo);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
-    if ($sub->has_status('active')) {
-        return new WP_Error('sigue_activa', 'Esa suscripción está activa, no es la vieja a cancelar — revisa el subId.', array('status' => 409));
-    }
 
-    $nueva = blokes_buscar_sub_mas_nueva($sub_id_viejo);
-    if (!$nueva) {
-        return new WP_Error('no_es_duplicado', 'No se ha encontrado ninguna suscripción más nueva en vigor del mismo alumno y la misma clase — esta puede ser la única suya. Revísalo antes de cancelarla a mano (usa "Dar de baja" si es lo que quieres).', array('status' => 409));
+    $nueva = null;
+    if ($sub->has_status('active')) {
+        // Cowork, 15/11 08:15: dos ACTIVAS duplicadas de la misma clase también se pueden
+        // fusionar (el caso real de octubre) — pero solo si hay otra, de la MISMA clase,
+        // estrictamente más nueva. Si no, sigue siendo un 409 (puede ser su única suscripción).
+        $nueva = blokes_buscar_sub_misma_clase_mas_nueva_activa($sub_id_viejo);
+        if (!$nueva) {
+            return new WP_Error('sigue_activa', 'Esa suscripción está activa y no hay otra más nueva de la misma clase — no es la vieja a cancelar, revisa el subId.', array('status' => 409));
+        }
+    } else {
+        $nueva = blokes_buscar_sub_mas_nueva($sub_id_viejo);
+        if (!$nueva) {
+            return new WP_Error('no_es_duplicado', 'No se ha encontrado ninguna suscripción más nueva en vigor del mismo alumno (ni en esta clase ni en otra) — esta puede ser la única suya. Revísalo antes de cancelarla a mano (usa "Dar de baja" si es lo que quieres).', array('status' => 409));
+        }
     }
 
     $pedidos_a_cancelar = blokes_cancelar_pedidos_impagados($sub, true);
+
+    // 19/11 (cowork §06:25, punto 4): "no deje cancelar a rol gestión" — Eva puede ver el aviso
+    // y simular (para entender qué pasaría), pero cancelar de verdad un duplicado queda para
+    // Ramiro; gestión usa "Avisar a Ramiro" (superadmin_gestion_avisar_duplicado) en su lugar.
+    if (!$simular && blokes_get_app_role() === 'gestion') {
+        return new WP_Error('solo_socio', 'Cancelar un duplicado es cosa de Ramiro — usa "Avisar a Ramiro" para que lo decida él.', array('status' => 403));
+    }
 
     if ($simular) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
@@ -7150,6 +13098,29 @@ function superadmin_gestion_fusionar($request) {
     blokes_gestion_log($sub_id_viejo, 'fusionar', $antes, $despues, array('subIdNueva' => intval($nueva['id'])));
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// 19/11 (cowork §06:25, punto 4): lo que rol gestión usa en vez de cancelar un duplicado de
+// verdad — deja un aviso visible (log de gestión, consultable con GET /gestion/log) y, de
+// mejor esfuerzo, un correo a las direcciones de "socios" (Ramiro) con los datos para decidir.
+// Nunca toca ninguna suscripción.
+function superadmin_gestion_avisar_duplicado($request) {
+    $sub_id_viejo = intval($request->get_param('sub_id_viejo'));
+    $sub_id_nueva = intval($request->get_param('sub_id_nueva'));
+    $motivo = sanitize_text_field((string) $request->get_param('motivo'));
+    if (!$sub_id_viejo) return new WP_Error('bad_request', 'Falta sub_id_viejo.', array('status' => 400));
+    $u = wp_get_current_user();
+    blokes_gestion_log($sub_id_viejo, 'aviso_duplicado_pendiente', null, array('subIdNueva' => $sub_id_nueva ?: null, 'motivo' => $motivo, 'por' => $u ? $u->user_login : ''));
+    $lists = blokes_get_email_lists();
+    $destinatarios = array_filter(array_map('strtolower', $lists['socios'] ?? array()));
+    if ($destinatarios) {
+        $cuerpo = sprintf(
+            "Posible suscripción duplicada que gestión no ha cancelado (decide tú):\n\nVieja/sospechosa: #%d\nMás nueva/recomendada: %s\nMotivo apuntado: %s\nQuién avisó: %s\n\nRevísalo en Supervisión.",
+            $sub_id_viejo, $sub_id_nueva ? ('#' . $sub_id_nueva) : '—', $motivo ?: '—', $u ? $u->user_login : '—'
+        );
+        wp_mail($destinatarios, 'Blokes: duplicado pendiente de decidir (#' . $sub_id_viejo . ')', $cuerpo);
+    }
+    return rest_ensure_response(array('success' => true));
 }
 
 /** Historial de acciones (para depurar o ver «quién, cuándo»). Sin sub_id, las últimas 50. */
@@ -7193,6 +13164,66 @@ function superadmin_gestion_exento($request) {
 }
 
 /**
+ * Busca en el catálogo de clases (Classes/Días sueltos) la variación que corresponde a un
+ * día/horario/edad concretos — misma lógica que ya usaba superadmin_gestion_cambiar_grupo(),
+ * extraída aquí para reutilizarla también al crear un alumno nuevo
+ * (superadmin_gestion_alta_cliente()). $dia/$horario/$edad deben venir ya normalizados
+ * (blokes_normalizar_dia/horario/edad). Devuelve null si no existe esa combinación, o un array
+ * con la variación encontrada y los datos derivados (frecuencia, producto, edad real buscada —
+ * Adolescentes se busca como Adultos, ver comentario abajo).
+ */
+function blokes_buscar_variacion_clase($dia, $horario, $edad) {
+    if (!class_exists('RocoMadrid_Step_Form')) return null;
+    $product_classes_id = RocoMadrid_Step_Form::product_tarifas_id();
+    $product_single_id  = RocoMadrid_Step_Form::product_dias_sueltos_id();
+
+    // 2 días/semana (bloques "Lunes-Miércoles"/"Martes-Jueves") van al producto Classes; un solo
+    // día va al producto de Días sueltos. Adolescentes NO es un término pa_edad real en ningún
+    // catálogo: hoy se monta sobre la variación de Adultos del mismo día/horario (precio
+    // ajustado por addon en el alta normal) — aquí hacemos lo mismo: buscamos la variación de
+    // Adultos; el precio real de Adolescentes se calcula aparte con RocoMadrid_SF_Pricing.
+    $frecuencia = (strpos($dia, '-') !== false) ? '2_days' : '1_day';
+    $target_product_id = ($frecuencia === '2_days') ? $product_classes_id : $product_single_id;
+    $target_taxonomy    = ($frecuencia === '2_days') ? 'pa_dias' : 'pa_dia-suelto';
+    $edad_buscar = $edad;
+    if ($edad === blokes_normalizar_edad('Adolescentes')) {
+        $edad_buscar = 'Adultos';
+    } elseif ($edad === blokes_normalizar_edad('Menores') && $frecuencia === '1_day') {
+        // Eva/cowork, 20/11 16:50 (Anne Sophie, sub 7895): el producto de Días sueltos no tiene
+        // ninguna variación de Menores, así que el alta de un niño de un solo día se quedaba sin
+        // opción y salía como Adultos (74€ en vez de 47€). Igual que Adolescentes: se monta
+        // sobre la variación de Adultos del mismo día/horario; el precio real de Menores se
+        // calcula aparte con RocoMadrid_SF_Pricing (sin tocar nada en WooCommerce).
+        $edad_buscar = 'Adultos';
+    }
+
+    $producto = wc_get_product($target_product_id);
+    if (!$producto) return null;
+    foreach ($producto->get_children() as $vid) {
+        $variacion = wc_get_product($vid);
+        if (!$variacion) continue;
+        $attrs = $variacion->get_attributes();
+        $dia_slug     = $attrs[$target_taxonomy] ?? '';
+        $horario_slug = $attrs['pa_horario'] ?? '';
+        $edad_slug    = $attrs['pa_edad'] ?? '';
+        $dia_term     = $dia_slug     ? get_term_by('slug', $dia_slug,     $target_taxonomy) : null;
+        $horario_term = $horario_slug ? get_term_by('slug', $horario_slug, 'pa_horario') : null;
+        $edad_term    = $edad_slug    ? get_term_by('slug', $edad_slug,    'pa_edad')    : null;
+        $dia_v     = blokes_normalizar_dia($dia_term ? $dia_term->name : ucfirst($dia_slug));
+        $horario_v = blokes_normalizar_horario($horario_term ? $horario_term->name : $horario_slug);
+        $edad_v    = blokes_normalizar_edad($edad_term ? $edad_term->name : ($edad_slug ? ucfirst($edad_slug) : 'Adultos'));
+        if ($dia_v === $dia && $horario_v === $horario && $edad_v === $edad_buscar) {
+            return array(
+                'variacion' => $variacion, 'frecuencia' => $frecuencia,
+                'targetProductId' => $target_product_id, 'targetTaxonomy' => $target_taxonomy,
+                'claveDia' => $target_taxonomy,
+            );
+        }
+    }
+    return null;
+}
+
+/**
  * Cambiar de grupo/horario, o de 1 a 2 días (y al revés) (8.2.5). Solo para suscripciones de
  * clase semanal (producto "Classes"/Tarifas) — no aplica a Pilates, Yoga ni Días sueltos. Busca
  * en el catálogo de WooCommerce la variación que corresponde a la combinación nueva (la misma
@@ -7200,7 +13231,10 @@ function superadmin_gestion_exento($request) {
  * (RocoMadrid_SF_Pricing, la misma que usa el formulario de alta), respetando el plan de pago
  * actual (mensual/trimestral/anual) — cambiar de grupo no cambia cada cuánto se cobra, solo
  * cuánto. No crea pedido ni toca renovaciones ya pagadas: el histórico queda intacto, el precio
- * nuevo se nota desde la próxima renovación.
+ * nuevo se nota desde la próxima renovación. Excepción: si el pedido padre (el "enlace de pago"
+ * inicial) sigue sin pagar (pending/on-hold), su línea y total se actualizan igual que los de la
+ * sub, para que el enlace ya pendiente cobre el grupo/precio nuevos (cowork, 07/11 10:10) — un
+ * pedido ya pagado nunca se toca.
  */
 function superadmin_gestion_cambiar_grupo($request) {
     if (!function_exists('wcs_get_subscription') || !class_exists('RocoMadrid_Step_Form') || !class_exists('RocoMadrid_SF_Pricing')) {
@@ -7219,13 +13253,39 @@ function superadmin_gestion_cambiar_grupo($request) {
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
 
     $product_classes_id = RocoMadrid_Step_Form::product_tarifas_id();
+    $product_single_id  = RocoMadrid_Step_Form::product_dias_sueltos_id();
     $item = null;
     foreach ($sub->get_items() as $it) {
-        if (intval($it->get_product_id()) === intval($product_classes_id)) { $item = $it; break; }
+        $pid = intval($it->get_product_id());
+        if ($pid === intval($product_classes_id) || $pid === intval($product_single_id)) { $item = $it; break; }
     }
     if (!$item) {
-        return new WP_Error('no_aplica', 'Esta suscripción no es de un grupo semanal (Classes) — esta acción no aplica a Pilates, Yoga o Días sueltos.', array('status' => 400));
+        return new WP_Error('no_aplica', 'Esta suscripción no es de un grupo semanal ni de un día suelto (Classes/Días sueltos) — esta acción no aplica a Pilates ni Yoga.', array('status' => 400));
     }
+
+    // Si el pedido padre (el "enlace de pago" inicial) sigue sin pagar, su línea se actualiza
+    // igual que la de la sub — si no, el enlace seguiría cobrando el grupo y el precio viejos
+    // aunque la sub ya esté bien (cowork, 07/11 10:10). Nunca se toca un pedido ya pagado
+    // (facturado/histórico): eso sigue intacto, como dice el comentario de arriba.
+    $item_padre = null;
+    $orden_padre = null;
+    $parent_id = $sub->get_parent_id();
+    if ($parent_id) {
+        $orden_padre_candidata = wc_get_order($parent_id);
+        if ($orden_padre_candidata && in_array($orden_padre_candidata->get_status(), array('pending', 'on-hold'), true)) {
+            foreach ($orden_padre_candidata->get_items() as $it) {
+                $pid = intval($it->get_product_id());
+                if ($pid === intval($product_classes_id) || $pid === intval($product_single_id)) { $item_padre = $it; break; }
+            }
+            if ($item_padre) $orden_padre = $orden_padre_candidata;
+        }
+    }
+
+    // ¿Es de 1 día (Días sueltos) o de 2 días (Classes)? La clave de _step_form_selections y la
+    // taxonomía de la variación cambian según cuál sea (mismo criterio que usa
+    // RocoMadrid_SF_Stats::get_all_subscription_data() para leer el día actual de cada tipo).
+    $es_dias_sueltos_actual = (intval($item->get_product_id()) === intval($product_single_id));
+    $clave_dia_actual = $es_dias_sueltos_actual ? 'pa_dia-suelto' : 'pa_dias';
 
     // Día/horario/edad actuales: para el "antes" y como valor por defecto de la edad si no se
     // pide cambiarla también. Mismo orden de prioridad que en blokes_get_pending_cancel_alumnos:
@@ -7233,16 +13293,16 @@ function superadmin_gestion_cambiar_grupo($request) {
     $selecciones_actuales = $item->get_meta('_step_form_selections', true);
     $dia_actual = $horario_actual = $edad_actual = '';
     if (!empty($selecciones_actuales) && is_array($selecciones_actuales)) {
-        $dia_actual     = $selecciones_actuales['pa_dias']    ?? '';
-        $horario_actual = $selecciones_actuales['pa_horario'] ?? '';
-        $edad_actual    = $selecciones_actuales['pa_edad']    ?? '';
+        $dia_actual     = $selecciones_actuales[$clave_dia_actual] ?? '';
+        $horario_actual = $selecciones_actuales['pa_horario']      ?? '';
+        $edad_actual    = $selecciones_actuales['pa_edad']         ?? '';
     }
     if (empty($dia_actual) || empty($horario_actual) || empty($edad_actual)) {
         $variacion_actual = wc_get_product($item->get_variation_id());
         if ($variacion_actual) {
             foreach ($variacion_actual->get_variation_attributes() as $key => $value) {
                 $key_lower = strtolower($key);
-                if (empty($dia_actual) && strpos($key_lower, 'dias') !== false) $dia_actual = $value;
+                if (empty($dia_actual) && (strpos($key_lower, 'dia-suelto') !== false || strpos($key_lower, 'dias') !== false)) $dia_actual = $value;
                 if (empty($horario_actual) && strpos($key_lower, 'horario') !== false) $horario_actual = $value;
                 if (empty($edad_actual) && strpos($key_lower, 'edad') !== false) $edad_actual = $value;
             }
@@ -7253,36 +13313,20 @@ function superadmin_gestion_cambiar_grupo($request) {
     $edad_actual    = blokes_normalizar_edad($edad_actual);
     $edad_nuevo     = ($edad_param !== null && $edad_param !== '') ? blokes_normalizar_edad(sanitize_text_field((string) $edad_param)) : $edad_actual;
 
-    // Buscar en el catálogo la variación que corresponde a la combinación nueva — igual que hace
-    // progreso_get_clases() para listarlas, para no inventar una combinación que no existe.
-    $producto = wc_get_product($product_classes_id);
-    if (!$producto) return new WP_Error('not_found', 'No se encuentra el producto de clases (Tarifas) en WooCommerce.', array('status' => 404));
-    $variacion_nueva = null;
-    foreach ($producto->get_children() as $vid) {
-        $variacion = wc_get_product($vid);
-        if (!$variacion) continue;
-        $attrs = $variacion->get_attributes();
-        $dia_slug     = $attrs['pa_dias']    ?? '';
-        $horario_slug = $attrs['pa_horario'] ?? '';
-        $edad_slug    = $attrs['pa_edad']    ?? '';
-        $dia_term     = $dia_slug     ? get_term_by('slug', $dia_slug,     'pa_dias')    : null;
-        $horario_term = $horario_slug ? get_term_by('slug', $horario_slug, 'pa_horario') : null;
-        $edad_term    = $edad_slug    ? get_term_by('slug', $edad_slug,    'pa_edad')    : null;
-        $dia_v     = blokes_normalizar_dia($dia_term ? $dia_term->name : ucfirst($dia_slug));
-        $horario_v = blokes_normalizar_horario($horario_term ? $horario_term->name : $horario_slug);
-        $edad_v    = blokes_normalizar_edad($edad_term ? $edad_term->name : ($edad_slug ? ucfirst($edad_slug) : 'Adultos'));
-        if ($dia_v === $dia_nuevo && $horario_v === $horario_nuevo && $edad_v === $edad_nuevo) {
-            $variacion_nueva = $variacion;
-            break;
-        }
-    }
-    if (!$variacion_nueva) {
+    // Busca en el catálogo (Classes/Días sueltos) la variación que corresponde a la combinación
+    // nueva — Adolescentes se busca como la variación de Adultos del mismo día/horario (no es
+    // un término pa_edad real, ver blokes_buscar_variacion_clase()).
+    $encontrado = blokes_buscar_variacion_clase($dia_nuevo, $horario_nuevo, $edad_nuevo);
+    if (!$encontrado) {
         return new WP_Error('no_existe', 'No existe esa combinación de día, horario y edad en el catálogo de clases.', array('status' => 404));
     }
+    $variacion_nueva = $encontrado['variacion'];
+    $frecuencia      = $encontrado['frecuencia'];
 
     // Precio nuevo según la tabla de tarifas vigente (misma lógica que el formulario de alta),
-    // respetando el plan de pago actual (mensual/trimestral/anual).
-    $frecuencia = (strpos($dia_nuevo, '-') !== false) ? '2_days' : '1_day';
+    // respetando el plan de pago actual (mensual/trimestral/anual). Usa $edad_nuevo (no
+    // $edad_buscar): el precio de Adolescentes es distinto al de la variación de Adultos que se
+    // reutiliza como variación real.
     $planes = RocoMadrid_SF_Pricing::calculate_plan_prices(array(
         'pa_dias' => $dia_nuevo, 'pa_horario' => $horario_nuevo, 'pa_edad' => $edad_nuevo, 'frequency' => $frecuencia,
     ));
@@ -7291,25 +13335,55 @@ function superadmin_gestion_cambiar_grupo($request) {
     $plan_key = ($periodo === 'year') ? 'annual' : (($interval >= 3) ? 'quarterly' : 'monthly');
     $precio_nuevo  = floatval($planes[$plan_key]['price'] ?? $planes['monthly']['price']);
     $precio_actual = floatval($sub->get_total());
+    // Ramiro/cowork, 15/11 17:25 (medianos → M-J 18:30-19:30: algunas suben de precio con la
+    // tarifa normal, p. ej. 55→74 o 157→200): con mantenerPrecio=true se ignora el precio
+    // recalculado y se conserva el de la línea/suscripción tal cual — solo cambia la clase
+    // (día/horario/edad), nunca el dinero. Pensado para mover gente de una franja a otra sin
+    // tocarle la tarifa que ya tenía.
+    $mantener_precio = (bool) $request->get_param('mantenerPrecio');
+    if ($mantener_precio) $precio_nuevo = $precio_actual;
 
     $antes   = array('dia' => $dia_actual, 'horario' => $horario_actual, 'edad' => $edad_actual, 'precio' => $precio_actual);
     $despues = array('dia' => $dia_nuevo,  'horario' => $horario_nuevo,  'edad' => $edad_nuevo,  'precio' => $precio_nuevo);
 
+    // Ramiro, 15/11 08:35: si en la clase NUEVA esta persona ya tiene otra suscripción activa/en
+    // espera/pendiente, cambiar de grupo la dejaría duplicada ahí — avisar antes, igual que al
+    // crear o al marcar cobrado.
+    $confirmar_duplicado_sub = (bool) $request->get_param('confirmarDuplicado');
+    $uid_cambiar_grupo = blokes_alumno_customer_id_de_sub(array('id' => $sub_id), $sub);
+    $subs_en_vigor = blokes_subs_en_vigor_de_persona($uid_cambiar_grupo, $sub_id, array('dia' => blokes_dia_a_pareja($dia_nuevo), 'horario' => $horario_nuevo, 'edad' => $edad_nuevo ?: 'Adultos'), true);
+    $hay_duplicado_sub_sin_resolver = !empty($subs_en_vigor) && !$confirmar_duplicado_sub;
+
     if ($simular) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'subId' => $sub_id, 'antes' => $antes, 'despues' => $despues,
-            'aviso' => 'Simulación: no se ha escrito nada en WooCommerce.',
+            'actualizaPedidoPendiente' => $item_padre ? $orden_padre->get_id() : null,
+            'posibleDuplicadoSub' => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+            'aviso' => $hay_duplicado_sub_sin_resolver
+                ? 'Esta persona ya tiene otra suscripción en esa misma clase nueva — confirma si quiere las dos (confirmarDuplicado) o cancela la vieja primero.'
+                : 'Simulación: no se ha escrito nada en WooCommerce.',
         )));
     }
+    if ($hay_duplicado_sub_sin_resolver) {
+        return new WP_Error('duplicado_suscripcion', 'Esta persona ya tiene otra suscripción en esa misma clase nueva — confirma (confirmarDuplicado) o cancela la vieja primero.', array('status' => 409));
+    }
 
-    blokes_gestion_sin_emails(function() use ($item, $sub, $variacion_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo, $precio_nuevo, $selecciones_actuales) {
+    blokes_gestion_sin_emails(function() use ($item, $sub, $item_padre, $orden_padre, $variacion_nueva, $dia_nuevo, $horario_nuevo, $edad_nuevo, $precio_nuevo, $selecciones_actuales, $frecuencia, $clave_dia_actual, $periodo, $interval) {
+        // Si cambia de 1 a 2 días (o al revés) la variación nueva es de OTRO producto padre
+        // (Días sueltos ↔ Classes) — hay que actualizar también product_id, no solo
+        // variation_id, para que no quede una variación "huérfana" de otro padre en el pedido.
+        $item->set_product_id($variacion_nueva->get_parent_id());
         $item->set_variation_id($variacion_nueva->get_id());
         $item->set_name($variacion_nueva->get_name());
         $nuevas_selecciones = is_array($selecciones_actuales) ? $selecciones_actuales : array();
-        $nuevas_selecciones['pa_dias']    = $dia_nuevo;
+        $clave_dia_nueva = ($frecuencia === '2_days') ? 'pa_dias' : 'pa_dia-suelto';
+        if ($clave_dia_nueva !== $clave_dia_actual) unset($nuevas_selecciones[$clave_dia_actual]);
+        $nuevas_selecciones[$clave_dia_nueva] = $dia_nuevo;
         $nuevas_selecciones['pa_horario'] = $horario_nuevo;
         $nuevas_selecciones['pa_edad']    = $edad_nuevo;
+        if (isset($nuevas_selecciones['frequency'])) $nuevas_selecciones['frequency'] = $frecuencia;
         $item->add_meta_data('_step_form_selections', $nuevas_selecciones, true);
+        blokes_gestion_actualizar_meta_visible_grupo($item, $edad_nuevo, $periodo, $interval);
         $item->set_subtotal($precio_nuevo);
         $item->set_total($precio_nuevo);
         $item->save();
@@ -7319,11 +13393,97 @@ function superadmin_gestion_cambiar_grupo($request) {
             $dia_nuevo, $horario_nuevo, $edad_nuevo, number_format($precio_nuevo, 2, ',', '.')
         ));
         $sub->save();
+
+        // El pedido padre ("enlace de pago" inicial) solo se toca si sigue sin pagar — si no, el
+        // enlace cobraría el grupo y el precio viejos aunque la sub ya esté bien (cowork, 07/11
+        // 10:10). Un pedido ya pagado/facturado nunca se tocaría aquí.
+        if ($item_padre && $orden_padre) {
+            $item_padre->set_product_id($variacion_nueva->get_parent_id());
+            $item_padre->set_variation_id($variacion_nueva->get_id());
+            $item_padre->set_name($variacion_nueva->get_name());
+            $item_padre->add_meta_data('_step_form_selections', $nuevas_selecciones, true);
+            blokes_gestion_actualizar_meta_visible_grupo($item_padre, $edad_nuevo, $periodo, $interval);
+            $item_padre->set_subtotal($precio_nuevo);
+            $item_padre->set_total($precio_nuevo);
+            $item_padre->save();
+            $orden_padre->calculate_totals();
+            $orden_padre->add_order_note(sprintf(
+                'ExcelMuerte: cambio de grupo a %s · %s (%s), %s € — pedido actualizado al no estar pagado aún.',
+                $dia_nuevo, $horario_nuevo, $edad_nuevo, number_format($precio_nuevo, 2, ',', '.')
+            ));
+            $orden_padre->save();
+        }
     });
 
     blokes_gestion_log($sub_id, 'cambiar_grupo', $antes, $despues);
 
-    return rest_ensure_response(array('success' => true, 'data' => array('subId' => $sub_id, 'antes' => $antes, 'despues' => $despues)));
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'subId' => $sub_id, 'antes' => $antes, 'despues' => $despues,
+        'pedidoPendienteActualizado' => $item_padre ? $orden_padre->get_id() : null,
+    )));
+}
+
+// Corrige la meta visible (Día/Horario/Edad del alumno) de toda suscripción que pasó por
+// "Cambiar de grupo" o "Crear cliente en la web" (cowork, 07/11) — usa el "después" ya guardado
+// en blokes_gestion_log (el último de cada sub). Borra las metas sueltas «Día»/«Horario» que
+// dejó la primera versión de esta migración, deja los `pa_*` con el slug de la variación y rehace
+// `_step_form_display`. No toca precio ni variación. En las altas de "Crear cliente" también
+// arregla la línea del pedido inicial y pone `_step_form_selections` en la suscripción si falta
+// (no se guardaba, ver superadmin_gestion_crear_cliente). Idempotente.
+function superadmin_cambiar_grupo_arreglar_meta_visible($request) {
+    if (!function_exists('wcs_get_subscription') || !class_exists('RocoMadrid_Step_Form')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions o RocoMadrid Step Form no disponibles.', array('status' => 503));
+    }
+    global $wpdb;
+    $tabla = blokes_gestion_log_table();
+    $filas = $wpdb->get_results("SELECT * FROM {$tabla} WHERE accion IN ('cambiar_grupo', 'alta_cliente') ORDER BY id ASC", ARRAY_A);
+    $ultimo_por_sub = array();
+    foreach ($filas as $fila) { $ultimo_por_sub[intval($fila['sub_id'])] = $fila; } // el más reciente pisa al anterior
+
+    $product_classes_id = intval(RocoMadrid_Step_Form::product_tarifas_id());
+    $product_single_id  = intval(RocoMadrid_Step_Form::product_dias_sueltos_id());
+    $item_de_clase = function($objeto) use ($product_classes_id, $product_single_id) {
+        foreach ($objeto->get_items() as $it) {
+            $pid = intval($it->get_product_id());
+            if ($pid === $product_classes_id || $pid === $product_single_id) return $it;
+        }
+        return null;
+    };
+    $resultado = array();
+    foreach ($ultimo_por_sub as $sub_id => $fila) {
+        $despues = json_decode($fila['despues'], true);
+        if (!is_array($despues) || empty($despues['dia']) || empty($despues['horario'])) {
+            // Altas de abono (sin día/horario): no tienen meta de grupo que arreglar
+            if ($fila['accion'] !== 'alta_cliente') $resultado[] = array('subId' => $sub_id, 'error' => 'log sin dia/horario');
+            continue;
+        }
+        $sub = wcs_get_subscription($sub_id);
+        if (!$sub) { $resultado[] = array('subId' => $sub_id, 'error' => 'suscripción no encontrada'); continue; }
+        $item = $item_de_clase($sub);
+        if (!$item) { $resultado[] = array('subId' => $sub_id, 'error' => 'sin línea de clases/días sueltos'); continue; }
+
+        $edad  = $despues['edad'] ?? 'Adultos';
+        $items = array($item);
+        if ($fila['accion'] === 'alta_cliente') {
+            $orden = !empty($despues['orderId']) ? wc_get_order(intval($despues['orderId'])) : null;
+            $item_orden = $orden ? $item_de_clase($orden) : null;
+            if ($item_orden) $items[] = $item_orden;
+        }
+        $periodo_sub  = $sub->get_billing_period();
+        $interval_sub = max(1, intval($sub->get_billing_interval()));
+        blokes_gestion_sin_emails(function() use ($items, $despues, $edad, $periodo_sub, $interval_sub) {
+            foreach ($items as $it) {
+                if (!$it->get_meta('_step_form_selections', true)) {
+                    $clave_dia = (strpos($despues['dia'], '-') !== false) ? 'pa_dias' : 'pa_dia-suelto';
+                    $it->add_meta_data('_step_form_selections', array($clave_dia => $despues['dia'], 'pa_horario' => $despues['horario'], 'pa_edad' => $edad), true);
+                }
+                blokes_gestion_actualizar_meta_visible_grupo($it, $edad, $periodo_sub, $interval_sub);
+                $it->save();
+            }
+        });
+        $resultado[] = array('subId' => $sub_id, 'accion' => $fila['accion'], 'dia' => $despues['dia'], 'horario' => $despues['horario'], 'edad' => $edad);
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $resultado));
 }
 
 // Nombre real (facturación) y teléfono del alumno, editable desde Grupos sin tocar wp-admin —
@@ -7331,50 +13491,394 @@ function superadmin_gestion_cambiar_grupo($request) {
 // usuario de la cuenta de WordPress, no un nombre real. Actualiza la dirección de facturación de ESTA
 // suscripción (de donde la lee Grupos) y, si hay un usuario detrás, también su perfil, para que
 // el resto de la web (otras suscripciones suyas, WooCommerce) vea lo mismo.
+// 20/11 06:30 (Ramiro vía cowork, punto 1a/1b): antes esto solo cambiaba el billing de la
+// suscripción (sub_id obligatorio) — el usuario de WordPress (first_name/last_name/
+// display_name) se quedaba igual, así que el nombre mal puesto seguía saliendo en cualquier
+// sitio que lea el perfil directamente (tele de la compe, listados de participantes…). Ahora:
+// - sub_id sigue aceptado (sigue tocando el billing de ESA suscripción), pero ya no es
+//   obligatorio — con uid solo también vale, para gente sin ninguna clase (compe, abonos).
+// - Si hay nombre/apellidos y se resuelve un uid (del sub_id o pasado directamente), también se
+//   escribe en el usuario de WordPress de verdad (wp_update_user: first_name/last_name/
+//   display_name), no solo en billing_first_name/billing_last_name (usermeta de Woo).
+// - Simular, como el resto de acciones de Grupos — antes escribía directo.
 function superadmin_gestion_editar_alumno($request) {
-    if (!function_exists('wcs_get_subscription')) {
-        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
-    }
     $sub_id    = intval($request->get_param('sub_id'));
+    $uid_param = intval($request->get_param('uid'));
     $nombre    = sanitize_text_field((string) $request->get_param('nombre'));
     $apellidos = sanitize_text_field((string) $request->get_param('apellidos'));
     $telefono  = sanitize_text_field((string) $request->get_param('telefono'));
     $tutor_nombre   = sanitize_text_field((string) $request->get_param('tutorNombre'));
     $tutor_telefono = sanitize_text_field((string) $request->get_param('tutorTelefono'));
-    if (!$sub_id || ($nombre === '' && $apellidos === '' && $telefono === '' && $tutor_nombre === '' && $tutor_telefono === '')) {
-        return new WP_Error('bad_request', 'Falta sub_id y al menos un dato que cambiar.', array('status' => 400));
+    $simular   = (bool) $request->get_param('simular');
+    if ((!$sub_id && !$uid_param) || ($nombre === '' && $apellidos === '' && $telefono === '' && $tutor_nombre === '' && $tutor_telefono === '')) {
+        return new WP_Error('bad_request', 'Falta sub_id o uid, y al menos un dato que cambiar.', array('status' => 400));
     }
-    $sub = wcs_get_subscription($sub_id);
-    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    $sub = null;
+    if ($sub_id) {
+        if (!function_exists('wcs_get_subscription')) {
+            return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+        }
+        $sub = wcs_get_subscription($sub_id);
+        if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    }
+    $uid = $uid_param ?: ($sub_id ? intval(get_post_meta($sub_id, '_customer_user', true)) : 0);
+    $wp_user = $uid ? get_user_by('id', $uid) : null;
+    if ($uid && !$wp_user) return new WP_Error('not_found', 'Usuario de WordPress no encontrado.', array('status' => 404));
 
     $antes = array(
-        'nombre' => $sub->get_billing_first_name(), 'apellidos' => $sub->get_billing_last_name(),
-        'telefono' => $sub->get_billing_phone(),
-        'tutorNombre' => get_post_meta($sub_id, '_rm_tutor_nombre', true), 'tutorTelefono' => get_post_meta($sub_id, '_rm_tutor_telefono', true),
+        'nombre' => $sub ? $sub->get_billing_first_name() : ($wp_user->first_name ?? ''),
+        'apellidos' => $sub ? $sub->get_billing_last_name() : ($wp_user->last_name ?? ''),
+        'displayName' => $wp_user->display_name ?? null,
+        'telefono' => $sub ? $sub->get_billing_phone() : ($uid ? get_user_meta($uid, 'billing_phone', true) : ''),
+        'tutorNombre' => $sub_id ? get_post_meta($sub_id, '_rm_tutor_nombre', true) : null,
+        'tutorTelefono' => $sub_id ? get_post_meta($sub_id, '_rm_tutor_telefono', true) : null,
     );
-    if ($nombre !== '')    $sub->set_billing_first_name($nombre);
-    if ($apellidos !== '') $sub->set_billing_last_name($apellidos);
-    if ($telefono !== '')  $sub->set_billing_phone(blokes_externos_normaliza_telefono($telefono) ?: $telefono);
-    $sub->save();
 
-    $uid = intval(get_post_meta($sub_id, '_customer_user', true));
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array_merge($antes, array(
+            'nombreNuevo' => $nombre !== '' ? $nombre : $antes['nombre'],
+            'apellidosNuevo' => $apellidos !== '' ? $apellidos : $antes['apellidos'],
+            'tocaUsuarioWP' => (bool) $uid,
+            'aviso' => 'Simulación: no se ha escrito nada todavía.',
+        ))));
+    }
+
+    if ($sub) {
+        if ($nombre !== '')    $sub->set_billing_first_name($nombre);
+        if ($apellidos !== '') $sub->set_billing_last_name($apellidos);
+        if ($telefono !== '')  $sub->set_billing_phone(blokes_externos_normaliza_telefono($telefono) ?: $telefono);
+        $sub->save();
+    }
     if ($uid) {
         if ($nombre !== '')    update_user_meta($uid, 'billing_first_name', $nombre);
         if ($apellidos !== '') update_user_meta($uid, 'billing_last_name', $apellidos);
         if ($telefono !== '')  update_user_meta($uid, 'billing_phone', $telefono);
+        if ($nombre !== '' || $apellidos !== '') {
+            $nombre_wp    = $nombre !== '' ? $nombre : $wp_user->first_name;
+            $apellidos_wp = $apellidos !== '' ? $apellidos : $wp_user->last_name;
+            wp_update_user(array(
+                'ID' => $uid, 'first_name' => $nombre_wp, 'last_name' => $apellidos_wp,
+                'display_name' => trim($nombre_wp . ' ' . $apellidos_wp) ?: $wp_user->user_login,
+            ));
+            // Tocado el nombre de verdad desde Blokes (aquí o desde "Nombres por revisar") —
+            // sale de la lista de pendientes aunque la heurística lo siguiera marcando.
+            update_user_meta($uid, '_rm_nombre_revisado', 1);
+        }
     }
-    // Tutor (padre/madre de un menor): campo propio de la suscripción, no de facturación.
-    // Igual que nombre/apellidos/teléfono: deja el campo en blanco para no cambiarlo.
-    if ($tutor_nombre !== '')   update_post_meta($sub_id, '_rm_tutor_nombre', $tutor_nombre);
-    if ($tutor_telefono !== '') update_post_meta($sub_id, '_rm_tutor_telefono', blokes_externos_normaliza_telefono($tutor_telefono) ?: $tutor_telefono);
+    // Tutor (padre/madre de un menor): campo propio de la suscripción, no de facturación —
+    // solo tiene sentido si hay sub_id. Igual que el resto: deja el campo en blanco para no
+    // cambiarlo.
+    if ($sub_id && $tutor_nombre !== '')   update_post_meta($sub_id, '_rm_tutor_nombre', $tutor_nombre);
+    if ($sub_id && $tutor_telefono !== '') update_post_meta($sub_id, '_rm_tutor_telefono', blokes_externos_normaliza_telefono($tutor_telefono) ?: $tutor_telefono);
 
+    $wp_user_despues = $uid ? get_user_by('id', $uid) : null;
     $despues = array(
-        'nombre' => $sub->get_billing_first_name(), 'apellidos' => $sub->get_billing_last_name(), 'telefono' => $sub->get_billing_phone(),
-        'tutorNombre' => get_post_meta($sub_id, '_rm_tutor_nombre', true), 'tutorTelefono' => get_post_meta($sub_id, '_rm_tutor_telefono', true),
+        'nombre' => $sub ? $sub->get_billing_first_name() : ($wp_user_despues->first_name ?? ''),
+        'apellidos' => $sub ? $sub->get_billing_last_name() : ($wp_user_despues->last_name ?? ''),
+        'displayName' => $wp_user_despues->display_name ?? null,
+        'telefono' => $sub ? $sub->get_billing_phone() : ($uid ? get_user_meta($uid, 'billing_phone', true) : ''),
+        'tutorNombre' => $sub_id ? get_post_meta($sub_id, '_rm_tutor_nombre', true) : null,
+        'tutorTelefono' => $sub_id ? get_post_meta($sub_id, '_rm_tutor_telefono', true) : null,
     );
-    blokes_gestion_log($sub_id, 'editar_alumno', $antes, $despues);
+    blokes_gestion_log($sub_id ?: 0, 'editar_alumno', $antes, $despues, array('uid' => $uid ?: null));
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// Partículas de apellido compuesto (prueba de cowork, 20/11 09:45, punto 4b): "de", "del", "la",
+// "las", "los", "y" van en minúscula dentro de un apellido ("de las Heras", "de Pablo") — eso es
+// correcto, nunca un error a corregir ni algo que capitalizar.
+function blokes_rm_particula_apellido($palabra) {
+    return in_array(mb_strtolower($palabra, 'UTF-8'), array('de', 'del', 'la', 'las', 'los', 'y'), true);
+}
+
+// Mayúscula inicial de cada palabra, el resto en minúscula — "capitalizar, NO inventar tildes"
+// (20/11 06:30, punto 1c): "garcia tomas" -> "Garcia Tomas", nunca le añade el acento que falta.
+// Las partículas de apellido (de/del/la/las/los/y) se dejan en minúscula, nunca capitalizadas.
+function blokes_capitalizar_simple($s) {
+    $s = trim((string) $s);
+    if ($s === '') return '';
+    $palabras = preg_split('/\s+/', $s);
+    return implode(' ', array_map(function($w) {
+        if ($w === '') return $w;
+        if (blokes_rm_particula_apellido($w)) return mb_strtolower($w, 'UTF-8');
+        return mb_strtoupper(mb_substr($w, 0, 1, 'UTF-8'), 'UTF-8') . mb_strtolower(mb_substr($w, 1, null, 'UTF-8'), 'UTF-8');
+    }, $palabras));
+}
+
+// ¿Esta palabra suelta (nombre o apellido) necesita revisión por minúscula inicial? Ignora las
+// partículas de apellido en minúscula (son correctas) — solo marca si hay alguna palabra QUE NO
+// sea una partícula empezando en minúscula (prueba de cowork, 20/11 09:45, punto 4b: "Carlos | de
+// las Heras" se marcaba como minúscula por la "d" de "de", sin serlo de verdad).
+function blokes_rm_nombre_necesita_revision($valor) {
+    $valor = trim((string) $valor);
+    if ($valor === '') return false;
+    foreach (preg_split('/\s+/', $valor) as $w) {
+        if ($w === '' || blokes_rm_particula_apellido($w)) continue;
+        if (preg_match('/^\p{Ll}/u', $w)) return true;
+    }
+    return false;
+}
+
+// 20/11 06:30 (punto 1c): "pantalla «Nombres por revisar» con propuesta automática a confirmar
+// uno a uno". Candidatos: sin first_name ni last_name, o con alguno empezando en minúscula.
+// Propuesta, en este orden: (1) el nombre de facturación de alguna suscripción suya si existe
+// (normalmente más fiable que el perfil); si no, (2) capitalizar lo que ya tenga el perfil (solo
+// mayúscula inicial); si no hay nada de donde sacarlo (típico de un usuario pegado tipo
+// "mariavictoriagomez", sin first_name/last_name reales), ninguna propuesta — lo escribe Eva.
+function superadmin_gestion_nombres_por_revisar($request) {
+    // Índice uid -> nombre de facturación de ALGUNA de sus suscripciones, construido una vez
+    // (en vez de volver a recorrer todas las suscripciones por cada usuario a revisar).
+    $billing_por_uid = array();
+    if (function_exists('wcs_get_subscription')) {
+        foreach (blokes_get_all_subscription_data() as $sub_row) {
+            $sid = intval($sub_row['id'] ?? 0);
+            if (!$sid) continue;
+            // Punto 4a de la prueba de cowork (20/11 09:45): leer solo el meta `_customer_user`
+            // no es fiable con HPOS (igual que ya advertía blokes_alumno_customer_id_de_sub) —
+            // por eso la fuente "suscripción" no se usaba nunca, todo salía "sin propuesta".
+            $sub_uid = blokes_alumno_customer_id_de_sub($sub_row);
+            if (!$sub_uid || isset($billing_por_uid[$sub_uid])) continue;
+            $sub_obj = wcs_get_subscription($sid);
+            if (!$sub_obj) continue;
+            $bn = trim($sub_obj->get_billing_first_name());
+            $ba = trim($sub_obj->get_billing_last_name());
+            if ($bn === '' && $ba === '') continue;
+            $billing_por_uid[$sub_uid] = array('nombre' => $bn, 'apellidos' => $ba);
+        }
+    }
+
+    $out = array();
+    foreach (get_users(array('fields' => array('ID', 'user_login', 'display_name'))) as $u) {
+        $uid = intval($u->ID);
+        if (get_user_meta($uid, '_rm_nombre_revisado', true)) continue;
+        $first = trim((string) get_user_meta($uid, 'first_name', true));
+        $last  = trim((string) get_user_meta($uid, 'last_name', true));
+
+        $motivo = '';
+        if ($first === '' && $last === '') $motivo = 'sin_nombre';
+        elseif (blokes_rm_nombre_necesita_revision($first) || blokes_rm_nombre_necesita_revision($last)) $motivo = 'minuscula';
+        if ($motivo === '') continue;
+
+        // Prueba de cowork (20/11 12:20, punto 4b): el nombre de facturación lo escribe el
+        // cliente en el checkout, con cualquier mayúscula/minúscula ("De las heras") — hay que
+        // capitalizarlo igual que la fuente "capitalizado", no usarlo tal cual.
+        $propuesta_nombre = ''; $propuesta_apellidos = ''; $fuente = 'sin_propuesta';
+        if (!empty($billing_por_uid[$uid])) {
+            $propuesta_nombre = blokes_capitalizar_simple($billing_por_uid[$uid]['nombre']); $propuesta_apellidos = blokes_capitalizar_simple($billing_por_uid[$uid]['apellidos']); $fuente = 'suscripcion';
+        } elseif ($first !== '' || $last !== '') {
+            $propuesta_nombre = blokes_capitalizar_simple($first); $propuesta_apellidos = blokes_capitalizar_simple($last); $fuente = 'capitalizado';
+        }
+
+        $out[] = array(
+            'uid' => $uid, 'usuario' => $u->user_login, 'displayName' => $u->display_name,
+            'nombreActual' => $first, 'apellidosActual' => $last,
+            'motivo' => $motivo, 'fuente' => $fuente,
+            'propuestaNombre' => $propuesta_nombre, 'propuestaApellidos' => $propuesta_apellidos,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// "Omitir" (20/11 06:30, punto 1c): sale de "Nombres por revisar" sin tocar el nombre — para
+// cuentas de staff/servicio o casos que Eva decide dejar tal cual a propósito.
+function superadmin_gestion_nombre_omitir($request) {
+    $uid = intval($request['uid']);
+    if (!$uid || !get_user_by('id', $uid)) return new WP_Error('not_found', 'Usuario no encontrado.', array('status' => 404));
+    update_user_meta($uid, '_rm_nombre_revisado', 1);
+    blokes_gestion_log(0, 'nombre_omitido', null, array('uid' => $uid));
+    return rest_ensure_response(array('success' => true));
+}
+
+// 20/11 07:20 (Ramiro, «Niños como alumnos en Blokes»): el que va a clase (el niño) y el que
+// paga (el tutor, con la suscripción en su cuenta) pueden ser personas distintas. Esto NUNCA
+// toca pedidos, facturas ni precios — _rm_alumno_user_id solo dice qué usuario de WordPress es
+// el que asiste/compite y aparece en tablet/tele; nada de facturación mira esta meta. Si no
+// está puesta, el alumno es quien paga (comportamiento de siempre, sin cambios).
+function blokes_rm_alumno_uid($sub_id, $payer_uid) {
+    $override = intval(get_post_meta($sub_id, '_rm_alumno_user_id', true));
+    return $override ?: intval($payer_uid);
+}
+
+// Crea la cuenta de WordPress del niño: sin email real (no lo necesita — siempre entra por
+// tablet con un targetUserId, nunca con su propia sesión), con un email técnico único que no
+// choca nunca con uno de verdad. El tutor queda enlazado para poder volver de uid a uid.
+function blokes_rm_crear_nino($nombre, $apellidos, $tutor_user_id, $tutor_nombre, $tutor_telefono) {
+    $nombre = trim((string) $nombre);
+    if ($nombre === '') return new WP_Error('bad_request', 'Falta el nombre del niño.', array('status' => 400));
+    if (!function_exists('wc_create_new_customer')) {
+        return new WP_Error('class_not_found', 'WooCommerce no disponible.', array('status' => 503));
+    }
+    do {
+        $email = 'nino-' . wp_generate_password(12, false, false) . '@sin-email.rocomadrid.local';
+    } while (email_exists($email));
+    $uid = blokes_gestion_sin_emails(function() use ($email, $nombre, $apellidos) {
+        return wc_create_new_customer($email, '', '', array('first_name' => $nombre, 'last_name' => $apellidos));
+    });
+    if (is_wp_error($uid)) return $uid;
+    wp_update_user(array('ID' => $uid, 'display_name' => trim($nombre . ' ' . $apellidos) ?: $nombre));
+    update_user_meta($uid, '_rm_es_menor', 1);
+    if ($tutor_user_id)         update_user_meta($uid, '_rm_tutor_user_id', intval($tutor_user_id));
+    if ($tutor_nombre !== '')   update_user_meta($uid, '_rm_tutor_nombre', $tutor_nombre);
+    if ($tutor_telefono !== '') update_user_meta($uid, '_rm_tutor_telefono', $tutor_telefono);
+    return intval($uid);
+}
+
+// Pestaña "Niños" en Grupos (Eva/Isa): confirma, asocia a una cuenta existente o crea la del
+// niño para una suscripción de Menores/Adolescentes. Nunca toca la suscripción salvo su propia
+// meta de enlace — pedidos, facturas y precio siguen SIEMPRE en la cuenta de quien paga.
+// Simular primero, como el resto de esta pantalla.
+function superadmin_gestion_ninos_asociar($request) {
+    $sub_id    = intval($request->get_param('sub_id'));
+    $accion    = sanitize_key((string) $request->get_param('accion')); // confirmar_pagador | usar_cuenta_existente | crear_nino
+    $uid_in    = intval($request->get_param('uid'));
+    $nombre    = sanitize_text_field((string) $request->get_param('nombre'));
+    $apellidos = sanitize_text_field((string) $request->get_param('apellidos'));
+    $simular   = (bool) $request->get_param('simular');
+
+    if (!$sub_id || !function_exists('wcs_get_subscription')) {
+        return new WP_Error('bad_request', 'Falta sub_id o WooCommerce Subscriptions no disponible.', array('status' => 400));
+    }
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    if (!in_array($accion, array('confirmar_pagador', 'usar_cuenta_existente', 'crear_nino'), true)) {
+        return new WP_Error('bad_request', 'accion debe ser confirmar_pagador, usar_cuenta_existente o crear_nino.', array('status' => 400));
+    }
+    if ($accion === 'usar_cuenta_existente' && !$uid_in) {
+        return new WP_Error('bad_request', 'Falta uid.', array('status' => 400));
+    }
+    if ($accion === 'crear_nino' && trim($nombre) === '') {
+        return new WP_Error('bad_request', 'Falta el nombre del niño.', array('status' => 400));
+    }
+
+    // Punto 5c de la prueba de cowork (20/11 09:45): esta pestaña es solo para Menores y
+    // Adolescentes — crear_nino aceptaba también una sub de Adultos (probado con la 5470 de
+    // Borja Erice). La pestaña Niños del frontend ya filtra a solo esas edades, pero el
+    // endpoint lo exige también por si se llama directo.
+    $edad_sub = '';
+    foreach (blokes_get_all_subscription_data() as $sub_row_edad) {
+        if (intval($sub_row_edad['id'] ?? 0) === $sub_id) { $edad_sub = $sub_row_edad['edad'] ?? ''; break; }
+    }
+    if (!in_array($edad_sub, array('Menores (6-12 años)', 'Adolescentes (12-18 años)'), true)) {
+        return new WP_Error('no_es_menor', 'Esta suscripción no es de Menores ni de Adolescentes — la pestaña Niños es solo para esas edades.', array('status' => 409));
+    }
+
+    $payer_uid = intval($sub->get_customer_id()) ?: intval(get_post_meta($sub_id, '_customer_user', true));
+    $tutor_nombre_actual   = get_post_meta($sub_id, '_rm_tutor_nombre', true) ?: '';
+    $tutor_telefono_actual = get_post_meta($sub_id, '_rm_tutor_telefono', true) ?: '';
+    $alumno_actual_uid = blokes_rm_alumno_uid($sub_id, $payer_uid);
+    $alumno_actual = $alumno_actual_uid ? get_user_by('id', $alumno_actual_uid) : null;
+
+    $destino_existente = null;
+    if ($accion === 'usar_cuenta_existente') {
+        $destino_existente = get_user_by('id', $uid_in);
+        if (!$destino_existente) return new WP_Error('not_found', 'Ese usuario de WordPress no existe.', array('status' => 404));
+    }
+
+    // Historial (tops) que ya tenga el PAGADOR: nunca se mueve solo al niño — Eva/Isa deciden
+    // caso a caso (nota del 20/11 07:20), esto solo avisa en la simulación para que lo sepan.
+    $aviso_historial = null;
+    if ($accion !== 'confirmar_pagador' && $payer_uid && $payer_uid !== $alumno_actual_uid) {
+        // Ya había un alumno distinto al pagador puesto antes — no hay nada "nuevo" que avisar.
+    } elseif ($accion !== 'confirmar_pagador' && $payer_uid) {
+        $completados = get_user_meta($payer_uid, '_blokes_completed', true);
+        $n_tops = is_array($completados) ? count($completados) : 0;
+        if ($n_tops > 0) {
+            $aviso_historial = "La cuenta de quien paga ya tiene {$n_tops} top(s) registrados — se quedan ahí, no se mueven al niño salvo que lo hagas tú a mano.";
+        }
+    }
+
+    if ($simular) {
+        $preview = array(
+            'subId'    => $sub_id,
+            'pagador'  => array('uid' => $payer_uid, 'nombre' => trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name())),
+            'alumnoActual' => $alumno_actual ? array('uid' => $alumno_actual_uid, 'nombre' => $alumno_actual->display_name) : null,
+            'avisoHistorial' => $aviso_historial,
+            'aviso' => 'Simulación: no se ha escrito nada todavía.',
+        );
+        if ($accion === 'confirmar_pagador') {
+            $preview['alumnoNuevo'] = array('uid' => $payer_uid, 'nombre' => $preview['pagador']['nombre']);
+        } elseif ($accion === 'usar_cuenta_existente') {
+            $preview['alumnoNuevo'] = array('uid' => $uid_in, 'nombre' => $destino_existente->display_name);
+        } else {
+            $preview['alumnoNuevo'] = array('uid' => null, 'nombre' => trim($nombre . ' ' . $apellidos), 'creaCuentaNueva' => true);
+        }
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $preview));
+    }
+
+    $antes = array(
+        'alumnoUserId' => $alumno_actual_uid !== $payer_uid ? $alumno_actual_uid : null,
+        'ninoRevisado' => (bool) get_post_meta($sub_id, '_rm_nino_revisado', true),
+    );
+    $alumno_nuevo_uid = $payer_uid;
+
+    if ($accion === 'confirmar_pagador') {
+        delete_post_meta($sub_id, '_rm_alumno_user_id');
+    } elseif ($accion === 'usar_cuenta_existente') {
+        $alumno_nuevo_uid = $uid_in;
+        if ($uid_in === $payer_uid) delete_post_meta($sub_id, '_rm_alumno_user_id');
+        else update_post_meta($sub_id, '_rm_alumno_user_id', $uid_in);
+    } else { // crear_nino
+        $nuevo_uid = blokes_rm_crear_nino($nombre, $apellidos, $payer_uid, $tutor_nombre_actual, $tutor_telefono_actual);
+        if (is_wp_error($nuevo_uid)) return $nuevo_uid;
+        $alumno_nuevo_uid = $nuevo_uid;
+        update_post_meta($sub_id, '_rm_alumno_user_id', $nuevo_uid);
+    }
+    update_post_meta($sub_id, '_rm_nino_revisado', 1);
+
+    $alumno_nuevo = get_user_by('id', $alumno_nuevo_uid);
+    $despues = array(
+        'alumnoUserId' => $alumno_nuevo_uid !== $payer_uid ? $alumno_nuevo_uid : null,
+        'ninoRevisado' => true,
+        'alumnoNombre' => $alumno_nuevo ? $alumno_nuevo->display_name : null,
+    );
+    blokes_gestion_log($sub_id, 'ninos_asociar', $antes, $despues, array('accion' => $accion));
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// Versión ligera de la pestaña Niños (20/11 12:10: Isa/profesores entran aquí, nunca en
+// superadmin_gestion_grupos — esa lleva pagos e importes). Mismo criterio de agrupado
+// (blokes_dia_a_pareja/blokes_horario_agrupable, igual label) pero sin ningún cálculo de pagos,
+// tarifas ni wellhub: solo identidad de la sub (quién paga, quién es el alumno, el tutor).
+function superadmin_gestion_ninos_listado($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions no disponible.', array('status' => 503));
+    }
+    $out = array();
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (empty($sub['id'])) continue;
+        $edad = $sub['edad'] ?? 'Adultos';
+        if (!in_array($edad, array('Menores (6-12 años)', 'Adolescentes (12-18 años)'), true)) continue;
+        $status = $sub['status'] ?? '';
+        if (!in_array($status, array('active', 'on-hold', 'pending'), true)) continue; // cancelled de verdad: fuera, igual que Grupos
+
+        $sub_id = intval($sub['id']);
+        $sub_obj = wcs_get_subscription($sub_id);
+        if (!$sub_obj) continue;
+        $payer_uid = intval($sub_obj->get_customer_id()) ?: intval(get_post_meta($sub_id, '_customer_user', true));
+        if (!$payer_uid) continue;
+
+        $pareja = blokes_dia_a_pareja($sub['dia'] ?? '');
+        $horario_agrupa = blokes_horario_agrupable($sub['horario'] ?? '');
+        $edad_suffix = ' · ' . (stripos($edad, 'Menores') !== false ? 'Niños' : 'Adol.');
+        $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
+
+        $alumno_nombre = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name());
+        if ($alumno_nombre === '') { $payer = get_user_by('id', $payer_uid); $alumno_nombre = $payer ? $payer->display_name : ''; }
+
+        $out[] = array(
+            'subId'        => $sub_id,
+            'grupoLabel'   => trim($pareja . ' · ' . $horario_agrupa) . $edad_suffix,
+            'enVigor'      => ($status === 'active' || $es_pending_cancel), // mismo criterio que Grupos
+            'alumno'       => $alumno_nombre,
+            'tutorNombre'   => get_post_meta($sub_id, '_rm_tutor_nombre', true) ?: '',
+            'tutorTelefono' => get_post_meta($sub_id, '_rm_tutor_telefono', true) ?: '',
+            'alumnoUserId' => intval(get_post_meta($sub_id, '_rm_alumno_user_id', true)) ?: null,
+            'ninoRevisado' => (bool) get_post_meta($sub_id, '_rm_nino_revisado', true),
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
 // Buscar por nombre, teléfono o email en suscripciones (cualquier estado, para encontrar
@@ -7496,8 +14000,762 @@ function superadmin_gestion_buscar_alumno($request) {
     return rest_ensure_response(array('success' => true, 'data' => $personas));
 }
 
+/**
+ * Crear cliente nuevo en WooCommerce desde "Añadir alumno" cuando no existe (Ramiro, 07/11
+ * 08:06, NOTAS_PARA_CODE_pestanas_grupos.md) — hasta ahora solo se podía dar de alta "externo"
+ * (fuera de la web) o asignar a un cliente YA existente (y eso exigía manage_woocommerce, solo
+ * wp-admin). Crea el usuario de WordPress (o reutiliza uno existente), la suscripción con la
+ * variación/producto correcto y la misma meta visible que pone el step-form al comprar, y deja
+ * el primer pago en uno de dos caminos: completado de verdad (como "Marcar cobrado", con su
+ * misma excepción de precio) o un enlace de pago con tarjeta pendiente de que el cliente pague.
+ */
+function superadmin_gestion_alta_cliente($request) {
+    if (!function_exists('wcs_create_subscription') || !class_exists('RocoMadrid_Step_Form') || !class_exists('RocoMadrid_SF_Pricing')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions o RocoMadrid Step Form no disponibles.', array('status' => 503));
+    }
+    $nombre        = sanitize_text_field((string) $request->get_param('nombre'));
+    $apellidos     = sanitize_text_field((string) $request->get_param('apellidos'));
+    $email         = sanitize_email((string) $request->get_param('email'));
+    $telefono_in   = sanitize_text_field((string) $request->get_param('telefono'));
+    $telefono      = blokes_externos_normaliza_telefono($telefono_in) ?: $telefono_in;
+    $tipo          = sanitize_key((string) $request->get_param('tipo')); // 'clase' | 'abono'
+    $dia_in        = sanitize_text_field((string) $request->get_param('dia'));
+    $horario_in    = sanitize_text_field((string) $request->get_param('horario'));
+    $edad_in       = sanitize_text_field((string) $request->get_param('edad'));
+    $plan          = sanitize_key((string) $request->get_param('plan')); // monthly|quarterly|annual (solo 'clase')
+    $producto_abono_id = intval($request->get_param('productoAbonoId'));
+    $fecha_inicio  = sanitize_text_field((string) $request->get_param('fechaInicio'));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fecha_inicio)) $fecha_inicio = current_time('Y-m-d');
+    $primer_pago   = sanitize_key((string) $request->get_param('primerPago')); // 'ya_pagado' | 'enlace_pago'
+    $metodo        = sanitize_key((string) $request->get_param('metodo'));
+    $importe_pago  = floatval($request->get_param('importe'));
+    $fecha_pago    = sanitize_text_field((string) $request->get_param('fechaPago'));
+    $ajustar_precio = sanitize_key((string) $request->get_param('ajustarPrecio'));
+    if (!in_array($ajustar_precio, array('', 'solo_este_mes', 'desde_ahora'), true)) $ajustar_precio = '';
+    $motivo_excepcion = sanitize_text_field((string) $request->get_param('motivoExcepcion'));
+    $enviar_acceso   = (bool) $request->get_param('enviarAcceso');
+    $usar_cliente_id = intval($request->get_param('usarClienteId'));
+    $confirmar_nuevo = (bool) $request->get_param('confirmarNuevo');
+    $simular         = (bool) $request->get_param('simular');
+    // 20/11 (Ramiro, 26 duplicados limpiados a mano en Sync Grupos): si la persona ya tiene una
+    // suscripción EN ESPERA de esta misma clase, reactivarla en vez de crear otra — casi todos
+    // los duplicados eran justo esto (una vieja en espera + una nueva). Rehecho tras perderse en
+    // un commit anterior — esta vez en commit aparte, siempre pasa primero por $simular (abajo),
+    // que es lo único que revela subsEnEsperaMismaClase para que el frontend pueda ofrecerlo.
+    $reactivar_sub_id = intval($request->get_param('reactivarSubId'));
+
+    if (!$nombre || (!$email && !$telefono)) {
+        return new WP_Error('bad_request', 'Falta el nombre y al menos email o teléfono.', array('status' => 400));
+    }
+    if (!in_array($tipo, array('clase', 'abono'), true)) {
+        return new WP_Error('bad_request', 'tipo debe ser "clase" o "abono".', array('status' => 400));
+    }
+    if ($primer_pago === 'ya_pagado' && (!$metodo || $importe_pago <= 0)) {
+        return new WP_Error('bad_request', 'Falta el método o el importe del primer pago.', array('status' => 400));
+    }
+    if ($primer_pago === 'ya_pagado' && !in_array($metodo, array('transferencia', 'tarjeta', 'efectivo', 'wellhub', 'bizum'), true)) {
+        return new WP_Error('bad_request', 'Método no reconocido. Usa transferencia, tarjeta, efectivo, bizum o wellhub.', array('status' => 400));
+    }
+    if (!in_array($primer_pago, array('ya_pagado', 'enlace_pago'), true)) {
+        return new WP_Error('bad_request', 'primerPago debe ser "ya_pagado" o "enlace_pago".', array('status' => 400));
+    }
+    if ($ajustar_precio !== '' && $motivo_excepcion === '') {
+        return new WP_Error('falta_motivo', 'El motivo de la excepción de precio es obligatorio.', array('status' => 400));
+    }
+
+    // --- Variación/producto y precio de catálogo ---
+    $dia_norm = $horario_norm = $edad_norm = '';
+    $producto_item = null; $frecuencia = null; $billing_period = 'month'; $billing_interval = 1;
+    if ($tipo === 'clase') {
+        $dia_norm     = blokes_normalizar_dia($dia_in);
+        $horario_norm = blokes_normalizar_horario($horario_in);
+        $edad_norm    = blokes_normalizar_edad($edad_in);
+        if (!$dia_norm || !$horario_norm) return new WP_Error('bad_request', 'Faltan dia/horario.', array('status' => 400));
+        if (!in_array($plan, array('monthly', 'quarterly', 'annual'), true)) {
+            return new WP_Error('bad_request', 'plan debe ser monthly, quarterly o annual.', array('status' => 400));
+        }
+        $encontrado = blokes_buscar_variacion_clase($dia_norm, $horario_norm, $edad_norm);
+        if (!$encontrado) return new WP_Error('no_existe', 'No existe esa combinación de día, horario y edad en el catálogo.', array('status' => 404));
+        $producto_item = $encontrado['variacion'];
+        $frecuencia     = $encontrado['frecuencia'];
+        $billing_period   = ($plan === 'annual') ? 'year' : 'month';
+        $billing_interval = ($plan === 'quarterly') ? 3 : 1;
+        $planes = RocoMadrid_SF_Pricing::calculate_plan_prices(array(
+            'pa_dias' => $dia_norm, 'pa_horario' => $horario_norm, 'pa_edad' => $edad_norm, 'frequency' => $frecuencia,
+        ));
+        $plan_key = ($plan === 'annual') ? 'annual' : (($plan === 'quarterly') ? 'quarterly' : 'monthly');
+        $precio_catalogo = floatval($planes[$plan_key]['price'] ?? $planes['monthly']['price']);
+    } else {
+        $abono_ids = array(5114, 5115, 7753, 7754, 7755, 7756);
+        if (!in_array($producto_abono_id, $abono_ids, true)) {
+            return new WP_Error('bad_request', 'productoAbonoId debe ser uno de los abonos existentes (5114, 5115, 7753-7756).', array('status' => 400));
+        }
+        $producto_item = wc_get_product($producto_abono_id);
+        if (!$producto_item) return new WP_Error('not_found', 'Abono no encontrado en WooCommerce.', array('status' => 404));
+        $precio_catalogo = floatval($producto_item->get_regular_price());
+        $billing_period   = get_post_meta($producto_abono_id, '_subscription_period', true) ?: 'month';
+        $billing_interval = max(1, intval(get_post_meta($producto_abono_id, '_subscription_period_interval', true) ?: 1));
+    }
+    $importe_final = ($primer_pago === 'ya_pagado' && $importe_pago > 0) ? $importe_pago : $precio_catalogo;
+
+    // --- Posible duplicado: mismo email (de verdad, WordPress no permite repetirlo) o
+    // teléfono/nombre parecido ya visto en Grupos/externos/usuarios (reutiliza el mismo
+    // buscador de "Añadir alumno" — nunca una lógica de coincidencia nueva). ---
+    $uid_por_email = $email ? email_exists($email) : false;
+    $duplicado = null;
+    $buscar_duplicado = function($q) {
+        if (!$q || mb_strlen($q) < 2) return null;
+        $req_busqueda = new WP_REST_Request('GET', '/superadmin/v1/gestion/buscar-alumno');
+        $req_busqueda->set_param('q', $q);
+        $res_busqueda = superadmin_gestion_buscar_alumno($req_busqueda);
+        if (is_wp_error($res_busqueda)) return null;
+        $personas_encontradas = $res_busqueda->get_data()['data'] ?? array();
+        return !empty($personas_encontradas) ? $personas_encontradas[0] : null;
+    };
+    if (!$uid_por_email) {
+        $duplicado = $buscar_duplicado($telefono ?: $email);
+        // Sin teléfono/email que ya coincida: prueba también por nombre + apellidos (cowork,
+        // 07/11 — alguien ya dado de alta con otro email/teléfono distinto no se detectaba).
+        if (!$duplicado) $duplicado = $buscar_duplicado(trim($nombre . ' ' . $apellidos));
+    }
+    // El email exacto manda siempre (no se puede crear un usuario de WordPress duplicado) —
+    // nunca hace falta confirmarlo, es la MISMA cuenta por definición.
+    if ($uid_por_email && !$usar_cliente_id) $usar_cliente_id = intval($uid_por_email);
+    $hay_duplicado_sin_resolver = $duplicado && !$usar_cliente_id && !$confirmar_nuevo;
+
+    // Ramiro, 15/11 08:35: aparte de si es la MISMA PERSONA (arriba), si esa persona YA tiene
+    // una suscripción activa/en espera/pendiente, hay que preguntar antes de crearle otra más
+    // — nunca automático, ni aunque ya se haya resuelto quién es.
+    $confirmar_duplicado_sub = (bool) $request->get_param('confirmarDuplicado');
+    $clase_objetivo_dup = ($tipo === 'clase' && $dia_norm) ? array('dia' => blokes_dia_a_pareja($dia_norm), 'horario' => $horario_norm, 'edad' => $edad_norm ?: 'Adultos') : null;
+    $subs_en_vigor = $usar_cliente_id ? blokes_subs_en_vigor_de_persona($usar_cliente_id, null, $clase_objetivo_dup) : array();
+    // 20/11: de las "en vigor" de esta misma clase, las "on-hold" son candidatas claras a
+    // reactivar en vez de crear otra — las "active"/"pending" no (esas sí son confirmarDuplicado
+    // de verdad: dos suscripciones cobrando a la vez, no una vieja parada esperando).
+    $subs_en_espera_misma_clase = array_values(array_filter($subs_en_vigor, function($s) { return $s['estado'] === 'on-hold'; }));
+    $hay_duplicado_sub_sin_resolver = !empty($subs_en_vigor) && !$confirmar_duplicado_sub && !$reactivar_sub_id;
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'nombre' => trim($nombre . ' ' . $apellidos), 'email' => $email, 'telefono' => $telefono,
+            'tipo' => $tipo, 'dia' => $dia_norm ?: null, 'horario' => $horario_norm ?: null, 'edad' => $edad_norm ?: null,
+            'producto' => $producto_item ? $producto_item->get_name() : null,
+            'precioCatalogo' => $precio_catalogo, 'importeFinal' => $importe_final,
+            'billingPeriod' => $billing_period, 'billingInterval' => $billing_interval, 'fechaInicio' => $fecha_inicio,
+            'primerPago' => $primer_pago, 'usaClienteExistente' => $usar_cliente_id ?: null,
+            'posibleDuplicado' => $hay_duplicado_sin_resolver ? $duplicado : null,
+            'posibleDuplicadoSub' => !empty($subs_en_vigor) ? $subs_en_vigor : null,
+            'subsEnEsperaMismaClase' => !empty($subs_en_espera_misma_clase) ? $subs_en_espera_misma_clase : null,
+            'aviso' => $hay_duplicado_sin_resolver
+                ? 'Ya hay alguien con ese teléfono/nombre parecido — elige "usar este cliente" o confirma que es una persona distinta antes de crear de verdad.'
+                : (!empty($subs_en_espera_misma_clase)
+                    ? 'Esta persona ya tiene una suscripción en espera de esta misma clase — mejor reactivarla (reactivarSubId) que crear otra.'
+                    : ($uid_por_email ? 'Ya existe un usuario de WordPress con ese email — se usará esa cuenta (no se crea una nueva).'
+                        : 'Simulación: no se ha creado nada todavía.')),
+        )));
+    }
+
+    if ($hay_duplicado_sin_resolver) {
+        return new WP_Error('posible_duplicado', 'Ya hay alguien con ese teléfono/nombre parecido — usa ese cliente (usarClienteId) o confirma que es una persona distinta (confirmarNuevo).', array('status' => 409));
+    }
+    if ($hay_duplicado_sub_sin_resolver) {
+        return new WP_Error('duplicado_suscripcion', 'Esta persona ya tiene una suscripción activa, en espera o pendiente — confirma si quieres crear otra (confirmarDuplicado) o, si es una «en espera» de esta misma clase, reactívala en vez de crear otra (reactivarSubId).', array('status' => 409));
+    }
+    // 20/11 (Ramiro): en vez de crear nada, reactiva la suscripción en espera indicada — mismo
+    // efecto que "Reanudar", y si ya se cobró este alta, lo marca cobrado en ESA suscripción
+    // (nunca en una nueva). Solo si de verdad está en la lista de candidatas de esta persona y
+    // esta clase — nunca un subId cualquiera que alguien pueda inventarse desde el cliente. Esto
+    // solo se alcanza habiendo pasado por $simular antes (es lo único que da a conocer
+    // reactivarSubId al frontend), así que "siempre Simular antes de escribir" queda garantizado
+    // por el propio flujo, no solo por convención.
+    if ($reactivar_sub_id) {
+        $es_candidata_valida = false;
+        foreach ($subs_en_espera_misma_clase as $s) { if ($s['subId'] === $reactivar_sub_id) { $es_candidata_valida = true; break; } }
+        if (!$es_candidata_valida) {
+            return new WP_Error('reactivar_no_valido', 'Esa suscripción no está en espera de esta misma clase para esta persona — revisa el subId.', array('status' => 409));
+        }
+        $req_reanudar = new WP_REST_Request('POST', '/superadmin/v1/gestion/reanudar');
+        $req_reanudar->set_param('sub_id', $reactivar_sub_id);
+        $resultado_reanudar = superadmin_gestion_reanudar($req_reanudar);
+        if (is_wp_error($resultado_reanudar)) return $resultado_reanudar;
+        $despues_reactivar = array('subId' => $reactivar_sub_id, 'reactivada' => true);
+        if ($primer_pago === 'ya_pagado') {
+            $req_cobro = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
+            $req_cobro->set_param('sub_id', $reactivar_sub_id);
+            $req_cobro->set_param('importe', $importe_final);
+            $req_cobro->set_param('metodo', $metodo);
+            $req_cobro->set_param('fecha', $fecha_pago ?: $fecha_inicio);
+            $req_cobro->set_param('confirmarDuplicado', true); // ya decidido: reactivar ESTA, no crear otra
+            $resultado_cobro = superadmin_gestion_marcar_cobrado($req_cobro);
+            if (!is_wp_error($resultado_cobro)) $despues_reactivar['cobrado'] = true;
+        }
+        blokes_gestion_log($reactivar_sub_id, 'alta_cliente_reactivada_en_vez_de_duplicar', null, $despues_reactivar);
+        return rest_ensure_response(array('success' => true, 'data' => $despues_reactivar));
+    }
+
+    // --- Cliente: reutilizar o crear ---
+    $resultado_crear_usuario = function() use ($usar_cliente_id, $email, $nombre, $apellidos) {
+        if ($usar_cliente_id) {
+            $u = get_user_by('id', $usar_cliente_id);
+            return $u ? $u->ID : new WP_Error('cliente_no_encontrado', 'El cliente indicado no existe.', array('status' => 404));
+        }
+        if (!$email) return new WP_Error('falta_email', 'Para crear un cliente nuevo hace falta un email.', array('status' => 400));
+        $uid = wc_create_new_customer($email, '', '', array('first_name' => $nombre, 'last_name' => $apellidos));
+        return $uid;
+    };
+    $customer_id = $enviar_acceso ? $resultado_crear_usuario() : blokes_gestion_sin_emails($resultado_crear_usuario);
+    if (is_wp_error($customer_id)) return $customer_id;
+
+    update_user_meta($customer_id, 'billing_first_name', $nombre);
+    update_user_meta($customer_id, 'billing_last_name', $apellidos);
+    if ($telefono) update_user_meta($customer_id, 'billing_phone', $telefono);
+    if ($email) update_user_meta($customer_id, 'billing_email', $email);
+
+    $billing = array(
+        'first_name' => $nombre, 'last_name' => $apellidos, 'email' => $email ?: get_userdata($customer_id)->user_email,
+        'phone' => $telefono, 'country' => 'ES',
+    );
+
+    $crear_todo = function() use (
+        $customer_id, $billing, $producto_item, $tipo, $dia_norm, $horario_norm, $edad_norm,
+        $billing_period, $billing_interval, $precio_catalogo, $importe_final, $fecha_inicio,
+        $primer_pago, $metodo, $fecha_pago, $ajustar_precio, $motivo_excepcion
+    ) {
+        $gateways = WC()->payment_gateways()->payment_gateways();
+        $bacs_title = isset($gateways['bacs']) ? $gateways['bacs']->get_title() : 'Transferencia bancaria';
+
+        $order = wc_create_order(array('customer_id' => $customer_id, 'created_via' => 'admin_assign'));
+        if (is_wp_error($order)) return $order;
+        if ($primer_pago === 'ya_pagado') { $order->set_payment_method('bacs'); $order->set_payment_method_title($bacs_title); }
+        $item_pedido_id = $order->add_product($producto_item, 1, array('subtotal' => $precio_catalogo, 'total' => $precio_catalogo));
+        if ($tipo === 'clase') {
+            $clave_dia = (strpos($dia_norm, '-') !== false) ? 'pa_dias' : 'pa_dia-suelto';
+            $selecciones = array($clave_dia => $dia_norm, 'pa_horario' => $horario_norm, 'pa_edad' => $edad_norm);
+            $item_pedido = $order->get_item($item_pedido_id);
+            $item_pedido->add_meta_data('_step_form_selections', $selecciones, true);
+            blokes_gestion_actualizar_meta_visible_grupo($item_pedido, $edad_norm, $billing_period, $billing_interval);
+            $item_pedido->save();
+        }
+        $order->set_address($billing, 'billing');
+        $order->add_order_note('ExcelMuerte: alta de cliente nueva creada desde Grupos.');
+        $order->set_status('pending');
+        $order->calculate_totals();
+        $order->save();
+
+        $subscription = wcs_create_subscription(array(
+            'order_id' => $order->get_id(), 'status' => 'pending',
+            'billing_period' => $billing_period, 'billing_interval' => $billing_interval,
+            'customer_id' => $customer_id, 'created_via' => 'admin_assign',
+        ));
+        if (is_wp_error($subscription)) { $order->delete(true); return $subscription; }
+        if ($primer_pago === 'ya_pagado') { $subscription->set_payment_method('bacs'); $subscription->set_payment_method_title($bacs_title); }
+        $item_sub = $subscription->add_product($producto_item, 1, array('subtotal' => $precio_catalogo, 'total' => $precio_catalogo));
+        if ($tipo === 'clase') {
+            $clave_dia = strpos($dia_norm, '-') !== false ? 'pa_dias' : 'pa_dia-suelto';
+            $selecciones = array($clave_dia => $dia_norm, 'pa_horario' => $horario_norm, 'pa_edad' => $edad_norm);
+            // Un solo objeto: get_item() recarga de la BD en cada llamada, así que añadir la meta
+            // en uno y guardar otro la perdía.
+            $item_sub_obj = $subscription->get_item($item_sub);
+            $item_sub_obj->add_meta_data('_step_form_selections', $selecciones, true);
+            blokes_gestion_actualizar_meta_visible_grupo($item_sub_obj, $edad_norm, $billing_period, $billing_interval);
+            $item_sub_obj->save();
+        }
+        $subscription->set_address($billing, 'billing');
+
+        $start_date = $fecha_inicio . ' 00:00:00';
+        $next_payment = null;
+        if (class_exists('WC_Subscriptions_Synchroniser')) {
+            $first_payment_ts = WC_Subscriptions_Synchroniser::calculate_first_payment_date($producto_item, 'timestamp');
+            if ($first_payment_ts > 0) $next_payment = gmdate('Y-m-d H:i:s', $first_payment_ts);
+        }
+        if (!$next_payment) {
+            $next_payment = ($billing_period === 'year')
+                ? gmdate('Y-m-d H:i:s', strtotime('+1 year'))
+                : gmdate('Y-m-d H:i:s', strtotime('+' . $billing_interval . ' month'));
+        }
+        try { $subscription->update_dates(array('start' => $start_date, 'next_payment' => $next_payment)); } catch (Exception $e) {}
+        $subscription->calculate_totals();
+        $subscription->save();
+
+        $importe_distinto = abs($importe_final - $precio_catalogo) > 0.009;
+        $pago_url = null;
+        if ($primer_pago === 'enlace_pago') {
+            $pago_url = $order->get_checkout_payment_url();
+        } else {
+            if ($importe_distinto && in_array($ajustar_precio, array('solo_este_mes', 'desde_ahora'), true)) {
+                blokes_gestion_ajustar_precio_linea($order, $importe_final);
+                if ($ajustar_precio === 'desde_ahora') {
+                    blokes_gestion_ajustar_precio_linea($subscription, $importe_final);
+                    update_post_meta($subscription->get_id(), '_rm_precio_especial', $importe_final);
+                    update_post_meta($subscription->get_id(), '_rm_precio_especial_motivo', $motivo_excepcion);
+                    update_post_meta($subscription->get_id(), '_rm_precio_especial_desde', date_i18n('d/m/Y'));
+                    $u = wp_get_current_user();
+                    update_post_meta($subscription->get_id(), '_rm_precio_especial_por', $u ? $u->user_login : '');
+                }
+            }
+            $metodo_label = blokes_gestion_metodo_label($metodo);
+            $order->set_payment_method_title($metodo_label);
+            $fecha_pago_ts = $fecha_pago ? strtotime($fecha_pago . ' 12:00:00') : time();
+            $order->add_order_note(sprintf('ExcelMuerte: cobrado %s € (%s) el %s — primer pago del alta.', number_format($importe_final, 2, ',', '.'), $metodo_label, date_i18n('d/m/Y', $fecha_pago_ts)));
+            $order->save();
+            update_post_meta($order->get_id(), '_rm_importe_cobrado', $importe_final);
+            update_post_meta($order->get_id(), '_rm_metodo_cobro', $metodo);
+            $order->payment_complete();
+            $order->update_status('completed', 'ExcelMuerte: pedido completado (alta con primer pago ya hecho).');
+            $order->set_date_paid($fecha_pago_ts);
+            $order->save();
+        }
+
+        return array('order' => $order, 'subscription' => $subscription, 'pagoUrl' => $pago_url);
+    };
+
+    $r = blokes_gestion_sin_emails($crear_todo);
+    if (is_wp_error($r)) return $r;
+
+    if ($primer_pago === 'ya_pagado') {
+        $periodo_alta = date('Y-m', strtotime($fecha_pago ?: $fecha_inicio));
+        $dh = ($tipo === 'clase') ? array('dia' => $dia_norm, 'horario' => $horario_norm) : blokes_sync_grupos_dia_horario_de_sub($r['subscription']->get_id());
+        blokes_sync_grupos_escribir_cobro(
+            $dh['dia'], $dh['horario'], $telefono, trim($nombre . ' ' . $apellidos),
+            $periodo_alta, $importe_final, $metodo,
+            date_i18n('d/m/Y', $fecha_pago ? strtotime($fecha_pago) : time()), $r['subscription']->get_id()
+        );
+        // 19/11 (cowork §06:25, punto 3): Patricia Bravo y Rita Acero ya estaban en el Excel con
+        // su pago cuando Eva las dio de alta con "+ Añadir alumno" — el "pago nuevo" que la
+        // sincronización ya había creado (sin emparejar, porque todavía no existía ninguna
+        // suscripción) se quedaba pendiente para siempre, pidiendo "Aplicar" sobre un pago que ya
+        // está cobrado de verdad en esta alta. Se cierra solo, nunca a ciegas: solo si el importe
+        // coincide (si no, puede ser un pago distinto y se deja para que alguien lo mire).
+        blokes_sync_grupos_resolver_pago_nuevo_tras_alta($telefono, $periodo_alta, $importe_final, $r['subscription']->get_id());
+    }
+
+    $despues = array(
+        'subId' => $r['subscription']->get_id(), 'orderId' => $r['order']->get_id(), 'customerId' => $customer_id,
+        'tipo' => $tipo, 'dia' => $dia_norm ?: null, 'horario' => $horario_norm ?: null, 'edad' => $edad_norm ?: null,
+        'precio' => $importe_final, 'primerPago' => $primer_pago, 'pagoUrl' => $r['pagoUrl'],
+    );
+    blokes_gestion_log($r['subscription']->get_id(), 'alta_cliente', null, $despues);
+
+    return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// GET /superadmin/v1/classes — envoltorio fino de blokes_altas_bajas_calcular().
 function superadmin_classes($request) {
-    $months   = max(1, min(60, intval($request->get_param('months'))));
+    $months = max(1, min(60, intval($request->get_param('months'))));
+    $r = blokes_altas_bajas_calcular($months);
+    // Cowork, 15/11 §17:50 punto 9: "Horario por día" (ScheduleGrid) solo contaba suscripciones
+    // de WooCommerce — igual que le pasaba a "Activos" de Rentabilidad/Retención antes de
+    // 19:25/19:50. Reutiliza el mismo reparto pestaña→clase ya probado en vivo
+    // (blokes_grupos_excel_externos_activos_por_clase()), sobre el catálogo sin franjas
+    // descontinuadas (mismo filtro que usa superadmin_clases_retencion()).
+    $clases_catalogo = array_values(array_filter($r['data'], function($c) { return empty($c['descontinuada']); }));
+    $res_externos = blokes_grupos_excel_externos_activos_por_clase($clases_catalogo, $r['nowYm']);
+    $data = $r['data'];
+    foreach ($data as &$c) {
+        $key = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
+        $c['activosFuera'] = $res_externos['porClase'][$key] ?? 0;
+    }
+    unset($c);
+    return rest_ensure_response(array(
+        'data' => $data, 'duplicadosMismaClase' => $r['duplicadosMismaClase'],
+        // Gente de hist-pagos que pagó alguna vez pero no empareja con ninguna suscripción de
+        // WooCommerce actual (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md, 11:15: "nunca
+        // como alta", solo un contador informativo).
+        'externosSinEmparejar' => $r['externosSinEmparejar'],
+        // Pestañas del Excel con pago este mes que no casaron con ninguna clase conocida — nunca
+        // se reparten a ciegas (15/11 19:30: "sin repartir").
+        'pestanasSinRepartir' => count($res_externos['sinRepartirDetalle']),
+        'pestanasSinRepartirDetalle' => $res_externos['sinRepartirDetalle'],
+    ));
+}
+
+// Primer mes pagado por persona en hist-pagos (import de hv_control_clientes), agrupado por
+// teléfono normalizado (últimos 9 dígitos), email y nombre normalizado — las mismas claves que
+// ya usan hist-pagos/estadísticas y el sync de Grupos (NOTAS_PARA_CODE_alumnos_clases_fuente_de_verdad.md,
+// cowork 15/11 11:15). Bajo cada teléfono se guardan TODOS los nombres distintos vistos (no solo
+// el primero) para poder exigir coincidencia de nombre cuando el teléfono está compartido
+// (hermanos/padre-hijo) — blokes_externo_primer_pago() es quien aplica esa regla.
+// Nombre normalizado SIN espacios — algunas cuentas web se crearon con el nombre de usuario en
+// vez del nombre real ("franciscomarquez" en vez de "Francisco Márquez"), y eso nunca iba a
+// casar con blokes_externos_normaliza_nombre() porque esa sí conserva los espacios (cowork,
+// 15/11 11:45: "19 altas, casi todas gente que ya pagaba por Excel con cuentas 'usuario' sin
+// teléfono"). Comparando sin espacios en los dos lados, "franciscomarquez" = "francisco marquez".
+function blokes_externos_normaliza_nombre_compacto($n) {
+    return str_replace(' ', '', blokes_externos_normaliza_nombre($n));
+}
+
+// TODOS los meses pagados por persona en hist-pagos (import de hv_control_clientes) — no solo
+// el primero: hace falta para saber también CUÁNDO deja de pagar (cowork, 15/11 13:15: "baja =
+// persona que deja de pagar en el Excel/hist-pagos, con 1 mes de margen por pagos tardíos" —
+// antes solo se guardaba el primer mes, que bastaba para "Nuevo" pero no para "Baja").
+function blokes_hist_pagos_pagos() {
+    global $wpdb;
+    blokes_ensure_hist_pagos_table();
+    $rows = $wpdb->get_results(
+        "SELECT telefono, nombre, email, fecha FROM " . blokes_hist_pagos_table() . " WHERE fecha IS NOT NULL AND fecha != ''",
+        ARRAY_A
+    );
+    $por_telefono_tmp = array(); $por_nombre = array(); $por_nombre_compacto = array(); $por_email = array();
+    foreach ($rows as $r) {
+        $ym = substr((string) $r['fecha'], 0, 7);
+        if (!preg_match('/^\d{4}-\d{2}$/', $ym)) continue;
+        $tel   = blokes_externos_normaliza_telefono((string) ($r['telefono'] ?? ''));
+        $nom   = blokes_externos_normaliza_nombre((string) ($r['nombre'] ?? ''));
+        $nomc  = blokes_externos_normaliza_nombre_compacto((string) ($r['nombre'] ?? ''));
+        $email = strtolower(trim((string) ($r['email'] ?? '')));
+        if ($tel) $por_telefono_tmp[$tel][$nom][$ym] = true;
+        if ($nom) $por_nombre[$nom][$ym] = true;
+        if ($nomc) $por_nombre_compacto[$nomc][$ym] = true;
+        if ($email) $por_email[$email][$ym] = true;
+    }
+    return blokes_externo_pagos_empaquetar($por_telefono_tmp, $por_nombre, $por_nombre_compacto, $por_email);
+}
+
+// Mismo empaquetado que usan blokes_hist_pagos_pagos() y blokes_grupos_excel_pagos(): de
+// "teléfono => nombreNorm => Set(ym)" a "porTelefono[tel] = [{nombreNorm, meses}, ...]", y los
+// demás mapas de Set(ym) a lista de ym.
+function blokes_externo_pagos_empaquetar($por_telefono_tmp, $por_nombre, $por_nombre_compacto, $por_email) {
+    $por_telefono = array();
+    foreach ($por_telefono_tmp as $tel => $por_nombre_tel) {
+        foreach ($por_nombre_tel as $nom => $meses_set) {
+            $por_telefono[$tel][] = array('nombreNorm' => $nom, 'meses' => array_keys($meses_set));
+        }
+    }
+    $aplanar = function($mapa) { return array_map('array_keys', $mapa); };
+    return array(
+        'porTelefono' => $por_telefono, 'porNombre' => $aplanar($por_nombre),
+        'porNombreCompacto' => $aplanar($por_nombre_compacto), 'porEmail' => $aplanar($por_email),
+    );
+}
+
+// TODOS los meses pagados por persona en el Excel de Grupos EN VIVO (la hoja de Eva, no
+// hist-pagos — cowork, 15/11 11:45: "el histórico de 2026 está en el Excel, no en hist-pagos,
+// que es de antes"). Mismo formato que blokes_hist_pagos_pagos().
+// CACHEADO 1 hora (transient): leer las ~150 pestañas de la hoja entera desde Google Sheets
+// dentro de /classes —una ruta que se pide en cada carga de Grupos, Pendientes de cobro y
+// Superadmin Clases— sin caché repetiría el fallo de rendimiento que tiró /revenue con los
+// reembolsos de WooCommerce (d267515). La primera carga tras cada hora puede tardar unos
+// segundos (igual que ya tarda "Sincronizar ahora" de Grupos); las demás salen del caché.
+// Nunca puede tirar /classes si Sheets falla o no está configurado: devuelve vacío y listo.
+// Filas RAW de TODAS las pestañas del Excel de Grupos (pestaña, nombre, teléfono, meses
+// pagados) — cacheado 1h, lo comparten blokes_grupos_excel_pagos() (emparejado con
+// hist-pagos/WooCommerce) y blokes_clases_personas_por_mes() (gráfica "Alumnos con pago en
+// curso", 15/11 16:30), para no leer Sheets dos veces. Nunca puede tirar lo que lo llame: un
+// fallo (Sheets no configurada, error de la API) devuelve vacío.
+function blokes_grupos_excel_filas_crudas() {
+    $cache = get_transient('blokes_grupos_excel_filas_crudas_v1');
+    if (is_array($cache)) return $cache;
+    $vacio = array();
+    try {
+        $activa = blokes_sync_grupos_sheet_activa();
+        $sheet_id = $activa['id'] ?? null;
+        if (!$sheet_id) { set_transient('blokes_grupos_excel_filas_crudas_v1', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
+
+        $meta = blokes_sync_grupos_get($sheet_id, '?fields=sheets.properties.title');
+        if (is_wp_error($meta)) { set_transient('blokes_grupos_excel_filas_crudas_v1', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
+        $pestanas = array_values(array_filter(array_map(function($s) { return $s['properties']['title'] ?? ''; }, $meta['sheets'] ?? array())));
+        $no_son_grupo = array('balance');
+
+        $valores_por_pestana = blokes_sync_grupos_leer_valores_lote($sheet_id, $pestanas);
+        if (is_wp_error($valores_por_pestana)) { set_transient('blokes_grupos_excel_filas_crudas_v1', $vacio, 10 * MINUTE_IN_SECONDS); return $vacio; }
+
+        $filas = array();
+        foreach ($pestanas as $tab) {
+            if (in_array(mb_strtolower(trim($tab)), $no_son_grupo, true)) continue;
+            $r = blokes_sync_grupos_leer_pestana_filas($valores_por_pestana[$tab] ?? array());
+            if (empty($r['bloques'])) continue;
+            foreach ($r['filas'] as $f) {
+                if (empty($f['pagos'])) continue;
+                $filas[] = array(
+                    'pestana' => $tab, 'nombre' => $f['nombre'] ?? '', 'telefono' => $f['telefono'] ?? '',
+                    'pagos' => array_values(array_filter(array_keys($f['pagos']), function($ym) { return preg_match('/^\d{4}-\d{2}$/', $ym); })),
+                );
+            }
+        }
+        set_transient('blokes_grupos_excel_filas_crudas_v1', $filas, HOUR_IN_SECONDS);
+        return $filas;
+    } catch (\Throwable $e) {
+        error_log('Blokes blokes_grupos_excel_filas_crudas: fallo: ' . $e->getMessage());
+        set_transient('blokes_grupos_excel_filas_crudas_v1', $vacio, 10 * MINUTE_IN_SECONDS);
+        return $vacio;
+    }
+}
+
+function blokes_grupos_excel_pagos() {
+    $por_telefono_tmp = array(); $por_nombre = array(); $por_nombre_compacto = array();
+    foreach (blokes_grupos_excel_filas_crudas() as $f) {
+        $tel  = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
+        $nom  = blokes_externos_normaliza_nombre($f['nombre'] ?? '');
+        $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
+        foreach ($f['pagos'] as $ym) {
+            if ($tel) $por_telefono_tmp[$tel][$nom][$ym] = true;
+            if ($nom) $por_nombre[$nom][$ym] = true;
+            if ($nomc) $por_nombre_compacto[$nomc][$ym] = true;
+        }
+    }
+    return blokes_externo_pagos_empaquetar($por_telefono_tmp, $por_nombre, $por_nombre_compacto, array());
+}
+
+// Categoría de una pestaña del Excel, por su NOMBRE (heurística — estas filas no llevan un
+// campo de edad/producto limpio): Pilates/Yoga por nombre; niños/adolescentes por las palabras
+// que ya usa Eva en sus pestañas (KIDS, INF, ADOL, MEDIANOS...); el resto, adultos.
+function blokes_grupos_excel_categoria_pestana($pestana) {
+    $p = blokes_externos_normaliza_nombre($pestana);
+    if (strpos($p, 'pilates') !== false || strpos($p, 'yoga') !== false) return 'pilates_yoga';
+    // 15/11 19:50: "mediano" sin la "s?" no casaba con "MEDIANOS" (plural, como lo escribe Eva)
+    // — "M-J 18.30 MEDIANOS" salía como "adultos" por defecto en vez de "ninos".
+    if (preg_match('/\b(kids?|infantil|inf|adol|medianos?|nino|chiqui)\b/', $p)) return 'ninos';
+    return 'adultos';
+}
+
+// Personas DISTINTAS con el mes pagado/cubierto, por mes — "Alumnos con pago en curso" (Ramiro,
+// 15/11 16:30, sustituye a la tabla "Por mes"). Cruza el Excel de Grupos (toda la temporada que
+// tenga, incluye años anteriores a la migración) con WooCommerce (para los meses recientes que
+// el Excel ya no lleva al día) — una persona cuenta una vez aunque tenga fila en dos pestañas o
+// vaya a una clase de 2 días: se identifica por teléfono normalizado si lo tiene (si no, por
+// nombre compacto), la MISMA clave en las dos fuentes, así alguien con fila en el Excel Y
+// suscripción en WooCommerce con el mismo teléfono no se cuenta dos veces. Aproximado para las
+// personas de WooCommerce sin teléfono propio conocido (identificadas solo por su cuenta/uid):
+// se re-identifican por su nombre, más flojo que el teléfono.
+function blokes_clases_personas_por_mes($categoria = 'todos') {
+    $personas = array(); // ym => [personaKey => true]
+    // Cowork, 15/11 17:50 punto 1: diciembre caía a casi 0 porque algunas suscripciones
+    // trimestrales/anuales tienen su intervalo "pagado" extendido hasta un mes que todavía no
+    // ha llegado — nunca pintar meses posteriores al actual (ese dato simplemente no existe
+    // todavía, no es que la clase esté vacía).
+    $hoy_ym = date('Y-m');
+    $clave_de = function($telefono, $nombre) {
+        $tel = blokes_externos_normaliza_telefono((string) $telefono);
+        if ($tel) return 't' . $tel;
+        $nomc = blokes_externos_normaliza_nombre_compacto((string) $nombre);
+        return $nomc ? 'n' . $nomc : null;
+    };
+
+    foreach (blokes_grupos_excel_filas_crudas() as $f) {
+        if ($categoria !== 'todos' && blokes_grupos_excel_categoria_pestana($f['pestana']) !== $categoria) continue;
+        $key = $clave_de($f['telefono'] ?? '', $f['nombre'] ?? '');
+        if (!$key) continue;
+        foreach ($f['pagos'] as $ym) {
+            if ($ym > $hoy_ym) continue;
+            $personas[$ym][$key] = true;
+        }
+    }
+
+    if (function_exists('wcs_get_subscription')) {
+        try {
+            $calculo = blokes_altas_bajas_calcular(36); // ~3 años, de sobra para llegar a 2024
+            foreach ($calculo['personaIntervalosPagadosReal'] as $pk => $ivs) {
+                $info = $calculo['personaInfo'][$pk] ?? array('telefono' => '', 'nombre' => '', 'edad' => 'Adultos');
+                if ($categoria !== 'todos') {
+                    $cat_persona = ($info['edad'] ?? 'Adultos') !== 'Adultos' ? 'ninos' : 'adultos'; // Pilates/Yoga no sale de aquí
+                    if ($cat_persona !== $categoria) continue;
+                }
+                $key = $clave_de($info['telefono'], $info['nombre']);
+                if (!$key) continue;
+                foreach ($ivs as $iv) {
+                    $mes = $iv['start'];
+                    $fin = min($iv['end'], $hoy_ym);
+                    while ($mes <= $fin) {
+                        $personas[$mes][$key] = true;
+                        $mes = blokes_mes_mas($mes, 1);
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            error_log('Blokes blokes_clases_personas_por_mes: fallo cruzando WooCommerce: ' . $e->getMessage());
+        }
+    }
+
+    $out = array();
+    foreach ($personas as $ym => $claves) $out[$ym] = count($claves);
+    ksort($out);
+    return $out;
+}
+
+// GET /superadmin/v1/clases-pago-en-curso
+function superadmin_clases_pago_en_curso($request) {
+    $categoria = sanitize_key($request->get_param('categoria') ?: 'todos');
+    if (!in_array($categoria, array('todos', 'adultos', 'ninos', 'pilates_yoga'), true)) $categoria = 'todos';
+    $por_mes = blokes_clases_personas_por_mes($categoria);
+    $hoy_ym = date('Y-m');
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'porMes' => $por_mes, 'mesEnCurso' => $hoy_ym,
+    )));
+}
+
+// TODOS los meses pagados por una persona en una fuente externa (hist-pagos o el Excel de
+// Grupos cacheado). Teléfono normalizado → email → nombre compacto (sin espacios, para cuentas
+// web creadas con el usuario en vez del nombre real) → email de la cuenta contra el nombre
+// compacto de la fuente (cowork: "blancaarregui@... contra Blanca Arregui") → nombre normalizado
+// con espacios. Con teléfono compartido por más de una persona (varios nombres distintos bajo
+// el mismo teléfono) exige ADEMÁS que el nombre case — si no, no se suman sus meses.
+function blokes_externo_meses_pagados($telefono, $nombre, $email, $fuente) {
+    $tel  = blokes_externos_normaliza_telefono((string) $telefono);
+    $nom  = blokes_externos_normaliza_nombre((string) $nombre);
+    $nomc = blokes_externos_normaliza_nombre_compacto((string) $nombre);
+    $eml  = strtolower(trim((string) $email));
+    $eml_local = $eml ? blokes_externos_normaliza_nombre_compacto(explode('@', $eml)[0]) : '';
+    $meses = array();
+    if ($tel && isset($fuente['porTelefono'][$tel])) {
+        $candidatos = $fuente['porTelefono'][$tel];
+        $nombres_distintos = array_unique(array_filter(array_column($candidatos, 'nombreNorm')));
+        foreach ($candidatos as $c) {
+            if (count($nombres_distintos) > 1 && $nom && $c['nombreNorm'] && !blokes_externos_nombres_parecidos($nom, $c['nombreNorm'])) continue;
+            $meses = array_merge($meses, $c['meses']);
+        }
+    }
+    if ($eml && isset($fuente['porEmail'][$eml])) $meses = array_merge($meses, $fuente['porEmail'][$eml]);
+    if ($nomc && isset($fuente['porNombreCompacto'][$nomc])) $meses = array_merge($meses, $fuente['porNombreCompacto'][$nomc]);
+    if ($eml_local && strlen($eml_local) >= 6 && isset($fuente['porNombreCompacto'][$eml_local])) $meses = array_merge($meses, $fuente['porNombreCompacto'][$eml_local]);
+    if ($nom && isset($fuente['porNombre'][$nom])) $meses = array_merge($meses, $fuente['porNombre'][$nom]);
+    return array_values(array_unique($meses));
+}
+function blokes_externo_primer_pago($telefono, $nombre, $email, $fuente) {
+    $meses = blokes_externo_meses_pagados($telefono, $nombre, $email, $fuente);
+    return $meses ? min($meses) : null;
+}
+
+// Mismo cálculo en VARIAS fuentes externas a la vez (hist-pagos + Excel de Grupos) — unión de
+// meses / mínimo de las dos, cada una con su propia regla de teléfono-compartido.
+function blokes_externo_meses_pagados_fuentes($telefono, $nombre, $email, $fuentes) {
+    $meses = array();
+    foreach ($fuentes as $fuente) $meses = array_merge($meses, blokes_externo_meses_pagados($telefono, $nombre, $email, $fuente));
+    return array_values(array_unique($meses));
+}
+function blokes_externo_primer_pago_fuentes($telefono, $nombre, $email, $fuentes) {
+    $meses = blokes_externo_meses_pagados_fuentes($telefono, $nombre, $email, $fuentes);
+    return $meses ? min($meses) : null;
+}
+
+// Convierte la lista de meses pagados (hist-pagos/Excel) en intervalos [start,end], tratando
+// como cubierto cada mes pagado MÁS un margen de 2 meses tras el último pago antes de un hueco
+// real (cowork, 15/11 13:15: "baja = último mes pagado + 1, con 1 mes de margen" — mismo
+// criterio de 2 meses sin actividad que ya usa esta función para la baja real de WooCommerce,
+// ver $two_months_ago). $hasta_excluir_ym corta la lista en el mes en que empieza el primer
+// intervalo real de WooCommerce: a partir de ahí manda WooCommerce, no el Excel/hist-pagos.
+function blokes_externo_intervalos_desde_meses($meses_pagados, $hasta_excluir_ym) {
+    $meses = array_values(array_unique(array_filter($meses_pagados, function($m) use ($hasta_excluir_ym) {
+        return $hasta_excluir_ym === null || $m < $hasta_excluir_ym;
+    })));
+    sort($meses);
+    if (!$meses) return array();
+    $intervalos = array();
+    $start = $meses[0]; $prev = $meses[0];
+    foreach (array_slice($meses, 1) as $m) {
+        if (blokes_meses_entre($prev, $m) > 2) {
+            $intervalos[] = array('start' => $start, 'end' => blokes_mes_mas($prev, 2));
+            $start = $m;
+        }
+        $prev = $m;
+    }
+    $fin = blokes_mes_mas($prev, 2);
+    $intervalos[] = array('start' => $start, 'end' => ($hasta_excluir_ym !== null && $fin >= $hasta_excluir_ym) ? blokes_mes_mas($hasta_excluir_ym, -1) : $fin);
+    return $intervalos;
+}
+
+// Agrupa una lista de meses pagados/cubiertos en tramos continuos [start,end] — UN mes sin pago
+// entre dos pagados NO corta el tramo (Ramiro, 15/11 16:40: "1 mes de margen"); dos o más meses
+// seguidos sin pago sí. A diferencia de blokes_externo_intervalos_desde_meses(), $end es el
+// último mes REALMENTE pagado del tramo (sin margen añadido después) — el hueco tolerado de un
+// mes ya queda "dentro" del tramo [start,end] para blokes_persona_cubre_mes().
+function blokes_meses_a_tramos($meses) {
+    $meses = array_values(array_unique($meses));
+    sort($meses);
+    if (!$meses) return array();
+    $tramos = array();
+    $start = $meses[0]; $prev = $meses[0];
+    foreach (array_slice($meses, 1) as $m) {
+        if (blokes_meses_entre($prev, $m) > 2) {
+            $tramos[] = array('start' => $start, 'end' => $prev);
+            $start = $m;
+        }
+        $prev = $m;
+    }
+    $tramos[] = array('start' => $start, 'end' => $prev);
+    return $tramos;
+}
+
+// Estancias por persona y clase (Ramiro, 15/11 16:40): una estancia es un tramo continuo de una
+// persona en una clase concreta, fusionando Excel de Grupos + WooCommerce + hist-pagos (ya
+// mezclados en personaClaseMesesPagados, ver blokes_altas_bajas_calcular). ÚNICA función para la
+// retención por clase, por profe y para "Retención 3M" de Rentabilidad — antes cada sitio
+// calculaba la retención a su manera (o no la calculaba) y los números no casaban entre sí.
+// Devuelve, por classKey: empezaron12m (estancias que empezaron en los últimos 12 meses),
+// siguenN/siguenNAbs/siguenNN (retención a 1/3/6 meses, con "n de N"), permanenciaMedia (meses),
+// bajas6m (estancias acabadas en los últimos 6 meses que NO fueron un cambio de clase) y
+// cambiosClase6m (acabaron porque la persona siguió en otra clase, no porque se fuera).
+function blokes_clases_estancias_calcular($calculo, $now_ym) {
+    $persona_clase_meses = $calculo['personaClaseMesesPagados'];
+    $doce_meses_atras = blokes_mes_mas($now_ym, -12);
+    $seis_meses_atras  = blokes_mes_mas($now_ym, -6);
+    $mes_anterior      = blokes_mes_mas($now_ym, -1);
+
+    // tramos[classKey][pk] = [ ['start'=>Y-m,'end'=>Y-m], ... ]
+    $tramos = array();
+    foreach ($persona_clase_meses as $pk => $por_clase) {
+        foreach ($por_clase as $class_key => $meses_set) {
+            $tramos[$class_key][$pk] = blokes_meses_a_tramos(array_keys($meses_set));
+        }
+    }
+
+    // Todas las estancias de cada persona (cualquier clase), para saber si una que acaba es un
+    // cambio de clase (empieza otra justo después) o una baja de verdad.
+    $estancias_persona = array(); // pk => [ ['classKey','start','end'], ... ]
+    foreach ($tramos as $class_key => $por_pk) {
+        foreach ($por_pk as $pk => $ivs) {
+            foreach ($ivs as $iv) $estancias_persona[$pk][] = array('classKey' => $class_key, 'start' => $iv['start'], 'end' => $iv['end']);
+        }
+    }
+    $es_cambio_de_clase = function($pk, $class_key, $end_ym) use ($estancias_persona) {
+        $siguiente_mes = blokes_mes_mas($end_ym, 1);
+        foreach ($estancias_persona[$pk] ?? array() as $otra) {
+            if ($otra['classKey'] === $class_key) continue;
+            if ($otra['start'] === $end_ym || $otra['start'] === $siguiente_mes) return true;
+        }
+        return false;
+    };
+
+    $por_clase = array();
+    foreach ($tramos as $class_key => $por_pk) {
+        $empezaron = array(); // [ ['pk'=>.., 'start'=>Y-m], ... ] — estancias que empezaron en los últimos 12 meses
+        $permanencias = array();
+        $bajas_6m = 0; $cambios_6m = 0;
+        foreach ($por_pk as $pk => $ivs) {
+            foreach ($ivs as $iv) {
+                $sigue_ahora = $iv['end'] >= $mes_anterior; // último pago este mes o el anterior (margen de 1 mes)
+                $permanencias[] = blokes_meses_entre($iv['start'], $iv['end']) + 1;
+                if (!$sigue_ahora && $iv['end'] >= $seis_meses_atras) {
+                    if ($es_cambio_de_clase($pk, $class_key, $iv['end'])) $cambios_6m++; else $bajas_6m++;
+                }
+                if ($iv['start'] >= $doce_meses_atras) $empezaron[] = array('pk' => $pk, 'start' => $iv['start']);
+            }
+        }
+        $resultado = array(
+            'empezaron12m' => count($empezaron), 'bajas6m' => $bajas_6m, 'cambiosClase6m' => $cambios_6m,
+            'permanenciaMedia' => $permanencias ? round(array_sum($permanencias) / count($permanencias), 1) : null,
+        );
+        foreach (array(1, 3, 6) as $offset) {
+            $siguen = 0; $medibles = 0;
+            foreach ($empezaron as $est) {
+                $mes_objetivo = blokes_mes_mas($est['start'], $offset);
+                if ($mes_objetivo > $now_ym) continue; // todavía no le toca esta antigüedad
+                $medibles++;
+                if (blokes_persona_retenida_continua($por_pk[$est['pk']] ?? array(), $est['start'], $mes_objetivo)) $siguen++;
+            }
+            $resultado['siguen' . $offset . 'Abs'] = $siguen;
+            $resultado['siguen' . $offset . 'N']   = $medibles;
+            $resultado['siguen' . $offset]         = $medibles ? round($siguen / $medibles * 100, 1) : null;
+        }
+        $por_clase[$class_key] = $resultado;
+    }
+    return $por_clase;
+}
+
+// Nuevo/Cambio de clase/Baja/Pendiente por persona (no por suscripción), agrupado por clase.
+// Única fuente de verdad para "Altas y Bajas" de Grupos, Superadmin › Clases (retención) y
+// ExcelMuerte (Ramiro, 15/11 07:50 punto B + 08:45: "mismo cálculo, una sola función").
+function blokes_altas_bajas_calcular($months) {
+    $months   = max(1, min(60, intval($months)));
     $start_dt = new DateTime("first day of this month -{$months} months");
     $start_ym = $start_dt->format('Y-m');
     $now_ym   = date('Y-m');
@@ -7512,103 +14770,400 @@ function superadmin_classes($request) {
 
     switch_to_blog(3);
 
-    $classes = array();
+    $two_months_ago = date('Y-m', strtotime('first day of this month -2 months'));
 
-    if (class_exists('RocoMadrid_SF_Stats')) {
+    // ---- PASADA 1: enriquecer cada suscripción (sin tocar $classes todavía) — cowork/Ramiro
+    // 15/11 07:50, punto B: para saber si alguien es de verdad "Nuevo", "Baja" o "Pendiente"
+    // hace falta ver TODAS sus suscripciones (cualquier clase, cualquier estado), no solo la
+    // de la fila que se está mirando.
+    $enriquecidos = array();
+    if (class_exists('RocoMadrid_SF_Stats') && function_exists('wcs_get_subscription')) {
         $all = blokes_get_all_subscription_data();
         foreach ($all as $sub) {
-            $edad      = sanitize_text_field($sub['edad'] ?? '') ?: 'Adultos';
-            $class_key = ($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '') . '|' . $edad;
             if (!$sub['dia'] && !$sub['horario']) continue;
-            if (!isset($classes[$class_key])) {
-                $classes[$class_key] = array(
-                    'label'           => ($sub['dia'] ?? '') . ' · ' . ($sub['horario'] ?? ''),
-                    'dia'             => $sub['dia'] ?? '',
-                    'horario'         => $sub['horario'] ?? '',
-                    'edad'            => $edad,
-                    'active'          => 0,
-                    'ending'          => 0,
-                    'all'             => 0,
-                    'history'         => array(),
-                    'members_active'  => array(),
-                    'members_ending'  => array(),
-                    'members_pending' => array(),
-                    'members_lost'    => array(),
-                );
-            }
-            $classes[$class_key]['all']++;
-            $member_name  = $sub['cliente']  ?? '';
-            $member_phone = $sub['telefono'] ?? '';
+            if (empty($sub['id'])) continue;
+            $sub_obj = wcs_get_subscription(intval($sub['id']));
+            if (!$sub_obj) continue;
+
+            $edad         = sanitize_text_field($sub['edad'] ?? '') ?: 'Adultos';
+            $class_key    = ($sub['dia'] ?? '') . '|' . ($sub['horario'] ?? '') . '|' . $edad;
+            // Cowork, 15/11 17:50 punto 10: en los chips de "Evolución por clase" salían
+            // teléfonos (+34609571550...) en vez de nombres — $sub['cliente'] es el display_name
+            // de la cuenta de WordPress, que para cuentas autorregistradas en el checkout puede
+            // ser literalmente el username (a veces el teléfono, a veces el nombre sin espacios).
+            // El nombre de facturación de la suscripción (lo que la persona escribió de verdad en
+            // el formulario de pago) es más fiable — se usa primero, y solo se cae al display_name
+            // si la suscripción no tiene nombre de facturación guardado.
+            $billing_nombre = trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name());
+            $member_name  = $billing_nombre !== '' ? $billing_nombre : ($sub['cliente'] ?? '');
+            $member_phone = $sub['telefono'] ?: ($sub_obj->get_billing_phone() ?: '');
+            $member_email = $sub['email'] ?: ($sub_obj->get_billing_email() ?: '');
             // pending-cancel: el cliente ya canceló pero sigue con acceso hasta que acabe el
             // periodo pagado. blokes_get_pending_cancel_alumnos() los marca 'status' => 'active'
             // para que no desaparezcan de ningún sitio, pero no son activos de verdad: no se
             // renuevan. Van aparte («se van este mes»), no al recuento de activos.
             $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
+            $uid = blokes_alumno_customer_id_de_sub($sub, $sub_obj);
+            // 17/11 15:50 punto 11 (Ramiro/cowork): "«PRUEBA COWORK» sale como baja: las
+            // suscripciones de prueba hay que excluirlas" — mismo criterio que ya usa Ligas
+            // (_blokes_cuenta_prueba, blokes_es_cuenta_prueba()) más el nombre literal "prueba"
+            // en el nombre de facturación (la convención real de estas cuentas de prueba, que no
+            // siempre pasan por marcar la cuenta como tal). Fuera de Altas y Bajas (y de todo lo
+            // demás que lee esta función: Retención, Clases) desde el origen, nunca solo ocultada
+            // en la pantalla de bajas.
+            if (($uid && blokes_es_cuenta_prueba($uid)) || stripos($member_name, 'prueba') !== false) continue;
+            $persona_key = $uid ? 'u' . $uid : ($member_phone ? 't' . $member_phone : 'n' . blokes_sync_grupos_normalizar_nombre($member_name));
 
-            // Per-month active snapshot using subscription start/end dates
-            if (function_exists('wcs_get_subscription') && !empty($sub['id'])) {
-                $sub_obj = wcs_get_subscription(intval($sub['id']));
-                if (!$sub_obj) continue;
-                if (empty($member_phone)) {
-                    $member_phone = $sub_obj->get_billing_phone() ?: '';
+            $dt_created = $sub_obj->get_date_created();
+            if (!$dt_created) continue;
+            $sub_start_ym = $dt_created->format('Y-m');
+
+            if ($sub['status'] === 'active') {
+                // Hasta que no acabe el periodo pagado sigue contando como activa mes a mes en
+                // el histórico (aunque ya esté "pending-cancel"): de verdad lo estuvo hasta ahora.
+                $sub_end_ym = $now_ym;
+            } else {
+                $end_ts = $sub_obj->get_time('cancelled') ?: $sub_obj->get_time('end');
+                // "En espera" (on-hold) no tiene fecha de cancelación ni de fin: sin esto, se le
+                // daba por acabada el mismo mes que empezó y desaparecía del histórico de los
+                // meses siguientes aunque siguiera en espera. Usamos el último pago.
+                if (!$end_ts && $sub['status'] === 'on-hold') $end_ts = $sub_obj->get_time('last_payment');
+                $sub_end_ym = $end_ts ? date('Y-m', $end_ts) : $sub_start_ym;
+            }
+
+            $enriquecidos[] = array(
+                'subId' => intval($sub['id']), 'classKey' => $class_key, 'uid' => $uid,
+                'dia' => $sub['dia'] ?? '', 'horario' => $sub['horario'] ?? '', 'edad' => $edad,
+                'nombre' => $member_name, 'telefono' => $member_phone, 'email' => $member_email,
+                'status' => $sub['status'], 'esPendingCancel' => $es_pending_cancel,
+                'personaKey' => $persona_key, 'startYm' => $sub_start_ym, 'endYm' => $sub_end_ym,
+            );
+        }
+    }
+
+    // Consolidar identidades: la misma persona real puede salir con personaKey distinta en
+    // suscripciones distintas si alguna no tiene customer_id (pedido de invitado) y otra sí —
+    // eso infla "personas activas" (cowork, 15/11 12:30: "nov «al final» 202 vs 164 activos de
+    // Grupos"). Si un teléfono aparece bajo un ÚNICO uid real Y también bajo alguna entrada sin
+    // uid, y los nombres se parecen (mismo guardia que el aviso de duplicados: nunca fundir
+    // hermanos que comparten el teléfono de un padre/madre, por eso solo actúa si el teléfono
+    // no es ambiguo — un solo uid detrás), esa entrada sin uid se reasigna al personaKey del uid.
+    $telefono_a_uids = array(); // telefono => [uid => nombre de ejemplo]
+    foreach ($enriquecidos as $e) {
+        if ($e['uid'] && $e['telefono']) {
+            $tel = blokes_externos_normaliza_telefono($e['telefono']);
+            if ($tel) $telefono_a_uids[$tel][$e['uid']] = $e['nombre'];
+        }
+    }
+    // 17/11 19:10 (cowork, Sandra Álvarez): dos cuentas de WordPress REALES (#1102 y #920) de la
+    // misma persona, compartiendo teléfono — antes solo se tocaban las entradas SIN uid; si las
+    // dos cuentas tienen uid (como aquí), count($telefono_a_uids[$tel]) > 1 y se dejaban
+    // "ambiguas" sin tocar, así que sus pagos/meses quedaban repartidos entre dos personaKey
+    // distintos y "Altas y Bajas" nunca veía el cuadro completo de ninguno de los dos (de ahí
+    // que no avisara "pagó por fuera después de la baja"). Si TODOS los nombres detrás de ese
+    // teléfono se parecen entre sí (mismo guardia de siempre: nunca funde padre/hijo o
+    // hermanos, que tienen nombres distintos), se fusionan en un solo personaKey — el uid más
+    // bajo, por determinismo. La fusión real de las cuentas de WordPress (que pidió cowork) sigue
+    // haciendo falta aparte; esto solo corrige el CÁLCULO mientras tanto.
+    foreach ($telefono_a_uids as $tel => $uids) {
+        if (count($uids) < 2) continue;
+        $nombres = array_values(array_filter(array_map('blokes_externos_normaliza_nombre', $uids)));
+        $todas_parecidas = true;
+        foreach ($nombres as $n) {
+            if (!blokes_externos_nombres_parecidos($nombres[0], $n)) { $todas_parecidas = false; break; }
+        }
+        if (!$todas_parecidas) continue;
+        $uid_canonico = min(array_keys($uids));
+        foreach ($enriquecidos as &$e) {
+            if ($e['uid'] && isset($uids[$e['uid']]) && $e['uid'] !== $uid_canonico) $e['personaKey'] = 'u' . $uid_canonico;
+        }
+        unset($e);
+    }
+    foreach ($enriquecidos as &$e) {
+        if ($e['uid'] || !$e['telefono']) continue;
+        $tel = blokes_externos_normaliza_telefono($e['telefono']);
+        if (!$tel || !isset($telefono_a_uids[$tel]) || count($telefono_a_uids[$tel]) !== 1) continue; // ambiguo o sin dato: no tocar
+        $uid_candidato = array_key_first($telefono_a_uids[$tel]);
+        $nombre_uid = $telefono_a_uids[$tel][$uid_candidato];
+        if ($nombre_uid && $e['nombre'] && !blokes_externos_nombres_parecidos(blokes_externos_normaliza_nombre($e['nombre']), blokes_externos_normaliza_nombre($nombre_uid))) continue;
+        $e['personaKey'] = 'u' . $uid_candidato;
+    }
+    unset($e);
+
+    // ---- Mapas globales por persona, a partir de TODAS sus suscripciones.
+    $persona_activo_en  = array(); // personaKey => [classKey => true] — sigue viniendo de verdad AHORA (pending-cancel incluido)
+    // 17/11 16:20 (cowork, Daniel Aragoneses/Abril Jiménez): "en espera" es alguien que pagó el
+    // mes pasado y le falta el de ahora — sigue apuntado, no de baja, aunque la comprobación de
+    // "¿activo en otra clase?" de abajo solo miraba $persona_activo_en (solo 'active'). Mapa
+    // aparte (no se toca $persona_activo_en, que exporta `personaActivoEn` y lo usa Retención con
+    // su propio significado de siempre) solo para decidir si una baja es real.
+    $persona_sigue_apuntado_en = array(); // personaKey => [classKey => true] — activa, en espera o pendiente
+    $persona_min_start  = array(); // personaKey => Y-m más antiguo entre TODAS sus suscripciones
+    $persona_max_end    = array(); // personaKey => Y-m más reciente con cobertura (para permanencia, Superadmin Clases)
+    $persona_historial  = array(); // personaKey => [ ['classKey','startYm','dia','horario','edad'], ... ]
+    $persona_intervalos = array(); // personaKey => [ ['start'=>Y-m,'end'=>Y-m], ... ] — para la retención por cohorte
+    $persona_intervalos_pagados = array(); // igual, pero solo con suscripciones 'active' (cobertura real de pago, no on-hold/pending)
+    // Por clase (no por persona): TODAS las suscripciones que ha tenido alguna vez esa clase
+    // (no solo las activas ahora) y desde cuándo hay datos — para el ingreso real por mes de
+    // Superadmin › Clases, que si no se calcula solo sobre el reparto de HOY (cowork, 15/11
+    // 09:55: octubre salía corto porque alguien que pagó en octubre y luego se dio de baja en
+    // noviembre ya no entraba en el reparto) y para no diluir las medias de 3/6/12 meses con
+    // meses de antes de que la clase existiera (la migración es de mayo-26).
+    $class_sub_ids  = array(); // classKey => [subId => true]
+    $class_min_start = array(); // classKey => Y-m más antiguo con actividad real en esa clase
+    // "Nuevo de verdad" (cowork, 15/11 09:45: "las altas de jun/sept son en gran parte gente que
+    // ya venía, pagaba por Excel") necesita el primer mes pagado en CUALQUIER fuente, no solo
+    // WooCommerce. $persona_min_start_real es una copia aparte de $persona_min_start SOLO para
+    // la clasificación de "Nuevo"/histórico de altas — nunca sustituye a $persona_min_start en
+    // los mapas exportados (personaMinStart/personaIntervalos), que siguen siendo 100%
+    // WooCommerce: la retención por cohorte ya se arregló en 750ffeb con ese dato y no hace
+    // falta (ni es seguro) tocarlo aquí sin repetir esa prueba.
+    // Dos fuentes externas (cowork, 15/11 11:45): hist-pagos (hv_control_clientes, de antes) Y
+    // el Excel de Grupos en vivo (cacheado 1h — el histórico de 2026 vive ahí, no en hist-pagos).
+    $hist_pagos_map = blokes_hist_pagos_pagos();
+    $excel_map      = blokes_grupos_excel_pagos();
+    $fuentes_externas = array($hist_pagos_map, $excel_map);
+    $persona_min_start_real = array();
+    $persona_externo_meses = array(); // personaKey => [ym, ...] (todos los meses pagados fuera de WooCommerce)
+    $persona_info = array(); // personaKey => {telefono, nombre, edad} — el primero visto, para re-identificar a esta persona en otras fuentes (Excel) por teléfono/nombre
+    // Cobertura mes a mes POR CLASE (Ramiro, 15/11 16:40 — retención por clase/profe): alguien
+    // puede cambiar de clase y seguir "activo" en general sin seguir en la clase donde empezó,
+    // así que la retención necesita saber en qué clase concreta estuvo pagando cada mes, no solo
+    // si estuvo activo en cualquiera. personaKey => classKey => [Y-m => true].
+    $persona_clase_meses_pagados = array();
+    $wc_telefonos = array(); $wc_emails = array(); $wc_nombres = array(); $wc_nombres_compactos = array();
+    foreach ($enriquecidos as $e) {
+        $pk = $e['personaKey'];
+        if (!isset($persona_info[$pk])) $persona_info[$pk] = array('telefono' => $e['telefono'], 'nombre' => $e['nombre'], 'edad' => $e['edad']);
+        if (!isset($persona_min_start[$pk]) || $e['startYm'] < $persona_min_start[$pk]) $persona_min_start[$pk] = $e['startYm'];
+        if (!isset($persona_max_end[$pk]) || $e['endYm'] > $persona_max_end[$pk]) $persona_max_end[$pk] = $e['endYm'];
+        if ($e['status'] === 'active') $persona_activo_en[$pk][$e['classKey']] = true;
+        if (in_array($e['status'], array('active', 'on-hold', 'pending'), true)) $persona_sigue_apuntado_en[$pk][$e['classKey']] = true;
+        $persona_historial[$pk][] = array('classKey' => $e['classKey'], 'startYm' => $e['startYm'], 'dia' => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad']);
+        $persona_intervalos[$pk][] = array('start' => $e['startYm'], 'end' => $e['endYm']);
+        // Cobertura REAL de pago (cowork, 15/11 14:00 punto 1: "al final = solo personas con el
+        // mes pagado/cubierto; en espera/impago = pendiente") — un pending nunca ha pagado nada
+        // (su intervalo WooCommerce hoy es [alta, alta] porque no tiene fecha de cancelación,
+        // así que "cubre" igual su propio mes de alta aunque nunca se cobrara) y un on-hold solo
+        // cubre hasta su ÚLTIMO pago real, nunca más allá — por eso solo 'active' aporta aquí.
+        if ($e['status'] === 'active') {
+            $persona_intervalos_pagados[$pk][] = array('start' => $e['startYm'], 'end' => $e['endYm']);
+            foreach ($months_range as $ym) {
+                if ($ym >= $e['startYm'] && $ym <= $e['endYm']) $persona_clase_meses_pagados[$pk][$e['classKey']][$ym] = true;
+            }
+        }
+        $class_sub_ids[$e['classKey']][$e['subId']] = true;
+        if (!isset($class_min_start[$e['classKey']]) || $e['startYm'] < $class_min_start[$e['classKey']]) $class_min_start[$e['classKey']] = $e['startYm'];
+
+        $meses_externos_e = blokes_externo_meses_pagados_fuentes($e['telefono'], $e['nombre'], $e['email'] ?? '', $fuentes_externas);
+        if ($meses_externos_e) {
+            $persona_externo_meses[$pk] = array_values(array_unique(array_merge($persona_externo_meses[$pk] ?? array(), $meses_externos_e)));
+            $externo_ym = min($meses_externos_e);
+        } else {
+            $externo_ym = null;
+        }
+        if (!isset($persona_min_start_real[$pk]) || $e['startYm'] < $persona_min_start_real[$pk]) $persona_min_start_real[$pk] = $e['startYm'];
+        if ($externo_ym !== null && $externo_ym < $persona_min_start_real[$pk]) $persona_min_start_real[$pk] = $externo_ym;
+        if ($e['telefono']) $wc_telefonos[blokes_externos_normaliza_telefono($e['telefono'])] = true;
+        if (!empty($e['email'])) $wc_emails[strtolower(trim($e['email']))] = true;
+        if ($e['nombre']) {
+            $wc_nombres[blokes_externos_normaliza_nombre($e['nombre'])] = true;
+            $wc_nombres_compactos[blokes_externos_normaliza_nombre_compacto($e['nombre'])] = true;
+        }
+    }
+    // Meses externos (Excel/hist-pagos, de ANTES de la migración a WooCommerce) atribuidos a una
+    // clase concreta SOLO cuando la persona no ha tenido más que una clase distinta en
+    // WooCommerce — con 2 o más clases no hay forma de saber a cuál pertenecen esos meses de
+    // antes sin adivinar (16:40: "no inventar"), así que esos casos se quedan fuera de la
+    // retención por clase (sí entran en la retención del club en general, vía personaIntervalosReal).
+    foreach ($persona_clase_meses_pagados as $pk => $por_clase_meses) {
+        if (count($por_clase_meses) !== 1) continue;
+        $unica_clase = array_key_first($por_clase_meses);
+        $meses_externos = $persona_externo_meses[$pk] ?? array();
+        if (!$meses_externos) continue;
+        $wc_min_clase = min(array_keys($por_clase_meses[$unica_clase]));
+        foreach ($meses_externos as $ym_ext) {
+            if ($ym_ext < $wc_min_clase) $persona_clase_meses_pagados[$pk][$unica_clase][$ym_ext] = true;
+        }
+    }
+    // Diagnóstico (nunca cuenta como alta): gente de hist-pagos/Excel que no tiene NINGUNA
+    // suscripción de WooCommerce con ese teléfono/email/nombre(compacto) — pagó alguna vez pero
+    // no está (o no se ha podido emparejar) en el sistema actual. Puede contar dos veces a la
+    // misma persona si aparece en las dos fuentes sin emparejar — es un contador informativo,
+    // no algo que afecte a ningún alta/baja.
+    $externos_sin_emparejar = 0;
+    foreach ($fuentes_externas as $fuente) {
+        foreach ($fuente['porTelefono'] as $tel => $candidatos) {
+            if (isset($wc_telefonos[$tel])) continue;
+            $externos_sin_emparejar += count(array_unique(array_column($candidatos, 'nombreNorm')));
+        }
+        foreach ($fuente['porNombreCompacto'] ?? array() as $nomc => $ym) {
+            if (isset($wc_nombres_compactos[$nomc])) continue;
+            $en_telefono = false;
+            foreach ($fuente['porTelefono'] as $candidatos) {
+                foreach ($candidatos as $c) {
+                    if (blokes_externos_normaliza_nombre_compacto($c['nombreNorm']) === $nomc) { $en_telefono = true; break 2; }
                 }
+            }
+            if (!$en_telefono) $externos_sin_emparejar++;
+        }
+    }
 
-                if ($sub['status'] === 'active' && !$es_pending_cancel) {
-                    $classes[$class_key]['active']++;
-                    $classes[$class_key]['members_active'][] = array('name' => $member_name, 'phone' => $member_phone, 'new' => false);
-                } elseif ($es_pending_cancel) {
-                    $classes[$class_key]['ending']++;
-                    $classes[$class_key]['members_ending'][] = array('name' => $member_name, 'phone' => $member_phone);
-                } elseif (in_array($sub['status'], array('on-hold', 'pending'))) {
-                    $classes[$class_key]['members_pending'][] = array('name' => $member_name, 'phone' => $member_phone);
-                }
+    // ---- PASADA 2: construir $classes ya con la clasificación correcta por persona.
+    $classes = array();
+    // 1 persona = 1 plaza por clase (punto A): si ya tiene otra suscripción activa en la MISMA
+    // clase, no sumar una plaza más — solo avisar, nunca cancelar ni reembolsar nada en
+    // automático, es dinero real y lo decide Ramiro.
+    $activos_por_clase = array(); // classKey => [personaKey => ['subId'=>.., 'uid'=>..]]
+    $duplicados_misma_clase = array();
 
-                $dt_created = $sub_obj->get_date_created();
-                if (!$dt_created) continue;
+    foreach ($enriquecidos as $e) {
+        $class_key = $e['classKey'];
+        $pk        = $e['personaKey'];
+        // Cowork, 15/11 17:50 punto 12: fe7a3e6 hacía "continue" aquí para las franjas
+        // descontinuadas, y eso también se llevó por delante las altas/bajas REALES de esas
+        // franjas (9 en vez de 19 en noviembre) — "altas y bajas" es gente, no catálogo de
+        // clases, y Ramiro solo pedía que no se muestren como clase, no que se pierdan como
+        // persona. Ahora NO se salta la fila: se marca "descontinuada" y cada pantalla de
+        // CATÁLOGO (Horario por día, Rentabilidad/Retención) la filtra ella misma; Altas y
+        // Bajas, que lee members_active/members_lost sin mirar esta marca, las sigue contando.
+        $es_descontinuada = blokes_franja_clase_descontinuada($e['dia'], $e['horario']);
+        // Cowork, 15/11 17:50 punto 4 ("clases fantasma"): los abonos (bono mensual/anual de
+        // acceso, blokes_get_abono_subscripciones()) no son una clase con profe — su "horario"
+        // es una franja genérica ("Mañana"/"Todo el día"), nunca un rango HH:MM-HH:MM real, y su
+        // "dia" siempre viene vacío. Antes se colaban como una fila fantasma "· Mañana — 0, profe
+        // —" en Clases/Retención. Se detecta por el FORMATO del horario (no por "dia" vacío a
+        // secas, para no perder el aviso de "revisar datos" de una clase real con el día sin
+        // guardar, que sí tiene un horario HH:MM-HH:MM válido). Estos SÍ se saltan del todo:
+        // nunca fueron una clase, ni siquiera para altas/bajas.
+        if (!preg_match('/^\d{1,2}:\d{2}-\d{1,2}:\d{2}$/', $e['horario'] ?? '')) continue;
+        if (!isset($classes[$class_key])) {
+            $classes[$class_key] = array(
+                'label'           => $e['dia'] . ' · ' . $e['horario'],
+                'dia'             => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad'],
+                'descontinuada'   => $es_descontinuada,
+                'active'          => 0,
+                'ending'          => 0,
+                'all'             => 0,
+                'history'         => array(),
+                'members_active'  => array(),
+                'members_ending'  => array(),
+                'members_pending' => array(),
+                'members_lost'    => array(),
+            );
+        }
+        $classes[$class_key]['all']++;
 
-                $sub_start_ym = $dt_created->format('Y-m');
-
-                if ($sub['status'] === 'active') {
-                    // Hasta que no acabe el periodo pagado sigue contando como activa mes a mes
-                    // en el histórico (aunque ya esté "pending-cancel" y no entre en el snapshot
-                    // de arriba): de verdad lo estuvo hasta ahora.
-                    $sub_end_ym = $now_ym;
-                    // Mark as new if subscription started this month
-                    if (!$es_pending_cancel && $sub_start_ym >= $now_ym) {
-                        $idx = count($classes[$class_key]['members_active']) - 1;
-                        if ($idx >= 0) $classes[$class_key]['members_active'][$idx]['new'] = true;
+        $es_duplicado = false;
+        if ($e['status'] === 'active' && !$e['esPendingCancel']) {
+            $previo = $activos_por_clase[$class_key][$pk] ?? null;
+            // Cowork, 15/11 10:30: el aviso rojo decía "51 duplicados" cuando de verdad
+            // activa+activa = 0. personaKey puede venir del TELÉFONO cuando no hay customer_id
+            // real — y dos hermanos que van a la misma clase con el teléfono de un padre/madre
+            // comparten ese personaKey sin ser la misma persona (ya hay precedente en
+            // onhold-diagnóstico: "mismo teléfono, misma clase, cliente distinto" se trata como
+            // "revisar", nunca como duplicado automático).
+            // 17/11 19:45 (cowork, Alvaro Fernandez Alvarez/los Frachini): el MISMO customer_id
+            // tampoco basta por sí solo — una cuenta de WordPress familiar puede llevar las
+            // suscripciones de varios hermanos o de un padre y su hijo/a. Solo cuenta como
+            // duplicado de verdad si, además del mismo customer_id, el nombre de facturación
+            // también se parece (nunca con un nombre vacío o sin espacio — solo el usuario de
+            // la cuenta — que no confirma nada por sí solo).
+            $n_prev = $previo ? blokes_externos_normaliza_nombre($previo['nombre'] ?? '') : '';
+            $n_este = blokes_externos_normaliza_nombre($e['nombre'] ?? '');
+            $nombres_confirman_dup = $n_prev !== '' && strpos($n_prev, ' ') !== false
+                && $n_este !== '' && strpos($n_este, ' ') !== false
+                && blokes_externos_nombres_parecidos($n_prev, $n_este);
+            if ($previo && $previo['subId'] !== $e['subId'] && $e['uid'] && $previo['uid'] && $e['uid'] === $previo['uid'] && $nombres_confirman_dup) {
+                $es_duplicado = true;
+                $duplicados_misma_clase[] = array(
+                    'dia' => $e['dia'], 'horario' => $e['horario'], 'edad' => $e['edad'],
+                    'nombre' => $e['nombre'], 'telefono' => $e['telefono'],
+                    'subIds' => array($previo['subId'], $e['subId']),
+                );
+            } else {
+                $activos_por_clase[$class_key][$pk] = array('subId' => $e['subId'], 'uid' => $e['uid'], 'nombre' => $e['nombre']);
+                $classes[$class_key]['active']++;
+                // Nuevo de verdad = esta suscripción empezó este mes Y es la actividad más
+                // antigua de la persona en TODO el sistema (no tenía ninguna suscripción antes,
+                // en ninguna clase) NI en hist-pagos (cowork, 15/11 09:45/11:15: "las altas de
+                // jun/sept son en gran parte gente que ya venía, pagaba por Excel"). Si tenía
+                // otra antes pero en otra clase, es un cambio de clase, no un alumno nuevo.
+                $es_nuevo = $e['startYm'] >= $now_ym && $persona_min_start[$pk] >= $now_ym
+                    && ($persona_min_start_real[$pk] ?? $persona_min_start[$pk]) >= $now_ym;
+                $movido_desde = null;
+                if ($e['startYm'] >= $now_ym && !$es_nuevo) {
+                    $previas = array_values(array_filter($persona_historial[$pk] ?? array(), function($p) use ($class_key, $e) {
+                        return $p['classKey'] !== $class_key && $p['startYm'] < $e['startYm'];
+                    }));
+                    if ($previas) {
+                        usort($previas, function($a, $b) { return strcmp($b['startYm'], $a['startYm']); });
+                        $p0 = $previas[0];
+                        $movido_desde = trim($p0['dia'] . ' ' . $p0['horario'] . ($p0['edad'] !== 'Adultos' ? ' · ' . $p0['edad'] : ''));
                     }
-                } else {
-                    $end_ts = $sub_obj->get_time('cancelled') ?: $sub_obj->get_time('end');
-                    // "En espera" (on-hold) no tiene fecha de cancelación ni de fin: sin esto,
-                    // se le daba por acabada el mismo mes que empezó y desaparecía del histórico
-                    // de los meses siguientes aunque siguiera en espera. Usamos el último pago.
-                    if (!$end_ts && $sub['status'] === 'on-hold') $end_ts = $sub_obj->get_time('last_payment');
-                    $sub_end_ym = $end_ts ? date('Y-m', $end_ts) : $sub_start_ym;
-                    // Track recently lost: cancelled within last 2 months
-                    $two_months_ago = date('Y-m', strtotime('first day of this month -2 months'));
-                    if ($sub_end_ym >= $two_months_ago && !in_array($sub['status'], array('on-hold', 'pending'))) {
-                        $classes[$class_key]['members_lost'][] = array('name' => $member_name, 'phone' => $member_phone);
-                    }
                 }
+                $classes[$class_key]['members_active'][] = array(
+                    'subId' => $e['subId'], 'name' => $e['nombre'], 'phone' => $e['telefono'],
+                    'new' => $es_nuevo, 'movedFrom' => $movido_desde, 'altaMes' => $es_nuevo ? $e['startYm'] : null,
+                );
+            }
+        } elseif ($e['esPendingCancel']) {
+            $classes[$class_key]['ending']++;
+            $classes[$class_key]['members_ending'][] = array('subId' => $e['subId'], 'name' => $e['nombre'], 'phone' => $e['telefono']);
+        } elseif (in_array($e['status'], array('on-hold', 'pending'))) {
+            // Si ya está activa en cualquier otra parte, es una "en espera" duplicada vieja —
+            // ya sale en Duplicados/Pendientes de cobro, no hace falta repetirla aquí.
+            if (!isset($persona_activo_en[$pk])) {
+                $classes[$class_key]['members_pending'][] = array('subId' => $e['subId'], 'name' => $e['nombre'], 'phone' => $e['telefono']);
+            }
+        } elseif (!in_array($e['status'], array('on-hold', 'pending')) && $e['endYm'] >= $two_months_ago) {
+            // Baja real = la persona ya no tiene NINGUNA suscripción activa NI en espera/pendiente
+            // en ninguna clase. Si sigue activa, en espera o pendiente (en esta clase o en otra),
+            // es que canceló un duplicado, cambió de clase, o simplemente le falta pagar el mes
+            // (Daniel Aragoneses/Abril Jiménez, 17/11 16:20: "en espera" no es de baja) — no está
+            // de baja. Tampoco cuenta si se canceló como "duplicado" (motivo _rm_baja_categoria
+            // === 'duplicado', cowork/Ramiro 15/11 08:15): no es una baja real, la persona sigue
+            // viniendo con la otra suscripción.
+            $baja_categoria = get_post_meta($e['subId'], '_rm_baja_categoria', true);
+            if (!isset($persona_sigue_apuntado_en[$pk]) && $baja_categoria !== 'duplicado') {
+                // 17/11 16:20 (cowork, Fernando Heras Díez): la baja es real en WooCommerce (se
+                // canceló sola por impago), pero sigue pagando por fuera (transferencia apuntada
+                // en el Excel, 03/11) — $persona_externo_meses[$pk] ya tiene TODOS los meses
+                // pagados fuera de WooCommerce (hist-pagos + Excel de Grupos); si alguno es
+                // posterior al mes de la baja, avisa en vez de darla por perdida sin más.
+                $meses_ext_tras_baja = array_values(array_filter(
+                    $persona_externo_meses[$pk] ?? array(), function($ym) use ($e) { return $ym > $e['endYm']; }
+                ));
+                sort($meses_ext_tras_baja);
+                $classes[$class_key]['members_lost'][] = array(
+                    'subId' => $e['subId'], 'name' => $e['nombre'], 'phone' => $e['telefono'],
+                    'fecha' => $e['endYm'], 'motivoCategoria' => $baja_categoria ?: null,
+                    'motivoTexto' => get_post_meta($e['subId'], '_rm_baja_motivo', true) ?: null,
+                    'pagoFueraTrasBaja' => $meses_ext_tras_baja ?: null,
+                );
+            }
+        }
 
-                // New enrollment (if start falls in requested range)
-                if ($sub_start_ym >= $start_ym) {
-                    if (!isset($classes[$class_key]['history'][$sub_start_ym])) {
-                        $classes[$class_key]['history'][$sub_start_ym] = array('month' => $sub_start_ym, 'new' => 0, 'active' => 0);
-                    }
-                    $classes[$class_key]['history'][$sub_start_ym]['new']++;
-                }
+        // Histórico de "nuevos" por mes: solo cuenta si ese mes es la primera actividad de la
+        // persona en todo el sistema (no una suscripción más de alguien que ya estaba) NI en
+        // hist-pagos — si no, alguien que ya pagaba por Excel/hv_control_clientes antes de
+        // migrar a WooCommerce sale como "nuevo" el mes que migra.
+        if ($e['startYm'] >= $start_ym) {
+            if (!isset($classes[$class_key]['history'][$e['startYm']])) {
+                $classes[$class_key]['history'][$e['startYm']] = array('month' => $e['startYm'], 'new' => 0, 'active' => 0);
+            }
+            if ($persona_min_start[$pk] === $e['startYm'] && ($persona_min_start_real[$pk] ?? $e['startYm']) === $e['startYm']) {
+                $classes[$class_key]['history'][$e['startYm']]['new']++;
+            }
+        }
 
-                // Active count for every month the subscription overlaps with the range
-                foreach ($months_range as $ym) {
-                    if ($ym >= $sub_start_ym && $ym <= $sub_end_ym) {
-                        if (!isset($classes[$class_key]['history'][$ym])) {
-                            $classes[$class_key]['history'][$ym] = array('month' => $ym, 'new' => 0, 'active' => 0);
-                        }
-                        $classes[$class_key]['history'][$ym]['active']++;
-                    }
+        // Active count for every month the subscription overlaps with the range
+        foreach ($months_range as $ym) {
+            if ($ym >= $e['startYm'] && $ym <= $e['endYm']) {
+                if (!isset($classes[$class_key]['history'][$ym])) {
+                    $classes[$class_key]['history'][$ym] = array('month' => $ym, 'new' => 0, 'active' => 0);
                 }
+                $classes[$class_key]['history'][$ym]['active']++;
             }
         }
     }
@@ -7622,7 +15177,312 @@ function superadmin_classes($request) {
     }
     usort($data, function($a, $b) { return $b['active'] <=> $a['active']; });
 
-    return rest_ensure_response(array('data' => $data));
+    // Intervalos "reales" (cowork, 15/11 12:30/13:15: "Por mes incoherente... al final no se
+    // recalcula... retención por cohorte sigue con los totales viejos" Y "bajas = 0 de nov-25 a
+    // may-26 porque antes de la migración se trataba como cobertura continua" — todo tiene que
+    // salir de la MISMA fuente cruzada con hist-pagos/Excel, no solo "altas"). Por persona: si
+    // tiene historial externo anterior a su alta de WooCommerce, ese periodo externo se convierte
+    // en sus propios intervalos (con huecos de más de 2 meses sin pago = baja real, igual que el
+    // criterio de WooCommerce) y se antepone a los intervalos reales de Woo — NUNCA se asume
+    // cobertura continua solo porque hay un alta real más antigua.
+    $persona_intervalos_real = array();
+    foreach ($persona_intervalos as $pk => $ivs) {
+        $wc_min = $persona_min_start[$pk] ?? null;
+        $meses_externos = $persona_externo_meses[$pk] ?? array();
+        $externos_ivs = ($meses_externos && $wc_min !== null) ? blokes_externo_intervalos_desde_meses($meses_externos, $wc_min) : array();
+        $persona_intervalos_real[$pk] = $externos_ivs ? array_merge($externos_ivs, $ivs) : $ivs;
+    }
+    // Mismo cruce, pero solo con cobertura REAL de pago del lado WooCommerce (cowork, 15/11
+    // 14:00 punto 1) — los intervalos externos (hist-pagos/Excel) ya son "pagados" por
+    // construcción (vienen de filas de pago), así que se reutilizan tal cual.
+    $persona_intervalos_pagados_real = array();
+    foreach ($persona_intervalos as $pk => $ivs) {
+        $wc_min = $persona_min_start[$pk] ?? null;
+        $meses_externos = $persona_externo_meses[$pk] ?? array();
+        $externos_ivs = ($meses_externos && $wc_min !== null) ? blokes_externo_intervalos_desde_meses($meses_externos, $wc_min) : array();
+        $pagados_ivs = $persona_intervalos_pagados[$pk] ?? array();
+        $persona_intervalos_pagados_real[$pk] = array_merge($externos_ivs, $pagados_ivs);
+    }
+
+    return array(
+        'data' => $data, 'duplicadosMismaClase' => $duplicados_misma_clase,
+        'monthsRange' => $months_range, 'startYm' => $start_ym, 'nowYm' => $now_ym,
+        // Para Superadmin › Clases (retención/cohortes, 08:45 punto D) — reutiliza este mismo
+        // cálculo por persona en vez de recorrer las suscripciones otra vez.
+        'personaMinStart' => $persona_min_start, 'personaMaxEnd' => $persona_max_end,
+        'personaActivoEn' => $persona_activo_en, 'personaIntervalos' => $persona_intervalos,
+        'personaHistorial' => $persona_historial,
+        'classSubIds' => $class_sub_ids, 'classMinStart' => $class_min_start,
+        // 'Nuevo' real cruzado con hist-pagos+Excel (11:15/12:30): personaMinStartReal +
+        // personaIntervalosReal se usan en "Por mes" y en la retención por cohorte de
+        // superadmin_clases_retencion(); personaMinStart/personaIntervalos (100% WooCommerce,
+        // sin extender) se dejan intactos para quien los necesite tal cual.
+        'personaMinStartReal' => $persona_min_start_real,
+        'personaIntervalosReal' => $persona_intervalos_real,
+        // Solo cobertura real de pago (sin on-hold/pending) — cowork, 15/11 14:00 punto 1: "al
+        // final = solo personas con el mes pagado/cubierto; en espera/impago = pendiente".
+        'personaIntervalosPagadosReal' => $persona_intervalos_pagados_real,
+        'externosSinEmparejar' => $externos_sin_emparejar,
+        // Para re-identificar a cada persona por teléfono/nombre en otra fuente (gráfica
+        // "Alumnos con pago en curso", 15/11 16:30).
+        'personaInfo' => $persona_info,
+        // Cobertura mes a mes por persona Y clase, para las estancias de la retención por clase/
+        // profe (15/11 16:40) — ver blokes_clases_estancias_calcular().
+        'personaClaseMesesPagados' => $persona_clase_meses_pagados,
+    );
+}
+
+// Dinero de verdad cobrado por una suscripción en un mes concreto (pedido completed/processing,
+// por fecha de creación — mismo criterio que Grupos/ExcelMuerte — y sin las facturas anuladas
+// en VeriFactu). Para Superadmin › Clases (15/11 09:10): rentabilidad con ingreso real, no tarifa fija.
+// Dinero de verdad cobrado por una suscripción en un mes concreto, YA PRORRATEADO si el pago es
+// trimestral/anual (Ramiro, 15/11 09:1x: "haz el prorrateo de trimestrales/anuales por mes" —
+// antes un pedido trimestral de 150€ inflaba entero el mes en que se pagó y dejaba los otros dos
+// en 0€). Un pedido cubre $meses_cubre meses empezando el mes en que se creó.
+function blokes_sub_importe_cobrado_mes($sub_id, $ym) {
+    if (!function_exists('wcs_get_subscription')) return 0.0;
+    $sub = wcs_get_subscription(intval($sub_id));
+    if (!$sub) return 0.0;
+    $periodo   = method_exists($sub, 'get_billing_period') ? $sub->get_billing_period() : 'month';
+    $intervalo = method_exists($sub, 'get_billing_interval') ? max(1, intval($sub->get_billing_interval())) : 1;
+    $meses_cubre = ($periodo === 'year') ? 12 * $intervalo : $intervalo; // trimestral = 'month' con intervalo 3
+    $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
+    $total = 0.0;
+    foreach ($order_ids as $oid) {
+        $order = wc_get_order($oid);
+        if (!$order || !in_array($order->get_status(), array('completed', 'processing'), true)) continue;
+        if (blokes_pedido_factura_anulada($order)) continue;
+        $fecha = $order->get_date_created();
+        if (!$fecha) continue;
+        $inicio_ym = $fecha->format('Y-m');
+        $fin_ym = blokes_mes_mas($inicio_ym, $meses_cubre - 1);
+        if ($ym >= $inicio_ym && $ym <= $fin_ym) {
+            $total += floatval($order->get_total()) / $meses_cubre;
+        }
+    }
+    return $total;
+}
+
+function blokes_mes_mas($ym, $n) {
+    $dt = DateTime::createFromFormat('Y-m-d', $ym . '-01');
+    $dt->modify("+{$n} months");
+    return $dt->format('Y-m');
+}
+function blokes_meses_entre($ym_desde, $ym_hasta) {
+    $a = DateTime::createFromFormat('Y-m-d', $ym_desde . '-01');
+    $b = DateTime::createFromFormat('Y-m-d', $ym_hasta . '-01');
+    return ($b->format('Y') - $a->format('Y')) * 12 + ($b->format('n') - $a->format('n'));
+}
+function blokes_persona_cubre_mes($intervalos, $ym) {
+    foreach ($intervalos as $iv) {
+        if ($ym >= $iv['start'] && $ym <= $iv['end']) return true;
+    }
+    return false;
+}
+// "Sigue" de verdad = cubre TODOS los meses desde el alta hasta el objetivo, no solo el mes
+// objetivo suelto (cowork, 15/11 09:45: con solo el mes objetivo, una pausa/pago tardío que
+// vuelve a activarse después contaba como "sigue" en +6m sin haber contado en +3m — la
+// retención subía con el tiempo, imposible en una cohorte de verdad). Así +6m ⊆ +3m ⊆ +1m
+// siempre, por construcción.
+function blokes_persona_retenida_continua($intervalos, $desde_ym, $hasta_ym) {
+    $mes = $desde_ym;
+    while ($mes <= $hasta_ym) {
+        if (!blokes_persona_cubre_mes($intervalos, $mes)) return false;
+        $mes = blokes_mes_mas($mes, 1);
+    }
+    return true;
+}
+
+// Externos del Excel de Grupos (pagan por fuera de WooCommerce) atribuidos a su clase real del
+// mes $ym, dado un catálogo de clases ya conocidas (dia/horario/edad/active/members_active).
+// Ramiro, 15/11 19:25/19:30 (algoritmo final probado en vivo 19:50, dos rondas): "activos" solo
+// contaba suscripciones de WooCommerce — los que pagan por fuera (transferencia, efectivo) no
+// salían en NINGUNA clase. blokes_grupos_excel_clases_candidatas_para_pestana() busca por
+// PESTAÑA (no por clase): cada pestaña con pago ese mes elige UNA sola clase ganadora entre sus
+// candidatas — primero la del grupo de edad que sugiere el propio nombre de la pestaña
+// (blokes_grupos_excel_categoria_pestana: "ADOL"/"KIDS"/"MEDIANOS" → no-adultos), y entre las que
+// empaten, la combinada (2 días) sobre la suelta y, si sigue habiendo más de una, la que ya
+// tenga más alumnos web (la variante "principal"). Las pestañas que de verdad no casen con
+// ninguna clase se devuelven en "sin repartir" con el motivo — nunca se reparten a ciegas ni se
+// duplican. Compartida entre superadmin_clases_retencion() (Rentabilidad/Retención) y
+// superadmin_classes() (Horario por día, 15/11 §17:50 punto 9) para no desincronizar el mismo
+// reparto en dos sitios.
+function blokes_grupos_excel_externos_activos_por_clase($clases_catalogo, $ym) {
+    $filas_mes_por_pestana = array();
+    foreach (blokes_grupos_excel_filas_crudas() as $f) {
+        if (!in_array($ym, $f['pagos'], true)) continue;
+        $filas_mes_por_pestana[$f['pestana']][] = $f;
+    }
+    $clase_por_key = array();
+    foreach ($clases_catalogo as $c) { $clase_por_key[$c['dia'] . '|' . $c['horario'] . '|' . $c['edad']] = $c; }
+
+    $externos_por_clase = array(); // classKey => nº de externos distintos
+    $sin_repartir_detalle = array(); // [{pestana, motivo}]
+    foreach ($filas_mes_por_pestana as $pestana => $filas) {
+        $candidatos = blokes_grupos_excel_clases_candidatas_para_pestana($pestana, $clases_catalogo);
+        if (!$candidatos) {
+            $sin_repartir_detalle[] = array('pestana' => $pestana, 'motivo' => 'no casa con ninguna clase conocida');
+            continue;
+        }
+        if (count($candidatos) > 1) {
+            $categoria_pestana = blokes_grupos_excel_categoria_pestana($pestana);
+            if ($categoria_pestana === 'ninos') {
+                $filtrados = array_values(array_filter($candidatos, function($k) use ($clase_por_key) { return ($clase_por_key[$k]['edad'] ?? 'Adultos') !== 'Adultos'; }));
+                if ($filtrados) $candidatos = $filtrados;
+            }
+            usort($candidatos, function($a, $b) use ($clase_por_key) {
+                $ca = $clase_por_key[$a]; $cb = $clase_por_key[$b];
+                $comboA = strpos($ca['dia'], '-') !== false ? 1 : 0;
+                $comboB = strpos($cb['dia'], '-') !== false ? 1 : 0;
+                if ($comboA !== $comboB) return $comboB - $comboA; // combinada primero
+                return $cb['active'] - $ca['active']; // más alumnos web primero
+            });
+        }
+        $ganador = $candidatos[0];
+        $c = $clase_por_key[$ganador];
+        $identidades_web = array();
+        foreach ($c['members_active'] as $m) {
+            $tel = blokes_externos_normaliza_telefono($m['phone'] ?? '');
+            if ($tel) $identidades_web['t' . $tel] = true;
+            $nomc = blokes_externos_normaliza_nombre_compacto($m['name'] ?? '');
+            if ($nomc) $identidades_web['n' . $nomc] = true;
+        }
+        $externos_unicos = array();
+        foreach ($filas as $f) {
+            $tel = blokes_externos_normaliza_telefono($f['telefono'] ?? '');
+            $nomc = blokes_externos_normaliza_nombre_compacto($f['nombre'] ?? '');
+            $key = $tel ? ('t' . $tel) : ($nomc ? ('n' . $nomc) : null);
+            if (!$key || isset($identidades_web[$key])) continue;
+            $externos_unicos[$key] = true;
+        }
+        if ($externos_unicos) {
+            $externos_por_clase[$ganador] = ($externos_por_clase[$ganador] ?? 0) + count($externos_unicos);
+        }
+    }
+    return array('porClase' => $externos_por_clase, 'sinRepartirDetalle' => $sin_repartir_detalle);
+}
+
+// GET /superadmin/v1/clases-retencion — Superadmin › Clases (15/11 16:40, solo socios):
+// rentabilidad e ingreso real por clase, con retención fiable por clase (1/3/6 meses, estancias
+// con 1 mes de margen, cambios de clase aparte de bajas de verdad) — ver
+// blokes_clases_estancias_calcular(). El desglose por PROFE y por «clase combinada» (día suelto
+// + M-J) lo hace el frontend con profesoresDeGrupo()/filasRentabilidad, que es donde vive esa
+// lógica — aquí solo se manda dia/horario/edad de cada clase cruda.
+function superadmin_clases_retencion($request) {
+    $months = max(3, min(24, intval($request->get_param('months') ?: 12)));
+    $calculo = blokes_altas_bajas_calcular($months);
+    $months_range = $calculo['monthsRange'];
+    $now_ym = $calculo['nowYm'];
+    // Mes para "ingreso real" de la rentabilidad (cowork, 15/11 09:45): por defecto el último
+    // mes YA CERRADO, no el actual a medias — con el mes a medio empezar, un trimestral cobrado
+    // el día 3 aparentaba ingresos altos y dejaba los otros dos meses que de verdad cubre con
+    // pinta de estar vacíos. Admite ?mes=YYYY-MM para elegir otro.
+    $mes_ingreso_param = sanitize_text_field((string) $request->get_param('mes'));
+    $mes_ingreso = preg_match('/^\d{4}-\d{2}$/', $mes_ingreso_param) ? $mes_ingreso_param : blokes_mes_mas($now_ym, -1);
+    $class_sub_ids      = $calculo['classSubIds'];
+    $class_min_start    = $calculo['classMinStart'];
+
+    // ---- Estancias por clase (Ramiro, 15/11 16:40): retención fiable, por clase, con 1 mes de
+    // margen y cambios de clase aparte de las bajas de verdad — ver blokes_clases_estancias_calcular().
+    $estancias_por_clase = blokes_clases_estancias_calcular($calculo, $now_ym);
+
+    // ---- Por clase: activos ahora, altas de este mes, bajas recientes, motivos de baja,
+    // ingreso real de este mes y retención (09:10 — rentabilidad real, movida aquí desde
+    // Superadmin › Ingresos; el coste del profe y el margen se calculan en el frontend, que es
+    // donde vive la lista de quién da cada clase).
+    // Hasta 12 meses atrás DESDE $mes_ingreso (no desde el mes actual a medias) para las medias
+    // de 3/6/12 meses.
+    $meses_media = array_slice(array_values(array_filter($months_range, function($ym) use ($mes_ingreso) { return $ym <= $mes_ingreso; })), -12);
+    // Franjas descontinuadas (Ramiro, 18:00): no salen en el catálogo de Rentabilidad/Retención
+    // — pero sí se dejaron contar en Altas y Bajas (15/11 17:50 punto 12), que lee $calculo['data']
+    // directamente, sin pasar por aquí.
+    $clases_catalogo = array_values(array_filter($calculo['data'], function($c) { return empty($c['descontinuada']); }));
+
+    // Externos del Excel de Grupos sumados a "Activos" por clase (Ramiro, 15/11 19:25/19:30,
+    // algoritmo final probado en vivo 19:50) — ver blokes_grupos_excel_externos_activos_por_clase().
+    // Compartida con superadmin_classes()/Horario por día (15/11 §17:50 punto 9), que necesita
+    // el mismo reparto para el mes en curso.
+    $res_externos = blokes_grupos_excel_externos_activos_por_clase($clases_catalogo, $now_ym);
+    $externos_activos_por_clase = $res_externos['porClase'];
+    $pestanas_sin_repartir_detalle = $res_externos['sinRepartirDetalle'];
+    $pestanas_sin_repartir = count($pestanas_sin_repartir_detalle);
+
+    $por_clase = array_map(function($c) use ($mes_ingreso, $estancias_por_clase, $meses_media, $class_sub_ids, $class_min_start, $externos_activos_por_clase) {
+        $altas_mes = array_values(array_filter($c['members_active'], function($m) { return $m['new']; }));
+        $motivos = array();
+        foreach ($c['members_lost'] as $m) {
+            $cat = $m['motivoCategoria'] ?: 'sin_categoria';
+            $motivos[$cat] = ($motivos[$cat] ?? 0) + 1;
+        }
+        $class_key = $c['dia'] . '|' . $c['horario'] . '|' . $c['edad'];
+        // Ingreso real por mes (ya prorrateado si hay trimestrales/anuales) — sobre TODAS las
+        // suscripciones que ha tenido esta clase alguna vez, no solo las activas AHORA (cowork,
+        // 15/11 09:55: octubre salía corto porque quien pagó en octubre y se dio de baja en
+        // noviembre ya no entraba en el reparto de "activos de hoy").
+        $sub_ids_clase = array_keys($class_sub_ids[$class_key] ?? array());
+        $min_start_clase = $class_min_start[$class_key] ?? $mes_ingreso;
+        $ingreso_por_mes = array();
+        foreach ($meses_media as $ym) {
+            // No cuenta un mes de antes de que hubiera ninguna suscripción de esta clase (la
+            // migración es de mayo-26) — si no, esos meses en 0 € diluían las medias de 6/12
+            // meses hacia abajo sin motivo (cowork, 15/11 09:55).
+            if ($ym < $min_start_clase) continue;
+            $t = 0.0;
+            foreach ($sub_ids_clase as $sub_id) $t += blokes_sub_importe_cobrado_mes($sub_id, $ym);
+            $ingreso_por_mes[$ym] = $t;
+        }
+        $ingreso_mes_real = $ingreso_por_mes[$mes_ingreso] ?? 0.0;
+        $media_n = function($n) use ($ingreso_por_mes) {
+            $ult = array_slice($ingreso_por_mes, -$n);
+            return $ult ? round(array_sum($ult) / count($ult), 2) : null;
+        };
+        // Retención (16/11 16:40): la MISMA función de estancias que la tabla "Retención por
+        // clase" de abajo — antes esto usaba su propio cálculo ("de quien ya estaba hace ≥3
+        // meses, % activo HOY en cualquier clase", sin mínimo de muestra ni separar cambios de
+        // clase de bajas de verdad) y los dos números no casaban.
+        $est = $estancias_por_clase[$class_key] ?? null;
+        $motivo_principal = null;
+        if ($motivos) { arsort($motivos); $motivo_principal = array_key_first($motivos); }
+        // Externos sumados a "activos" (Ramiro, 15/11 19:25/19:30) — ver más arriba.
+        $activos_fuera = $externos_activos_por_clase[$class_key] ?? 0;
+        return array(
+            'dia' => $c['dia'], 'horario' => $c['horario'], 'edad' => $c['edad'], 'label' => $c['label'],
+            'activos' => $c['active'] + $activos_fuera, 'activosWeb' => $c['active'], 'activosFuera' => $activos_fuera,
+            'altasMes' => count($altas_mes), 'bajasRecientes' => count($c['members_lost']),
+            'motivosBaja' => $motivos, 'motivoPrincipal' => $motivo_principal, 'ingresoMesReal' => round($ingreso_mes_real, 2),
+            'ingresoMedia3m' => $media_n(3), 'ingresoMedia6m' => $media_n(6), 'ingresoMedia12m' => $media_n(12),
+            // Retención 1/3/6 meses con "n de N", permanencia media (meses) y bajas/cambios de
+            // clase de los últimos 6 meses — todo de blokes_clases_estancias_calcular().
+            'estanciasEmpezaron12m' => $est['empezaron12m'] ?? 0,
+            'siguen1' => $est['siguen1'] ?? null, 'siguen1Abs' => $est['siguen1Abs'] ?? 0, 'siguen1N' => $est['siguen1N'] ?? 0,
+            'siguen3' => $est['siguen3'] ?? null, 'siguen3Abs' => $est['siguen3Abs'] ?? 0, 'siguen3N' => $est['siguen3N'] ?? 0,
+            'siguen6' => $est['siguen6'] ?? null, 'siguen6Abs' => $est['siguen6Abs'] ?? 0, 'siguen6N' => $est['siguen6N'] ?? 0,
+            'permanenciaMediaClase' => $est['permanenciaMedia'] ?? null,
+            'bajas6mClase' => $est['bajas6m'] ?? 0, 'cambiosClase6m' => $est['cambiosClase6m'] ?? 0,
+            // Retención 3M = siguen3, tal cual (Ramiro 16:40: "la columna «Retención 3M» de
+            // Rentabilidad pasa a usar este mismo cálculo") — se deja también como retencion3m
+            // para no romper el nombre que ya usa el frontend de Rentabilidad.
+            'retencion3m' => $est['siguen3'] ?? null,
+        );
+    }, $clases_catalogo);
+
+    $coste_profe_mes = blokes_coste_real_profe_mes($mes_ingreso);
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'porClase' => $por_clase, 'mesIngreso' => $mes_ingreso, 'mesesDisponibles' => array_slice($months_range, 0, -1),
+        // Coste real de empresa por profe DEL MES ELEGIDO (15/11 10:25 punto A) — nómina
+        // bruta+efectivo real de Nóminas + SS real del banco, nada de ×1,43 ni de usar siempre
+        // el mes actual. 'costeRealProfeFuente': true = hay fila de nómina de ese mes; false/
+        // ausente = cae al plan B (ficha), para que el ⓘ del frontend lo diga sin mirar logs.
+        'costeRealProfe' => $coste_profe_mes['costes'],
+        'costeRealProfeFuente' => $coste_profe_mes['fuentes'],
+        // Pestañas del Excel con pago este mes que no casaron con ninguna clase conocida —
+        // nunca se reparten a ciegas (Ramiro, 15/11 19:30: "sin repartir"). Solo un contador de
+        // momento; si hace falta verlas una por una, se puede sacar un endpoint de diagnóstico.
+        'pestanasSinRepartir' => $pestanas_sin_repartir,
+        'pestanasSinRepartirDetalle' => $pestanas_sin_repartir_detalle,
+        'avisoFuente' => 'Ingreso real de un mes a medias puede salir bajo simplemente porque todavía no ha pasado — usa el selector de mes para ver uno ya cerrado. Retención por clase (16/11 16:40): fusiona Excel de Grupos + WooCommerce + hist-pagos con 1 mes de margen, pero los meses de antes de la migración solo se atribuyen a una clase cuando la persona no ha tenido más que una clase distinta en WooCommerce — con varias clases esos meses de antes no entran en la retención por clase (no se puede saber a cuál pertenecen sin adivinar). "Activos" por clase (15/11 19:25-19:50) ya suma los externos del Excel de Grupos que pagan por fuera, emparejados por día+hora de inicio con blokes_grupos_excel_clases_candidatas_para_pestana() — lo que no case con ninguna clase se cuenta en "pestanasSinRepartir", nunca se adivina.',
+    )));
 }
 
 // ============================================================
@@ -7631,10 +15491,16 @@ function superadmin_classes($request) {
 
 // ── Instalación de tablas ─────────────────────────────────────
 add_action('plugins_loaded', function() {
-    if (get_option('blokes_leagues_db_version') !== '1.0') {
+    if (get_option('blokes_leagues_db_version') !== '1.1') {
         blokes_leagues_create_tables();
         blokes_leagues_seed();
-        update_option('blokes_leagues_db_version', '1.0');
+        // v1.1 (Ramiro 12/11 11:55, NOTAS_PARA_CODE_ligas_incentivo.md): nuevos tipos de evento
+        // bonus_nuevo/bonus_racha — el ENUM ya existente no lo coge dbDelta solo con el CREATE
+        // TABLE (es flojo con los ENUM), así que se fuerza aquí una vez.
+        global $wpdb;
+        $wpdb->query("ALTER TABLE {$wpdb->prefix}blokes_league_events
+            MODIFY event_type ENUM('promoted','demoted','top_scored','bonus_nuevo','bonus_racha') NOT NULL");
+        update_option('blokes_leagues_db_version', '1.1');
     }
 });
 
@@ -7671,7 +15537,7 @@ function blokes_leagues_create_tables() {
     dbDelta("CREATE TABLE IF NOT EXISTS {$wpdb->prefix}blokes_league_events (
         id                   INT UNSIGNED      NOT NULL AUTO_INCREMENT,
         user_id              BIGINT UNSIGNED   NOT NULL,
-        event_type           ENUM('promoted','demoted','top_scored') NOT NULL,
+        event_type           ENUM('promoted','demoted','top_scored','bonus_nuevo','bonus_racha') NOT NULL,
         from_league_id       SMALLINT UNSIGNED,
         to_league_id         SMALLINT UNSIGNED,
         points_at_event      INT               NOT NULL DEFAULT 0,
@@ -7718,15 +15584,149 @@ function blokes_calculate_points($post_id) {
     return ($color_base[$color] ?? 0) + ($grado_bonus[$grado] ?? 2);
 }
 
-// ── Lógica principal ──────────────────────────────────────────
+// ── Incentivo (Ramiro 12/11 11:55, NOTAS_PARA_CODE_ligas_incentivo.md) ─────────
+// Opciones 1 (bloques nuevos ×2), 2 (racha semanal +5) y 4 (feedback "+X pts · te
+// faltan Y"). Los bonus se guardan como eventos con tipo propio en
+// blokes_league_events para poder auditarlos o deshacerlos — nunca se suman a
+// total_points sin dejar rastro.
 
-function blokes_register_top_for_leagues($user_id, $post_id) {
+// Lunes de la semana de una fecha dada (o de ahora) — aritmética de días explícita,
+// nunca strtotime('monday this week') (ambiguo si la fecha YA es lunes).
+function blokes_monday_of($ts = null) {
+    $ts = $ts ?: current_time('timestamp');
+    $dow = (int) date('N', $ts); // 1 (lunes) .. 7 (domingo)
+    return date('Y-m-d', $ts - ($dow - 1) * 86400);
+}
+
+// Opción 1: un bloke puesto en las últimas 2 semanas vale el doble — empuja a
+// probar lo nuevo, igual encaja con la equipación semanal. post_date es la fecha
+// en la que se creó el bloke en WordPress (al equiparlo desde la app).
+function blokes_bloke_es_nuevo($post_id) {
+    $post = get_post($post_id);
+    if (!$post || !$post->post_date) return false;
+    $dias = (current_time('timestamp') - strtotime($post->post_date)) / 86400;
+    return $dias >= 0 && $dias <= 14;
+}
+
+// Opción 2: si esta semana ya hay (o esta tarea la deja en) al menos 3 tops
+// propios, +5 pts, una sola vez por semana. Cuenta solo tops que SIGAN puestos
+// (nada de duplicados por un toggle off/on, ni de un bloke que ya se borró —
+// aviso de la nota, ver blokes_quitar_completions_de_bloke).
+function blokes_check_racha_semanal($user_id) {
+    global $wpdb;
+    $ev = $wpdb->prefix . 'blokes_league_events';
+    $monday = blokes_monday_of();
+
+    $ya = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM $ev WHERE user_id = %d AND event_type = 'bonus_racha' AND created_at >= %s",
+        $user_id, $monday . ' 00:00:00'
+    ));
+    if ($ya > 0) return 0;
+
+    $completados = get_user_meta($user_id, '_blokes_completed', true);
+    $completados = is_array($completados) ? array_map('intval', $completados) : array();
+    $log = get_user_meta($user_id, '_blokes_completion_log', true);
+    $log = is_array($log) ? $log : array();
+
+    $ids_esta_semana = array();
+    $inicio_semana = strtotime($monday . ' 00:00:00');
+    foreach ($log as $entry) {
+        $pid = intval($entry['postId'] ?? 0);
+        if (!$pid || !in_array($pid, $completados, true)) continue;
+        $ts = strtotime($entry['timestamp'] ?? '');
+        if ($ts && $ts >= $inicio_semana) $ids_esta_semana[$pid] = true;
+    }
+    if (count($ids_esta_semana) < 3) return 0;
+
+    $wpdb->insert($ev, array(
+        'user_id' => $user_id, 'event_type' => 'bonus_racha',
+        'from_league_id' => null, 'to_league_id' => null,
+        'points_at_event' => 5, 'triggered_by_user_id' => null,
+        'created_at' => current_time('mysql'), 'seen' => 0,
+    ));
+    return 5;
+}
+
+// "🔥 Racha: N semanas" en la ficha — semanas CONSECUTIVAS (terminando en la
+// actual o la pasada; si se rompió hace 2+ semanas, la racha ya está a 0) con el
+// bonus semanal conseguido. Se deriva del propio registro de eventos, nada de un
+// contador aparte que se pueda desincronizar.
+function blokes_calcular_racha_semanas($user_id) {
+    global $wpdb;
+    $ev = $wpdb->prefix . 'blokes_league_events';
+    $fechas = $wpdb->get_col($wpdb->prepare(
+        "SELECT created_at FROM $ev WHERE user_id = %d AND event_type = 'bonus_racha' ORDER BY created_at DESC",
+        $user_id
+    ));
+    if (!$fechas) return 0;
+
+    $mondays = array();
+    foreach ($fechas as $f) { $mondays[blokes_monday_of(strtotime($f))] = true; }
+    $mondays = array_keys($mondays);
+    rsort($mondays);
+
+    $hoy_monday = blokes_monday_of();
+    $semana_pasada = date('Y-m-d', strtotime($hoy_monday) - 7 * 86400);
+    if ($mondays[0] !== $hoy_monday && $mondays[0] !== $semana_pasada) return 0;
+
+    $racha = 0;
+    $cursor = $mondays[0];
+    foreach ($mondays as $m) {
+        if ($m !== $cursor) break;
+        $racha++;
+        $cursor = date('Y-m-d', strtotime($cursor) - 7 * 86400);
+    }
+    return $racha;
+}
+
+// Opción 4: cuántos puntos le faltan al usuario para superar al más flojo de la
+// liga de arriba (el mismo umbral que usa blokes_evaluate_league_change para el
+// swap) y cómo se llama esa liga — null/null en la liga top o si la de arriba
+// está vacía (nadie con quien hacer swap todavía).
+function blokes_liga_siguiente_info($league_id, $total_points) {
     global $wpdb;
     $ul = $wpdb->prefix . 'blokes_user_leagues';
     $l  = $wpdb->prefix . 'blokes_leagues';
 
+    $current = $wpdb->get_row($wpdb->prepare("SELECT * FROM $l WHERE id = %d", $league_id));
+    if (!$current || (int) $current->tier >= 6) {
+        return array('pointsToPromote' => null, 'nextLeagueName' => null);
+    }
+    $next = $wpdb->get_row($wpdb->prepare("SELECT * FROM $l WHERE tier = %d", (int) $current->tier + 1));
+    if (!$next) return array('pointsToPromote' => null, 'nextLeagueName' => null);
+
+    $weakest = $wpdb->get_var($wpdb->prepare("SELECT MIN(total_points) FROM $ul WHERE league_id = %d", $next->id));
+    if ($weakest === null) return array('pointsToPromote' => null, 'nextLeagueName' => $next->name);
+
+    return array(
+        'pointsToPromote' => max(0, (int) $weakest - (int) $total_points + 1),
+        'nextLeagueName'  => $next->name,
+    );
+}
+
+// ── Lógica principal ──────────────────────────────────────────
+
+// Ramiro 12/11 12:30 (de cara al futuro, tras los tops de prueba de RamiroTop): una cuenta
+// marcada como "de pruebas" (_blokes_cuenta_prueba) no debe entrar en ligas — ni puntos, ni
+// bonus, ni ascensos/descensos de nadie real por su culpa. Se marca desde
+// POST /blokes/v1/admin/cuenta-prueba (solo socio).
+function blokes_es_cuenta_prueba($user_id) {
+    return (bool) get_user_meta((int) $user_id, '_blokes_cuenta_prueba', true);
+}
+
+function blokes_register_top_for_leagues($user_id, $post_id) {
+    if (blokes_es_cuenta_prueba($user_id)) return null;
+    global $wpdb;
+    $ul = $wpdb->prefix . 'blokes_user_leagues';
+    $l  = $wpdb->prefix . 'blokes_leagues';
+    $ev = $wpdb->prefix . 'blokes_league_events';
+
     $pts = blokes_calculate_points($post_id);
     if ($pts <= 0) return null;
+
+    // Opción 1: bloke nuevo (últimas 2 semanas) vale el doble — el bonus es el
+    // mismo importe que los puntos base, guardado como su propio evento.
+    $bonus_nuevo = blokes_bloke_es_nuevo($post_id) ? $pts : 0;
 
     $wpdb->query('START TRANSACTION');
 
@@ -7738,34 +15738,69 @@ function blokes_register_top_for_leagues($user_id, $post_id) {
         $pedri = $wpdb->get_row("SELECT * FROM $l WHERE tier = 1");
         if (!$pedri) { $wpdb->query('ROLLBACK'); return null; }
 
+        $total = $pts + $bonus_nuevo;
         $wpdb->insert($ul, array(
             'user_id'        => $user_id,
             'league_id'      => $pedri->id,
-            'total_points'   => $pts,
+            'total_points'   => $total,
             'rank_in_league' => 9999,
             'zone'           => 'stay',
             'joined_at'      => current_time('mysql'),
             'last_updated'   => current_time('mysql'),
         ));
+        if ($bonus_nuevo > 0) {
+            $wpdb->insert($ev, array(
+                'user_id' => $user_id, 'event_type' => 'bonus_nuevo',
+                'from_league_id' => null, 'to_league_id' => null,
+                'points_at_event' => $bonus_nuevo, 'triggered_by_user_id' => null,
+                'created_at' => current_time('mysql'), 'seen' => 0,
+            ));
+        }
         $wpdb->query('COMMIT');
         blokes_recalculate_league_ranks((int) $pedri->id);
         blokes_check_tier_overflow((int) $pedri->id);
-        return array('pointsEarned' => $pts, 'newTotal' => $pts, 'leagueChanged' => false);
+        $info = blokes_liga_siguiente_info((int) $pedri->id, $total);
+        return array(
+            'pointsEarned' => $total, 'bonusNuevo' => $bonus_nuevo, 'bonusRacha' => 0,
+            'newTotal' => $total, 'leagueChanged' => false,
+            'pointsToPromote' => $info['pointsToPromote'], 'nextLeagueName' => $info['nextLeagueName'],
+        );
     }
 
-    $new_total = (int) $row->total_points + $pts;
+    // Opción 2: racha semanal — se comprueba DESPUÉS de saber que esta tarea ya
+    // quedó registrada en el log (blokes_toggle_completion actualiza el log antes
+    // de llamar aquí), así que este mismo top ya cuenta si es el 3º de la semana.
+    $bonus_racha = blokes_check_racha_semanal($user_id);
+
+    $ganado = $pts + $bonus_nuevo + $bonus_racha;
+    $new_total = (int) $row->total_points + $ganado;
     $wpdb->update($ul,
         array('total_points' => $new_total, 'last_updated' => current_time('mysql')),
         array('user_id' => $user_id)
     );
+    if ($bonus_nuevo > 0) {
+        $wpdb->insert($ev, array(
+            'user_id' => $user_id, 'event_type' => 'bonus_nuevo',
+            'from_league_id' => null, 'to_league_id' => null,
+            'points_at_event' => $bonus_nuevo, 'triggered_by_user_id' => null,
+            'created_at' => current_time('mysql'), 'seen' => 0,
+        ));
+    }
     $wpdb->query('COMMIT');
 
     $change = blokes_evaluate_league_change((int) $user_id, $new_total, (int) $row->league_id);
+    $liga_final = $change['changed'] ? (int) $change['newLeague']['id'] : (int) $row->league_id;
+    $info = blokes_liga_siguiente_info($liga_final, $new_total);
+
     return array(
-        'pointsEarned'  => $pts,
-        'newTotal'      => $new_total,
-        'leagueChanged' => $change['changed'],
-        'newLeague'     => $change['newLeague'] ?? null,
+        'pointsEarned'    => $ganado,
+        'bonusNuevo'      => $bonus_nuevo,
+        'bonusRacha'      => $bonus_racha,
+        'newTotal'        => $new_total,
+        'leagueChanged'   => $change['changed'],
+        'newLeague'       => $change['newLeague'] ?? null,
+        'pointsToPromote' => $info['pointsToPromote'],
+        'nextLeagueName'  => $info['nextLeagueName'],
     );
 }
 
@@ -7986,6 +16021,30 @@ add_action('rest_api_init', function() {
         'callback'            => 'blokes_api_get_comunidad_leagues',
         'permission_callback' => '__return_true',
     ));
+    // Tele del Roco, opción 4 de NOTAS_PARA_CODE_ligas_incentivo.md — público, sin login, igual
+    // que el resto de endpoints que ya lee /compe/directo. Namespace blokes/v1 (no progreso/v1)
+    // a propósito: las tablas de ligas viven en el sitio Principal, igual que este namespace —
+    // así nos ahorramos el switch_to_blog que haría falta si esto corriera desde el Club.
+    register_rest_route('blokes/v1', '/tele/liga-semana', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_tele_liga_semana',
+        'permission_callback' => '__return_true',
+    ));
+    // Diagnóstico TEMPORAL, solo socio (Ramiro 12/11 12:30: deshacer los tops de prueba de
+    // RamiroTop, con el plan por delante antes de borrar nada) — se quita en cuanto se decida la
+    // limpieza. De solo lectura: no cambia nada.
+    register_rest_route('blokes/v1', '/admin/diag-cuenta', array(
+        'methods'             => 'GET',
+        'callback'            => 'blokes_api_diag_cuenta',
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+    ));
+    // "Para el futuro" (Ramiro 12/11 12:30): marcar una cuenta como "de pruebas" para que sus
+    // tops dejen de contar en ligas/tele/clasificaciones.
+    register_rest_route('blokes/v1', '/admin/cuenta-prueba', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_api_set_cuenta_prueba',
+        'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+    ));
 });
 
 function blokes_api_get_leagues() {
@@ -8011,14 +16070,21 @@ function blokes_api_get_my_league() {
 
     if (!$row) return new WP_Error('no_league', 'Not placed yet', array('status' => 404));
 
+    // Opciones 2 y 4 de NOTAS_PARA_CODE_ligas_incentivo.md: que se vea en la ficha, no solo al
+    // apuntar el top.
+    $info = blokes_liga_siguiente_info((int) $row->league_id, (int) $row->total_points);
+
     return rest_ensure_response(array(
-        'leagueId'    => (int) $row->league_id,
-        'name'        => $row->name,
-        'slug'        => $row->slug,
-        'tier'        => (int) $row->tier,
-        'totalPoints' => (int) $row->total_points,
-        'rank'        => (int) $row->rank_in_league,
-        'zone'        => $row->zone,
+        'leagueId'        => (int) $row->league_id,
+        'name'            => $row->name,
+        'slug'            => $row->slug,
+        'tier'            => (int) $row->tier,
+        'totalPoints'     => (int) $row->total_points,
+        'rank'            => (int) $row->rank_in_league,
+        'zone'            => $row->zone,
+        'rachaSemanas'    => blokes_calcular_racha_semanas($uid),
+        'pointsToPromote' => $info['pointsToPromote'],
+        'nextLeagueName'  => $info['nextLeagueName'],
     ));
 }
 
@@ -8303,6 +16369,106 @@ function blokes_api_upload_avatar($request) {
     if (is_wp_error($attachment_id)) return $attachment_id;
 
     return rest_ensure_response(array('url' => wp_get_attachment_url($attachment_id)));
+}
+
+// GET /blokes/v1/tele/liga-semana — ver registro de la ruta más arriba. Nombre público igual
+// que el resto de pantallas compartidas (blokes_api_get_my_leaderboard): nombre de pila +
+// nickname entre paréntesis, nunca apellidos.
+function blokes_api_tele_liga_semana() {
+    global $wpdb;
+    $ev = $wpdb->prefix . 'blokes_league_events';
+    $l  = $wpdb->prefix . 'blokes_leagues';
+    $monday = blokes_monday_of();
+
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT ev.user_id, ev.created_at, lto.name AS to_name
+         FROM $ev ev JOIN $l lto ON lto.id = ev.to_league_id
+         WHERE ev.event_type = 'promoted' AND ev.created_at >= %s
+         ORDER BY ev.created_at DESC LIMIT 12", $monday . ' 00:00:00'
+    ));
+
+    $out = array();
+    foreach ($rows as $r) {
+        if (blokes_es_cuenta_prueba($r->user_id)) continue; // Ramiro 12/11 12:30
+        $u = get_userdata($r->user_id);
+        $first = $u ? trim($u->first_name ?? '') : '';
+        $name = $first ?: ($u ? (explode(' ', trim($u->display_name ?? ''))[0] ?? '') : '');
+        $nick = blokes_get_user_nickname($r->user_id);
+        $out[] = array(
+            'nombreMostrar' => trim(($name ?: 'Alguien') . ($nick ? " ({$nick})" : '')),
+            'liga'          => $r->to_name,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// POST /blokes/v1/admin/cuenta-prueba — marca/desmarca una cuenta como "de pruebas" por nickname
+// (Ramiro 12/11 12:30: "para el futuro"). Solo evita que sus FUTUROS tops entren en ligas; no
+// deshace nada de lo que ya hubiera pasado antes de marcarla.
+function blokes_api_set_cuenta_prueba($request) {
+    global $wpdb;
+    $nickname = sanitize_text_field((string) $request->get_param('nickname'));
+    if (!$nickname) return new WP_Error('bad_request', 'Falta nickname.', array('status' => 400));
+    $user_id = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = '_blokes_nickname' AND meta_value = %s", $nickname
+    ));
+    if (!$user_id) return new WP_Error('not_found', 'No existe ese nickname.', array('status' => 404));
+    $es_prueba = (bool) $request->get_param('esPrueba');
+    if ($es_prueba) update_user_meta($user_id, '_blokes_cuenta_prueba', 1);
+    else delete_user_meta($user_id, '_blokes_cuenta_prueba');
+    return rest_ensure_response(array('success' => true, 'userId' => $user_id, 'esCuentaPrueba' => $es_prueba));
+}
+
+// GET /blokes/v1/admin/diag-cuenta?nickname=X — ver registro de la ruta más arriba. De solo
+// lectura, para plantar el plan de limpieza de una cuenta de pruebas antes de tocar nada:
+// estado actual, todos sus eventos de liga, y para cada "promoted" suyo, quién bajó a la vez
+// (mismo instante, triggered_by_user_id = esta cuenta) y su estado actual.
+function blokes_api_diag_cuenta($request) {
+    global $wpdb;
+    $nickname = sanitize_text_field((string) $request->get_param('nickname'));
+    if (!$nickname) return new WP_Error('bad_request', 'Falta nickname.', array('status' => 400));
+    $user_id = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = '_blokes_nickname' AND meta_value = %s", $nickname
+    ));
+    if (!$user_id) return new WP_Error('not_found', 'No existe ese nickname.', array('status' => 404));
+
+    $ul = $wpdb->prefix . 'blokes_user_leagues';
+    $l  = $wpdb->prefix . 'blokes_leagues';
+    $ev = $wpdb->prefix . 'blokes_league_events';
+
+    $actual = $wpdb->get_row($wpdb->prepare(
+        "SELECT ul.total_points, ul.rank_in_league, l.id as league_id, l.name, l.tier
+         FROM $ul ul JOIN $l l ON l.id = ul.league_id WHERE ul.user_id = %d", $user_id
+    ), ARRAY_A);
+
+    $eventos = $wpdb->get_results($wpdb->prepare(
+        "SELECT ev.*, lf.name as from_name, lt.name as to_name FROM $ev ev
+         LEFT JOIN $l lf ON lf.id = ev.from_league_id LEFT JOIN $l lt ON lt.id = ev.to_league_id
+         WHERE ev.user_id = %d ORDER BY ev.created_at ASC", $user_id
+    ), ARRAY_A);
+
+    $afectados = array();
+    foreach ($eventos as $e) {
+        if ($e['event_type'] !== 'promoted') continue;
+        $demotido = $wpdb->get_row($wpdb->prepare(
+            "SELECT ev.*, nick.meta_value as nickname FROM $ev ev
+             LEFT JOIN {$wpdb->usermeta} nick ON nick.user_id = ev.user_id AND nick.meta_key = '_blokes_nickname'
+             WHERE ev.event_type = 'demoted' AND ev.triggered_by_user_id = %d AND ev.created_at = %s",
+            $user_id, $e['created_at']
+        ), ARRAY_A);
+        if ($demotido) {
+            $estado_actual = $wpdb->get_row($wpdb->prepare(
+                "SELECT ul.total_points, l.name, l.tier FROM $ul ul JOIN $l l ON l.id = ul.league_id WHERE ul.user_id = %d",
+                intval($demotido['user_id'])
+            ), ARRAY_A);
+            $afectados[] = array_merge($demotido, array('estadoActual' => $estado_actual));
+        }
+    }
+
+    return rest_ensure_response(array(
+        'userId' => $user_id, 'nickname' => $nickname, 'actual' => $actual,
+        'eventos' => $eventos, 'afectadosPorPromocion' => $afectados,
+    ));
 }
 
 function blokes_api_get_comunidad_leagues() {
@@ -9438,6 +17604,10 @@ function progreso_equip_task_type_fila($r) {
         'durationMin' => $r['duration_min'] !== null ? intval($r['duration_min']) : null,
         'recurring' => (bool) $r['recurring'],
         'active' => (bool) ($r['active'] ?? 1),
+        // Pauta de quién suele hacer esta tarea, en orden de preferencia (ids de trabajador) —
+        // editable desde Normas (Ramiro, 5/11 21:08: "guarda la pauta como datos editables, no
+        // fija en código"). Vacío = sigue como hasta ahora (por historial propio de la app).
+        'preferredWorkers' => array_values(array_filter(array_map('intval', explode(',', $r['preferred_workers'] ?? '')))),
     );
 }
 
@@ -9495,6 +17665,11 @@ function progreso_equip_update_task_type($request) {
         $upd['duration_min'] = ($dm === '' ? null : intval($dm)); $fmt[] = '%d';
     }
     if ($request->get_param('leadOnly') !== null) { $upd['lead_only'] = $request->get_param('leadOnly') ? 1 : 0; $fmt[] = '%d'; }
+    if ($request->get_param('preferredWorkers') !== null) {
+        $pw = $request->get_param('preferredWorkers');
+        $upd['preferred_workers'] = is_array($pw) ? implode(',', array_filter(array_map('intval', $pw))) : '';
+        $fmt[] = '%s';
+    }
     // Nunca se borra un tipo (rompería el histórico de tareas que ya lo usaron): "borrar" desde
     // la interfaz manda `active: false`, que lo saca del reparto automático sin perder nada.
     if ($request->get_param('active') !== null) { $upd['active'] = $request->get_param('active') ? 1 : 0; $fmt[] = '%d'; }
@@ -9503,14 +17678,58 @@ function progreso_equip_update_task_type($request) {
     return rest_ensure_response(array('success' => true));
 }
 
-// DELETE /equipacion/task-types/{id} — "borrar" desde la interfaz es desactivar, nunca se
-// borra el tipo de verdad (el histórico de tareas ya hechas con ese tipo se quedaría sin
-// nombre). Reactivable después con PUT { active: true }.
+// DELETE /equipacion/task-types/{id} — si ya se usó alguna vez (hay tareas con este
+// taskTypeId), "borrar" desde la interfaz es desactivar, nunca se borra el tipo de verdad (el
+// histórico de tareas ya hechas con ese tipo se quedaría sin nombre); reactivable después con
+// PUT { active: true }. Si NUNCA se usó, se borra de verdad — para quitar del todo una prueba
+// o un tipo creado por error (cowork, NOTAS_PARA_CODE_equipacion.md 3/11 11:30: la "PRUEBA
+// Cowork (borrar)" se quedaba desactivada para siempre en la lista).
 function progreso_equip_deactivate_task_type($request) {
     global $wpdb;
     $id = sanitize_text_field((string) $request['id']);
-    $wpdb->update(progreso_equip_table('task_types'), array('active' => 0), array('id' => $id), array('%d'), array('%s'));
-    return rest_ensure_response(array('success' => true));
+    $usado = $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM " . progreso_equip_table('tasks') . " WHERE task_type_id = %s", $id
+    ));
+    if (intval($usado) > 0) {
+        $wpdb->update(progreso_equip_table('task_types'), array('active' => 0), array('id' => $id), array('%d'), array('%s'));
+        return rest_ensure_response(array('success' => true, 'deactivated' => true));
+    }
+    $wpdb->delete(progreso_equip_table('task_types'), array('id' => $id), array('%s'));
+    return rest_ensure_response(array('success' => true, 'deleted' => true));
+}
+
+// Quién hace el cambio, para el rastro de la tarea: la persona elegida en «¿Quién eres?»
+// (`byWorkerId`) si viene; si no, el nombre de la cuenta de WordPress (Eva entra con la suya y no
+// es del equipo de equipación).
+function progreso_equip_actor($request) {
+    global $wpdb;
+    $by = intval($request->get_param('byWorkerId'));
+    if ($by) {
+        $name = $wpdb->get_var($wpdb->prepare("SELECT name FROM " . progreso_equip_table('workers') . " WHERE id = %d", $by));
+        if ($name) return $name;
+    }
+    $user = wp_get_current_user();
+    return ($user && $user->ID) ? ($user->display_name ?: $user->user_login) : '';
+}
+
+// Ramiro 12/11 11:35: "no pueden editar alguien que no sea Álvaro o los socios las tareas, ni
+// Ana ni Edu ni Sara" — ni en la interfaz ni en la API. Un socio siempre vale; para "Álvaro" (el
+// jefe de equipación) no se hardcodea el nombre — se mira qué worker tiene is_lead=1 y se
+// compara su email con el de la sesión real, igual que ya hace blokes_get_app_role_real() con
+// las listas de email. Así el "jefe" es asignable (basta con mover el is_lead a otro worker),
+// sin tocar código. Usa blokes_get_app_role() (no la "_real"), así que respeta "ver como": un
+// socio probando "ver como: profesor" también se queda sin estos permisos aquí (a menos que su
+// email sea literalmente el del jefe), igual que ya pasa con el resto de la app.
+function progreso_equip_es_jefe_o_socio() {
+    if (blokes_get_app_role() === 'socio') return true;
+    if (!is_user_logged_in()) return false;
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    if ($email === '') return false;
+    global $wpdb;
+    $lead_email = $wpdb->get_var(
+        "SELECT email FROM " . progreso_equip_table('workers') . " WHERE is_lead = 1 AND active = 1 ORDER BY id ASC LIMIT 1"
+    );
+    return $lead_email && $lead_email !== '' && strtolower(trim($lead_email)) === $email;
 }
 
 // POST /equipacion/tasks — tarea suelta para un día y persona concretos, sin esperar al
@@ -9531,22 +17750,25 @@ function progreso_equip_create_loose_task($request) {
 
     $custom_text = trim((string) $request->get_param('customText'));
     $task_type_id = sanitize_text_field((string) $request->get_param('taskTypeId'));
+    // subzona/notas valen igual para una tarea de texto libre que para una del catálogo
+    // (cowork, 11/11 05:40: antes se perdían silenciosamente en texto libre).
+    $params = array();
     if ($custom_text !== '') {
         $task_type_id = 'custom';
-        $params = array('texto' => sanitize_text_field($custom_text));
-    } else {
-        if ($task_type_id === '') return new WP_Error('invalid_data', 'Elige un tipo del catálogo o escribe un texto.', array('status' => 400));
-        $params = array();
-        $subzona = $request->get_param('subzona');
-        if ($subzona !== null && $subzona !== '') $params['subzona'] = intval($subzona);
-        $notas = trim((string) $request->get_param('notas'));
-        if ($notas !== '') $params['notas'] = sanitize_text_field($notas);
+        $params['texto'] = sanitize_text_field($custom_text);
+    } elseif ($task_type_id === '') {
+        return new WP_Error('invalid_data', 'Elige un tipo del catálogo o escribe un texto.', array('status' => 400));
     }
+    $subzona = $request->get_param('subzona');
+    if ($subzona !== null && $subzona !== '') $params['subzona'] = intval($subzona);
+    $notas = trim((string) $request->get_param('notas'));
+    if ($notas !== '') $params['notas'] = sanitize_text_field($notas);
 
     $wpdb->insert(progreso_equip_table('tasks'), array(
         'assignment_id' => $assignment_id, 'task_type_id' => $task_type_id, 'task_date' => $date,
         'params' => wp_json_encode($params), 'done' => 0, 'status' => 'pendiente', 'original_date' => $date,
-    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s'));
+        'created_by' => progreso_equip_actor($request), 'created_at' => current_time('mysql'),
+    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%s'));
     return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
 }
 
@@ -9572,11 +17794,46 @@ function progreso_equip_get_config() {
     // del encargo del 28/10), sin esperar al cron diario.
     progreso_equip_autocrear_semanas();
     return rest_ensure_response(array('success' => true, 'data' => array(
-        'subzones'  => progreso_equip_subzones(),
-        'grades'    => progreso_equip_grades(),
-        'taskTypes' => progreso_equip_task_types(),
-        'rules'     => progreso_equip_rules(),
+        'subzones'     => progreso_equip_subzones(),
+        'grades'       => progreso_equip_grades(),
+        'taskTypes'    => progreso_equip_task_types(),
+        'rules'        => progreso_equip_rules(),
+        // Ramiro 12/11 11:35: para que el frontend solo PINTE los botones de editar/mover/
+        // quitar tareas con la sesión real (nunca con el selector local de "quién soy").
+        'esJefeOSocio' => progreso_equip_es_jefe_o_socio(),
+        // 17/11 §10:50 (cowork, sustituye el punto A.1 de §09:40): "el selector sale ya elegido
+        // si el email de la cuenta coincide con el de la ficha de Nóminas. Sin campo email nuevo
+        // en Gestionar personas" — se reutiliza el email que ya hay en la ficha personal de
+        // Superadmin › Nóminas (payroll_get_personal(), de pedírselo para las nóminas), nunca un
+        // dato adivinado ni un campo nuevo. A Organización solo llega este id, nunca el DNI, el
+        // IBAN ni el email de la ficha.
+        'miWorkerId'   => progreso_equip_mi_worker_id(),
     )));
+}
+
+function progreso_equip_mi_worker_id() {
+    if (!is_user_logged_in()) return null;
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    if ($email === '') return null;
+
+    $slug = null;
+    foreach (payroll_get_personal() as $personaId => $ficha) {
+        if (strtolower(trim((string) ($ficha['email'] ?? ''))) === $email) { $slug = $personaId; break; }
+    }
+    if ($slug === null) return null;
+
+    $nombre = '';
+    foreach (overtime_get_people() as $p) {
+        if (($p['id'] ?? '') === $slug) { $nombre = trim((string) ($p['name'] ?? '')); break; }
+    }
+    if ($nombre === '') return null;
+
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $id = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND LOWER(name) = %s LIMIT 1", strtolower($nombre)
+    ));
+    return $id ? intval($id) : null;
 }
 
 // Crea la semana actual y la siguiente si no existen todavía (ni reales ni de prueba), con
@@ -9589,6 +17846,13 @@ function progreso_equip_autocrear_semanas() {
     progreso_equip_ensure_tables();
     $lead = $wpdb->get_row("SELECT * FROM " . progreso_equip_table('workers') . " WHERE is_lead = 1 AND active = 1 ORDER BY id ASC LIMIT 1", ARRAY_A);
     if (!$lead) return;
+    // Todo el equipo activo de mantenimiento, no solo el responsable (cowork,
+    // NOTAS_PARA_CODE_equipacion.md 3/11 12:00: las semanas 35 y 36 se habían creado solo con
+    // Álvaro — sin columnas de Ana/Edu/Sara no puede repartirles nada arrastrando). Los
+    // eventuales (solo vienen a compes puntuales) se quedan fuera, igual que en
+    // `progreso_equip_ensure_week_for_lead`.
+    $activos = $wpdb->get_results("SELECT id FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND eventual = 0 ORDER BY is_lead DESC, id ASC", ARRAY_A);
+    if (!$activos) $activos = array(array('id' => $lead['id']));
 
     $hoy = current_time('Y-m-d');
     // "Semana actual" en sábado/domingo no puede ser la que ya terminó (lunes-viernes ya
@@ -9610,7 +17874,7 @@ function progreso_equip_autocrear_semanas() {
         $req = new WP_REST_Request('POST', '/progreso/v1/equipacion/weeks');
         $req->set_param('startDate', $monday);
         $req->set_param('subzones', array());
-        $req->set_param('assignments', array(array('workerId' => intval($lead['id']))));
+        $req->set_param('assignments', array_map(function($w) { return array('workerId' => intval($w['id'])); }, $activos));
         $req->set_param('isAuto', true);
         $res = progreso_equip_create_week($req);
         if (is_wp_error($res)) continue;
@@ -9644,7 +17908,30 @@ function progreso_equip_ensure_tables() {
     // debe entrar en el reparto normal de mantenimiento de cada semana; cowork, 2/11 14:00:
     // generate-plan metía a todo el equipo activo, incluidos los de un solo finde, en semanas
     // normales enteras).
-    $version = '9';
+    // v10: nada de esquema — solo para disparar `progreso_equip_backfill_semanas_auto()` una vez
+    // (cowork, NOTAS_PARA_CODE_equipacion.md 3/11 12:00: las semanas automáticas solo llevaban al
+    // responsable, `progreso_equip_autocrear_semanas()` no pasaba el resto del equipo).
+    // v11: tasks.created_by/created_at/updated_by/updated_at (Ramiro, 5/11 06:54: cualquier profe
+    // o Eva puede crear y modificar tareas, y Álvaro tiene que ver quién cambió qué).
+    // v12: task_types.preferred_workers (Ramiro, 5/11 21:08: pauta de quién suele hacer cada
+    // tarea, sacada del histórico de Notion — editable desde Normas, no fija en código).
+    // v13: competitions.modo_activo (interruptor manual de "modo compe", solo lo enciende/apaga
+    // un socio) y comp_blocks.bloke_post_id (enlace al bloke real de la app una vez creado) —
+    // encargo "la compe en Blokes" (Ramiro, 7/11 08:39/08:46/08:48/08:51,
+    // NOTAS_PARA_CODE_compe_en_blokes.md). Nuevas tablas comp_resultados (top/zona/intentos de
+    // cada participante por bloque, pendiente de validar) y comp_participantes_rapidos (gente
+    // sin cuenta de Blokes dada de alta desde recepción).
+    // v14: comp_blocks.photo_attachment_id (Ramiro 12/11 09:11: borrar el adjunto de Medios de
+    // verdad, no solo la referencia). weeks.zona_id/zona_sugerida_id y nueva tabla zonas
+    // (Ramiro 12/11 09:31/09:35/09:37: calendario de semanas + rotación de zonas — Pasillo,
+    // Salón izquierda, Salón derecha, Cueva).
+    // v15: nada de esquema — solo para disparar `progreso_equip_limpiar_retrasadas_global()` una
+    // vez (Ramiro 12/11 10:45: quitar las marcas rojas de los arrastres de octubre sin borrar ni
+    // completar ninguna tarea). tasks.manual (Ramiro 12/11 10:44: "+ Tarea" a mano en el plan de
+    // la compe — para que "Regenerar" nunca la toque, aunque coincida tipo+fecha con el plan).
+    // v16 (20/11 06:30): tabla comp_categorias (punto 2, masculina/femenina/infantil) y
+    // corrección del "16" hardcodeado en dos nombres de tarea ya sembrados (punto 4).
+    $version = '16';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -9670,14 +17957,29 @@ function progreso_equip_ensure_tables() {
     ) {$charset};");
 
     dbDelta("CREATE TABLE " . progreso_equip_table('weeks') . " (
-        id         bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
-        start_date date                NOT NULL,
-        subzones   varchar(50)         NOT NULL DEFAULT '',
-        notes      text                NULL,
-        archived   tinyint(1)          NOT NULL DEFAULT 0,
-        is_test    tinyint(1)          NOT NULL DEFAULT 0,
-        auto       tinyint(1)          NOT NULL DEFAULT 0,
-        created_at datetime            NOT NULL,
+        id               bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        start_date       date                NOT NULL,
+        subzones         varchar(50)         NOT NULL DEFAULT '',
+        notes            text                NULL,
+        archived         tinyint(1)          NOT NULL DEFAULT 0,
+        is_test          tinyint(1)          NOT NULL DEFAULT 0,
+        auto             tinyint(1)          NOT NULL DEFAULT 0,
+        zona_id          bigint(20) UNSIGNED NULL,
+        zona_sugerida_id bigint(20) UNSIGNED NULL,
+        created_at       datetime            NOT NULL,
+        PRIMARY KEY (id)
+    ) {$charset};");
+
+    // Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31/09:35/09:37): una zona
+    // (grupo de subzonas) por semana, para que cada bloque dure aproximadamente un mes.
+    // subzonas: lista "1,2" en el mismo orden de números que usa el resto de equipación.
+    dbDelta("CREATE TABLE " . progreso_equip_table('zonas') . " (
+        id       bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        nombre   varchar(60)         NOT NULL,
+        color    varchar(20)         NOT NULL DEFAULT '#60a5fa',
+        subzonas varchar(50)         NOT NULL DEFAULT '',
+        orden    tinyint(3)          NOT NULL DEFAULT 0,
+        activa   tinyint(1)          NOT NULL DEFAULT 1,
         PRIMARY KEY (id)
     ) {$charset};");
 
@@ -9709,6 +18011,11 @@ function progreso_equip_ensure_tables() {
         moved_to_task_id  bigint(20) UNSIGNED NULL,
         original_worker_id bigint(20) UNSIGNED NULL,
         competition_id    bigint(20) UNSIGNED NULL,
+        manual             tinyint(1)          NOT NULL DEFAULT 0,
+        created_by        varchar(100)        NULL,
+        created_at        datetime            NULL,
+        updated_by        varchar(100)        NULL,
+        updated_at        datetime            NULL,
         PRIMARY KEY (id),
         KEY assignment_id (assignment_id),
         KEY task_date (task_date)
@@ -9735,6 +18042,7 @@ function progreso_equip_ensure_tables() {
         comp_end_date date                NULL,
         lead_weeks    tinyint(3)          NOT NULL DEFAULT 3,
         is_test       tinyint(1)          NOT NULL DEFAULT 0,
+        modo_activo   tinyint(1)          NOT NULL DEFAULT 0,
         created_at    datetime            NOT NULL,
         PRIMARY KEY (id)
     ) {$charset};");
@@ -9755,10 +18063,73 @@ function progreso_equip_ensure_tables() {
         volumes        text                NOT NULL DEFAULT '',
         equipador      varchar(60)         NOT NULL DEFAULT '',
         photo_url      varchar(255)        NOT NULL DEFAULT '',
+        photo_attachment_id bigint(20) UNSIGNED NULL,
         tested         tinyint(1)          NOT NULL DEFAULT 0,
         status         varchar(20)         NOT NULL DEFAULT 'planeado',
+        bloke_post_id  bigint(20) UNSIGNED NULL,
         PRIMARY KEY (id),
         KEY competition_id (competition_id)
+    ) {$charset};");
+
+    // Resultado de UN participante en UN bloque de compe — top/zona/intentos, pendiente de
+    // validar por un juez/profe hasta que alguien lo confirme. participante_tipo distingue un
+    // usuario real de Blokes de un "participante rápido" sin cuenta (mismo patrón que
+    // wp_blokes_placeholder_completions ya usa para alumnos sin cuenta).
+    dbDelta("CREATE TABLE " . progreso_equip_table('comp_resultados') . " (
+        id                bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        competition_id    bigint(20) UNSIGNED NOT NULL,
+        comp_block_id     bigint(20) UNSIGNED NOT NULL,
+        participante_tipo varchar(12)         NOT NULL DEFAULT 'user',
+        participante_id   bigint(20) UNSIGNED NOT NULL,
+        top               tinyint(1)          NOT NULL DEFAULT 0,
+        zona              tinyint(1)          NOT NULL DEFAULT 0,
+        intentos          smallint(5)         NOT NULL DEFAULT 0,
+        apuntado_por      bigint(20) UNSIGNED NULL,
+        estado            varchar(20)         NOT NULL DEFAULT 'pendiente',
+        validado_por      bigint(20) UNSIGNED NULL,
+        validado_at       datetime            NULL,
+        created_at        datetime            NOT NULL,
+        updated_at        datetime            NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY resultado_unico (competition_id, comp_block_id, participante_tipo, participante_id),
+        KEY competition_id (competition_id),
+        KEY estado (estado)
+    ) {$charset};");
+
+    // Gente sin cuenta de Blokes dada de alta desde recepción (pase de día, no socio) —
+    // linked_user_id/linked_at: si más tarde se crea una cuenta con el mismo email/teléfono, se
+    // enlazan sus resultados (mismo patrón que wp_blokes_placeholder_alumnos).
+    dbDelta("CREATE TABLE " . progreso_equip_table('comp_participantes_rapidos') . " (
+        id             bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        competition_id bigint(20) UNSIGNED NOT NULL,
+        nombre         varchar(190)        NOT NULL,
+        telefono       varchar(30)         NOT NULL DEFAULT '',
+        email          varchar(190)        NOT NULL DEFAULT '',
+        categoria      varchar(60)         NOT NULL DEFAULT 'General',
+        pin            varchar(4)          NOT NULL DEFAULT '',
+        linked_user_id bigint(20) UNSIGNED NULL,
+        linked_at      datetime            NULL,
+        created_by     varchar(100)        NOT NULL DEFAULT '',
+        created_at     datetime            NOT NULL,
+        PRIMARY KEY (id),
+        KEY competition_id (competition_id)
+    ) {$charset};");
+
+    // 20/11 06:30 (punto 2): categoría masculina/femenina/infantil por participante y por
+    // compe — no hay sexo/fecha de nacimiento fiable en ningún perfil (ni de alumno ni de
+    // participante sin cuenta), así que es siempre manual: se elige al apuntarse (o lo pone
+    // recepción) y se puede cambiar luego. Única para los 3 tipos de participante (user/rapido/
+    // placeholder) — sustituye a la columna `categoria` de comp_participantes_rapidos (que se
+    // queda, sin usar, para no perder histórico).
+    dbDelta("CREATE TABLE " . progreso_equip_table('comp_categorias') . " (
+        id                 bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        competition_id     bigint(20) UNSIGNED NOT NULL,
+        participante_tipo  varchar(12)         NOT NULL,
+        participante_id    bigint(20) UNSIGNED NOT NULL,
+        categoria          varchar(20)         NOT NULL,
+        updated_at         datetime            NOT NULL,
+        PRIMARY KEY (id),
+        UNIQUE KEY categoria_unica (competition_id, participante_tipo, participante_id)
     ) {$charset};");
 
     // Catálogo de tareas en tabla propia (antes hardcoded) para que la
@@ -9780,14 +18151,18 @@ function progreso_equip_ensure_tables() {
         recurring         tinyint(1)   NOT NULL DEFAULT 1,
         active            tinyint(1)   NOT NULL DEFAULT 1,
         sort_order        tinyint(3)   NOT NULL DEFAULT 0,
+        preferred_workers varchar(100) NOT NULL DEFAULT '',
         PRIMARY KEY (id)
     ) {$charset};");
 
     update_option('blokes_equip_tables_version', $version);
     progreso_equip_seed_if_empty();
+    progreso_equip_seed_zonas_if_empty();
     progreso_equip_seed_task_types_if_empty();
     progreso_equip_seed_comp_task_types_if_missing();
     progreso_equip_marcar_eventuales_ramiro_1();
+    progreso_equip_limpiar_retrasadas_global();
+    progreso_equip_backfill_semanas_auto();
 
     // Periodicidades reales de Ramiro (1/11 17:20): se habían quedado todas a 1 (cowork
     // sospecha que un reseed del 29/10 las pisó). Una sola vez, no vuelve a tocarlas si alguien
@@ -9797,6 +18172,26 @@ function progreso_equip_ensure_tables() {
             $wpdb->update(progreso_equip_table('task_types'), array('periodicity_weeks' => 2), array('id' => $tipo_id), array('%d'), array('%s'));
         }
         update_option('blokes_equip_periodicidades_ramiro_1', 1, false);
+    }
+}
+
+// Semilla de las 4 zonas por defecto (Ramiro 12/11 09:35: "las zonas son pasillo, salón
+// izquierda, salón derecha y cueva" — 4 zonas = 4 semanas = cada bloque dura
+// aproximadamente un mes). Editable desde "⚙️ Configurar zonas" por si cambian algún día.
+function progreso_equip_seed_zonas_if_empty() {
+    global $wpdb;
+    $table = progreso_equip_table('zonas');
+    if ((int) $wpdb->get_var("SELECT COUNT(*) FROM $table") > 0) return;
+    $seed = array(
+        array('nombre' => 'Pasillo',          'color' => '#60a5fa', 'subzonas' => '1,2'),
+        array('nombre' => 'Salón izquierda',  'color' => '#34d399', 'subzonas' => '3,4,5'),
+        array('nombre' => 'Salón derecha',    'color' => '#f5c842', 'subzonas' => '6,7'),
+        array('nombre' => 'Cueva',            'color' => '#a78bfa', 'subzonas' => '8'),
+    );
+    foreach ($seed as $i => $z) {
+        $wpdb->insert($table, array(
+            'nombre' => $z['nombre'], 'color' => $z['color'], 'subzonas' => $z['subzonas'], 'orden' => $i, 'activa' => 1,
+        ), array('%s', '%s', '%s', '%d', '%d'));
     }
 }
 
@@ -9840,7 +18235,7 @@ function progreso_equip_seed_comp_task_types_if_missing() {
     global $wpdb;
     $table = progreso_equip_table('task_types');
     $seed = array(
-        array('id' => 'comp_disenar_bloques', 'name' => 'Compe: diseñar los 16 bloques (zona, dificultad, presas, volúmenes)'),
+        array('id' => 'comp_disenar_bloques', 'name' => 'Compe: diseñar los bloques (zona, dificultad, presas, volúmenes)'),
         array('id' => 'comp_revisar_material', 'name' => 'Compe: revisar presas y tornillería, pedir lo que falte'),
         array('id' => 'comp_limpieza_presas', 'name' => 'Compe: limpieza de presas'),
         array('id' => 'comp_puntuacion', 'name' => 'Compe: preparar hojas de puntuación / sistema de resultados'),
@@ -9849,7 +18244,7 @@ function progreso_equip_seed_comp_task_types_if_missing() {
         array('id' => 'comp_decidir_forerunners', 'name' => 'Compe: decidir lista de forerunners'),
         array('id' => 'comp_desequipar_cueva', 'name' => 'Compe: desequipar — primero la Cueva'),
         array('id' => 'comp_desequipar_resto', 'name' => 'Compe: desequipar — resto de zonas'),
-        array('id' => 'comp_equipar_bloques', 'name' => 'Compe: equipar los 16 bloques'),
+        array('id' => 'comp_equipar_bloques', 'name' => 'Compe: equipar los bloques'),
         array('id' => 'comp_numeracion', 'name' => 'Compe: numeración y cintas'),
         array('id' => 'comp_foto_bloque', 'name' => 'Compe: foto de cada bloque'),
         array('id' => 'comp_forerunning', 'name' => 'Compe: prueba de bloques (forerunning)'),
@@ -9869,6 +18264,11 @@ function progreso_equip_seed_comp_task_types_if_missing() {
             'lead_only' => 0, 'periodicity_weeks' => 1, 'recurring' => 0, 'sort_order' => 90 + $i,
         ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d'));
     }
+    // 20/11 06:30 (punto 4): "16" hardcodeado en el nombre de estas dos tareas, ya sembradas en
+    // producción desde antes — cambiar el texto de arriba no las toca (el seed de arriba se
+    // salta todo lo que ya existe), así que se corrigen aquí a mano, siempre (idempotente).
+    $wpdb->update($table, array('name' => 'Compe: diseñar los bloques (zona, dificultad, presas, volúmenes)'), array('id' => 'comp_disenar_bloques'));
+    $wpdb->update($table, array('name' => 'Compe: equipar los bloques'), array('id' => 'comp_equipar_bloques'));
 }
 
 // Migración de una sola vez (cowork, 2/11 12:55/14:00): Ramiro (id 5), Álvaro V. (id 6) y Javi
@@ -9899,6 +18299,228 @@ function progreso_equip_marcar_eventuales_ramiro_1() {
         }
     }
     update_option('blokes_equip_eventuales_ramiro_1', 1, false);
+}
+
+// Migración de una sola vez (cowork, NOTAS_PARA_CODE_equipacion.md 3/11 12:00): hasta ahora
+// `progreso_equip_autocrear_semanas()` solo metía al responsable en las semanas automáticas —
+// sin columna para Ana/Edu/Sara, Álvaro no podía repartirles nada arrastrando. Ya está arreglado
+// para las semanas NUEVAS; esto completa el equipo en las que ya existían (p. ej. la 35 y la 36
+// del club), igual que el backfill de `progreso_equip_ensure_week_for_lead`.
+function progreso_equip_backfill_semanas_auto() {
+    if (get_option('blokes_equip_backfill_semanas_auto_1')) return;
+    global $wpdb;
+    $weeks_table = progreso_equip_table('weeks');
+    $assignments_table = progreso_equip_table('assignments');
+    $activos = $wpdb->get_results("SELECT id, name FROM " . progreso_equip_table('workers') . " WHERE active = 1 AND eventual = 0", ARRAY_A);
+    $weeks = $wpdb->get_results("SELECT id FROM {$weeks_table} WHERE auto = 1", ARRAY_A);
+    foreach ($weeks as $w) {
+        $week_id = intval($w['id']);
+        $ya_asignados = $wpdb->get_col($wpdb->prepare("SELECT worker_id FROM {$assignments_table} WHERE week_id = %d", $week_id));
+        foreach ($activos as $worker) {
+            if (in_array(intval($worker['id']), array_map('intval', $ya_asignados), true)) continue;
+            $wpdb->insert($assignments_table, array(
+                'week_id' => $week_id, 'worker_id' => intval($worker['id']), 'subzones' => '', 'status' => 'pendiente',
+            ), array('%d', '%d', '%s', '%s'));
+        }
+    }
+    update_option('blokes_equip_backfill_semanas_auto_1', 1, false);
+}
+
+// POST /equipacion/migrar-principal-a-club — CAUSA ENCONTRADA por cowork (NOTAS_PARA_CODE_equipacion.md,
+// 3/11 12:00): la app llama siempre a /club/wp-json (blog_id 3), pero la compe id 2 (repartida a
+// mano: Ana, Edu, Sara, Ramiro, Álvaro V., Javi) y los trabajadores eventuales 5/6/7 se crearon
+// probando contra el sitio principal (blog_id 1), que en la multisite usa sus propias tablas —
+// por eso la app nunca los vio. Copia eso al club SIN BORRAR nada del principal (por si hay que
+// repetirlo) y SIN TOCAR las semanas 12/13 del principal (cowork: las 35/36 del club son las
+// buenas, se descartan). Por defecto solo informa de lo que haría (`confirmar` no mandado o
+// false) — para escribir de verdad hay que mandar `confirmar: true`, y solo se puede una vez
+// (lo marca `blokes_equip_migrado_principal_1`; si hay que repetirlo, hay que borrar esa opción
+// a mano primero).
+function progreso_equip_migrar_principal_a_club($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $confirmar = (bool) $request->get_param('confirmar');
+    if ($confirmar && get_option('blokes_equip_migrado_principal_1')) {
+        return new WP_Error('ya_migrado', 'Esto ya se migró antes. Si hace falta repetirlo, borra la opción blokes_equip_migrado_principal_1 primero.', array('status' => 409));
+    }
+
+    $main = function($name) use ($wpdb) { return $wpdb->get_blog_prefix(1) . 'blokes_equip_' . $name; };
+    $club = function($name) { return progreso_equip_table($name); };
+    $reporte = array(
+        'workers' => array(), 'competition' => null, 'weeks' => array(),
+        'assignments' => 0, 'tasks' => 0, 'taskTypes' => array(), 'compBlocks' => 0, 'avisos' => array(),
+    );
+
+    // 1. Trabajadores eventuales del principal que no existan ya en club (por nombre) — y mapeo
+    // por nombre de TODOS los trabajadores (también Álvaro/Ana/Edu/Sara, que ya existen en los
+    // dos sitios pero con IDs distintos) para poder remapear asignaciones y tareas más abajo.
+    $main_workers = $wpdb->get_results("SELECT * FROM " . $main('workers'), ARRAY_A);
+    $club_workers_by_name = array();
+    foreach ($wpdb->get_results("SELECT * FROM " . $club('workers'), ARRAY_A) as $w) {
+        $club_workers_by_name[mb_strtolower(trim($w['name']))] = $w;
+    }
+    $worker_map = array();
+    foreach ($main_workers as $w) {
+        $oid = intval($w['id']);
+        $key = mb_strtolower(trim($w['name']));
+        if (isset($club_workers_by_name[$key])) {
+            $worker_map[$oid] = intval($club_workers_by_name[$key]['id']);
+            if ($w['eventual']) $reporte['workers'][] = $w['name'] . ' (eventual, ya existía en club)';
+            continue;
+        }
+        if (!$w['eventual']) { $reporte['avisos'][] = 'Trabajador "' . $w['name'] . '" del principal no es eventual y no existe en club: no se crea solo (podría ser un duplicado con otro nombre).'; continue; }
+        $reporte['workers'][] = $w['name'] . ' (eventual, nuevo)';
+        if ($confirmar) {
+            $wpdb->insert($club('workers'), array(
+                'name' => $w['name'], 'email' => $w['email'], 'work_days' => $w['work_days'],
+                'blocks_min' => $w['blocks_min'], 'blocks_max' => $w['blocks_max'],
+                'is_lead' => $w['is_lead'], 'active' => $w['active'], 'eventual' => $w['eventual'],
+            ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d', '%d'));
+            $worker_map[$oid] = $wpdb->insert_id;
+        } else {
+            // En el informe (sin escribir) todavía no hay un id real del club: un id negativo de
+            // relleno basta para que el resto del informe pueda contar bien las asignaciones y
+            // tareas de este trabajador en vez de salir como "sin mapear" (cowork, 3/11 12:35: el
+            // aviso hacía parecer que se iba a perder el reparto del fin de semana de montaje,
+            // cuando al confirmar de verdad sí se crea el trabajador antes de mapear).
+            $worker_map[$oid] = -$oid;
+        }
+    }
+
+    // 2. Competición #2 del principal.
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . $main('competitions') . " WHERE id = %d", 2), ARRAY_A);
+    $new_comp_id = null;
+    if ($comp) {
+        $existe_comp = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . $club('competitions') . " WHERE name = %s AND comp_date = %s", $comp['name'], $comp['comp_date']), ARRAY_A);
+        if ($existe_comp) {
+            $new_comp_id = intval($existe_comp['id']);
+            $reporte['competition'] = $comp['name'] . ' (ya existía en club, #' . $new_comp_id . ')';
+        } else {
+            $reporte['competition'] = $comp['name'] . ' (nueva)';
+            if ($confirmar) {
+                $wpdb->insert($club('competitions'), array(
+                    'name' => $comp['name'], 'comp_date' => $comp['comp_date'], 'comp_end_date' => $comp['comp_end_date'],
+                    'lead_weeks' => $comp['lead_weeks'], 'is_test' => $comp['is_test'], 'created_at' => $comp['created_at'],
+                ), array('%s', '%s', '%s', '%d', '%d', '%s'));
+                $new_comp_id = $wpdb->insert_id;
+            }
+        }
+    } else {
+        $reporte['avisos'][] = 'No se encontró la competición #2 en el sitio principal.';
+    }
+
+    // 3. Semanas 18, 15, 16 y 19 del principal (las de la compe intensiva con el reparto a
+    // mano) — nunca las 12/13 (maneimiento normal, ya superadas por la 35/36 del club).
+    $week_ids_principal = array(18, 15, 16, 19);
+    $week_map = array();
+    foreach ($week_ids_principal as $wid) {
+        $week = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . $main('weeks') . " WHERE id = %d", $wid), ARRAY_A);
+        if (!$week) { $reporte['avisos'][] = "Semana #{$wid} no encontrada en el principal."; continue; }
+        $existe_week = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . $club('weeks') . " WHERE start_date = %s", $week['start_date']), ARRAY_A);
+        if ($existe_week) {
+            $week_map[$wid] = intval($existe_week['id']);
+            $reporte['weeks'][] = $week['start_date'] . ' (ya existía en club, #' . $existe_week['id'] . ')';
+            continue;
+        }
+        $reporte['weeks'][] = $week['start_date'] . ' (nueva)';
+        if ($confirmar) {
+            $wpdb->insert($club('weeks'), array(
+                'start_date' => $week['start_date'], 'subzones' => $week['subzones'], 'notes' => $week['notes'],
+                'archived' => $week['archived'], 'is_test' => $week['is_test'], 'auto' => $week['auto'], 'created_at' => $week['created_at'],
+            ), array('%s', '%s', '%s', '%d', '%d', '%d', '%s'));
+            $week_map[$wid] = $wpdb->insert_id;
+        } else {
+            $week_map[$wid] = $wid; // placeholder solo para que el resto del informe pueda seguir en modo simulación
+        }
+    }
+
+    // 4. Asignaciones de esas semanas.
+    $assignment_map = array();
+    $week_ids_for_query = $week_ids_principal;
+    $ph = implode(',', array_fill(0, count($week_ids_for_query), '%d'));
+    $main_assignments = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . $main('assignments') . " WHERE week_id IN ($ph)", ...$week_ids_for_query
+    ), ARRAY_A);
+    foreach ($main_assignments as $a) {
+        $old_week_id = intval($a['week_id']);
+        $new_worker_id = $worker_map[intval($a['worker_id'])] ?? null;
+        if (!$new_worker_id) { $reporte['avisos'][] = 'Asignación #' . $a['id'] . ' (semana #' . $old_week_id . '): trabajador #' . $a['worker_id'] . ' sin mapear, no se migra.'; continue; }
+        $reporte['assignments']++;
+        if ($confirmar) {
+            $new_week_id = $week_map[$old_week_id] ?? null;
+            if (!$new_week_id) continue;
+            $wpdb->insert($club('assignments'), array(
+                'week_id' => $new_week_id, 'worker_id' => $new_worker_id, 'subzones' => $a['subzones'],
+                'blocks_min' => $a['blocks_min'], 'blocks_max' => $a['blocks_max'], 'work_days' => $a['work_days'], 'status' => $a['status'],
+            ), array('%d', '%d', '%s', '%d', '%d', '%s', '%s'));
+            $assignment_map[intval($a['id'])] = $wpdb->insert_id;
+        }
+    }
+
+    // 5. Tipos de tarea que usan esas tareas y que todavía no existen en club (se copian tal
+    // cual, mismo id-slug, para que el nombre no salga en blanco).
+    $main_tasks = $wpdb->get_results($wpdb->prepare(
+        "SELECT t.* FROM " . $main('tasks') . " t JOIN " . $main('assignments') . " a ON a.id = t.assignment_id WHERE a.week_id IN ($ph)", ...$week_ids_for_query
+    ), ARRAY_A);
+    $tipos_usados = array_values(array_unique(array_filter(array_map(function($t) { return $t['task_type_id']; }, $main_tasks), function($id) { return $id !== 'custom'; })));
+    if ($tipos_usados) {
+        $ph2 = implode(',', array_fill(0, count($tipos_usados), '%s'));
+        $existentes = $wpdb->get_col($wpdb->prepare("SELECT id FROM " . $club('task_types') . " WHERE id IN ($ph2)", ...$tipos_usados));
+        foreach ($tipos_usados as $tid) {
+            if (in_array($tid, $existentes, true)) continue;
+            $tipo = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . $main('task_types') . " WHERE id = %s", $tid), ARRAY_A);
+            if (!$tipo) continue;
+            $reporte['taskTypes'][] = $tipo['name'] . ' (' . $tid . ')';
+            if ($confirmar) {
+                $wpdb->insert($club('task_types'), $tipo);
+            }
+        }
+    }
+
+    // 6. Tareas (dos pasadas: primero se crean sin moved_to_task_id, luego se enlaza el que
+    // apunte a OTRA tarea de este mismo lote; si apuntaba fuera del lote — p. ej. a la semana
+    // 12/13 que no se migra — se deja sin enlazar, nunca roto).
+    $task_map = array();
+    $pendientes_moved_to = array();
+    foreach ($main_tasks as $t) {
+        $new_assignment_id = $assignment_map[intval($t['assignment_id'])] ?? null;
+        $reporte['tasks']++;
+        if (!$confirmar || !$new_assignment_id) continue;
+        $new_original_worker = $t['original_worker_id'] ? ($worker_map[intval($t['original_worker_id'])] ?? null) : null;
+        $new_competition_id = ($new_comp_id && intval($t['competition_id']) === 2) ? $new_comp_id : null;
+        $wpdb->insert($club('tasks'), array(
+            'assignment_id' => $new_assignment_id, 'task_type_id' => $t['task_type_id'], 'task_date' => $t['task_date'],
+            'params' => $t['params'], 'done' => $t['done'], 'done_at' => $t['done_at'], 'status' => $t['status'],
+            'original_date' => $t['original_date'], 'postponed_count' => $t['postponed_count'],
+            'original_worker_id' => $new_original_worker, 'competition_id' => $new_competition_id,
+        ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%s', '%d', '%d', '%d'));
+        $new_task_id = $wpdb->insert_id;
+        $task_map[intval($t['id'])] = $new_task_id;
+        if ($t['moved_to_task_id']) $pendientes_moved_to[$new_task_id] = intval($t['moved_to_task_id']);
+    }
+    foreach ($pendientes_moved_to as $new_task_id => $old_moved_to) {
+        $mapped = $task_map[$old_moved_to] ?? null;
+        if ($mapped) $wpdb->update($club('tasks'), array('moved_to_task_id' => $mapped), array('id' => $new_task_id), array('%d'), array('%d'));
+    }
+
+    // 7. Bloques de la ficha de la compe (mapa, equipador, foto…) de la competición #2.
+    if ($comp) {
+        $comp_blocks = $wpdb->get_results($wpdb->prepare("SELECT * FROM " . $main('comp_blocks') . " WHERE competition_id = %d", 2), ARRAY_A);
+        $reporte['compBlocks'] = count($comp_blocks);
+        if ($confirmar && $new_comp_id) {
+            foreach ($comp_blocks as $b) {
+                $wpdb->insert($club('comp_blocks'), array(
+                    'competition_id' => $new_comp_id, 'number' => $b['number'], 'x_pct' => $b['x_pct'], 'y_pct' => $b['y_pct'],
+                    'subzone' => $b['subzone'], 'grade_color' => $b['grade_color'], 'hold_set_ids' => $b['hold_set_ids'],
+                    'volumes' => $b['volumes'], 'equipador' => $b['equipador'], 'photo_url' => $b['photo_url'],
+                    'tested' => $b['tested'], 'status' => $b['status'],
+                ));
+            }
+        }
+    }
+
+    if ($confirmar) update_option('blokes_equip_migrado_principal_1', 1, false);
+    return rest_ensure_response(array('success' => true, 'confirmado' => $confirmar, 'data' => $reporte));
 }
 
 // Semilla inicial (trabajadores y catálogo de presas actuales) — solo si
@@ -9994,6 +18616,24 @@ function progreso_equip_update_worker($request) {
     return rest_ensure_response(array('success' => true));
 }
 
+// 19/11: vincula un worker con la sesión real de quien lo pulsa — nunca con un email que
+// mande el cliente, para que esto siga sirviendo de verdad para progreso_equip_es_jefe_o_socio()
+// (si cualquiera pudiera escribir el email, cualquiera podría autonombrarse "jefe").
+function progreso_equip_vincular_mi_email($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    if ($email === '') return new WP_Error('sin_email', 'Tu sesión no tiene un email de WordPress.', array('status' => 400));
+    $table = progreso_equip_table('workers');
+    $actual = $wpdb->get_var($wpdb->prepare("SELECT email FROM $table WHERE id = %d", $id));
+    if ($actual === null) return new WP_Error('not_found', 'Persona no encontrada.', array('status' => 404));
+    if ($actual !== '') {
+        return new WP_Error('ya_vinculado', 'Esta fila ya tiene un email vinculado — pide a un socio que la desvincule primero si hace falta cambiarlo.', array('status' => 409));
+    }
+    $wpdb->update($table, array('email' => $email), array('id' => $id), array('%s'), array('%d'));
+    return rest_ensure_response(array('success' => true, 'data' => array('email' => $email)));
+}
+
 function progreso_equip_delete_worker($request) {
     global $wpdb;
     $wpdb->delete(progreso_equip_table('workers'), array('id' => intval($request['id'])), array('%d'));
@@ -10037,11 +18677,33 @@ function progreso_equip_get_weeks($request = null) {
         "SELECT * FROM " . progreso_equip_table('weeks') . " WHERE archived = 0 AND is_test = %d ORDER BY start_date DESC LIMIT 20",
         $solo_prueba ? 1 : 0
     ), ARRAY_A);
-    return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
+    $tasks_table = progreso_equip_table('tasks');
+    $assignments_table = progreso_equip_table('assignments');
+    // Calendario de semanas (Ramiro 12/11 09:31): cada tarjeta de la tira necesita hechas/total
+    // y si hay festivo o compe esa semana, sin tener que pedir el detalle entero.
+    return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) use ($wpdb, $tasks_table, $assignments_table) {
+        $week_id = intval($r['id']);
+        // 17/11 11:25 (cowork): una «descartada» (progreso_equip_cerrar_arrastradas() / Quitar en
+        // una arrastrada) no es una tarea de esta semana de cara al equipo — nunca cuenta aquí,
+        // solo sigue visible en Ver histórico.
+        $hechas = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id
+             WHERE a.week_id = %d AND t.done = 1 AND t.status != 'descartada'", $week_id
+        ));
+        $total = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id
+             WHERE a.week_id = %d AND t.status != 'descartada'", $week_id
+        ));
+        $fin = date('Y-m-d', strtotime($r['start_date']) + 6 * 86400);
+        $tiene_festivo = !empty(blokes_club_days_cerrados($r['start_date'], $fin));
         return array(
-            'id' => intval($r['id']), 'startDate' => $r['start_date'],
+            'id' => $week_id, 'startDate' => $r['start_date'],
             'subzones' => array_values(array_filter(array_map('intval', explode(',', $r['subzones'])))),
             'notes' => $r['notes'], 'isTest' => (bool) $r['is_test'], 'isAuto' => (bool) $r['auto'],
+            'zonaId' => $r['zona_id'] !== null ? intval($r['zona_id']) : null,
+            'zonaSugeridaId' => $r['zona_sugerida_id'] !== null ? intval($r['zona_sugerida_id']) : null,
+            'tasksHechas' => $hechas, 'tasksTotal' => $total,
+            'tieneFestivo' => $tiene_festivo, 'tieneCompe' => progreso_equip_semana_es_de_compe($r['start_date']),
         );
     }, $rows)));
 }
@@ -10065,9 +18727,13 @@ function progreso_equip_get_weeks_historico() {
              LEFT JOIN " . progreso_equip_table('workers') . " orig ON orig.id = t.original_worker_id
              WHERE a.week_id = %d", $week_id
         ), ARRAY_A);
-        $hechas = 0; $retrasadas = 0; $pendientes = 0; $por_persona = array();
+        $hechas = 0; $retrasadas = 0; $pendientes = 0; $descartadas = 0; $por_persona = array();
         foreach ($rows as $r) {
             if ($r['done']) { $hechas++; continue; }
+            // 17/11 11:25 (cowork): una «descartada» (progreso_equip_cerrar_arrastradas() /
+            // Quitar en una arrastrada) se queda solo aquí, en el histórico — nunca en "sin hacer
+            // todavía" (ya no se va a hacer) ni en "retrasada" (ya no se va a volver a arrastrar).
+            if ($r['status'] === 'descartada') { $descartadas++; continue; }
             if ($r['status'] === 'retrasada') {
                 $retrasadas++;
                 $name = $r['original_worker_name'] ?: $r['worker_name'];
@@ -10078,7 +18744,7 @@ function progreso_equip_get_weeks_historico() {
         }
         $out[] = array(
             'id' => $week_id, 'startDate' => $w['start_date'], 'archived' => (bool) $w['archived'],
-            'hechas' => $hechas, 'retrasadas' => $retrasadas, 'pendientes' => $pendientes,
+            'hechas' => $hechas, 'retrasadas' => $retrasadas, 'pendientes' => $pendientes, 'descartadas' => $descartadas,
             'retrasosPorPersona' => $por_persona,
         );
     }
@@ -10100,6 +18766,7 @@ function progreso_equip_merge_rolled_task($week_id, $assignment_id, $type_id, $t
         "SELECT t.* FROM {$tasks_table} t
          JOIN {$assignments_table} a ON a.id = t.assignment_id
          WHERE a.week_id = %d AND t.task_type_id = %s AND t.done = 0 AND t.moved_to_task_id IS NULL
+           AND t.status != 'descartada'
          ORDER BY t.id ASC LIMIT 1",
         $week_id, $type_id
     ), ARRAY_A);
@@ -10151,11 +18818,16 @@ function progreso_equip_sweep_overdue_into_current_week() {
     if (!$week) return;
     $week_id = intval($week['id']);
 
+    // 17/11 10:40 (cowork, urgente): excluye las "descartadas" (progreso_equip_delete_task() /
+    // progreso_equip_cerrar_arrastradas()) — si no, una tarea vieja que se acaba de dar por
+    // cerrada vuelve a parecer "pendiente, sin mover" y el barrido la recrea en la siguiente
+    // carga, justo lo que se acababa de quitar.
     $pending = $wpdb->get_results($wpdb->prepare(
         "SELECT t.*, a.worker_id FROM {$tasks_table} t
          JOIN {$assignments_table} a ON a.id = t.assignment_id
          JOIN {$weeks_table} wk ON wk.id = a.week_id
          WHERE t.task_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL
+           AND t.status != 'descartada'
            AND wk.start_date < %s AND wk.id != %d",
         $today, $week['start_date'], $week_id
     ), ARRAY_A);
@@ -10213,6 +18885,163 @@ function progreso_equip_sweep_overdue_into_current_week() {
     }
 }
 
+// ============================================================
+//  Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31/09:35/09:37).
+// ============================================================
+
+function progreso_equip_zonas_activas() {
+    global $wpdb;
+    return $wpdb->get_results(
+        "SELECT * FROM " . progreso_equip_table('zonas') . " WHERE activa = 1 ORDER BY orden ASC", ARRAY_A
+    );
+}
+
+function progreso_equip_zona_fila($z) {
+    return array(
+        'id' => intval($z['id']), 'nombre' => $z['nombre'], 'color' => $z['color'],
+        'subzonas' => array_values(array_filter(array_map('intval', explode(',', $z['subzonas'])))),
+        'orden' => intval($z['orden']), 'activa' => (bool) $z['activa'],
+    );
+}
+
+// ¿Esta semana (start_date, +6 días) se salta la rotación de zonas? — se solapa con la
+// precompe (lead_weeks antes de comp_date) o la compe de una competición real (nunca una de
+// prueba, esas no deben afectar al reparto de verdad).
+function progreso_equip_semana_es_de_compe($start_date) {
+    global $wpdb;
+    $fin = date('Y-m-d', strtotime($start_date) + 6 * 86400);
+    $comps = $wpdb->get_results(
+        "SELECT comp_date, comp_end_date, lead_weeks FROM " . progreso_equip_table('competitions') . " WHERE is_test = 0",
+        ARRAY_A
+    );
+    foreach ($comps as $c) {
+        $precompe_inicio = date('Y-m-d', strtotime($c['comp_date']) - intval($c['lead_weeks']) * 7 * 86400);
+        $compe_fin = $c['comp_end_date'] ?: $c['comp_date'];
+        if ($start_date <= $compe_fin && $fin >= $precompe_inicio) return true;
+    }
+    return false;
+}
+
+function progreso_equip_zona_arranque() {
+    $v = get_option('blokes_equip_zona_arranque');
+    return (is_array($v) && !empty($v['zonaId']) && !empty($v['weekStart'])) ? $v : null;
+}
+
+// Qué zona le toca de verdad a una semana. Ancla: la semana existente más reciente, anterior a
+// esta, que ya tenga zona_id puesto — así una corrección manual ("esta semana repetimos...",
+// "saltamos a...") recoloca solas las semanas siguientes sin tener que tocarlas una a una. Sin
+// ninguna semana previa, usa el arranque guardado desde "⚙️ Configurar zonas"; sin arranque
+// tampoco, la primera zona activa siempre.
+function progreso_equip_calcular_zona_semana($start_date) {
+    global $wpdb;
+    $zonas = progreso_equip_zonas_activas();
+    if (!$zonas) return null;
+
+    $ancla = $wpdb->get_row($wpdb->prepare(
+        "SELECT start_date, zona_id FROM " . progreso_equip_table('weeks') . "
+         WHERE start_date < %s AND zona_id IS NOT NULL ORDER BY start_date DESC LIMIT 1", $start_date
+    ), ARRAY_A);
+
+    if ($ancla) {
+        $ancla_fecha = $ancla['start_date'];
+        $ancla_zona_id = intval($ancla['zona_id']);
+    } else {
+        $arranque = progreso_equip_zona_arranque();
+        if (!$arranque) return intval($zonas[0]['id']);
+        $ancla_fecha = $arranque['weekStart'];
+        $ancla_zona_id = intval($arranque['zonaId']);
+    }
+
+    $idx_ancla = 0;
+    foreach ($zonas as $i => $z) { if (intval($z['id']) === $ancla_zona_id) { $idx_ancla = $i; break; } }
+    if (strtotime($start_date) <= strtotime($ancla_fecha)) return intval($zonas[$idx_ancla]['id']);
+
+    $cursor = $ancla_fecha; $n = 0;
+    while (strtotime($cursor) < strtotime($start_date)) {
+        if (!progreso_equip_semana_es_de_compe($cursor)) $n++;
+        $cursor = date('Y-m-d', strtotime($cursor) + 7 * 86400);
+    }
+    $idx = ($idx_ancla + $n) % count($zonas);
+    return intval($zonas[$idx]['id']);
+}
+
+// GET /equipacion/zonas/sugerida?weekStart=YYYY-MM-DD — para enseñar "zona sugerida: Cueva
+// (#8)" en el formulario de crear semana, antes de guardar nada.
+function progreso_equip_get_zona_sugerida($request) {
+    progreso_equip_ensure_tables();
+    global $wpdb;
+    $week_start = sanitize_text_field((string) $request->get_param('weekStart'));
+    if (!$week_start || !strtotime($week_start)) {
+        return new WP_Error('invalid_data', 'Falta la semana.', array('status' => 400));
+    }
+    $week_start = date('Y-m-d', strtotime($week_start));
+    $zona_id = progreso_equip_calcular_zona_semana($week_start);
+    $zona = $zona_id ? $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM " . progreso_equip_table('zonas') . " WHERE id = %d", $zona_id
+    ), ARRAY_A) : null;
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'zona' => $zona ? progreso_equip_zona_fila($zona) : null,
+        'esSemanaDeCompe' => progreso_equip_semana_es_de_compe($week_start),
+    )));
+}
+
+function progreso_equip_get_zonas($request) {
+    progreso_equip_ensure_tables();
+    global $wpdb;
+    $zonas = $wpdb->get_results("SELECT * FROM " . progreso_equip_table('zonas') . " ORDER BY orden ASC", ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'zonas' => array_map('progreso_equip_zona_fila', $zonas),
+        'arranque' => progreso_equip_zona_arranque(),
+    )));
+}
+
+// PUT /equipacion/zonas — sustituye la lista entera (reordenar, renombrar, cambiar subzonas o
+// color, activar/desactivar, añadir una nueva con id 0). Pensado para el diálogo "⚙️ Configurar
+// zonas", que manda siempre la lista completa ya en el orden que ha quedado.
+function progreso_equip_update_zonas($request) {
+    global $wpdb;
+    $zonas_in = $request->get_param('zonas');
+    if (!is_array($zonas_in)) return new WP_Error('invalid_data', 'Faltan las zonas.', array('status' => 400));
+    $table = progreso_equip_table('zonas');
+    $vistos = array();
+    foreach ($zonas_in as $i => $z) {
+        $nombre = sanitize_text_field((string) ($z['nombre'] ?? ''));
+        if ($nombre === '') continue;
+        $color = sanitize_text_field((string) ($z['color'] ?? '#60a5fa'));
+        $subzonas = is_array($z['subzonas'] ?? null) ? implode(',', array_map('intval', $z['subzonas'])) : '';
+        $activa = empty($z['activa']) ? 0 : 1;
+        $id = intval($z['id'] ?? 0);
+        if ($id > 0) {
+            $wpdb->update($table, array(
+                'nombre' => $nombre, 'color' => $color, 'subzonas' => $subzonas, 'orden' => $i, 'activa' => $activa,
+            ), array('id' => $id), array('%s', '%s', '%s', '%d', '%d'), array('%d'));
+            $vistos[] = $id;
+        } else {
+            $wpdb->insert($table, array(
+                'nombre' => $nombre, 'color' => $color, 'subzonas' => $subzonas, 'orden' => $i, 'activa' => $activa,
+            ), array('%s', '%s', '%s', '%d', '%d'));
+            $vistos[] = $wpdb->insert_id;
+        }
+    }
+    return rest_ensure_response(array('success' => true));
+}
+
+// POST /equipacion/zonas/arranque — fija por qué zona empieza la rotación y en qué semana
+// (Ramiro: "cuando se da aceptar empieza por la primera subzona que se quiere hacer esa
+// semana"). Solo hace falta una vez; en cuanto haya alguna semana con zona_id puesto, esa pasa
+// a ser el ancla real (ver progreso_equip_calcular_zona_semana) y esto queda como respaldo.
+function progreso_equip_set_zona_arranque($request) {
+    $zona_id = intval($request->get_param('zonaId'));
+    $week_start = sanitize_text_field((string) $request->get_param('weekStart'));
+    if (!$zona_id || !$week_start || !strtotime($week_start)) {
+        return new WP_Error('invalid_data', 'Falta la zona o la semana de arranque.', array('status' => 400));
+    }
+    update_option('blokes_equip_zona_arranque', array(
+        'zonaId' => $zona_id, 'weekStart' => date('Y-m-d', strtotime($week_start)),
+    ), false);
+    return rest_ensure_response(array('success' => true));
+}
+
 // Crea la semana y, para cada trabajador asignado, reparte el catálogo de
 // tareas entre sus días de trabajo reales esa semana — así nadie se queda
 // un día sin plan, que es justo el hueco que tenía el sistema de Notion.
@@ -10247,10 +19076,24 @@ function progreso_equip_create_week($request) {
     $is_test = $request->get_param('isTest') ? 1 : 0;
     $is_auto = $request->get_param('isAuto') ? 1 : 0;
 
+    // Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31): la zona que toca se
+    // calcula sola; si no mandan subzonas a propósito, se rellenan solas con las de esa zona
+    // ("se acaba lo de «— subzonas» vacío en la cabecera"). Las semanas de prueba no cuentan
+    // para la rotación — nunca mueven el ancla real.
+    $zona_sugerida_id = $is_test ? null : progreso_equip_calcular_zona_semana($start_date);
+    if (empty($subzones) && $zona_sugerida_id) {
+        $zona = $wpdb->get_row($wpdb->prepare(
+            "SELECT subzonas FROM " . progreso_equip_table('zonas') . " WHERE id = %d", $zona_sugerida_id
+        ), ARRAY_A);
+        if ($zona) $subzones = array_values(array_filter(array_map('intval', explode(',', $zona['subzonas']))));
+    }
+
     $wpdb->insert(progreso_equip_table('weeks'), array(
         'start_date' => $start_date, 'subzones' => implode(',', $subzones),
-        'notes' => $notes, 'is_test' => $is_test, 'auto' => $is_auto, 'created_at' => current_time('mysql'),
-    ), array('%s', '%s', '%s', '%d', '%d', '%s'));
+        'notes' => $notes, 'is_test' => $is_test, 'auto' => $is_auto,
+        'zona_id' => $zona_sugerida_id, 'zona_sugerida_id' => $zona_sugerida_id,
+        'created_at' => current_time('mysql'),
+    ), array('%s', '%s', '%s', '%d', '%d', '%d', '%d', '%s'));
     $week_id = $wpdb->insert_id;
 
     $day_offset         = array('mon' => 0, 'tue' => 1, 'wed' => 2, 'thu' => 3, 'fri' => 4, 'sat' => 5, 'sun' => 6);
@@ -10326,13 +19169,19 @@ function progreso_equip_create_week($request) {
         // semana en curso que todavía no han llegado a su fecha): una
         // semana nueva puede crearse mientras la anterior aún no termina.
         $today = current_time('Y-m-d');
+        // Nunca mezclar prueba con real (cowork, 4/11 07:20): una tarea atrasada de una semana de
+        // PRUEBA no debe colarse en la primera semana REAL que se cree después, ni al revés.
+        // 17/11 10:40 (cowork, urgente): mismo arreglo que en progreso_equip_sweep_overdue_
+        // into_current_week() — excluye las "descartadas", para que una tarea ya cerrada no
+        // vuelva a arrastrarse a la semana nueva.
         $pending = $wpdb->get_results($wpdb->prepare(
             "SELECT t.*, a.worker_id FROM {$tasks_table} t
              JOIN {$assignments_table} a ON a.id = t.assignment_id
              JOIN " . progreso_equip_table('weeks') . " wk ON wk.id = a.week_id
              WHERE t.task_date < %s AND t.done = 0 AND t.moved_to_task_id IS NULL
-               AND wk.start_date < %s AND wk.id != %d",
-            $today, $start_date, $week_id
+               AND t.status != 'descartada'
+               AND wk.start_date < %s AND wk.id != %d AND wk.is_test = %d",
+            $today, $start_date, $week_id, $is_test
         ), ARRAY_A);
         $pending_by_type = array();
         foreach ($pending as $old) { $pending_by_type[$old['task_type_id']][] = $old; }
@@ -10389,20 +19238,23 @@ function progreso_equip_create_week($request) {
     }
 
     // 4. ¿Quién recibe cada tarea que toca?
-    //    - Periódicas (periodicity_weeks > 1) y las "lead_only": siempre al
-    //      responsable, que luego la reparte él mismo. Si no está esta
-    //      semana, al primero de la lista (con aviso).
-    //    - Semanales normales: a quien más veces la haya hecho entre los de
-    //      esta semana; sin historial, turno rotatorio.
+    //    - "lead_only": siempre al responsable (se marca a mano para lo que de verdad solo
+    //      puede decidir él, p. ej. "Organizar próximas semanas"). Si no está esta semana, al
+    //      primero de la lista (con aviso).
+    //    - El resto (ya no depende de la periodicidad — Ramiro, 5/11 21:08: "ya no todo al
+    //      responsable"): si el tipo tiene gente preferida (pauta editable desde Normas,
+    //      sacada del histórico real de quién suele hacer cada tarea), se reparte entre los
+    //      preferidos que están esta semana — el que menos tareas lleve hasta ahora, para no
+    //      cargarlo todo en el primero de la lista. Sin pauta puesta: a quien más veces la haya
+    //      hecho en el histórico de la propia app; sin historial, turno rotatorio — igual que
+    //      antes.
     $warnings = array();
     if ($rolled_count > 0 && $rollover_target) {
         $warnings[] = "{$rolled_count} tarea(s) retrasada(s) asignada(s) a {$rollover_target['worker']['name']} para repartir.";
     }
     $rr_cursor = 0;
     foreach ($due_types as $type) {
-        $goes_to_lead = $type['lead_only'] || intval($type['periodicityWeeks']) > 1;
-
-        if ($goes_to_lead) {
+        if ($type['lead_only']) {
             $chosen = $lead_worker_id ?: ($eligible_worker_ids[0] ?? null);
             if ($chosen === null) continue;
             if (!$lead_worker_id) {
@@ -10414,6 +19266,16 @@ function progreso_equip_create_week($request) {
 
         $candidates = $eligible_worker_ids;
         if (empty($candidates)) continue;
+
+        $preferidos_aqui = array_values(array_intersect($type['preferredWorkers'], $candidates));
+        if (!empty($preferidos_aqui)) {
+            usort($preferidos_aqui, function($a, $b) use ($crew) {
+                return count($crew[$a]['queue']) <=> count($crew[$b]['queue']);
+            });
+            $chosen = $preferidos_aqui[0];
+            $crew[$chosen]['queue'][] = $type;
+            continue;
+        }
 
         $ph = implode(',', array_fill(0, count($candidates), '%d'));
         $history = $wpdb->get_results($wpdb->prepare(
@@ -10457,6 +19319,57 @@ function progreso_equip_create_week($request) {
     return rest_ensure_response(array('success' => true, 'week_id' => $week_id, 'assignment_ids' => $created_assignments, 'warnings' => $warnings));
 }
 
+// Cuenta, por asignación (persona), cuántos blokes REALES (blog 1, Crear bloke) se crearon
+// durante esa semana con ese equipador — comparado por nombre normalizado (minúsculas, sin
+// acentos, primera palabra), porque `bloke_equipador` guarda un slug tipo "alvaro" y el nombre
+// del trabajador es "Álvaro". Mismo límite que ya tiene Crear bloke: si hay dos personas que
+// normalizan igual (p. ej. "Álvaro" y "Álvaro V."), Crear bloke tampoco las distingue — no es
+// algo que esta cuenta pueda arreglar por su cuenta.
+function progreso_equip_contar_blokes_reales_semana($week_start, $nombres_por_assignment) {
+    if (!$nombres_por_assignment) return array();
+    $fin = date('Y-m-d', strtotime($week_start) + 6 * 86400);
+    global $wpdb;
+    switch_to_blog(1);
+    // 🐞 Cowork 11/11 10:15: seguía a 0 para todos (no solo Álvaro) tras la normalización de
+    // tildes — señal de que el problema real era otro: `bloke_equipador` se lee aquí con SQL
+    // directo contra `meta_key = 'bloke_equipador'`, pero el campo ACF puede guardarse con otra
+    // clave real si vive dentro de un grupo. Se cambia a `get_field()` (la propia API de ACF,
+    // la misma que usa BlokeForm.jsx para escribirlo vía update_field()) para no depender de
+    // adivinar la clave de wp_postmeta.
+    $post_ids = $wpdb->get_col($wpdb->prepare(
+        "SELECT ID FROM {$wpdb->posts} WHERE post_type = 'blokes' AND post_status IN ('publish', 'draft')
+         AND DATE(post_date) BETWEEN %s AND %s", $week_start, $fin
+    ));
+    $rows = array();
+    foreach ($post_ids as $post_id) {
+        $equipador = get_field('bloke_equipador', intval($post_id));
+        if ($equipador) $rows[] = array('equipador' => $equipador, 'n' => 1);
+    }
+    restore_current_blog();
+
+    // 🎯 Cowork 11/11 11:05 (gracias al diagnóstico): el orden estaba al revés. strtolower() no
+    // toca "Á" (no es multibyte) y se quedaba igual; remove_accents() después la convertía en
+    // "A" MAYÚSCULA (conserva mayúsculas); y el preg_replace solo dejaba a-z minúsculas, así que
+    // esa "A" se borraba — "Álvaro" → "lvaro", que nunca coincidía con "alvaro". Las tildes van
+    // primero, las minúsculas después.
+    $normaliza = function($s) {
+        $s = strtolower(remove_accents(trim((string) $s)));
+        $s = preg_replace('/[^a-z0-9\s]/', '', $s);
+        $partes = preg_split('/\s+/', trim($s));
+        return $partes[0] ?? '';
+    };
+    $por_nombre = array();
+    foreach ($rows as $r) {
+        $clave = $normaliza($r['equipador']);
+        $por_nombre[$clave] = ($por_nombre[$clave] ?? 0) + intval($r['n']);
+    }
+    $out = array();
+    foreach ($nombres_por_assignment as $assignment_id => $nombre) {
+        $out[$assignment_id] = $por_nombre[$normaliza($nombre)] ?? 0;
+    }
+    return $out;
+}
+
 function progreso_equip_get_week_detail($request) {
     global $wpdb;
     progreso_equip_ensure_tables();
@@ -10476,8 +19389,11 @@ function progreso_equip_get_week_detail($request) {
     $blocks_by_assignment = array();
     if ($assignment_ids) {
         $ph = implode(',', array_fill(0, count($assignment_ids), '%d'));
+        // 17/11 11:25 (cowork): una «descartada» ya no es una tarea de esta semana de cara al
+        // equipo (contaba como pendiente/retrasada en Semana y en la tira) — se queda solo en
+        // Ver histórico (progreso_equip_get_weeks_historico() no filtra por status).
         $tasks = $wpdb->get_results($wpdb->prepare(
-            "SELECT * FROM " . progreso_equip_table('tasks') . " WHERE assignment_id IN ($ph) ORDER BY task_date ASC, id ASC",
+            "SELECT * FROM " . progreso_equip_table('tasks') . " WHERE assignment_id IN ($ph) AND status != 'descartada' ORDER BY task_date ASC, id ASC",
             ...$assignment_ids
         ), ARRAY_A);
         $moved_to_ids = array_values(array_filter(array_map(function($t) { return intval($t['moved_to_task_id']); }, $tasks)));
@@ -10499,6 +19415,12 @@ function progreso_equip_get_week_detail($request) {
                 'postponedCount' => intval($t['postponed_count']),
                 'movedToTaskId' => $moved_to_task_id,
                 'movedToDate' => $moved_to_task_id && isset($moved_to_dates[$moved_to_task_id]) ? $moved_to_dates[$moved_to_task_id]->task_date : null,
+                'createdBy' => $t['created_by'] ?? null, 'createdAt' => $t['created_at'] ?? null,
+                'updatedBy' => $t['updated_by'] ?? null, 'updatedAt' => $t['updated_at'] ?? null,
+                // 17/11 (NOTAS_PARA_CODE_tareas_movil.md, punto A.1): «Mis tareas» del móvil
+                // necesita saber qué tareas son de compe para ponerlas primero — antes no se
+                // mandaba, aunque la columna ya existe desde que se generan los planes de compe.
+                'competitionId' => $t['competition_id'] ? intval($t['competition_id']) : null,
             );
         }
         $blocks = $wpdb->get_results($wpdb->prepare(
@@ -10514,7 +19436,14 @@ function progreso_equip_get_week_detail($request) {
         }
     }
 
-    $out_assignments = array_map(function($a) use ($tasks_by_assignment, $blocks_by_assignment) {
+    // "0 bloques puestos esta semana" aunque el equipador sí creó blokes reales en Crear bloke
+    // (cowork, 11/11 04:45: el contador solo miraba equip_blocks, nunca los blokes reales de la
+    // app). Se suman aparte, nunca se mezclan con `blocks` (que sigue siendo solo lo planeado).
+    $nombres_por_assignment = array();
+    foreach ($assignments as $a) $nombres_por_assignment[intval($a['id'])] = $a['worker_name'];
+    $reales_por_assignment = progreso_equip_contar_blokes_reales_semana($week['start_date'], $nombres_por_assignment);
+
+    $out_assignments = array_map(function($a) use ($tasks_by_assignment, $blocks_by_assignment, $reales_por_assignment) {
         $id = intval($a['id']);
         return array(
             'id' => $id, 'workerId' => intval($a['worker_id']), 'workerName' => $a['worker_name'], 'isLead' => (bool) $a['is_lead'],
@@ -10522,6 +19451,7 @@ function progreso_equip_get_week_detail($request) {
             'blocksMin' => intval($a['blocks_min']), 'blocksMax' => intval($a['blocks_max']), 'status' => $a['status'],
             'workDays' => array_values(array_filter(explode(',', $a['work_days']))),
             'tasks' => $tasks_by_assignment[$id] ?? array(), 'blocks' => $blocks_by_assignment[$id] ?? array(),
+            'blokesRealesCreados' => intval($reales_por_assignment[$id] ?? 0),
         );
     }, $assignments);
 
@@ -10529,6 +19459,8 @@ function progreso_equip_get_week_detail($request) {
         'id' => intval($week['id']), 'startDate' => $week['start_date'],
         'subzones' => array_values(array_filter(array_map('intval', explode(',', $week['subzones'])))),
         'notes' => $week['notes'], 'isTest' => (bool) $week['is_test'], 'isAuto' => (bool) $week['auto'], 'assignments' => $out_assignments,
+        'zonaId' => $week['zona_id'] !== null ? intval($week['zona_id']) : null,
+        'zonaSugeridaId' => $week['zona_sugerida_id'] !== null ? intval($week['zona_sugerida_id']) : null,
     )));
 }
 
@@ -10617,6 +19549,34 @@ function progreso_equip_delete_assignment($request) {
 // próxima vez que se cree una semana. Las semanas de prueba (`isTest`) se
 // borran siempre de verdad, aunque tengan hechas/retrasadas — cowork
 // (1/11) las necesita para poder probar sin dejar residuos en producción.
+// PUT /equipacion/weeks/{id} — corrección manual de la zona ("esta semana repetimos la
+// #3-4", "saltamos a la Cueva") desde "⚙️ Configurar zonas" si van retrasados o adelantados.
+// Al cambiar zona_id de una semana, las siguientes se recolocan solas (ver
+// progreso_equip_calcular_zona_semana, que siempre ancla en la semana puesta más reciente).
+// También sirve para tocar las subzonas o las notas sueltas de una semana ya creada.
+function progreso_equip_update_week($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $id));
+    if (!$existe) return new WP_Error('not_found', 'Semana no encontrada.', array('status' => 404));
+    $upd = array(); $fmt = array();
+    if ($request->get_param('zonaId') !== null) {
+        $zona_id = intval($request->get_param('zonaId'));
+        $upd['zona_id'] = $zona_id ?: null; $fmt[] = '%d';
+    }
+    if ($request->get_param('subzones') !== null) {
+        $subzones = $request->get_param('subzones');
+        $subzones = is_array($subzones) ? array_map('intval', $subzones) : array();
+        $upd['subzones'] = implode(',', $subzones); $fmt[] = '%s';
+    }
+    if ($request->get_param('notes') !== null) {
+        $upd['notes'] = sanitize_textarea_field((string) $request->get_param('notes')); $fmt[] = '%s';
+    }
+    if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    $wpdb->update(progreso_equip_table('weeks'), $upd, array('id' => $id), $fmt, array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
 function progreso_equip_delete_week($request) {
     global $wpdb;
     $week_id = intval($request['id']);
@@ -10673,6 +19633,26 @@ function progreso_equip_delete_week($request) {
     return rest_ensure_response(array('success' => true, 'mode' => 'archived', 'doneTasks' => $done_tasks, 'blocks' => $blocks_count, 'retrasadaTasks' => $retrasada_tasks));
 }
 
+// Una vez (Ramiro 12/11 10:45, NOTAS_PARA_CODE_equipacion.md: "urgente antes de la reunión con
+// Álvaro, quitar todo lo marcado como retrasado sin borrar ni completar ninguna tarea"). Mismo
+// gesto que `progreso_equip_limpiar_retrasadas_falsas`, pero para TODAS las semanas de golpe, no
+// solo una: quita la marca de retraso (status, contador, fecha original, enlace a la tarea
+// "siguiente") de cualquier tarea sin hacer que hoy sale en rojo o con "RETRASADA (×n)" —
+// incluidas las copias viejas ya sustituidas (quedan como una tarea suelta más en su semana de
+// origen, no se borran) y las "copias vivas" que arrastraron el contador. Nada se marca como
+// hecho ni se borra.
+function progreso_equip_limpiar_retrasadas_global() {
+    if (get_option('blokes_equip_limpieza_retrasadas_12_11')) return;
+    global $wpdb;
+    $tasks_table = progreso_equip_table('tasks');
+    $wpdb->query(
+        "UPDATE {$tasks_table}
+         SET status = 'pendiente', postponed_count = 0, original_date = task_date, moved_to_task_id = NULL
+         WHERE done = 0 AND (status = 'retrasada' OR postponed_count > 0)"
+    );
+    update_option('blokes_equip_limpieza_retrasadas_12_11', 1, false);
+}
+
 // POST /equipacion/weeks/{id}/limpiar-retrasadas-falsas — arreglo puntual (cowork, 1/11 18:25 y
 // 18:45): el cálculo de "semana actual" en domingo creó una semana ya pasada, y su barrido
 // arrastró tareas a la semana siguiente marcándolas "retrasada ×1" sin que ese retraso hubiera
@@ -10687,11 +19667,15 @@ function progreso_equip_limpiar_retrasadas_falsas($request) {
     $assignment_ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM {$assignments_table} WHERE week_id = %d", $week_id));
     if (!$assignment_ids) return new WP_Error('not_found', 'Semana sin asignaciones.', array('status' => 404));
 
+    // 17/11 10:40 (cowork): nunca reabre una "descartada" (progreso_equip_delete_task() /
+    // progreso_equip_cerrar_arrastradas()) — es un arreglo de retrasos, no debe deshacer un
+    // cierre deliberado.
     $afectadas = $wpdb->query(
         "UPDATE {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id
          SET t.status = 'pendiente', t.postponed_count = 0, t.original_date = t.task_date,
              t.moved_to_task_id = NULL, t.original_worker_id = a.worker_id
-         WHERE t.assignment_id IN (" . implode(',', array_map('intval', $assignment_ids)) . ") AND t.done = 0"
+         WHERE t.assignment_id IN (" . implode(',', array_map('intval', $assignment_ids)) . ")
+           AND t.done = 0 AND t.status != 'descartada'"
     );
     return rest_ensure_response(array('success' => true, 'afectadas' => intval($afectadas)));
 }
@@ -10754,6 +19738,8 @@ function progreso_equip_get_today($request) {
                 'postponedCount' => intval($t['postponed_count']),
                 'movedToTaskId' => $moved_to_task_id,
                 'movedToDate' => $moved_to_task_id && isset($moved_to_dates[$moved_to_task_id]) ? $moved_to_dates[$moved_to_task_id] : null,
+                'createdBy' => $t['created_by'] ?? null, 'createdAt' => $t['created_at'] ?? null,
+                'updatedBy' => $t['updated_by'] ?? null, 'updatedAt' => $t['updated_at'] ?? null,
             );
         }, $tasks),
         'blocks' => array_map(function($b) {
@@ -10773,7 +19759,18 @@ function progreso_equip_get_today($request) {
 // progreso_equip_create_week la próxima vez.
 function progreso_equip_update_task($request) {
     global $wpdb;
+    progreso_equip_ensure_tables();
     $id = intval($request['id']);
+    // Ramiro 12/11 11:35: cualquier equipador puede marcar su propia tarea como hecha (`done`),
+    // pero editarla, moverla de persona, cambiarle el día, el texto o la subzona es solo de
+    // Álvaro o un socio — esos campos SÍ llegan por este mismo endpoint, así que el filtro va
+    // aquí dentro, no en el permission_callback de la ruta (que tiene que dejar pasar "done").
+    $campos_restringidos = array('date', 'assignmentId', 'workerName', 'customText', 'notas', 'subzona');
+    foreach ($campos_restringidos as $campo) {
+        if ($request->get_param($campo) !== null && !progreso_equip_es_jefe_o_socio()) {
+            return new WP_Error('forbidden', 'Solo Álvaro o un socio puede editar, mover o cambiar de día una tarea.', array('status' => 403));
+        }
+    }
     $upd = array(); $fmt = array();
     if ($request->get_param('done') !== null) {
         $done = (bool) $request->get_param('done');
@@ -10809,9 +19806,114 @@ function progreso_equip_update_task($request) {
         $upd['assignment_id'] = $new_assignment_id;
         $fmt[] = '%d';
     }
+    // Mover la tarea a otra persona por nombre, en la misma semana en la que ya está — "⇄ Mover
+    // a..." del plan de la compe (Ramiro 12/11 10:44/10:45, punto 5): el frontend no siempre
+    // tiene a mano el assignmentId de alguien que todavía no tenía ninguna tarea esa semana, así
+    // que aquí se resuelve (o se crea) solo.
+    if ($request->get_param('workerName') !== null) {
+        $row = $wpdb->get_row($wpdb->prepare(
+            "SELECT a.week_id FROM " . progreso_equip_table('tasks') . " t
+             JOIN " . progreso_equip_table('assignments') . " a ON a.id = t.assignment_id
+             WHERE t.id = %d", $id
+        ), ARRAY_A);
+        if (!$row) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
+        $worker_name = sanitize_text_field((string) $request->get_param('workerName'));
+        $worker = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . progreso_equip_table('workers') . " WHERE name = %s", $worker_name), ARRAY_A);
+        if (!$worker) return new WP_Error('invalid_data', 'No existe esa persona.', array('status' => 400));
+        $upd['assignment_id'] = progreso_equip_ensure_assignment(intval($row['week_id']), intval($worker['id']));
+        $fmt[] = '%d';
+    }
+    // Editar el texto (tareas de texto libre), las notas (Ramiro, 5/11 06:54) o la subzona
+    // (cowork, 11/11 05:40: "+ Tarea" ya admitía subzona al crear, pero editarla no se podía).
+    if ($request->get_param('customText') !== null || $request->get_param('notas') !== null || $request->get_param('subzona') !== null) {
+        $row = $wpdb->get_row($wpdb->prepare("SELECT task_type_id, params FROM " . progreso_equip_table('tasks') . " WHERE id = %d", $id), ARRAY_A);
+        if (!$row) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
+        $params = json_decode($row['params'], true) ?: array();
+        if ($request->get_param('customText') !== null && $row['task_type_id'] === 'custom') {
+            $texto = sanitize_text_field(trim((string) $request->get_param('customText')));
+            if ($texto === '') return new WP_Error('invalid_data', 'El texto de la tarea no puede quedar vacío.', array('status' => 400));
+            $params['texto'] = $texto;
+        }
+        if ($request->get_param('notas') !== null) {
+            $notas = sanitize_text_field(trim((string) $request->get_param('notas')));
+            if ($notas === '') unset($params['notas']); else $params['notas'] = $notas;
+        }
+        if ($request->get_param('subzona') !== null) {
+            $subzona = intval($request->get_param('subzona'));
+            if ($subzona < 1 || $subzona > 8) unset($params['subzona']); else $params['subzona'] = $subzona;
+        }
+        $upd['params'] = wp_json_encode($params ?: new stdClass()); $fmt[] = '%s';
+    }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    // Marcar hecha no cuenta como modificación; cambiar persona, día, texto o notas, sí.
+    if (array_diff(array_keys($upd), array('done', 'done_at', 'status'))) {
+        $upd['updated_by'] = progreso_equip_actor($request); $fmt[] = '%s';
+        $upd['updated_at'] = current_time('mysql');           $fmt[] = '%s';
+    }
     $wpdb->update(progreso_equip_table('tasks'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
+}
+
+// Quitar una tarea concreta de la semana (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30: Ramiro
+// quiere poder quitarlas, no solo moverlas a la semana siguiente). Borrado de verdad, no un
+// estado "cancelada" — el frontend solo enseña el botón al responsable o a un socio.
+//
+// 17/11 10:40 (Cowork, URGENTE — probado en vivo): si otra tarea ya movida apuntaba a esta como
+// destino (el caso normal: una tarea vieja sin hacer que el barrido progreso_equip_sweep_
+// overdue_into_current_week() fue arrastrando semana tras semana hasta esta), antes se
+// "desenlazaba" poniendo su moved_to_task_id a null — pensado para no dejar un puntero roto,
+// pero el efecto real es que esa tarea vieja vuelve a quedar "pendiente, sin mover" y el
+// barrido la vuelve a recoger en la siguiente carga, recreando exactamente lo que se acababa de
+// quitar (comprobado en vivo: borrar la copia de la semana 37 hizo reaparecer 10 tareas nuevas
+// con postponedCount 2). Un moved_to_task_id apuntando a un id ya borrado no rompe nada al
+// leerlo (superadmin_get_week_detail ya comprobaba si existía antes de usarlo) — así que ahora,
+// en vez de desenlazar, se marca la vieja como "descartada" (deja de contar como pendiente para
+// el barrido, sin borrarla: queda en el histórico como no hecha, tal como pidió Ramiro).
+function progreso_equip_delete_task($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $tasks_table = progreso_equip_table('tasks');
+    $task = $wpdb->get_var($wpdb->prepare("SELECT id FROM {$tasks_table} WHERE id = %d", $id));
+    if (!$task) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
+    $wpdb->update($tasks_table, array('status' => 'descartada'), array('moved_to_task_id' => $id), array('%s'), array('%d'));
+    $wpdb->delete($tasks_table, array('id' => $id), array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
+// "Dar por cerradas las arrastradas de antes de una fecha" (Cowork, 17/11 10:40 — jefe/socio):
+// para las tareas viejas, sin hacer, que nadie va a ponerse a hacer ya — se marcan (ellas y toda
+// su cadena de copias arrastradas, si el barrido ya las había movido alguna vez) como
+// "descartada", NUNCA se borran. Punto (b) de la misma nota (que "Quitar" haga esto con la
+// original) ya queda cubierto por progreso_equip_delete_task(); esto es para cerrarlas de golpe
+// sin tener que quitar una por una.
+function progreso_equip_cerrar_arrastradas($request) {
+    global $wpdb;
+    $tasks_table = progreso_equip_table('tasks');
+    $antes_de = sanitize_text_field((string) $request->get_param('antesDe'));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $antes_de)) {
+        return new WP_Error('bad_request', 'Falta antesDe (fecha YYYY-MM-DD).', array('status' => 400));
+    }
+    $raices = $wpdb->get_col($wpdb->prepare(
+        "SELECT id FROM {$tasks_table} WHERE task_date < %s AND done = 0 AND status != 'descartada'", $antes_de
+    ));
+    if (!$raices) return rest_ensure_response(array('success' => true, 'cerradas' => 0));
+
+    // Sigue la cadena de moved_to_task_id (puede haber varias generaciones de arrastre, una por
+    // cada semana que la fue recogiendo) y marca TODAS las que encuentre — nunca se borra nada.
+    $vistos = array();
+    $pendientes = $raices;
+    while ($pendientes) {
+        $id = intval(array_shift($pendientes));
+        if (isset($vistos[$id])) continue;
+        $vistos[$id] = true;
+        $siguiente = $wpdb->get_var($wpdb->prepare("SELECT moved_to_task_id FROM {$tasks_table} WHERE id = %d", $id));
+        if ($siguiente) $pendientes[] = intval($siguiente);
+    }
+    $ids = array_keys($vistos);
+    $ph = implode(',', array_fill(0, count($ids), '%d'));
+    $wpdb->query($wpdb->prepare("UPDATE {$tasks_table} SET status = 'descartada' WHERE id IN ($ph)", ...$ids));
+
+    return rest_ensure_response(array('success' => true, 'cerradas' => count($ids)));
 }
 
 // Las tareas no se cancelan: solo se mueven a la semana siguiente. La
@@ -10876,6 +19978,49 @@ function progreso_equip_postpone_task($request) {
     return rest_ensure_response(array('success' => true, 'queued' => false, 'newTaskId' => $new_task_id, 'nextWeekId' => intval($next_week['id'])));
 }
 
+// POST /equipacion/tasks/{id}/duplicar — "⧉ Duplicar a..." (Ramiro 12/11 11:40: "que se puedan
+// duplicar una tarea para que la tengan varios, como balizar"). Copia independiente para cada
+// persona marcada (mismo tipo, fecha, params y competición), done=0 siempre — cada una marca la
+// suya. `workerIds` (array) o `all: true` para todo el equipo de esa semana. Nunca duplica a
+// quien ya tenga esa misma tarea (tipo+fecha) esa semana, para no crear dobles.
+function progreso_equip_duplicar_tarea($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $tasks_table = progreso_equip_table('tasks');
+    $task = $wpdb->get_row($wpdb->prepare(
+        "SELECT t.*, a.week_id FROM {$tasks_table} t JOIN " . progreso_equip_table('assignments') . " a ON a.id = t.assignment_id WHERE t.id = %d", $id
+    ), ARRAY_A);
+    if (!$task) return new WP_Error('not_found', 'Tarea no encontrada.', array('status' => 404));
+
+    if ($request->get_param('all')) {
+        $worker_ids = $wpdb->get_col($wpdb->prepare(
+            "SELECT worker_id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d", intval($task['week_id'])
+        ));
+    } else {
+        $worker_ids = (array) $request->get_param('workerIds');
+    }
+    $worker_ids = array_values(array_unique(array_filter(array_map('intval', $worker_ids))));
+    if (!$worker_ids) return new WP_Error('invalid_data', 'Elige al menos una persona.', array('status' => 400));
+
+    $creadas = 0; $omitidas = 0;
+    foreach ($worker_ids as $wid) {
+        $assignment_id = progreso_equip_ensure_assignment(intval($task['week_id']), $wid);
+        $ya = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$tasks_table} WHERE assignment_id = %d AND task_type_id = %s AND task_date = %s",
+            $assignment_id, $task['task_type_id'], $task['task_date']
+        ));
+        if ($ya) { $omitidas++; continue; }
+        $wpdb->insert($tasks_table, array(
+            'assignment_id'  => $assignment_id, 'task_type_id' => $task['task_type_id'], 'task_date' => $task['task_date'],
+            'params'         => $task['params'], 'done' => 0, 'status' => 'pendiente', 'original_date' => $task['task_date'],
+            'competition_id' => $task['competition_id'], 'manual' => intval($task['manual']),
+            'created_by'     => progreso_equip_actor($request), 'created_at' => current_time('mysql'),
+        ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%d', '%s', '%s'));
+        $creadas++;
+    }
+    return rest_ensure_response(array('success' => true, 'creadas' => $creadas, 'omitidas' => $omitidas));
+}
+
 function progreso_equip_create_block($request) {
     global $wpdb;
     progreso_equip_ensure_tables();
@@ -10906,13 +20051,18 @@ function progreso_equip_create_block($request) {
         }
     }
 
+    // Bloques planificados (Ramiro, 11/11 04:27: "vale, hacerlo" — la tabla grado→presas que
+    // Álvaro llevaba en Notion, dentro de "Poner bloques"): por defecto sigue creándose como
+    // "ya puesto" (done=1, para no romper el uso de siempre), pero si se manda done=false se
+    // crea como plan — grado y presas decididos de antemano, pendiente de equipar de verdad.
+    $done = $request->get_param('done') === null ? 1 : ($request->get_param('done') ? 1 : 0);
     $wpdb->insert(progreso_equip_table('blocks'), array(
         'assignment_id'   => $assignment_id,
         'subzone'         => $subzone,
         'grade_color'     => $grade,
         'hold_set_ids'    => implode(',', $hold_set_ids),
         'is_traverse'     => $is_traverse ? 1 : 0,
-        'done'            => 1,
+        'done'            => $done,
         'uploaded_webapp' => 0,
         'created_at'      => current_time('mysql'),
     ), array('%d', '%d', '%s', '%s', '%d', '%d', '%d', '%s'));
@@ -10955,12 +20105,24 @@ function progreso_equip_get_competitions($request = null) {
     return rest_ensure_response(array('success' => true, 'data' => array_map('progreso_equip_competition_fila', $rows)));
 }
 
+// Resumen rápido (días que faltan, tareas y bloques) para que la lista de competiciones diga
+// algo de un vistazo en vez de una fila de texto plano (Ramiro, 4/11 05:48: "no pude ver la compe
+// que creamos" — ni tarjeta pulsable ni estado, parecía que no había nada).
 function progreso_equip_competition_fila($r) {
+    global $wpdb;
+    $id = intval($r['id']);
+    $tasks_total  = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('tasks') . " WHERE competition_id = %d", $id)));
+    $tasks_hechas = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('tasks') . " WHERE competition_id = %d AND done = 1", $id)));
+    $blocks_total = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d", $id)));
+    $blocks_colocados = intval($wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d AND x_pct IS NOT NULL", $id)));
     return array(
-        'id' => intval($r['id']), 'name' => $r['name'], 'compDate' => $r['comp_date'],
+        'id' => $id, 'name' => $r['name'], 'compDate' => $r['comp_date'],
         'compEndDate' => $r['comp_end_date'] ?: $r['comp_date'],
         'leadWeeks' => intval($r['lead_weeks']), 'isTest' => (bool) $r['is_test'],
         'tasksStartDate' => date('Y-m-d', strtotime($r['comp_date']) - intval($r['lead_weeks']) * 7 * 86400),
+        'tasksTotal' => $tasks_total, 'tasksHechas' => $tasks_hechas,
+        'blocksTotal' => $blocks_total, 'blocksColocados' => $blocks_colocados,
+        'modoActivo' => (bool) $r['modo_activo'],
     );
 }
 
@@ -10976,7 +20138,9 @@ function progreso_equip_create_competition($request) {
     $comp_end_date_in = sanitize_text_field((string) $request->get_param('compEndDate'));
     $comp_end_date = ($comp_end_date_in && strtotime($comp_end_date_in) >= strtotime($comp_date))
         ? date('Y-m-d', strtotime($comp_end_date_in)) : $comp_date;
-    $lead_weeks = intval($request->get_param('leadWeeks')) ?: 3;
+    // Mínimo 3: por debajo no hay sitio para una semana de diseño distinta de la de limpieza sin
+    // mover las de prep/equipar, que son fijas (cowork, 4/11 08:30 — ver generate-plan).
+    $lead_weeks = max(3, intval($request->get_param('leadWeeks')) ?: 3);
     $is_test = $request->get_param('isTest') ? 1 : 0;
 
     $wpdb->insert(progreso_equip_table('competitions'), array(
@@ -11031,26 +20195,174 @@ function progreso_equip_update_competition($request) {
     if ($request->get_param('name') !== null)      { $upd['name']      = sanitize_text_field($request->get_param('name'));             $fmt[] = '%s'; }
     if ($request->get_param('compDate') !== null)  { $upd['comp_date'] = date('Y-m-d', strtotime($request->get_param('compDate')));     $fmt[] = '%s'; }
     if ($request->get_param('compEndDate') !== null) { $upd['comp_end_date'] = date('Y-m-d', strtotime($request->get_param('compEndDate'))); $fmt[] = '%s'; }
-    if ($request->get_param('leadWeeks') !== null)  { $upd['lead_weeks'] = intval($request->get_param('leadWeeks'));                     $fmt[] = '%d'; }
+    if ($request->get_param('leadWeeks') !== null)  { $upd['lead_weeks'] = max(3, intval($request->get_param('leadWeeks')));             $fmt[] = '%d'; }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     $wpdb->update(progreso_equip_table('competitions'), $upd, array('id' => $id), $fmt, array('%d'));
     return rest_ensure_response(array('success' => true));
 }
 
 // Borra también las tareas que hubiera generado el plan de esta compe (si lo hubo), para no
-// dejar huérfanas tareas "Compe: ..." sin ninguna competición a la que pertenezcan.
+// dejar huérfanas tareas "Compe: ..." sin ninguna competición a la que pertenezcan. Si la compe
+// es de PRUEBA, además borra ENTERAS las semanas de prueba que tocó su plan, tengan lo que
+// tengan (también el reparto normal de mantenimiento que añade `progreso_equip_ensure_week_for_lead`
+// al crear la semana) — es todo dato de prueba desechable, igual que el resto. Nunca una semana
+// REAL (cowork, 4/11 07:20 y reprueba 08:30: primero dejaba huérfanas las semanas con tareas de
+// mantenimiento normal además de las de compe; "borra todas sus semanas de prueba, tengan lo que
+// tengan").
 function progreso_equip_delete_competition($request) {
     global $wpdb;
     $id = intval($request['id']);
-    $wpdb->delete(progreso_equip_table('tasks'), array('competition_id' => $id), array('%d'));
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT is_test FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $id), ARRAY_A);
+    $tasks_table = progreso_equip_table('tasks');
+    $assignments_table = progreso_equip_table('assignments');
+    $semanas_afectadas = $comp && $comp['is_test'] ? $wpdb->get_col($wpdb->prepare(
+        "SELECT DISTINCT a.week_id FROM {$tasks_table} t JOIN {$assignments_table} a ON a.id = t.assignment_id WHERE t.competition_id = %d",
+        $id
+    )) : array();
+
+    // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md, punto 8: compe de prueba
+    // borrable entera): si es de prueba, borra también los blokes reales que se hubieran creado
+    // para sus bloques — nunca para una compe REAL, ahí el bloke ya es contenido de verdad de la
+    // app y se deja huérfano (sin competition_id) en vez de borrarlo.
+    // 🚨 CRÍTICO (cowork, 07/11 11:00): esta petición llega por el Club (blog 3) — sin
+    // switch_to_blog(1), wp_delete_post() borraba el post con ESE MISMO id pero EN EL CLUB, que
+    // no tiene nada que ver con el bloke real: ahí esos ids eran 16 PEDIDOS REALES (la mayoría
+    // completados, con factura). Comprobado con cowork: nunca se llegó a borrar ninguno porque lo
+    // pilló antes, pero el riesgo era real. Ahora: dentro de switch_to_blog(1), y solo se borra
+    // si el post es de verdad un 'blokes' (nunca a ciegas por id).
+    $diagnostico_blokes = array();
+    if ($comp && $comp['is_test']) {
+        $bloke_ids = $wpdb->get_col($wpdb->prepare(
+            "SELECT bloke_post_id FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d AND bloke_post_id IS NOT NULL", $id
+        ));
+        if ($bloke_ids) {
+            $es_multisite = is_multisite();
+            if ($es_multisite) switch_to_blog(1);
+            // Cowork, 07/11 11:45: tras el primer arreglo los blokes de prueba NO se borraron
+            // (seguían en borrador) — en vez de fiarse de get_post_type()/get_post() (que pueden
+            // devolver algo cacheado de antes del switch_to_blog), se comprueba aquí con SQL
+            // directo contra {$wpdb->posts} — esa tabla sí respeta el prefijo del blog actual
+            // siempre, sin caché de objetos de por medio — y se devuelve en la respuesta qué vio
+            // y qué hizo con cada uno, para poder ver exactamente dónde falla si vuelve a pasar.
+            foreach ($bloke_ids as $bloke_id) {
+                $bloke_id = intval($bloke_id);
+                if (!$bloke_id) continue;
+                clean_post_cache($bloke_id);
+                $tipo_real = $wpdb->get_var($wpdb->prepare("SELECT post_type FROM {$wpdb->posts} WHERE ID = %d", $bloke_id));
+                $fila_diag = array('blokePostId' => $bloke_id, 'blogActual' => get_current_blog_id(), 'postType' => $tipo_real);
+                if ($tipo_real === 'blokes') {
+                    blokes_quitar_completions_de_bloke($bloke_id);
+                    $ok = wp_delete_post($bloke_id, true);
+                    $fila_diag['borrado'] = (bool) $ok;
+                    // Cowork, 07/11 16:30: wp_delete_post() fallaba justo cuando ese MISMO id
+                    // existía como pedido/suscripción en el Club (otro blog) — algo en su cadena
+                    // de hooks (WooCommerce/Subscriptions) sigue mirando ahí aunque estemos ya en
+                    // switch_to_blog(1), y cancela el borrado por verlo "ocupado". Como aquí ya
+                    // hemos comprobado por SQL directo que el post de ESTE blog es de verdad un
+                    // 'blokes' (nunca un pedido), si wp_delete_post() no lo consigue se borra la
+                    // fila a mano (posts/postmeta/term_relationships, todo con el prefijo del blog
+                    // 1 en el que ya estamos) — sin pasar por esos hooks.
+                    if (!$ok) {
+                        $wpdb->delete($wpdb->postmeta, array('post_id' => $bloke_id), array('%d'));
+                        $wpdb->delete($wpdb->term_relationships, array('object_id' => $bloke_id), array('%d'));
+                        $wpdb->delete($wpdb->posts, array('ID' => $bloke_id), array('%d'));
+                        clean_post_cache($bloke_id);
+                        $sigue = $wpdb->get_var($wpdb->prepare("SELECT ID FROM {$wpdb->posts} WHERE ID = %d", $bloke_id));
+                        $fila_diag['borradoSql'] = ($sigue === null);
+                        $fila_diag['borrado'] = ($sigue === null);
+                    }
+                } else {
+                    $fila_diag['borrado'] = false;
+                    $fila_diag['motivo'] = $tipo_real ? 'post_type no es blokes' : 'no existe ese post en este blog';
+                }
+                $diagnostico_blokes[] = $fila_diag;
+            }
+            if ($es_multisite) restore_current_blog();
+        }
+    }
+    // Ramiro 12/11 09:11: al borrar la compe entera, borrar también las fotos de sus bloques de
+    // Medios — si no, se quedan huérfanas. Paso aparte, antes de borrar las filas.
+    $fotos_de_la_compe = $wpdb->get_col($wpdb->prepare(
+        "SELECT photo_attachment_id FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d AND photo_attachment_id IS NOT NULL", $id
+    ));
+    foreach ($fotos_de_la_compe as $attachment_id) {
+        wp_delete_attachment(intval($attachment_id), true);
+    }
+    $wpdb->delete(progreso_equip_table('comp_resultados'), array('competition_id' => $id), array('%d'));
+    $wpdb->delete(progreso_equip_table('comp_participantes_rapidos'), array('competition_id' => $id), array('%d'));
+    $wpdb->delete(progreso_equip_table('comp_categorias'), array('competition_id' => $id), array('%d')); // 20/11 06:30 punto 2
+    $wpdb->delete($tasks_table, array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('comp_blocks'), array('competition_id' => $id), array('%d'));
     $wpdb->delete(progreso_equip_table('competitions'), array('id' => $id), array('%d'));
-    return rest_ensure_response(array('success' => true));
+
+    foreach ($semanas_afectadas as $week_id) {
+        $week_id = intval($week_id);
+        $semana = $wpdb->get_row($wpdb->prepare("SELECT is_test FROM " . progreso_equip_table('weeks') . " WHERE id = %d", $week_id), ARRAY_A);
+        if (!$semana || !$semana['is_test']) continue; // nunca una semana real
+        $assignment_ids = $wpdb->get_col($wpdb->prepare("SELECT id FROM {$assignments_table} WHERE week_id = %d", $week_id));
+        if ($assignment_ids) {
+            $ph = implode(',', array_fill(0, count($assignment_ids), '%d'));
+            $wpdb->query($wpdb->prepare("DELETE FROM {$tasks_table} WHERE assignment_id IN ($ph)", ...$assignment_ids));
+            $wpdb->query($wpdb->prepare("DELETE FROM " . progreso_equip_table('blocks') . " WHERE assignment_id IN ($ph)", ...$assignment_ids));
+            $wpdb->query($wpdb->prepare("DELETE FROM {$assignments_table} WHERE week_id = %d", $week_id));
+        }
+        $wpdb->delete(progreso_equip_table('weeks'), array('id' => $week_id), array('%d'));
+    }
+    return rest_ensure_response(array('success' => true, 'diagnosticoBlokes' => $diagnostico_blokes));
+}
+
+// POST /progreso/v1/compe/limpiar-blokes-prueba-antiguos — barrido de mantenimiento (cowork,
+// 08/11 11:15: 45 blokes de prueba quedaron en la papelera del sitio Principal de rondas
+// anteriores, de antes de arreglar el borrado de verdad). Solo socio. Nunca toca un bloke real:
+// busca por `_comp_competition_id` (meta que SOLO pone progreso_equip_set_modo_compe() al crear
+// un bloke de compe) en la papelera del blog 1, con el mismo camino seguro de
+// progreso_equip_delete_competition() (SQL directo si wp_delete_post() no puede por los hooks de
+// WooCommerce/Subscriptions). Se puede volver a llamar sin riesgo si vuelve a quedar alguno.
+function progreso_compe_limpiar_blokes_prueba_antiguos($request) {
+    if (!blokes_es_socio()) return new WP_Error('forbidden', 'Solo un socio puede hacer esta limpieza.', array('status' => 403));
+    global $wpdb;
+    $es_multisite = is_multisite();
+    if ($es_multisite) switch_to_blog(1);
+    $bloke_ids = $wpdb->get_col(
+        "SELECT p.ID FROM {$wpdb->posts} p
+         JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = '_comp_competition_id'
+         WHERE p.post_type = 'blokes' AND p.post_status = 'trash'"
+    );
+    $diagnostico = array();
+    foreach ($bloke_ids as $bloke_id) {
+        $bloke_id = intval($bloke_id);
+        clean_post_cache($bloke_id);
+        $tipo_real = $wpdb->get_var($wpdb->prepare("SELECT post_type FROM {$wpdb->posts} WHERE ID = %d", $bloke_id));
+        $fila_diag = array('blokePostId' => $bloke_id, 'postType' => $tipo_real);
+        if ($tipo_real === 'blokes') {
+            blokes_quitar_completions_de_bloke($bloke_id);
+            $ok = wp_delete_post($bloke_id, true);
+            if (!$ok) {
+                $wpdb->delete($wpdb->postmeta, array('post_id' => $bloke_id), array('%d'));
+                $wpdb->delete($wpdb->term_relationships, array('object_id' => $bloke_id), array('%d'));
+                $wpdb->delete($wpdb->posts, array('ID' => $bloke_id), array('%d'));
+                clean_post_cache($bloke_id);
+                $ok = ($wpdb->get_var($wpdb->prepare("SELECT ID FROM {$wpdb->posts} WHERE ID = %d", $bloke_id)) === null);
+            }
+            $fila_diag['borrado'] = (bool) $ok;
+        } else {
+            $fila_diag['borrado'] = false;
+        }
+        $diagnostico[] = $fila_diag;
+    }
+    if ($es_multisite) restore_current_blog();
+    return rest_ensure_response(array('success' => true, 'data' => $diagnostico));
 }
 
 function progreso_equip_update_comp_block($request) {
     global $wpdb;
     $id = intval($request['id']);
+    // Ramiro 12/11 11:35: mover un bloque a otro equipador ("mover entre personas") es solo de
+    // Álvaro o un socio — registrar el propio trabajo (presas, volúmenes, subzona, foto) sigue
+    // abierto a cualquier equipador, es el supuesto pendiente de confirmar de la nota.
+    if ($request->get_param('equipador') !== null && !progreso_equip_es_jefe_o_socio()) {
+        return new WP_Error('forbidden', 'Solo Álvaro o un socio puede mover un bloque a otro equipador.', array('status' => 403));
+    }
     $upd = array(); $fmt = array();
     if ($request->get_param('unplace')) {
         // Quitar la burbuja del mapa — vuelve a la bandeja de "sin colocar".
@@ -11062,7 +20374,21 @@ function progreso_equip_update_comp_block($request) {
     if ($request->get_param('subzone') !== null) { $upd['subzone'] = intval($request->get_param('subzone')); $fmt[] = '%d'; }
     if ($request->get_param('volumes') !== null) { $upd['volumes'] = sanitize_textarea_field((string) $request->get_param('volumes')); $fmt[] = '%s'; }
     if ($request->get_param('equipador') !== null) { $upd['equipador'] = sanitize_text_field((string) $request->get_param('equipador')); $fmt[] = '%s'; }
-    if ($request->get_param('photoUrl') !== null) { $upd['photo_url'] = sanitize_text_field((string) $request->get_param('photoUrl')); $fmt[] = '%s'; }
+    if ($request->get_param('photoUrl') !== null) {
+        $nueva_url = sanitize_text_field((string) $request->get_param('photoUrl'));
+        $upd['photo_url'] = $nueva_url; $fmt[] = '%s';
+        // "✕ Quitar foto" (Ramiro 12/11 09:11): además de quitar la referencia, borrar de
+        // verdad el adjunto de Medios — nunca dejarlo huérfano.
+        if ($nueva_url === '') {
+            $bloque_actual = $wpdb->get_row($wpdb->prepare(
+                "SELECT photo_attachment_id FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id
+            ), ARRAY_A);
+            if ($bloque_actual && !empty($bloque_actual['photo_attachment_id'])) {
+                wp_delete_attachment(intval($bloque_actual['photo_attachment_id']), true);
+            }
+            $upd['photo_attachment_id'] = null; $fmt[] = '%d';
+        }
+    }
     if ($request->get_param('tested') !== null) { $upd['tested'] = $request->get_param('tested') ? 1 : 0; $fmt[] = '%d'; }
     if ($request->get_param('xPct') !== null) { $upd['x_pct'] = floatval($request->get_param('xPct')); $fmt[] = '%f'; }
     if ($request->get_param('yPct') !== null) { $upd['y_pct'] = floatval($request->get_param('yPct')); $fmt[] = '%f'; }
@@ -11078,14 +20404,79 @@ function progreso_equip_update_comp_block($request) {
     return rest_ensure_response(array('success' => true));
 }
 
+// POST /equipacion/comp-blocks/{id}/intercambiar-numero — punto 8 (Ramiro, 11/11 05:01): un
+// bloque ya empezado a equipar resulta demasiado difícil/fácil para su número; se intercambia
+// solo el número con otro bloque de la misma compe (lo que depende del número, como el color de
+// escala o la posición en el ranking/tele, se recalcula solo porque se basa en este campo). La
+// burbuja, la ficha (posición, presas, equipador, foto) y los resultados ya apuntados se quedan
+// con su bloque físico (id), no se tocan.
+function progreso_equip_intercambiar_numero_comp_block($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $otro_numero = $request->get_param('otroNumero');
+    if ($otro_numero === null || $otro_numero === '') {
+        return new WP_Error('invalid_data', 'Falta el número con el que intercambiar.', array('status' => 400));
+    }
+    $otro_numero = intval($otro_numero);
+    $table = progreso_equip_table('comp_blocks');
+    $bloque = $wpdb->get_row($wpdb->prepare("SELECT * FROM $table WHERE id = %d", $id), ARRAY_A);
+    if (!$bloque) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
+    if (intval($bloque['number']) === $otro_numero) {
+        return new WP_Error('invalid_data', 'Es el mismo número.', array('status' => 400));
+    }
+    $otro = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM $table WHERE competition_id = %d AND number = %d", $bloque['competition_id'], $otro_numero
+    ), ARRAY_A);
+    if (!$otro) return new WP_Error('not_found', 'No hay ningún bloque con ese número en esta compe.', array('status' => 404));
+    $wpdb->update($table, array('number' => $otro_numero), array('id' => $id), array('%d'), array('%d'));
+    $wpdb->update($table, array('number' => intval($bloque['number'])), array('id' => intval($otro['id'])), array('%d'), array('%d'));
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'bloqueId' => $id, 'nuevoNumero' => $otro_numero,
+        'otroBloqueId' => intval($otro['id']), 'otroNuevoNumero' => intval($bloque['number']),
+    )));
+}
+
+// POST /equipacion/competitions/{id}/comp-blocks — "Vamos bien de tiempo, añadir el 17 y 18"
+// (Ramiro, 11/11 05:01): un bloque más, numerado detrás del último que ya hubiera. El cartel y
+// el resto de sitios que cuentan bloques leen siempre COUNT(comp_blocks), nunca un 16 fijo.
+function progreso_equip_add_comp_block($request) {
+    global $wpdb;
+    $comp_id = intval($request['id']);
+    $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $comp_id));
+    if (!$existe) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+    $siguiente = intval($wpdb->get_var($wpdb->prepare(
+        "SELECT COALESCE(MAX(number), 0) + 1 FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d", $comp_id
+    )));
+    $wpdb->insert(progreso_equip_table('comp_blocks'), array(
+        'competition_id' => $comp_id, 'number' => $siguiente, 'status' => 'planeado',
+    ), array('%d', '%d', '%s'));
+    return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id, 'number' => $siguiente));
+}
+
+// DELETE /equipacion/comp-blocks/{id} — deshacer un bloque añadido de más, solo mientras no se
+// haya colocado en el mapa (si ya está colocado o tiene datos, se queda — igual que cualquier
+// otro bloque de la compe; para quitarlo de verdad hay que hacerlo a propósito desde fuera).
+function progreso_equip_delete_comp_block($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $block = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id), ARRAY_A);
+    if (!$block) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
+    if ($block['x_pct'] !== null) return new WP_Error('placed', 'Este bloque ya está colocado en el mapa — quítalo del mapa antes de borrarlo.', array('status' => 400));
+    if (!empty($block['photo_attachment_id'])) {
+        wp_delete_attachment(intval($block['photo_attachment_id']), true);
+    }
+    $wpdb->delete(progreso_equip_table('comp_blocks'), array('id' => $id), array('%d'));
+    return rest_ensure_response(array('success' => true));
+}
+
 // POST /equipacion/comp-blocks/{id}/photo — sube la foto del bloque desde el móvil (Álvaro no
 // va a usar la API para pegar una URL, Ramiro 1/11 17:20). Misma mecánica que el avatar del
 // perfil (`blokes_api_upload_avatar`): `media_handle_upload` a la mediateca de WordPress.
 function progreso_equip_upload_comp_block_photo($request) {
     global $wpdb;
     $id = intval($request['id']);
-    $existe = $wpdb->get_var($wpdb->prepare("SELECT id FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id));
-    if (!$existe) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
+    $bloque = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id), ARRAY_A);
+    if (!$bloque) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
 
     $files = $request->get_file_params();
     if (empty($files['file'])) return new WP_Error('no_file', 'Falta el fichero.', array('status' => 400));
@@ -11097,8 +20488,856 @@ function progreso_equip_upload_comp_block_photo($request) {
     if (is_wp_error($attachment_id)) return $attachment_id;
     $url = wp_get_attachment_url($attachment_id);
 
-    $wpdb->update(progreso_equip_table('comp_blocks'), array('photo_url' => $url), array('id' => $id), array('%s'), array('%d'));
+    // Cowork 12/11 09:30, encargo de Ramiro: al subir una foto nueva encima de otra, la anterior
+    // se queda huérfana en Medios. Se borra la que hubiera antes (si la hay) de verdad, no solo
+    // la referencia en la fila.
+    if (!empty($bloque['photo_attachment_id'])) {
+        wp_delete_attachment(intval($bloque['photo_attachment_id']), true);
+    }
+
+    $wpdb->update(
+        progreso_equip_table('comp_blocks'),
+        array('photo_url' => $url, 'photo_attachment_id' => $attachment_id),
+        array('id' => $id), array('%s', '%d'), array('%d')
+    );
     return rest_ensure_response(array('success' => true, 'photoUrl' => $url));
+}
+
+// ============================================================
+//  "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 7/11 08:39 en adelante).
+//  Puntuación/categorías quedan deliberadamente SIN fijar en código (punto final, 08:51): de
+//  momento se guarda top/zona/intentos de cada uno y se ordena por nº de tops y luego menos
+//  intentos, una sola categoría "General" por defecto — cuando Ramiro decida el formato de
+//  verdad, cambia solo blokes_compe_config(), no la forma de guardar los datos.
+// ============================================================
+
+// Al borrar una compe de PRUEBA (y con ella sus blokes), quita cualquier rastro de ese bloke en
+// completions de usuarios/placeholders — si no, la zona personal/ligas se quedan con tops de un
+// bloke que ya no existe. Llamar siempre ya dentro de switch_to_blog(1) (el caller es quien
+// decide el contexto). OJO — límite a propósito: esto NO deshace puntos de liga ni ascensos/
+// descensos de categoría que ese top de prueba pudiera haber disparado (blokes_register_top_
+// for_leagues hace swaps con otros miembros reales de la liga, y deshacerlo a ciegas podría
+// tocar la clasificación de alguien real) — si una compe de prueba llegó a afectar a eso, hay
+// que revisarlo a mano, no lo intenta este helper.
+function blokes_quitar_completions_de_bloke($post_id) {
+    global $wpdb;
+    $post_id = intval($post_id);
+    if (!$post_id) return;
+    $like = '%' . $wpdb->esc_like('i:' . $post_id . ';') . '%';
+    $user_ids = $wpdb->get_col($wpdb->prepare(
+        "SELECT user_id FROM {$wpdb->usermeta} WHERE meta_key = '_blokes_completed' AND meta_value LIKE %s", $like
+    ));
+    foreach ($user_ids as $uid) {
+        $uid = intval($uid);
+        $completed = get_user_meta($uid, '_blokes_completed', true);
+        if (is_array($completed)) {
+            update_user_meta($uid, '_blokes_completed', array_values(array_diff(array_map('intval', $completed), array($post_id))));
+        }
+        $log = get_user_meta($uid, '_blokes_completion_log', true);
+        if (is_array($log)) {
+            update_user_meta($uid, '_blokes_completion_log', array_values(array_filter($log, function($e) use ($post_id) {
+                return intval($e['postId'] ?? 0) !== $post_id;
+            })));
+        }
+        $fa = get_user_meta($uid, '_blokes_first_ascents', true);
+        if (is_array($fa)) {
+            update_user_meta($uid, '_blokes_first_ascents', array_values(array_diff(array_map('intval', $fa), array($post_id))));
+        }
+    }
+    $wpdb->delete(blokes_placeholder_completions_table(), array('post_id' => $post_id), array('%d'));
+}
+
+// Igual que blokes_toggle_completion() pero SIN alternar (marca hecho si no lo estaba ya, nunca
+// lo quita) — para cuando se apaga "modo compe" y los tops ya validados tienen que empezar a
+// contar en la zona personal y en las ligas como cualquier bloke normal, sin que nadie tenga que
+// volver a tocarlos uno a uno.
+function blokes_marcar_completado_si_no_estaba($user_id, $post_id) {
+    $saved = get_user_meta($user_id, '_blokes_completed', true);
+    $completed_ids = is_array($saved) ? array_map('intval', $saved) : array();
+    if (in_array(intval($post_id), $completed_ids, true)) return; // ya contaba, no duplicar
+    $completed_ids[] = intval($post_id);
+    $log = get_user_meta($user_id, '_blokes_completion_log', true);
+    if (!is_array($log)) $log = array();
+    $color = sanitize_text_field(get_field('bloke_color', $post_id) ?: 'green');
+    $sala  = sanitize_text_field(get_field('bloke_sala', $post_id) ?: 'entrada');
+    $log[] = array('postId' => intval($post_id), 'color' => $color, 'sala' => $sala, 'timestamp' => current_time('c'));
+    update_user_meta($user_id, '_blokes_completed', $completed_ids);
+    update_user_meta($user_id, '_blokes_completion_log', $log);
+    $count = (int) get_post_meta($post_id, '_bloke_completion_count', true) + 1;
+    update_post_meta($post_id, '_bloke_completion_count', $count);
+    if ($count === 1) {
+        $u = get_userdata($user_id);
+        $display_name = $u ? $u->display_name : '';
+        $first_name = explode(' ', trim($display_name))[0];
+        update_post_meta($post_id, '_bloke_first_ascent', array(
+            'user_id' => $user_id, 'name' => $first_name ?: $display_name, 'timestamp' => current_time('c'),
+        ));
+        $my_fa = get_user_meta($user_id, '_blokes_first_ascents', true);
+        if (!is_array($my_fa)) $my_fa = array();
+        $my_fa[] = intval($post_id);
+        update_user_meta($user_id, '_blokes_first_ascents', $my_fa);
+    }
+    blokes_register_top_for_leagues($user_id, intval($post_id));
+}
+
+// Igual que blokes_marcar_completado_si_no_estaba() pero para un alumno manual sin cuenta de
+// WordPress (comp_resultados.participante_tipo = 'placeholder') — mismo criterio no-toggle,
+// reutilizando la tabla e inserción que ya usa blokes_toggle_completion_placeholder().
+function blokes_marcar_completado_placeholder_si_no_estaba($placeholder_id, $post_id) {
+    global $wpdb;
+    blokes_ensure_placeholder_completions_table();
+    $table = blokes_placeholder_completions_table();
+    $ya = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM {$table} WHERE placeholder_id = %d AND post_id = %d", $placeholder_id, $post_id
+    ));
+    if ($ya) return; // ya contaba, no duplicar
+    $color = sanitize_text_field(get_field('bloke_color', $post_id) ?: 'green');
+    $sala  = sanitize_text_field(get_field('bloke_sala', $post_id) ?: 'entrada');
+    $wpdb->insert($table, array(
+        'placeholder_id' => intval($placeholder_id), 'post_id' => intval($post_id),
+        'color' => $color, 'sala' => $sala, 'completed_at' => current_time('mysql'), 'logged_by' => get_current_user_id(),
+    ), array('%d', '%d', '%s', '%s', '%s', '%d'));
+    $count = (int) get_post_meta($post_id, '_bloke_completion_count', true) + 1;
+    update_post_meta($post_id, '_bloke_completion_count', $count);
+    if ($count === 1) {
+        $nombre = $wpdb->get_var($wpdb->prepare("SELECT nombre FROM " . blokes_placeholder_table() . " WHERE id = %d", $placeholder_id));
+        $first_name = $nombre ? explode(' ', trim($nombre))[0] : '';
+        update_post_meta($post_id, '_bloke_first_ascent', array(
+            'placeholder_id' => intval($placeholder_id), 'name' => $first_name ?: $nombre, 'timestamp' => current_time('c'),
+        ));
+    }
+}
+
+// POST /equipacion/competitions/{id}/modo-compe — body {activo: bool}. Solo un socio (Ramiro,
+// 07/11 08:46: "lo enciende/apaga un socio"). Al ENCENDER: crea (si no existía ya) un bloke real
+// por cada uno de los 16 comp_blocks, oculto (post_status 'draft') hasta que alguien lo publique
+// — "Colección solo con los 16, sin foto" se resuelve en el frontend (punto aparte), aquí solo se
+// prepara el bloke sin ninguna foto puesta todavía (se guarda aparte, pendiente). Al APAGAR: los
+// 16 blokes pasan a 'publish' de verdad (ya son blokes normales de la colección, con su foto de
+// verdad si la había) y cualquier resultado YA VALIDADO de esta compe se traspasa a completions
+// normales (zona personal + ligas) — lo que siga "pendiente" o "rechazado" no cuenta, igual que
+// antes de apagar el modo.
+function progreso_equip_set_modo_compe($request) {
+    if (!blokes_es_socio()) return new WP_Error('forbidden', 'Solo un socio puede encender o apagar el modo compe.', array('status' => 403));
+    global $wpdb;
+    $id = intval($request['id']);
+    $activo = (bool) $request->get_param('activo');
+    $simular = (bool) $request->get_param('simular');
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $id), ARRAY_A);
+    if (!$comp) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+    // 20/11 06:30 (punto 3): una compe de PRUEBA nunca debe verse por la vía normal
+    // (modo_activo), solo con ?previewCompeId= — si no, "nadie real debe verla" se rompería en
+    // cuanto alguien pulsara "Encender modo compe" sin darse cuenta de que es la de prueba.
+    if ($comp['is_test'] && $activo) {
+        return new WP_Error('es_de_prueba', 'Esta es una compe de prueba — nunca se activa así (la verían los usuarios reales). Pruébala con ?previewCompeId=' . $id . ' en la tele.', array('status' => 409));
+    }
+    if ((bool) $comp['modo_activo'] === $activo) {
+        return rest_ensure_response(array('success' => true, 'data' => array('modoActivo' => $activo, 'aviso' => 'Ya estaba así.')));
+    }
+    $blocks = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $id
+    ), ARRAY_A);
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'modoActivoDespues' => $activo, 'bloques' => count($blocks),
+            'aviso' => $activo
+                ? 'Se crearán (o reutilizarán) ' . count($blocks) . ' blokes ocultos, uno por bloque de la compe.'
+                : 'Los blokes de la compe pasarán a publicados (colección normal) y los resultados ya validados contarán en ligas/zona personal.',
+        )));
+    }
+
+    // Esta petición llega por el subsitio Club (donde viven las tablas de equipación), pero los
+    // blokes de verdad (post_type 'blokes'), sus completions y las ligas viven en el subsitio
+    // Principal (blog 1) — multisite real, tablas con prefijo distinto. Todo lo que toca un
+    // bloke/usuario/liga tiene que hacerse dentro de switch_to_blog(1); todo lo que toca las
+    // tablas de progreso_equip_table() tiene que hacerse FUERA (en el contexto en que llegó la
+    // petición), nunca mezclado, o se escribe en el prefijo equivocado sin que salte ningún error.
+    $es_multisite = is_multisite();
+    $bloques_tocados = array();
+    if ($activo) {
+        // Fase 1 (blog 1): crear/actualizar cada bloke real. Solo se recogen aquí los datos del
+        // bloke — nada de progreso_equip_table() dentro de este switch.
+        if ($es_multisite) switch_to_blog(1);
+        $post_por_bloque = array(); // comp_block_id => post_id (solo los NUEVOS, para guardar luego)
+        foreach ($blocks as $b) {
+            $post_id = intval($b['bloke_post_id']);
+            $es_nuevo = !$post_id || !get_post($post_id);
+            if ($es_nuevo) {
+                $post_id = wp_insert_post(array(
+                    'post_type' => 'blokes', 'post_title' => 'Bloque ' . intval($b['number']),
+                    'post_status' => 'draft',
+                    'post_content' => 'Compe RocoMadrid · bloque ' . intval($b['number']),
+                ));
+                if (is_wp_error($post_id)) continue;
+                $post_por_bloque[intval($b['id'])] = $post_id;
+            }
+            // Los campos ACF de descripción/categoría no son post_content — sin tocarlos,
+            // ACF enseña su valor por defecto ("nuevo bloke de RocoMadrid" / TÉCNICA), que no
+            // pinta nada en un bloke de compe (cowork, 07/11 16:30).
+            update_field('bloke_description', 'Compe RocoMadrid · bloque ' . intval($b['number']), $post_id);
+            update_field('bloke_category', array(), $post_id);
+            if ($b['grade_color']) update_field('bloke_color', $b['grade_color'], $post_id);
+            // Subzona de la compe → "subsala" del bloke (mismo número) y "sala" real, según la
+            // tabla que dio cowork (07/11 11:45, sacada de los blokes que ya existen):
+            // subzona 1-2 = entrada, 3-7 = sala_grande, 8 = cueva.
+            if ($b['subzone'] !== null) {
+                $subzona = intval($b['subzone']);
+                update_field('bloke_subsala', (string) $subzona, $post_id);
+                $sala = ($subzona === 8) ? 'cueva' : (($subzona >= 3) ? 'sala_grande' : 'entrada');
+                update_field('bloke_sala', $sala, $post_id);
+            }
+            update_post_meta($post_id, '_comp_competition_id', $id);
+            update_post_meta($post_id, '_comp_block_id', intval($b['id']));
+            update_post_meta($post_id, '_comp_block_number', intval($b['number']));
+            if ($b['photo_url']) update_post_meta($post_id, '_comp_photo_pendiente', $b['photo_url']);
+            $bloques_tocados[] = $post_id;
+        }
+        if ($es_multisite) restore_current_blog();
+        // Fase 2 (de vuelta al contexto de la petición): guardar el id del bloke nuevo en
+        // comp_blocks — nunca dentro del switch_to_blog de arriba.
+        foreach ($post_por_bloque as $comp_block_id => $post_id) {
+            $wpdb->update(progreso_equip_table('comp_blocks'), array('bloke_post_id' => $post_id), array('id' => $comp_block_id), array('%d'), array('%d'));
+        }
+    } else {
+        // Resultados de ANTES de tocar ningún bloke (mismo contexto en que llegó la petición, las
+        // tablas de resultados son de equipación) — se aplican después, ya en blog 1, junto con
+        // el resto de lo que toca un bloke/usuario/liga. Sin validación en la app (Ramiro, 07/11
+        // 16:36): todo lo apuntado (estado siempre 'validado' desde ese cambio) cuenta al apagar,
+        // no solo "lo validado" de antes. Participantes con cuenta ('user') y alumnos manuales
+        // ('placeholder', 09/11: picker de Colección en modo tablet) sí tienen un sitio donde
+        // guardar su completion — un rápido no, sus tops quedan en comp_resultados hasta que, si
+        // crea cuenta, se le asocien (pendiente, ver notas).
+        $resultados = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND top = 1 AND participante_tipo IN ('user', 'placeholder')", $id
+        ), ARRAY_A);
+        $bloque_a_post = array();
+        foreach ($blocks as $b) { $bloque_a_post[intval($b['id'])] = intval($b['bloke_post_id']); }
+
+        if ($es_multisite) switch_to_blog(1);
+        foreach ($blocks as $b) {
+            $post_id = intval($b['bloke_post_id']);
+            if (!$post_id) continue;
+            $post = get_post($post_id);
+            if ($post && $post->post_status !== 'publish') {
+                wp_update_post(array('ID' => $post_id, 'post_status' => 'publish'));
+            }
+            $photo_pendiente = get_post_meta($post_id, '_comp_photo_pendiente', true);
+            if ($photo_pendiente) {
+                $attachment_id = attachment_url_to_postid($photo_pendiente);
+                if ($attachment_id) set_post_thumbnail($post_id, $attachment_id);
+                delete_post_meta($post_id, '_comp_photo_pendiente');
+            }
+            $bloques_tocados[] = $post_id;
+        }
+        // Resultados ya validados → completions normales (zona personal + ligas). Nunca los
+        // pendientes/rechazados: igual que antes de apagar el modo, esos no cuentan para nada.
+        foreach ($resultados as $r) {
+            $post_id = $bloque_a_post[intval($r['comp_block_id'])] ?? 0;
+            if (!$post_id) continue;
+            if ($r['participante_tipo'] === 'placeholder') {
+                blokes_marcar_completado_placeholder_si_no_estaba(intval($r['participante_id']), $post_id);
+            } else {
+                blokes_marcar_completado_si_no_estaba(intval($r['participante_id']), $post_id);
+            }
+        }
+        if ($es_multisite) restore_current_blog();
+    }
+
+    $wpdb->update(progreso_equip_table('competitions'), array('modo_activo' => $activo ? 1 : 0), array('id' => $id), array('%d'), array('%d'));
+    return rest_ensure_response(array('success' => true, 'data' => array('modoActivo' => $activo, 'bloques' => $bloques_tocados)));
+}
+
+// GET /progreso/v1/compe/estado — público (sin login), lo usa tanto el móvil para saber si
+// mostrar "apuntar resultados" como (más adelante) la pantalla de la tele. Nunca enseña la foto
+// de los bloques (eso solo se revela al apagar el modo compe) ni ningún dato de quién ha hecho
+// qué — eso va aparte, con sesión, en el endpoint de apuntar/leer resultados.
+function progreso_compe_estado($request) {
+    global $wpdb;
+    // Vista previa del modo compe para grabar un vídeo tutorial (Ramiro 12/11 16:15): con
+    // ?previewCompeId=X Y sesión de socio Y esa competición marcada is_test=1, se ve como si
+    // estuviera activa sin tocar modo_activo de ninguna compe real ni afectar a nadie más —
+    // "que solo vea quien la active". Cualquier otro caso (sin sesión, sin previewCompeId,
+    // compe real) sigue mirando la única con modo_activo=1 de siempre. Mira el rol REAL (no el
+    // de "ver como"): un socio tiene que poder combinar la vista previa con "Ver como: Usuario"
+    // para grabar exactamente lo que ve un alumno normal.
+    $preview_id = intval($request->get_param('previewCompeId'));
+    if ($preview_id && blokes_get_app_role_real() === 'socio') {
+        $comp = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM " . progreso_equip_table('competitions') . " WHERE id = %d AND is_test = 1", $preview_id
+        ), ARRAY_A);
+    } else {
+        $comp = $wpdb->get_row(
+            "SELECT * FROM " . progreso_equip_table('competitions') . " WHERE modo_activo = 1 ORDER BY id DESC LIMIT 1", ARRAY_A
+        );
+    }
+    if (!$comp) return rest_ensure_response(array('success' => true, 'data' => array('activo' => false)));
+    $blocks = $wpdb->get_results($wpdb->prepare(
+        "SELECT id, number, grade_color, bloke_post_id, subzone FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $comp['id']
+    ), ARRAY_A);
+    // "Dónde está cada bloque" (Ramiro, 09/11 05:45): misma subzona que ya guarda Organización
+    // (comp_blocks.subzone) y la misma tabla sala↔subzona de progreso_equip_set_modo_compe() —
+    // si el bloque no tiene subzona asignada todavía, "zona por confirmar" en vez de adivinar.
+    $sala_de = array(1 => 'entrada', 2 => 'entrada', 3 => 'sala_grande', 4 => 'sala_grande', 5 => 'sala_grande', 6 => 'sala_grande', 7 => 'sala_grande', 8 => 'cueva');
+    $sala_label = array('entrada' => 'Entrada', 'sala_grande' => 'Sala Grande', 'cueva' => 'Cueva');
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'activo' => true, 'competitionId' => intval($comp['id']), 'nombre' => $comp['name'],
+        'compDate' => $comp['comp_date'], 'compEndDate' => $comp['comp_end_date'] ?: $comp['comp_date'],
+        'bloques' => array_map(function($b) use ($sala_de, $sala_label) {
+            $subzona = $b['subzone'] !== null ? intval($b['subzone']) : null;
+            $sala = $subzona && isset($sala_de[$subzona]) ? $sala_de[$subzona] : null;
+            return array(
+                'compBlockId' => intval($b['id']), 'blokePostId' => intval($b['bloke_post_id']),
+                'numero' => intval($b['number']), 'color' => $b['grade_color'],
+                'subzona' => $subzona, 'sala' => $sala ? $sala_label[$sala] : null,
+            );
+        }, $blocks),
+    )));
+}
+
+// GET /progreso/v1/compe/proxima — la próxima compe real (no de prueba), para el gancho de
+// "Instala Blokes". A diferencia de compe/estado, no exige modo_activo=1 (eso solo se enciende
+// el día de la compe) — aquí hace falta verla desde días antes.
+function progreso_compe_proxima($request) {
+    global $wpdb;
+    $comp = $wpdb->get_row(
+        "SELECT id, name, comp_date, comp_end_date FROM " . progreso_equip_table('competitions') . "
+         WHERE is_test = 0 AND comp_date >= CURDATE() ORDER BY comp_date ASC LIMIT 1", ARRAY_A
+    );
+    if (!$comp) return rest_ensure_response(array('success' => true, 'data' => null));
+    // Posiciones de los bloques ya colocados en el mapa, para la pantalla "Próximamente" de
+    // la tele (cowork, 11/11 05:15: "falta... mapa de los 16 bloques, cartel y cuenta atrás
+    // en movimiento").
+    $blocks = $wpdb->get_results($wpdb->prepare(
+        "SELECT number, x_pct, y_pct, tested FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", intval($comp['id'])
+    ), ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'nombre'      => $comp['name'],
+        'compDate'    => $comp['comp_date'],
+        'compEndDate' => $comp['comp_end_date'] ?: $comp['comp_date'],
+        'bloques'     => array_map(function($b) {
+            return array(
+                'numero' => intval($b['number']),
+                'xPct'   => $b['x_pct'] !== null ? floatval($b['x_pct']) : null,
+                'yPct'   => $b['y_pct'] !== null ? floatval($b['y_pct']) : null,
+                'tested' => (bool) $b['tested'],
+            );
+        }, $blocks),
+    )));
+}
+
+// 20/11 12:10 (Ramiro, categoría automática de la compe, opción B): ¿tiene esta cuenta una sub
+// EN VIGOR de Menores (6-12), bien como la propia cuenta que paga, bien como el alumno (niño con
+// _rm_alumno_user_id, ver blokes_rm_alumno_uid)? Nunca Adolescentes — esos entran por "el
+// buscador" como cualquier adulto. "En vigor" = mismo criterio que Grupos/Niños (activa o de
+// baja a fin de mes, nunca pausada/pendiente de pago).
+function blokes_rm_tiene_sub_menores_en_vigor($uid) {
+    if (!$uid || !function_exists('wcs_get_subscription')) return false;
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (empty($sub['id']) || ($sub['edad'] ?? '') !== 'Menores (6-12 años)') continue;
+        $es_pending_cancel = ($sub['status_raw'] ?? '') === 'pending-cancel';
+        if (($sub['status'] ?? '') !== 'active' && !$es_pending_cancel) continue;
+        $sub_id = intval($sub['id']);
+        $sub_obj = wcs_get_subscription($sub_id);
+        if (!$sub_obj) continue;
+        $payer_uid = intval($sub_obj->get_customer_id()) ?: intval(get_post_meta($sub_id, '_customer_user', true));
+        if (!$payer_uid) continue;
+        if ($payer_uid === $uid || blokes_rm_alumno_uid($sub_id, $payer_uid) === $uid) return true;
+    }
+    return false;
+}
+
+// POST /progreso/v1/compe/resultado — apunta/corrige el top/zona/intentos de UN bloque. Con
+// sesión normal, siempre el propio usuario. targetUserId (como en blokes_toggle_completion) es
+// para recepción apuntando por otra persona (Ramiro, 07/11 08:46) — exige
+// blokes_can_supervise(), igual que el resto de "actuar en nombre de alguien". Cualquier cambio
+// vuelve a dejarlo en "pendiente" — editar algo ya validado necesita que el juez lo vuelva a
+// mirar, nunca se queda validado con datos distintos de los que vio.
+function progreso_compe_apuntar_resultado($request) {
+    if (!is_user_logged_in()) return new WP_Error('forbidden', 'Hace falta sesión.', array('status' => 401));
+    global $wpdb;
+    $comp_block_id = intval($request->get_param('compBlockId'));
+    $top      = $request->get_param('top') ? 1 : 0;
+    $zona     = $request->get_param('zona') ? 1 : 0;
+    $intentos = max(0, intval($request->get_param('intentos')));
+    $target_user_id = intval($request->get_param('targetUserId'));
+    // Participante rápido (Ramiro, 07/11 08:48: pase de día sin cuenta) — siempre lo crea
+    // recepción.
+    $target_rapido_id = intval($request->get_param('targetParticipanteRapidoId'));
+    // Alumno manual sin cuenta de WordPress (Ramiro, 09/11: reutilizar el picker "¿quién lo ha
+    // hecho?" de Colección en modo tablet — ese picker también puede devolver uno de estos, no
+    // solo cuentas reales).
+    $target_placeholder_id = intval($request->get_param('targetPlaceholderId'));
+    if (!$comp_block_id) return new WP_Error('bad_request', 'Falta compBlockId.', array('status' => 400));
+    if (($target_user_id || $target_rapido_id || $target_placeholder_id) && !blokes_can_supervise()) {
+        return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
+    }
+    $participante_tipo = $target_rapido_id ? 'rapido' : ($target_placeholder_id ? 'placeholder' : 'user');
+    $participante_id = $target_rapido_id ?: ($target_placeholder_id ?: ($target_user_id ?: get_current_user_id()));
+
+    $block = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $comp_block_id), ARRAY_A);
+    if (!$block) return new WP_Error('not_found', 'Bloque no encontrado.', array('status' => 404));
+    // Una compe de PRUEBA deja apuntar siempre, sin encender modo_activo — así la vista previa
+    // del modo compe (Ramiro 12/11 16:15) puede demostrar "apuntar un top" en el vídeo sin
+    // afectar a la compe real.
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT modo_activo, is_test FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $block['competition_id']), ARRAY_A);
+    if (!$comp || (!$comp['modo_activo'] && !$comp['is_test'])) {
+        return new WP_Error('modo_inactivo', 'El modo compe no está activo para este bloque.', array('status' => 409));
+    }
+    if ($target_rapido_id) {
+        $existe_rapido = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE id = %d AND competition_id = %d",
+            $target_rapido_id, $block['competition_id']
+        ));
+        if (!$existe_rapido) return new WP_Error('not_found', 'Participante rápido no encontrado en esta compe.', array('status' => 404));
+    }
+
+    $ahora = current_time('mysql');
+    $existente = $wpdb->get_row($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND comp_block_id = %d AND participante_tipo = %s AND participante_id = %d",
+        $block['competition_id'], $comp_block_id, $participante_tipo, $participante_id
+    ), ARRAY_A);
+    // Sin validación en la app (Ramiro, 07/11): todo lo apuntado cuenta al momento, venga del
+    // móvil, de la tablet o de recepción — lo validan los compañeros de palabra, fuera de la app.
+    $datos = array(
+        'top' => $top, 'zona' => $zona ?: $top, 'intentos' => $intentos, 'apuntado_por' => get_current_user_id(),
+        'estado' => 'validado', 'validado_por' => get_current_user_id(), 'validado_at' => $ahora, 'updated_at' => $ahora,
+    );
+    if ($existente) {
+        $wpdb->update(progreso_equip_table('comp_resultados'), $datos, array('id' => intval($existente['id'])), null, array('%d'));
+    } else {
+        $wpdb->insert(progreso_equip_table('comp_resultados'), array_merge($datos, array(
+            'competition_id' => $block['competition_id'], 'comp_block_id' => $comp_block_id,
+            'participante_tipo' => $participante_tipo, 'participante_id' => $participante_id, 'created_at' => $ahora,
+        )));
+    }
+
+    // 20/11 12:10 (categoría automática, opción B): el camino de Colección no pregunta — si al
+    // apuntar un top esta persona todavía no tiene categoría en esta compe, y es una cuenta con
+    // una sub en vigor de Menores (como alumno o como la propia cuenta), se le pone "infantil"
+    // sin preguntar. Si no aplica, se avisa al frontend (necesitaCategoria) para que el buscador
+    // pregunte una sola vez — nunca se repite una vez puesta, y recepción puede cambiarla siempre.
+    $categoria_asignada = null;
+    $tiene_categoria = (bool) progreso_compe_categoria_get($block['competition_id'], $participante_tipo, $participante_id);
+    if (!$tiene_categoria && $top && $participante_tipo === 'user' && blokes_rm_tiene_sub_menores_en_vigor($participante_id)) {
+        $categoria_asignada = 'infantil';
+        $req_cat = new WP_REST_Request('POST', '/progreso/v1/compe/categoria');
+        $req_cat->set_param('competitionId', $block['competition_id']);
+        $req_cat->set_param('participanteTipo', $participante_tipo);
+        $req_cat->set_param('participanteId', $participante_id);
+        $req_cat->set_param('categoria', $categoria_asignada);
+        progreso_compe_categoria_set($req_cat);
+        $tiene_categoria = true;
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'estado' => $datos['estado'],
+        'necesitaCategoria' => $top ? !$tiene_categoria : false,
+        'categoriaAsignada' => $categoria_asignada,
+    )));
+}
+
+// GET /progreso/v1/compe/buscar-participante?q=X&competitionId=Y — "¿quién eres?" de recepción
+// (Ramiro, 07/11 08:46/08:48): busca entre usuarios reales de WordPress (nombre/nickname, en el
+// sitio Principal) y entre los participantes rápidos YA creados en esta compe (para no crear
+// uno nuevo cada vez que vuelve la misma persona sin cuenta). Solo quien puede supervisar
+// (profe/gestión/socio/tablet).
+function progreso_compe_buscar_participante($request) {
+    if (!blokes_can_supervise()) return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
+    $q = trim((string) $request->get_param('q'));
+    $competition_id = intval($request->get_param('competitionId'));
+    if (mb_strlen($q) < 2) return new WP_Error('bad_request', 'Escribe al menos 2 caracteres.', array('status' => 400));
+
+    global $wpdb;
+    $resultado = array();
+
+    // Clase de cada uno (Ramiro, 09/11 05:45: "hay 3 Ramiro, con solo nombre+apodo o
+    // nombre+clase no se sabe cuál es — usa nombre + (apodo) + clase en los dos sitios") —
+    // RocoMadrid_SF_Stats vive en el Club, así que el mapa se construye AQUÍ, antes de
+    // cualquier switch_to_blog(1): dentro del switch el prefijo de WooCommerce ya no sería el
+    // del Club y saldría vacío o mal.
+    $clase_por_email = array();
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        if (($sub['status'] ?? '') !== 'active' || empty($sub['email'])) continue;
+        $clase = trim(($sub['dia'] ?? '') . (!empty($sub['horario']) ? ' ' . $sub['horario'] : ''));
+        if ($clase) $clase_por_email[strtolower($sub['email'])] = $clase;
+    }
+
+    $es_multisite = is_multisite();
+    if ($es_multisite) switch_to_blog(1);
+    $usuarios = get_users(array(
+        'number' => 20, 'search' => '*' . $q . '*', 'search_columns' => array('display_name', 'user_nicename'),
+    ));
+    foreach ($usuarios as $u) {
+        $nick = blokes_get_user_nickname($u->ID);
+        $nombre_mostrar = $nick ? "{$u->display_name} ({$nick})" : $u->display_name;
+        $clase = $clase_por_email[strtolower($u->user_email)] ?? '';
+        if ($clase) $nombre_mostrar .= " · {$clase}";
+        $resultado[] = array('tipo' => 'user', 'id' => $u->ID, 'nombreMostrar' => $nombre_mostrar);
+    }
+    if ($es_multisite) restore_current_blog();
+
+    if ($competition_id) {
+        $rapidos = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, nombre FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE competition_id = %d AND nombre LIKE %s LIMIT 20",
+            $competition_id, '%' . $wpdb->esc_like($q) . '%'
+        ), ARRAY_A);
+        foreach ($rapidos as $r) {
+            $resultado[] = array('tipo' => 'rapido', 'id' => intval($r['id']), 'nombreMostrar' => $r['nombre'] . ' (sin cuenta)');
+        }
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $resultado));
+}
+
+// POST /progreso/v1/compe/participante-rapido — crea un participante sin cuenta (pase de día,
+// Ramiro 07/11 08:48). Solo recepción (can_supervise).
+function progreso_compe_crear_participante_rapido($request) {
+    if (!blokes_can_supervise()) return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
+    global $wpdb;
+    $competition_id = intval($request->get_param('competitionId'));
+    $nombre = sanitize_text_field((string) $request->get_param('nombre'));
+    $telefono = sanitize_text_field((string) $request->get_param('telefono'));
+    $email = sanitize_email((string) $request->get_param('email'));
+    if (!$competition_id || !$nombre) return new WP_Error('bad_request', 'Falta competitionId o nombre.', array('status' => 400));
+    $u = wp_get_current_user();
+    $wpdb->insert(progreso_equip_table('comp_participantes_rapidos'), array(
+        'competition_id' => $competition_id, 'nombre' => $nombre, 'telefono' => $telefono, 'email' => $email,
+        'categoria' => 'General', 'created_by' => $u ? $u->user_login : '', 'created_at' => current_time('mysql'),
+    ));
+    $id = $wpdb->insert_id;
+    return rest_ensure_response(array('success' => true, 'data' => array('id' => $id, 'nombreMostrar' => $nombre . ' (sin cuenta)')));
+}
+
+// POST /progreso/v1/compe/simular-top (20/11 06:30, punto 3) — solo socio, solo compes de
+// prueba (comprobado dos veces: aquí Y dentro de progreso_compe_apuntar_resultado, que ya
+// exige is_test o modo_activo). Apunta un top real en la tabla de resultados, a un participante
+// y bloque al azar de ESTA compe — la tele y la app lo ven exactamente igual que un top de
+// verdad, que es el objetivo: probar la animación sin fabricar un camino aparte para pruebas.
+// Si la compe todavía no tiene suficientes participantes de prueba, los crea (repartidos en las
+// 3 categorías) para no obligar a darlos de alta uno a uno antes de poder usar el simulador.
+function progreso_compe_simular_top($request) {
+    global $wpdb;
+    $competition_id = intval($request->get_param('competitionId'));
+    if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT is_test FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $competition_id), ARRAY_A);
+    if (!$comp) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+    if (!$comp['is_test']) return new WP_Error('solo_prueba', 'El simulador solo funciona en una compe de prueba — nunca en una real.', array('status' => 409));
+
+    $rapidos = $wpdb->get_results($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE competition_id = %d", $competition_id
+    ), ARRAY_A);
+    // Nombres distintos (prueba de cowork, 20/11 09:45, punto 2): "Prueba M1".."Prueba M5" salían
+    // todos como "Prueba M." en la tele (nombre + inicial del "apellido"), indistinguibles entre
+    // sí — y esa colisión de texto era la causa real del número de puesto duplicado del punto 3
+    // (la animación de la tele encontraba la fila por el texto mostrado, no por un id). Ahora:
+    // nombre inventado distinto + apellido fijo "Prueba" ("Daniel Prueba" -> tele "Daniel P."),
+    // y 13 por categoría (pedido: 12-15) para ver si caben las 11 filas de la vista rotativa.
+    $semilla = array(
+        'masculina' => array('Daniel', 'Pablo', 'Alvaro', 'Sergio', 'Marcos', 'Adrian', 'Hugo', 'Javier', 'Diego', 'Mario', 'Ruben', 'Victor', 'Ismael'),
+        'femenina'  => array('Marta', 'Laura', 'Elena', 'Sara', 'Paula', 'Lucia', 'Irene', 'Alba', 'Carmen', 'Noelia', 'Cristina', 'Patricia', 'Beatriz'),
+        'infantil'  => array('Leo', 'Ana', 'Mia', 'Jan', 'Nora', 'Max', 'Vera', 'Teo', 'Lola', 'Iker', 'Nina', 'Dani', 'Eva'),
+    );
+    $total_objetivo = 0;
+    foreach ($semilla as $nombres) $total_objetivo += count($nombres);
+    if (count($rapidos) < $total_objetivo) {
+        $nombres_existentes = $wpdb->get_col($wpdb->prepare(
+            "SELECT nombre FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE competition_id = %d", $competition_id
+        ));
+        foreach ($semilla as $cat => $nombres) {
+            foreach ($nombres as $nombre_pila) {
+                $nombre = $nombre_pila . ' Prueba';
+                if (in_array($nombre, $nombres_existentes, true)) continue; // ya sembrado, no duplicar
+                $wpdb->insert(progreso_equip_table('comp_participantes_rapidos'), array(
+                    'competition_id' => $competition_id, 'nombre' => $nombre, 'categoria' => 'General',
+                    'created_by' => 'simulador', 'created_at' => current_time('mysql'),
+                ));
+                $rid = $wpdb->insert_id;
+                $wpdb->insert(progreso_equip_table('comp_categorias'), array(
+                    'competition_id' => $competition_id, 'participante_tipo' => 'rapido', 'participante_id' => $rid,
+                    'categoria' => $cat, 'updated_at' => current_time('mysql'),
+                ));
+            }
+        }
+        $rapidos = $wpdb->get_results($wpdb->prepare(
+            "SELECT id FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE competition_id = %d", $competition_id
+        ), ARRAY_A);
+    }
+
+    $bloques = $wpdb->get_results($wpdb->prepare(
+        "SELECT id, number FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d", $competition_id
+    ), ARRAY_A);
+    if (!$bloques) return new WP_Error('sin_bloques', 'Esta compe de prueba todavía no tiene bloques.', array('status' => 409));
+
+    $rapido = $rapidos[array_rand($rapidos)];
+    $bloque = $bloques[array_rand($bloques)];
+
+    $req_resultado = new WP_REST_Request('POST', '/progreso/v1/compe/resultado');
+    $req_resultado->set_param('compBlockId', intval($bloque['id']));
+    $req_resultado->set_param('top', true);
+    $req_resultado->set_param('targetParticipanteRapidoId', intval($rapido['id']));
+    $resultado = progreso_compe_apuntar_resultado($req_resultado);
+    if (is_wp_error($resultado)) return $resultado;
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'participanteId' => intval($rapido['id']), 'bloque' => intval($bloque['number']), 'totalParticipantesPrueba' => count($rapidos),
+    )));
+}
+
+// GET /progreso/v1/compe/mis-resultados?competitionId=X — lo que YA ha apuntado el usuario (o
+// subjectUserId, misma regla de supervisión) en esta compe, para que el móvil pinte cada bloque
+// con lo que ya tiene puesto en vez de partir siempre de cero.
+// Ventana de la compe de ESTE participante (Ramiro, 07/11 09:11): 1h30 desde su primer top
+// apuntado en esta compe — un solo intento de sentada, no se repite cada día. Lo de fuera de esa
+// ventana no cuenta para la clasificación de la compe (pero sí para ligas/estadísticas, eso ya
+// lo hace blokes_marcar_completado_si_no_estaba sin mirar la ventana). Se calcula al vuelo desde
+// el primer `created_at` con top=1 — no hace falta guardar la hora de inicio aparte.
+const PROGRESO_COMPE_VENTANA_MINUTOS = 90;
+
+const PROGRESO_COMPE_CATEGORIAS = array('masculina', 'femenina', 'infantil');
+
+// 20/11 06:30 (punto 2): categoría de un participante en una compe concreta — nunca se infiere
+// de nombre, edad ni ningún otro dato, ver PROGRESO_COMPE_CATEGORIAS.
+function progreso_compe_categoria_get($competition_id, $tipo, $id) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    return $wpdb->get_var($wpdb->prepare(
+        "SELECT categoria FROM " . progreso_equip_table('comp_categorias') . "
+         WHERE competition_id = %d AND participante_tipo = %s AND participante_id = %d",
+        $competition_id, $tipo, $id
+    )) ?: '';
+}
+
+// POST /progreso/v1/compe/categoria — pone o cambia la categoría de un participante.
+// Cualquiera puede poner la SUYA propia (tipo=user, id = su propio id, o sin id = se asume el
+// suyo); cualquier otro caso (otro usuario, un rápido, un placeholder) exige recepción
+// (blokes_can_supervise) — igual que el resto de "apuntar por otra persona" de esta compe.
+function progreso_compe_categoria_set($request) {
+    $competition_id = intval($request->get_param('competitionId'));
+    $tipo = sanitize_key((string) $request->get_param('participanteTipo')) ?: 'user';
+    $id = intval($request->get_param('participanteId')) ?: get_current_user_id();
+    $categoria = sanitize_key((string) $request->get_param('categoria'));
+    if (!$competition_id || !$id) return new WP_Error('bad_request', 'Falta competitionId o participanteId.', array('status' => 400));
+    if (!in_array($categoria, PROGRESO_COMPE_CATEGORIAS, true)) {
+        return new WP_Error('categoria_no_valida', 'La categoría debe ser masculina, femenina o infantil.', array('status' => 400));
+    }
+    $es_uno_mismo = ($tipo === 'user' && $id === get_current_user_id());
+    if (!$es_uno_mismo && !blokes_can_supervise()) {
+        return new WP_Error('forbidden', 'Solo recepción puede poner la categoría de otra persona.', array('status' => 403));
+    }
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $table = progreso_equip_table('comp_categorias');
+    $existe = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM $table WHERE competition_id = %d AND participante_tipo = %s AND participante_id = %d",
+        $competition_id, $tipo, $id
+    ));
+    $datos = array('categoria' => $categoria, 'updated_at' => current_time('mysql'));
+    if ($existe) {
+        $wpdb->update($table, $datos, array('id' => intval($existe)));
+    } else {
+        $wpdb->insert($table, array_merge($datos, array(
+            'competition_id' => $competition_id, 'participante_tipo' => $tipo, 'participante_id' => $id,
+        )));
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array('categoria' => $categoria)));
+}
+
+function progreso_compe_mis_resultados($request) {
+    if (!is_user_logged_in()) return new WP_Error('forbidden', 'Hace falta sesión.', array('status' => 401));
+    global $wpdb;
+    $competition_id = intval($request->get_param('competitionId'));
+    $subject_user_id = intval($request->get_param('subjectUserId'));
+    $subject_rapido_id = intval($request->get_param('subjectParticipanteRapidoId'));
+    if (($subject_user_id || $subject_rapido_id) && !blokes_can_supervise()) return new WP_Error('forbidden', 'No autorizado.', array('status' => 403));
+    $participante_tipo = $subject_rapido_id ? 'rapido' : 'user';
+    $participante_id = $subject_rapido_id ?: ($subject_user_id ?: get_current_user_id());
+    if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
+    $filas = $wpdb->get_results($wpdb->prepare(
+        "SELECT comp_block_id, top, zona, intentos, estado, created_at FROM " . progreso_equip_table('comp_resultados') . "
+         WHERE competition_id = %d AND participante_tipo = %s AND participante_id = %d",
+        $competition_id, $participante_tipo, $participante_id
+    ), ARRAY_A);
+    $data = array();
+    $ventana_inicio = null;
+    foreach ($filas as $f) {
+        $data[intval($f['comp_block_id'])] = array(
+            'top' => (bool) $f['top'], 'zona' => (bool) $f['zona'], 'intentos' => intval($f['intentos']), 'estado' => $f['estado'],
+        );
+        if ($f['top'] && ($ventana_inicio === null || $f['created_at'] < $ventana_inicio)) $ventana_inicio = $f['created_at'];
+    }
+    $ventana = null;
+    if ($ventana_inicio) {
+        // $ventana_inicio viene de current_time('mysql') (hora LOCAL de Madrid) — hay que
+        // compararlo con current_time('timestamp') (el mismo desplazamiento), nunca con time()
+        // a secas (UTC real): si no, sale desplazado por el offset horario de Madrid — cowork,
+        // 07/11 11:00, "sale 149 min en vez de 90".
+        $ahora_ts = current_time('timestamp');
+        $fin_ts = strtotime($ventana_inicio) + PROGRESO_COMPE_VENTANA_MINUTOS * 60;
+        $ventana = array(
+            'inicio' => $ventana_inicio, 'minutosRestantes' => max(0, (int) round(($fin_ts - $ahora_ts) / 60)),
+            'cerrada' => $ahora_ts >= $fin_ts,
+        );
+    }
+    $categoria_actual = progreso_compe_categoria_get($competition_id, $participante_tipo, $participante_id);
+    return rest_ensure_response(array('success' => true, 'data' => $data, 'ventana' => $ventana, 'categoria' => $categoria_actual ?: null));
+}
+
+// GET /progreso/v1/compe/clasificacion?competitionId=X — público (pantalla de la tele,
+// NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 07/11): clasificación provisional de ESTA compe
+// (nº de tops validados, ordenado por tops y luego por quién llegó antes a esa cifra) y los
+// últimos tops validados. Punto 7 de Ramiro: "solo nombre y nickname entre paréntesis, nunca
+// apellidos" — se construye aquí, nunca se manda el apellido al frontend. Categorías y puntos de
+// verdad (y la liga de temporada de las 3 compes) quedan para cuando Ramiro confirme el formato
+// — de momento una sola categoría "General".
+function progreso_compe_clasificacion($request) {
+    global $wpdb;
+    $competition_id = intval($request->get_param('competitionId'));
+    if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
+
+    $filas = $wpdb->get_results($wpdb->prepare(
+        "SELECT r.*, b.number AS numero, b.grade_color AS color FROM " . progreso_equip_table('comp_resultados') . " r
+         JOIN " . progreso_equip_table('comp_blocks') . " b ON b.id = r.comp_block_id
+         WHERE r.competition_id = %d AND r.estado = 'validado' AND r.top = 1
+         ORDER BY r.validado_at ASC", $competition_id
+    ), ARRAY_A);
+
+    // Participantes rápidos (sin cuenta): su nombre ya está guardado tal cual, no hace falta
+    // mirar usuarios de WordPress — una sola consulta para todos los que aparezcan.
+    $nombres_rapidos = array();
+    $rapido_ids = array();
+    foreach ($filas as $f) {
+        if ($f['participante_tipo'] === 'rapido') $rapido_ids[intval($f['participante_id'])] = true;
+    }
+    $rapido_ids = array_keys($rapido_ids);
+    if ($rapido_ids) {
+        $ph = implode(',', array_fill(0, count($rapido_ids), '%d'));
+        $filas_rapidos = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, nombre FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE id IN ($ph)", ...$rapido_ids
+        ), ARRAY_A);
+        foreach ($filas_rapidos as $fr) $nombres_rapidos[intval($fr['id'])] = $fr['nombre'];
+    }
+
+    // Alumnos manuales sin cuenta (Ramiro, 09/11: el picker "¿quién lo ha hecho?" de Colección
+    // en modo tablet también puede devolver uno de estos) — mismo trato que un rápido.
+    $nombres_placeholder = array();
+    $placeholder_ids = array();
+    foreach ($filas as $f) {
+        if ($f['participante_tipo'] === 'placeholder') $placeholder_ids[intval($f['participante_id'])] = true;
+    }
+    $placeholder_ids = array_keys($placeholder_ids);
+    if ($placeholder_ids) {
+        $ph = implode(',', array_fill(0, count($placeholder_ids), '%d'));
+        $filas_placeholder = $wpdb->get_results($wpdb->prepare(
+            "SELECT id, nombre FROM " . blokes_placeholder_table() . " WHERE id IN ($ph)", ...$placeholder_ids
+        ), ARRAY_A);
+        foreach ($filas_placeholder as $fp) $nombres_placeholder[intval($fp['id'])] = $fp['nombre'];
+    }
+
+    $por_participante = array();
+    foreach ($filas as $f) {
+        $clave = $f['participante_tipo'] . ':' . intval($f['participante_id']);
+        if (!isset($por_participante[$clave])) {
+            $por_participante[$clave] = array(
+                'tipo' => $f['participante_tipo'], 'id' => intval($f['participante_id']),
+                'tops' => 0, 'primerTop' => $f['created_at'],
+            );
+        }
+        $por_participante[$clave]['tops']++;
+    }
+
+    // 20/11 06:30 (punto 2): categoría de cada participante que aparece aquí, de la tabla nueva
+    // — nunca inferida. Una sola consulta para todos a la vez.
+    $categoria_por_clave = array();
+    if ($por_participante) {
+        $claves_sql = array();
+        foreach ($por_participante as $info) $claves_sql[] = $wpdb->prepare('(%s,%d)', $info['tipo'], $info['id']);
+        $filas_cat = $wpdb->get_results(
+            "SELECT participante_tipo, participante_id, categoria FROM " . progreso_equip_table('comp_categorias') . "
+             WHERE competition_id = " . intval($competition_id) . " AND (participante_tipo, participante_id) IN (" . implode(',', $claves_sql) . ")",
+            ARRAY_A
+        );
+        foreach ($filas_cat as $fc) $categoria_por_clave[$fc['participante_tipo'] . ':' . intval($fc['participante_id'])] = $fc['categoria'];
+    }
+
+    $es_multisite = is_multisite();
+    if ($es_multisite) switch_to_blog(1);
+    $acortar_sin_cuenta = function($nombre_completo) {
+        // Público (tele/clasificación): nunca apellidos (Ramiro, punto 7) — un rápido/alumno
+        // manual se escribe entero (nombre y apellidos sueltos, sin un campo separado), así que
+        // aquí solo se enseña la primera palabra + la inicial de la siguiente si hay (cowork,
+        // 07/11 16:30: "Rápido P."). Sin el sufijo "(sin cuenta)" aquí (prueba de cowork,
+        // 20/11 09:45, punto 2): eso es un detalle interno de recepción, no de la tele pública —
+        // los pickers de recepción (participante-rapido, picker de recepción) SÍ lo siguen
+        // llevando, solo se quita en esta pantalla.
+        $partes = array_values(array_filter(explode(' ', trim((string) $nombre_completo))));
+        $nombre_corto = $partes[0] ?? 'Alguien';
+        if (isset($partes[1]) && $partes[1] !== '') $nombre_corto .= ' ' . mb_substr($partes[1], 0, 1) . '.';
+        return $nombre_corto;
+    };
+    // 20/11 06:30 (punto 2): "Nombre I. (alias)" — nombre + inicial del primer apellido + punto,
+    // y el alias de la app entre paréntesis si lo tiene (sustituye a "Nombre (alias)" sin
+    // inicial). first_name/last_name son los que arregla el punto 1 de la misma nota.
+    $nombre_de = function($tipo, $id) use ($nombres_rapidos, $nombres_placeholder, $acortar_sin_cuenta) {
+        if ($tipo === 'rapido') return $acortar_sin_cuenta($nombres_rapidos[$id] ?? 'Alguien');
+        if ($tipo === 'placeholder') return $acortar_sin_cuenta($nombres_placeholder[$id] ?? 'Alguien');
+        $u = get_userdata($id);
+        if (!$u) return 'Alguien';
+        $nombre = $u->first_name ?: explode(' ', trim($u->display_name))[0];
+        $apellido = trim((string) $u->last_name);
+        if ($apellido !== '') $nombre .= ' ' . mb_strtoupper(mb_substr($apellido, 0, 1, 'UTF-8'), 'UTF-8') . '.';
+        $nick = blokes_get_user_nickname($id);
+        return $nick ? "{$nombre} ({$nick})" : $nombre;
+    };
+    $clasificacion_por_cat = array('masculina' => array(), 'femenina' => array(), 'infantil' => array(), '' => array());
+    foreach ($por_participante as $clave => $info) {
+        $cat = $categoria_por_clave[$clave] ?? '';
+        if (!isset($clasificacion_por_cat[$cat])) $cat = '';
+        $clasificacion_por_cat[$cat][] = array(
+            // "clave" (20/11): identificador estable tipo:id para que la tele sepa qué fila es
+            // cuál durante la animación — nombreMostrar es solo texto y dos personas distintas
+            // pueden mostrar lo mismo (p. ej. dos "Carlos G." sin alias, o varios participantes
+            // de prueba con el mismo formato), lo que confundía qué fila mover.
+            'clave' => $clave,
+            'nombreMostrar' => $nombre_de($info['tipo'], $info['id']),
+            'tops' => $info['tops'], 'primerTop' => $info['primerTop'],
+        );
+    }
+    $orden = function($a, $b) {
+        return $b['tops'] !== $a['tops'] ? $b['tops'] <=> $a['tops'] : strcmp($a['primerTop'], $b['primerTop']);
+    };
+    $categorias_out = array();
+    foreach (array('masculina' => 'Masculina', 'femenina' => 'Femenina', 'infantil' => 'Infantil') as $key => $label) {
+        usort($clasificacion_por_cat[$key], $orden);
+        $categorias_out[] = array('id' => $key, 'nombre' => $label, 'clasificacion' => $clasificacion_por_cat[$key]);
+    }
+    // "Sin categoría" (20/11 06:30): nadie se pierde en silencio solo por no haber elegido
+    // todavía masculina/femenina/infantil — sale aparte, visible, en vez de caer en una de las
+    // tres por defecto (eso sí sería inventar un dato que no tenemos).
+    if (!empty($clasificacion_por_cat[''])) {
+        usort($clasificacion_por_cat[''], $orden);
+        $categorias_out[] = array('id' => '', 'nombre' => 'Sin categoría', 'clasificacion' => $clasificacion_por_cat['']);
+    }
+
+    $ultimos = array_slice(array_reverse($filas), 0, 10);
+    $ultimos_validados = array();
+    foreach ($ultimos as $f) {
+        $clave = $f['participante_tipo'] . ':' . intval($f['participante_id']);
+        $ultimos_validados[] = array(
+            // id estable del resultado (20/11 06:30): para que la tele sepa qué es "nuevo de
+            // verdad" entre un sondeo y el siguiente, sin adivinarlo por nombre/bloque/hace.
+            'id' => intval($f['id']),
+            'clave' => $clave,
+            'nombreMostrar' => $nombre_de($f['participante_tipo'], intval($f['participante_id'])),
+            'categoria' => $categoria_por_clave[$clave] ?? '',
+            'numero' => intval($f['numero']), 'color' => $f['color'], 'hace' => human_time_diff(strtotime($f['validado_at']), current_time('timestamp')),
+        );
+    }
+    if ($es_multisite) restore_current_blog();
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'categorias' => $categorias_out,
+        'ultimosValidados' => $ultimos_validados,
+    )));
 }
 
 function progreso_equip_monday_of($date) {
@@ -11207,6 +21446,85 @@ function progreso_equip_ensure_week_for_lead($monday, $lead, $is_test, &$warning
     return array(intval($week_id), intval($assignment_id));
 }
 
+// Asignación de una persona en una semana, creándola si todavía no existe — usado tanto por
+// "+ Tarea" a mano en el plan de la compe como por "⇄ Mover a..." cuando esa persona todavía no
+// tenía ninguna tarea esa semana.
+function progreso_equip_ensure_assignment($week_id, $worker_id) {
+    global $wpdb;
+    $assignment_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('assignments') . " WHERE week_id = %d AND worker_id = %d",
+        intval($week_id), intval($worker_id)
+    ));
+    if ($assignment_id) return intval($assignment_id);
+    $wpdb->insert(progreso_equip_table('assignments'), array(
+        'week_id' => intval($week_id), 'worker_id' => intval($worker_id), 'subzones' => '', 'status' => 'pendiente',
+    ), array('%d', '%d', '%s', '%s'));
+    return $wpdb->insert_id;
+}
+
+// Semana mínima para colgar una tarea de compe puesta a mano en un día que todavía no tiene
+// ninguna — sin el reparto normal completo de `progreso_equip_ensure_week_for_lead` (eso es solo
+// para las fases del plan automático).
+function progreso_equip_ensure_week_simple($monday, $is_test) {
+    global $wpdb;
+    $week_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('weeks') . " WHERE start_date = %s AND is_test = %d", $monday, $is_test ? 1 : 0
+    ));
+    if ($week_id) return intval($week_id);
+    $wpdb->insert(progreso_equip_table('weeks'), array(
+        'start_date' => $monday, 'subzones' => '',
+        'notes' => 'Generada por una tarea a mano del plan de una competición.',
+        'is_test' => $is_test ? 1 : 0, 'created_at' => current_time('mysql'),
+    ), array('%s', '%s', '%s', '%d', '%s'));
+    return $wpdb->insert_id;
+}
+
+// POST /equipacion/competitions/{id}/tasks — "+ Tarea" a mano en una columna del plan de la
+// compe (Ramiro 12/11 10:44): tipo del catálogo "Compe: ..." o texto libre, día y notas. Se
+// marca `manual = 1` para que "Regenerar" nunca la toque (ver el filtro `$tocada` en
+// progreso_equip_competition_generate_plan), aunque coincida tipo+fecha con una fase del plan.
+function progreso_equip_competition_add_task($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $comp_id = intval($request['id']);
+    $comp = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . progreso_equip_table('competitions') . " WHERE id = %d", $comp_id), ARRAY_A);
+    if (!$comp) return new WP_Error('not_found', 'Competición no encontrada.', array('status' => 404));
+
+    $worker_name = sanitize_text_field((string) $request->get_param('workerName'));
+    if ($worker_name === '') return new WP_Error('invalid_data', 'Elige a quién se asigna la tarea.', array('status' => 400));
+    $worker = $wpdb->get_row($wpdb->prepare("SELECT id FROM " . progreso_equip_table('workers') . " WHERE name = %s", $worker_name), ARRAY_A);
+    if (!$worker) return new WP_Error('invalid_data', 'No existe esa persona.', array('status' => 400));
+
+    $date = sanitize_text_field((string) $request->get_param('date'));
+    if (!$date || !strtotime($date)) return new WP_Error('invalid_data', 'Fecha no válida.', array('status' => 400));
+    $date = date('Y-m-d', strtotime($date));
+
+    $task_type_id = sanitize_text_field((string) $request->get_param('taskTypeId'));
+    $custom_text = trim((string) $request->get_param('customText'));
+    $params = array();
+    if ($custom_text !== '') {
+        $task_type_id = 'custom';
+        $params['texto'] = sanitize_text_field($custom_text);
+    } elseif ($task_type_id === '') {
+        return new WP_Error('invalid_data', 'Elige un tipo del catálogo o escribe un texto.', array('status' => 400));
+    }
+    $notas = trim((string) $request->get_param('notas'));
+    if ($notas !== '') $params['notas'] = sanitize_text_field($notas);
+
+    $monday = progreso_equip_monday_of($date);
+    $week_id = progreso_equip_ensure_week_simple($monday, (bool) $comp['is_test']);
+    $assignment_id = progreso_equip_ensure_assignment($week_id, intval($worker['id']));
+
+    $wpdb->insert(progreso_equip_table('tasks'), array(
+        'assignment_id' => $assignment_id, 'task_type_id' => $task_type_id, 'task_date' => $date,
+        'params' => wp_json_encode($params), 'done' => 0, 'status' => 'pendiente', 'original_date' => $date,
+        'competition_id' => $comp_id, 'manual' => 1,
+        'created_by' => progreso_equip_actor($request), 'created_at' => current_time('mysql'),
+    ), array('%d', '%s', '%s', '%s', '%d', '%s', '%s', '%d', '%d', '%s', '%s'));
+
+    return rest_ensure_response(array('success' => true, 'id' => $wpdb->insert_id));
+}
+
 function progreso_equip_insert_comp_task($assignment_id, $task_type_id, $date, $competition_id, $params = array()) {
     global $wpdb;
     $wpdb->insert(progreso_equip_table('tasks'), array(
@@ -11268,13 +21586,20 @@ function progreso_equip_competition_generate_plan($request) {
     $s0_monday = date('Y-m-d', strtotime($comp_monday) - 7 * 86400);
     $s1_monday = date('Y-m-d', strtotime($s0_monday) - 7 * 86400);
     $s2_monday = date('Y-m-d', strtotime($s0_monday) - 14 * 86400);
-    $s3_monday = date('Y-m-d', strtotime($s0_monday) - 21 * 86400);
+    // La semana de diseño/revisar material arranca "leadWeeks" semanas antes de la compe (el
+    // campo "Semanas de antelación" del formulario de creación) — antes era siempre fija, sin
+    // usar ese campo para nada (cowork, 4/11 07:20). Mínimo 3: por debajo no queda sitio para
+    // una semana de diseño distinta de la de limpieza (s2, que siempre es comp-3 semanas) sin
+    // mover también las semanas de prep/equipar, que son fijas — mismo mínimo que ahora exige
+    // el formulario (cowork, 4/11 08:30: con leadWeeks 1 y 2 seguía dando comp-3 semanas igual,
+    // mi primer intento de arreglo solo movía la fecha interna sin bajar el mínimo real).
+    $lead_weeks = max(3, intval($comp['lead_weeks']) ?: 3);
+    $s3_monday = date('Y-m-d', strtotime($comp_monday) - $lead_weeks * 7 * 86400);
     $after_monday = date('Y-m-d', strtotime($comp_monday) + 7 * 86400);
-    // Si la semana de diseño ya ha pasado (no queda runway desde hoy), se junta con la de
-    // limpieza/inscripciones en vez de crear tareas ya vencidas desde el primer día — confirmado
-    // con cowork (1/11 17:20) como regla general, aunque para esta compe en concreto sí hay
-    // margen y las 4 semanas de antes quedan separadas, una por semana.
-    $diseno_monday = (strtotime($s3_monday) < strtotime($today)) ? $s2_monday : $s3_monday;
+    // Si la semana de diseño ya ha pasado (no queda runway desde hoy), o coincide con la de
+    // limpieza/inscripciones (leadWeeks = 3 exactas), se juntan en una sola — confirmado con cowork (1/11
+    // 17:20) como regla general.
+    $diseno_monday = (strtotime($s3_monday) < strtotime($today) || strtotime($s3_monday) >= strtotime($s2_monday)) ? $s2_monday : $s3_monday;
 
     $fases = array();
     if ($diseno_monday === $s2_monday) {
@@ -11370,7 +21695,9 @@ function progreso_equip_competition_generate_plan($request) {
     // nunca se borra trabajo real por regenerar el plan.
     $borradas = 0;
     foreach ($existentes as $t) {
-        $tocada = $t['done'] || $t['status'] !== 'pendiente' || $t['task_date'] !== $t['original_date']
+        // Ramiro 12/11 10:44: una tarea puesta a mano ("+ Tarea") no se borra nunca al
+        // regenerar, aunque por casualidad coincida tipo+fecha con una fase del plan actual.
+        $tocada = $t['manual'] || $t['done'] || $t['status'] !== 'pendiente' || $t['task_date'] !== $t['original_date']
             || intval($t['worker_id']) !== intval($lead['id']) || $t['moved_to_task_id'];
         if ($tocada) {
             $warnings[] = "La tarea «{$t['task_type_id']}» del {$t['original_date']} ya no está en el plan actual, pero como ya se tocó (movida, hecha o aplazada) no se ha borrado — revísala a mano si ya no hace falta.";
@@ -11405,12 +21732,27 @@ function progreso_equip_get_competition_plan($request) {
             'id' => intval($t['id']), 'taskTypeId' => $t['task_type_id'], 'date' => $t['task_date'],
             'weekStart' => $t['week_start'], 'workerId' => intval($t['worker_id']), 'workerName' => $t['worker_name'],
             'done' => (bool) $t['done'], 'assignmentId' => intval($t['assignment_id']),
+            'manual' => (bool) $t['manual'], 'params' => $t['params'] ? (json_decode($t['params'], true) ?: array()) : array(),
         );
     }
     $total = count($tasks);
+
+    // Punto 7 (Ramiro, 11/11 05:01): el plan de la compe en columnas por equipador necesita
+    // también los bloques, no solo las tareas — antes solo salían en el mapa.
+    $blocks = $wpdb->get_results($wpdb->prepare(
+        "SELECT id, number, equipador, subzone, tested FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $id
+    ), ARRAY_A);
+    $out_blocks = array_map(function($b) {
+        return array(
+            'id' => intval($b['id']), 'number' => intval($b['number']), 'equipador' => $b['equipador'],
+            'subzone' => $b['subzone'] !== null ? intval($b['subzone']) : null, 'tested' => (bool) $b['tested'],
+        );
+    }, $blocks);
+
     return rest_ensure_response(array('success' => true, 'data' => array(
         'tasks' => $out, 'total' => $total, 'hechas' => $hechas, 'retrasadas' => $retrasadas,
         'pctHecho' => $total ? round($hechas / $total * 100) : 0,
+        'blocks' => $out_blocks,
     )));
 }
 
@@ -11706,6 +22048,80 @@ add_action('blokes_sync_grupos_cron', function() {
     }
 });
 
+// Precio de catálogo desactualizado en la variación 4673 (M-J Menores 17:30-18:30): mostraba
+// 86 € en wc-admin/Gestor de horarios, pero el formulario ya cobraba bien 57 € (vía Ajustes) —
+// solo confundía al mirar el catálogo, el cobro real nunca fue el erróneo (cowork, 3/11 21:00).
+// Migración de una sola vez, mismo patrón que el resto de arreglos de este fichero.
+add_action('init', function() {
+    if (get_option('blokes_fix_variacion_4673_precio')) return;
+    if (function_exists('wc_get_product')) {
+        $v = wc_get_product(4673);
+        if ($v) {
+            $v->set_regular_price('57');
+            $v->save();
+            update_post_meta(4673, '_subscription_price', '57');
+        }
+    }
+    update_option('blokes_fix_variacion_4673_precio', 1, false);
+});
+
+// Variación duplicada 6706 "Children" (L-X Menores): confirmado por cowork que tiene 0
+// suscripciones (la 6707 "Menores" sí tiene 2) — se pasa a privada, nunca se borra, igual que el
+// resto de variaciones sin uso que ya se limpiaron a mano (cowork, 4/11 04:30).
+add_action('init', function() {
+    if (get_option('blokes_fix_variacion_6706_privada')) return;
+    if (function_exists('wc_get_product')) {
+        $v = wc_get_product(6706);
+        if ($v) {
+            $v->set_status('private');
+            $v->save();
+        }
+    }
+    update_option('blokes_fix_variacion_6706_privada', 1, false);
+});
+
+// Ramiro, 20/11 12:20: renombra los 14 participantes de prueba del simulador de compe que se
+// crearon ANTES del arreglo del punto 2 de la prueba del 09:45 ("Prueba M1".."Prueba M5" etc.,
+// indistinguibles en la tele) al mismo esquema nuevo (nombre inventado + apellido "Prueba") —
+// solo cambia el campo 'nombre', nunca el id, así que los tops ya apuntados en la compe #26
+// durante las pruebas de cowork se quedan exactamente donde estaban. Migración de una sola vez.
+add_action('init', function() {
+    if (get_option('blokes_rm_renombrar_prueba_antiguos')) return;
+    global $wpdb;
+    $tabla = progreso_equip_table('comp_participantes_rapidos');
+    $mapa = array(
+        'Prueba M1' => 'Daniel Prueba', 'Prueba M2' => 'Pablo Prueba', 'Prueba M3' => 'Alvaro Prueba', 'Prueba M4' => 'Sergio Prueba', 'Prueba M5' => 'Marcos Prueba',
+        'Prueba F1' => 'Marta Prueba',  'Prueba F2' => 'Laura Prueba', 'Prueba F3' => 'Elena Prueba',  'Prueba F4' => 'Sara Prueba',   'Prueba F5' => 'Paula Prueba',
+        'Prueba I1' => 'Leo Prueba',    'Prueba I2' => 'Ana Prueba',   'Prueba I3' => 'Mia Prueba',    'Prueba I4' => 'Jan Prueba',
+    );
+    foreach ($mapa as $viejo => $nuevo) {
+        $wpdb->update($tabla, array('nombre' => $nuevo), array('nombre' => $viejo, 'created_by' => 'simulador'));
+    }
+    update_option('blokes_rm_renombrar_prueba_antiguos', 1, false);
+});
+
+// «Bajo tarifa» — 3 suscripciones en espera ya decididas por Ramiro (16/11 07:35 punto B.6):
+// 10% de descuento de la migración a WooCommerce, confirmado por él, no una duda de Eva. Solo
+// estas 3 (identificadas por subId, un dato seguro) se precargan como "revisado" — los demás
+// casos que dio por nombre + fila de Excel NO se tocan aquí: una fila de Excel no es un
+// identificador seguro para adivinar a cuál suscripción/externo corresponde sin arriesgarse a
+// marcarle el revisado a la persona equivocada (dinero de por medio). Esos quedan para que
+// alguien los marque a mano desde la lista, ya con el motivo que dio Ramiro.
+add_action('init', function() {
+    if (get_option('blokes_bajo_tarifa_migracion_10pc')) return;
+    if (function_exists('wcs_get_subscription')) {
+        foreach (array(5396, 5374, 5406) as $sub_id) {
+            $sub_obj = wcs_get_subscription($sub_id);
+            if (!$sub_obj) continue;
+            update_post_meta($sub_id, '_rm_bajo_tarifa_motivo', 'descuento migración 10 % (Ramiro)');
+            update_post_meta($sub_id, '_rm_bajo_tarifa_revisado_por', 'ramiro (migración)');
+            update_post_meta($sub_id, '_rm_bajo_tarifa_revisado_en', current_time('mysql'));
+            update_post_meta($sub_id, '_rm_bajo_tarifa_importe_revisado', $sub_obj->get_total());
+        }
+    }
+    update_option('blokes_bajo_tarifa_migracion_10pc', 1, false);
+});
+
 function nueve_config() {
     $c = get_option('blokes_9to5_config', array());
     return is_array($c) ? $c : array();
@@ -11886,6 +22302,43 @@ function nueve_sync($full = false) {
                 'workable' => !empty($h['workable']),
             );
         }, $hol));
+        // Cowork, calendario.md 08/11 11:02 puntos 1 y 2: antes los festivos de 9to5 y el
+        // calendario del club (club_days) solo se fusionaban en silencio en el frontend
+        // (festivosKey, TimeOffTab.jsx) — nunca se avisaba si uno de los dos faltaba. Mismo aviso
+        // sirve para el punto 2 (festivo trabajado): si el club decide ABRIR un día que 9to5 tiene
+        // como festivo no laborable, ese es justo el caso de "márcalo en 9to5 como festivo
+        // trabajado" — no hay endpoint de escritura de festivos en la API de 9to5 (solo lectura),
+        // así que se avisa en vez de intentar escribirlo a ciegas.
+        global $wpdb;
+        blokes_ensure_club_days_table();
+        $club_rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT fecha, nombre, decision FROM " . blokes_club_days_table() . " WHERE fecha BETWEEN %s AND %s",
+            $y . '-01-01', ($y + 1) . '-12-31'
+        ), ARRAY_A);
+        $club_por_fecha = array();
+        foreach ($club_rows as $cr) { $club_por_fecha[$cr['fecha']] = $cr; }
+        $festivos_9to5 = array();
+        foreach ($c['holidays'] as $h) { if (!$h['workable'] && $h['date'] !== '') $festivos_9to5[$h['date']] = $h['name']; }
+
+        foreach ($festivos_9to5 as $fecha => $nombre) {
+            $club = $club_por_fecha[$fecha] ?? null;
+            if (!$club) {
+                $warnings[] = "9to5 tiene festivo el $fecha ($nombre) que no está en el calendario del club — añádelo en Fiestas y cierres.";
+            } elseif (in_array($club['decision'], array('abre', 'abre_horario_especial'), true)) {
+                $warnings[] = "9to5 tiene festivo el $fecha ($nombre) pero el club decidió ABRIR ese día (festivo trabajado) — márcalo en 9to5 como festivo trabajado para que las horas/compensaciones cuadren.";
+            } elseif ($club['decision'] === 'pendiente') {
+                $warnings[] = "9to5 tiene festivo el $fecha ($nombre) y el calendario del club todavía no ha decidido qué hacer ese día.";
+            }
+            // 'cierra'/'cierra_vacaciones': cuadra con 9to5, sin aviso.
+        }
+        foreach ($club_por_fecha as $fecha => $cr) {
+            // Solo 'cierra' (festivo oficial) entra en esta dirección — 'cierra_vacaciones' es a
+            // propósito un cierre que NO es festivo oficial (Nochebuena/Nochevieja: cierra pero
+            // SÍ gasta vacaciones), nunca se espera que 9to5 lo tenga como festivo.
+            if ($cr['decision'] === 'cierra' && !isset($festivos_9to5[$fecha])) {
+                $warnings[] = "El calendario del club tiene el $fecha ({$cr['nombre']}) como cierre, pero 9to5 no lo tiene como festivo — revisa la fecha o avísalo en 9to5.";
+            }
+        }
     }
     $balances = array();
     foreach (array($y, $y + 1) as $yr) {
@@ -12140,6 +22593,7 @@ function presup_clean_partida($p) {
     $medida = (string) ($p['medida'] ?? '');
     $enlace = esc_url_raw(trim((string) ($p['enlace'] ?? '')), array('http', 'https'));
     $fecha  = (string) ($p['fecha_consulta'] ?? '');
+    $limite = (string) ($p['fecha_limite'] ?? '');
     return array(
         'id'                => $p['id'] ?? wp_generate_uuid4(),
         'zona_id'           => $zona_id,
@@ -12160,6 +22614,10 @@ function presup_clean_partida($p) {
         'enlace'            => mb_substr($enlace, 0, 500),
         'fecha_consulta'    => timeoff_valid_date($fecha) ? $fecha : null,
         'nota'              => presup_longtext($p['nota'] ?? '', 2000),
+        // Actuaciones inmediatas: tareas pequeñas que se pueden ejecutar ya
+        'inmediata'         => filter_var($p['inmediata'] ?? false, FILTER_VALIDATE_BOOLEAN),
+        'responsable'       => presup_text($p['responsable'] ?? '', 80),
+        'fecha_limite'      => timeoff_valid_date($limite) ? $limite : null,
         'actualizado'       => current_time('mysql'),
         'por'               => timeoff_user_name(),
     );

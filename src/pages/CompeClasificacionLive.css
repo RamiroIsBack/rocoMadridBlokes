@@ -1,0 +1,80 @@
+/* Clasificación en directo de la tele (20/11 06:30, punto 2) — puerto del prototipo
+   media_para_code/prototipo_clasificacion_tele.html. Prefijo "cl-" porque algunos nombres del
+   prototipo (.row, .list, .body...) son demasiado genéricos para el resto de la app. Unidades
+   vh/vw/clamp(), como el resto de .td-* de esta página — no el "stage 960×540 + scale()" del
+   prototipo, que era solo para la vista previa en el navegador normal. */
+
+.cl-stage { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+
+.cl-tabs { display: flex; gap: 0.5vw; padding: 0 3vw 1vh; flex: 0 0 auto; }
+.cl-tab {
+  flex: 1; position: relative; text-align: center; font-weight: 800; letter-spacing: .12em;
+  text-transform: uppercase; color: #4b5563; padding: 0.8vh 0; background: #0e1628; border-radius: 4px;
+  overflow: hidden; font-size: clamp(0.6rem, 1.6vh, 1rem);
+}
+.cl-tab.on { color: #0b1120; background: #fbbf24; }
+.cl-tab .cl-bar { position: absolute; left: 0; bottom: 0; height: 3px; background: rgba(11,17,32,.55); width: 0; }
+.cl-tab.on .cl-bar { animation: cl-fill var(--rot) linear forwards; }
+.cl-tab.paused .cl-bar { animation-play-state: paused; }
+@keyframes cl-fill { to { width: 100%; } }
+
+.cl-body { flex: 1; min-height: 0; display: flex; gap: 3vw; padding: 0 3vw; box-sizing: border-box; }
+.cl-col-c { flex: 2; min-width: 0; display: flex; flex-direction: column; }
+.cl-col-u { flex: 1; min-width: 0; border-left: 1px solid #1f2937; padding-left: 2vw; display: flex; flex-direction: column; }
+.cl-h2 {
+  font-size: clamp(0.7rem, 1.8vh, 1.2rem); color: #9ca3af; margin: 0 0 0.8vh; font-weight: 700;
+  letter-spacing: .06em; text-transform: uppercase; display: flex; justify-content: space-between; flex: 0 0 auto;
+}
+
+.cl-list { position: relative; flex: 1; min-height: 0; }
+.cl-row {
+  position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 1vw;
+  font-size: clamp(0.85rem, 2.6vh, 1.6rem); height: calc(100% / 11); border-bottom: 1px solid #1f2937;
+  box-sizing: border-box; padding: 0 0.5vw; transition: top 1s cubic-bezier(.65,0,.35,1), opacity .4s;
+  font-variant-numeric: tabular-nums;
+}
+.cl-row .cl-pos { width: 2.2em; text-align: right; color: #9ca3af; font-weight: 700; flex-shrink: 0; }
+.cl-row .cl-nm { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cl-row .cl-tp { font-weight: 800; flex-shrink: 0; }
+.cl-row.r1 { color: #fbbf24; font-weight: 800; }
+.cl-row.r2 { color: #d1d5db; font-weight: 800; }
+.cl-row.r3 { color: #fb923c; font-weight: 800; }
+.cl-row.moving { z-index: 3; background: rgba(212,160,23,.14); }
+.cl-row.bump .cl-tp { animation: cl-bump .5s; }
+@keyframes cl-bump { 50% { transform: scale(1.4); color: #d4a017; } }
+.cl-list.flip .cl-row { animation: cl-flap .5s both; animation-delay: calc(var(--i) * 45ms); }
+@keyframes cl-flap { 0% { transform: rotateX(90deg); opacity: 0; } 100% { transform: none; opacity: 1; } }
+
+/* marco mostaza dibujado alrededor de la fila con un top nuevo */
+.cl-hl { position: absolute; left: -4px; right: -4px; z-index: 4; pointer-events: none; transition: top 1s cubic-bezier(.65,0,.35,1), opacity .4s; }
+.cl-hl svg { width: 100%; height: 100%; overflow: visible; }
+.cl-hl rect { fill: none; stroke: #d4a017; stroke-width: 3; stroke-dasharray: var(--per); stroke-dashoffset: var(--per); }
+.cl-hl.draw rect { animation: cl-draw .7s ease-out forwards; }
+@keyframes cl-draw { to { stroke-dashoffset: 0; } }
+.cl-hl .cl-tag {
+  position: absolute; right: 8px; top: -1.4em; background: #d4a017; color: #0b1120; font-weight: 900;
+  padding: 1px 7px; border-radius: 3px; letter-spacing: .04em; opacity: 0; transition: opacity .3s;
+  font-size: clamp(0.55rem, 1.3vh, 0.85rem); white-space: nowrap;
+}
+.cl-hl.tagon .cl-tag { opacity: 1; }
+
+.cl-ult { list-style: none; margin: 0; padding: 0; font-size: clamp(0.6rem, 1.5vh, 1rem); overflow: hidden; flex: 1; min-height: 0; }
+.cl-ult li { display: flex; align-items: center; gap: 0.6vw; padding: 0.6vh 0; border-bottom: 1px solid #1f2937; animation: cl-in .5s; }
+.cl-dot { width: 0.7em; height: 0.7em; border-radius: 50%; flex-shrink: 0; }
+@keyframes cl-in { from { opacity: 0; transform: translateY(-6px); } }
+
+/* 3-column variant (?vista=columnas) */
+.cl-tri { display: flex; gap: 1.4vw; flex: 1; min-height: 0; padding: 0.4vh 2vw 0; }
+.cl-tri > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.cl-tri .cl-row { font-size: clamp(0.65rem, 1.8vh, 1.1rem); height: calc(100% / 13); gap: 0.4vw; padding: 0 0.3vw; }
+.cl-tri .cl-row .cl-pos { width: 1.6em; }
+.cl-stage.v3 .cl-tabs, .cl-stage.v3 .cl-body { display: none; }
+.cl-stage:not(.v3) .cl-tri { display: none; }
+
+.cl-vista-btn {
+  position: absolute; right: 1vw; bottom: 1vh; opacity: .15; border: none; background: rgba(255,255,255,.08);
+  color: #fff; width: 2.2em; height: 2.2em; border-radius: 50%; font-size: 1rem; cursor: pointer;
+}
+.cl-vista-btn:hover { opacity: .6; }
+
+@media (prefers-reduced-motion: reduce) { .cl-row, .cl-hl { transition: none; } .cl-list.flip .cl-row { animation: none; } }

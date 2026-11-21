@@ -1,0 +1,260 @@
+import { useState, useEffect, useRef } from 'react'
+import './InstalarPage.css'
+
+const CLUB_URL      = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
+const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
+const ICON_URL       = `${import.meta.env.BASE_URL}icons/icon-512.png`
+// Vídeo tutorial (Ramiro, 12/11 16:40/16:37) — ficheros estáticos en public/media/ (no pasan
+// por el hash del bundler), con nombre fijo para poder reemplazarlos luego por la versión con
+// el modo compe sin tocar código ni URLs.
+const VIDEO_TUTORIAL_URL  = `${import.meta.env.BASE_URL}media/Blokes_tutorial_Roco.mp4`
+const VIDEO_TUTORIAL_POSTER = `${import.meta.env.BASE_URL}media/Blokes_tutorial_poster.jpg`
+
+function detectarEntorno() {
+  const ua = navigator.userAgent || ''
+  const esIOS = /iphone|ipad|ipod/i.test(ua) && !window.MSStream
+  const esAndroid = /android/i.test(ua)
+  // Navegador interno de WhatsApp/Instagram/Facebook — ahí no hay beforeinstallprompt ni
+  // "Añadir a pantalla de inicio" (Ramiro, 09/11 11:53). En Android, ese webview también
+  // suele llevar "; wv)" en el user-agent.
+  const esWhatsApp = /WhatsApp/i.test(ua)
+  const esInstagram = /Instagram/i.test(ua)
+  const esFacebook = /FBAN|FBAV/i.test(ua)
+  const esWebviewEmbebido = esWhatsApp || esInstagram || esFacebook || /Line\//i.test(ua) || (esAndroid && /; wv\)/i.test(ua))
+  // 17/11 18:30 (cowork, Eva: "pincha el enlace y no se descarga nada"): nombrar la app de
+  // verdad en el aviso, no un genérico "tu navegador" — ayuda a que la gente entienda por qué
+  // hace falta un paso más.
+  const nombreWebview = esWhatsApp ? 'WhatsApp' : esInstagram ? 'Instagram' : esFacebook ? 'Facebook' : 'esta app'
+  return { esIOS, esAndroid, esWebviewEmbebido, nombreWebview }
+}
+
+function registrarEvento(tipo) {
+  fetch(`${WORDPRESS_URL}/wp-json/blokes/v1/install-event`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tipo }),
+  }).catch(() => {})
+}
+
+function cuentaAtrasTexto(compDate, compEndDate) {
+  const ahora = new Date()
+  const inicio = new Date(`${compDate}T00:00:00`)
+  const fin = new Date(`${compEndDate || compDate}T23:59:59`)
+  if (ahora > fin) return 'ya celebrada'
+  if (ahora >= inicio) return '¡hoy toca!'
+  const dias = Math.ceil((inicio - ahora) / 86400000)
+  return dias === 1 ? 'mañana' : `en ${dias} días`
+}
+
+function fechaRango(compDate, compEndDate) {
+  const opts = { day: 'numeric', month: 'long' }
+  const ini = new Date(`${compDate}T00:00:00`).toLocaleDateString('es-ES', opts)
+  if (!compEndDate || compEndDate === compDate) return ini
+  const fin = new Date(`${compEndDate}T00:00:00`).toLocaleDateString('es-ES', opts)
+  return `${ini} – ${fin}`
+}
+
+// Plegado, con una miniatura grande (la portada + ▶ + texto), nunca un enlace o línea pequeña
+// (Ramiro, 12/11 16:37). Al tocarla se despliega y se reproduce ahí mismo, vertical, sin
+// sonido por defecto — el usuario lo activa con los controles del propio vídeo.
+function VideoTutorial() {
+  const [abierto, setAbierto] = useState(false)
+  if (!abierto) {
+    return (
+      <button type="button" className="instalar__video-miniatura" onClick={() => setAbierto(true)}>
+        <img src={VIDEO_TUTORIAL_POSTER} alt="" className="instalar__video-poster" />
+        <span className="instalar__video-play">▶</span>
+        <span className="instalar__video-texto">Ver cómo funciona · 1 min</span>
+      </button>
+    )
+  }
+  return (
+    <video
+      className="instalar__video"
+      src={VIDEO_TUTORIAL_URL}
+      poster={VIDEO_TUTORIAL_POSTER}
+      controls
+      playsInline
+      muted
+      autoPlay
+      preload="metadata"
+    />
+  )
+}
+
+export default function InstalarPage() {
+  const entorno = useRef(detectarEntorno()).current
+  const [compe, setCompe] = useState(null)
+  const [yaInstalada, setYaInstalada] = useState(false)
+  const [sinPrompt, setSinPrompt] = useState(false)
+  const [enlaceCopiado, setEnlaceCopiado] = useState(false)
+  const promptEventRef = useRef(null)
+
+  // 17/11 18:30 (cowork): "Copiar enlace" para quien está atrapado en el navegador de WhatsApp/
+  // Instagram y prefiere pegarlo él mismo en Chrome/Safari en vez de fiarse del botón "Abrir en
+  // Chrome" (que no siempre funciona según la versión del teléfono).
+  const copiarEnlace = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href)
+    } catch {
+      // Clipboard API puede fallar dentro de un webview sin permiso — selecciona el texto en un
+      // campo temporal y usa el comando viejo como respaldo, nunca se queda sin hacer nada.
+      const input = document.createElement('input')
+      input.value = window.location.href
+      document.body.appendChild(input)
+      input.select()
+      try { document.execCommand('copy') } catch {}
+      document.body.removeChild(input)
+    }
+    setEnlaceCopiado(true)
+    setTimeout(() => setEnlaceCopiado(false), 3000)
+  }
+
+  useEffect(() => {
+    setYaInstalada(!!(window.matchMedia && window.matchMedia('(display-mode: standalone)').matches))
+
+    fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/proxima`)
+      .then(r => r.json())
+      .then(d => { if (d?.success && d.data) setCompe(d.data) })
+      .catch(() => {})
+
+    // main.jsx ya lo captura en cuanto carga el script, antes de que React monte este
+    // efecto (cowork, 09/11 12:25: con el service worker ya instalado, Chrome a veces lanza
+    // el evento antes de llegar aquí, y se perdía). Si ya llegó, está en window.blokesInstallEvent.
+    if (window.blokesInstallEvent) promptEventRef.current = window.blokesInstallEvent
+    const onBeforeInstall = (e) => {
+      e.preventDefault()
+      window.blokesInstallEvent = e
+      promptEventRef.current = e
+    }
+    window.addEventListener('beforeinstallprompt', onBeforeInstall)
+    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall)
+  }, [])
+
+  const abrirEnChrome = () => {
+    const destino = window.location.href.replace(/^https?:\/\//, '')
+    window.location.href = `intent://${destino}#Intent;scheme=https;package=com.android.chrome;end`
+  }
+
+  const instalar = async () => {
+    registrarEvento('instalar_click')
+    const evento = promptEventRef.current
+    if (!evento) {
+      setSinPrompt(true)
+      return
+    }
+    try {
+      await evento.prompt()
+      promptEventRef.current = null
+      window.blokesInstallEvent = null
+    } catch {
+      registrarEvento('prompt_fail')
+      setSinPrompt(true)
+    }
+  }
+
+  return (
+    <div className="instalar">
+      <img className="instalar__logo" src={ICON_URL} alt="Blokes" />
+      <h1 className="instalar__titulo">Blokes</h1>
+
+      {compe ? (
+        <p className="instalar__gancho">
+          {compe.nombre} — {fechaRango(compe.compDate, compe.compEndDate)}
+          <br />
+          <span className="instalar__cuenta-atras">{cuentaAtrasTexto(compe.compDate, compe.compEndDate)}</span>
+        </p>
+      ) : (
+        <p className="instalar__gancho">La app para apuntar tus tops de búlder</p>
+      )}
+
+      {yaInstalada ? (
+        <div className="instalar__ya-tienes">✓ Ya la tienes instalada</div>
+      ) : entorno.esWebviewEmbebido ? (
+        <div className="instalar__webview-aviso">
+          {/* 17/11 18:30 (cowork, Eva: "pincha y no se descarga nada"): un aviso grande que
+              nombre el problema de verdad — la gente esperaba una descarga de tienda al ver
+              "Instálala ya" en el WhatsApp de la campaña. */}
+          <p className="instalar__webview-titulo">⚠ Estás dentro de {entorno.nombreWebview}</p>
+          <p>
+            Para instalar Blokes tienes que abrir esta página en {entorno.esAndroid ? 'Chrome' : 'Safari'}.
+            {' '}Blokes no se descarga de Play Store ni de App Store: se añade a tu pantalla de inicio desde
+            el navegador. No ocupa espacio y se actualiza sola.
+          </p>
+          {entorno.esAndroid ? (
+            <button className="instalar__cta" onClick={abrirEnChrome}>Abrir en Chrome para instalar</button>
+          ) : (
+            <div className="instalar__pasos">
+              <h2>Para instalarla, ábrela en Safari:</h2>
+              <ol>
+                <li>Toca <strong>⋯</strong> o el icono de Safari, arriba o abajo de esta pantalla.</li>
+                <li>Elige <strong>"Abrir en Safari"</strong>.</li>
+                <li>Ahí, toca compartir <strong>⬆️</strong> y luego <strong>"Añadir a pantalla de inicio"</strong>.</li>
+              </ol>
+            </div>
+          )}
+          <button type="button" className="instalar__link-btn" onClick={copiarEnlace}>
+            {enlaceCopiado ? '✓ Enlace copiado' : '📋 Copiar enlace (para pegarlo en Chrome o Safari)'}
+          </button>
+          <a className="instalar__cta instalar__cta--secundario" href={`${import.meta.env.BASE_URL}`}>
+            Usarla sin instalar →
+          </a>
+        </div>
+      ) : entorno.esIOS ? (
+        <div className="instalar__pasos">
+          <h2>En iPhone (no sale un botón, se hace así):</h2>
+          <ol>
+            <li>Toca el icono de compartir <strong>⬆️</strong> (abajo en Safari).</li>
+            <li>Elige <strong>"Añadir a pantalla de inicio"</strong>.</li>
+          </ol>
+          <p className="instalar__hint">
+            Blokes no se descarga de Play Store ni de App Store: se añade a tu pantalla de inicio desde
+            Safari. No ocupa espacio y se actualiza sola.
+          </p>
+        </div>
+      ) : (
+        <>
+          <button className="instalar__cta" onClick={instalar}>📲 Instalar Blokes</button>
+          {sinPrompt && entorno.esAndroid && (
+            // Pestaña personalizada (Custom Tab) abierta desde WhatsApp sin "WhatsApp" en el
+            // user-agent: se ve como Chrome normal pero no tiene el menú ⋮ → "Instalar
+            // aplicación" (cowork, 09/11 12:25). El botón de abrir en Chrome de verdad es
+            // la salida segura ahí; en Chrome normal no hace daño, solo reabre la misma página.
+            <button className="instalar__cta instalar__cta--secundario" onClick={abrirEnChrome}>
+              Abrir en Chrome para instalar
+            </button>
+          )}
+          {sinPrompt && (
+            <div className="instalar__pasos">
+              <h2>Tu navegador no deja instalar con un botón. Hazlo así:</h2>
+              <ol>
+                <li>Abre el menú <strong>⋮</strong> arriba a la derecha.</li>
+                <li>Elige <strong>"Instalar aplicación"</strong> o <strong>"Añadir a pantalla de inicio"</strong>.</li>
+              </ol>
+              <p className="instalar__hint">
+                Blokes no se descarga de Play Store ni de App Store: se añade a tu pantalla de inicio desde
+                el navegador. No ocupa espacio y se actualiza sola.
+              </p>
+            </div>
+          )}
+        </>
+      )}
+
+      <VideoTutorial />
+
+      <div className="instalar__about">
+        <h2>Cómo funciona la compe</h2>
+        <ul>
+          <li>30 de noviembre – 4 de diciembre, en el horario normal del Roco.</li>
+          <li>16 bloques numerados.</li>
+          <li>1 h 30 desde tu primer top, en tu clase o, si vas por libre, cuando empieces.</li>
+          <li>Apuntas tus tops desde el móvil (o te ayudan los profes y Eva en recepción); de buena fe, lo ven tus compañeros.</li>
+          <li>Clasificación en directo en la tele.</li>
+          <li>Cuenta para la Liga de 3 compes al año, con premios en la fiesta de junio.</li>
+        </ul>
+      </div>
+
+      <a className="instalar__login" href={`${import.meta.env.BASE_URL}`}>Inicia sesión o crea tu cuenta →</a>
+    </div>
+  )
+}

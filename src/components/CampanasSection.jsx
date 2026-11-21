@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react'
 import * as XLSX from 'xlsx'
 import {
-  campanasContactosImportar, campanasContactosGet, campanasEnviosHoyGet,
+  campanasContactosImportar, campanasContactosGet, campanasContactoBorrar, campanasEnviosHoyGet,
   campanasListar, campanasCrear, campanasEditar, campanasDestinatarios, campanasMarcarAccion,
+  campanasDeshacerEnviados, campanasRecalcularIndirectas, campanasReclasificarTipo,
 } from '../hooks/useSuperAdmin'
 import './CampanasSection.css'
 
@@ -11,6 +12,11 @@ const LISTA_LABEL = {
   bajas: 'Bajas de mensajes', sin_clasificar: 'Sin clasificar',
 }
 const CAMPANA_LISTAS = ['actuales', 'nuevos', 'en_espera', 'antiguos']
+// El filtro "ya en vigor ahora mismo" solo tiene sentido en una campaña de solo-antiguos (no
+// mandar "¿te animas a volver?" a quien ya viene). En una campaña que incluye actuales/nuevos/
+// en_espera, esas personas SON el destinatario — filtrarlas escondía a 184 de 185 (Ramiro,
+// 09/11 11:40, campaña #2 "Compe RocoMadrid + app Blokes").
+const LISTAS_VIGENTES = ['actuales', 'nuevos', 'en_espera']
 
 // Marca de consentimiento de WhatsApp, igual en Contactos y en la lista de envío de una
 // campaña: gris = sin preguntar, verde = sí, rojo = no/BAJA.
@@ -170,6 +176,20 @@ function ContactosPanel({ onPlantillasSugeridas }) {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(null)
   const [refreshKey, setRefresh] = useState(0)
+  const [reclasificando, setReclasificando] = useState(false)
+
+  // Ramiro 12/11 15:52: reclasifica a mano, cuando haga falta (p. ej. tras un Sync Grupos que
+  // traiga más alumnos menores con el teléfono de un padre/madre).
+  const reclasificarTipo = async () => {
+    setReclasificando(true)
+    try {
+      const res = await campanasReclasificarTipo()
+      window.alert(res.cambiados > 0
+        ? `${res.cambiados} contacto(s) pasado(s) de adulto a menor:\n${res.detalle.map(d => `${d.telefono} — ${(d.nombres || []).join(', ')}`).join('\n')}`
+        : 'Ningún contacto ha cambiado — ya estaban bien clasificados.')
+      setRefresh(k => k + 1)
+    } catch (e) { window.alert(e.message) } finally { setReclasificando(false) }
+  }
 
   useEffect(() => {
     setLoading(true); setError(null)
@@ -213,6 +233,9 @@ function ContactosPanel({ onPlantillasSugeridas }) {
             <option value="sin_preguntar">Sin preguntar ({data.resumenOptin?.sin_preguntar || 0})</option>
           </select>
         )}
+        <button className="cmp-btn cmp-btn--sm" onClick={reclasificarTipo} disabled={reclasificando}>
+          {reclasificando ? 'Reclasificando...' : 'Reclasificar por edad'}
+        </button>
       </div>
 
       {loading && <p className="cmp-hint">Cargando…</p>}
@@ -221,7 +244,7 @@ function ContactosPanel({ onPlantillasSugeridas }) {
         <div className="cmp-table-wrap">
           <table className="cmp-table">
             <thead>
-              <tr><th>Teléfono</th><th>Nombres</th><th>Tipo</th><th>Lista</th><th>Origen</th><th>WhatsApp</th></tr>
+              <tr><th>Teléfono</th><th>Nombres</th><th>Tipo</th><th>Lista</th><th>Origen</th><th>WhatsApp</th><th></th></tr>
             </thead>
             <tbody>
               {data.contactos.filter(c => soloOptin === 'all' || (c.optinWhatsapp || 'sin_preguntar') === soloOptin).map(c => (
@@ -232,6 +255,15 @@ function ContactosPanel({ onPlantillasSugeridas }) {
                   <td><span className={`cmp-badge cmp-badge--${c.lista || 'sin_clasificar'}`}>{LISTA_LABEL[c.lista || 'sin_clasificar']}</span></td>
                   <td className="cmp-muted">{c.origen}</td>
                   <td><WaMark value={c.optinWhatsapp} /></td>
+                  <td>
+                    <button
+                      className="cmp-btn"
+                      onClick={async () => {
+                        if (!window.confirm(`¿Borrar el contacto «${c.nombres.join(', ')}» (${c.telefono})? No se puede deshacer.`)) return
+                        try { await campanasContactoBorrar(c.id); setRefresh(k => k + 1) } catch (e) { window.alert(e.message) }
+                      }}
+                    >Borrar</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -254,6 +286,7 @@ function CrearCampanaPanel({ sugeridas, onCreated, editando, onEdited, onCancelE
   const [plantillaAdulto, setPlantillaAdulto] = useState(base.plantillaAdulto || '')
   const [plantillaMenor, setPlantillaMenor]   = useState(base.plantillaMenor || '')
   const [remitente, setRemitente]         = useState(base.remitente || '')
+  const [destinoEnlace, setDestinoEnlace] = useState(base.destinoEnlace || '')
   const [fechaFin, setFechaFin]           = useState(base.fechaFin || '')
   const [saving, setSaving]               = useState(false)
   const [error, setError]                 = useState(null)
@@ -273,7 +306,7 @@ function CrearCampanaPanel({ sugeridas, onCreated, editando, onEdited, onCancelE
     if (!listasElegidas.length) { setError('Elige al menos una lista.'); return }
     setSaving(true)
     try {
-      const body = { nombre, listas: listasElegidas, plantillaAdulto, plantillaMenor, remitente, fechaFin: fechaFin || null }
+      const body = { nombre, listas: listasElegidas, plantillaAdulto, plantillaMenor, remitente, destinoEnlace, fechaFin: fechaFin || null }
       if (editando) {
         await campanasEditar(editando.id, body)
         if (onEdited) onEdited()
@@ -304,10 +337,13 @@ function CrearCampanaPanel({ sugeridas, onCreated, editando, onEdited, onCancelE
       <label className="cmp-field">Remitente
         <input className="cmp-input" type="text" value={remitente} onChange={e => setRemitente(e.target.value)} placeholder="Ramiro" />
       </label>
-      <label className="cmp-field">Plantilla adultos — usa {'{nombre}'} y {'{remitente}'}
+      <label className="cmp-field">Enlace de destino para medir clics (opcional) — si lo pones, usa {'{enlace}'} en la plantilla
+        <input className="cmp-input" type="text" value={destinoEnlace} onChange={e => setDestinoEnlace(e.target.value)} placeholder="https://rocomadrid.com/..." />
+      </label>
+      <label className="cmp-field">Plantilla adultos — usa {'{nombre}'}, {'{remitente}'}{destinoEnlace ? <> y {'{enlace}'}</> : null}
         <textarea className="cmp-textarea" rows={5} value={plantillaAdulto} onChange={e => setPlantillaAdulto(e.target.value)} />
       </label>
-      <label className="cmp-field">Plantilla menores/familias — usa {'{nombre}'} y {'{remitente}'}
+      <label className="cmp-field">Plantilla menores/familias — usa {'{nombre}'}, {'{remitente}'}{destinoEnlace ? <> y {'{enlace}'}</> : null}
         <textarea className="cmp-textarea" rows={5} value={plantillaMenor} onChange={e => setPlantillaMenor(e.target.value)} />
       </label>
       <label className="cmp-field">Fecha fin de la oferta (opcional)
@@ -388,10 +424,15 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
     } catch (e) { setError(e.message) }
   }
 
+  // Ramiro 12/11 15:52: "Abrir WhatsApp" ya NO marca enviado al abrir — antes, abrir sin llegar
+  // a mandar (dato equivocado, pestaña cerrada a tiempo...) dejaba la fila en "enviado" igual.
+  // Ahora hace falta pulsar "✓ Enviado" aparte, después de mandarlo de verdad.
   const abrirWhatsapp = (d) => {
-    const url = `https://wa.me/34${d.telefono}?text=${encodeURIComponent(d.mensaje)}`
-    window.open(url, '_blank')
-    accion(d.contactoId, 'enviado')
+    // web.whatsapp.com/send, no wa.me: wa.me pasa por api.whatsapp.com, que abre la app de
+    // escritorio en vez de la pestaña de WhatsApp Web ya abierta y rompía los emojis del mensaje
+    // (NOTAS_PARA_CODE_pestanas_grupos.md, 3/11 10:45). Ventana con nombre fijo para reutilizarla.
+    const url = `https://web.whatsapp.com/send?phone=34${d.telefono}&text=${encodeURIComponent(d.mensaje)}`
+    window.open(url, 'blokes_whatsapp')
   }
 
   const marcarBaja = (d) => {
@@ -404,7 +445,8 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
   if (error)   return <p className="cmp-error">Error: {error}</p>
   if (!data)   return null
 
-  const base = (data.destinatarios || []).filter(d => !d.yaEnVigor)
+  const esCampanaVigentes = data.campana.listas.some(l => LISTAS_VIGENTES.includes(l))
+  const base = esCampanaVigentes ? (data.destinatarios || []) : (data.destinatarios || []).filter(d => !d.yaEnVigor)
   const porEstado = { pendientes: 0, enviados: 0, respondieron: 0, bajas: 0, apuntados: 0 }
   base.forEach(d => { porEstado[clasificarDestinatario(d)]++ })
 
@@ -468,8 +510,26 @@ function DestinatariosPanel({ campana, onBack, onChanged }) {
                 </td>
                 <td className="cmp-acciones">
                   <button className="cmp-btn cmp-btn--sm cmp-btn--primary" onClick={() => abrirWhatsapp(d)}>Abrir WhatsApp</button>
-                  <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'respondio')}>Respondió</button>
-                  <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'apuntado')}>Se apuntó</button>
+                  {/* Ramiro 12/11 15:52: "✓ Enviado" se pulsa aparte, después de mandarlo de
+                      verdad — "Abrir WhatsApp" ya no lo marca solo con abrir la pestaña. */}
+                  {d.enviado ? (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'enviado_deshacer')}>Deshacer enviado</button>
+                  ) : (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'enviado')}>✓ Enviado</button>
+                  )}
+                  {/* "Deshacer" para Respondió y Se apuntó, igual que ya existía para BAJA — pedido
+                      por cowork el 10/11 (un clic mal dado) y otra vez el 12/11 (los 11 "Se
+                      apuntaron" falsos del bug de conversión automática, antes de arreglarlo). */}
+                  {d.respondio ? (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'respondio_deshacer')}>Deshacer Respondió</button>
+                  ) : (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'respondio')}>Respondió</button>
+                  )}
+                  {d.apuntado ? (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'apuntado_deshacer')}>Deshacer Se apuntó</button>
+                  ) : (
+                    <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'apuntado')}>Se apuntó</button>
+                  )}
                   {d.baja ? (
                     <button className="cmp-btn cmp-btn--sm" onClick={() => accion(d.contactoId, 'baja_deshacer')}>Deshacer baja</button>
                   ) : (
@@ -493,9 +553,19 @@ function CampanasPanel({ sugeridas }) {
   const [editando, setEditando] = useState(null)
   const [verArchivadas, setVerArchivadas] = useState(false)
   const [refreshKey, setRefresh] = useState(0)
+  // Parte C de la trazabilidad (11/11): cruce indirecto por teléfono — para quien no hizo
+  // clic (o se le envió antes de que existiera el enlace) pero volvió igual.
+  // 🐞 Cowork 12/11 11:00: este useState estaba DESPUÉS del `return` de abajo — con `abierta`
+  // puesto, React veía menos hooks que en el render anterior y rompía toda la pantalla
+  // ("a is not a function"). Las reglas de Hooks exigen que se llamen siempre, en el mismo
+  // orden, nunca después de un return condicional — subido aquí con el resto de useState.
+  const [recalculando, setRecalculando] = useState(null)
 
-  const cargar = () => campanasListar().then(setCampanas).catch(e => setError(e.message))
-  useEffect(cargar, [refreshKey])
+  // 🐞 Cowork 12/11 11:00: `cargar` devolvía la Promise de `.then()/.catch()` (arrow de una
+  // sola expresión); `useEffect(cargar, ...)` la tomaba como función de limpieza y la
+  // llamaba al desmontar — "a is not a function". Envuelto en llaves para que no devuelva nada.
+  const cargar = () => { campanasListar().then(setCampanas).catch(e => setError(e.message)) }
+  useEffect(() => { cargar() }, [refreshKey])
 
   if (abierta) {
     return <DestinatariosPanel campana={abierta} onBack={() => { setAbierta(null); setRefresh(k => k + 1) }} onChanged={cargar} />
@@ -504,6 +574,26 @@ function CampanasPanel({ sugeridas }) {
   const archivar = async (c, activa) => {
     await campanasEditar(c.id, { activa })
     setRefresh(k => k + 1)
+  }
+
+  // Ramiro, 3/11 12:10: alguna campaña se queda con contactos marcados "enviado" por pruebas,
+  // sin haberse mandado nada de verdad — esto los deja todos como pendientes otra vez.
+  const deshacerEnviados = async c => {
+    if (!window.confirm(`¿Quitar el "enviado" de los ${c.enviados} contacto(s) de «${c.nombre}»? Volverán a salir como pendientes. No se pierde quién respondió, se dio de baja o se apuntó.`)) return
+    try {
+      const res = await campanasDeshacerEnviados(c.id)
+      window.alert(`Hecho: ${res.filas} fila(s) actualizadas.`)
+    } catch (e) { window.alert(e.message) }
+    setRefresh(k => k + 1)
+  }
+
+  const recalcularIndirectas = async c => {
+    setRecalculando(c.id)
+    try {
+      const res = await campanasRecalcularIndirectas(c.id)
+      window.alert(`Revisados ${res.revisados}: ${res.nuevas} conversión(es) indirecta(s) nueva(s).`)
+    } catch (e) { window.alert(e.message) }
+    finally { setRecalculando(null); setRefresh(k => k + 1) }
   }
 
   const visibles = (campanas || []).filter(c => verArchivadas || c.activa)
@@ -534,6 +624,8 @@ function CampanasPanel({ sugeridas }) {
           </div>
           <div className="cmp-campana-stats">
             <span>Enviados: {c.enviados}</span>
+            <span>Clics (únicos): {c.clicsUnicos ?? 0}</span>
+            <span>Conversiones: {c.conversiones ?? 0} ({c.conversionesDirectas ?? 0} directas, {c.conversionesIndirectas ?? 0} indirectas)</span>
             <span>Respondidos: {c.respondidos}</span>
             <span>Bajas: {c.bajas}</span>
             <span>Se apuntaron: {c.apuntados}</span>
@@ -542,6 +634,14 @@ function CampanasPanel({ sugeridas }) {
             <button className="cmp-btn cmp-btn--primary" onClick={() => setAbierta(c)}>Enviar / ver destinatarios</button>
             <button className="cmp-btn" onClick={() => setEditando(c)}>Editar</button>
             <button className="cmp-btn" onClick={() => archivar(c, !c.activa)}>{c.activa ? 'Archivar' : 'Reactivar'}</button>
+            {c.enviados > 0 && (
+              <button className="cmp-btn" onClick={() => recalcularIndirectas(c)} disabled={recalculando === c.id}>
+                {recalculando === c.id ? 'Revisando…' : 'Buscar conversiones indirectas'}
+              </button>
+            )}
+            {c.enviados > 0 && (
+              <button className="cmp-btn" onClick={() => deshacerEnviados(c)}>Deshacer enviados (eran pruebas)</button>
+            )}
           </div>
         </div>
       ))}
@@ -556,7 +656,7 @@ export default function CampanasSection() {
   return (
     <div className="cmp-section">
       <p className="sv-note">
-        Campañas de WhatsApp (envío manual, enlaces wa.me — sin API de Meta por ahora). Las listas (Actuales,
+        Campañas de WhatsApp (envío manual, enlaces de WhatsApp Web — sin API de Meta por ahora). Las listas (Actuales,
         Nuevos, Antiguos) se calculan solas a partir de las suscripciones y externos de Grupos; «Bajas de
         mensajes» solo se marca a mano y nunca se recalcula.
       </p>

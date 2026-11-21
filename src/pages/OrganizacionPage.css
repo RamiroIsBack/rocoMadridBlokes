@@ -1,5 +1,8 @@
 .org {
-  max-width: 700px;
+  /* Ramiro, 09/11 06:36: "el contenedor de página a todo el ancho — los max-width pequeños
+     solo para texto corrido, formularios y diálogos, nunca para tableros/tablas/rejillas" —
+     el tablero Hoy/Semana es justo eso. El límite exterior lo sigue poniendo .app-main. */
+  max-width: none;
   margin: 0 auto;
   padding: 20px 16px 48px;
 }
@@ -18,19 +21,42 @@
 .org__switch-btn {
   flex: 1;
   padding: 10px;
-  background: #fff;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   font-size: 0.8rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #2a2015;
+  color: var(--color-text-primary);
   cursor: pointer;
 }
 .org__switch-btn--active {
   background: #2a2015;
   color: #f5c842;
 }
+
+/* 17/11 punto A.5: barra fija abajo en el móvil (Semana/Normas/Compe + Crear bloke) — a
+   diferencia de .org__switch (que sube con el contenido), esta se queda siempre visible aunque
+   se haga scroll en una lista larga. .org--con-barra reserva el hueco de la barra abajo del
+   todo para que el último elemento de la página no quede tapado. */
+.org--con-barra { padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px)); }
+.org__bottombar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  display: flex;
+  background: var(--color-surface); border-top: 1.5px solid var(--color-border);
+  padding: 4px 4px calc(4px + env(safe-area-inset-bottom, 0px));
+}
+.org__bottombar-btn {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 6px 2px;
+  background: none; border: none;
+  color: var(--color-text-secondary);
+  font-size: 0.68rem; font-weight: 600;
+  min-height: 44px;
+}
+.org__bottombar-icon { font-size: 1.1rem; line-height: 1; }
+.org__bottombar-btn--active { color: #f5c842; }
 
 .org__whoami-list {
   display: flex;
@@ -40,14 +66,14 @@
 }
 .org__whoami-btn {
   padding: 14px 20px;
-  background: #fff;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   font-size: 1rem;
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
   cursor: pointer;
 }
-.org__whoami-btn:hover { border-color: #2a2015; }
+.org__whoami-btn:hover { border-color: var(--color-accent-hover); }
 
 .org__who-row {
   display: flex;
@@ -55,11 +81,22 @@
   align-items: center;
   margin-bottom: 16px;
 }
-.org__who-name { font-weight: 700; font-size: 1.1rem; color: #2a2015; }
+.org__who-name { font-weight: 700; font-size: 1.1rem; color: var(--color-text-primary); }
+/* "¿Quién eres? — elige —" no tenía clase ni regla propia: fallback al <select> nativo del
+   navegador (fondo blanco fijo), invisible/feo en oscuro. */
+.org__whoami-select {
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
 .org__link-btn {
   background: none;
   border: none;
-  color: #8a6416;
+  color: var(--color-accent-hover);
   text-decoration: underline;
   cursor: pointer;
   font-size: 0.85rem;
@@ -69,7 +106,7 @@
 .org__section-title {
   font-family: var(--font-serif);
   font-size: 1.1rem;
-  color: #2a2015;
+  color: var(--color-text-primary);
   margin: 0 0 10px;
 }
 
@@ -79,21 +116,24 @@
   display: flex; flex-direction: column; gap: 6px;
 }
 .org__task {
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  /* Ramiro, 13/11 05:30: fondo blanco + borde claro fijos — Blokes ya no tiene modo claro. El
+     override de [data-theme="dark"] de más abajo quedaba por detrás de esta regla en
+     especificidad/orden y no siempre ganaba; ahora el valor "bueno" está aquí directamente. */
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 10px 12px;
 }
 .org__task--done { opacity: 0.55; }
 .org__task label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
-.org__task-name { font-weight: 600; color: #2a2015; flex: 1; }
+.org__task-name { font-weight: 600; color: var(--color-text-primary); flex: 1; }
 .org__task-params { font-size: 0.78rem; color: var(--color-text-secondary); }
 
 .org__block-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 8px 10px;
   flex-wrap: wrap;
 }
@@ -104,8 +144,25 @@
   color: #fff;
   border-radius: 3px;
 }
-.org__block-info { font-size: 0.85rem; color: #2a2015; flex: 1; }
+.org__block-info { font-size: 0.85rem; color: var(--color-text-primary); flex: 1; }
 .org__block-upload { font-size: 0.75rem; color: var(--color-text-secondary); display: flex; align-items: center; gap: 4px; }
+
+/* Bloques planificados (Ramiro, 11/11 04:27): decididos de antemano, pero sin poner todavía —
+   más apagados que uno ya puesto, para que se distingan de un vistazo en la columna. */
+.org__block-row--planificado { background: var(--color-bg); border-style: dashed; opacity: 0.85; }
+.org__block-planificado-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--state-warn);
+  background: color-mix(in srgb, var(--state-warn) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--state-warn) 40%, transparent);
+  border-radius: 3px;
+  padding: 1px 6px;
+}
 .org__remove-btn {
   background: none; border: none; color: #b42318; cursor: pointer; font-size: 0.9rem;
 }
@@ -123,8 +180,8 @@
 }
 
 .org__add-form {
-  background: #fdf7e6;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   padding: 16px;
   margin-top: 10px;
   display: flex;
@@ -136,21 +193,22 @@
 .org__add-row--check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
 .org__add-row--check span { font-size: 0.82rem; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--color-text-primary); }
 .org__add-row select, .org__add-row input[type="date"] {
-  padding: 8px; border: 1.5px solid #c8bc9a; background: #fff; font-size: 0.9rem;
+  padding: 8px; border: 1.5px solid var(--color-border); background: var(--color-surface);
+  color: var(--color-text-primary); font-size: 0.9rem;
 }
 .org__holdset-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .org__holdset-chip {
   padding: 6px 10px;
-  background: #fff;
-  border: 1.5px solid #c8bc9a;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   font-size: 0.78rem;
   cursor: pointer;
-  color: #2a2015;
+  color: var(--color-text-primary);
 }
 .org__holdset-chip--on { background: #2a2015; color: #f5c842; border-color: #2a2015; }
 
-.org__warning { color: #9a5b13; font-size: 0.82rem; }
-.org__error { color: #b42318; font-size: 0.82rem; }
+.org__warning { color: var(--state-warn); font-size: 0.82rem; }
+.org__error { color: var(--state-bad); font-size: 0.82rem; }
 
 .org__add-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .org__btn {
@@ -158,35 +216,101 @@
   font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer;
 }
 .org__btn:disabled { opacity: 0.6; }
-.org__btn--ghost { background: none; color: #2a2015; border: 1.5px solid #2a2015; }
+/* Ramiro, 13/11 05:30: botón "ghost" con texto #2a2015 (marrón oscuro) sobre fondo
+   transparente — invisible encima del fondo oscuro de la página. */
+.org__btn--ghost { background: none; color: var(--color-text-primary); border: 1.5px solid var(--color-border); }
 
 .org__week-row {
   display: flex;
   justify-content: space-between;
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 10px 12px;
   cursor: pointer;
 }
 .org__week-row:hover { border-color: #c8961e; }
 .org__week-subzones { color: var(--color-text-secondary); font-size: 0.85rem; }
 
+/* Lista de competiciones: tarjeta pulsable con estado, no un <li> de texto plano
+   (Ramiro, 4/11 05:48: "no pude ver la compe que creamos" — no se notaba que fuera pulsable). */
+.org__compe-list { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.org__compe-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  border-radius: 6px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.org__compe-card:hover, .org__compe-card:active { border-color: #c8961e; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+.org__compe-card-main { display: flex; flex-direction: column; gap: 3px; }
+.org__compe-card-nombre { font-weight: 700; color: var(--color-text-primary); font-size: 1rem; }
+.org__compe-card-fechas { font-size: 0.85rem; color: var(--color-text-secondary); }
+.org__compe-card-estado { font-size: 0.8rem; color: var(--color-accent-hover); font-weight: 600; }
+.org__compe-card-flecha { font-weight: 700; color: var(--color-accent-hover); white-space: nowrap; }
+
+/* Tarjeta-resumen de la compe en curso, arriba de Hoy. */
+.org__compe-resumen {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  background: var(--color-bg);
+  border: 1.5px solid var(--state-warn);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  cursor: pointer;
+  text-align: left;
+}
+.org__compe-resumen-nombre { font-weight: 700; color: var(--color-text-primary); font-size: 1rem; }
+.org__compe-resumen-datos { font-size: 0.82rem; color: var(--color-accent-hover); }
+.org__compe-resumen-flecha { align-self: flex-end; font-weight: 700; color: var(--color-accent-hover); margin-top: -4px; }
+
+.org__mi-parte-semana { font-size: 0.78rem; font-weight: 700; color: var(--color-accent-hover); text-transform: uppercase; letter-spacing: 0.03em; margin: 10px 0 4px; }
+
+.org__danger-zone { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--color-border); text-align: right; }
+.org__link-btn--danger { color: var(--state-bad); }
+
+/* Aviso visible de error (Ramiro, 4/11 05:48: las llamadas fallidas no decían nada en pantalla). */
+.org__toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  background: #2a2015;
+  color: #fdf0d8;
+  padding: 12px 18px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+  cursor: pointer;
+  z-index: 1000;
+  max-width: 90vw;
+}
+.org__toast-close { opacity: 0.6; margin-left: 6px; }
+
 .org__assignment-card {
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 12px;
   margin-bottom: 8px;
 }
-.org__assignment-name { font-weight: 700; color: #2a2015; margin: 0 0 4px; font-size: 0.9rem; }
+.org__assignment-name { font-weight: 700; color: var(--color-text-primary); margin: 0 0 4px; font-size: 0.9rem; }
 .org__assignment-tasks { font-size: 0.8rem; color: var(--color-text-secondary); margin: 0; }
 
 .org__grade-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-.org__grade-table th, .org__grade-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #e5ddc8; }
+.org__grade-table th, .org__grade-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--color-border); color: var(--color-text-primary); }
 
-.org__rule { padding: 8px 10px; font-size: 0.85rem; }
-.org__rule--info { background: #fff; border: 1px solid #e5ddc8; }
-.org__rule--warning { background: #fdf0d8; border: 1px solid #c8961e; color: #7a5a10; }
-.org__rule--validation { background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; }
+.org__rule { padding: 8px 10px; font-size: 0.85rem; color: var(--color-text-primary); }
+.org__rule--info { background: var(--color-surface); border: 1px solid var(--color-border); }
+.org__rule--warning { background: color-mix(in srgb, var(--state-warn) 16%, transparent); border: 1px solid #c8961e; color: var(--state-warn); }
+.org__rule--validation { background: color-mix(in srgb, var(--state-bad) 16%, transparent); border: 1px solid var(--state-bad); color: var(--state-bad); }
 
 /* ── Semana: acciones + gestor de personas ── */
 .org__semana-actions {
@@ -200,8 +324,8 @@
 .org__semana-actions .org__add-btn { width: auto; flex: 1; margin-top: 0; }
 
 .org__workers-admin {
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 12px;
   margin-bottom: 16px;
 }
@@ -211,29 +335,29 @@
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  background: #fdf7e6;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
 }
-.org__worker-name { font-weight: 700; color: #2a2015; flex: 1; }
+.org__worker-name { font-weight: 700; color: var(--color-text-primary); flex: 1; }
 .org__worker-meta { font-size: 0.78rem; color: var(--color-text-secondary); }
 .org__blocks-range { display: flex; align-items: center; gap: 8px; }
-.org__blocks-range input { width: 60px; padding: 8px; border: 1.5px solid #c8bc9a; background: #fff; }
+.org__blocks-range input { width: 60px; padding: 8px; border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary); }
 
 /* ── Compe: bandeja de números + mapa con burbujas ── */
 .org__comp-tray {
   margin-bottom: 12px;
   padding: 10px 12px;
-  background: #fdf0d8;
+  background: rgba(200, 150, 30, 0.14);
   border: 1px dashed #c8961e;
 }
 .org__comp-tray-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .org__comp-chip {
   width: 36px; height: 36px;
   border-radius: 50%;
-  background: #fff;
-  border: 2px solid #2a2015;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
   font-weight: 700;
-  color: #2a2015;
+  color: var(--color-text-primary);
   cursor: pointer;
   touch-action: none;
 }
@@ -242,9 +366,14 @@
 .org__comp-map-wrap {
   position: relative;
   width: 100%;
-  touch-action: none;
+  /* NOTAS_PARA_CODE_tareas_movil.md punto A.4: "con zoom con los dedos" — `none` bloqueaba
+     también el pinch-zoom nativo del navegador, no solo el scroll de la página que de verdad
+     hacía falta evitar al arrastrar una burbuja. `pinch-zoom` deja el gesto de dos dedos al
+     navegador y sigue sin dejar que un solo dedo haga scroll — el arrastre de una burbuja (un
+     puntero) no se ve afectado. El mapa ya era 100% ancho, eso no cambia. */
+  touch-action: pinch-zoom;
   user-select: none;
-  border: 2px solid #2a2015;
+  border: 2px solid var(--color-border);
 }
 .org__comp-map-img {
   width: 100%;
@@ -272,7 +401,65 @@
 .org__comp-bubble:active { cursor: grabbing; }
 .org__comp-bubble--ghost { opacity: 0.6; pointer-events: none; border-style: dashed; }
 .org__comp-bubble--tested { box-shadow: 0 0 0 2px #22c55e, 0 2px 4px rgba(0,0,0,0.4); }
-.org__comp-block-photo { max-width: 160px; display: block; margin-bottom: 6px; border: 1px solid #c8bc9a; }
+/* Marca de "probado (forerunning)" sobre la burbuja (Ramiro, 11/11 05:01) — el halo verde de
+   arriba ya avisaba, pero quería un ✓ explícito, con "Forerun hecho" al pasar el ratón/tocar. */
+.org__comp-bubble__tested-mark {
+  position: absolute;
+  top: -6px; right: -6px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #22c55e;
+  color: #052e16;
+  font-size: 0.6rem;
+  font-weight: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #052e16;
+  pointer-events: none;
+}
+.org__comp-block-photo { max-width: 160px; display: block; margin-bottom: 6px; border: 1px solid var(--color-border); }
+
+/* Botón de encender/apagar el modo compe, bien visible (Ramiro, 11/11 05:01: "tiene que
+   quedar claro para el socio"). */
+.org__modo-compe {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  margin-bottom: 20px;
+  border-radius: 8px;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+.org__modo-compe--activo { background: rgba(34, 197, 94, 0.14); border-color: #22c55e; }
+.org__modo-compe__estado { font-weight: 800; margin: 0 0 4px; color: var(--color-text-primary); }
+/* "Bloque #3" se leía mal en la ficha (Ramiro, 11/11 05:01) — más grande y en negrita, el
+   número sobre todo. No se toca .org__section-title (compartido con cabeceras de otras
+   secciones) para no afectar a nada más. */
+.org__comp-block-title { font-size: 1.4rem; font-weight: 800; margin: 0; }
+.org__comp-block-title strong { font-size: 1.7rem; }
+
+/* "Fijar bloque" — intercambiar el número (Ramiro, 11/11 05:01, punto 8) */
+.org__comp-block-fijar { margin-bottom: 14px; background: var(--color-bg); border: 1px dashed var(--color-border); border-radius: var(--radius-sm); padding: 8px 10px; }
+.org__comp-block-numero--fijado {
+  /* --state-warn es ámbar oscuro en claro (blanco encima lee bien) pero amarillo vivo en
+     oscuro (blanco encima no) — texto oscuro fijo, que lee bien sobre los dos. */
+  font-size: 1.7rem; font-weight: 800; background: var(--state-warn); color: #1f1f1f;
+  border: none; border-radius: var(--radius-sm); padding: 2px 10px; cursor: pointer;
+}
+.org__comp-block-numero--fijado:disabled { opacity: 0.6; cursor: wait; }
+.org__comp-block-numero--cambiando {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 1rem; font-weight: 700;
+  vertical-align: middle;
+}
+.org__comp-block-numero--cambiando input[type="number"] {
+  width: 56px; padding: 2px 6px; font-size: 1rem; text-align: center;
+  border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary);
+}
 
 /* ── Mover tarea (Semana, detalle) / editar periodicidad (Normas) ── */
 .org__task-move {
@@ -283,8 +470,8 @@
 }
 .org__task-move select, .org__task-move input[type="date"] {
   padding: 4px 6px;
-  border: 1.5px solid #c8bc9a;
-  background: #fff;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
   font-size: 0.75rem;
 }
 .org__task label { gap: 0; }
@@ -300,29 +487,42 @@
 .org__periodicity-edit input {
   width: 48px;
   padding: 4px 6px;
-  border: 1.5px solid #c8bc9a;
-  background: #fff;
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
 }
 
 /* ── Semana: tablero de columnas por persona con tiles arrastrables ── */
+/* Ramiro, 09/11 06:36: con pantalla ancha, todos los trabajadores a la vez, sin scroll
+   horizontal — antes eran columnas de ancho fijo en una fila (`flex`), así que por mucho que
+   el contenedor se ensanchara, seguían sin caber y salía la barra. Con `grid` + `auto-fit` se
+   reparten solas: más columnas en pantalla ancha, menos (hasta 1) en móvil, sin scroll. */
+/* 17/11 punto B.3: aviso de arrastradas + filtro Todas/Pendientes/Retrasadas del tablero. */
+.org__board-aviso-arrastre {
+  background: #fdf0d8; border: 1px solid #c8961e; color: #8a6416;
+  padding: 8px 10px; margin-bottom: 10px; font-size: 0.82rem; font-weight: 600;
+}
+.org__board-filtro { display: flex; gap: 4px; margin-bottom: 10px; max-width: 360px; }
 .org__board {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 10px;
-  overflow-x: auto;
   padding-bottom: 8px;
   touch-action: none;
 }
 .org__board-col {
-  flex: 0 0 220px;
-  background: #fdf7e6;
-  border: 1.5px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
   padding: 10px;
+  /* 17/11 punto B.1: "cada columna con su propia altura" — por defecto una fila de CSS grid
+     estira todas sus celdas a la altura de la más alta (la de más tareas); con align-self:
+     start cada columna solo ocupa lo que necesita. */
+  align-self: start;
 }
 .org__board-col--over {
   border-color: #c8961e;
-  background: #fdf0d8;
+  background: rgba(200, 150, 30, 0.16);
 }
-.org__board-col-title { font-weight: 700; color: #2a2015; margin: 0 0 2px; font-size: 0.95rem; }
+.org__board-col-title { font-weight: 700; color: var(--color-text-primary); margin: 0 0 2px; font-size: 0.95rem; }
 .org__board-col-meta { font-size: 0.72rem; color: var(--color-text-secondary); margin: 0 0 10px; }
 .org__board-day { margin-bottom: 10px; }
 .org__board-day-label {
@@ -336,11 +536,11 @@
 
 .org__tile {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: flex-start;
   gap: 8px;
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 8px;
   margin-bottom: 6px;
   cursor: grab;
@@ -353,7 +553,7 @@
 .org__tile--dragging { opacity: 0.3; }
 .org__tile-check { display: flex; align-items: center; padding-top: 1px; cursor: pointer; }
 .org__tile-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.org__tile-name { font-weight: 600; color: #2a2015; font-size: 0.85rem; }
+.org__tile-name { font-weight: 600; color: var(--color-text-primary); font-size: 0.85rem; }
 .org__tile-params { font-size: 0.72rem; color: var(--color-text-secondary); }
 .org__tile-badge {
   align-self: flex-start;
@@ -366,10 +566,17 @@
   border-radius: 3px;
 }
 .org__tile--retrasada .org__tile-badge { background: #c8961e; }
+/* Tarea ya hecha que venía de antes: solo una nota discreta, no la alarma roja/ámbar de
+   arriba — esa es para lo que SIGUE sin hacer (cowork, 11/11 05:40). */
+.org__tile--done .org__tile-badge { background: none; color: var(--color-text-secondary); font-weight: 600; letter-spacing: normal; padding: 0; }
+/* Arrastre automático sin hacer todavía: mismo estilo discreto de arriba, pero el tile NO es
+   "hecho" (cowork 12/11 11:20: el texto ya decía "viene del X" pero el fondo rojo por defecto
+   de .org__tile-badge seguía ahí porque el tile no tenía ni --done ni --retrasada). */
+.org__tile-badge--discreto { background: none; color: var(--color-text-secondary); font-weight: 600; letter-spacing: normal; padding: 0; }
 .org__tile-postpone {
   flex: 0 0 100%;
   background: none;
-  border: 1px dashed #c8bc9a;
+  border: 1px dashed var(--color-border);
   color: #8a6416;
   font-size: 0.68rem;
   font-weight: 700;
@@ -377,10 +584,125 @@
   cursor: pointer;
 }
 .org__tile-postpone:disabled { opacity: 0.6; cursor: default; }
+.org__tile-delete {
+  flex: 0 0 100%;
+  background: none;
+  border: 1px dashed #c8928c;
+  color: #a33d33;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.org__tile-delete:disabled { opacity: 0.6; cursor: default; }
+.org__tile-edit {
+  flex: 0 0 100%;
+  background: none;
+  border: 1px dashed var(--color-border);
+  color: #5a4a2a;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+/* 17/11 punto B.2: una línea por tarea en el tablero de escritorio (checkbox + título +
+   iconos pequeños que aparecen al pasar el ratón) en vez de los 3-4 botones de ancho completo
+   de arriba (.org__tile-postpone/-edit/-delete, que siguen igual para el plan de la compe, que
+   no tenía ese problema). */
+.org__tile-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; opacity: 0; transition: opacity 0.1s; }
+.org__tile:hover .org__tile-actions, .org__tile:focus-within .org__tile-actions { opacity: 1; }
+.org__tile-icon-btn {
+  background: none; border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 0.8rem; line-height: 1; padding: 3px 6px;
+  cursor: pointer;
+}
+.org__tile-icon-btn:disabled { opacity: 0.6; cursor: default; }
+.org__tile-icon-btn--danger { color: #a33d33; border-color: #c8928c; }
+
+.org__task-rastro { font-size: 0.66rem; color: var(--color-text-secondary); font-style: italic; }
 .org__task--retrasada { border-color: #c8961e; background: #fdf0d8; }
 .org__task--moved { opacity: 0.6; }
 .org__task--moved .org__task-name { text-decoration: line-through; }
 .org__task--inactive { opacity: 0.55; }
+
+/* ── "Mis tareas" (móvil ≤700px) — NOTAS_PARA_CODE_tareas_movil.md, 17/11. Lista en vez de
+   tablero: una línea por tarea, acciones en un menú ⋯ (hoja inferior). Reutiliza los mismos
+   colores que .org__tile/.org__tile-badge para que "retrasada"/"FALTÓ" se vean igual en las
+   dos vistas. */
+.org__tm { margin-bottom: 16px; }
+.org__tm-mia-titulo {
+  font-weight: 700; font-size: 0.95rem; color: var(--color-text-primary);
+  margin: 14px 0 6px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.org__tm-seccion { margin-bottom: 8px; }
+.org__tm-acordeon { border-bottom: 1px solid var(--color-border); }
+.org__tm-acordeon-cabecera {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: none; border: none; padding: 12px 2px; font-size: 0.88rem; font-weight: 600;
+  color: var(--color-text-primary); text-align: left; cursor: pointer; min-height: 44px;
+}
+.org__tm-acordeon-flecha { color: var(--color-text-secondary); font-size: 0.8rem; }
+.org__tm-linea {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  padding: 8px; margin-bottom: 6px; min-height: 44px;
+}
+.org__tm-linea--done { opacity: 0.55; }
+.org__tm-linea--retrasada { border-color: #c8961e; background: #fdf0d8; }
+.org__tm-check { display: flex; align-items: center; cursor: pointer; flex: 0 0 auto; }
+.org__tm-check input { width: 20px; height: 20px; }
+.org__tm-body { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
+.org__tm-nombre { font-weight: 600; color: var(--color-text-primary); font-size: 0.85rem; overflow-wrap: anywhere; }
+.org__tm-compe-tag { font-size: 0.8rem; }
+.org__tm-mas {
+  flex: 0 0 auto; background: none; border: none; color: var(--color-text-secondary);
+  font-size: 1.3rem; font-weight: 700; line-height: 1; padding: 8px 6px; cursor: pointer; min-height: 44px;
+}
+/* Hoja inferior de acciones (alternativa táctil a lo que en escritorio son botones sueltos/
+   arrastre) — "⇄ Reasignar a…" reutiliza el mismo reassignTask() del tablero. */
+.org__tm-menu-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: flex-end; justify-content: center; z-index: 60;
+}
+.org__tm-menu {
+  width: 100%; max-width: 480px; background: var(--color-surface);
+  border-radius: 14px 14px 0 0; padding: 10px 0; display: flex; flex-direction: column;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25);
+}
+.org__tm-menu button {
+  background: none; border: none; border-bottom: 1px solid var(--color-border);
+  text-align: left; padding: 13px 18px; font-size: 0.92rem; color: var(--color-text-primary);
+  cursor: pointer; min-height: 44px;
+}
+.org__tm-menu button:last-child { border-bottom: none; }
+.org__tm-menu button:disabled { opacity: 0.5; cursor: default; }
+.org__tm-menu__quitar { color: var(--state-bad) !important; }
+.org__tm-menu__cancelar { text-align: center !important; font-weight: 700; color: var(--color-text-secondary) !important; }
+.org__tm-menu-pregunta { padding: 13px 18px; margin: 0; font-size: 0.92rem; color: var(--color-text-primary); }
+
+/* ── Plan de la compe (móvil ≤700px) — A4, NOTAS_PARA_CODE_tareas_movil.md 17/11. Selector
+   arriba + una sola lista vertical, nunca columnas. */
+.org__cp-movil-selector {
+  width: 100%; padding: 10px; margin-bottom: 12px; font-size: 0.9rem;
+  border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary);
+}
+.org__cp-movil-dia { margin-bottom: 14px; }
+.org__cp-movil-dia-titulo {
+  font-weight: 700; font-size: 0.85rem; color: var(--color-text-primary);
+  margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+/* 17/11 punto B.4: vista tabla del plan de la compe (personas en filas × días en columnas). */
+.org__cp-tabla-wrap { overflow-x: auto; }
+.org__cp-tabla { border-collapse: collapse; width: 100%; min-width: 640px; }
+.org__cp-tabla th, .org__cp-tabla td {
+  border: 1px solid var(--color-border);
+  padding: 6px; vertical-align: top; text-align: left;
+}
+.org__cp-tabla th { background: var(--color-surface); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-secondary); white-space: nowrap; }
+.org__cp-tabla-persona { font-weight: 700; color: var(--color-text-primary); white-space: nowrap; min-width: 120px; }
+.org__cp-tabla .org__task-list { min-width: 160px; }
 
 /* ── Semana: histórico ── */
 .org__historico {
@@ -390,11 +712,11 @@
   margin-bottom: 14px;
 }
 .org__historico-row {
-  background: #fff;
-  border: 1px solid #e5ddc8;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   padding: 8px 12px;
 }
-.org__historico-title { font-weight: 700; color: #2a2015; margin: 0 0 2px; font-size: 0.88rem; }
+.org__historico-title { font-weight: 700; color: var(--color-text-primary); margin: 0 0 2px; font-size: 0.88rem; }
 .org__historico-meta { font-size: 0.78rem; color: var(--color-text-secondary); margin: 0; }
 
 .org__drag-ghost {
@@ -409,4 +731,246 @@
   pointer-events: none;
   z-index: 1000;
   box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+}
+
+/* ── Plan de la compe: columnas por equipador (Ramiro, 11/11 05:01, punto 7) — sustituye a la
+   lista plana "Semana del lunes... · Compe: ... — Álvaro" ("se ve muy feo y mal"). Reaprovecha
+   .org__board/.org__board-col de las semanas normales.
+   🐞 Cowork 11/11 10:15: en vez del grid de las semanas (que deja huecos vacíos cuando las
+   columnas no llenan la fila exacta, porque aquí hay pocas columnas más anchas, una por
+   persona), fila única con scroll horizontal — "como las semanas normales" se refería al
+   aspecto, no al grid en concreto. ── */
+.org__board--compe-plan {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 10px;
+}
+.org__board--compe-plan .org__board-col {
+  flex: 0 0 280px;
+  min-width: 280px;
+}
+.org__board-col--expandida { flex: 1 1 100%; max-width: 480px; }
+.org__board--compe-plan .org__board-col-title--btn {
+  background: none; border: none; width: 100%; text-align: left; padding: 0; cursor: pointer;
+  font-weight: 700; color: var(--color-text-primary); margin: 0 0 6px; font-size: 0.95rem;
+}
+.org__board--compe-plan .org__board-col-title--btn::before { content: '▸ '; color: var(--color-text-secondary); }
+.org__comp-plan-bloques { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.org__comp-plan-bloque-chip {
+  display: inline-flex; align-items: center; gap: 4px; background: var(--color-surface);
+  border: 1px solid var(--color-border); border-radius: 999px; padding: 2px 8px; font-size: 0.78rem; font-weight: 700;
+  color: var(--color-text-primary);
+}
+.org__comp-plan-bloque-chip--probado { border-color: var(--state-ok); }
+.org__comp-plan-bloque-color { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.org__comp-plan-bloque-mover {
+  background: none; border: none; cursor: pointer; font-size: 0.85rem; padding: 0 0 0 2px; color: var(--color-text-secondary);
+}
+.org__comp-plan-bloque-chip select { font-size: 0.72rem; max-width: 110px; }
+.org__board-col--sin-asignar { background: var(--color-bg); border-style: dashed; }
+/* 🐞 Cowork 11/11 10:15: "el checkbox se monta encima de la primera letra" — el plan de la
+   compe reutiliza .org__task-list, pero .org__task label más abajo en este mismo fichero pone
+   gap:0 pensado para la fila de "mover tarea" (que añade su propio margen con margin-left:auto
+   en .org__task-move). Se le da su hueco aquí sin tocar esa regla compartida. */
+.org__board--compe-plan .org__task-list input[type="checkbox"] { margin-right: 8px; }
+
+/* Mezcla de tareas generadas + a mano, "+ Tarea", "✕ Quitar" y "⇄ Mover a..." del plan de la
+   compe (Ramiro 12/11 10:44/10:45, punto 2 y 5). */
+.org__board--compe-plan .org__task { cursor: grab; }
+.org__board--compe-plan .org__task--dragging { opacity: 0.4; }
+.org__task-check { display: flex; align-items: center; cursor: pointer; flex-shrink: 0; }
+.org__task-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.org__task-title { font-weight: 600; }
+/* Cowork 12/11 11:20: la nota salía apretada al lado del título, en una columnita estrecha —
+   ahora es su propia línea debajo, a todo el ancho de la tarjeta. */
+.org__task-notas { font-size: 0.78rem; color: var(--color-text-secondary); }
+.org__task-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
+.org__task-actions select { font-size: 0.72rem; max-width: 110px; }
+.org__task-manual-badge {
+  margin-left: 6px; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--color-accent-hover); border: 1px solid var(--color-accent-hover); border-radius: 999px; padding: 1px 6px;
+}
+/* Cowork 12/11 11:20: en columna estrecha se salía y cortaba "Cancelar" — en columna (no en
+   fila) cada campo ocupa el ancho disponible y nunca desborda. */
+.org__add-form--compe-tarea { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; max-width: 100%; }
+.org__add-form--compe-tarea select,
+.org__add-form--compe-tarea input { width: 100%; box-sizing: border-box; min-width: 0; }
+.org__add-form--compe-tarea .org__add-actions { margin-top: 2px; }
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   MODO OSCURO — Organización (Ramiro/Cowork, 11/11 10:05: auditoría de contraste, "siguiente
+   pantalla a pasar: Organización, porque se usa a diario"). Resto de la página sigue con los
+   mismos colores de siempre: esto solo añade overrides cuando [data-theme="dark"] (o el
+   sistema en oscuro sin elegir "Claro" a mano), sin tocar ninguna regla de arriba. Cubre las
+   tarjetas/tableros de uso diario (Hoy, Semana, plan de la compe) y los títulos — el resto de
+   Organización (reglas, danger zone, chips de holdsets) queda para la siguiente ronda, según
+   lo acordado ("pantalla a pantalla"). ── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .org__section-title,
+  :root:not([data-theme="light"]) .org__who-name,
+  :root:not([data-theme="light"]) .org__board-col-title,
+  :root:not([data-theme="light"]) .org__tile-name,
+  :root:not([data-theme="light"]) .org__task-name,
+  :root:not([data-theme="light"]) .org__worker-name,
+  :root:not([data-theme="light"]) .org__assignment-name,
+  :root:not([data-theme="light"]) .org__compe-card-nombre,
+  :root:not([data-theme="light"]) .org__compe-resumen-nombre,
+  :root:not([data-theme="light"]) .org__historico-title,
+  :root:not([data-theme="light"]) .org__block-info,
+  :root:not([data-theme="light"]) .org__whoami-btn,
+  :root:not([data-theme="light"]) .org__switch-btn,
+  :root:not([data-theme="light"]) .org__holdset-chip,
+  :root:not([data-theme="light"]) .org__modo-compe__estado,
+  :root:not([data-theme="light"]) .org__modo-compe {
+    color: var(--color-text-primary);
+  }
+  :root:not([data-theme="light"]) .org__board-day-label,
+  :root:not([data-theme="light"]) .org__add-btn,
+  :root:not([data-theme="light"]) .org__tile-postpone { color: var(--color-accent-hover); }
+  :root:not([data-theme="light"]) .org__btn--ghost { color: var(--color-text-primary); border-color: var(--color-border); }
+  :root:not([data-theme="light"]) .org__link-btn { color: var(--color-accent-hover); }
+  /* 🐞 Cowork 11/11 12:15: regresión — al oscurecer el fondo de .org__tile/.org__block-row
+     estos botones de acción (pensados para fondo claro, con rojo/marrón oscuro) se quedaron
+     invisibles encima. */
+  :root:not([data-theme="light"]) .org__tile-edit { color: var(--color-text-secondary); }
+  :root:not([data-theme="light"]) .org__tile-delete,
+  :root:not([data-theme="light"]) .org__remove-btn { color: var(--state-bad); }
+  :root:not([data-theme="light"]) .org__switch-btn,
+  :root:not([data-theme="light"]) .org__whoami-btn,
+  :root:not([data-theme="light"]) .org__board-col,
+  :root:not([data-theme="light"]) .org__tile,
+  :root:not([data-theme="light"]) .org__task,
+  :root:not([data-theme="light"]) .org__block-row,
+  :root:not([data-theme="light"]) .org__week-row,
+  :root:not([data-theme="light"]) .org__historico-row,
+  :root:not([data-theme="light"]) .org__compe-card,
+  :root:not([data-theme="light"]) .org__holdset-chip,
+  :root:not([data-theme="light"]) .org__add-form,
+  :root:not([data-theme="light"]) .org__modo-compe {
+    background: var(--color-surface);
+    border-color: var(--color-border);
+  }
+  :root:not([data-theme="light"]) .org__modo-compe--activo { background: rgba(34, 197, 94, 0.14); }
+  :root:not([data-theme="light"]) .org__warning { color: var(--state-warn); }
+  :root:not([data-theme="light"]) .org__error { color: var(--state-bad); }
+  :root:not([data-theme="light"]) .org__compe-resumen { background: var(--color-bg); border-color: var(--state-warn); }
+  :root:not([data-theme="light"]) .org__block-row--planificado { background: var(--color-bg); }
+  :root:not([data-theme="light"]) .org__tile--missed { background: rgba(248, 113, 113, 0.14); }
+  :root:not([data-theme="light"]) .org__tile--retrasada,
+  :root:not([data-theme="light"]) .org__task--retrasada,
+  :root:not([data-theme="light"]) .org__tm-linea--retrasada { background: rgba(245, 200, 66, 0.14); }
+  :root:not([data-theme="light"]) .org__tm-linea,
+  :root:not([data-theme="light"]) .org__tm-menu { background: var(--color-surface); border-color: var(--color-border); }
+}
+:root[data-theme="dark"] .org__section-title,
+:root[data-theme="dark"] .org__who-name,
+:root[data-theme="dark"] .org__board-col-title,
+:root[data-theme="dark"] .org__tile-name,
+:root[data-theme="dark"] .org__task-name,
+:root[data-theme="dark"] .org__worker-name,
+:root[data-theme="dark"] .org__assignment-name,
+:root[data-theme="dark"] .org__compe-card-nombre,
+:root[data-theme="dark"] .org__compe-resumen-nombre,
+:root[data-theme="dark"] .org__historico-title,
+:root[data-theme="dark"] .org__block-info,
+:root[data-theme="dark"] .org__whoami-btn,
+:root[data-theme="dark"] .org__switch-btn,
+:root[data-theme="dark"] .org__holdset-chip,
+:root[data-theme="dark"] .org__modo-compe__estado,
+:root[data-theme="dark"] .org__modo-compe {
+  color: var(--color-text-primary);
+}
+:root[data-theme="dark"] .org__board-day-label,
+:root[data-theme="dark"] .org__add-btn,
+:root[data-theme="dark"] .org__tile-postpone { color: var(--color-accent-hover); }
+:root[data-theme="dark"] .org__btn--ghost { color: var(--color-text-primary); border-color: var(--color-border); }
+:root[data-theme="dark"] .org__link-btn { color: var(--color-accent-hover); }
+:root[data-theme="dark"] .org__tile-edit { color: var(--color-text-secondary); }
+:root[data-theme="dark"] .org__tile-delete,
+:root[data-theme="dark"] .org__remove-btn { color: var(--state-bad); }
+:root[data-theme="dark"] .org__switch-btn,
+:root[data-theme="dark"] .org__whoami-btn,
+:root[data-theme="dark"] .org__board-col,
+:root[data-theme="dark"] .org__tile,
+:root[data-theme="dark"] .org__task,
+:root[data-theme="dark"] .org__block-row,
+:root[data-theme="dark"] .org__week-row,
+:root[data-theme="dark"] .org__historico-row,
+:root[data-theme="dark"] .org__compe-card,
+:root[data-theme="dark"] .org__holdset-chip,
+:root[data-theme="dark"] .org__add-form,
+:root[data-theme="dark"] .org__modo-compe {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+:root[data-theme="dark"] .org__modo-compe--activo { background: rgba(34, 197, 94, 0.14); }
+:root[data-theme="dark"] .org__warning { color: var(--state-warn); }
+:root[data-theme="dark"] .org__error { color: var(--state-bad); }
+:root[data-theme="dark"] .org__compe-resumen { background: var(--color-bg); border-color: var(--state-warn); }
+:root[data-theme="dark"] .org__block-row--planificado { background: var(--color-bg); }
+:root[data-theme="dark"] .org__tile--missed { background: rgba(248, 113, 113, 0.14); }
+:root[data-theme="dark"] .org__tile--retrasada,
+:root[data-theme="dark"] .org__task--retrasada,
+:root[data-theme="dark"] .org__tm-linea--retrasada { background: rgba(245, 200, 66, 0.14); }
+:root[data-theme="dark"] .org__tm-linea,
+:root[data-theme="dark"] .org__tm-menu { background: var(--color-surface); border-color: var(--color-border); }
+
+/* ══ Calendario de semanas + rotación de zonas (Ramiro, 12/11 09:31/09:35/09:37) ══
+   Escrito ya con variables de tema desde el principio — no hace falta otra ronda de arreglos
+   de contraste para esto. */
+.org__calendario { margin-bottom: 20px; }
+.org__calendario-nav {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 10px; flex-wrap: wrap;
+}
+.org__calendario-tira {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px;
+}
+.org__calendario-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-top: 4px solid var(--color-border); border-radius: var(--radius-sm);
+  padding: 10px 12px; cursor: pointer; text-align: left; font-family: inherit;
+}
+.org__calendario-card--sel { box-shadow: 0 0 0 2px var(--color-accent-hover) inset; }
+.org__calendario-card--vacia { opacity: 0.7; border-style: dashed; }
+.org__calendario-card__fecha { font-weight: 700; font-size: 0.95rem; color: var(--color-text-primary); }
+.org__calendario-card__zona { font-size: 0.78rem; font-weight: 700; }
+.org__calendario-card__tareas, .org__calendario-card__nueva { font-size: 0.78rem; color: var(--color-text-secondary); }
+.org__calendario-card__marcas { font-size: 0.85rem; }
+
+/* Diálogo genérico (⚙️ Configurar zonas y los que vengan después) */
+.org__modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 16px;
+}
+.org__modal {
+  background: var(--color-surface); border: 1.5px solid var(--color-border);
+  padding: 20px; max-width: 640px; width: 100%; max-height: 90vh; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+.org__zonas-mapa-wrap { position: relative; width: 100%; max-width: 480px; margin: 0 auto; }
+.org__zonas-mapa-img { width: 100%; height: auto; display: block; border-radius: 6px; }
+.org__zonas-mapa-num {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 26px; height: 26px; border-radius: 50%; color: #fff; font-weight: 800; font-size: 0.8rem;
+  display: flex; align-items: center; justify-content: center; border: 2px solid rgba(0,0,0,0.4);
+}
+.org__zonas-mapa-entrada {
+  position: absolute; transform: translate(-50%, -50%);
+  background: #1f1f1f; color: #fff; font-size: 0.68rem; font-weight: 700;
+  padding: 2px 6px; border-radius: 3px; white-space: nowrap;
+}
+
+.org__zona-fila {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+}
+.org__zona-fila__orden { display: flex; align-items: center; gap: 4px; font-weight: 700; color: var(--color-text-secondary); }
+.org__zona-fila__color { width: 28px; height: 28px; padding: 0; border: 1px solid var(--color-border); cursor: pointer; }
+.org__zona-fila__nombre {
+  padding: 6px 8px; border: 1.5px solid var(--color-border); background: var(--color-bg);
+  color: var(--color-text-primary); font-size: 0.85rem; min-width: 140px;
 }

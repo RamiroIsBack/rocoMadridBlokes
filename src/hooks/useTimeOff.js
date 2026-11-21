@@ -1,17 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
+import { fetchWithNonceRetry } from '../utils/wpNonce'
 
 // CTRL Time Off (Supervisión, solo socios): plan oficial, escenarios y solicitudes
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 const BASE     = `${CLUB_URL}/wp-json/superadmin/v1/timeoff`
 
 async function request(path = '', method = 'GET', body) {
-  const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetchWithNonceRetry(() => fetch(`${BASE}${path}`, {
     method,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': nonce },
+    headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || '' },
     body: body ? JSON.stringify(body) : undefined,
-  })
+  }))
   const json = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(json.message || `HTTP ${res.status}`)
   return json

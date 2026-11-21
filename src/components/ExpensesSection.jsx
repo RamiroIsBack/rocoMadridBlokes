@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
 import { parseExpensesCSV, CATEGORIES, CATEGORY_IVA, autoCategory, detectClubCaixaFormat } from '../utils/expensesParser'
-import { useExpenses, gestionExpenseSendersGet, gestionExpenseSenderSet } from '../hooks/useSuperAdmin'
+import { useExpenses, gestionExpenseSendersGet, gestionExpenseSenderSet, gestionExpenseVariacionesGet, gestionExpenseVariacionSet } from '../hooks/useSuperAdmin'
 import { getExpenseRules, saveExpenseRules } from '../hooks/useBudget'
 import { conceptKey } from '../utils/expensesParser'
 import './ExpensesSection.css'
@@ -439,8 +439,9 @@ function periodLabel(period) {
 
 // ── Variation detection helpers ───────────────────────────────────────
 const NOTES_KEY = 'blokes_exp_notes'
+// Respaldo si el servidor no responde (gastos_banco.md punto 8 ya las guarda en servidor; esto
+// es solo para no perder la pantalla si falla la carga).
 function loadNotes() { try { return JSON.parse(localStorage.getItem(NOTES_KEY) || '{}') } catch { return {} } }
-function saveNotes(n) { try { localStorage.setItem(NOTES_KEY, JSON.stringify(n)) } catch {} }
 function median(arr) {
   const s = [...arr].sort((a, b) => a - b)
   const m = Math.floor(s.length / 2)
@@ -448,13 +449,21 @@ function median(arr) {
 }
 
 function VariationsPanel({ byMonth }) {
-  const [notes, setNotes]     = useState(loadNotes)
+  // Notas compartidas en servidor (gastos_banco.md punto 8) -- antes vivían solo en el
+  // localStorage de quien las escribía, así que Eva y Ramiro veían notas distintas.
+  const [notes, setNotes]     = useState({})
   const [editing, setEditing] = useState({})
+  useEffect(() => { gestionExpenseVariacionesGet().then(setNotes).catch(() => setNotes(loadNotes())) }, [])
+
+  const hoyYm = new Date().toISOString().slice(0, 7)
+  // Mes en curso excluido (gastos_banco.md punto 8: "mínimo 3 meses completos, sin el mes en
+  // curso") -- un mes a medias siempre parece "una variación" comparado con meses completos.
+  const byMonthCerrados = useMemo(() => byMonth.filter(r => r.month < hoyYm), [byMonth, hoyYm])
 
   const variations = useMemo(() => {
     // Build per-category monthly amounts
     const catMonthly = {}
-    byMonth.forEach(row => {
+    byMonthCerrados.forEach(row => {
       const byCat = {}
       if (row.nominas > 0) byCat['nominas'] = row.nominas
       Object.entries(row.by_concepto || {}).forEach(([c, v]) => {
@@ -490,14 +499,16 @@ function VariationsPanel({ byMonth }) {
     return flags
       .sort((a, b) => b.month.localeCompare(a.month) || Math.abs(b.pct) - Math.abs(a.pct))
       .slice(0, 12)
-  }, [byMonth])
+  }, [byMonthCerrados])
 
   const startEdit  = (key, val) => setEditing(e => ({ ...e, [key]: val }))
   const cancelEdit = (key)      => setEditing(e => { const n = { ...e }; delete n[key]; return n })
   const handleSave = (key, txt) => {
+    const nota = txt.trim()
     const next = { ...notes }
-    txt.trim() ? next[key] = txt.trim() : delete next[key]
-    setNotes(next); saveNotes(next); cancelEdit(key)
+    nota ? next[key] = nota : delete next[key]
+    setNotes(next); cancelEdit(key)
+    gestionExpenseVariacionSet(key, nota).catch(() => {})
   }
 
   if (!variations.length) return (
@@ -603,7 +614,9 @@ function categorizeIncomeItem(concepto, amount, entity, overrides = {}) {
 function HistoryView({ period, onDeleted }) {
   const from  = useMemo(() => periodFrom(period), [period])
   const label = periodLabel(period)
-  const [entity, setEntity]                   = useState('all')
+  // Por defecto solo Club (Ramiro, 15/11 09:25: es la única cuenta que importa — recibe todos
+  // los ingresos; Rocoteca tiene ~800€ residuales entre sus dos bancos, que se dejan de colchón).
+  const [entity, setEntity]                   = useState('club')
   const [excludeInternal, setExcludeInternal] = useState(true)
   const [showManager, setShowManager]         = useState(false)
   const [deletingKey, setDeletingKey]         = useState(null)
@@ -632,7 +645,7 @@ function HistoryView({ period, onDeleted }) {
     return next
   })
   const effectiveExclude = excludeInternal
-  const { data, breakdown, loading, error } = useExpenses(from, entity, effectiveExclude)
+  const { data, breakdown, saldoReal, loading, error } = useExpenses(from, entity, effectiveExclude)
 
   const handleDelete = async (month, ent) => {
     const key = `${month}·${ent}`
@@ -658,12 +671,17 @@ function HistoryView({ period, onDeleted }) {
     if (!data) return []
     const acc = {}
     data.forEach(r => {
-      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, nominas: 0, ss: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {}, ingresos_items: [] }
+      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, iva_r_real: 0, nominas: 0, nominas_real: null, nominas_descuadre: false, ss: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {}, ingresos_items: [] }
       acc[r.month].costes   += Math.abs(r.total_costes    || 0)
       acc[r.month].ingresos += Math.abs(r.total_ingresos  || 0)
       acc[r.month].iva_s    += Math.abs(r.iva_soportado   || 0)
       acc[r.month].iva_r    += Math.abs(r.iva_repercutido || 0)
+      acc[r.month].iva_r_real += Math.abs(r.iva_repercutido_real || 0)
       acc[r.month].nominas  += Math.abs(r.nominas         || 0)
+      // Nóminas reales (de Superadmin › Nóminas) solo vienen en la fila del Club (15/11 09:18
+      // punto 5) — si hay descuadre con lo que dice el banco, avisar.
+      if (r.nominas_real != null) acc[r.month].nominas_real = (acc[r.month].nominas_real || 0) + Math.abs(r.nominas_real)
+      if (r.nominas_descuadre) acc[r.month].nominas_descuadre = true
       const ent = r.entity || 'rocoteca'
       if ((r.nominas || 0) > 0) {
         acc[r.month].nominas_by_entity[ent] = (acc[r.month].nominas_by_entity[ent] || 0) + Math.abs(r.nominas)
@@ -710,15 +728,31 @@ function HistoryView({ period, onDeleted }) {
       gastos:          r.costes,
       ingresos_banco:  r.ingresos,
       iva_soportado:   r.iva_s,
-      iva_repercutido: r.iva_r,
+      // Ramiro, NOTAS_PARA_CODE_gastos_banco.md punto 3: "no estimarlo desde el banco" -- iva_r
+      // (estimado por % de concepto) se sustituye por iva_r_real (de las facturas de verdad de
+      // WooCommerce, get_total_tax(), ya sin anuladas/rectificativas).
+      iva_repercutido: r.iva_r_real,
     }))
   , [byMonth])
 
-  const totals = useMemo(() => ({
-    gastos:   byMonth.reduce((s, r) => s + r.costes,             0),
-    ingresos: byMonth.reduce((s, r) => s + r.ingresos,           0),
-    iva_net:  byMonth.reduce((s, r) => s + r.iva_r - r.iva_s,   0),
-  }), [byMonth])
+  // IVA por trimestre natural (Ramiro, punto 3: "Resultado por trimestre: T4 a pagar / a
+  // devolver, en verde si es a devolver"). repercutido ya es real (WooCommerce); soportado sigue
+  // siendo por categoría (CATEGORY_IVA, editable por concepto) -- ya no estimado "desde el banco
+  // con un % por concepto" sin más: cada gasto lleva el tipo real de SU categoría.
+  const ivaTrimestral = useMemo(() => {
+    const trimestres = {}
+    byMonth.forEach(r => {
+      const [y, m] = r.month.split('-').map(Number)
+      const t = Math.ceil(m / 3)
+      const key = `${y}-T${t}`
+      if (!trimestres[key]) trimestres[key] = { key, year: y, t, repercutido: 0, soportado: 0 }
+      trimestres[key].repercutido += r.iva_r_real || 0
+      trimestres[key].soportado   += r.iva_s || 0
+    })
+    return Object.values(trimestres).sort((a, b) => a.key.localeCompare(b.key)).map(x => ({
+      ...x, resultado: x.repercutido - x.soportado,
+    }))
+  }, [byMonth])
 
   const incomeBreakdown = useMemo(() => {
     // Per-month categorised income for chart
@@ -770,26 +804,22 @@ function HistoryView({ period, onDeleted }) {
         <button
           className={`sa-transfer-toggle${excludeInternal ? ' sa-transfer-toggle--on' : ''}`}
           onClick={() => setExcludeInternal(v => !v)}
-          title="Movimientos internos: transferencias entre cuentas propias, USO DE ROCODROMO, cobros TPV/WooCommerce ya contabilizados en Ingresos"
+          title="Movimientos internos: transferencias entre cuentas propias, USO DE ROCODROMO (el Club ya lo paga, pero la Rocoteca contabiliza aparte ese gasto — contarlo aquí lo duplicaría), cobros TPV/WooCommerce ya contabilizados en Ingresos"
         >
           {excludeInternal ? '🚫' : '👁️'} Movimientos internos
         </button>
       </div>
 
-      <div className="exp-kpis">
-        <div className="exp-kpi" style={{ '--c': '#ef4444' }}>
-          <span className="exp-kpi__val">{fmtEur(totals.gastos)}</span>
-          <span className="exp-kpi__lbl">Gastos ({label})</span>
-        </div>
-        <div className="exp-kpi" style={{ '--c': '#60a5fa' }}>
-          <span className="exp-kpi__val">{fmtEur(totals.ingresos)}</span>
-          <span className="exp-kpi__lbl">Ingresos banco ({label})</span>
-        </div>
-        <div className="exp-kpi" style={{ '--c': '#f97316' }}>
-          <span className="exp-kpi__val">{fmtEur(Math.abs(totals.iva_net))}</span>
-          <span className="exp-kpi__lbl">IVA neto {totals.iva_net >= 0 ? 'a pagar' : 'a favor'} ({label})</span>
-        </div>
-      </div>
+      {/* Ramiro, 15/11 11:05: "quita esas fichas de arriba del todo, no dicen nada" -- las 5
+          tarjetas (Ingresos/Gastos/Resultado/Saldo/IVA) se quitan de aquí. El resumen anual +
+          el cuadre con el banco se mueven al P&L (11:10); aquí solo queda el saldo del Club
+          como una línea de texto pequeña, no como ficha. */}
+      {saldoReal?.saldo != null && (
+        <p className="exp-hint" style={{ fontSize: '0.8rem' }}>
+          Saldo Club{saldoReal.fecha ? ` a ${saldoReal.fecha.slice(8,10)}/${saldoReal.fecha.slice(5,7)}/${saldoReal.fecha.slice(0,4)}` : ''}: <strong>{fmtEur(saldoReal.saldo)}</strong>
+          {' '}· el resumen del año (ingresos, gastos, resultado) y el cuadre con este saldo están en <strong>P&L</strong>.
+        </p>
+      )}
 
       <p className="exp-chart-title">Gastos e ingresos banco por mes</p>
       <ResponsiveContainer width="100%" height={180}>
@@ -808,7 +838,7 @@ function HistoryView({ period, onDeleted }) {
         </BarChart>
       </ResponsiveContainer>
 
-      <p className="exp-chart-title" style={{ marginTop: 16 }}>IVA soportado vs repercutido</p>
+      <p className="exp-chart-title" style={{ marginTop: 16 }}>IVA soportado vs repercutido (repercutido real, de las facturas de WooCommerce)</p>
       <ResponsiveContainer width="100%" height={140}>
         <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
@@ -817,13 +847,38 @@ function HistoryView({ period, onDeleted }) {
           <Tooltip
             contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
             labelStyle={{ color: '#f97316' }}
-            formatter={(v, name) => [fmtEur(v), name === 'iva_soportado' ? 'IVA soportado (gastos)' : 'IVA repercutido (ventas)']}
+            formatter={(v, name) => [fmtEur(v), name === 'iva_soportado' ? 'IVA soportado (gastos)' : 'IVA repercutido (ventas, real)']}
           />
-          <Legend formatter={k => k === 'iva_soportado' ? 'IVA soportado' : 'IVA repercutido'} />
+          <Legend formatter={k => k === 'iva_soportado' ? 'IVA soportado' : 'IVA repercutido (real)'} />
           <Bar dataKey="iva_repercutido" fill="#f97316" radius={[3,3,0,0]} />
           <Bar dataKey="iva_soportado"   fill="#6366f1" radius={[3,3,0,0]} />
         </BarChart>
       </ResponsiveContainer>
+
+      {ivaTrimestral.length > 0 && (
+        <>
+          {/* Cowork, 15/11 18:00: los 4 trimestres de 2026 salían "a devolver" — no es creíble
+              con ~100.000 € de TPV al año. El repercutido real solo cuenta las facturas de
+              WooCommerce (desde mayo); falta taquilla/TPV/bar/tienda y los meses de antes de
+              mayo, así que el resultado por trimestre no es de fiar todavía. Se quita el
+              veredicto "a pagar/a devolver" (y el verde/rojo que lo acompañaba) hasta que esto
+              cuadre con el banco — se deja el desglose repercutido/soportado en el ⓘ para quien
+              quiera mirarlo, pero ya no como un resultado. */}
+          <p className="exp-hint" style={{ fontSize: '0.78rem', marginTop: 8 }}>
+            Estimación incompleta de IVA por trimestre: el repercutido solo cuenta facturas de WooCommerce (desde mayo-2026) — falta taquilla/TPV, bar, tienda y los meses de antes de mayo. No es un resultado real todavía.
+          </p>
+          <div className="exp-kpis" style={{ marginTop: 8 }}>
+            {ivaTrimestral.map(tr => (
+              <div key={tr.key} className="exp-kpi" style={{ '--c': 'var(--color-text-secondary)' }}>
+                <span className="exp-kpi__val">{fmtEur(Math.abs(tr.resultado))}</span>
+                <span className="exp-kpi__lbl" title={`Repercutido (solo WooCommerce) ${fmtEur(tr.repercutido)} − soportado ${fmtEur(tr.soportado)} (soportado por categoría, editable en «Gestionar») — estimación incompleta, no es el resultado real del trimestre.`}>
+                  {tr.year} T{tr.t}: estimación incompleta ⓘ
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* ─── Resultado neto mensual ─── */}
       {netData.length > 0 && (
@@ -870,6 +925,12 @@ function HistoryView({ period, onDeleted }) {
       {nominasData.some(r => r.nominas > 0 || r.ss > 0 || r.retiradas_rocoteca > 0 || r.retiradas_club > 0) && (
         <>
           <p className="exp-chart-title" style={{ marginTop: 16 }}>Nóminas por mes</p>
+          {byMonth.some(r => r.nominas_descuadre) && (
+            <p className="exp-error" style={{ fontSize: '0.75rem' }}>
+              ⚠ La remesa del banco no cuadra con el neto real de Superadmin › Nóminas en: {byMonth.filter(r => r.nominas_descuadre).map(r => fmtMonth(r.month)).join(', ')}.
+              Revisa si falta algún pago parcial/efectivo o si la remesa incluye algo más que nóminas.
+            </p>
+          )}
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={nominasData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />

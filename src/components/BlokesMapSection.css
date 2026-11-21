@@ -1,5 +1,14 @@
 /* Mapa de Blokes (Superadmin) — ya con la imagen corporativa: fondo claro y mostaza */
 .bm {
+  /* Colores de la marca por si la página aún no los define (en master todavía no está la imagen nueva) */
+  --color-ink: #1d1d1b;
+  --color-accent-soft: #fbf3d9;
+  --brand-peacock: #006b92;
+  --color-surface: #fff;
+  --color-bg: #f5f4f0;
+  --color-border: #dddbd3;
+  --color-text-secondary: #5c5b57;
+  --color-accent: #d09c01;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 12px;

@@ -3,7 +3,9 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { useRevenue, useProducts, useExpenses, useClasses } from '../hooks/useSuperAdmin'
+import { useRevenue, useExpenses, useClasesRetencion, useClasesPagoEnCurso, useIngresosDesglose, ingresosFamiliaSet, expensesAperturaSet, useGestionGrupos } from '../hooks/useSuperAdmin'
+import { PROF_META } from '../data/staffSchedule'
+import useTemaOscuro from '../hooks/useTemaOscuro'
 import ExpensesSection from '../components/ExpensesSection'
 import { PL_DATA, PL_VENTAS_IVA } from '../data/plHistorico'
 import PayrollSection from '../components/PayrollSection'
@@ -24,6 +26,23 @@ const PERIOD_OPTIONS = [
 
 const STORE_COLORS = { store1: '#f5c842', store2: '#60a5fa', total: '#34d399' }
 const STORE_LABELS = { store1: 'Rocoteca', store2: 'Club', total: 'Total' }
+
+// Cowork 11/11 15:00: los colores de KPI (--kpi-color) son vivos, pensados para el panel
+// siempre oscuro de antes — ahora que el panel sigue el tema (d84e788), en claro fallan sobre
+// crema. Versión oscurecida de cada uno para claro, solo cuando se usan como TEXTO (no para
+// las líneas/puntos decorativos de las gráficas, que se quedan vivos en los dos modos).
+const KPI_COLOR_CLARO = {
+  '#f5c842': '#8a6400',
+  '#60a5fa': '#1d4ed8',
+  '#34d399': '#047857',
+  '#f97316': '#c2410c',
+  '#a78bfa': '#6d28d9',
+  '#888':    '#5e5650',
+  '#fb7185': '#be123c',
+}
+function kpiColorTema(hex, oscuro) {
+  return oscuro ? hex : (KPI_COLOR_CLARO[hex] || hex)
+}
 
 function fmtEur(v) { return `${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €` }
 function fmtMonth(m) {
@@ -53,47 +72,26 @@ function PeriodSelector({ value, onChange }) {
 function LoadingBlock() { return <div className="sa-loading">Cargando…</div> }
 function ErrorBlock({ msg }) { return <div className="sa-error">Error: {msg}</div> }
 
-const IVA_COLOR = '#f97316'
-
-function quarterLabel() {
-  const m = new Date().getMonth() + 1
-  return `Q${Math.ceil(m / 3)} ${new Date().getFullYear()}`
-}
-function currentQuarterMonths() {
-  const now = new Date()
-  const y   = now.getFullYear()
-  const q   = Math.ceil((now.getMonth() + 1) / 3)
-  const s   = (q - 1) * 3 + 1
-  return [0, 1, 2].map(i => `${y}-${String(s + i).padStart(2, '0')}`)
-}
-
 // ─── Revenue section ────────────────────────────────────────────────
 function RevenueSection({ excludeTransfer, onToggleExclude }) {
+  // Cowork 11/11 13:55: var(--color-text-secondary) en el fill de Recharts no se repinta solo
+  // al cambiar de tema (atributo SVG fijo) — se resuelve a mano con useTemaOscuro().
+  const oscuro = useTemaOscuro()
+  const tickFill = oscuro ? '#b3ab9a' : '#5e5650'
   const [months, setMonths]      = useState(12)
   const { data, loading, error } = useRevenue(months, excludeTransfer)
 
   const totals = useMemo(() => {
     if (!data) return {}
     return {
-      store1:     data.reduce((s, r) => s + (r.store1     || 0), 0),
-      store2:     data.reduce((s, r) => s + (r.store2     || 0), 0),
-      total:      data.reduce((s, r) => s + (r.total      || 0), 0),
-      store1_tax: data.reduce((s, r) => s + (r.store1_tax || 0), 0),
+      store1: data.reduce((s, r) => s + (r.store1 || 0), 0),
+      store2: data.reduce((s, r) => s + (r.store2 || 0), 0),
+      total:  data.reduce((s, r) => s + (r.total  || 0), 0),
     }
-  }, [data])
-
-  const quarterIva = useMemo(() => {
-    if (!data) return 0
-    const qm = currentQuarterMonths()
-    return data.filter(r => qm.includes(r.month)).reduce((s, r) => s + (r.store1_tax || 0), 0)
   }, [data])
 
   const chartData = useMemo(() =>
     (data || []).map(r => ({ ...r, month: fmtMonth(r.month) }))
-  , [data])
-
-  const ivaData = useMemo(() =>
-    (data || []).map(r => ({ month: fmtMonth(r.month), iva: r.store1_tax || 0 }))
   , [data])
 
   return (
@@ -112,7 +110,7 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
         </div>
       </div>
       <p className="sa-legend">
-        Ingresos netos de WooCommerce sin IVA (get_subtotal), suma de todos los pedidos completados en el período. «Con/Sin uso Rocódromo» excluye la factura de arrendamiento inter-empresa Club → Rocoteca.
+        Ingresos netos de WooCommerce sin IVA (completados/processing), por fecha de pago (una renovación de octubre pagada en noviembre cuenta en noviembre), sin facturas anuladas en VeriFactu y con los reembolsos ya restados. «Con/Sin uso Rocódromo» excluye la factura de arrendamiento inter-empresa Club → Rocoteca (por defecto sin ella: infla el total y no es ingreso del club).
       </p>
 
       {loading && <LoadingBlock />}
@@ -122,19 +120,17 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
         <>
           <div className="sa-kpis">
             {[
-              { key: 'store1', label: excludeTransfer ? 'Principal (sin Rocódromo)' : 'Tienda Principal' },
+              // Tienda Principal apenas vende desde julio (Ramiro 15/11 09:02): si suma ~0 en
+              // el período, no ocupa sitio.
+              ...(Math.abs(totals.store1 || 0) > 1 ? [{ key: 'store1', label: excludeTransfer ? 'Principal (sin Rocódromo)' : 'Tienda Principal' }] : []),
               { key: 'store2', label: 'Tienda Club' },
               { key: 'total',  label: 'Total combinado' },
             ].map(({ key, label }) => (
-              <div key={key} className="sa-kpi" style={{ '--kpi-color': STORE_COLORS[key] }}>
+              <div key={key} className="sa-kpi" style={{ '--kpi-color': kpiColorTema(STORE_COLORS[key], oscuro) }}>
                 <span className="sa-kpi__value">{fmtEur(totals[key] || 0)}</span>
                 <span className="sa-kpi__label">{label}</span>
               </div>
             ))}
-            <div className="sa-kpi" style={{ '--kpi-color': IVA_COLOR }}>
-              <span className="sa-kpi__value">{fmtEur(quarterIva)}</span>
-              <span className="sa-kpi__label">IVA {quarterLabel()}</span>
-            </div>
           </div>
 
           <ResponsiveContainer width="100%" height={240}>
@@ -148,217 +144,83 @@ function RevenueSection({ excludeTransfer, onToggleExclude }) {
                 ))}
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-              <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 11 }} />
-              <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 11 }} width={56} />
+              <XAxis dataKey="month" tick={{ fill: tickFill, fontSize: 11 }} />
+              <YAxis tickFormatter={v => `${v}€`} tick={{ fill: tickFill, fontSize: 11 }} width={56} />
               <Tooltip
                 contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                 labelStyle={{ color: '#f5c842' }}
                 formatter={(v, name) => [fmtEur(v), STORE_LABELS[name] || name]}
               />
               <Legend formatter={k => STORE_LABELS[k] || k} />
-              <Area type="monotone" dataKey="store1" stroke={STORE_COLORS.store1} fill={`url(#grad-store1)`} strokeWidth={2} dot={false} />
+              {Math.abs(totals.store1 || 0) > 1 && (
+                <Area type="monotone" dataKey="store1" stroke={STORE_COLORS.store1} fill={`url(#grad-store1)`} strokeWidth={2} dot={false} />
+              )}
               <Area type="monotone" dataKey="store2" stroke={STORE_COLORS.store2} fill={`url(#grad-store2)`} strokeWidth={2} dot={false} />
               <Area type="monotone" dataKey="total"  stroke={STORE_COLORS.total}  fill={`url(#grad-total)`}  strokeWidth={2} dot={false} strokeDasharray="4 2" />
             </AreaChart>
           </ResponsiveContainer>
-
-          <div className="sa-iva-block">
-            <p className="sa-iva-title">IVA mensual · Tienda Principal</p>
-            <ResponsiveContainer width="100%" height={110}>
-              <BarChart data={ivaData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
-                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={48} />
-                <Tooltip
-                  contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
-                  labelStyle={{ color: IVA_COLOR }}
-                  formatter={v => [fmtEur(v), 'IVA']}
-                />
-                <Bar dataKey="iva" fill={IVA_COLOR} radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
         </>
       )}
     </section>
   )
 }
 
-// Strip accents for matching (mirrors PHP iconv approach)
-function normName(s) {
-  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-}
-const isRocodromo = name => normName(name).includes('rocodromo')
-
-function matchesMarginProd(p) {
-  const n   = normName(p.name)
-  const cat = normName(p.category || '')
-  return (
-    n.includes('recauchut') ||
-    n.includes('magnesio') ||
-    cat.includes('bebida')
-  )
+// ─── Desglose de ingresos (NOTAS_PARA_CODE_ingresos_superadmin.md, 15/11 09:02) ───────────────
+// Sustituye a "Productos y suscripciones" (mezclaba categorías de WooCommerce con cosas que no
+// pintaban nada ahí) y a la calculadora de margen (ese análisis lo hace cowork aparte).
+const INGRESOS_FAMILIAS = ['Clases', 'Eventos y grupos', 'Consumibles', 'Acceso al rocódromo', 'Otros']
+const FAMILIA_COLOR = {
+  'Sin clasificar': '#9ca3af', Clases: '#f5c842', 'Eventos y grupos': '#a78bfa',
+  Consumibles: '#60a5fa', 'Acceso al rocódromo': '#34d399', Otros: '#f97316',
 }
 
-// ─── Margin calculator ────────────────────────────────────────────────
-function MarginCalculator({ products, months }) {
-  const candidates = useMemo(() => products.filter(matchesMarginProd), [products])
-
-  const [costs, setCosts] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('sa_product_costs') || '{}') } catch { return {} }
-  })
-
-  if (!candidates.length) return null
-
-  const updateCost = (key, val) => {
-    const next = { ...costs, [key]: val }
-    setCosts(next)
-    try { localStorage.setItem('sa_product_costs', JSON.stringify(next)) } catch {}
-  }
-
-  const rows = candidates.map(p => {
-    const key          = `${p.store}|${p.name}`
-    const cost         = parseFloat(costs[key]) || 0
-    const pricePerUnit = p.units > 0 ? p.revenue / p.units : 0
-    const profit       = (pricePerUnit - cost) * p.units
-    const margin       = pricePerUnit > 0 ? ((pricePerUnit - cost) / pricePerUnit) * 100 : null
-    return { p, key, cost, pricePerUnit, profit, margin }
-  })
-
-  const anyHasCost  = rows.some(r => r.cost > 0)
-  const totalProfit = rows.reduce((s, r) => s + r.profit, 0)
-
+function ProductoFila({ p, onReclasificar }) {
   return (
-    <div className="sa-margin-calc">
-      <p className="sa-margin-calc__title">Calculadora de margen · {months}m</p>
-      <div className="sa-margin-table-wrap">
-        <table className="sa-margin-table">
-          <thead>
-            <tr>
-              <th>Producto</th>
-              <th>Uds.</th>
-              <th>Precio/ud</th>
-              <th>Coste/ud</th>
-              <th>Beneficio</th>
-              <th>Margen</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ p, key, cost, pricePerUnit, profit, margin }, i) => (
-              <tr key={i}>
-                <td className="sa-mt__name">{p.name}</td>
-                <td className="sa-mt__num">{p.units}</td>
-                <td className="sa-mt__num">{pricePerUnit > 0 ? pricePerUnit.toFixed(2) + '€' : '—'}</td>
-                <td className="sa-mt__cost">
-                  <input
-                    type="number"
-                    className="sa-margin-input"
-                    value={cost || ''}
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    onChange={e => updateCost(key, e.target.value)}
-                  />
-                </td>
-                <td className={`sa-mt__profit${cost > 0 ? profit >= 0 ? ' sa-mt__profit--pos' : ' sa-mt__profit--neg' : ''}`}>
-                  {cost > 0 ? fmtEur(profit) : '—'}
-                </td>
-                <td className={`sa-mt__pct${margin != null && cost > 0 ? margin >= 50 ? ' sa-mt__pct--hi' : margin >= 20 ? ' sa-mt__pct--mid' : ' sa-mt__pct--lo' : ''}`}>
-                  {margin != null && cost > 0 ? `${margin.toFixed(1)}%` : '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-          {anyHasCost && (
-            <tfoot>
-              <tr>
-                <td colSpan={4} className="sa-mt__total-lbl">Beneficio total</td>
-                <td className={`sa-mt__total${totalProfit >= 0 ? '' : ' sa-mt__total--neg'}`} colSpan={2}>
-                  {fmtEur(totalProfit)}
-                </td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
+    <div className="sa-product-inner">
+      <span className="sa-product-inner__name">{p.name}</span>
+      <span className="sa-product-inner__units">{p.units} uds</span>
+      <span className="sa-product-inner__rev">{fmtEur(p.revenue)}</span>
+      <button className="sa-link" onClick={onReclasificar}>reclasificar</button>
     </div>
   )
 }
 
-// ─── Products section ────────────────────────────────────────────────
-function ProductsSection({ excludeTransfer }) {
-  const [months,      setMonths    ] = useState(12)
-  const [storeFilter, setStore     ] = useState('Todas')
-  const [openCats,    setOpenCats  ] = useState(() => new Set())
-  const [chartCat,    setChartCat  ] = useState('__all__')
-  const [chartProd,   setChartProd ] = useState('__all__')
-  const { data, loading, error }     = useProducts(months)
+function IngresosDesgloseSection({ excludeTransfer }) {
+  const [months, setMonths] = useState(12)
+  const { data, loading, error, refetch } = useIngresosDesglose(months, excludeTransfer)
+  const [openFam, setOpenFam] = useState(() => new Set())
+  const [openSub, setOpenSub] = useState(() => new Set())
+  const [reclasificando, setReclasificando] = useState(null)
+  const [busy, setBusy] = useState(false)
 
-  const stores = useMemo(() => {
-    if (!data) return ['Todas']
-    return ['Todas', ...new Set(data.map(p => p.store))]
-  }, [data])
-
-  const filtered = useMemo(() => {
-    if (!data) return []
-    let d = storeFilter === 'Todas' ? data : data.filter(p => p.store === storeFilter)
-    if (excludeTransfer) d = d.filter(p => !isRocodromo(p.name))
-    return d
-  }, [data, storeFilter, excludeTransfer])
-
-  const byCategory = useMemo(() => {
-    const groups = {}
-    filtered.forEach(p => {
-      const cat = p.category || 'Sin categoría'
-      if (!groups[cat]) groups[cat] = { name: cat, revenue: 0, products: [] }
-      groups[cat].revenue += p.revenue
-      groups[cat].products.push(p)
-    })
-    return Object.values(groups).sort((a, b) => b.revenue - a.revenue)
-  }, [filtered])
-
-  const toggleCat = cat => setOpenCats(prev => {
-    const next = new Set(prev)
-    next.has(cat) ? next.delete(cat) : next.add(cat)
-    return next
-  })
-
-  const chartProds = useMemo(() => {
-    if (chartCat === '__all__') return filtered
-    return byCategory.find(g => g.name === chartCat)?.products || []
-  }, [filtered, byCategory, chartCat])
-
-  const selectedProd = useMemo(() =>
-    chartProd === '__all__' ? null : chartProds.find(p => `${p.store}|${p.name}` === chartProd) || null
-  , [chartProds, chartProd])
-
-  const allMonths = useMemo(() => {
-    const s = new Set()
-    filtered.forEach(p => p.history.forEach(h => s.add(h.month)))
-    return [...s].sort()
-  }, [filtered])
+  const toggleFam = f => setOpenFam(prev => { const n = new Set(prev); n.has(f) ? n.delete(f) : n.add(f); return n })
+  const toggleSub = k => setOpenSub(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })
 
   const chartData = useMemo(() => {
-    const prods = selectedProd ? [selectedProd] : chartProds
-    return allMonths.map(m => {
-      const revenue = prods.reduce((s, p) => {
-        const h = p.history.find(e => e.month === m)
-        return s + (h?.revenue ?? 0)
-      }, 0)
-      return { month: fmtMonth(m), revenue: Math.round(revenue * 100) / 100 }
+    if (!data?.familias) return []
+    const meses = new Set()
+    data.familias.forEach(f => f.porMes.forEach(m => meses.add(m.mes)))
+    return [...meses].sort().map(mes => {
+      const row = { month: fmtMonth(mes) }
+      data.familias.forEach(f => { row[f.familia] = f.porMes.find(m => m.mes === mes)?.importe || 0 })
+      return row
     })
-  }, [allMonths, chartProds, selectedProd])
+  }, [data])
 
-  const handleCatChange = cat => { setChartCat(cat); setChartProd('__all__') }
+  async function reclasificar(nombre, familia, sub) {
+    setBusy(true)
+    try { await ingresosFamiliaSet({ nombre, familia, sub }); await refetch() } finally { setBusy(false); setReclasificando(null) }
+  }
 
   return (
     <section className="sa-section">
       <div className="sa-section__header">
-        <SectionTitle>Productos y suscripciones</SectionTitle>
+        <SectionTitle>Desglose de ingresos</SectionTitle>
         <PeriodSelector value={months} onChange={setMonths} />
       </div>
       <p className="sa-legend">
-        Unidades vendidas e ingresos sin IVA por producto en el período. Gráfico: evolución mensual de la categoría/producto seleccionado. Calculadora de margen: precios y costes siempre sin IVA (bebidas IVA reducido 10%; recauchutes y magnesio IVA general 21%).
+        Familias propias de Blokes (no las categorías de WooCommerce — mezclaban clases, eventos y uso del rocódromo). Mismo cálculo que la gráfica de Ingresos (anuladas fuera, reembolsos restados, mes de pago, después de descuentos, y el mismo botón «Con/Sin uso Rocódromo» de arriba) — la suma debería cuadrar con el total de arriba.
+        No incluye lo cobrado fuera de la web (efectivo/transferencia que solo está en el Excel de Eva) ni el módulo Eventos todavía.
       </p>
 
       {loading && <LoadingBlock />}
@@ -366,94 +228,73 @@ function ProductsSection({ excludeTransfer }) {
 
       {!loading && !error && data && (
         <>
-          <div className="sa-filters">
-            {stores.map(s => (
-              <button
-                key={s}
-                className={`sa-filter-btn${storeFilter === s ? ' sa-filter-btn--active' : ''}`}
-                onClick={() => setStore(s)}
-              >{s}</button>
+          <div className="sa-kpis">
+            {data.familias.map(f => (
+              <div key={f.familia} className="sa-kpi" style={{ '--kpi-color': FAMILIA_COLOR[f.familia] || '#999' }}>
+                <span className="sa-kpi__value">{fmtEur(f.importe)}</span>
+                <span className="sa-kpi__label">{f.familia} ({f.pct}%)</span>
+              </div>
             ))}
           </div>
 
-          {/* Category accordion */}
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
+              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+              <YAxis tickFormatter={v => `${v}€`} tick={{ fontSize: 11 }} width={56} />
+              <Tooltip formatter={(v, name) => [fmtEur(v), name]} />
+              <Legend />
+              {data.familias.map(f => (
+                <Bar key={f.familia} dataKey={f.familia} stackId="a" fill={FAMILIA_COLOR[f.familia] || '#999'} />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+
           <div className="sa-cat-list">
-            {byCategory.map(cat => {
-              const isOpen = openCats.has(cat.name)
-              const maxRev = cat.products[0]?.revenue || 1
-              return (
-                <div key={cat.name} className="sa-cat-group">
-                  <button
-                    className={`sa-cat-header${isOpen ? ' sa-cat-header--open' : ''}`}
-                    onClick={() => toggleCat(cat.name)}
-                  >
-                    <span className="sa-cat-arrow">{isOpen ? '▼' : '▶'}</span>
-                    <span className="sa-cat-name">{cat.name}</span>
-                    <span className="sa-cat-count">{cat.products.length}</span>
-                    <span className="sa-cat-rev">{fmtEur(cat.revenue)}</span>
-                  </button>
-                  {isOpen && (
-                    <div className="sa-cat-products">
-                      {cat.products.map((p, i) => (
-                        <div key={i} className="sa-product-inner">
-                          <span className="sa-product-inner__pos">#{i + 1}</span>
-                          <span className="sa-product-inner__name">{p.name}</span>
-                          <span className="sa-product-inner__store">{p.store}</span>
-                          <div className="sa-product-inner__bar-wrap">
-                            <div className="sa-product-inner__bar" style={{ width: `${(p.revenue / maxRev) * 100}%` }} />
-                          </div>
-                          <span className="sa-product-inner__units">{p.units} uds</span>
-                          <span className="sa-product-inner__rev">{fmtEur(p.revenue)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+            {data.familias.map(f => (
+              <div key={f.familia} className="sa-cat-group">
+                <button className={`sa-cat-header${openFam.has(f.familia) ? ' sa-cat-header--open' : ''}`} onClick={() => toggleFam(f.familia)}>
+                  <span className="sa-cat-arrow">{openFam.has(f.familia) ? '▼' : '▶'}</span>
+                  <span className="sa-cat-name">{f.familia}</span>
+                  <span className="sa-cat-count">{f.familia === 'Consumibles' ? f.subs.reduce((s, x) => s + x.productos.length, 0) : f.productos.length}</span>
+                  <span className="sa-cat-rev">{fmtEur(f.importe)}</span>
+                </button>
+                {openFam.has(f.familia) && (
+                  <div className="sa-cat-products">
+                    {f.familia === 'Consumibles' ? f.subs.map(s => (
+                      <div key={s.sub} className="sa-cat-group" style={{ marginLeft: 16 }}>
+                        <button className={`sa-cat-header${openSub.has(s.sub) ? ' sa-cat-header--open' : ''}`} onClick={() => toggleSub(s.sub)}>
+                          <span className="sa-cat-arrow">{openSub.has(s.sub) ? '▼' : '▶'}</span>
+                          <span className="sa-cat-name">{s.sub}</span>
+                          <span className="sa-cat-count">{s.productos.length}</span>
+                          <span className="sa-cat-rev">{fmtEur(s.importe)}</span>
+                        </button>
+                        {openSub.has(s.sub) && s.productos.map((p, i) => (
+                          <ProductoFila key={i} p={p} onReclasificar={() => setReclasificando(p)} />
+                        ))}
+                      </div>
+                    )) : f.productos.map((p, i) => (
+                      <ProductoFila key={i} p={p} onReclasificar={() => setReclasificando(p)} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {reclasificando && (
+            <div className="sv-grp-overlay" onClick={() => !busy && setReclasificando(null)}>
+              <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
+                <h3>Reclasificar «{reclasificando.name}»</h3>
+                <div className="sv-grp-modal__actions" style={{ flexWrap: 'wrap' }}>
+                  {INGRESOS_FAMILIAS.map(fam => (
+                    <button key={fam} className="sa-filter-btn" disabled={busy} onClick={() => reclasificar(reclasificando.name, fam, fam === 'Consumibles' ? 'Bar' : null)}>{fam}</button>
+                  ))}
                 </div>
-              )
-            })}
-          </div>
-
-          {/* Monthly trend chart */}
-          <div className="sa-prod-chart">
-            <div className="sa-prod-chart__filters">
-              <select
-                value={chartCat}
-                onChange={e => handleCatChange(e.target.value)}
-                className="sa-chart-select"
-              >
-                <option value="__all__">Todas las categorías</option>
-                {byCategory.map(g => (
-                  <option key={g.name} value={g.name}>{g.name}</option>
-                ))}
-              </select>
-              <select
-                value={chartProd}
-                onChange={e => setChartProd(e.target.value)}
-                className="sa-chart-select"
-                disabled={chartCat === '__all__'}
-              >
-                <option value="__all__">Todos los productos</option>
-                {chartProds.map((p, i) => (
-                  <option key={i} value={`${p.store}|${p.name}`}>{p.name}</option>
-                ))}
-              </select>
+                <button className="sv-tests-select" disabled={busy} onClick={() => setReclasificando(null)}>Cancelar</button>
+              </div>
             </div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
-                <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={52} />
-                <Tooltip
-                  contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
-                  labelStyle={{ color: '#f5c842' }}
-                  formatter={v => [fmtEur(v), selectedProd ? selectedProd.name : chartCat === '__all__' ? 'Total' : chartCat]}
-                />
-                <Bar dataKey="revenue" fill="#f5c842" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <MarginCalculator products={filtered} months={months} />
+          )}
         </>
       )}
     </section>
@@ -475,7 +316,6 @@ const PROF_CLASS_SLOTS = {
   Eva:     [['martes','17:30','menor'],['martes','18:30'],['jueves','17:30','menor'],['jueves','18:30'],['viernes','18:00'],['viernes','19:00']],
 }
 
-const PROF_EUR_H = { Alvaro: 14.12, Sigurd: 18.40, 'Lucía': 12.09, Sara: 12.08, Ana: 13.20, Eva: 16.45 }
 const PROF_COLOR = { Alvaro: '#f5c842', Sigurd: '#60a5fa', 'Lucía': '#34d399', Sara: '#f97316', Ana: '#a78bfa', Eva: '#fb7185' }
 
 function getProfForClass(c) {
@@ -496,156 +336,474 @@ function classDurationH(horario) {
   return (toMin(parts[1]) - toMin(parts[0])) / 60
 }
 
-function classRevPerStudent(c) {
-  const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
-  const hourStr = (c.horario || '').split(':')[0]
-  const hour    = parseInt(hourStr, 10)
-  const isMorn  = hour < 16
-  const diaLow  = normForProf(c.dia || '')
-  const is2Day  = (diaLow.includes('lunes') && diaLow.includes('miercoles')) ||
-                  (diaLow.includes('martes') && diaLow.includes('jueves'))
-  const isFri   = diaLow === 'viernes'
-
-  if (isKid) return is2Day ? 57 / 8 : 47 / 4
-  if (isFri) return 78 / 4
-  if (is2Day) return isMorn ? 77 / 8 : 86 / 8
-  return isMorn ? 68 / 4 : 74 / 4
+// Ramiro, 15/11 09:10: "Rentabilidad de las clases" se mueve aquí (antes en Ingresos) y se
+// rehace con dinero de verdad en vez de tarifas fijas, junto a la retención de la 08:45 punto D
+// — una sola pestaña "Clases" para todo lo que no es dinero agregado del club.
+function profesorClaseConIsa(c) {
+  // Isa/Eva en niños-adolescentes (igual que profesoresDeGrupo() en SupervisionPage.jsx — NO se
+  // ha metido a Isa en PROF_CLASS_SLOTS/PROF_META porque esa fuente también alimenta Nóminas y
+  // ella es voluntaria, Ramiro 15/11 07:25). Ramiro, 15/11 16:20 (tabla de franjas real): Isa
+  // da las 3 franjas de Martes-Jueves (17:30-18:30, 18:30-19:30, 19:30-21:00 adolescentes); Eva
+  // da Lunes-Miércoles Y Viernes — antes esto último asignaba Viernes a Isa por error (solo
+  // miraba L-X, no Viernes).
+  if (c.edad && c.edad !== 'Adultos') {
+    const dias = normForProf(c.dia || '').split(/[\s\-·,|]+/).filter(Boolean)
+    const esMartesJueves = dias.length > 0 && dias.every(d => d === 'martes' || d === 'jueves')
+    return esMartesJueves ? 'Isa' : 'Eva'
+  }
+  return getProfForClass(c)
 }
 
-function ClassProfitabilitySection() {
-  const [months, setMonths] = useState(6)
-  const { data, loading, error } = useClasses(months)
+// Cowork, 15/11 17:50 punto 6: "Medianos M-J 18:30-19:30" en vez de la etiqueta genérica
+// "Martes-Jueves · 18:30-19:30 (Adolescentes)" — es el nombre que usa Eva/el Excel para esta
+// clase concreta (donde se fusiona también la variación huérfana 18:30-20:00, commits
+// 13795fe/50a089c).
+function claseLabel(c) {
+  if (c.dia === 'Martes-Jueves' && c.horario === '18:30-19:30') return 'Medianos M-J 18:30-19:30'
+  return c.edad !== 'Adultos' ? `${c.label} (${c.edad})` : c.label
+}
 
-  const rows = useMemo(() => {
-    if (!data) return []
+// "Alumnos con pago en curso" (Ramiro, 15/11 16:30) — sustituye a la tabla "Por mes" (cabeceras
+// desplazadas, inicio/altas/bajas/final confuso). Una línea por año, como el P&L: personas
+// distintas con el mes pagado o cubierto, del Excel de Grupos fusionado con WooCommerce.
+// Umbrales de color de la retención (Ramiro, 15/11 16:40): 🟢 ≥80% a 3 meses, 🟡 60-79%, 🔴
+// <60%; gris si la muestra (N, estancias que ya tienen esa antigüedad) es menor de 5 — "en
+// constantes para poder ajustarlos".
+const RETENCION_UMBRAL_VERDE = 80
+const RETENCION_UMBRAL_AMARILLO = 60
+const RETENCION_N_MINIMO = 5
+function retencionCelda(pct, n) {
+  if (n < RETENCION_N_MINIMO) return { cls: 'sa-ret--pocos', texto: pct != null ? `${pct}%` : '—' }
+  if (pct == null) return { cls: '', texto: '—' }
+  const cls = pct >= RETENCION_UMBRAL_VERDE ? 'sa-ret--verde' : pct >= RETENCION_UMBRAL_AMARILLO ? 'sa-ret--amarillo' : 'sa-ret--rojo'
+  return { cls, texto: `${pct}%` }
+}
+// Funde los campos de retención/estancias de una clase combinada (p. ej. "Martes-Jueves") con
+// sus días sueltos relacionados ("Martes", "Jueves") — mismo criterio que ya usa filasRentabilidad
+// para activos/ingreso: son sesiones reales distintas (alumnos con variantes de producto
+// distintas) que hay que sumar, no una clase aparte. La permanencia media se pondera por
+// estanciasEmpezaron12m de cada lado como aproximación (no hay un recuento total de tramos por
+// clase para ponderar con más precisión).
+function mergeRetencion(rows) {
+  const suma = k => rows.reduce((t, r) => t + (r[k] || 0), 0)
+  const motivos = {}
+  rows.forEach(r => Object.entries(r.motivosBaja || {}).forEach(([k, v]) => { motivos[k] = (motivos[k] || 0) + v }))
+  let motivoPrincipal = null, max = 0
+  Object.entries(motivos).forEach(([k, v]) => { if (v > max) { max = v; motivoPrincipal = k } })
+  const empezaron12m = suma('estanciasEmpezaron12m')
+  const conPermanencia = rows.filter(r => r.permanenciaMediaClase != null)
+  const pesoTotal = conPermanencia.reduce((t, r) => t + (r.estanciasEmpezaron12m || 1), 0)
+  const permanenciaMediaClase = conPermanencia.length
+    ? Math.round((conPermanencia.reduce((t, r) => t + r.permanenciaMediaClase * (r.estanciasEmpezaron12m || 1), 0) / pesoTotal) * 10) / 10
+    : null
+  const out = { estanciasEmpezaron12m: empezaron12m, bajas6mClase: suma('bajas6mClase'), cambiosClase6m: suma('cambiosClase6m'), permanenciaMediaClase, motivoPrincipal }
+  ;[1, 3, 6].forEach(n => {
+    const abs = suma(`siguen${n}Abs`), tot = suma(`siguen${n}N`)
+    out[`siguen${n}Abs`] = abs; out[`siguen${n}N`] = tot
+    out[`siguen${n}`] = tot ? Math.round(abs / tot * 1000) / 10 : null
+  })
+  return out
+}
+// Mismas categorías que BAJA_MOTIVO_OPCIONES (SupervisionPage.jsx) — compartido con
+// BLOKES_BAJA_MOTIVOS del backend. 'sin_categoria' es lo que pone el backend cuando la baja no
+// tiene motivo guardado (impago sin que nadie haya rellenado el desplegable de Bajas).
+const MOTIVO_LABEL = {
+  precio: 'Precio', horario: 'Horario', falta_tiempo: 'Falta de tiempo', mudanza: 'Mudanza',
+  otro_rocodromo: 'Se va a otro rocódromo', clase_profe: 'La clase o el profe', lesion: 'Lesión',
+  temporal_vuelve: 'Temporal, dice que vuelve', duplicado: 'Duplicado (no es baja real)', otro: 'Otro',
+  sin_categoria: 'Sin motivo guardado',
+}
 
-    const profed  = data.filter(c => getProfForClass(c))
-    const combos  = profed.filter(c => (c.dia || '').includes('-'))
-    const singles = profed.filter(c => !(c.dia || '').includes('-'))
+const PAGO_CURSO_CATS = [
+  { v: 'todos', l: 'Todos' }, { v: 'adultos', l: 'Adultos' },
+  { v: 'ninos', l: 'Niños-adolescentes' }, { v: 'pilates_yoga', l: 'Pilates-Yoga' },
+]
+function AlumnosPagoEnCursoChart() {
+  const oscuro = useTemaOscuro()
+  const tickFill = oscuro ? '#b3ab9a' : '#5e5650'
+  const [categoria, setCategoria] = useState('todos')
+  const { data, loading, error } = useClasesPagoEnCurso(categoria)
 
-    // Index: "singleDia|horario" → combo classes that include that day
-    // (without edad: horario already disambiguates overlapping same-time classes)
-    const comboForSingle = {}
-    combos.forEach(combo => {
-      combo.dia.split('-').forEach(day => {
-        const key = `${day.trim()}|${combo.horario}`
-        ;(comboForSingle[key] = comboForSingle[key] || []).push(combo)
-      })
+  const chartData = useMemo(() => {
+    if (!data?.porMes) return []
+    return PL_MONTHS_ABB.map((month, i) => {
+      const row = { month }
+      ;[2024, 2025, 2026].forEach(yr => { row[`y${yr}`] = data.porMes[`${yr}-${String(i + 1).padStart(2, '0')}`] ?? null })
+      return row
     })
-
-    const covered = new Set()
-    const result  = []
-
-    combos.forEach(combo => {
-      const prof      = getProfForClass(combo)
-      const durationH = classDurationH(combo.horario)
-      // Combo = 2 sessions/week → cost and revenue are weekly totals
-      const costCls   = (PROF_EUR_H[prof] || 0) * durationH * 2
-      const comboActive = combo.active || 0
-
-      // Related singles (same horario, one of the combo's days)
-      const related = singles.filter(s => {
-        const key = `${s.dia.trim()}|${s.horario}`
-        return comboForSingle[key]?.includes(combo)
-      })
-
-      if (comboActive === 0) return // combo empty → singles will show standalone
-
-      related.forEach(s => covered.add(`${s.dia.trim()}|${s.horario}`))
-
-      const activeSubs    = related.filter(s => (s.active || 0) > 0)
-      const singlesActive = activeSubs.reduce((t, s) => t + (s.active || 0), 0)
-      const singlesRev    = activeSubs.reduce((t, s) => t + (s.active || 0) * classRevPerStudent(s), 0)
-      const totalActive   = comboActive + singlesActive
-      // combo students contribute 2 sessions/week at their per-session tariff
-      const totalRev      = comboActive * classRevPerStudent(combo) * 2 + singlesRev
-      const benefit       = totalRev - costCls
-
-      const costDay = (PROF_EUR_H[prof] || 0) * durationH  // 1 session, for sub-rows
-      const subs = activeSubs.map(s => ({
-        c: s,
-        active: s.active || 0,
-        revPerSt: classRevPerStudent(s),
-        revCls: (s.active || 0) * classRevPerStudent(s),
-        costDay,
-        benefit: (s.active || 0) * classRevPerStudent(s) - costDay,
-      }))
-
-      result.push({ type: 'combo', c: combo, prof, costCls, revCls: totalRev, benefit, ea: totalActive, subs })
-    })
-
-    // Standalone singles (not covered by any active combo)
-    singles.forEach(s => {
-      if (covered.has(`${s.dia.trim()}|${s.horario}`)) return
-      const prof      = getProfForClass(s)
-      const durationH = classDurationH(s.horario)
-      const costCls   = (PROF_EUR_H[prof] || 0) * durationH
-      const ea        = s.active || 0
-      const revCls    = ea * classRevPerStudent(s)
-      result.push({ type: 'single', c: s, prof, costCls, revCls, benefit: revCls - costCls, ea, subs: [] })
-    })
-
-    result.sort((a, b) => (b.benefit ?? -Infinity) - (a.benefit ?? -Infinity))
-    return result
   }, [data])
+
+  return (
+    <>
+      <div className="sa-section__header">
+        <h3 className="sa-subtitle">Alumnos con pago en curso</h3>
+        <div className="sa-period">
+          {PAGO_CURSO_CATS.map(c => (
+            <button key={c.v} className={`sa-period__btn${categoria === c.v ? ' sa-period__btn--active' : ''}`} onClick={() => setCategoria(c.v)}>{c.l}</button>
+          ))}
+        </div>
+      </div>
+      <p className="sa-legend">
+        Personas distintas con el mes pagado o cubierto (mensual, trimestral/anual que cubre ese mes, exentos) — del Excel de Grupos fusionado con WooCommerce; una persona cuenta una vez aunque vaya a 2 clases o a una de 2 días.
+        {data?.mesEnCurso && <> <strong>{fmtMonth(data.mesEnCurso)} va a medias</strong> (mes en curso).</>}
+        {' '}Los meses de antes de septiembre de 2024 pueden estar incompletos en el Excel de Grupos.
+      </p>
+      {loading && <LoadingBlock />}
+      {error && <ErrorBlock msg={error} />}
+      {!loading && !error && (
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
+            <XAxis dataKey="month" tick={{ fill: tickFill, fontSize: 11 }} />
+            <YAxis tick={{ fill: tickFill, fontSize: 11 }} width={40} />
+            <Tooltip
+              contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
+              labelStyle={{ color: '#f5c842' }}
+              formatter={(v, name) => [v, name.replace('y', '')]}
+            />
+            <Legend formatter={k => k.replace('y', '')} />
+            {[2024, 2025, 2026].map(yr => (
+              <Line key={yr} type="monotone" dataKey={`y${yr}`} stroke={PL_YEAR_COLORS[yr]} strokeWidth={2}
+                dot={({ cx, cy, value }) => value != null ? <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={3.5} fill={PL_YEAR_COLORS[yr]} /> : null}
+                connectNulls={false} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+    </>
+  )
+}
+
+// «Bajo tarifa» (16/11 07:35 punto B.5): solo socios. Mismos datos que Supervisión › Grupos
+// (/gestion/grupos, ya trae tarifaEsperada/diferenciaMensual/bajoTarifa* por alumno) — el total
+// que se deja de cobrar al mes es solo un reduce aquí, sin endpoint propio. Eva ve la diferencia
+// de cada alumno en Grupos (es suya, es un pendiente de ella), pero nunca este total agregado.
+function BajoTarifaResumenSection() {
+  const oscuro = useTemaOscuro()
+  const { data, loading, error } = useGestionGrupos(1)
+  const filas = useMemo(() => {
+    const out = []
+    for (const g of (data?.grupos || [])) {
+      for (const a of g.alumnos) {
+        if (a.bajoTarifa) out.push({ ...a, grupoLabel: g.label })
+      }
+    }
+    return out.sort((a, b) => (a.diferenciaMensual ?? 0) - (b.diferenciaMensual ?? 0))
+  }, [data])
+  const totalMes = useMemo(() => filas.reduce((s, a) => s + Math.abs(a.diferenciaMensual || 0), 0), [filas])
+  const sinRevisar = filas.filter(a => !a.bajoTarifaRevisado).length
+
+  if (loading) return null
+  if (error) return null
+  if (filas.length === 0) return null
+
+  return (
+    <section className="sa-section">
+      <SectionTitle>Bajo tarifa</SectionTitle>
+      <p className="sa-legend">
+        Alumnos que pagan menos que la tarifa de su clase (margen de 2 €). Eva escribe el motivo y lo marca revisado
+        desde Supervisión › Grupos — aquí solo el total agregado, que no es suyo.
+      </p>
+      <div className="sa-kpis">
+        <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#ef4444', oscuro) }}>
+          <span className="sa-kpi__value">−{fmtEur(totalMes)}</span>
+          <span className="sa-kpi__label">al mes, entre {filas.length} alumno{filas.length === 1 ? '' : 's'}</span>
+        </div>
+        {sinRevisar > 0 && (
+          <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#f5c842', oscuro) }}>
+            <span className="sa-kpi__value">{sinRevisar}</span>
+            <span className="sa-kpi__label">sin revisar todavía</span>
+          </div>
+        )}
+      </div>
+      <div className="sa-profit-wrap">
+        <table className="sa-profit-table">
+          <thead>
+            <tr><th>Alumno</th><th>Clase</th><th>Diferencia/mes</th><th>Motivo</th><th>Revisado</th></tr>
+          </thead>
+          <tbody>
+            {filas.map(a => (
+              <tr key={`${a.subId}-${a.grupoLabel}`}>
+                <td>{a.alumno || '—'}</td>
+                <td className="sa-profit__num--dim">{a.grupoLabel}</td>
+                <td className="sa-profit__ben sa-profit__ben--neg">−{fmtEur(Math.abs(a.diferenciaMensual || 0))}</td>
+                <td className="sa-profit__num--dim">
+                  {a.bajoTarifaMotivoEva || a.notas || (a.bajoTarifaMotivoSugerido ? <em>{a.bajoTarifaMotivoSugerido}</em> : 'sin motivo anotado')}
+                </td>
+                <td className="sa-profit__num--dim">{a.bajoTarifaRevisado ? `✓ ${a.bajoTarifaRevisadoPor}` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function ClasesRetencionSection() {
+  const [months, setMonths] = useState(12)
+  // Mes de "ingreso real" (cowork, 15/11 09:45): por defecto el último mes cerrado que decide
+  // el backend (mesIngreso) — el usuario puede elegir otro con el selector.
+  const [mesSel, setMesSel] = useState('')
+  const { data, loading, error } = useClasesRetencion(months, mesSel)
+
+  // Isa (Ramiro, 15/11 16:00/16:20): voluntaria con nómina real, 12 €/hora confirmado y
+  // "profe visible" en Clases/Grupos/Horarios — pero a propósito NO entra en PROF_META (esa
+  // ficha también alimenta Playground/TimeOff/campamento, herramientas de personal pagado; no
+  // hay horasSem suya confirmada para equipar/gestión, solo para sus 3 franjas de clase: M-J
+  // 17:30-18:30 + 18:30-19:30 + 19:30-21:00 = 3,5 h/día × 2 días = 7 h/semana — ningún otro
+  // número suyo se inventa aquí). Objeto aparte, solo para el coste de SUS clases.
+  const ISA_META = { costoHClase: 12, horasSem: 7 }
+
+  // Ramiro, 15/11 10:25 punto A: coste de empresa REAL del mes elegido — nómina bruta (+
+  // efectivo) real + Seguridad Social real, nada de ×1,43 (eso era useCostes/FACTOR_COSTE) ni
+  // de usar siempre la nómina del mes actual en vez de la del mes que se está mirando. El
+  // backend ya lo calcula para $mesIngreso; aquí solo se divide por las horas del mes (clases +
+  // equipar + gestión — PROF_META.horasSem ya es esa cifra semanal, no solo horas de clase).
+  function costeHoraReal(prof) {
+    if (!prof) return 0
+    const meta = prof === 'Isa' ? ISA_META : PROF_META[prof]
+    if (!meta || !meta.horasSem) return 0
+    const real = data?.costeRealProfe?.[normForProf(prof)]
+    // Si no hay dato real para ese mes (p. ej. Nóminas sin nada cargado para ese mes concreto),
+    // usar la ficha en vez de 0€ — 0 es la peor respuesta posible para una rentabilidad (cowork,
+    // 15/11 10:40: "deja el coste a 0€ en todas"). Investigando por qué sale vacío — mientras
+    // tanto, mejor una estimación que un 0 que hace parecer gratis a todos los profes.
+    if (real == null || real <= 0) return meta.costoHClase || 0
+    return real / (meta.horasSem * 4.33)
+  }
+  // Cowork, 15/11 11:15: en vez de mirar error_log, enseñar en el ⓘ qué fuente se usó de
+  // verdad — si tiene fila de nómina de ESE mes (costeRealProfeFuente) usa nómina+SS banco,
+  // si no, cae al plan B de la ficha (costoHClase), visible en vivo sin acceso al servidor.
+  function fuenteProfe(prof) {
+    if (!prof) return ''
+    const meta = prof === 'Isa' ? ISA_META : PROF_META[prof]
+    if (!meta || !meta.horasSem) return ''
+    const mes = fmtMonth(data?.mesIngreso)
+    const tieneNomina = !!data?.costeRealProfeFuente?.[normForProf(prof)]
+    if (prof === 'Isa' && !tieneNomina) return `ficha (12 €/h confirmado, Ramiro 15/11 16:00), sin nómina de ${mes}`
+    return tieneNomina ? `nómina ${mes} + SS banco (prorrateada)` : `ficha, sin nómina de ${mes}`
+  }
+  // Sesiones por semana de esta clase: "Martes-Jueves"/"Lunes-Miércoles" = 2, un día suelto
+  // (p. ej. "Viernes") = 1 — faltaba este factor, por eso el coste salía de 1 sola sesión en
+  // vez del mes completo (× ~4,33 semanas/mes).
+  function sesionesSemana(dia) {
+    return (dia || '').includes('-') ? 2 : 1
+  }
+
+  function semaforoYrecomendacion(margen, ocupacion) {
+    const semaforo = margen < 0 ? 'bad' : (ocupacion < 0.5 ? 'warn' : 'ok')
+    // Recomendación (Ramiro, 15/11 09:10): una primera lectura automática, no una decisión —
+    // Ramiro/Ramiro-socio sigue siendo quien decide de verdad.
+    const recomendacion = margen >= 0
+      ? (ocupacion < 0.5 ? 'Promocionar (hay hueco)' : 'Va bien')
+      : (ocupacion < 0.3 ? 'Juntar con otra clase o cerrar' : 'Hablar con el profe (coste alto para lo que entra)')
+    return { semaforo, recomendacion }
+  }
+  const sumaMedia = (a, b, k) => (a[k] != null || b[k] != null) ? (a[k] || 0) + (b[k] || 0) : null
+
+  const filasRentabilidad = useMemo(() => {
+    if (!data?.porClase) return []
+    // Un "día suelto" (p. ej. "Martes" solo) no es una clase aparte: es la MISMA sesión que ya
+    // da la clase de 2 días de ese día+horario ("Martes-Jueves") — el profe cobra 1 vez por esa
+    // sesión, no 2 (cowork, 15/11 09:55: "Martes 17:30 Sigurd 98€" + "Martes-Jueves 17:30
+    // Sigurd 196€" contaba la misma sesión del martes dos veces). El de 2 días absorbe el
+    // coste; los de día suelto solo aportan ingreso/activos, con 0€ de coste propio.
+    const combos  = data.porClase.filter(c => (c.dia || '').includes('-'))
+    const singles = data.porClase.filter(c => !(c.dia || '').includes('-'))
+    const comboPorSuelto = {}
+    combos.forEach(combo => {
+      combo.dia.split('-').forEach(dia => {
+        const key = `${dia.trim()}|${combo.horario}|${combo.edad}`
+        ;(comboPorSuelto[key] = comboPorSuelto[key] || []).push(combo)
+      })
+    })
+    const cubiertos = new Set()
+    const filas = []
+
+    combos.forEach(combo => {
+      const prof = profesorClaseConIsa(combo)
+      const costeProfe = costeHoraReal(prof) * classDurationH(combo.horario) * 2 * 4.33
+      const relacionadas = singles.filter(s => comboPorSuelto[`${s.dia.trim()}|${s.horario}|${s.edad}`]?.includes(combo))
+      relacionadas.forEach(s => cubiertos.add(`${s.dia.trim()}|${s.horario}|${s.edad}`))
+      const activos = combo.activos + relacionadas.reduce((t, s) => t + s.activos, 0)
+      const activosFuera = (combo.activosFuera || 0) + relacionadas.reduce((t, s) => t + (s.activosFuera || 0), 0)
+      const ingresoMesReal = combo.ingresoMesReal + relacionadas.reduce((t, s) => t + s.ingresoMesReal, 0)
+      const ingresoMedia3m = sumaMedia(combo, { ingresoMedia3m: relacionadas.reduce((t, s) => t + (s.ingresoMedia3m || 0), 0) }, 'ingresoMedia3m')
+      const ingresoMedia6m = sumaMedia(combo, { ingresoMedia6m: relacionadas.reduce((t, s) => t + (s.ingresoMedia6m || 0), 0) }, 'ingresoMedia6m')
+      const ingresoMedia12m = sumaMedia(combo, { ingresoMedia12m: relacionadas.reduce((t, s) => t + (s.ingresoMedia12m || 0), 0) }, 'ingresoMedia12m')
+      const ocupacion = activos / 15
+      const margen = ingresoMesReal - costeProfe
+      const retencion = mergeRetencion([combo, ...relacionadas])
+      filas.push({ ...combo, ...retencion, prof, costeProfe, fuenteProfe: fuenteProfe(prof), ocupacion, margen, activos, activosFuera, ingresoMesReal, ingresoMedia3m, ingresoMedia6m, ingresoMedia12m, ...semaforoYrecomendacion(margen, ocupacion) })
+    })
+
+    singles.forEach(s => {
+      if (cubiertos.has(`${s.dia.trim()}|${s.horario}|${s.edad}`)) return // ya absorbida por su combo
+      const prof = profesorClaseConIsa(s)
+      const costeProfe = costeHoraReal(prof) * classDurationH(s.horario) * 1 * 4.33
+      const ocupacion = s.activos / 15
+      const margen = s.ingresoMesReal - costeProfe
+      filas.push({ ...s, ...mergeRetencion([s]), prof, costeProfe, fuenteProfe: fuenteProfe(prof), ocupacion, margen, ...semaforoYrecomendacion(margen, ocupacion) })
+    })
+
+    return filas.sort((a, b) => b.margen - a.margen)
+  }, [data])
+
+  // Retención por clase (Ramiro, 15/11 16:40) — mismas clases ya combinadas de filasRentabilidad
+  // (día suelto absorbido por su M-J), ordenadas de mejor a peor por retención a 3 meses.
+  const filasRetencionClase = useMemo(() => (
+    filasRentabilidad.slice().sort((a, b) => (b.siguen3 ?? -1) - (a.siguen3 ?? -1))
+  ), [filasRentabilidad])
+
+  // Retención por profe: las mismas estancias, agrupadas por profe (suma de empezaron/siguen,
+  // nunca media de porcentajes — una clase de 20 alumnos no pesa igual que una de 3).
+  const filasRetencionProfe = useMemo(() => {
+    const porProfe = {}
+    filasRentabilidad.forEach(c => {
+      const prof = c.prof || '—'
+      ;(porProfe[prof] = porProfe[prof] || []).push(c)
+    })
+    return Object.entries(porProfe).map(([prof, clases]) => ({
+      prof, nClases: clases.length, activos: clases.reduce((t, c) => t + (c.activos || 0), 0),
+      ...mergeRetencion(clases),
+    })).sort((a, b) => (b.siguen3 ?? -1) - (a.siguen3 ?? -1))
+  }, [filasRentabilidad])
 
   return (
     <section className="sa-section">
       <div className="sa-section__header">
-        <SectionTitle>Rentabilidad de las clases</SectionTitle>
+        <SectionTitle>Clases — retención y rentabilidad</SectionTitle>
         <PeriodSelector value={months} onChange={setMonths} />
       </div>
-
       {loading && <LoadingBlock />}
       {error && <ErrorBlock msg={error} />}
+      {!loading && !error && data && (
+        <>
+          <AlumnosPagoEnCursoChart />
 
-      <p className="sa-legend">
-        Cifras semanales. Clases de 2 días: ingresos = alumnos × tarifa/sesión × 2; coste = €/h × duración × 2 (el profe da 2 sesiones). Clases de 1 día: ingresos y coste por sesión. Tarifas: 2d tarde €10.75/ses, 2d mañana €9.63/ses; 1d tarde €18.50, 1d mañana €17; viernes €19.50; niños 2d €7.13, 1d €11.75. Sub-filas: aportación de alumnos de día suelto (se les descuenta 1 sesión del profe).
-      </p>
-
-      {!loading && !error && rows.length > 0 && (
-        <div className="sa-profit-wrap">
-          <table className="sa-profit-table">
-            <thead>
-              <tr>
-                <th>Clase</th>
-                <th>Profe</th>
-                <th>Al.</th>
-                <th>Rev/clase</th>
-                <th>Coste/clase</th>
-                <th>Beneficio</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.flatMap(({ c, prof, costCls, revCls, benefit, ea, subs }, i) => {
-                const isKid = c.edad && c.edad.toLowerCase() !== 'adultos'
-                const label = isKid ? `${c.label} (${c.edad})` : c.label
-                return [
-                  <tr key={`r${i}`} className={benefit < 0 ? 'sa-profit-row--loss' : ''}>
-                    <td className="sa-profit__label">{label}</td>
-                    <td className="sa-profit__prof" style={{ color: PROF_COLOR[prof] }}>{prof}</td>
-                    <td className="sa-profit__num">{ea}</td>
-                    <td className="sa-profit__num">{fmtEur(revCls)}</td>
-                    <td className="sa-profit__num">{fmtEur(costCls)}</td>
-                    <td className={`sa-profit__ben${benefit >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>
-                      {fmtEur(benefit)}
+          <div className="sa-section__header">
+            <h3 className="sa-subtitle">Rentabilidad por clase (ingreso de verdad cobrado, trimestrales/anuales ya prorrateados por mes)</h3>
+            <select className="sa-chart-select" value={mesSel || data.mesIngreso || ''} onChange={e => setMesSel(e.target.value)}>
+              {(data.mesesDisponibles || []).slice().reverse().map(m => (
+                <option key={m} value={m}>{fmtMonth(m)}{m === data.mesIngreso && !mesSel ? ' (último cerrado)' : ''}</option>
+              ))}
+            </select>
+          </div>
+          <p className="sa-legend">
+            Coste del profe: coste de empresa real del mes elegido (nómina bruta + efectivo + Seguridad Social real + gastos de voluntarios, de Nóminas y Gastos banco — nada de factores inventados), dividido entre sus horas del mes (clases + equipar + gestión). Isa: 12 €/h confirmado, o su nómina real del mes si ya hay (ⓘ de cada fila dice la fuente).
+            Semáforo: 🔴 margen negativo · 🟡 margen positivo pero ocupación por debajo del 50% (7-8 de 15) · 🟢 margen positivo y ocupación ≥ 50%.
+            El margen se calcula sobre el ingreso del mes elegido; las medias de 3/6/12 meses son solo para ver la tendencia.
+            {data.pestanasSinRepartir > 0 && (
+              <>
+                {' '}
+                <span
+                  title={(data.pestanasSinRepartirDetalle || []).map(p => `${p.pestana}: ${p.motivo}`).join('\n')}
+                  style={{ cursor: 'help', textDecoration: 'underline dotted' }}
+                >
+                  {data.pestanasSinRepartir} pestaña{data.pestanasSinRepartir === 1 ? '' : 's'} del Excel con pago este mes sin repartir ⓘ
+                </span>
+                {' '}(pasa el ratón para ver cuáles y por qué).
+              </>
+            )}
+          </p>
+          <div className="sa-profit-wrap">
+            <table className="sa-profit-table">
+              <thead>
+                <tr><th></th><th>Clase</th><th>Profe</th><th>Activos</th><th>Ocupación/15</th><th>Ingreso del mes</th><th>Media 3m</th><th>Media 6m</th><th>Media 12m</th><th>Coste profe</th><th>Margen</th><th>Retención 3m</th><th>Recomendación</th></tr>
+              </thead>
+              <tbody>
+                {filasRentabilidad.map((c, i) => {
+                  const pocos = (c.siguen3N ?? 0) < RETENCION_N_MINIMO
+                  return (
+                  <tr key={i} className={pocos ? 'sa-ret-row--pocos' : ''}>
+                    <td><span className={`sa-semaforo sa-semaforo--${c.semaforo}`} title={c.semaforo} /></td>
+                    <td className="sa-profit__label">{claseLabel(c)}</td>
+                    <td className="sa-profit__prof" style={{ color: PROF_COLOR[c.prof] }}>{c.prof || '—'}</td>
+                    <td className="sa-profit__num" title={c.activosFuera ? `${c.activosWeb ?? (c.activos - c.activosFuera)} web + ${c.activosFuera} que pagan por fuera` : 'Todos con suscripción en la web'}>
+                      {c.activos}{c.activosFuera ? ' ⓘ' : ''}
                     </td>
-                  </tr>,
-                  ...subs.map((sub, j) => (
-                    <tr key={`s${i}-${j}`} className="sa-profit-row--sub">
-                      <td className="sa-profit__sub-label">↳ {sub.c.label} solo · {sub.revPerSt.toFixed(2)}€/sesión</td>
-                      <td></td>
-                      <td className="sa-profit__num sa-profit__num--dim">{sub.active}</td>
-                      <td className="sa-profit__num sa-profit__num--dim">{fmtEur(sub.revCls)}</td>
-                      <td className="sa-profit__num sa-profit__num--dim">{fmtEur(sub.costDay)}</td>
-                      <td className={`sa-profit__num sa-profit__num--dim${sub.benefit >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>{fmtEur(sub.benefit)}</td>
+                    <td className="sa-profit__num">{Math.round(c.ocupacion * 100)}%</td>
+                    <td className="sa-profit__num">{fmtEur(c.ingresoMesReal)}</td>
+                    <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia3m != null ? fmtEur(c.ingresoMedia3m) : '—'}</td>
+                    <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia6m != null ? fmtEur(c.ingresoMedia6m) : '—'}</td>
+                    <td className="sa-profit__num sa-profit__num--dim">{c.ingresoMedia12m != null ? fmtEur(c.ingresoMedia12m) : '—'}</td>
+                    <td className="sa-profit__num" title={`Fuente: ${c.fuenteProfe}`}>{fmtEur(c.costeProfe)} ⓘ</td>
+                    <td className={`sa-profit__ben${c.margen >= 0 ? ' sa-profit__ben--pos' : ' sa-profit__ben--neg'}`}>{fmtEur(c.margen)}</td>
+                    <td className={`sa-profit__num ${retencionCelda(c.siguen3, c.siguen3N).cls}`} title={`${c.siguen3Abs ?? 0} de ${c.siguen3N ?? 0}`}>
+                      {c.siguen3N ? `${c.siguen3Abs} de ${c.siguen3N}` : '—'}
+                    </td>
+                    <td className="sa-profit__num" style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{c.recomendacion}</td>
+                  </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <h3 className="sa-subtitle">Retención por clase</h3>
+          <p className="sa-legend">
+            Estancia = tramo continuo de una persona en esa clase (Excel de Grupos + WooCommerce + hist-pagos fusionados, 1 mes de margen). "Empezaron (12m)" = estancias nuevas en esa clase en el último año; "Siguen" muestra cuántas de ESAS ya tienen esa antigüedad y de ellas cuántas seguían en la MISMA clase ("n de N"). Un cambio de clase cierra la estancia vieja pero no cuenta como baja del club — sale aparte en "Cambios".
+            🟢 ≥{RETENCION_UMBRAL_VERDE}% a 3 meses · 🟡 {RETENCION_UMBRAL_AMARILLO}-{RETENCION_UMBRAL_VERDE - 1}% · 🔴 &lt;{RETENCION_UMBRAL_AMARILLO}% · gris si la muestra es menor de {RETENCION_N_MINIMO}.
+          </p>
+          <div className="sa-profit-wrap">
+            <table className="sa-profit-table">
+              <thead>
+                <tr><th>Clase</th><th>Profe</th><th>Alumnos ahora</th><th>Empezaron (12m)</th><th>Siguen 1m</th><th>Siguen 3m</th><th>Siguen 6m</th><th>Permanencia media</th><th>Bajas 6m</th><th>Cambios clase (6m)</th><th>Motivo principal</th></tr>
+              </thead>
+              <tbody>
+                {filasRetencionClase.map((c, i) => {
+                  const pocos = (c.siguen3N ?? 0) < RETENCION_N_MINIMO
+                  return (
+                    <tr key={i} className={pocos ? 'sa-ret-row--pocos' : ''}>
+                      <td className="sa-profit__label">{claseLabel(c)}</td>
+                      <td className="sa-profit__prof" style={{ color: PROF_COLOR[c.prof] }}>{c.prof || '—'}</td>
+                      <td className="sa-profit__num" title={c.activosFuera ? `${c.activosWeb ?? (c.activos - c.activosFuera)} web + ${c.activosFuera} que pagan por fuera` : 'Todos con suscripción en la web'}>
+                        {c.activos}{c.activosFuera ? ' ⓘ' : ''}
+                      </td>
+                      <td className="sa-profit__num">{c.estanciasEmpezaron12m}</td>
+                      <td className={`sa-profit__num ${retencionCelda(c.siguen1, c.siguen1N).cls}`} title={`${c.siguen1Abs} de ${c.siguen1N}`}>{c.siguen1N ? `${c.siguen1Abs} de ${c.siguen1N}` : '—'}</td>
+                      <td className={`sa-profit__num ${retencionCelda(c.siguen3, c.siguen3N).cls}`} title={`${c.siguen3Abs} de ${c.siguen3N}`}>{c.siguen3N ? `${c.siguen3Abs} de ${c.siguen3N} (${c.siguen3}%)` : '—'}</td>
+                      <td className={`sa-profit__num ${retencionCelda(c.siguen6, c.siguen6N).cls}`} title={`${c.siguen6Abs} de ${c.siguen6N}`}>{c.siguen6N ? `${c.siguen6Abs} de ${c.siguen6N}` : '—'}</td>
+                      <td className="sa-profit__num sa-profit__num--dim">{c.permanenciaMediaClase != null ? `${c.permanenciaMediaClase} m` : '—'}</td>
+                      <td className="sa-profit__num">{c.bajas6mClase}</td>
+                      <td className="sa-profit__num sa-profit__num--dim">{c.cambiosClase6m}</td>
+                      <td className="sa-profit__num sa-profit__num--dim" style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{c.motivoPrincipal ? (MOTIVO_LABEL[c.motivoPrincipal] || c.motivoPrincipal) : '—'}</td>
                     </tr>
-                  )),
-                ]
-              })}
-            </tbody>
-          </table>
-        </div>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <h3 className="sa-subtitle">Retención por profe</h3>
+          <div className="sa-profit-wrap">
+            <table className="sa-profit-table">
+              <thead>
+                <tr><th>Profe</th><th>Clases</th><th>Alumnos ahora</th><th>Empezaron (12m)</th><th>Siguen 1m</th><th>Siguen 3m</th><th>Siguen 6m</th><th>Permanencia media</th><th>Bajas 6m</th><th>Motivo principal</th></tr>
+              </thead>
+              <tbody>
+                {filasRetencionProfe.map((p, i) => {
+                  const pocos = (p.siguen3N ?? 0) < RETENCION_N_MINIMO
+                  return (
+                    <tr key={i} className={pocos ? 'sa-ret-row--pocos' : ''}>
+                      <td className="sa-profit__prof" style={{ color: PROF_COLOR[p.prof] }}>{p.prof}</td>
+                      <td className="sa-profit__num">{p.nClases}</td>
+                      <td className="sa-profit__num">{p.activos}</td>
+                      <td className="sa-profit__num">{p.estanciasEmpezaron12m}</td>
+                      <td className={`sa-profit__num ${retencionCelda(p.siguen1, p.siguen1N).cls}`} title={`${p.siguen1Abs} de ${p.siguen1N}`}>{p.siguen1N ? `${p.siguen1Abs} de ${p.siguen1N}` : '—'}</td>
+                      <td className={`sa-profit__num ${retencionCelda(p.siguen3, p.siguen3N).cls}`} title={`${p.siguen3Abs} de ${p.siguen3N}`}>{p.siguen3N ? `${p.siguen3Abs} de ${p.siguen3N} (${p.siguen3}%)` : '—'}</td>
+                      <td className={`sa-profit__num ${retencionCelda(p.siguen6, p.siguen6N).cls}`} title={`${p.siguen6Abs} de ${p.siguen6N}`}>{p.siguen6N ? `${p.siguen6Abs} de ${p.siguen6N}` : '—'}</td>
+                      <td className="sa-profit__num sa-profit__num--dim">{p.permanenciaMediaClase != null ? `${p.permanenciaMediaClase} m` : '—'}</td>
+                      <td className="sa-profit__num">{p.bajas6mClase}</td>
+                      <td className="sa-profit__num sa-profit__num--dim" style={{ textAlign: 'left', whiteSpace: 'nowrap' }}>{p.motivoPrincipal ? (MOTIVO_LABEL[p.motivoPrincipal] || p.motivoPrincipal) : '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </section>
   )
@@ -707,11 +865,11 @@ function ClassesSection_UNUSED() {
         <>
           {hasRevenue && (
             <div className="sa-kpis">
-              <div className="sa-kpi" style={{ '--kpi-color': '#34d399' }}>
+              <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#34d399', oscuro) }}>
                 <span className="sa-kpi__value">{fmtEur(totalRevenue)}</span>
                 <span className="sa-kpi__label">Ingresos WC clases ({months}m)</span>
               </div>
-              <div className="sa-kpi" style={{ '--kpi-color': '#888' }}>
+              <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#888', oscuro) }}>
                 <span className="sa-kpi__value">—</span>
                 <span className="sa-kpi__label">Ing. banco clases (pendiente PHP /expenses income_tpv)</span>
               </div>
@@ -724,10 +882,10 @@ function ClassesSection_UNUSED() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" horizontal={false} />
                 <XAxis
                   type="number"
-                  tick={{ fill: '#888', fontSize: 10 }}
+                  tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }}
                   tickFormatter={mode === 'ingresos' ? v => `${v}€` : undefined}
                 />
-                <YAxis type="category" dataKey="name" width={130} tick={{ fill: '#ccc', fontSize: 10 }} />
+                <YAxis type="category" dataKey="name" width={130} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
                 <Tooltip
                   contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                   labelStyle={{ color: '#f5c842' }}
@@ -781,8 +939,8 @@ function ClassesSection_UNUSED() {
               <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={histData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-                  <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
-                  <YAxis allowDecimals={false} tick={{ fill: '#888', fontSize: 10 }} width={28} />
+                  <XAxis dataKey="month" tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} />
+                  <YAxis allowDecimals={false} tick={{ fill: 'var(--color-text-secondary)', fontSize: 11 }} width={28} />
                   <Tooltip
                     contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
                     labelStyle={{ color: '#f5c842' }}
@@ -824,44 +982,92 @@ const PL_METRICS_LIST = [
 const PL_YEAR_COLORS = { 2024: '#f5c842', 2025: '#60a5fa', 2026: '#34d399' }
 
 
+// Cowork, 16/11 07:00: sin maximumFractionDigits, toLocaleString('es-ES') deja hasta 3
+// decimales en valores no enteros (bank-derived, con prorrateos) — salían cifras como
+// «131.288,267€». Redondeado a euros enteros, como se pidió.
 function fmtPLVal(v) {
   if (v == null) return '—'
-  return `${v < 0 ? '-' : ''}${Math.abs(v).toLocaleString('es-ES')}€`
+  return `${v < 0 ? '-' : ''}${Math.abs(v).toLocaleString('es-ES', { maximumFractionDigits: 0 })}€`
 }
 
 function PLTab() {
-  const { data: expData, loading } = useExpenses('', 'all', true)
+  const oscuro = useTemaOscuro()
+  const tickFill = oscuro ? '#b3ab9a' : '#5e5650'
+  // Ramiro, 15/11 11:25 (GRAVE, corrige 11:10): "Ingresos" y "Gastos" de 2026 tienen que venir
+  // de la MISMA fuente y periodo. WooCommerce solo tiene ventas desde la migración (may-26) —
+  // ene-abr se cobraba por TPV/transferencia/Excel y no está en Woo — así que compararlo con los
+  // gastos del banco de TODO el año daba un resultado negativo falso (−59.568 €). "Ingresos" pasa
+  // a ser el banco consolidado (Club+Rocoteca) sin internos/préstamos, sin IVA estimado por
+  // categoría (mismo campo iva_repercutido que ya usa /expenses -- ojo, hoy ese estimado trata
+  // TPV/transferencia como 21% uniforme, no "clases exentas + bar 10% + resto 21%" como pide
+  // Ramiro; day para afinarlo por familia necesita blendear con el reparto real de WooCommerce,
+  // que solo existe desde mayo -- lo dejo aparte, ver nota). WooCommerce queda como una cifra de
+  // comparación aparte, no como el total.
+  const { data: expData, cuadre, cuadreRocoteca, loading, refetch: refetchExp } = useExpenses('', 'all', true)
   const [metric,  setMetric ] = useState('ventas')
   const [view,    setView   ] = useState('comparativa')
   const [showIva, setShowIva] = useState(true)
+  // Apertura editable por entidad (cowork, 15/11 11:45: la Rocoteca no tiene semilla, hay que
+  // poder metérsela a mano).
+  const [editandoApertura, setEditandoApertura] = useState(null) // 'club' | 'rocoteca' | null
+  const [aperturaValor, setAperturaValor] = useState('')
+  const [guardandoApertura, setGuardandoApertura] = useState(false)
+  async function guardarApertura(entity) {
+    const n = parseFloat(aperturaValor.replace(',', '.'))
+    if (isNaN(n)) return
+    setGuardandoApertura(true)
+    try {
+      await expensesAperturaSet(new Date().getFullYear(), entity, n)
+      await refetchExp()
+    } catch (e) { alert(e.message) } finally { setGuardandoApertura(false); setEditandoApertura(null) }
+  }
 
+  // Ramiro, 15/11 20:00 (bug visto en oct/sep): "ingresos sin IVA" dividía TODO entre 1,21
+  // (iva_repercutido, estimado del banco por categoría con un 21% genérico para transferencia/
+  // TPV) — pero casi todo lo que entra son clases, exentas de IVA, así que oct salía 13.309 €
+  // en vez de ≈16.000 €. Ahora se usa iva_repercutido_real (de las facturas reales de
+  // WooCommerce, que ya refleja el 0% de las clases). En los meses de antes de la migración
+  // (sin facturas reales) se estima con el % medio real de los meses que SÍ las tienen — nunca
+  // con un 21% fijo. Gastos se dejan CON IVA a propósito (20:10 punto 2): casi todo lo que
+  // vendemos va exento, así que el IVA de las compras no se recupera y es coste real.
   const live2026 = useMemo(() => {
     if (!expData) return {}
     const acc = {}
     expData.forEach(r => {
       const [y, m] = r.month.split('-').map(Number)
       if (y !== 2026) return
-      if (!acc[m]) acc[m] = { ingresos: 0, costes: 0, iva_r: 0, iva_s: 0 }
-      acc[m].ingresos += Math.abs(r.total_ingresos  || 0)
-      acc[m].costes   += Math.abs(r.total_costes    || 0)
-      acc[m].iva_r    += Math.abs(r.iva_repercutido || 0)
-      acc[m].iva_s    += Math.abs(r.iva_soportado   || 0)
+      if (!acc[m]) acc[m] = { ingresoBanco: 0, costes: 0, ivaReal: 0 }
+      acc[m].ingresoBanco += Math.abs(r.total_ingresos || 0)
+      acc[m].costes        += Math.abs(r.total_costes  || 0)
+      acc[m].ivaReal        += Math.abs(r.iva_repercutido_real || 0)
     })
-    // Quarterly IVA payment months: Q1(Jan-Mar)→Apr, Q2→Jul, Q3→Oct
-    const ivaPayments = {}
-    for (let m = 1; m <= 12; m++) {
-      if (!acc[m]) continue
-      const payM = Math.ceil(m / 3) * 3 + 1
-      if (payM <= 12) ivaPayments[payM] = (ivaPayments[payM] || 0) + (acc[m].iva_r - acc[m].iva_s)
-    }
+    let sumaIvaConFactura = 0, sumaIngresoConFactura = 0
+    Object.values(acc).forEach(d => {
+      if (d.ivaReal > 0) { sumaIvaConFactura += d.ivaReal; sumaIngresoConFactura += d.ingresoBanco }
+    })
+    const pctMedioReal = sumaIngresoConFactura > 0 ? sumaIvaConFactura / sumaIngresoConFactura : 0
     const res = {}
     for (let m = 1; m <= 12; m++) {
       if (!acc[m]) continue
-      const d = acc[m], resultado = d.ingresos - d.costes
-      res[m] = { ventas: d.ingresos, costes: -d.costes, resultado }
+      const d = acc[m]
+      const tieneFactura = d.ivaReal > 0
+      const ivaUsado = tieneFactura ? d.ivaReal : d.ingresoBanco * pctMedioReal
+      const ventas = d.ingresoBanco - ivaUsado
+      const resultado = ventas - d.costes
+      res[m] = {
+        ventas, costes: -d.costes, resultado,
+        ivaFuente: tieneFactura ? 'IVA real de facturas' : `IVA estimado (${(pctMedioReal * 100).toFixed(1)}%, media de los meses con facturas)`,
+      }
     }
     return res
   }, [expData])
+
+  const resumenAnual = useMemo(() => {
+    const vals = Object.values(live2026)
+    const ingresos = vals.reduce((s, d) => s + d.ventas, 0)
+    const gastos   = vals.reduce((s, d) => s - d.costes, 0)
+    return { ingresos, gastos, resultado: ingresos - gastos, meses: vals.length }
+  }, [live2026])
 
   const lastMonth = useMemo(() => {
     for (let m = 12; m >= 1; m--) if (live2026[m]) return m
@@ -918,6 +1124,70 @@ function PLTab() {
       : [fmtPLVal(v), name.replace('y', '')],
   }
 
+  // Ramiro, 15/11 20:10: el resumen del año en curso + cuadre con el banco se mueve al FINAL de
+  // la pestaña ("¿qué es esto que sale lo primero?") — arriba se queda la gráfica y el detalle
+  // mensual. Quitada la ficha "Ventas en WooCommerce (desde may-26)": confunde (no es el total
+  // del año) y ya está en Superadmin › Ingresos.
+  const resumenAnualYCuadre = (
+    <>
+      <SectionTitle>2026 (año en curso, hasta {!loading ? PL_MONTHS_FULL[lastMonth - 1] : '…'})</SectionTitle>
+      <div className="sa-kpis">
+        <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#60a5fa', oscuro) }}>
+          <span className="sa-kpi__value">{fmtPLVal(resumenAnual.ingresos)}</span>
+          <span className="sa-kpi__label">Ingresos (banco, consolidado, sin IVA real/estimado)</span>
+        </div>
+        <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema('#ef4444', oscuro) }}>
+          <span className="sa-kpi__value">{fmtPLVal(resumenAnual.gastos)}</span>
+          <span className="sa-kpi__label">Gastos (banco, consolidado, con IVA — casi todo lo que vendemos va exento, no se recupera)</span>
+        </div>
+        <div className="sa-kpi" style={{ '--kpi-color': kpiColorTema(resumenAnual.resultado >= 0 ? '#34d399' : '#ef4444', oscuro) }}>
+          <span className="sa-kpi__value">{fmtPLVal(resumenAnual.resultado)}</span>
+          <span className="sa-kpi__label">Resultado</span>
+        </div>
+      </div>
+      {/* Cowork, 15/11 20:10 punto 4: línea gris siempre (nunca naranja), con el detalle largo
+          de los traspasos en el ⓘ en vez de como texto suelto debajo. */}
+      {[['club', 'Club', cuadre], ['rocoteca', 'Rocoteca', cuadreRocoteca]].map(([entity, label, c]) => (
+        c && (
+          <p
+            key={entity}
+            className="sa-legend"
+            title={entity === 'club' ? 'Los traspasos con la Rocoteca («Uso de Rocódromo», ene-jul 26, ya no se hace) no son gasto del Club: ese dinero paga gastos que la Rocoteca ya contabiliza aparte — por eso ene-jul el resultado real es el consolidado Club+Rocoteca, no solo el Club.' : undefined}
+          >
+            <strong>Cuadre con el banco ({label}){entity === 'club' ? ' ⓘ' : ''}:</strong>{' '}
+            apertura 1/1{' '}
+            {editandoApertura === entity ? (
+              <>
+                <input
+                  type="number" step="0.01" value={aperturaValor} autoFocus
+                  onChange={e => setAperturaValor(e.target.value)}
+                  style={{ width: 90 }}
+                />
+                <button className="sa-link" disabled={guardandoApertura} onClick={() => guardarApertura(entity)}>Guardar</button>
+                <button className="sa-link" onClick={() => setEditandoApertura(null)}>Cancelar</button>
+              </>
+            ) : c.apertura != null ? (
+              <>
+                {fmtPLVal(c.apertura)}{c.aperturaEsSemilla ? ' (estimada del CSV' : ''}{c.aperturaEsSemilla ? ')' : ''}{' '}
+                <button className="sa-link" onClick={() => { setEditandoApertura(entity); setAperturaValor(String(c.apertura)) }}>editar</button>
+              </>
+            ) : (
+              <button className="sa-link" onClick={() => { setEditandoApertura(entity); setAperturaValor('') }}>sin dato, añadir</button>
+            )}
+            {c.apertura != null && (
+              <>
+                {' '}+ resultado {fmtPLVal(c.resultado)}
+                {c.traspasosRocodromo !== 0 && <> {c.traspasosRocodromo >= 0 ? '+' : '−'} traspasos {fmtPLVal(Math.abs(c.traspasosRocodromo))}</>}
+                {' '}= esperado {fmtPLVal(c.apertura + c.resultado + c.traspasosRocodromo)} · real {c.fechaHoy ? `a ${c.fechaHoy.slice(8,10)}/${c.fechaHoy.slice(5,7)}` : 'hoy'} {fmtPLVal(c.saldoHoy)}
+                {Math.abs(c.diferencia ?? 0) > 50 ? ` · diferencia ${fmtPLVal(c.diferencia)} sin explicar` : ' · cuadra ✓'}
+              </>
+            )}
+          </p>
+        )
+      ))}
+    </>
+  )
+
   return (
     <section className="sa-section">
       <div className="sa-pl-tabs">
@@ -946,7 +1216,7 @@ function PLTab() {
 
       <div className="sa-kpis">
         {[2024, 2025, 2026].map(yr => (
-          <div key={yr} className="sa-kpi" style={{ '--kpi-color': PL_YEAR_COLORS[yr] }}>
+          <div key={yr} className="sa-kpi" style={{ '--kpi-color': kpiColorTema(PL_YEAR_COLORS[yr], oscuro) }}>
             <span className="sa-kpi__value">{fmtPLVal(kpis[yr].total)}</span>
             <span className="sa-kpi__label">{yr}{kpis[yr].n < 12 ? ` (${kpis[yr].n} m)` : ''}{yr === 2026 ? ' · banco' : ''}</span>
           </div>
@@ -972,8 +1242,8 @@ function PLTab() {
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={comparativaData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-            <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 11 }} />
-            <YAxis tickFormatter={tickFmt} tick={{ fill: '#888', fontSize: 11 }} width={44} />
+            <XAxis dataKey="month" tick={{ fill: tickFill, fontSize: 11 }} />
+            <YAxis tickFormatter={tickFmt} tick={{ fill: tickFill, fontSize: 11 }} width={44} />
             <Tooltip {...chartTooltip} />
             {[2024, 2025, 2026].map(yr => (
               <Line key={yr} type="monotone" dataKey={`y${yr}`} stroke={PL_YEAR_COLORS[yr]} strokeWidth={2}
@@ -989,8 +1259,8 @@ function PLTab() {
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={historicoData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-            <XAxis dataKey="label" tick={{ fill: '#888', fontSize: 10 }} interval={2} />
-            <YAxis tickFormatter={tickFmt} tick={{ fill: '#888', fontSize: 11 }} width={44} />
+            <XAxis dataKey="label" tick={{ fill: tickFill, fontSize: 11 }} interval={2} />
+            <YAxis tickFormatter={tickFmt} tick={{ fill: tickFill, fontSize: 11 }} width={44} />
             <Tooltip {...chartTooltip} />
             {[2024, 2025, 2026].map(yr => (
               <Line key={yr} type="monotone" dataKey={`y${yr}`} stroke={PL_YEAR_COLORS[yr]} strokeWidth={2}
@@ -1001,11 +1271,14 @@ function PLTab() {
       )}
 
       <PLAccordion live2026={live2026} lastMonth={lastMonth} />
+
+      {resumenAnualYCuadre}
     </section>
   )
 }
 
 function PLAccordion({ live2026, lastMonth }) {
+  const oscuro = useTemaOscuro()
   const [open, setOpen] = useState(new Set())
 
   useEffect(() => {
@@ -1032,10 +1305,10 @@ function PLAccordion({ live2026, lastMonth }) {
                 <span className="sa-pl-acc-header__month">{PL_MONTHS_FULL[m - 1]}</span>
                 <div className="sa-pl-acc-pills">
                   {v25ventas != null && (
-                    <span className="sa-pl-pill sa-pl-pill--25">2025: {Math.abs(v25ventas).toLocaleString('es-ES')}€</span>
+                    <span className="sa-pl-pill sa-pl-pill--25">2025: {Math.abs(v25ventas).toLocaleString('es-ES', { maximumFractionDigits: 0 })}€</span>
                   )}
                   {v26?.ventas != null && (
-                    <span className="sa-pl-pill sa-pl-pill--26">2026: {Math.abs(v26.ventas).toLocaleString('es-ES')}€ banco</span>
+                    <span className="sa-pl-pill sa-pl-pill--26" title={`Ingresos sin IVA = ingresos del banco (Club+Rocoteca, sin internos) − ${v26.ivaFuente}.`}>2026: {Math.abs(v26.ventas).toLocaleString('es-ES', { maximumFractionDigits: 0 })}€ banco ⓘ</span>
                   )}
                 </div>
               </div>
@@ -1047,10 +1320,11 @@ function PLAccordion({ live2026, lastMonth }) {
                   <thead>
                     <tr>
                       <th>Métrica</th>
-                      <th style={{ color: PL_YEAR_COLORS[2024] }}>2024</th>
-                      <th style={{ color: PL_YEAR_COLORS[2025] }}>2025</th>
-                      <th style={{ color: PL_YEAR_COLORS[2026] }}>2026 banco</th>
+                      <th style={{ color: kpiColorTema(PL_YEAR_COLORS[2024], oscuro) }}>2024</th>
+                      <th style={{ color: kpiColorTema(PL_YEAR_COLORS[2025], oscuro) }}>2025</th>
+                      <th style={{ color: kpiColorTema(PL_YEAR_COLORS[2026], oscuro) }}>2026 banco</th>
                       <th>Var. 25/24</th>
+                      <th>Var. 26/25</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1058,16 +1332,25 @@ function PLAccordion({ live2026, lastMonth }) {
                       const v24 = PL_DATA[key][2024][m - 1]
                       const v25 = PL_DATA[key][2025][m - 1]
                       const v2026 = v26?.[key] ?? null
-                      const delta = v24 != null && v25 != null && v24 !== 0
+                      const delta2524 = v24 != null && v25 != null && v24 !== 0
                         ? (v25 - v24) / Math.abs(v24) * 100 : null
+                      // Cowork, 16/11 07:00 punto 2: faltaba la variación con el año en curso,
+                      // que es la que de verdad interesa ahora (misma fórmula que Var. 25/24).
+                      const delta2625 = v2026 != null && v25 != null && v25 !== 0
+                        ? (v2026 - v25) / Math.abs(v25) * 100 : null
                       return (
                         <tr key={key}>
                           <td className="sa-pl-table__metric">{label}</td>
-                          <td className="sa-pl-table__val">{v24 != null ? Math.abs(v24).toLocaleString('es-ES') + '€' : '—'}</td>
-                          <td className="sa-pl-table__val">{v25 != null ? Math.abs(v25).toLocaleString('es-ES') + '€' : '—'}</td>
-                          <td className="sa-pl-table__val sa-pl-table__val--26">{v2026 != null ? Math.abs(v2026).toLocaleString('es-ES') + '€' : '—'}</td>
-                          <td className={`sa-pl-table__delta${delta == null ? '' : delta >= 0 ? ' sa-pl-table__delta--pos' : ' sa-pl-table__delta--neg'}`}>
-                            {delta != null ? `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}%` : '—'}
+                          <td className="sa-pl-table__val">{v24 != null ? Math.abs(v24).toLocaleString('es-ES', { maximumFractionDigits: 0 }) + '€' : '—'}</td>
+                          <td className="sa-pl-table__val">{v25 != null ? Math.abs(v25).toLocaleString('es-ES', { maximumFractionDigits: 0 }) + '€' : '—'}</td>
+                          <td className="sa-pl-table__val sa-pl-table__val--26" title={key === 'ventas' && v26 ? v26.ivaFuente : (key === 'costes' ? 'Con IVA: casi todo lo que vendemos va exento, el IVA de las compras no se recupera y es coste.' : undefined)}>
+                            {v2026 != null ? Math.abs(v2026).toLocaleString('es-ES', { maximumFractionDigits: 0 }) + '€' : '—'}{key === 'ventas' && v2026 != null ? ' ⓘ' : ''}
+                          </td>
+                          <td className={`sa-pl-table__delta${delta2524 == null ? '' : delta2524 >= 0 ? ' sa-pl-table__delta--pos' : ' sa-pl-table__delta--neg'}`}>
+                            {delta2524 != null ? `${delta2524 >= 0 ? '+' : ''}${delta2524.toFixed(1)}%` : '—'}
+                          </td>
+                          <td className={`sa-pl-table__delta${delta2625 == null ? '' : delta2625 >= 0 ? ' sa-pl-table__delta--pos' : ' sa-pl-table__delta--neg'}`}>
+                            {delta2625 != null ? `${delta2625 >= 0 ? '+' : ''}${delta2625.toFixed(1)}%` : '—'}
                           </td>
                         </tr>
                       )
@@ -1088,6 +1371,7 @@ function PLAccordion({ live2026, lastMonth }) {
 const SA_GROUPS = [
   { key: 'tesoreria', label: 'Tesorería', tabs: [
     { key: 'ingresos',          label: 'Ingresos' },
+    { key: 'clases',            label: 'Clases' },
     { key: 'gastos',            label: 'Gastos banco' },
     { key: 'presupuesto-anual', label: 'Presupuesto anual' },
     { key: 'pl',                label: 'P&L' },
@@ -1118,7 +1402,9 @@ export default function SuperAdminPage() {
   const role = window.blokesSiteData?.userRole
   const [saTab, setSaTab]               = useState(loadLastTab)
   useTabParam('tab', t => SA_ALL_TABS.includes(t), t => { setSaTab(t); saveLastTab(t) })
-  const [excludeTransfer, setExclude]   = useState(false)
+  // Por defecto "Sin uso Rocódromo" (Ramiro 15/11 09:02 (d): la factura entre empresas infla el
+  // total combinado — se puede ver con el botón, pero no es lo que sale por defecto).
+  const [excludeTransfer, setExclude]   = useState(true)
 
   if (role !== 'socio') {
     return (
@@ -1156,10 +1442,13 @@ export default function SuperAdminPage() {
       {saTab === 'ingresos' && (
         <>
           <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
-          <ProductsSection excludeTransfer={excludeTransfer} />
-          <ClassProfitabilitySection />
+          <IngresosDesgloseSection excludeTransfer={excludeTransfer} />
+          <p className="sa-legend">
+            La rentabilidad por clase se movió a <button type="button" className="sa-link" onClick={() => setSaTab('clases')}>Clases</button> (09:10: con ingreso real cobrado, no tarifa fija).
+          </p>
         </>
       )}
+      {saTab === 'clases'   && (<><ClasesRetencionSection /><BajoTarifaResumenSection /></>)}
       {saTab === 'gastos'   && <ExpensesSection />}
       {saTab === 'pl'       && <PLTab />}
       {saTab === 'nominas'  && <PayrollSection />}

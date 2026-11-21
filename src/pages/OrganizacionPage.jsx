@@ -1,5 +1,9 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from 'react'
+import { useNavigate } from 'react-router-dom'
 import mapaEquipacion from '../assets/mapa-equipacion.jpg'
+import { colorPorNumeroBloque } from '../utils/compeColorScale'
+import { fetchWithNonceRetry } from '../utils/wpNonce'
+import { useTabParam } from '../hooks/useTabParam'
 import './OrganizacionPage.css'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
@@ -10,17 +14,23 @@ const GRADE_COLOR = {
   INTRO: '#9ca3af', VERDE: '#22c55e', AZUL: '#3b82f6', AMARILLO: '#eab308',
   ROJO: '#ef4444', NEGRO: '#1f2937', BLANCO: '#e5e7eb',
 }
+// Auditoría de contraste (cowork, 11/11 10:05, causa 5): texto blanco fijo sobre AMARILLO/VERDE
+// sale a 1.9-2.x. Negro en los fondos claros, blanco en los oscuros.
+const GRADE_TEXTO_OSCURO = new Set(['INTRO', 'VERDE', 'AMARILLO', 'BLANCO'])
+function textoSobreGrado(grado) {
+  return GRADE_TEXTO_OSCURO.has(grado) ? '#1f1f1f' : '#fff'
+}
 
 function getAuthHeaders() {
   const nonce = window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || ''
   return nonce ? { 'X-WP-Nonce': nonce } : {}
 }
 async function api(method, path, body) {
-  const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1${path}`, {
+  const res = await fetchWithNonceRetry(() => fetch(`${CLUB_URL}/wp-json/progreso/v1${path}`, {
     method, credentials: 'include',
     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
-  })
+  }))
   const json = await res.json().catch(() => null)
   if (!res.ok) throw new Error(json?.message || `Error ${res.status}`)
   return json
@@ -47,18 +57,112 @@ function dayLabel(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number)
   return `${DOW_LABEL[new Date(y, m - 1, d).getDay()]} ${d}/${m}`
 }
+const DOW_LABEL_LARGO = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado']
+const MES_LABEL_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+// "Semana del ISO" en humano (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30: Ramiro pidió "lunes 2 de noviembre" en vez de "2026-11-02").
+function weekLabel(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return `${DOW_LABEL_LARGO[new Date(y, m - 1, d).getDay()]} ${d} de ${MES_LABEL_LARGO[m - 1]}`
+}
+// "2 nov" — para la tira de 4 semanas del calendario (Ramiro, 12/11 09:31), más compacto que
+// weekLabel.
+function fechaCorta(dateStr) {
+  const [, m, d] = dateStr.split('-').map(Number)
+  return `${d} ${MES_LABEL_CORTO[m - 1]}`
+}
 // Una tarea suelta con texto libre (sin tipo de catálogo) se guarda como taskTypeId "custom"
 // con el texto en params.texto (creador de tareas de Álvaro, Ramiro 1/11 17:20).
 function taskLabel(t, taskTypeById) {
   if (t.taskTypeId === 'custom') return t.params?.texto || 'Tarea'
   return taskTypeById[t.taskTypeId]?.name || t.taskTypeId
 }
+const MES_LABEL_CORTO = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+// "lun 30 nov" o, con fecha de fin distinta, "lun 30 nov – vie 4 dic" — en vez de ISO
+// (Ramiro, 4/11 05:48, encargo "refina compe": las fechas en 2026-11-30 no se entienden de un vistazo).
+function dateRangeLabel(startStr, endStr) {
+  const corta = dateStr => {
+    const [y, m, d] = dateStr.split('-').map(Number)
+    return `${DOW_LABEL[new Date(y, m - 1, d).getDay()].toLowerCase()} ${d} ${MES_LABEL_CORTO[m - 1]}`
+  }
+  if (!endStr || endStr === startStr) return corta(startStr)
+  return `${corta(startStr)} – ${corta(endStr)}`
+}
+// Rastro pequeño en la tarjeta: «añadida por Eva · 5 nov» o, si alguien la cambió después,
+// «cambiada por Ana · 6 nov» (Ramiro, 5/11 06:54: que Álvaro vea qué ha tocado otro).
+function rastroTarea(t) {
+  const fecha = dt => {
+    const [, m, d] = dt.slice(0, 10).split('-').map(Number)
+    return `${d} ${MES_LABEL_CORTO[m - 1]}`
+  }
+  if (t.updatedBy && t.updatedAt) return `cambiada por ${t.updatedBy} · ${fecha(t.updatedAt)}`
+  if (t.createdBy && t.createdAt) return `añadida por ${t.createdBy} · ${fecha(t.createdAt)}`
+  return null
+}
+function daysUntil(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  const target = new Date(y, m - 1, d)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return Math.round((target - today) / 86400000)
+}
+
+// 17/11 (NOTAS_PARA_CODE_tareas_movil.md): el tablero de columnas y el plan de la compe no se
+// pueden usar en el móvil (medido a 390 px: scroll lateral de 2600/327 px, columnas de 4600 px
+// de alto vacío, 60 botones en una sola pantalla...). Mismos datos y endpoints, pero dos vistas
+// distintas según el ancho — no es solo CSS, la estructura cambia (lista vs tablero), así que
+// hace falta saberlo en JS, no solo con una media query.
+const MOBILE_BREAKPOINT = 700
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth <= MOBILE_BREAKPOINT : false
+  )
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`)
+    const onChange = () => setIsMobile(mq.matches)
+    onChange()
+    mq.addEventListener ? mq.addEventListener('change', onChange) : mq.addListener(onChange)
+    return () => { mq.removeEventListener ? mq.removeEventListener('change', onChange) : mq.removeListener(onChange) }
+  }, [])
+  return isMobile
+}
+
+// Aviso visible de "algo falló" (Ramiro, 4/11 05:48: casi todas las llamadas se tragaban el error
+// con `.catch(() => {})` y no pasaba nada en pantalla — parecía que la acción "no estaba").
+// Un contexto en vez de pasar la función por props por media docena de niveles de componentes.
+const ToastCtx = createContext(() => {})
+function useToast() {
+  return useContext(ToastCtx)
+}
+function ToastProvider({ children }) {
+  const [toast, setToast] = useState(null)
+  const timerRef = useRef(null)
+  const showToast = useCallback(msg => {
+    setToast(msg)
+    clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => setToast(null), 5000)
+  }, [])
+  return (
+    <ToastCtx.Provider value={showToast}>
+      {children}
+      {toast && (
+        <div className="org__toast" role="alert" onClick={() => setToast(null)}>
+          {toast} <span className="org__toast-close">✕</span>
+        </div>
+      )}
+    </ToastCtx.Provider>
+  )
+}
 
 export default function OrganizacionPage() {
+  const isMobile = useIsMobile()
+  const navigate = useNavigate()
   const [config, setConfig] = useState(null)
   const [workers, setWorkers] = useState([])
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState('hoy') // 'hoy' | 'semana' | 'normas' | 'compe'
+  // Ramiro, 12/11 11:45: "quitar el HOY... dejar solo la semana para dar algo de libertad" — las
+  // tareas son de la semana, no de un día concreto. "Semana" es ahora la vista por defecto.
+  const [view, setView] = useState('semana') // 'semana' | 'normas' | 'compe'
+  useTabParam('vista', v => ['semana', 'normas', 'compe'].includes(v), setView)
   const [workerId, setWorkerId] = useState(() => {
     try { return Number(localStorage.getItem(WHOAMI_KEY)) || null } catch { return null }
   })
@@ -84,173 +188,149 @@ export default function OrganizacionPage() {
     setWorkerId(id)
     try { localStorage.setItem(WHOAMI_KEY, String(id)) } catch {}
   }
-  // Quién puede crear/editar el catálogo de tareas y añadir tareas sueltas: el responsable
-  // (Álvaro) o un socio — el resto solo ve y marca hecho (Ramiro, 1/11 17:20). La identidad de
-  // "quién soy" en Organización es de toda la vida solo un selector local (no hay cuenta por
-  // persona), así que esto es un permiso de interfaz, no una comprobación de seguridad real —
-  // igual que el resto de "quién soy" aquí.
+  // 17/11 §10:50 (cowork, sustituye el punto A.1 de §09:40): "«¿Quién eres?» no se bloquea
+  // nunca. Cada uno elige en el selector y ya está." — el selector solo se PRERRELLENA la
+  // primera vez (si nunca se ha elegido nada, ni siquiera "No soy yo"); después siempre se
+  // puede volver a cambiar directamente desde el propio selector, sin pasos intermedios.
+  // chooseWorker(null) deja en localStorage el texto "null" (no borra la clave), así que se
+  // distingue de "nunca se ha tocado esto" (clave ausente) — si ya elegiste "— elige —" a
+  // propósito, eso se respeta y no se vuelve a autorellenar en cada carga.
+  useEffect(() => {
+    if (!config?.miWorkerId || workerId) return
+    let yaElegido = true
+    try { yaElegido = localStorage.getItem(WHOAMI_KEY) !== null } catch {}
+    if (!yaElegido) chooseWorker(config.miWorkerId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config?.miWorkerId])
+  // Ramiro, 12/11 11:35: "ni Ana ni Edu ni Sara" pueden crear, editar, mover ni quitar tareas —
+  // solo Álvaro (el jefe de equipación) o un socio. Antes `canManage` salía del selector local
+  // de "quién soy" (`currentWorker?.isLead`), que cualquiera puede cambiar sin ninguna
+  // comprobación real — "no basta con ocultar los botones". Ahora viene de
+  // `config.esJefeOSocio`, que el backend calcula con la sesión real
+  // (progreso_equip_es_jefe_o_socio()) y que esos mismos endpoints vuelven a comprobar por su
+  // cuenta devolviendo 403 si no toca — esto solo decide qué botones se pintan.
   const currentWorker = workers.find(w => w.id === workerId)
-  const canManage = !!currentWorker?.isLead || window.blokesSiteData?.userRole === 'socio'
+  const userRole = window.blokesSiteData?.userRole
+  const canEdit = ['profesor', 'gestion', 'socio'].includes(userRole)
+  const canManage = !!config?.esJefeOSocio
 
   if (loading) return <div className="org"><p className="org__hint">Cargando...</p></div>
 
+  const currentWorkerName = currentWorker?.name
+
   return (
-    <div className="org">
-      <div className="org__switch">
-        <button className={`org__switch-btn${view === 'hoy' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('hoy')}>Hoy</button>
-        <button className={`org__switch-btn${view === 'semana' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('semana')}>Semana</button>
-        <button className={`org__switch-btn${view === 'normas' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('normas')}>Normas</button>
-        <button className={`org__switch-btn${view === 'compe' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('compe')}>Compe</button>
-      </div>
-
-      {view === 'hoy' && (
-        <HoyView
-          config={config} workers={workers}
-          workerId={workerId} onChooseWorker={chooseWorker} canManage={canManage}
-        />
-      )}
-      {view === 'semana' && <SemanaView config={config} workers={workers} canManage={canManage} onWorkersChanged={reloadWorkers} />}
-      {view === 'normas' && <NormasView config={config} canManage={canManage} onConfigChanged={reloadConfig} />}
-      {view === 'compe' && <CompeView config={config} workers={workers} />}
-    </div>
-  )
-}
-
-// ─── Hoy ──────────────────────────────────────────────────────────────
-function HoyView({ config, workers, workerId, onChooseWorker, canManage }) {
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [showAddBlock, setShowAddBlock] = useState(false)
-  const [showAddTask, setShowAddTask] = useState(false)
-  const [holdsets, setHoldsets] = useState([])
-
-  const worker = workers.find(w => w.id === workerId)
-  const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
-
-  useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
-
-  const reload = useCallback(() => {
-    if (!workerId) return
-    setLoading(true)
-    api('GET', `/equipacion/today?workerId=${workerId}&date=${todayStr()}`)
-      .then(res => setData(res.data))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [workerId])
-
-  useEffect(() => { reload() }, [reload])
-
-  if (!workerId || !worker) {
-    return (
-      <div className="org__whoami">
-        <p className="org__hint">¿Quién eres?</p>
-        <div className="org__whoami-list">
-          {workers.map(w => (
-            <button key={w.id} className="org__whoami-btn" onClick={() => onChooseWorker(w.id)}>{w.name}</button>
-          ))}
+    <ToastProvider>
+      <div className={`org${isMobile ? ' org--con-barra' : ''}`}>
+        {/* Identidad ("¿quién soy?"), antes solo dentro de la vista "Hoy" que se ha quitado —
+            sigue haciendo falta para firmar lo que se añade o cambia desde cualquier vista.
+            17/11 §10:50 (cowork): el selector nunca se bloquea — siempre se puede elegir o
+            cambiar directamente ahí, sin un paso intermedio de "No soy yo". */}
+        <div className="org__who-row">
+          <span className="org__hint">¿Quién eres? (solo para firmar lo que añadas o cambies)</span>
+          <select
+            className="org__whoami-select" value={workerId || ''}
+            onChange={e => chooseWorker(e.target.value ? Number(e.target.value) : null)}
+          >
+            <option value="">— elige —</option>
+            {workers.map(w => <option key={w.id} value={w.id}>{w.name}{w.eventual ? ' (solo compe)' : ''}</option>)}
+          </select>
+          {currentWorker?.isLead && <span className="org__who-name">· responsable</span>}
         </div>
+
+        <div className="org__switch">
+          <button className={`org__switch-btn${view === 'semana' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('semana')}>Semana</button>
+          <button className={`org__switch-btn${view === 'normas' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('normas')}>Normas</button>
+          <button className={`org__switch-btn${view === 'compe' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('compe')}>Compe</button>
+        </div>
+
+        <CompeResumenHoy workerId={workerId} onGoToCompe={() => setView('compe')} />
+
+        {/* 17/11 punto A.6: "Compe de hoy" tiene que salir ARRIBA, no al final de los 5000 px de
+            Semana — antes se pintaba después de SemanaView, con ningún motivo técnico para eso. */}
+        {view === 'semana' && <MiParteCompesHoy config={config} />}
+
+        {view === 'semana' && <SemanaView config={config} workers={workers} workerId={workerId} canEdit={canEdit} canManage={canManage} onWorkersChanged={reloadWorkers} />}
+        {view === 'normas' && <NormasView config={config} workers={workers} canManage={canEdit} onConfigChanged={reloadConfig} />}
+        {view === 'compe' && <CompeView config={config} workers={workers} canManage={canManage} workerId={workerId} />}
       </div>
-    )
-  }
 
-  const toggleTask = async (taskId, done) => {
-    setData(d => ({ ...d, tasks: d.tasks.map(t => t.id === taskId ? { ...t, done } : t) }))
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { reload() }
-  }
-
-  return (
-    <div>
-      <div className="org__who-row">
-        <span className="org__who-name">{worker.name}{worker.isLead ? ' · responsable' : ''}</span>
-        <button className="org__link-btn" onClick={() => onChooseWorker(null)}>No soy yo</button>
-      </div>
-
-      {loading && <p className="org__hint">Cargando...</p>}
-
-      {!loading && data && (
-        <>
-          <section className="org__section">
-            <h3 className="org__section-title">Tareas de hoy</h3>
-            {data.tasks.length === 0 ? (
-              <p className="org__hint">Sin tareas para hoy (puede que no sea día de trabajo, o que no haya semana planificada).</p>
-            ) : (
-              <ul className="org__task-list">
-                {data.tasks.map(t => {
-                  const params = Object.entries(t.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
-                  const isRetrasada = t.status === 'retrasada'
-                  const movedAway = isRetrasada && t.movedToTaskId
-                  if (movedAway) {
-                    return (
-                      <li key={t.id} className="org__task org__task--moved">
-                        <span className="org__task-name">{taskLabel(t, taskTypeById)}</span>
-                        {params && <span className="org__task-params">{params}</span>}
-                        <span className="org__tile-badge">→ pasada a la semana del {dayLabel(t.movedToDate)}</span>
-                      </li>
-                    )
-                  }
-                  return (
-                    <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}${isRetrasada ? ' org__task--retrasada' : ''}`}>
-                      <label>
-                        <input type="checkbox" checked={t.done} onChange={e => toggleTask(t.id, e.target.checked)} />
-                        <span className="org__task-name">{taskLabel(t, taskTypeById)}</span>
-                        {params && <span className="org__task-params">{params}</span>}
-                        {isRetrasada && <span className="org__tile-badge">RETRASADA{t.postponedCount > 1 ? ` ×${t.postponedCount}` : ''}</span>}
-                      </label>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-            {canManage && data.assignmentId && !showAddTask && (
-              <button className="org__link-btn" onClick={() => setShowAddTask(true)}>+ Tarea</button>
-            )}
-            {showAddTask && (
-              <LooseTaskForm
-                config={config} assignmentId={data.assignmentId} defaultDate={todayStr()}
-                onDone={() => { setShowAddTask(false); reload() }}
-                onCancel={() => setShowAddTask(false)}
-              />
-            )}
-          </section>
-
-          <MiParteCompes workerId={workerId} config={config} />
-
-          <section className="org__section">
-            <h3 className="org__section-title">Bloques puestos</h3>
-            {data.blocks.length === 0 ? (
-              <p className="org__hint">Ninguno todavía.</p>
-            ) : (
-              <ul className="org__block-list">
-                {data.blocks.map(b => (
-                  <BlockRow key={b.id} block={b} holdsets={holdsets} onChanged={reload} />
-                ))}
-              </ul>
-            )}
-            {!data.assignmentId && <p className="org__hint">No hay semana planificada: pide a Álvaro que la cree.</p>}
-            {data.assignmentId && !showAddBlock && (
-              <button className="org__add-btn" onClick={() => setShowAddBlock(true)}>+ Añadir bloque</button>
-            )}
-            {showAddBlock && (
-              <AddBlockForm
-                config={config} holdsets={holdsets} assignmentId={data.assignmentId}
-                onDone={() => { setShowAddBlock(false); reload() }}
-                onCancel={() => setShowAddBlock(false)}
-              />
-            )}
-          </section>
-        </>
+      {/* 17/11 punto A.5: barra fija abajo — a diferencia de .org__switch (que sube con el
+          contenido y desaparece al hacer scroll en una lista larga), esta se queda siempre
+          visible. Mismos 3 destinos que .org__switch (Semana/Normas/Compe, sin "Hoy": ya no
+          existe como vista propia desde el 12/11, su sitio lo ocupa Semana) + "Crear bloke", la
+          única de las 4 que es otra página entera (/tareas/crear-bloke), para no tener que
+          volver al menú de arriba (el que no cabe y por eso hacía falta esto). */}
+      {isMobile && (
+        <nav className="org__bottombar">
+          <button type="button" className={`org__bottombar-btn${view === 'semana' ? ' org__bottombar-btn--active' : ''}`} onClick={() => setView('semana')}>
+            <span className="org__bottombar-icon">📋</span>Semana
+          </button>
+          <button type="button" className={`org__bottombar-btn${view === 'normas' ? ' org__bottombar-btn--active' : ''}`} onClick={() => setView('normas')}>
+            <span className="org__bottombar-icon">📖</span>Normas
+          </button>
+          <button type="button" className={`org__bottombar-btn${view === 'compe' ? ' org__bottombar-btn--active' : ''}`} onClick={() => setView('compe')}>
+            <span className="org__bottombar-icon">🏆</span>Compe
+          </button>
+          <button type="button" className="org__bottombar-btn" onClick={() => navigate('/tareas/crear-bloke')}>
+            <span className="org__bottombar-icon">➕</span>Crear bloke
+          </button>
+        </nav>
       )}
-    </div>
+    </ToastProvider>
   )
 }
 
-// "Mi parte" dentro de Hoy (Ramiro, 1/11 17:20): las tareas del plan de cualquier competición
-// que le toquen a esta persona, igual que las tareas normales del día pero sin filtrar por
-// fecha — una compe tiene semanas de antelación y conviene verlas todas, no solo las de hoy.
-function MiParteCompes({ workerId, config }) {
+// Tarjeta-resumen arriba de Hoy cuando hay una compe en curso (dentro de sus semanas de
+// antelación), para que se note que existe sin tener que ir a la pestaña Compe a buscarla
+// (Ramiro, 4/11 05:48: "no pude ver la compe que creamos" — abría siempre en Hoy y ahí no se veía
+// nada de ella).
+function CompeResumenHoy({ workerId, onGoToCompe }) {
+  const [comp, setComp] = useState(null)
+  // Si hay "quién soy" elegido, cuenta solo lo suyo ("tu parte"); si no (Hoy ya no obliga a
+  // elegir, Ramiro 5/11), cuenta lo de todo el equipo — nunca se queda sin número.
+  const [pendientes, setPendientes] = useState(null)
+  useEffect(() => {
+    api('GET', '/equipacion/competitions').then(r => {
+      // Desde que se crea la compe, no solo desde que empiezan sus tareas (cowork, 4/11 07:20:
+      // Ramiro no la veía porque la tarjeta no salía hasta tasksStartDate).
+      const hoy = todayStr()
+      const enCurso = (r.data || []).find(c => hoy <= c.compEndDate)
+      setComp(enCurso || null)
+      if (enCurso) {
+        api('GET', `/equipacion/competitions/${enCurso.id}/plan`).then(p => {
+          const tareas = workerId ? (p.data?.tasks || []).filter(t => String(t.workerId) === String(workerId)) : (p.data?.tasks || [])
+          setPendientes(tareas.filter(t => !t.done).length)
+        }).catch(() => {})
+      }
+    }).catch(() => {})
+  }, [workerId])
+  if (!comp) return null
+  const faltan = daysUntil(comp.compDate)
+  const estadoFechas = faltan > 0 ? `Faltan ${faltan} día${faltan === 1 ? '' : 's'}` : faltan === 0 ? 'Es hoy' : 'En curso'
+  const etiquetaPendientes = workerId ? 'tu parte' : 'equipo'
+  return (
+    <button className="org__compe-resumen" onClick={onGoToCompe}>
+      <span className="org__compe-resumen-nombre">🏆 {comp.name}</span>
+      <span className="org__compe-resumen-datos">
+        {estadoFechas}{pendientes !== null ? ` · ${etiquetaPendientes}: ${pendientes} pendiente${pendientes === 1 ? '' : 's'}` : ''}
+      </span>
+      <span className="org__compe-resumen-flecha">→</span>
+    </button>
+  )
+}
+
+
+// Tareas de compe de HOY, agrupadas por persona (Ramiro, 5/11: Hoy ya no filtra por "quién
+// soy" — esta sección tampoco debe hacerlo, se ve el reparto de todos igual que en el tablero
+// de arriba). Antes era "Mi parte" (solo de la persona elegida, sin filtrar por fecha); ahora
+// muestra a todo el equipo, solo lo de hoy — el resto de días de la compe se ve en la pestaña
+// Compe → Plan.
+function MiParteCompesHoy({ config }) {
   const [competitions, setCompetitions] = useState([])
   const [plans, setPlans] = useState({})
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
+  const showToast = useToast()
+  const today = todayStr()
 
   useEffect(() => {
     api('GET', '/equipacion/competitions').then(r => setCompetitions(r.data || [])).catch(() => {})
@@ -262,34 +342,44 @@ function MiParteCompes({ workerId, config }) {
   }, [competitions])
 
   const toggleDone = async (taskId, done, compId) => {
+    const antes = plans[compId]
     setPlans(p => ({ ...p, [compId]: { ...p[compId], tasks: p[compId].tasks.map(t => t.id === taskId ? { ...t, done } : t) } }))
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch {}
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) }
+    catch { showToast('No se ha podido guardar — deshecho.'); setPlans(p => ({ ...p, [compId]: antes })) }
   }
 
   const sections = competitions
-    .map(c => ({ comp: c, mine: (plans[c.id]?.tasks || []).filter(t => String(t.workerId) === String(workerId)) }))
-    .filter(s => s.mine.length > 0)
+    .map(c => ({ comp: c, hoy: (plans[c.id]?.tasks || []).filter(t => t.date === today) }))
+    .filter(s => s.hoy.length > 0)
   if (sections.length === 0) return null
 
   return (
     <section className="org__section">
-      <h3 className="org__section-title">Mi parte de la compe</h3>
-      {sections.map(({ comp, mine }) => (
-        <div key={comp.id}>
-          {sections.length > 1 && <p className="org__hint">{comp.name}</p>}
-          <ul className="org__task-list">
-            {mine.map(t => (
-              <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}`}>
-                <label>
-                  <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked, comp.id)} />
-                  <span className="org__task-name">{taskTypeById[t.taskTypeId]?.name || t.taskTypeId}</span>
-                  <span className="org__task-params">{dayLabel(t.date)}</span>
-                </label>
-              </li>
+      <h3 className="org__section-title">Compe de hoy</h3>
+      {sections.map(({ comp, hoy }) => {
+        const porPersona = {}
+        hoy.forEach(t => { (porPersona[t.workerName] = porPersona[t.workerName] || []).push(t) })
+        return (
+          <div key={comp.id}>
+            {sections.length > 1 && <p className="org__hint">{comp.name}</p>}
+            {Object.keys(porPersona).sort().map(nombre => (
+              <div key={nombre}>
+                <p className="org__mi-parte-semana">{nombre}</p>
+                <ul className="org__task-list">
+                  {porPersona[nombre].map(t => (
+                    <li key={t.id} className={`org__task${t.done ? ' org__task--done' : ''}`}>
+                      <label>
+                        <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked, comp.id)} />
+                        <span className="org__task-name">{taskTypeById[t.taskTypeId]?.name || t.taskTypeId}</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ))}
-          </ul>
-        </div>
-      ))}
+          </div>
+        )
+      })}
     </section>
   )
 }
@@ -302,6 +392,13 @@ function BlockRow({ block, holdsets, onChanged }) {
     try { await api('PUT', `/equipacion/blocks/${block.id}`, { uploadedWebapp: !block.uploadedWebapp }); onChanged() }
     finally { setBusy(false) }
   }
+  // Bloques planificados (Ramiro, 11/11 04:27): decididos de antemano (grado + presas), pero
+  // sin poner todavía — se marcan "puesto" cuando de verdad se equipan.
+  const marcarPuesto = async () => {
+    setBusy(true)
+    try { await api('PUT', `/equipacion/blocks/${block.id}`, { done: true }); onChanged() }
+    finally { setBusy(false) }
+  }
   const remove = async () => {
     if (!window.confirm('¿Borrar este bloque?')) return
     setBusy(true)
@@ -309,15 +406,20 @@ function BlockRow({ block, holdsets, onChanged }) {
     finally { setBusy(false) }
   }
   return (
-    <li className="org__block-row">
-      <span className="org__block-grade" style={{ background: GRADE_COLOR[block.grade] || '#ccc' }}>{block.grade}</span>
+    <li className={`org__block-row${!block.done ? ' org__block-row--planificado' : ''}`}>
+      <span className="org__block-grade" style={{ background: GRADE_COLOR[block.grade] || '#ccc', color: textoSobreGrado(block.grade) }}>{block.grade}</span>
       <span className="org__block-info">
         Subzona #{block.subzone}{block.isTraverse ? ' · travesía' : ''}{holdsetNames ? ` · ${holdsetNames}` : ''}
+        {!block.done && <span className="org__block-planificado-tag">planificado</span>}
       </span>
-      <label className="org__block-upload">
-        <input type="checkbox" checked={block.uploadedWebapp} onChange={toggleUploaded} disabled={busy} />
-        subido a la webapp
-      </label>
+      {block.done ? (
+        <label className="org__block-upload">
+          <input type="checkbox" checked={block.uploadedWebapp} onChange={toggleUploaded} disabled={busy} />
+          subido a la webapp
+        </label>
+      ) : (
+        <button className="org__link-btn" onClick={marcarPuesto} disabled={busy}>✓ Marcar puesto</button>
+      )}
       <button className="org__remove-btn" onClick={remove} disabled={busy}>✕</button>
     </li>
   )
@@ -328,6 +430,9 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
   const [grade, setGrade] = useState('VERDE')
   const [holdSetIds, setHoldSetIds] = useState([])
   const [isTraverse, setIsTraverse] = useState(false)
+  // Bloques planificados (Ramiro, 11/11 04:27): la tabla grado→presas que Álvaro llevaba en
+  // Notion, para decidir de antemano qué va en cada subzona antes de ponerlo de verdad.
+  const [planificado, setPlanificado] = useState(false)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
 
@@ -338,7 +443,7 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
   const submit = async () => {
     setSaving(true); setError(null)
     try {
-      const res = await api('POST', '/equipacion/blocks', { assignmentId, subzone, grade, holdSetIds, isTraverse })
+      const res = await api('POST', '/equipacion/blocks', { assignmentId, subzone, grade, holdSetIds, isTraverse, done: !planificado })
       if (res.warning) { window.alert(`⚠ ${res.warning}`) }
       onDone()
     } catch (e) {
@@ -365,6 +470,9 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
       <div className="org__add-row">
         <label><input type="checkbox" checked={isTraverse} onChange={e => setIsTraverse(e.target.checked)} /> Es travesía</label>
       </div>
+      <div className="org__add-row">
+        <label><input type="checkbox" checked={planificado} onChange={e => setPlanificado(e.target.checked)} /> Solo planificado (lo pondré luego)</label>
+      </div>
       <div className="org__add-row org__add-row--holdsets">
         <label>Juego(s) de presas</label>
         <div className="org__holdset-chips">
@@ -380,29 +488,84 @@ function AddBlockForm({ config, holdsets, assignmentId, onDone, onCancel }) {
       {error && <p className="org__error">{error}</p>}
       <div className="org__add-actions">
         <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
-        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Guardando...' : 'Guardar bloque'}</button>
+        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Guardando...' : planificado ? 'Planificar' : 'Guardar bloque'}</button>
       </div>
     </div>
   )
 }
 
 // ─── Semana ───────────────────────────────────────────────────────────
-function SemanaView({ config, workers, canManage, onWorkersChanged }) {
+function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersChanged }) {
+  const isMobile = useIsMobile()
   const [weeks, setWeeks] = useState([])
   const [detail, setDetail] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
+  const [createDate, setCreateDate] = useState(null)
   const [showWorkers, setShowWorkers] = useState(false)
   const [showHistorico, setShowHistorico] = useState(false)
+  // Ramiro 12/11 11:45: con la vista "Hoy" quitada, registrar bloques (fotos, grado, presas) se
+  // hace desde aquí — mismo "+ Añadir bloque" que tenía Hoy, abierto a cualquier profe/gestión
+  // (no restringido por canManage, es trabajo propio, no edición de tareas de otros).
+  const [holdsets, setHoldsets] = useState([])
+  const [addingBlockFor, setAddingBlockFor] = useState(null)
+  useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
   // Las semanas de prueba no salen en la lista normal del equipo (cowork las necesita para
   // probar sin dejar residuos) — este botón las enseña aparte para poder gestionarlas.
   const [showTest, setShowTest] = useState(false)
+  // "Dar por cerradas las arrastradas de antes de..." (cowork, 17/11 10:40, urgente).
+  const [showCerrar, setShowCerrar] = useState(false)
+  // 17/11 punto B.3: filtro del tablero de escritorio — "Todas / Pendientes / Retrasadas".
+  const [filtroTablero, setFiltroTablero] = useState('todas')
+  const showToast = useToast()
+
+  // Calendario de semanas + rotación de zonas (Ramiro, 12/11 09:31): tira de 4 semanas —
+  // anterior, la seleccionada (empieza siendo la actual), y 2 siguientes.
+  const [selectedDate, setSelectedDate] = useState(() => mondayOf(todayStr()))
+  const [zonas, setZonas] = useState([])
+  const [showZonas, setShowZonas] = useState(false)
+  const reloadZonas = useCallback(() => {
+    api('GET', '/equipacion/zonas').then(r => setZonas(r.data?.zonas || [])).catch(() => {})
+  }, [])
+  useEffect(() => { reloadZonas() }, [reloadZonas])
+
+  const selectWeek = date => {
+    setSelectedDate(date)
+    const w = weeks.find(x => x.startDate === date)
+    if (w) openWeek(w.id)
+    else setDetail(null)
+  }
+  const askCreateAt = date => {
+    setSelectedDate(date)
+    setCreateDate(date)
+    setDetail(null)
+    setShowCreate(true)
+  }
 
   const reloadWeeks = useCallback(() => {
-    api('GET', `/equipacion/weeks${showTest ? '?test=1' : ''}`).then(r => setWeeks(r.data || [])).catch(() => {})
-  }, [showTest])
+    api('GET', `/equipacion/weeks${showTest ? '?test=1' : ''}`).then(r => setWeeks(r.data || [])).catch(() => showToast('No se ha podido cargar la lista de semanas.'))
+  }, [showTest, showToast])
   useEffect(() => { reloadWeeks() }, [reloadWeeks])
 
-  const openWeek = id => api('GET', `/equipacion/weeks/${id}`).then(r => setDetail(r.data)).catch(() => {})
+  // Ramiro 12/11 11:45: "Semana" es ahora la vista por defecto, "abierta en la semana actual" —
+  // antes había que tocar la tira a mano (cowork, 12/11 10:20: "sale «Toca una semana...»").
+  useEffect(() => {
+    if (detail || showCreate) return
+    const w = weeks.find(x => x.startDate === selectedDate)
+    if (w) openWeek(w.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weeks, selectedDate])
+
+  // Si se pide abrir otra semana (o recargar la misma) antes de que responda la petición
+  // anterior, esa respuesta vieja no debe pisar a la nueva al llegar tarde — guardamos solo la
+  // del último `openWeek` pedido (cowork, 3/11 11:30: sospecha de que el tablero se quedaba con
+  // datos de otra semana).
+  const openWeekSeq = useRef(0)
+  const openWeek = id => {
+    const seq = ++openWeekSeq.current
+    return api('GET', `/equipacion/weeks/${id}`)
+      .then(r => { if (seq === openWeekSeq.current) setDetail(r.data) })
+      .catch(() => showToast('No se ha podido abrir la semana.'))
+  }
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const workerById = useMemo(() => Object.fromEntries(workers.map(w => [w.id, w])), [workers])
 
@@ -411,7 +574,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   const [moving, setMoving] = useState(false)
   const reassignTask = async (taskId, assignmentId, date) => {
     setMoving(true)
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { assignmentId, date }) } catch {}
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { assignmentId, date, byWorkerId: workerId }) } catch { showToast('No se ha podido mover la tarea.') }
     await openWeek(detail.id)
     setMoving(false)
   }
@@ -423,7 +586,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
         tasks: a.tasks.map(t => t.id === taskId ? { ...t, done, doneAt: done ? new Date().toISOString() : null } : t),
       })),
     }))
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { openWeek(detail.id) }
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch { showToast('No se ha podido guardar — deshecho.'); openWeek(detail.id) }
   }
 
   // Las tareas no se cancelan: solo se mueven a la semana siguiente, y
@@ -431,13 +594,47 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   const [postponing, setPostponing] = useState(null)
   const postponeTask = async taskId => {
     setPostponing(taskId)
-    try { await api('POST', `/equipacion/tasks/${taskId}/postpone`) } catch {}
+    try { await api('POST', `/equipacion/tasks/${taskId}/postpone`) } catch { showToast('No se ha podido posponer la tarea.') }
     await openWeek(detail.id)
     setPostponing(null)
   }
 
+  // Quitar una tarea de verdad (NOTAS_PARA_CODE_equipacion.md, 3/11 11:30) — distinto de
+  // "→ Semana siguiente", que la mueve. Solo Álvaro o un socio (canManage, Ramiro 12/11 11:35).
+  const [deletingTask, setDeletingTask] = useState(null)
+  // Cowork, 17/11 09:40 punto 3: en el ⋯ del móvil (hoja inferior) queda mejor confirmar DENTRO
+  // de la propia hoja («¿Quitar? Sí/No») que con el window.confirm() nativo — `alreadyConfirmed`
+  // deja que la vista móvil se salte este confirm porque ya lo hizo ella misma; el botón del
+  // tablero de escritorio sigue llamando sin el segundo argumento, así que ahí no cambia nada.
+  const deleteTask = async (taskId, alreadyConfirmed = false) => {
+    if (!alreadyConfirmed && !window.confirm('¿Quitar esta tarea? No se puede deshacer.')) return
+    setDeletingTask(taskId)
+    try { await api('DELETE', `/equipacion/tasks/${taskId}`) } catch { showToast('No se ha podido quitar la tarea.') }
+    await openWeek(detail.id)
+    setDeletingTask(null)
+  }
+
+  // "⧉ Duplicar a..." (Ramiro 12/11 11:40): copia independiente de la tarea para cada persona
+  // marcada — útil para "balizar", que lo hacen varios. El backend ya evita duplicar a quien
+  // tenga esa misma tarea esa semana.
+  const [duplicandoTask, setDuplicandoTask] = useState(null)
+  const [duplicarSeleccion, setDuplicarSeleccion] = useState([])
+  const [duplicando, setDuplicando] = useState(false)
+  const toggleDuplicarWorker = wid => setDuplicarSeleccion(cur => cur.includes(wid) ? cur.filter(x => x !== wid) : [...cur, wid])
+  const confirmarDuplicar = async (todos = false) => {
+    setDuplicando(true)
+    try {
+      const body = todos ? { all: true } : { workerIds: duplicarSeleccion }
+      const res = await api('POST', `/equipacion/tasks/${duplicandoTask}/duplicar`, body)
+      showToast(`Duplicada a ${res.creadas} persona(s)${res.omitidas ? ` (${res.omitidas} ya la tenían)` : ''}.`)
+      setDuplicandoTask(null); setDuplicarSeleccion([])
+      await openWeek(detail.id)
+    } catch (e) { showToast(e.message) } finally { setDuplicando(false) }
+  }
+
   const [editingDaysFor, setEditingDaysFor] = useState(null)
   const [addingTaskFor, setAddingTaskFor] = useState(null)
+  const [editingTask, setEditingTask] = useState(null)
   // Añadir a alguien a una semana que ya existe (Álvaro/cowork, 2/11 12:55: el plan de una compe
   // la crea solo con el responsable). Solo la asignación, sin tareas de mantenimiento — sus
   // tareas de esta semana se añaden sueltas (+Tarea) o arrastrando, como siempre.
@@ -455,6 +652,20 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
     try { await api('PUT', `/equipacion/assignments/${assignmentId}`, { workDays: days }) } catch (e) { window.alert(e.message); return }
     setEditingDaysFor(null)
     await openWeek(detail.id)
+  }
+
+  // "Si van retrasados o adelantados": cambiar la zona de ESTA semana concreta ("esta semana
+  // repetimos la #3-4", "saltamos a la Cueva") — las siguientes se recolocan solas, porque la
+  // rotación siempre ancla en la semana puesta más reciente (ver progreso_equip_calcular_zona_
+  // semana en el backend).
+  const [cambiandoZona, setCambiandoZona] = useState(false)
+  const changeWeekZone = async zonaId => {
+    setCambiandoZona(false)
+    try {
+      await api('PUT', `/equipacion/weeks/${detail.id}`, { zonaId: Number(zonaId) })
+      await openWeek(detail.id)
+      reloadWeeks()
+    } catch (e) { window.alert(e.message) }
   }
 
   const deleteWeek = async () => {
@@ -483,7 +694,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
   const dragInfoRef = useRef(null)
 
   const onTileDown = (taskId, originalDate, originalAssignmentId) => e => {
-    if (moving) return
+    if (moving || !canManage) return
     e.preventDefault()
     dragInfoRef.current = { taskId, date: originalDate, assignmentId: originalAssignmentId }
     setDragTaskId(taskId)
@@ -517,9 +728,19 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
     const todayS = todayStr()
     return (
       <div>
+        <CalendarioSemanas
+          weeks={weeks} zonas={zonas} selectedDate={selectedDate}
+          onSelectDate={selectWeek} onCreateAt={askCreateAt}
+          onConfigurarZonas={() => setShowZonas(true)} canManage={canManage}
+        />
+        {showZonas && (
+          <ConfigurarZonasDialog
+            zonas={zonas} config={config}
+            onClose={() => setShowZonas(false)}
+            onSaved={() => { setShowZonas(false); reloadZonas(); reloadWeeks() }}
+          />
+        )}
         <div className="org__semana-actions">
-          <button className="org__link-btn" onClick={() => setDetail(null)}>← Volver a semanas</button>
-          <button className="org__link-btn" onClick={deleteWeek}>Borrar semana</button>
           {canManage && (addingPerson ? (
             <select
               autoFocus value="" disabled={addPersonBusy}
@@ -535,16 +756,91 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
             <button className="org__link-btn" onClick={() => setAddingPerson(true)}>+ Persona</button>
           ))}
         </div>
-        <h3 className="org__section-title">Semana del {detail.startDate} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
+        <h3 className="org__section-title">Semana del {weekLabel(detail.startDate)} — subzonas {detail.subzones.map(s => `#${s}`).join(', ')}</h3>
+        {canManage && (
+          <p className="org__hint">
+            Zona: {cambiandoZona ? (
+              <select autoFocus defaultValue={detail.zonaId ?? ''} onChange={e => changeWeekZone(e.target.value)} onBlur={() => setCambiandoZona(false)}>
+                {zonas.map(z => <option key={z.id} value={z.id}>{z.nombre}</option>)}
+              </select>
+            ) : (
+              <>
+                <strong style={{ color: zonas.find(z => z.id === detail.zonaId)?.color }}>
+                  {zonas.find(z => z.id === detail.zonaId)?.nombre || '— sin asignar —'}
+                </strong>
+                {' '}
+                <button className="org__link-btn" onClick={() => setCambiandoZona(true)}>cambiar (si van retrasados o adelantados)</button>
+              </>
+            )}
+          </p>
+        )}
         {detail.isAuto && <p className="org__hint org__hint--auto">Semana creada automáticamente: reparte las tareas arrastrándolas.</p>}
-        <p className="org__hint">Arrastra una tarjeta a otra persona (o a otro día de esa persona) para reasignarla.</p>
+        {/* Ramiro 12/11 11:45: "las tareas son de la semana, no de un día concreto" — ya no se
+            arrastra entre días, solo entre personas. */}
+        {isMobile ? (
+          // 17/11 (NOTAS_PARA_CODE_tareas_movil.md, puntos A.1-A.3): el tablero de columnas no
+          // se puede usar en el móvil (9 columnas de 280 px con scroll lateral, 60 botones por
+          // pantalla...) — misma información y endpoints, pero en una lista: "Mis tareas"
+          // primero (compe → retrasadas → el resto), el equipo en un acordeón, acciones en ⋯.
+          <MisTareasMovil
+            assignments={detail.assignments}
+            myWorkerId={workerId}
+            canManage={canManage}
+            taskTypeById={taskTypeById}
+            todayS={todayS}
+            holdsets={holdsets}
+            config={config}
+            addingBlockFor={addingBlockFor}
+            setAddingBlockFor={setAddingBlockFor}
+            addingTaskFor={addingTaskFor}
+            setAddingTaskFor={setAddingTaskFor}
+            onReload={() => openWeek(detail.id)}
+            postponing={postponing}
+            onPostpone={postponeTask}
+            deletingTask={deletingTask}
+            onDelete={deleteTask}
+            editingTask={editingTask}
+            setEditingTask={setEditingTask}
+            onToggleDone={toggleTaskDone}
+            duplicandoTask={duplicandoTask}
+            setDuplicandoTask={setDuplicandoTask}
+            duplicarSeleccion={duplicarSeleccion}
+            toggleDuplicarWorker={toggleDuplicarWorker}
+            confirmarDuplicar={confirmarDuplicar}
+            duplicando={duplicando}
+            onReassign={reassignTask}
+          />
+        ) : (
+        <>
+        <p className="org__hint">Arrastra una tarjeta a otra persona para reasignarla.</p>
+        {/* 17/11 punto B.3: aviso de tareas arrastradas (postponedCount > 0 y sin hacer) + filtro
+            Todas/Pendientes/Retrasadas, para encontrarlas sin tener que mirar columna a columna. */}
+        {(() => {
+          const arrastradas = detail.assignments.flatMap(a => a.tasks).filter(t => !t.done && t.postponedCount > 0)
+          if (arrastradas.length === 0) return null
+          const masAntigua = arrastradas.reduce((min, t) => (!min || (t.originalDate || t.date) < min) ? (t.originalDate || t.date) : min, null)
+          return (
+            <p className="org__board-aviso-arrastre">
+              ⚠ {arrastradas.length} tarea{arrastradas.length === 1 ? '' : 's'} viene{arrastradas.length === 1 ? '' : 'n'} del {dayLabel(masAntigua)} → cerrar (arriba, "Cerrar tareas arrastradas...") o reasignar.
+            </p>
+          )
+        })()}
+        <div className="org__board-filtro">
+          {[['todas', 'Todas'], ['pendientes', 'Pendientes'], ['retrasadas', 'Retrasadas']].map(([key, label]) => (
+            <button
+              key={key} type="button"
+              className={`org__switch-btn${filtroTablero === key ? ' org__switch-btn--active' : ''}`}
+              onClick={() => setFiltroTablero(key)}
+            >{label}</button>
+          ))}
+        </div>
         <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
           {detail.assignments.map(a => {
             const worker = workerById[a.workerId]
             const effectiveDays = a.workDays?.length ? a.workDays : (worker?.workDays || [])
-            const workerDates = effectiveDays.map(d => addDays(detail.startDate, DAY_OFFSET[d]))
-            const taskDates = a.tasks.map(t => t.date)
-            const allDates = Array.from(new Set([...workerDates, ...taskDates])).sort()
+            const tareasOrdenadas = [...a.tasks]
+              .filter(t => filtroTablero === 'todas' ? true : filtroTablero === 'pendientes' ? !t.done : tareaEsRetrasada(t, todayS))
+              .sort((x, y) => x.date.localeCompare(y.date))
             return (
               <div
                 key={a.id}
@@ -555,7 +851,7 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
                 <p className="org__board-col-meta">
                   subzonas {a.subzones.map(s => `#${s}`).join(', ')} · bloques {a.blocksMin}-{a.blocksMax}
                   {a.workDays?.length > 0 && <> · días cambiados esta semana</>}
-                  {' '}<button className="org__link-btn" onClick={() => setEditingDaysFor(cur => cur === a.id ? null : a.id)}>editar días</button>
+                  {canManage && <>{' '}<button className="org__link-btn" onClick={() => setEditingDaysFor(cur => cur === a.id ? null : a.id)}>editar días</button></>}
                 </p>
                 {editingDaysFor === a.id && (
                   <div className="org__holdset-chips">
@@ -574,42 +870,106 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
                 )}
                 {addingTaskFor === a.id && (
                   <LooseTaskForm
-                    config={config} weekStart={detail.startDate}
+                    config={config} weekStart={detail.startDate} byWorkerId={workerId}
                     onDone={() => { setAddingTaskFor(null); openWeek(detail.id) }}
                     onCancel={() => setAddingTaskFor(null)}
                     assignmentId={a.id}
                   />
                 )}
-                {allDates.map(date => {
-                  const tasksOnDate = a.tasks.filter(t => t.date === date)
-                  return (
-                    <div key={date} className="org__board-day" data-date={date}>
-                      <p className="org__board-day-label">{dayLabel(date)}</p>
-                      {tasksOnDate.map(t => (
-                        <TaskTile
-                          key={t.id}
-                          task={t}
-                          typeName={taskLabel(t, taskTypeById)}
-                          isMissed={!t.done && t.date < todayS && t.status !== 'retrasada'}
-                          dragging={dragTaskId === t.id}
-                          postponing={postponing === t.id}
-                          onPointerDown={onTileDown(t.id, t.date, a.id)}
-                          onToggleDone={toggleTaskDone}
-                          onPostpone={postponeTask}
-                        />
+                {tareasOrdenadas.map(t => editingTask === t.id ? (
+                  <TaskEditForm
+                    key={t.id} task={t} byWorkerId={workerId}
+                    assignments={detail.assignments} assignmentId={a.id}
+                    onDone={() => { setEditingTask(null); openWeek(detail.id) }}
+                    onCancel={() => setEditingTask(null)}
+                  />
+                ) : (
+                  <TaskTile
+                    key={t.id}
+                    task={t}
+                    typeName={taskLabel(t, taskTypeById)}
+                    isMissed={!t.done && t.date < todayS && t.status !== 'retrasada' && !t.postponedCount}
+                    dragging={dragTaskId === t.id}
+                    postponing={postponing === t.id}
+                    onPointerDown={onTileDown(t.id, t.date, a.id)}
+                    onToggleDone={toggleTaskDone}
+                    onPostpone={postponeTask}
+                    canManage={canManage}
+                    onEdit={() => setEditingTask(t.id)}
+                    onDelete={deleteTask}
+                    deleting={deletingTask === t.id}
+                    onDuplicate={taskId => { setDuplicandoTask(taskId); setDuplicarSeleccion([]) }}
+                    otherAssignments={detail.assignments.filter(other => other.id !== a.id)}
+                    onReassign={reassignTask}
+                  />
+                ))}
+                {tareasOrdenadas.length === 0 && (
+                  <p className="org__hint">{filtroTablero === 'todas' ? 'Sin tareas (no le tocó ninguna esta semana).' : 'Ninguna con este filtro.'}</p>
+                )}
+                {duplicandoTask && tareasOrdenadas.some(t => t.id === duplicandoTask) && (
+                  <div className="org__add-form">
+                    <p className="org__hint">Duplicar a:</p>
+                    <div className="org__holdset-chips">
+                      {detail.assignments.filter(other => other.id !== a.id).map(other => (
+                        <button
+                          key={other.id} type="button"
+                          className={`org__holdset-chip${duplicarSeleccion.includes(other.workerId) ? ' org__holdset-chip--on' : ''}`}
+                          onClick={() => toggleDuplicarWorker(other.workerId)}
+                        >{other.workerName}</button>
                       ))}
                     </div>
+                    <div className="org__add-actions">
+                      <button className="org__btn" onClick={() => confirmarDuplicar(false)} disabled={duplicando || duplicarSeleccion.length === 0}>
+                        {duplicando ? 'Duplicando...' : `Duplicar a ${duplicarSeleccion.length} persona(s)`}
+                      </button>
+                      <button className="org__btn" onClick={() => confirmarDuplicar(true)} disabled={duplicando}>Todos los de esta semana</button>
+                      <button className="org__link-btn" onClick={() => setDuplicandoTask(null)}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+                {(() => {
+                  const puestosAqui = a.blocks.filter(b => b.done).length
+                  const planificados = a.blocks.length - puestosAqui
+                  const total = puestosAqui + (a.blokesRealesCreados || 0)
+                  return (
+                    <p className="org__assignment-tasks">
+                      {total} bloques puestos
+                      {a.blokesRealesCreados > 0 && ` (${puestosAqui} aquí + ${a.blokesRealesCreados} en Crear bloke)`}
+                      {planificados > 0 && ` · ${planificados} planificado${planificados === 1 ? '' : 's'}`}
+                    </p>
                   )
-                })}
-                {allDates.length === 0 && <p className="org__hint">Sin tareas (no le tocó ninguna esta semana).</p>}
-                <p className="org__assignment-tasks">{a.blocks.length} bloques puestos</p>
+                })()}
+                {/* Registrar bloques (Ramiro 12/11 11:45: trasladado desde la vista "Hoy", que
+                    se quita) — abierto a cualquiera, como ya estaba. */}
+                {a.blocks.length > 0 && (
+                  <ul className="org__block-list">
+                    {a.blocks.map(b => <BlockRow key={b.id} block={b} holdsets={holdsets} onChanged={() => openWeek(detail.id)} />)}
+                  </ul>
+                )}
+                {addingBlockFor === a.id ? (
+                  <AddBlockForm
+                    config={config} holdsets={holdsets} assignmentId={a.id}
+                    onDone={() => { setAddingBlockFor(null); openWeek(detail.id) }}
+                    onCancel={() => setAddingBlockFor(null)}
+                  />
+                ) : <button className="org__add-btn" onClick={() => setAddingBlockFor(a.id)}>+ Añadir bloque</button>}
               </div>
             )
           })}
         </div>
         {dragTaskId != null && dragPos && (
           <div className="org__drag-ghost" style={{ left: dragPos.x, top: dragPos.y }}>
-            {taskTypeById[detail.assignments.flatMap(a => a.tasks).find(t => t.id === dragTaskId)?.taskTypeId]?.name}
+            {(() => {
+              const t = detail.assignments.flatMap(a => a.tasks).find(t => t.id === dragTaskId)
+              return t ? taskLabel(t, taskTypeById) : ''
+            })()}
+          </div>
+        )}
+        </>
+        )}
+        {canManage && (
+          <div className="org__danger-zone">
+            <button className="org__link-btn org__link-btn--danger" onClick={deleteWeek}>Borrar semana</button>
           </div>
         )}
       </div>
@@ -618,8 +978,20 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
 
   return (
     <div>
+      <CalendarioSemanas
+        weeks={weeks} zonas={zonas} selectedDate={selectedDate}
+        onSelectDate={selectWeek} onCreateAt={askCreateAt}
+        onConfigurarZonas={() => setShowZonas(true)} canManage={canManage}
+      />
+      {showZonas && (
+        <ConfigurarZonasDialog
+          zonas={zonas} config={config}
+          onClose={() => setShowZonas(false)}
+          onSaved={() => { setShowZonas(false); reloadZonas(); reloadWeeks() }}
+        />
+      )}
       <div className="org__semana-actions">
-        {!showCreate && <button className="org__add-btn" onClick={() => setShowCreate(true)}>+ Crear semana nueva</button>}
+        {!showCreate && <button className="org__add-btn" onClick={() => { setCreateDate(null); setShowCreate(true) }}>+ Crear semana nueva</button>}
         <button className="org__link-btn" onClick={() => setShowWorkers(s => !s)}>
           {showWorkers ? 'Ocultar personas' : 'Gestionar personas'}
         </button>
@@ -629,24 +1001,178 @@ function SemanaView({ config, workers, canManage, onWorkersChanged }) {
         <button className="org__link-btn" onClick={() => setShowTest(s => !s)}>
           {showTest ? 'Ver semanas normales' : 'Ver semanas de prueba'}
         </button>
+        {canManage && (
+          <button className="org__link-btn" onClick={() => setShowCerrar(s => !s)}>
+            {showCerrar ? 'Ocultar cerrar arrastradas' : 'Cerrar tareas arrastradas...'}
+          </button>
+        )}
       </div>
-      {showWorkers && <WorkersAdmin workers={workers} onChanged={onWorkersChanged} />}
+      {showWorkers && <WorkersAdmin workers={workers} canManage={canManage} onChanged={onWorkersChanged} />}
+      {showCerrar && (
+        <CerrarArrastradasForm onDone={() => { setShowCerrar(false); reloadWeeks() }} showToast={showToast} />
+      )}
       {showCreate && (
         <CreateWeekForm
-          config={config} workers={workers}
-          onDone={() => { setShowCreate(false); reloadWeeks() }}
-          onCancel={() => setShowCreate(false)}
+          config={config} workers={workers} initialDate={createDate}
+          onDone={() => { setShowCreate(false); setCreateDate(null); reloadWeeks() }}
+          onCancel={() => { setShowCreate(false); setCreateDate(null) }}
         />
       )}
       {showHistorico && <HistoricoView />}
-      <ul className="org__week-list">
-        {weeks.map(w => (
-          <li key={w.id} className="org__week-row" onClick={() => openWeek(w.id)}>
-            <span>Semana del {w.startDate}{w.isAuto ? ' · automática' : ''}</span>
-            <span className="org__week-subzones">{w.subzones.map(s => `#${s}`).join(', ')}</span>
-          </li>
+      {!showCreate && <p className="org__hint">Toca una semana de la tira de arriba para abrirla.</p>}
+    </div>
+  )
+}
+
+// Tira de 4 semanas — anterior, la seleccionada (en el centro, resaltada) y 2 siguientes
+// (Ramiro, 12/11 09:31). Cada tarjeta enseña la zona que le toca (nombre y color), hechas/total
+// y si hay festivo o compe esa semana; si la semana no existe todavía, ofrece crearla.
+function CalendarioSemanas({ weeks, zonas, selectedDate, onSelectDate, onCreateAt, onConfigurarZonas, canManage }) {
+  const zonaById = useMemo(() => Object.fromEntries(zonas.map(z => [z.id, z])), [zonas])
+  const dates = [-7, 0, 7, 14].map(n => addDays(selectedDate, n))
+  return (
+    <div className="org__calendario">
+      <div className="org__calendario-nav">
+        <button className="org__link-btn" onClick={() => onSelectDate(addDays(selectedDate, -7))}>↑ Semana anterior</button>
+        {/* Ramiro 12/11 11:35: configurar zonas y crear semanas es solo de Álvaro o un socio. */}
+        {canManage && <button className="org__btn org__btn--ghost" onClick={onConfigurarZonas}>⚙️ Configurar zonas</button>}
+        <button className="org__link-btn" onClick={() => onSelectDate(addDays(selectedDate, 7))}>Semana siguiente ↓</button>
+      </div>
+      <div className="org__calendario-tira">
+        {dates.map(d => {
+          const w = weeks.find(x => x.startDate === d)
+          const zona = w?.zonaId != null ? zonaById[w.zonaId] : null
+          const esSel = d === selectedDate
+          return (
+            <button
+              key={d}
+              type="button"
+              className={`org__calendario-card${esSel ? ' org__calendario-card--sel' : ''}${!w ? ' org__calendario-card--vacia' : ''}`}
+              onClick={() => w ? onSelectDate(d) : (canManage && onCreateAt(d))}
+              style={zona ? { borderTopColor: zona.color } : undefined}
+            >
+              <span className="org__calendario-card__fecha">{fechaCorta(d)}</span>
+              {zona && <span className="org__calendario-card__zona" style={{ color: zona.color }}>{zona.nombre}</span>}
+              {w ? (
+                <span className="org__calendario-card__tareas">{w.tasksHechas}/{w.tasksTotal} tareas</span>
+              ) : (
+                canManage && <span className="org__calendario-card__nueva">+ crear</span>
+              )}
+              {(w?.tieneFestivo || w?.tieneCompe) && (
+                <span className="org__calendario-card__marcas">
+                  {w.tieneFestivo && <span title="Festivo esta semana">🌴</span>}
+                  {w.tieneCompe && <span title="Semana de compe">🏆</span>}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// Diálogo "⚙️ Configurar zonas" (Ramiro, 12/11 09:31/09:35/09:37): agrupar subzonas en zonas,
+// ordenarlas, y elegir por cuál empieza la rotación y en qué semana. Si van retrasados o
+// adelantados, se usa este mismo diálogo para cambiar el orden o la zona de una semana
+// concreta — eso se hace desde la ficha de la semana (PUT .../weeks/{id} con zonaId), no aquí.
+function ConfigurarZonasDialog({ zonas, config, onClose, onSaved }) {
+  const [filas, setFilas] = useState(() => zonas.map(z => ({ ...z })))
+  const [zonaArranqueId, setZonaArranqueId] = useState(String(zonas[0]?.id || ''))
+  const [semanaArranque, setSemanaArranque] = useState(mondayOf(todayStr()))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  const mover = (i, dir) => setFilas(cur => {
+    const next = [...cur]
+    const j = i + dir
+    if (j < 0 || j >= next.length) return cur
+    ;[next[i], next[j]] = [next[j], next[i]]
+    return next
+  })
+  const actualizar = (i, campo, valor) => setFilas(cur => cur.map((f, idx) => idx === i ? { ...f, [campo]: valor } : f))
+  const toggleSubzonaEnFila = (i, s) => setFilas(cur => cur.map((f, idx) => idx === i ? {
+    ...f, subzonas: f.subzonas.includes(s) ? f.subzonas.filter(x => x !== s) : [...f.subzonas, s].sort((a, b) => a - b),
+  } : f))
+  const quitarFila = i => setFilas(cur => cur.filter((_, idx) => idx !== i))
+  const añadirFila = () => setFilas(cur => [...cur, { id: 0, nombre: 'Nueva zona', color: '#888', subzonas: [], orden: cur.length, activa: true }])
+
+  const colorDeSubzona = s => filas.find(f => f.subzonas.includes(s))?.color
+
+  const guardar = async () => {
+    setSaving(true); setError(null)
+    try {
+      await api('PUT', '/equipacion/zonas', { zonas: filas })
+      if (zonaArranqueId && semanaArranque) {
+        await api('POST', '/equipacion/zonas/arranque', { zonaId: Number(zonaArranqueId), weekStart: semanaArranque })
+      }
+      onSaved()
+    } catch (e) { setError(e.message) } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="org__modal-overlay">
+      <div className="org__modal org__modal--zonas">
+        <div className="org__semana-actions">
+          <h2 className="org__comp-block-title">⚙️ Configurar zonas</h2>
+          <button className="org__link-btn" onClick={onClose}>Cerrar</button>
+        </div>
+        <p className="org__hint">
+          Una zona por semana, para que cada bloque dure aproximadamente un mes. ↑↓ para
+          ordenarlas; la entrada al Salón está marcada en el mapa para que "izquierda/derecha"
+          tengan sentido.
+        </p>
+
+        <div className="org__zonas-mapa-wrap">
+          <img src={mapaEquipacion} alt="Mapa del rocódromo" className="org__zonas-mapa-img" draggable={false} />
+          {SUBZONA_RECTS.map(r => (
+            <span
+              key={r.subzona} className="org__zonas-mapa-num"
+              style={{ left: `${(r.x[0] + r.x[1]) / 2}%`, top: `${(r.y[0] + r.y[1]) / 2}%`, background: colorDeSubzona(r.subzona) || '#888' }}
+            >{r.subzona}</span>
+          ))}
+          <span className="org__zonas-mapa-entrada" style={{ left: '17%', top: '58%' }}>⬆ Entrada al Salón</span>
+        </div>
+
+        {filas.map((f, i) => (
+          <div key={f.id || `nueva-${i}`} className="org__zona-fila">
+            <div className="org__zona-fila__orden">
+              <button type="button" className="org__link-btn" onClick={() => mover(i, -1)} disabled={i === 0}>↑</button>
+              <span>{i + 1}</span>
+              <button type="button" className="org__link-btn" onClick={() => mover(i, 1)} disabled={i === filas.length - 1}>↓</button>
+            </div>
+            <input type="color" value={f.color} onChange={e => actualizar(i, 'color', e.target.value)} className="org__zona-fila__color" />
+            <input type="text" value={f.nombre} onChange={e => actualizar(i, 'nombre', e.target.value)} className="org__zona-fila__nombre" />
+            <div className="org__holdset-chips">
+              {config.subzones.map(s => (
+                <button key={s} type="button" className={`org__holdset-chip${f.subzonas.includes(s) ? ' org__holdset-chip--on' : ''}`} onClick={() => toggleSubzonaEnFila(i, s)}>#{s}</button>
+              ))}
+            </div>
+            <label className="org__add-row--check" style={{ display: 'inline-flex' }}>
+              <input type="checkbox" checked={f.activa} onChange={e => actualizar(i, 'activa', e.target.checked)} />
+              <span>Activa</span>
+            </label>
+            <button type="button" className="org__link-btn org__link-btn--danger" onClick={() => quitarFila(i)}>✕ Quitar</button>
+          </div>
         ))}
-      </ul>
+        <button type="button" className="org__link-btn" onClick={añadirFila}>+ Añadir zona</button>
+
+        <div className="org__add-row">
+          <label>Empezar por esta zona, en la semana del</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <select value={zonaArranqueId} onChange={e => setZonaArranqueId(e.target.value)}>
+              {filas.filter(f => f.activa && f.id).map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+            </select>
+            <input type="date" value={semanaArranque} onChange={e => setSemanaArranque(mondayOf(e.target.value))} />
+          </div>
+        </div>
+
+        {error && <p className="org__error">{error}</p>}
+        <div className="org__add-actions">
+          <button className="org__btn org__btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button>
+          <button className="org__btn" onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : 'Aceptar'}</button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -668,10 +1194,11 @@ function HistoricoView() {
       {rows.map(w => (
         <div key={w.id} className="org__historico-row">
           <p className="org__historico-title">
-            Semana del {w.startDate}{w.archived ? ' · archivada' : ''}
+            Semana del {weekLabel(w.startDate)}{w.archived ? ' · archivada' : ''}
           </p>
           <p className="org__historico-meta">
             {w.hechas} hecha(s) · {w.retrasadas} retrasada(s) · {w.pendientes} sin hacer todavía
+            {w.descartadas > 0 ? ` · ${w.descartadas} descartada(s)` : ''}
           </p>
           {Object.keys(w.retrasosPorPersona || {}).length > 0 && (
             <p className="org__historico-meta">
@@ -685,8 +1212,9 @@ function HistoricoView() {
 }
 
 // Crear/editar/borrar personas — "a veces participa más gente en las tareas".
-function WorkersAdmin({ workers, onChanged }) {
+function WorkersAdmin({ workers, canManage, onChanged }) {
   const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
+  const showToast = useToast()
   const [showAdd, setShowAdd] = useState(false)
   const [name, setName] = useState('')
   const [days, setDays] = useState(['mon', 'tue', 'wed', 'thu', 'fri'])
@@ -696,6 +1224,34 @@ function WorkersAdmin({ workers, onChanged }) {
   const [eventual, setEventual] = useState(false)
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [vinculando, setVinculando] = useState(null)
+
+  // 19/11 (Ramiro: "todos nos logueamos con nuestro email, ya sabes quién está editando") — la
+  // propia persona vincula su fila de un clic, con el email de su sesión real; el servidor nunca
+  // se fía de un email escrito a mano aquí. Hace falta para que "responsable" (is_lead) se
+  // traduzca de verdad en permisos de jefe (progreso_equip_es_jefe_o_socio compara emails).
+  const vincularMiEmail = async w => {
+    setVinculando(w.id)
+    try {
+      const res = await api('POST', `/equipacion/workers/${w.id}/vincular-mi-email`)
+      showToast(`Vinculado — esta fila ya usa tu email (${res.data.email}).`)
+      onChanged()
+    } catch (e) {
+      showToast(e.message || 'No se ha podido vincular.')
+    } finally {
+      setVinculando(null)
+    }
+  }
+
+  const desvincularEmail = async w => {
+    if (!window.confirm(`¿Quitar el email vinculado a ${w.name}? Dejará de contar como "jefe" hasta que alguien vuelva a vincularse.`)) return
+    try {
+      await api('PUT', `/equipacion/workers/${w.id}`, { email: '' })
+      onChanged()
+    } catch (e) {
+      showToast(e.message || 'No se ha podido desvincular.')
+    }
+  }
 
   const toggleDay = d => setDays(cur => cur.includes(d) ? cur.filter(x => x !== d) : [...cur, d])
 
@@ -734,6 +1290,16 @@ function WorkersAdmin({ workers, onChanged }) {
           <li key={w.id} className="org__worker-row">
             <span className="org__worker-name">{w.name}{w.isLead ? ' · responsable' : ''}{w.eventual ? ' · eventual' : ''}</span>
             <span className="org__worker-meta">{w.workDays.map(d => DAY_LABEL[d]).join('/')} · {w.blocksMin}-{w.blocksMax} bloques</span>
+            {w.email ? (
+              <>
+                <span className="org__worker-meta" title={w.email}>✓ vinculado</span>
+                {canManage && <button className="org__link-btn" onClick={() => desvincularEmail(w)}>Quitar vínculo</button>}
+              </>
+            ) : (
+              <button className="org__link-btn" onClick={() => vincularMiEmail(w)} disabled={vinculando === w.id} title="Solo pulsa esto si ERES tú — vincula esta fila con el email de tu propia sesión">
+                {vinculando === w.id ? 'Vinculando...' : 'Soy yo — vincular mi sesión'}
+              </button>
+            )}
             <button className="org__link-btn" onClick={() => toggleEventual(w)} title="Eventual: solo viene a compes puntuales, no entra en el reparto normal de mantenimiento">
               {w.eventual ? 'Quitar eventual' : 'Marcar eventual'}
             </button>
@@ -784,11 +1350,55 @@ function WorkersAdmin({ workers, onChanged }) {
   )
 }
 
+// "Dar por cerradas las arrastradas de antes de..." (cowork, 17/11 10:40, urgente): para
+// tareas viejas sin hacer que nadie va a ponerse a hacer ya — las marca (a ellas y a toda la
+// cadena de copias que el barrido fuera arrastrando) como "descartada", sin borrar nada, para
+// que dejen de recogerse semana tras semana. Jefe/socio, con una fecha de corte a propósito
+// (nunca "todo lo de antes de hoy" por defecto).
+function CerrarArrastradasForm({ onDone, showToast }) {
+  const [antesDe, setAntesDe] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+
+  const submit = async () => {
+    if (!antesDe) { setError('Elige una fecha de corte'); return }
+    if (!window.confirm(`¿Dar por cerradas (sin borrar) las tareas sin hacer de antes del ${antesDe}? No se puede deshacer desde aquí.`)) return
+    setSaving(true); setError(null)
+    try {
+      const res = await api('POST', '/equipacion/tasks/cerrar-arrastradas', { antesDe })
+      showToast?.(`${res.cerradas ?? 0} tarea(s) cerradas.`)
+      onDone()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="org__add-form">
+      <p className="org__hint">
+        Marca como "descartada" (queda en el histórico como no hecha, nunca se borra) cualquier tarea
+        sin hacer con fecha anterior a la de corte, y toda su cadena de copias arrastradas. Así el
+        barrido deja de volver a recogerlas.
+      </p>
+      <div className="org__add-row">
+        <label>Cerrar las de antes de</label>
+        <input type="date" value={antesDe} onChange={e => setAntesDe(e.target.value)} />
+      </div>
+      {error && <p className="org__error">{error}</p>}
+      <div className="org__add-actions">
+        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Cerrando...' : 'Cerrar arrastradas'}</button>
+      </div>
+    </div>
+  )
+}
+
 const ALL_WEEK_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 const ALL_WEEK_DAYS_5 = ['mon', 'tue', 'wed', 'thu', 'fri']
 
-function CreateWeekForm({ config, workers, onDone, onCancel }) {
-  const [startDate, setStartDate] = useState(mondayOf(todayStr()))
+function CreateWeekForm({ config, workers, onDone, onCancel, initialDate }) {
+  const [startDate, setStartDate] = useState(initialDate || mondayOf(todayStr()))
   const [subzones, setSubzones] = useState([])
   const [included, setIncluded] = useState({})
   const [isTest, setIsTest] = useState(false)
@@ -799,7 +1409,25 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  const toggleSubzone = s => setSubzones(cur => cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s])
+  // Calendario de semanas + rotación de zonas (Ramiro 12/11 09:31): "dentro de la semana... las
+  // subzonas se rellenan solas" — se sugieren las de la zona que toca, sin obligar: en cuanto
+  // se toca algo a mano, deja de rellenarlas solo al cambiar de fecha.
+  const [zonaSugerida, setZonaSugerida] = useState(null)
+  const subzonesManualRef = useRef(false)
+  useEffect(() => {
+    let activo = true
+    api('GET', `/equipacion/zonas/sugerida?weekStart=${startDate}`).then(r => {
+      if (!activo) return
+      setZonaSugerida(r.data?.zona || null)
+      if (!subzonesManualRef.current && r.data?.zona) setSubzones(r.data.zona.subzonas)
+    }).catch(() => {})
+    return () => { activo = false }
+  }, [startDate])
+
+  const toggleSubzone = s => {
+    subzonesManualRef.current = true
+    setSubzones(cur => cur.includes(s) ? cur.filter(x => x !== s) : [...cur, s])
+  }
   const chosenWorkers = workers.filter(w => included[w.id])
   const toggleDayOverride = (workerId, day) => setWorkDaysOverride(cur => {
     const current = cur[workerId] ?? workers.find(w => w.id === workerId)?.workDays ?? []
@@ -815,7 +1443,6 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
         workerId: w.id, subzones, blocksMin: w.blocksMin, blocksMax: w.blocksMax,
         ...(workDaysOverride[w.id] ? { workDays: workDaysOverride[w.id] } : {}),
       }))
-      if (!subzones.length) throw new Error('Elige al menos una subzona')
       if (!assignments.length) throw new Error('Elige al menos un trabajador')
       const res = await api('POST', '/equipacion/weeks', { startDate, subzones, assignments, isTest })
       if (res.warnings?.length) window.alert(res.warnings.join('\n'))
@@ -830,8 +1457,14 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
     <div className="org__add-form">
       <div className="org__add-row">
         <label>Lunes de la semana</label>
-        <input type="date" value={startDate} onChange={e => setStartDate(mondayOf(e.target.value))} />
+        <input type="date" value={startDate} onChange={e => { subzonesManualRef.current = false; setStartDate(mondayOf(e.target.value)) }} />
       </div>
+      {zonaSugerida && (
+        <p className="org__hint">
+          Zona sugerida: <strong style={{ color: zonaSugerida.color }}>{zonaSugerida.nombre}</strong>
+          {' '}({zonaSugerida.subzonas.map(s => `#${s}`).join(', ')}) — puedes cambiarlo si queda hueco para otras.
+        </p>
+      )}
       <div className="org__add-row">
         <label>Subzonas</label>
         <div className="org__holdset-chips">
@@ -895,10 +1528,21 @@ function CreateWeekForm({ config, workers, onDone, onCancel }) {
 
 // Tarea suelta para un día concreto, del catálogo o con texto libre (creador de tareas de
 // Álvaro, Ramiro 1/11 17:20) — se usa igual en el tablero de Semana y en Hoy.
-function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, onDone, onCancel }) {
+// Día por defecto: hoy, salvo que hoy quede fuera de la semana que se está viendo (una semana
+// futura o pasada) — ahí sí tiene más sentido el lunes de esa semana (cowork, 11/11 05:40: el
+// formulario arrancaba siempre en lunes, aunque se estuviera viendo la semana actual).
+function defaultTaskDate(defaultDate, weekStart) {
+  if (defaultDate) return defaultDate
+  if (!weekStart) return todayStr()
+  const hoy = todayStr()
+  return (hoy >= weekStart && hoy <= addDays(weekStart, 6)) ? hoy : weekStart
+}
+
+function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, byWorkerId, onDone, onCancel }) {
   const [taskTypeId, setTaskTypeId] = useState('')
   const [customText, setCustomText] = useState('')
-  const [date, setDate] = useState(defaultDate || weekStart || todayStr())
+  const [date, setDate] = useState(() => defaultTaskDate(defaultDate, weekStart))
+  const [subzona, setSubzona] = useState('')
   const [notas, setNotas] = useState('')
   const [error, setError] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -907,7 +1551,7 @@ function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, onDone, o
     if (!taskTypeId && !customText.trim()) { setError('Elige un tipo del catálogo o escribe un texto.'); return }
     setSaving(true); setError(null)
     try {
-      await api('POST', '/equipacion/tasks', { assignmentId, date, taskTypeId, customText: customText.trim(), notas })
+      await api('POST', '/equipacion/tasks', { assignmentId, date, taskTypeId, customText: customText.trim(), subzona: subzona || null, notas, byWorkerId })
       onDone()
     } catch (e) { setError(e.message) } finally { setSaving(false) }
   }
@@ -926,11 +1570,77 @@ function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, onDone, o
         <input type="text" value={customText} onChange={e => { setCustomText(e.target.value); if (e.target.value) setTaskTypeId('') }} placeholder="p. ej. arreglar una presa suelta" />
       </div>
       <div className="org__add-row"><label>Día</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
-      {taskTypeId && <div className="org__add-row"><label>Notas (opcional)</label><input type="text" value={notas} onChange={e => setNotas(e.target.value)} /></div>}
+      <div className="org__add-row">
+        <label>Subzona (opcional)</label>
+        <select value={subzona} onChange={e => setSubzona(e.target.value)}>
+          <option value="">— sin especificar —</option>
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(n => <option key={n} value={n}>#{n}</option>)}
+        </select>
+      </div>
+      <div className="org__add-row"><label>Notas (opcional)</label><input type="text" value={notas} onChange={e => setNotas(e.target.value)} /></div>
       {error && <p className="org__error">{error}</p>}
       <div className="org__add-actions">
         <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
         <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Añadiendo...' : 'Añadir tarea'}</button>
+      </div>
+    </div>
+  )
+}
+
+// Editar una tarea que ya existe (Ramiro, 5/11 06:54): texto (si es de texto libre), notas, día
+// y, desde el tablero de Semana, persona. Solo manda lo que ha cambiado.
+function TaskEditForm({ task, byWorkerId, assignments, assignmentId, onDone, onCancel }) {
+  const esLibre = task.taskTypeId === 'custom'
+  const [texto, setTexto] = useState(task.params?.texto || '')
+  const [notas, setNotas] = useState(task.params?.notas || '')
+  const [subzona, setSubzona] = useState(task.params?.subzona || '')
+  const [date, setDate] = useState(task.date)
+  const [persona, setPersona] = useState(assignmentId)
+  const [error, setError] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  const submit = async () => {
+    const body = { byWorkerId }
+    if (esLibre && texto.trim() !== (task.params?.texto || '')) {
+      if (!texto.trim()) { setError('El texto no puede quedar vacío.'); return }
+      body.customText = texto.trim()
+    }
+    if (notas.trim() !== (task.params?.notas || '')) body.notas = notas.trim()
+    if (subzona !== (task.params?.subzona || '')) body.subzona = subzona || null
+    if (date !== task.date) body.date = date
+    if (assignments && persona !== assignmentId) body.assignmentId = persona
+    if (Object.keys(body).length === 1) { onCancel(); return }
+    setSaving(true); setError(null)
+    try {
+      await api('PUT', `/equipacion/tasks/${task.id}`, body)
+      onDone()
+    } catch (e) { setError(e.message); setSaving(false) }
+  }
+
+  return (
+    <div className="org__add-form">
+      {esLibre && <div className="org__add-row"><label>Texto</label><input type="text" value={texto} onChange={e => setTexto(e.target.value)} /></div>}
+      <div className="org__add-row"><label>Notas</label><input type="text" value={notas} onChange={e => setNotas(e.target.value)} placeholder="opcional" /></div>
+      <div className="org__add-row">
+        <label>Subzona</label>
+        <select value={subzona} onChange={e => setSubzona(e.target.value)}>
+          <option value="">— sin especificar —</option>
+          {[1, 2, 3, 4, 5, 6, 7, 8].map(n => <option key={n} value={n}>#{n}</option>)}
+        </select>
+      </div>
+      <div className="org__add-row"><label>Día</label><input type="date" value={date} onChange={e => setDate(e.target.value)} /></div>
+      {assignments && (
+        <div className="org__add-row">
+          <label>Persona</label>
+          <select value={persona} onChange={e => setPersona(Number(e.target.value))}>
+            {assignments.map(a => <option key={a.id} value={a.id}>{a.workerName}</option>)}
+          </select>
+        </div>
+      )}
+      {error && <p className="org__error">{error}</p>}
+      <div className="org__add-actions">
+        <button className="org__btn org__btn--ghost" onClick={onCancel} disabled={saving}>Cancelar</button>
+        <button className="org__btn" onClick={submit} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
       </div>
     </div>
   )
@@ -941,16 +1651,49 @@ function LooseTaskForm({ config, assignmentId, defaultDate, weekStart, onDone, o
 // no se cancelan, solo se mueven a la semana siguiente ("→ Semana
 // siguiente"), y quedan marcadas "retrasada" para que no se pierda el
 // histórico de lo que se fue quedando atrás.
-function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone }) {
+function TaskTile({
+  task, typeName, isMissed, dragging, postponing, onPointerDown, onToggleDone, onPostpone, canManage, onEdit, onDelete, deleting, onDuplicate,
+  otherAssignments, onReassign,
+}) {
+  // 17/11 punto B.5: "se mantiene el arrastre con ratón. Además, Reasignar a… en el ⋯, para que
+  // el móvil y el ordenador hagan lo mismo" — alternativa de un clic al arrastre (que sigue
+  // intacto), mismo reassignTask() de siempre.
+  const [reasignando, setReasignando] = useState(false)
   const params = Object.entries(task.params || {}).filter(([k, v]) => v && k !== 'texto').map(([k, v]) => `${k}: ${v}`).join(' · ')
   const movedAway = task.status === 'retrasada' && task.movedToTaskId
-  const isRetrasada = task.status === 'retrasada'
-  const canPostpone = !task.done && !movedAway
+  // Una tarea ya hecha no es "un atraso visible" — solo importa que quede constancia discreta
+  // de que venía de antes (cowork, 11/11 05:40: en rojo a todo volumen parecía que Álvaro lo
+  // lleva todo atrasado en la demo). El aviso llamativo solo es para lo que SIGUE sin hacer.
+  const isRetrasada = task.status === 'retrasada' && !task.done
+  // Ramiro 12/11 11:35: mover a la semana siguiente, editar o quitar es solo de Álvaro o un
+  // socio — antes estos tres no comprobaban ningún permiso (canPostpone) o usaban el `canEdit`
+  // amplio (profesor/gestión/socio), así que Ana/Edu/Sara también los veían.
+  const canPostpone = !task.done && !movedAway && canManage
+  const rastro = rastroTarea(task)
 
   let badge = null
-  if (movedAway) badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
-  else if (task.postponedCount > 0) badge = `RETRASADA (×${task.postponedCount}) · prevista ${dayLabel(task.originalDate || task.date)}`
-  else if (isMissed) badge = 'FALTÓ'
+  let badgeDiscreto = false
+  // 17/11 10:40 (cowork): cerrada a mano (progreso_equip_cerrar_arrastradas() / Quitar en una
+  // arrastrada) — "que quede en el histórico como no hecha", nunca con el aviso llamativo de
+  // RETRASADA, puesto que ya no se va a recoger ni a hacer.
+  if (task.status === 'descartada') {
+    badge = 'cerrada (no se hizo)'
+    badgeDiscreto = true
+  } else if (task.done) {
+    if (movedAway) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
+    else if (task.postponedCount > 0) badge = `viene del ${dayLabel(task.originalDate || task.date)}`
+    badgeDiscreto = true
+  } else {
+    if (movedAway) badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
+    // Arrastre automático (de la semana anterior, o del barrido de "Hoy"): no es una tarea
+    // retrasada A DÍA DE HOY, solo viene de antes — la misma marca discreta que ya se usa en
+    // las hechas, nunca el aviso llamativo (Ramiro 12/11 10:45: "en rojo a todo volumen" daba la
+    // impresión de que todo estaba atrasado). 🐞 Cowork 12/11 11:20: el texto ya cambiaba, pero
+    // el badge seguía con el rojo por defecto (.org__tile-badge sin ninguna clase que lo frene)
+    // — le falta esta clase --discreto para que de verdad no sea la alarma.
+    else if (task.postponedCount > 0) { badge = `viene del ${dayLabel(task.originalDate || task.date)}`; badgeDiscreto = true }
+    else if (isMissed) badge = 'FALTÓ'
+  }
 
   return (
     <div
@@ -963,23 +1706,321 @@ function TaskTile({ task, typeName, isMissed, dragging, postponing, onPointerDow
       <div className="org__tile-body">
         <span className="org__tile-name">{typeName}</span>
         {params && <span className="org__tile-params">{params}</span>}
-        {badge && <span className="org__tile-badge">{badge}</span>}
+        {badge && <span className={`org__tile-badge${badgeDiscreto ? ' org__tile-badge--discreto' : ''}`}>{badge}</span>}
+        {rastro && <span className="org__task-rastro">{rastro}</span>}
       </div>
-      {canPostpone && (
-        <button
-          type="button"
-          className="org__tile-postpone"
+      {/* 17/11 punto B.2: "tarjeta de una línea... iconos pequeños que aparecen al pasar el
+          ratón, quitar los 4 botones grandes" — antes cada acción era su propio botón de ancho
+          completo (flex: 0 0 100%), hasta 3 filas extra por tarea. Mismos handlers de siempre,
+          solo iconos sueltos escondidos con opacity hasta pasar el ratón o entrar por teclado
+          (:focus-within, para no depender solo del hover). */}
+      {canManage && reasignando ? (
+        <select
+          autoFocus
           onPointerDown={e => e.stopPropagation()}
-          onClick={() => onPostpone(task.id)}
-          disabled={postponing}
-        >{postponing ? '...' : '→ Semana siguiente'}</button>
+          onChange={e => { setReasignando(false); if (e.target.value) onReassign(task.id, Number(e.target.value), task.date) }}
+          onBlur={() => setReasignando(false)}
+        >
+          <option value="">— reasignar a… —</option>
+          {(otherAssignments || []).map(o => <option key={o.id} value={o.id}>{o.workerName}</option>)}
+        </select>
+      ) : (canPostpone || (canManage && !movedAway) || (canManage && onDuplicate) || canManage) && (
+        <span className="org__tile-actions">
+          {canPostpone && (
+            <button
+              type="button" className="org__tile-icon-btn"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => onPostpone(task.id)}
+              disabled={postponing} title="Semana siguiente"
+            >{postponing ? '…' : '→'}</button>
+          )}
+          {canManage && onReassign && (otherAssignments || []).length > 0 && (
+            <button
+              type="button" className="org__tile-icon-btn"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => setReasignando(true)}
+              title="Reasignar a otra persona"
+            >⇄</button>
+          )}
+          {canManage && !movedAway && (
+            <button
+              type="button" className="org__tile-icon-btn"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={onEdit} title="Editar"
+            >✎</button>
+          )}
+          {canManage && onDuplicate && (
+            <button
+              type="button" className="org__tile-icon-btn"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => onDuplicate(task.id)}
+              title="Duplicar a otras personas"
+            >⧉</button>
+          )}
+          {canManage && (
+            <button
+              type="button" className="org__tile-icon-btn org__tile-icon-btn--danger"
+              onPointerDown={e => e.stopPropagation()}
+              onClick={() => onDelete(task.id)}
+              disabled={deleting} title="Quitar"
+            >{deleting ? '…' : '✕'}</button>
+          )}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// ─── Mis tareas (móvil) ────────────────────────────────────────────────
+// 17/11 (NOTAS_PARA_CODE_tareas_movil.md, puntos A.1-A.3): mismos datos y endpoints que el
+// tablero de escritorio (TaskTile/reassignTask/postponeTask/deleteTask/confirmarDuplicar ya
+// existían) — solo cambia cómo se ven y se tocan. "Retrasada" aquí es la misma condición que ya
+// usa el badge de TaskTile (venía de antes y sigue sin hacerse), no una nueva regla de negocio.
+function tareaEsRetrasada(t, todayS) {
+  return !t.done && (t.status === 'retrasada' || t.postponedCount > 0 || t.date < todayS)
+}
+// Orden pedido: compe primero, luego retrasadas, luego el resto.
+function ordenarTareasMovil(tasks, todayS) {
+  const rango = t => (t.competitionId ? 0 : (tareaEsRetrasada(t, todayS) ? 1 : 2))
+  return [...tasks].sort((x, y) => {
+    const rx = rango(x), ry = rango(y)
+    return rx !== ry ? rx - ry : x.date.localeCompare(y.date)
+  })
+}
+function tareaMovida(t) { return t.status === 'retrasada' && !!t.movedToTaskId }
+
+// Una línea por tarea: casilla + título + acciones en un menú ⋯ (hoja/desplegable), en vez de
+// los 3-4 botones de ancho completo del tablero (punto A.2). "Reasignar a…" es la alternativa
+// táctil al arrastre del escritorio — mismo reassignTask() de siempre, solo cambia cómo se elige
+// a quién.
+function TaskLineaMovil({
+  task, typeName, isMissed, isRetrasada, canManage, canPostpone, postponing, deleting,
+  onToggleDone, onPostpone, onEdit, onDelete, onDuplicateOpen, onReassignOpen, movedAway,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false)
+  const rastro = rastroTarea(task)
+  let badge = null, badgeDiscreto = false
+  if (task.status === 'descartada') {
+    badge = 'cerrada (no se hizo)'
+    badgeDiscreto = true
+  } else if (task.done) {
+    if (movedAway || task.postponedCount > 0) { badge = `viene del ${dayLabel(task.originalDate || task.date)}`; badgeDiscreto = true }
+  } else if (movedAway) {
+    badge = `RETRASADA → semana del ${dayLabel(task.movedToDate)}`
+  } else if (task.postponedCount > 0) {
+    badge = `retrasada ${task.postponedCount} sem`
+  } else if (isMissed) {
+    badge = 'FALTÓ'
+  }
+  return (
+    <div className={`org__tm-linea${task.done ? ' org__tm-linea--done' : ''}${isRetrasada ? ' org__tm-linea--retrasada' : ''}`}>
+      <label className="org__tm-check">
+        <input type="checkbox" checked={task.done} onChange={e => onToggleDone(task.id, e.target.checked)} />
+      </label>
+      <div className="org__tm-body" onClick={() => setMenuOpen(true)}>
+        {task.competitionId && <span className="org__tm-compe-tag" title="Tarea de la compe">🏆</span>}
+        <span className="org__tm-nombre">{typeName}</span>
+        {badge && <span className={`org__tile-badge${badgeDiscreto ? ' org__tile-badge--discreto' : ''}`}>{badge}</span>}
+        {rastro && <span className="org__task-rastro">{rastro}</span>}
+      </div>
+      <button type="button" className="org__tm-mas" onClick={() => setMenuOpen(true)} aria-label="Acciones">⋯</button>
+      {menuOpen && (
+        <TaskActionsMenu
+          onClose={() => setMenuOpen(false)}
+          done={task.done}
+          onToggleDone={() => { onToggleDone(task.id, !task.done); setMenuOpen(false) }}
+          canPostpone={canPostpone} postponing={postponing}
+          canManage={canManage} movedAway={movedAway} deleting={deleting}
+          onPostpone={() => { onPostpone(task.id); setMenuOpen(false) }}
+          onEdit={() => { onEdit(); setMenuOpen(false) }}
+          onDuplicate={() => { onDuplicateOpen(); setMenuOpen(false) }}
+          onReassign={() => { onReassignOpen(); setMenuOpen(false) }}
+          onConfirmDelete={() => { onDelete(task.id, true); setMenuOpen(false) }}
+        />
+      )}
+    </div>
+  )
+}
+
+// Menú ⋯ de una tarea (punto A.2, arreglado 17/11 09:40 puntos 2 y 3 con lo que vio Cowork
+// leyendo el código): "Marcar/Desmarcar hecha" siempre está (nunca sin sesión de jefe/socio),
+// para que a Ana/Edu/Sara (que solo pueden marcar hecha) nunca se les quede el ⋯ vacío con solo
+// "Cancelar". "Quitar" confirma DENTRO de la propia hoja («¿Quitar? Sí/No») en vez del
+// window.confirm() nativo, mejor en el móvil.
+function TaskActionsMenu({ onClose, done, onToggleDone, canPostpone, postponing, canManage, movedAway, deleting, onPostpone, onEdit, onDuplicate, onReassign, onConfirmDelete }) {
+  const [confirmandoQuitar, setConfirmandoQuitar] = useState(false)
+  if (confirmandoQuitar) {
+    return (
+      <div className="org__tm-menu-overlay" onClick={onClose}>
+        <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+          <p className="org__tm-menu-pregunta">¿Quitar esta tarea? No se puede deshacer.</p>
+          <button type="button" className="org__tm-menu__quitar" onClick={onConfirmDelete} disabled={deleting}>{deleting ? 'Quitando…' : 'Sí, quitar'}</button>
+          <button type="button" onClick={() => setConfirmandoQuitar(false)}>No</button>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="org__tm-menu-overlay" onClick={onClose}>
+      <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+        <button type="button" onClick={onToggleDone}>{done ? '☐ Desmarcar hecha' : '✓ Marcar hecha'}</button>
+        {canPostpone && <button type="button" onClick={onPostpone} disabled={postponing}>→ Semana siguiente</button>}
+        {canManage && !movedAway && <button type="button" onClick={onEdit}>✎ Editar</button>}
+        {canManage && <button type="button" onClick={onDuplicate}>⧉ Duplicar a…</button>}
+        {canManage && <button type="button" onClick={onReassign}>⇄ Reasignar a…</button>}
+        {canManage && <button type="button" className="org__tm-menu__quitar" onClick={() => setConfirmandoQuitar(true)}>✕ Quitar</button>}
+        <button type="button" className="org__tm-menu__cancelar" onClick={onClose}>Cancelar</button>
+      </div>
+    </div>
+  )
+}
+
+// Vista completa del móvil para una semana: "Mis tareas" (la persona conectada) arriba, el
+// resto del equipo en un acordeón cerrado por defecto (punto A.3). Reutiliza EXACTAMENTE los
+// mismos handlers que ya tenía el tablero de escritorio (pasados por SemanaView) — nunca
+// lógica nueva de negocio, solo una disposición distinta.
+function MisTareasMovil({
+  assignments, myWorkerId, canManage, taskTypeById, todayS, holdsets, config,
+  addingBlockFor, setAddingBlockFor, addingTaskFor, setAddingTaskFor, onReload,
+  postponing, onPostpone, deletingTask, onDelete, editingTask, setEditingTask, onToggleDone,
+  duplicandoTask, setDuplicandoTask, duplicarSeleccion, toggleDuplicarWorker, confirmarDuplicar, duplicando,
+  onReassign,
+}) {
+  const [abiertos, setAbiertos] = useState(() => new Set())
+  const toggleAbierto = id => setAbiertos(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const [reasignando, setReasignando] = useState(null) // { taskId, assignmentId, date }
+
+  const seccion = a => {
+    const tareas = ordenarTareasMovil(a.tasks, todayS)
+    return (
+      <div className="org__tm-seccion">
+        {canManage && (
+          <button type="button" className="org__link-btn" onClick={() => setAddingTaskFor(cur => cur === a.id ? null : a.id)}>+ Tarea</button>
+        )}
+        {addingTaskFor === a.id && (
+          <LooseTaskForm
+            config={config} weekStart={undefined} byWorkerId={myWorkerId}
+            onDone={() => { setAddingTaskFor(null); onReload() }}
+            onCancel={() => setAddingTaskFor(null)}
+            assignmentId={a.id}
+          />
+        )}
+        {tareas.map(t => editingTask === t.id ? (
+          <TaskEditForm
+            key={t.id} task={t} byWorkerId={myWorkerId}
+            assignments={assignments} assignmentId={a.id}
+            onDone={() => { setEditingTask(null); onReload() }}
+            onCancel={() => setEditingTask(null)}
+          />
+        ) : (
+          <TaskLineaMovil
+            key={t.id}
+            task={t}
+            typeName={taskLabel(t, taskTypeById)}
+            isMissed={!t.done && t.date < todayS && t.status !== 'retrasada' && !t.postponedCount}
+            isRetrasada={tareaEsRetrasada(t, todayS)}
+            canManage={canManage}
+            canPostpone={!t.done && !(t.status === 'retrasada' && t.movedToTaskId) && canManage}
+            postponing={postponing === t.id}
+            deleting={deletingTask === t.id}
+            onToggleDone={onToggleDone}
+            onPostpone={onPostpone}
+            onEdit={() => setEditingTask(t.id)}
+            onDelete={onDelete}
+            onDuplicateOpen={() => { setDuplicandoTask(t.id) }}
+            onReassignOpen={() => setReasignando({ taskId: t.id, assignmentId: a.id, date: t.date })}
+            movedAway={tareaMovida(t)}
+          />
+        ))}
+        {tareas.length === 0 && <p className="org__hint">Sin tareas.</p>}
+        {duplicandoTask && tareas.some(t => t.id === duplicandoTask) && (
+          <div className="org__add-form">
+            <p className="org__hint">Duplicar a:</p>
+            <div className="org__holdset-chips">
+              {assignments.filter(other => other.id !== a.id).map(other => (
+                <button
+                  key={other.id} type="button"
+                  className={`org__holdset-chip${duplicarSeleccion.includes(other.workerId) ? ' org__holdset-chip--on' : ''}`}
+                  onClick={() => toggleDuplicarWorker(other.workerId)}
+                >{other.workerName}</button>
+              ))}
+            </div>
+            <div className="org__add-actions">
+              <button className="org__btn" onClick={() => confirmarDuplicar(false)} disabled={duplicando || duplicarSeleccion.length === 0}>
+                {duplicando ? 'Duplicando...' : `Duplicar a ${duplicarSeleccion.length} persona(s)`}
+              </button>
+              <button className="org__btn" onClick={() => confirmarDuplicar(true)} disabled={duplicando}>Todos los de esta semana</button>
+              <button className="org__link-btn" onClick={() => setDuplicandoTask(null)}>Cancelar</button>
+            </div>
+          </div>
+        )}
+        {reasignando && tareas.some(t => t.id === reasignando.taskId) && (
+          <div className="org__tm-menu-overlay" onClick={() => setReasignando(null)}>
+            <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+              <p className="org__hint">Reasignar a…</p>
+              {assignments.filter(other => other.id !== a.id).map(other => (
+                <button
+                  key={other.id} type="button"
+                  onClick={async () => { const info = reasignando; setReasignando(null); await onReassign(info.taskId, other.id, info.date) }}
+                >{other.workerName}</button>
+              ))}
+              <button type="button" className="org__tm-menu__cancelar" onClick={() => setReasignando(null)}>Cancelar</button>
+            </div>
+          </div>
+        )}
+        {a.blocks.length > 0 && (
+          <ul className="org__block-list">
+            {a.blocks.map(b => <BlockRow key={b.id} block={b} holdsets={holdsets} onChanged={onReload} />)}
+          </ul>
+        )}
+        {addingBlockFor === a.id ? (
+          <AddBlockForm config={config} holdsets={holdsets} assignmentId={a.id} onDone={() => { setAddingBlockFor(null); onReload() }} onCancel={() => setAddingBlockFor(null)} />
+        ) : <button type="button" className="org__add-btn" onClick={() => setAddingBlockFor(a.id)}>+ Añadir bloque</button>}
+      </div>
+    )
+  }
+
+  const mia = assignments.find(a => String(a.workerId) === String(myWorkerId))
+  const otras = assignments.filter(a => a !== mia)
+
+  return (
+    <div className="org__tm">
+      {mia ? (
+        <div className="org__tm-mia">
+          <p className="org__tm-mia-titulo">Mis tareas</p>
+          {seccion(mia)}
+        </div>
+      ) : (
+        <p className="org__hint">No tienes ninguna columna esta semana — mira el resto del equipo abajo.</p>
+      )}
+
+      {otras.length > 0 && (
+        <div className="org__tm-resto">
+          <p className="org__tm-mia-titulo">Resto del equipo</p>
+          {otras.map(a => {
+            const nAtrasadas = a.tasks.filter(t => tareaEsRetrasada(t, todayS)).length
+            const abierta = abiertos.has(a.id)
+            return (
+              <div key={a.id} className="org__tm-acordeon">
+                <button type="button" className="org__tm-acordeon-cabecera" onClick={() => toggleAbierto(a.id)}>
+                  <span>
+                    {a.workerName}{a.isLead ? ' · responsable' : ''} · {a.tasks.length} tarea{a.tasks.length === 1 ? '' : 's'}
+                    {nAtrasadas > 0 ? ` · ${nAtrasadas} retrasada${nAtrasadas === 1 ? '' : 's'}` : ''}
+                  </span>
+                  <span className="org__tm-acordeon-flecha">{abierta ? '▾' : '▸'}</span>
+                </button>
+                {abierta && seccion(a)}
+              </div>
+            )
+          })}
+        </div>
       )}
     </div>
   )
 }
 
 // ─── Normas ───────────────────────────────────────────────────────────
-function NormasView({ config, canManage, onConfigChanged }) {
+function NormasView({ config, workers, canManage, onConfigChanged }) {
   const [allTypes, setAllTypes] = useState(null) // incluye inactivas, solo si canManage
   const [editing, setEditing] = useState(null) // id del tipo que se está editando entero
   const [editForm, setEditForm] = useState(null)
@@ -998,7 +2039,7 @@ function NormasView({ config, canManage, onConfigChanged }) {
     setEditForm({
       name: t.name, description: t.description || '', periodicityWeeks: t.periodicityWeeks ?? 1,
       preferredDay: t.preferredDay || '', subzone: t.subzone ?? '', durationMin: t.durationMin ?? '',
-      leadOnly: !!t.leadOnly,
+      leadOnly: !!t.leadOnly, preferredWorkers: t.preferredWorkers || [],
     })
   }
   const save = async id => {
@@ -1008,10 +2049,13 @@ function NormasView({ config, canManage, onConfigChanged }) {
     setEditing(null); setEditForm(null)
     onConfigChanged(); reloadAll()
   }
+  const [showInactive, setShowInactive] = useState(false)
   const toggleActive = async t => {
     try {
-      if (t.active) await api('DELETE', `/equipacion/task-types/${t.id}`)
-      else await api('PUT', `/equipacion/task-types/${t.id}`, { active: true })
+      if (t.active) {
+        // Si nunca se usó, el backend la borra de verdad en vez de solo desactivarla.
+        await api('DELETE', `/equipacion/task-types/${t.id}`)
+      } else await api('PUT', `/equipacion/task-types/${t.id}`, { active: true })
     } catch (e) { window.alert(e.message) }
     onConfigChanged(); reloadAll()
   }
@@ -1021,23 +2065,28 @@ function NormasView({ config, canManage, onConfigChanged }) {
       <section className="org__section">
         <h3 className="org__section-title">Catálogo de tareas</h3>
         <p className="org__hint">
-          El sistema propone solo las tareas activas que tocan según su periodicidad, y elige a quien más
-          la haya hecho antes. {canManage ? 'Puedes crear tareas nuevas, editarlas o desactivarlas (nunca se borran, para no perder el histórico).' : 'Solo el responsable o un socio pueden crear o editar tareas del catálogo.'}
+          El sistema propone solo las tareas activas que tocan según su periodicidad. Si una tarea tiene
+          "personas preferidas" puestas, se reparte entre ellas (la que menos lleve esta semana); si no,
+          a quien más la haya hecho antes en esta app, o turno rotatorio sin historial.{' '}
+          {canManage ? 'Puedes crear tareas nuevas, editarlas o desactivarlas (nunca se borran, para no perder el histórico).' : 'Solo un profe, gestión o un socio pueden crear o editar tareas del catálogo.'}
         </p>
         <ul className="org__task-list">
-          {types.map(t => (
-            <li key={t.id} className={`org__task${t.active === false ? ' org__task--inactive' : ''}`}>
+          {types.filter(t => t.active !== false).map(t => (
+            <li key={t.id} className="org__task">
               {editing === t.id ? (
-                <TaskTypeEditForm form={editForm} setForm={setEditForm} config={config} onSave={() => save(t.id)} onCancel={() => { setEditing(null); setEditForm(null) }} />
+                <TaskTypeEditForm form={editForm} setForm={setEditForm} config={config} workers={workers} onSave={() => save(t.id)} onCancel={() => { setEditing(null); setEditForm(null) }} />
               ) : (
                 <>
-                  <span className="org__task-name">{t.name}{t.active === false ? ' (desactivada)' : ''}</span>
+                  <span className="org__task-name">{t.name}</span>
                   {t.description && <span className="org__task-params">{t.description}</span>}
                   <span className="org__task-params">cada {t.periodicityWeeks ?? 1} semana(s){t.preferredDay ? ` · ${DAY_LABEL[t.preferredDay] || t.preferredDay}` : ''}{t.subzone ? ` · subzona #${t.subzone}` : ''}{t.durationMin ? ` · ${t.durationMin} min` : ''}{t.leadOnly ? ' · siempre al responsable' : ''}</span>
+                  {t.preferredWorkers?.length > 0 && (
+                    <span className="org__task-params">preferido: {t.preferredWorkers.map(id => workers.find(w => w.id === id)?.name || `#${id}`).join(', ')}</span>
+                  )}
                   {canManage && (
                     <span className="org__periodicity-edit">
                       <button className="org__link-btn" onClick={() => startEdit(t)}>Editar</button>
-                      <button className="org__link-btn" onClick={() => toggleActive(t)}>{t.active === false ? 'Reactivar' : 'Desactivar'}</button>
+                      <button className="org__link-btn" onClick={() => toggleActive(t)}>Desactivar</button>
                     </span>
                   )}
                 </>
@@ -1045,6 +2094,25 @@ function NormasView({ config, canManage, onConfigChanged }) {
             </li>
           ))}
         </ul>
+        {canManage && types.some(t => t.active === false) && (
+          <>
+            <button className="org__link-btn" onClick={() => setShowInactive(s => !s)}>
+              {showInactive ? 'Ocultar desactivadas' : `Ver desactivadas (${types.filter(t => t.active === false).length})`}
+            </button>
+            {showInactive && (
+              <ul className="org__task-list">
+                {types.filter(t => t.active === false).map(t => (
+                  <li key={t.id} className="org__task org__task--inactive">
+                    <span className="org__task-name">{t.name} (desactivada)</span>
+                    <span className="org__periodicity-edit">
+                      <button className="org__link-btn" onClick={() => toggleActive(t)}>Reactivar</button>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
         {canManage && !showCreate && <button className="org__add-btn" onClick={() => setShowCreate(true)}>+ Nueva tarea</button>}
         {canManage && showCreate && (
           <CreateTaskTypeForm config={config} onDone={() => { setShowCreate(false); onConfigChanged(); reloadAll() }} onCancel={() => setShowCreate(false)} />
@@ -1057,7 +2125,7 @@ function NormasView({ config, canManage, onConfigChanged }) {
           <tbody>
             {config.grades.map(g => (
               <tr key={g.color}>
-                <td><span className="org__block-grade" style={{ background: GRADE_COLOR[g.color] }}>{g.color}</span></td>
+                <td><span className="org__block-grade" style={{ background: GRADE_COLOR[g.color], color: textoSobreGrado(g.color) }}>{g.color}</span></td>
                 <td>{g.range}{g.nota ? ` (${g.nota})` : ''}</td>
                 <td>{g.planificado ? 'Sí' : 'No'}{g.aviso ? ` — ⚠ ${g.aviso}` : ''}</td>
               </tr>
@@ -1077,8 +2145,10 @@ function NormasView({ config, canManage, onConfigChanged }) {
   )
 }
 
-function TaskTypeEditForm({ form, setForm, config, onSave, onCancel }) {
+function TaskTypeEditForm({ form, setForm, config, workers, onSave, onCancel }) {
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const toggleWorker = id => set('preferredWorkers', (form.preferredWorkers || []).includes(id)
+    ? form.preferredWorkers.filter(x => x !== id) : [...(form.preferredWorkers || []), id])
   return (
     <div className="org__add-form">
       <div className="org__add-row"><label>Nombre</label><input type="text" value={form.name} onChange={e => set('name', e.target.value)} /></div>
@@ -1099,6 +2169,20 @@ function TaskTypeEditForm({ form, setForm, config, onSave, onCancel }) {
         </select>
       </div>
       <div className="org__add-row"><label>Duración estimada (min)</label><input type="number" min="0" value={form.durationMin} onChange={e => set('durationMin', e.target.value)} /></div>
+      {workers?.length > 0 && (
+        <div className="org__add-row org__add-row--holdsets">
+          <label>Personas preferidas (vacío = reparto automático de siempre)</label>
+          <div className="org__holdset-chips">
+            {workers.filter(w => !w.eventual).map(w => (
+              <button
+                key={w.id} type="button"
+                className={`org__holdset-chip${(form.preferredWorkers || []).includes(w.id) ? ' org__holdset-chip--on' : ''}`}
+                onClick={() => toggleWorker(w.id)}
+              >{w.name}</button>
+            ))}
+          </div>
+        </div>
+      )}
       <label className="org__add-row org__add-row--check">
         <input type="checkbox" checked={form.leadOnly} onChange={e => set('leadOnly', e.target.checked)} />
         <span>Siempre al responsable (él la reparte)</span>
@@ -1161,23 +2245,24 @@ function CreateTaskTypeForm({ config, onDone, onCancel }) {
 // Organización de una competición: fecha, semanas de antelación para las
 // tareas de equipación, y dónde va cada uno de los 16 bloques en el mapa.
 // Más reglas (categorías, puntuación...) se añaden sobre la marcha.
-function CompeView({ config, workers }) {
+function CompeView({ config, workers, canManage, workerId }) {
   const [competitions, setCompetitions] = useState([])
   const [current, setCurrent] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
+  const showToast = useToast()
 
   const reload = useCallback(() => {
-    return api('GET', '/equipacion/competitions').then(r => setCompetitions(r.data || [])).catch(() => {})
-  }, [])
+    return api('GET', '/equipacion/competitions').then(r => setCompetitions(r.data || [])).catch(() => showToast('No se ha podido cargar la lista de competiciones.'))
+  }, [showToast])
   useEffect(() => { reload().finally(() => setLoading(false)) }, [reload])
 
-  const openComp = id => api('GET', `/equipacion/competitions/${id}`).then(r => setCurrent(r.data)).catch(() => {})
+  const openComp = id => api('GET', `/equipacion/competitions/${id}`).then(r => setCurrent(r.data)).catch(() => showToast('No se ha podido abrir la competición.'))
 
   if (current) {
     return (
       <CompeMapEditor
-        comp={current} config={config} workers={workers}
+        comp={current} config={config} workers={workers} canManage={canManage} workerId={workerId}
         onBack={() => { setCurrent(null); reload() }}
         onRefresh={() => openComp(current.id)}
       />
@@ -1195,13 +2280,23 @@ function CompeView({ config, workers }) {
           onCancel={() => setShowCreate(false)}
         />
       )}
-      <ul className="org__week-list">
-        {competitions.map(c => (
-          <li key={c.id} className="org__week-row" onClick={() => openComp(c.id)}>
-            <span>{c.name} — {c.compDate}{c.compEndDate !== c.compDate ? ` al ${c.compEndDate}` : ''}{c.isTest ? ' (prueba)' : ''}</span>
-            <span className="org__week-subzones">tareas desde {c.tasksStartDate}</span>
-          </li>
-        ))}
+      <ul className="org__compe-list">
+        {competitions.map(c => {
+          const faltan = daysUntil(c.compDate)
+          const faltanTxt = faltan > 0 ? `Faltan ${faltan} día${faltan === 1 ? '' : 's'}` : faltan === 0 ? 'Es hoy' : (daysUntil(c.compEndDate) >= 0 ? 'En curso' : 'Terminada')
+          return (
+            <li key={c.id} className="org__compe-card" onClick={() => openComp(c.id)}>
+              <div className="org__compe-card-main">
+                <span className="org__compe-card-nombre">{c.name}{c.isTest ? ' (prueba)' : ''}</span>
+                <span className="org__compe-card-fechas">{dateRangeLabel(c.compDate, c.compEndDate)}</span>
+                <span className="org__compe-card-estado">
+                  {faltanTxt} · {c.tasksHechas}/{c.tasksTotal} tareas · {c.blocksColocados}/{c.blocksTotal} bloques colocados
+                </span>
+              </div>
+              <span className="org__compe-card-flecha">Abrir →</span>
+            </li>
+          )
+        })}
         {competitions.length === 0 && <p className="org__hint">Sin competiciones todavía.</p>}
       </ul>
     </div>
@@ -1234,7 +2329,11 @@ function CreateCompForm({ onDone, onCancel }) {
       <div className="org__add-row"><label>Nombre</label><input type="text" value={name} onChange={e => setName(e.target.value)} /></div>
       <div className="org__add-row"><label>Empieza</label><input type="date" value={compDate} onChange={e => setCompDate(e.target.value)} /></div>
       <div className="org__add-row"><label>Termina</label><input type="date" value={compEndDate} min={compDate} onChange={e => setCompEndDate(e.target.value)} /></div>
-      <div className="org__add-row"><label>Semanas de antelación para las tareas</label><input type="number" min="1" max="12" value={leadWeeks} onChange={e => setLeadWeeks(Number(e.target.value))} /></div>
+      <div className="org__add-row">
+        <label>Semanas de antelación para las tareas</label>
+        <input type="number" min="3" max="12" value={leadWeeks} onChange={e => setLeadWeeks(Math.max(3, Number(e.target.value)))} />
+        <span className="org__hint">Mínimo 3 — por debajo no queda sitio para la semana de diseño antes de la de limpieza/equipar.</span>
+      </div>
       <label className="org__add-row org__add-row--check">
         <input type="checkbox" checked={isTest} onChange={e => setIsTest(e.target.checked)} />
         <span>Competición de prueba (no sale en la lista normal; se puede borrar del todo)</span>
@@ -1250,10 +2349,36 @@ function CreateCompForm({ onDone, onCancel }) {
 
 // Vista "Mi parte"/tablero del plan generado de una compe: % hecho, lo retrasado en rojo, y un
 // filtro por persona para que cada uno vea solo lo suyo (encargo "Preparador de compes", 1/11).
-function CompePlanView({ compId, taskTypeById, workers }) {
+const COMP_TAREA_VACIA = { taskTypeId: '', customText: '', date: '', notas: '' }
+
+function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
+  const isMobile = useIsMobile()
+  const myName = useMemo(() => (workers || []).find(w => w.id === workerId)?.name || null, [workers, workerId])
   const [plan, setPlan] = useState(null)
-  const [filterWorker, setFilterWorker] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [columnaExpandida, setColumnaExpandida] = useState(null)
+  const [reasignando, setReasignando] = useState(null)
+  const [reasignandoTarea, setReasignandoTarea] = useState(null)
+  const [confirmandoQuitar, setConfirmandoQuitar] = useState(null)
+  const [quitandoTarea, setQuitandoTarea] = useState(null)
+  const [addingTareaFor, setAddingTareaFor] = useState(null)
+  const [nuevaTarea, setNuevaTarea] = useState(COMP_TAREA_VACIA)
+  const [savingTarea, setSavingTarea] = useState(false)
+  const [dragTareaId, setDragTareaId] = useState(null)
+  // 17/11 11:25 (cowork): el ⋯ del móvil (igual que en Semana) en vez de los botones ⇄/⧉/✕ en
+  // línea, que se salían de ancho (scrollWidth 496 en 375).
+  const [menuTareaAbierto, setMenuTareaAbierto] = useState(null)
+  // 17/11 punto B.4: vista tabla del plan de la compe (personas en filas × días en columnas),
+  // alternativa a las columnas por persona — el mismo generate-plan/tasks/blocks de siempre,
+  // solo otra forma de verlos.
+  const [vistaCompe, setVistaCompe] = useState('columnas')
+  const showToast = useToast()
+
+  const compTaskTypes = useMemo(
+    () => Object.values(taskTypeById || {}).filter(t => t.id?.startsWith('comp_')).sort((a, b) => a.name.localeCompare(b.name)),
+    [taskTypeById]
+  )
+  const tareaLabel = t => t.taskTypeId === 'custom' ? (t.params?.texto || '(sin texto)') : (taskTypeById[t.taskTypeId]?.name || t.taskTypeId)
 
   const reload = useCallback(() => {
     api('GET', `/equipacion/competitions/${compId}/plan`).then(r => setPlan(r.data)).catch(() => setPlan(null))
@@ -1261,7 +2386,7 @@ function CompePlanView({ compId, taskTypeById, workers }) {
   useEffect(() => { reload() }, [reload])
 
   const generate = async () => {
-    if (!window.confirm('¿Generar (o regenerar) el plan de tareas de esta compe? Si ya había uno, se sustituye por el nuevo.')) return
+    if (!window.confirm('¿Generar (o regenerar) el plan de tareas de esta compe? Las tareas puestas a mano no se tocan.')) return
     setGenerating(true)
     try {
       const res = await api('POST', `/equipacion/competitions/${compId}/generate-plan`)
@@ -1272,13 +2397,310 @@ function CompePlanView({ compId, taskTypeById, workers }) {
 
   const toggleDone = async (taskId, done) => {
     setPlan(p => ({ ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, done } : t) }))
-    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) } catch {} finally { reload() }
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { done }) }
+    catch { showToast('No se ha podido guardar — deshecho.') }
+    finally { reload() }
   }
 
-  const tasks = (plan?.tasks || []).filter(t => !filterWorker || String(t.workerId) === filterWorker)
-  const byWeek = {}
-  tasks.forEach(t => { (byWeek[t.weekStart] = byWeek[t.weekStart] || []).push(t) })
+  const abrirNuevaTarea = nombre => {
+    setAddingTareaFor(nombre)
+    setNuevaTarea({ ...COMP_TAREA_VACIA, date: today })
+  }
+
+  const guardarNuevaTarea = async () => {
+    if (!nuevaTarea.date || (!nuevaTarea.taskTypeId && !nuevaTarea.customText.trim())) {
+      showToast('Falta el día, y el tipo o el texto.')
+      return
+    }
+    setSavingTarea(true)
+    try {
+      await api('POST', `/equipacion/competitions/${compId}/tasks`, {
+        workerName: addingTareaFor, date: nuevaTarea.date,
+        taskTypeId: nuevaTarea.taskTypeId || undefined,
+        customText: nuevaTarea.customText.trim() || undefined,
+        notas: nuevaTarea.notas.trim() || undefined,
+      })
+      setAddingTareaFor(null)
+      setNuevaTarea(COMP_TAREA_VACIA)
+      await reload()
+    } catch (e) { showToast(e.message) } finally { setSavingTarea(false) }
+  }
+
+  // "sin window.confirm()" (Ramiro 12/11 10:44), pero SÍ con confirmación dentro de la página
+  // (punto 4) — cowork, 12/11 11:20: un clic sin querer borraba sin avisar. Mismo patrón de
+  // "¿Seguro? Sí/Cancelar" ya usado en la ficha de bloque.
+  const quitarTarea = async taskId => {
+    setConfirmandoQuitar(null)
+    setMenuTareaAbierto(null)
+    setQuitandoTarea(taskId)
+    setPlan(p => ({ ...p, tasks: p.tasks.filter(t => t.id !== taskId) }))
+    try { await api('DELETE', `/equipacion/tasks/${taskId}`) }
+    catch (e) { showToast('No se ha podido quitar — deshecho.'); await reload() }
+    finally { setQuitandoTarea(null) }
+  }
+
+  // Arrastrar (ratón) o "⇄ Mover a..." (móvil/tablet) — punto 5, mismo patrón ya aceptado para
+  // los bloques más abajo (chipReasignable).
+  const moverTarea = async (taskId, nuevoNombre) => {
+    setReasignandoTarea(null)
+    setMenuTareaAbierto(null)
+    if (!nuevoNombre) return
+    setPlan(p => ({ ...p, tasks: p.tasks.map(t => t.id === taskId ? { ...t, workerName: nuevoNombre } : t) }))
+    try { await api('PUT', `/equipacion/tasks/${taskId}`, { workerName: nuevoNombre }) }
+    catch { showToast('No se ha podido mover la tarea — deshecho.'); reload() }
+  }
+
+  // "⧉ Duplicar a..." (Ramiro 12/11 11:40) — igual que en la semana normal.
+  const [duplicandoTarea, setDuplicandoTarea] = useState(null)
+  const [duplicarSeleccionCompe, setDuplicarSeleccionCompe] = useState([])
+  const [duplicandoCompe, setDuplicandoCompe] = useState(false)
+  const confirmarDuplicarCompe = async todos => {
+    setDuplicandoCompe(true)
+    try {
+      const body = todos ? { all: true } : { workerIds: duplicarSeleccionCompe }
+      const res = await api('POST', `/equipacion/tasks/${duplicandoTarea}/duplicar`, body)
+      showToast(`Duplicada a ${res.creadas} persona(s)${res.omitidas ? ` (${res.omitidas} ya la tenían)` : ''}.`)
+      setDuplicandoTarea(null); setDuplicarSeleccionCompe([]); setMenuTareaAbierto(null)
+      await reload()
+    } catch (e) { showToast(e.message) } finally { setDuplicandoCompe(false) }
+  }
+
+  // Punto 7 (Ramiro, 11/11 05:01): "se mueven arrastrando, igual que las tareas" — en vez de
+  // montar drag&drop (bastante más esfuerzo/riesgo para lo que aporta aquí), se mueve tocando el
+  // bloque y eligiendo el nuevo equipador en un desplegable — mismo resultado, menos piezas.
+  const reasignarBloque = async (blockId, nuevoEquipador) => {
+    setReasignando(null)
+    setPlan(p => ({ ...p, blocks: p.blocks.map(b => b.id === blockId ? { ...b, equipador: nuevoEquipador } : b) }))
+    try { await api('PUT', `/equipacion/comp-blocks/${blockId}`, { equipador: nuevoEquipador }) }
+    catch { showToast('No se ha podido mover el bloque — deshecho.'); reload() }
+  }
+
   const today = todayStr()
+  const tasks = plan?.tasks || []
+  const blocks = plan?.blocks || []
+  const totalBloques = blocks.length || 16
+
+  // Columnas por equipador: el nombre es la clave que une tareas (workerName) y bloques
+  // (equipador, un texto libre elegido en la ficha de la misma lista de personas — ver
+  // CompBlockFicha) — cuando coinciden, caen en la misma columna. "La lista de abajo... se
+  // quita: se ve muy feo y mal" (Ramiro) — sustituida por este tablero.
+  const nombres = new Set([...(workers || []).filter(w => w.active).map(w => w.name)])
+  tasks.forEach(t => nombres.add(t.workerName))
+  blocks.forEach(b => { if (b.equipador) nombres.add(b.equipador) })
+  const columnas = Array.from(nombres).sort().map(nombre => ({
+    nombre,
+    tareas: tasks.filter(t => t.workerName === nombre).sort((a, b) => a.date.localeCompare(b.date)),
+    bloques: blocks.filter(b => b.equipador === nombre).sort((a, b) => a.number - b.number),
+  })).filter(c => c.tareas.length > 0 || c.bloques.length > 0 || (workers || []).some(w => w.name === c.nombre && w.active))
+  const bloquesSinAsignar = blocks.filter(b => !b.equipador).sort((a, b) => a.number - b.number)
+  const columnasAMostrar = columnaExpandida ? columnas.filter(c => c.nombre === columnaExpandida) : columnas
+  // 17/11 punto B.4: fechas únicas de las tareas del plan, para las columnas de la vista tabla.
+  const diasCompeTabla = useMemo(() => Array.from(new Set(tasks.map(t => t.date))).sort(), [tasks])
+
+  const chipReasignable = (b, nombreActual) => (
+    <span key={b.id} className={`org__comp-plan-bloque-chip${b.tested ? ' org__comp-plan-bloque-chip--probado' : ''}`}>
+      <span className="org__comp-plan-bloque-color" style={{ background: colorPorNumeroBloque(b.number, totalBloques) }} />
+      #{b.number}
+      {canManage && (reasignando === b.id ? (
+        <select autoFocus value={nombreActual} onChange={e => reasignarBloque(b.id, e.target.value)} onBlur={() => setReasignando(null)}>
+          <option value="">Sin asignar</option>
+          {Array.from(nombres).sort().map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+      ) : (
+        <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignando(b.id)} title="Mover a otro equipador">⇄</button>
+      ))}
+    </span>
+  )
+
+  // 17/11 09:40 (A4): sacado del bucle de columnas del tablero para reutilizarlo igual en la
+  // lista vertical del móvil (NOTAS_PARA_CODE_tareas_movil.md) — ninguna lógica nueva, los
+  // mismos handlers de siempre (toggleDone/moverTarea/quitarTarea/confirmarDuplicarCompe).
+  // `mostrarPersona` añade el nombre delante del título, para cuando la tarea no está ya
+  // agrupada en la columna de su persona (el modo "Todos por día" del móvil).
+  const renderTareaLi = (t, mostrarPersona = false) => (
+    <li
+      key={t.id}
+      draggable={canManage && !mostrarPersona}
+      onDragStart={() => canManage && !mostrarPersona && setDragTareaId(t.id)}
+      onDragEnd={() => setDragTareaId(null)}
+      className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}${t.manual ? ' org__task--manual' : ''}${dragTareaId === t.id ? ' org__task--dragging' : ''}`}
+    >
+      <label className="org__task-check" onPointerDown={e => e.stopPropagation()}>
+        <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
+      </label>
+      <div className="org__task-body">
+        <span className="org__task-title">
+          {mostrarPersona && <strong>{t.workerName} · </strong>}
+          {tareaLabel(t)} ({dayLabel(t.date)})
+          {t.manual && <span className="org__task-manual-badge" title="Puesta a mano">a mano</span>}
+        </span>
+        {t.params?.notas && <span className="org__task-notas">{t.params.notas}</span>}
+      </div>
+      {canManage && (
+        <span className="org__task-actions">
+          {confirmandoQuitar === t.id ? (
+            <>
+              <button type="button" className="org__link-btn org__link-btn--danger" onClick={() => quitarTarea(t.id)} disabled={quitandoTarea === t.id}>
+                {quitandoTarea === t.id ? '...' : 'Sí, quitar'}
+              </button>
+              <button type="button" className="org__link-btn" onClick={() => setConfirmandoQuitar(null)}>Cancelar</button>
+            </>
+          ) : reasignandoTarea === t.id ? (
+            <select autoFocus value={t.workerName} onChange={e => moverTarea(t.id, e.target.value)} onBlur={() => setReasignandoTarea(null)}>
+              {Array.from(nombres).sort().map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          ) : (
+            <>
+              <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignandoTarea(t.id)} title="Mover a otra persona">⇄</button>
+              <button type="button" className="org__tile-edit" onClick={() => { setDuplicandoTarea(t.id); setDuplicarSeleccionCompe([]) }} title="Duplicar esta tarea para otras personas">⧉ Duplicar a…</button>
+              <button type="button" className="org__tile-delete" onClick={() => setConfirmandoQuitar(t.id)} title="Quitar esta tarea">✕</button>
+            </>
+          )}
+        </span>
+      )}
+      {duplicandoTarea === t.id && (
+        <div className="org__add-form org__add-form--compe-tarea">
+          <p className="org__hint">Duplicar a:</p>
+          <div className="org__holdset-chips">
+            {(workers || []).filter(w => w.active && w.name !== t.workerName).map(w => (
+              <button
+                key={w.id} type="button"
+                className={`org__holdset-chip${duplicarSeleccionCompe.includes(w.id) ? ' org__holdset-chip--on' : ''}`}
+                onClick={() => setDuplicarSeleccionCompe(cur => cur.includes(w.id) ? cur.filter(x => x !== w.id) : [...cur, w.id])}
+              >{w.name}</button>
+            ))}
+          </div>
+          <div className="org__add-actions">
+            <button className="org__btn" onClick={() => confirmarDuplicarCompe(false)} disabled={duplicandoCompe || duplicarSeleccionCompe.length === 0}>
+              {duplicandoCompe ? 'Duplicando...' : `Duplicar a ${duplicarSeleccionCompe.length} persona(s)`}
+            </button>
+            <button className="org__link-btn" onClick={() => setDuplicandoTarea(null)}>Cancelar</button>
+          </div>
+        </div>
+      )}
+    </li>
+  )
+
+  // 17/11 11:25 (cowork): versión móvil de la misma tarjeta — una sola línea (checkbox +
+  // título) con las acciones en un ⋯ (igual que TaskActionsMenu en Semana), en vez de los
+  // botones ⇄/⧉ Duplicar a…/✕ en línea de renderTareaLi, que en 375 px sacaban la fila fuera
+  // de ancho (scrollWidth 496). Mismos handlers de siempre, ninguna lógica nueva.
+  const renderTareaLiMovil = (t, mostrarPersona = false) => {
+    const faltó = !t.done && t.date < today
+    const cerrarTodo = () => { setMenuTareaAbierto(null); setConfirmandoQuitar(null); setReasignandoTarea(null); setDuplicandoTarea(null) }
+    let overlay = null
+    if (confirmandoQuitar === t.id) {
+      overlay = (
+        <div className="org__tm-menu-overlay" onClick={cerrarTodo}>
+          <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+            <p className="org__tm-menu-pregunta">¿Quitar esta tarea? No se puede deshacer.</p>
+            <button type="button" className="org__tm-menu__quitar" onClick={() => quitarTarea(t.id)} disabled={quitandoTarea === t.id}>
+              {quitandoTarea === t.id ? 'Quitando…' : 'Sí, quitar'}
+            </button>
+            <button type="button" onClick={() => setConfirmandoQuitar(null)}>No</button>
+          </div>
+        </div>
+      )
+    } else if (reasignandoTarea === t.id) {
+      overlay = (
+        <div className="org__tm-menu-overlay" onClick={cerrarTodo}>
+          <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+            <p className="org__hint">Reasignar a…</p>
+            {Array.from(nombres).sort().filter(n => n !== t.workerName).map(n => (
+              <button key={n} type="button" onClick={() => moverTarea(t.id, n)}>{n}</button>
+            ))}
+            <button type="button" className="org__tm-menu__cancelar" onClick={() => setReasignandoTarea(null)}>Cancelar</button>
+          </div>
+        </div>
+      )
+    } else if (duplicandoTarea === t.id) {
+      overlay = (
+        <div className="org__tm-menu-overlay" onClick={cerrarTodo}>
+          <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+            <p className="org__hint">Duplicar a:</p>
+            <div className="org__holdset-chips">
+              {(workers || []).filter(w => w.active && w.name !== t.workerName).map(w => (
+                <button
+                  key={w.id} type="button"
+                  className={`org__holdset-chip${duplicarSeleccionCompe.includes(w.id) ? ' org__holdset-chip--on' : ''}`}
+                  onClick={() => setDuplicarSeleccionCompe(cur => cur.includes(w.id) ? cur.filter(x => x !== w.id) : [...cur, w.id])}
+                >{w.name}</button>
+              ))}
+            </div>
+            <button type="button" className="org__btn" onClick={() => confirmarDuplicarCompe(false)} disabled={duplicandoCompe || duplicarSeleccionCompe.length === 0}>
+              {duplicandoCompe ? 'Duplicando...' : `Duplicar a ${duplicarSeleccionCompe.length} persona(s)`}
+            </button>
+            <button type="button" className="org__tm-menu__cancelar" onClick={() => setDuplicandoTarea(null)}>Cancelar</button>
+          </div>
+        </div>
+      )
+    } else if (menuTareaAbierto === t.id) {
+      overlay = (
+        <div className="org__tm-menu-overlay" onClick={cerrarTodo}>
+          <div className="org__tm-menu" onClick={e => e.stopPropagation()}>
+            <button type="button" onClick={() => { toggleDone(t.id, !t.done); cerrarTodo() }}>{t.done ? '☐ Desmarcar hecha' : '✓ Marcar hecha'}</button>
+            {canManage && <button type="button" onClick={() => setReasignandoTarea(t.id)}>⇄ Reasignar a…</button>}
+            {canManage && <button type="button" onClick={() => { setDuplicandoTarea(t.id); setDuplicarSeleccionCompe([]) }}>⧉ Duplicar a…</button>}
+            {canManage && <button type="button" className="org__tm-menu__quitar" onClick={() => setConfirmandoQuitar(t.id)}>✕ Quitar</button>}
+            <button type="button" className="org__tm-menu__cancelar" onClick={cerrarTodo}>Cancelar</button>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <li key={t.id} className={`org__tm-linea${t.done ? ' org__tm-linea--done' : ''}`}>
+        <label className="org__tm-check" onClick={e => e.stopPropagation()}>
+          <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
+        </label>
+        <div className="org__tm-body" onClick={() => setMenuTareaAbierto(t.id)}>
+          <span className="org__tm-nombre">
+            {mostrarPersona && <strong>{t.workerName} · </strong>}
+            {tareaLabel(t)} ({dayLabel(t.date)})
+            {t.manual && <span className="org__task-manual-badge" title="Puesta a mano">a mano</span>}
+          </span>
+          {faltó && <span className="org__tile-badge">FALTÓ</span>}
+          {t.params?.notas && <span className="org__task-notas">{t.params.notas}</span>}
+        </div>
+        <button type="button" className="org__tm-mas" onClick={() => setMenuTareaAbierto(t.id)} aria-label="Acciones">⋯</button>
+        {overlay}
+      </li>
+    )
+  }
+
+  if (isMobile) {
+    return (
+      <div className="org__section">
+        <h4 className="org__section-title">Plan de la compe</h4>
+        {(!plan || plan.total === 0) ? (
+          <p className="org__hint">Todavía no hay un plan generado.</p>
+        ) : (
+          <p className="org__hint">{plan.pctHecho}% hecho ({plan.hechas}/{plan.total}) · {plan.retrasadas} retrasada(s)</p>
+        )}
+        {canManage && (
+          <div className="org__add-actions">
+            <button className="org__btn" onClick={generate} disabled={generating}>{generating ? 'Generando...' : (plan?.total ? 'Regenerar plan' : 'Generar plan')}</button>
+          </div>
+        )}
+        <CompePlanMovil
+          columnas={columnas}
+          bloquesSinAsignar={bloquesSinAsignar}
+          tasks={tasks}
+          myName={myName}
+          chipReasignable={chipReasignable}
+          renderTareaLi={renderTareaLiMovil}
+          canManage={canManage}
+          addingTareaFor={addingTareaFor}
+          nuevaTarea={nuevaTarea}
+          setNuevaTarea={setNuevaTarea}
+          compTaskTypes={compTaskTypes}
+          abrirNuevaTarea={abrirNuevaTarea}
+          guardarNuevaTarea={guardarNuevaTarea}
+          savingTarea={savingTarea}
+          onCancelNuevaTarea={() => setAddingTareaFor(null)}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="org__section">
@@ -1289,48 +2711,313 @@ function CompePlanView({ compId, taskTypeById, workers }) {
         <p className="org__hint">{plan.pctHecho}% hecho ({plan.hechas}/{plan.total}) · {plan.retrasadas} retrasada(s)</p>
       )}
       <div className="org__add-actions">
-        <button className="org__btn" onClick={generate} disabled={generating}>{generating ? 'Generando...' : (plan?.total ? 'Regenerar plan' : 'Generar plan')}</button>
-        <select value={filterWorker} onChange={e => setFilterWorker(e.target.value)}>
-          <option value="">Tablero completo</option>
-          {workers.map(w => <option key={w.id} value={w.id}>Mi parte: {w.name}</option>)}
-        </select>
-      </div>
-      {Object.keys(byWeek).sort().map(weekStart => (
-        <div key={weekStart} className="org__historico-row">
-          <p className="org__historico-title">Semana del {weekStart}</p>
-          <ul className="org__task-list">
-            {byWeek[weekStart].map(t => (
-              <li key={t.id} className={`org__task${!t.done && t.date < today ? ' org__tile--missed' : ''}`}>
-                <label>
-                  <input type="checkbox" checked={t.done} onChange={e => toggleDone(t.id, e.target.checked)} />
-                  {' '}{taskTypeById[t.taskTypeId]?.name || t.taskTypeId} — {t.workerName} ({dayLabel(t.date)})
-                </label>
-              </li>
-            ))}
-          </ul>
+        {/* Ramiro 12/11 11:35: generar/regenerar el plan es solo de Álvaro o un socio. */}
+        {canManage && (
+          <button className="org__btn" onClick={generate} disabled={generating}>{generating ? 'Generando...' : (plan?.total ? 'Regenerar plan' : 'Generar plan')}</button>
+        )}
+        {columnaExpandida && (
+          <button className="org__link-btn" onClick={() => setColumnaExpandida(null)}>← Ver todas las columnas</button>
+        )}
+        {/* 17/11 punto B.4: columnas por persona (de siempre, con arrastre) o tabla personas ×
+            días — la misma lista de tareas/bloques, solo otra forma de verlos. */}
+        <div className="org__board-filtro">
+          <button type="button" className={`org__switch-btn${vistaCompe === 'columnas' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('columnas')}>Columnas</button>
+          <button type="button" className={`org__switch-btn${vistaCompe === 'tabla' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('tabla')}>Tabla</button>
         </div>
-      ))}
+      </div>
+
+      {vistaCompe === 'tabla' ? (
+        <div className="org__cp-tabla-wrap">
+          <table className="org__cp-tabla">
+            <thead>
+              <tr>
+                <th>Persona</th>
+                {diasCompeTabla.map(d => <th key={d}>{dayLabel(d)}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {columnas.map(col => (
+                <tr key={col.nombre}>
+                  <td className="org__cp-tabla-persona">
+                    {col.nombre}
+                    {col.bloques.length > 0 && <div className="org__comp-plan-bloques">{col.bloques.map(b => chipReasignable(b, col.nombre))}</div>}
+                  </td>
+                  {diasCompeTabla.map(d => (
+                    <td key={d}>
+                      <ul className="org__task-list">{col.tareas.filter(t => t.date === d).map(t => renderTareaLi(t))}</ul>
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              {bloquesSinAsignar.length > 0 && (
+                <tr>
+                  <td className="org__cp-tabla-persona">Sin asignar</td>
+                  <td colSpan={diasCompeTabla.length}>
+                    <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+          {diasCompeTabla.length === 0 && <p className="org__hint">Todavía no hay tareas con fecha en el plan.</p>}
+        </div>
+      ) : (
+      <div className="org__board org__board--compe-plan">
+        {columnasAMostrar.map(col => (
+          <div key={col.nombre} className={`org__board-col${columnaExpandida ? ' org__board-col--expandida' : ''}`}>
+            <button
+              type="button"
+              className="org__board-col-title org__board-col-title--btn"
+              onClick={() => setColumnaExpandida(columnaExpandida === col.nombre ? null : col.nombre)}
+              title="Ver esta columna en grande"
+            >
+              {col.nombre}
+            </button>
+            {col.bloques.length > 0 && (
+              <div className="org__comp-plan-bloques">{col.bloques.map(b => chipReasignable(b, col.nombre))}</div>
+            )}
+            <ul
+              className="org__task-list"
+              onDragOver={e => { if (canManage) e.preventDefault() }}
+              onDrop={e => { if (!canManage) return; e.preventDefault(); if (dragTareaId) moverTarea(dragTareaId, col.nombre); setDragTareaId(null) }}
+            >
+              {col.tareas.map(t => renderTareaLi(t))}
+            </ul>
+            {canManage && (addingTareaFor === col.nombre ? (
+              <div className="org__add-form org__add-form--compe-tarea">
+                <select value={nuevaTarea.taskTypeId} onChange={e => setNuevaTarea(n => ({ ...n, taskTypeId: e.target.value, customText: '' }))}>
+                  <option value="">— Texto libre —</option>
+                  {compTaskTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                {!nuevaTarea.taskTypeId && (
+                  <input type="text" placeholder="Texto de la tarea" value={nuevaTarea.customText} onChange={e => setNuevaTarea(n => ({ ...n, customText: e.target.value }))} />
+                )}
+                <input type="date" value={nuevaTarea.date} onChange={e => setNuevaTarea(n => ({ ...n, date: e.target.value }))} />
+                <input type="text" placeholder="Notas (opcional)" value={nuevaTarea.notas} onChange={e => setNuevaTarea(n => ({ ...n, notas: e.target.value }))} />
+                <div className="org__add-actions">
+                  <button type="button" className="org__btn" onClick={guardarNuevaTarea} disabled={savingTarea}>{savingTarea ? 'Guardando...' : 'Añadir'}</button>
+                  <button type="button" className="org__link-btn" onClick={() => setAddingTareaFor(null)}>Cancelar</button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="org__link-btn" onClick={() => abrirNuevaTarea(col.nombre)}>+ Tarea</button>
+            ))}
+            {col.tareas.length === 0 && col.bloques.length === 0 && <p className="org__hint">Sin tareas ni bloques.</p>}
+          </div>
+        ))}
+        {!columnaExpandida && bloquesSinAsignar.length > 0 && (
+          <div className="org__board-col org__board-col--sin-asignar">
+            <p className="org__board-col-title">Sin asignar</p>
+            <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
+          </div>
+        )}
+      </div>
+      )}
     </div>
   )
+}
+
+// 17/11 09:40 (A4, pedido por Ramiro/Cowork como prioridad 1 para el móvil, antes que A5/B — la
+// preparación de la compe empieza el 25/11): "arriba un selector «Persona: [yo ▾] / Todos por
+// día», y debajo una sola lista vertical. Nunca columnas." — reutiliza `columnas`/`tasks` que ya
+// calcula CompePlanView y los mismos renderTareaLi()/chipReasignable() que el tablero de
+// escritorio, nunca lógica nueva de negocio.
+function CompePlanMovil({
+  columnas, bloquesSinAsignar, tasks, myName, chipReasignable, renderTareaLi, canManage,
+  addingTareaFor, nuevaTarea, setNuevaTarea, compTaskTypes, abrirNuevaTarea, guardarNuevaTarea, savingTarea, onCancelNuevaTarea,
+}) {
+  const nombresConDatos = columnas.map(c => c.nombre)
+  // 17/11 11:25 (cowork): salía "Persona: Ana" (la primera alfabética) cuando no hay miWorkerId
+  // — por defecto, la persona elegida en "¿Quién eres?" si la tiene, o si no "Todos por día",
+  // nunca una persona al azar.
+  const [modo, setModo] = useState(() => (myName && nombresConDatos.includes(myName)) ? myName : 'todos')
+  const colSeleccionada = columnas.find(c => c.nombre === modo)
+
+  const porDia = useMemo(() => {
+    const mapa = {}
+    tasks.forEach(t => { (mapa[t.date] = mapa[t.date] || []).push(t) })
+    return Object.keys(mapa).sort().map(date => ({
+      date, tareas: mapa[date].sort((a, b) => a.workerName.localeCompare(b.workerName)),
+    }))
+  }, [tasks])
+
+  return (
+    <div className="org__cp-movil">
+      <select className="org__cp-movil-selector" value={modo} onChange={e => setModo(e.target.value)}>
+        {myName && nombresConDatos.includes(myName) && <option value={myName}>Persona: yo ({myName})</option>}
+        {nombresConDatos.filter(n => n !== myName).map(n => <option key={n} value={n}>Persona: {n}</option>)}
+        <option value="todos">Todos por día</option>
+      </select>
+
+      {modo === 'todos' ? (
+        <div className="org__cp-movil-dias">
+          {porDia.map(({ date, tareas }) => (
+            <div key={date} className="org__cp-movil-dia">
+              <p className="org__cp-movil-dia-titulo">{dayLabel(date)}</p>
+              <ul className="org__task-list">{tareas.map(t => renderTareaLi(t, true))}</ul>
+            </div>
+          ))}
+          {porDia.length === 0 && <p className="org__hint">Sin tareas todavía.</p>}
+          {bloquesSinAsignar.length > 0 && (
+            <div className="org__cp-movil-dia">
+              <p className="org__cp-movil-dia-titulo">Bloques sin asignar</p>
+              <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
+            </div>
+          )}
+        </div>
+      ) : colSeleccionada ? (
+        <div>
+          {colSeleccionada.bloques.length > 0 && (
+            <div className="org__comp-plan-bloques">{colSeleccionada.bloques.map(b => chipReasignable(b, colSeleccionada.nombre))}</div>
+          )}
+          <ul className="org__task-list">{colSeleccionada.tareas.map(t => renderTareaLi(t))}</ul>
+          {colSeleccionada.tareas.length === 0 && colSeleccionada.bloques.length === 0 && <p className="org__hint">Sin tareas ni bloques.</p>}
+          {canManage && (addingTareaFor === modo ? (
+            <div className="org__add-form org__add-form--compe-tarea">
+              <select value={nuevaTarea.taskTypeId} onChange={e => setNuevaTarea(n => ({ ...n, taskTypeId: e.target.value, customText: '' }))}>
+                <option value="">— Texto libre —</option>
+                {compTaskTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              {!nuevaTarea.taskTypeId && (
+                <input type="text" placeholder="Texto de la tarea" value={nuevaTarea.customText} onChange={e => setNuevaTarea(n => ({ ...n, customText: e.target.value }))} />
+              )}
+              <input type="date" value={nuevaTarea.date} onChange={e => setNuevaTarea(n => ({ ...n, date: e.target.value }))} />
+              <input type="text" placeholder="Notas (opcional)" value={nuevaTarea.notas} onChange={e => setNuevaTarea(n => ({ ...n, notas: e.target.value }))} />
+              <div className="org__add-actions">
+                <button type="button" className="org__btn" onClick={guardarNuevaTarea} disabled={savingTarea}>{savingTarea ? 'Guardando...' : 'Añadir'}</button>
+                <button type="button" className="org__link-btn" onClick={onCancelNuevaTarea}>Cancelar</button>
+              </div>
+            </div>
+          ) : (
+            <button type="button" className="org__link-btn" onClick={() => abrirNuevaTarea(modo)}>+ Tarea</button>
+          ))}
+        </div>
+      ) : (
+        <p className="org__hint">Sin tareas para esa persona.</p>
+      )}
+    </div>
+  )
+}
+
+// Rectángulos aproximados (en % del mapa `mapa-equipacion.jpg`, 1600×570 px) de cada subzona
+// dibujada en el plano, para deducir la subzona sola al colocar/mover una burbuja (Ramiro,
+// 11/11 05:01). Sacados a ojo del propio dibujo (los rótulos "SUBZONA #n" ya están en la
+// imagen) — no son exactos pixel a pixel, por eso la ficha deja corregirla a mano si hace
+// falta. Se comprueban en este orden; la primera que encaja gana.
+const SUBZONA_RECTS = [
+  { subzona: 1, x: [34.5, 66],   y: [4,  30] },
+  { subzona: 2, x: [0,   35],    y: [4,  41] },
+  { subzona: 4, x: [35,  65],    y: [43, 57] },
+  { subzona: 3, x: [8,   34],    y: [43, 62] },
+  { subzona: 5, x: [53,  66],    y: [56, 96] },
+  { subzona: 6, x: [28,  53],    y: [77, 96] },
+  { subzona: 7, x: [0,   28],    y: [60, 96] },
+  { subzona: 8, x: [78,  100],   y: [24, 68] },
+]
+function subzonaDesdePosicion(xPct, yPct) {
+  const r = SUBZONA_RECTS.find(z => xPct >= z.x[0] && xPct <= z.x[1] && yPct >= z.y[0] && yPct <= z.y[1])
+  return r ? r.subzona : null
 }
 
 // Arrastra una burbuja ya colocada para moverla, o toca un número sin
 // colocar y luego el sitio del mapa — pensado para funcionar igual con
 // ratón que con el dedo en la tablet.
-function CompeMapEditor({ comp, config, workers, onBack }) {
+function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) {
   const wrapRef = useRef(null)
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const [blocks, setBlocks] = useState(comp.blocks)
+  const showToast = useToast()
   const [selectedToPlace, setSelectedToPlace] = useState(null)
   const [editingBlockId, setEditingBlockId] = useState(null)
   const [holdsets, setHoldsets] = useState([])
+  const [holdsetsError, setHoldsetsError] = useState(false)
   const dragIdRef = useRef(null)
   const dragStartRef = useRef(null)
   const [trayDrag, setTrayDrag] = useState(null)
   const trayPointerRef = useRef(null)
+  const [modoActivo, setModoActivo] = useState(!!comp.modoActivo)
+  const [cambiandoModo, setCambiandoModo] = useState(false)
 
   useEffect(() => { setBlocks(comp.blocks) }, [comp])
-  useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
+  useEffect(() => { setModoActivo(!!comp.modoActivo) }, [comp.modoActivo])
+  // Cowork 19/11: esto fallaba en silencio (catch vacío) y se quedaba sin presas que elegir, sin
+  // ningún aviso — se veía igual que "no puedo seleccionar". Ahora avisa si falla.
+  useEffect(() => {
+    api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || []))
+      .catch(e => { setHoldsetsError(true); showToast(e.message || 'No se han podido cargar los juegos de presas.') })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Botón "+ nuevo juego de presas…" en la ficha del bloque — Ramiro 19/11: Álvaro necesita
+  // poder dar de alta un color/forma de presa que todavía no esté en la lista, sin tener que
+  // pedírselo a nadie. Reutiliza el POST /equipacion/holdsets que ya existía (antes sin UI).
+  const crearHoldset = async nombre => {
+    const res = await api('POST', '/equipacion/holdsets', { name: nombre })
+    const nuevo = { id: res.id, name: nombre }
+    setHoldsets(cur => [...cur, nuevo].sort((a, b) => a.name.localeCompare(b.name)))
+    return nuevo.id
+  }
+
+  // Botón bien visible para encender/apagar el modo compe (Ramiro, 11/11 05:01: "tiene que
+  // quedar claro para el socio") — antes había que llamar a la API a mano.
+  const toggleModoCompe = async () => {
+    const encender = !modoActivo
+    const confirmacion = encender
+      ? `¿Encender el modo compe de "${comp.name}"?\n\nSe crea un bloke real (oculto) por cada uno de los ${blocks.length} bloques. A partir de ahí, lo que se apunte en /compe cuenta como resultado de la compe.`
+      : `¿Apagar el modo compe de "${comp.name}"?\n\nLos bloques pasan a publicados de verdad en la Colección (con su foto, si la tenían) y todo lo apuntado durante la compe cuenta ya para la zona personal y las ligas de cada uno.`
+    if (!window.confirm(confirmacion)) return
+    setCambiandoModo(true)
+    try {
+      await api('POST', `/equipacion/competitions/${comp.id}/modo-compe`, { activo: encender })
+      setModoActivo(encender)
+      showToast(encender ? 'Modo compe encendido.' : 'Modo compe apagado — bloques publicados.')
+    } catch (e) {
+      showToast(e.message || 'No se ha podido cambiar el modo compe.')
+    } finally {
+      setCambiandoModo(false)
+    }
+  }
+
+  // "Simulador" (20/11 06:30, punto 3) — solo socio, solo en una compe de prueba: apunta tops
+  // falsos (el backend crea participantes de prueba la primera vez si hacen falta) para ver la
+  // animación de la tele en /blokes/compe/directo?previewCompeId=X sin ir apuntando a mano.
+  const [simulando, setSimulando] = useState(false)
+  const simularTop = async () => {
+    setSimulando(true)
+    try {
+      const res = await api('POST', '/compe/simular-top', { competitionId: comp.id })
+      showToast(`Top simulado: participante de prueba, bloque ${res.data.bloque}.`)
+    } catch (e) {
+      showToast(e.message || 'No se ha podido simular.')
+    } finally {
+      setSimulando(false)
+    }
+  }
+  const simularRafaga = async () => {
+    setSimulando(true)
+    try {
+      for (let i = 0; i < 3; i++) await api('POST', '/compe/simular-top', { competitionId: comp.id })
+      showToast('Ráfaga simulada: 3 tops.')
+    } catch (e) {
+      showToast(e.message || 'No se ha podido simular.')
+    } finally {
+      setSimulando(false)
+    }
+  }
+
+  // Relleno de una vez: bloques ya colocados en el mapa de antes de este cambio, que se
+  // quedaron sin subzona (Ramiro, 11/11 05:01: "los 6 bloques ya colocados sin subzona se
+  // rellenan con esa misma lógica"). Solo toca los que de verdad están vacíos, nunca
+  // sobreescribe una subzona ya puesta a mano.
+  useEffect(() => {
+    const sinSubzona = comp.blocks.filter(b => b.xPct != null && b.subzone == null)
+    if (!sinSubzona.length) return
+    sinSubzona.forEach(b => {
+      const subzona = subzonaDesdePosicion(b.xPct, b.yPct)
+      if (subzona == null) return
+      setBlocks(cur => cur.map(x => x.id === b.id ? { ...x, subzone: subzona } : x))
+      api('PUT', `/equipacion/comp-blocks/${b.id}`, { subzone: subzona }).catch(() => {})
+    })
+  }, [comp.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const clampPct = v => Math.max(2, Math.min(98, v))
   const posFromClient = (clientX, clientY) => {
@@ -1365,15 +3052,23 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
     if (id == null) return
     if (!moved) { setEditingBlockId(id); return }
     const b = blocks.find(x => x.id === id)
-    if (b) { try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: b.xPct, yPct: b.yPct }) } catch {} }
+    if (b) {
+      // La subzona se recalcula sola al mover la burbuja — se puede corregir a mano después
+      // en la ficha (Ramiro, 11/11 05:01).
+      const subzona = subzonaDesdePosicion(b.xPct, b.yPct)
+      setBlocks(cur => cur.map(x => x.id === id ? { ...x, subzone: subzona } : x))
+      try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: b.xPct, yPct: b.yPct, subzone: subzona }) } catch { showToast('No se ha podido guardar la posición.') }
+    }
   }
   const onWrapClick = async e => {
     if (dragIdRef.current != null || !selectedToPlace) return
     const { x, y } = posFromClient(e.clientX, e.clientY)
     const id = selectedToPlace
-    setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: x, yPct: y } : b))
+    const subzona = subzonaDesdePosicion(x, y)
+    setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: x, yPct: y, subzone: subzona } : b))
     setSelectedToPlace(null)
-    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: x, yPct: y }) } catch {}
+    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { xPct: x, yPct: y, subzone: subzona }) }
+    catch { showToast('No se ha podido colocar el bloque.'); setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: null, yPct: null } : b)) }
   }
   // Arrastrar un número de la bandeja hasta el mapa (además de tocar y
   // tocar): mismo mecanismo de pointer que las burbujas ya colocadas, con un
@@ -1401,14 +3096,18 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
     const within = e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom
     if (!within) return
     const { x, y } = posFromClient(e.clientX, e.clientY)
+    const subzona = subzonaDesdePosicion(x, y)
     setSelectedToPlace(null)
-    setBlocks(cur => cur.map(b => b.id === st.id ? { ...b, xPct: x, yPct: y } : b))
-    try { await api('PUT', `/equipacion/comp-blocks/${st.id}`, { xPct: x, yPct: y }) } catch {}
+    setBlocks(cur => cur.map(b => b.id === st.id ? { ...b, xPct: x, yPct: y, subzone: subzona } : b))
+    try { await api('PUT', `/equipacion/comp-blocks/${st.id}`, { xPct: x, yPct: y, subzone: subzona }) }
+    catch { showToast('No se ha podido colocar el bloque.'); setBlocks(cur => cur.map(b => b.id === st.id ? { ...b, xPct: null, yPct: null } : b)) }
   }
 
   const unplace = async id => {
+    const antes = blocks.find(b => b.id === id)
     setBlocks(cur => cur.map(b => b.id === id ? { ...b, xPct: null, yPct: null } : b))
-    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { unplace: true }) } catch {}
+    try { await api('PUT', `/equipacion/comp-blocks/${id}`, { unplace: true }) }
+    catch { showToast('No se ha podido quitar el bloque.'); if (antes) setBlocks(cur => cur.map(b => b.id === id ? antes : b)) }
   }
 
   const unplaced = blocks.filter(b => b.xPct == null)
@@ -1416,18 +3115,93 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
 
   const removeComp = async () => {
     if (!window.confirm(`¿Borrar la competición "${comp.name}"? No se puede deshacer.`)) return
-    try { await api('DELETE', `/equipacion/competitions/${comp.id}`) } catch {}
-    onBack()
+    try { await api('DELETE', `/equipacion/competitions/${comp.id}`); onBack() }
+    catch { showToast('No se ha podido borrar la competición.') }
+  }
+
+  // "Vamos bien de tiempo, añadir el 17 y 18" (Ramiro, 11/11 05:01) — un bloque más cada vez
+  // que se pulsa, nunca da por hecho que son 16. Se puede deshacer mientras el añadido todavía
+  // no se haya colocado en el mapa.
+  const [addingBlock, setAddingBlock] = useState(false)
+  // Qué bloques se han añadido EN ESTA SESIÓN con "+ Añadir bloque" (cowork, 11/11 07:05: antes
+  // "Deshacer" ofrecía quitar cualquier bloque sin colocar, incluido uno de los 16 originales,
+  // en vez de solo el recién añadido). Solo estos se pueden deshacer, y solo mientras sigan sin
+  // colocar.
+  const [recienAnadidos, setRecienAnadidos] = useState([])
+  const addBlock = async () => {
+    setAddingBlock(true)
+    try {
+      const res = await api('POST', `/equipacion/competitions/${comp.id}/comp-blocks`, {})
+      setBlocks(cur => [...cur, { id: res.id, number: res.number, xPct: null, yPct: null, subzone: null, grade: '', holdSetIds: [], volumes: '', equipador: '', tested: false, photoUrl: '' }])
+      setRecienAnadidos(cur => [...cur, res.id])
+    } catch (e) {
+      showToast(e.message || 'No se ha podido añadir el bloque.')
+    } finally {
+      setAddingBlock(false)
+    }
+  }
+  const ultimoSinColocar = unplaced.find(b => recienAnadidos.includes(b.id)) || null
+  const undoAddBlock = async () => {
+    if (!ultimoSinColocar) return
+    try {
+      await api('DELETE', `/equipacion/comp-blocks/${ultimoSinColocar.id}`)
+      setBlocks(cur => cur.filter(b => b.id !== ultimoSinColocar.id))
+      setRecienAnadidos(cur => cur.filter(id => id !== ultimoSinColocar.id))
+    } catch (e) {
+      showToast(e.message || 'No se ha podido deshacer.')
+    }
   }
 
   return (
     <div>
       <div className="org__semana-actions">
         <button className="org__link-btn" onClick={onBack}>← Volver a competiciones</button>
-        <button className="org__link-btn" onClick={removeComp}>Borrar competición</button>
+        {canManage && <button className="org__link-btn" onClick={removeComp}>Borrar competición</button>}
       </div>
       <h3 className="org__section-title">{comp.name} — {comp.compDate}{comp.compEndDate && comp.compEndDate !== comp.compDate ? ` al ${comp.compEndDate}` : ''}</h3>
       <p className="org__hint">Las tareas de equipación para esta compe empiezan el {comp.tasksStartDate}.</p>
+
+      {canManage && (
+        <div className={`org__modo-compe${modoActivo ? ' org__modo-compe--activo' : ''}`}>
+          <div>
+            <p className="org__modo-compe__estado">{modoActivo ? '🟢 Modo compe ENCENDIDO' : '⚪ Modo compe apagado'}</p>
+            <p className="org__hint" style={{ margin: 0 }}>
+              {modoActivo
+                ? 'Los bloques están ocultos en la Colección, apuntando como compe. Al apagarlo se publican de verdad y lo apuntado cuenta para zona personal y ligas.'
+                : `Al encenderlo se crea un bloke real (oculto) por cada uno de los ${blocks.length} bloques, y lo que se apunte en /compe cuenta como resultado de esta compe.`}
+            </p>
+          </div>
+          {!comp.isTest && (
+            <button className="org__btn" onClick={toggleModoCompe} disabled={cambiandoModo}>
+              {cambiandoModo ? 'Cambiando...' : modoActivo ? 'Apagar modo compe' : 'Encender modo compe'}
+            </button>
+          )}
+        </div>
+      )}
+      {/* 20/11 06:30 (punto 3): una compe de prueba nunca se "enciende" de verdad (la verían
+          los usuarios reales) — se ve siempre con ?previewCompeId=, y aquí tiene además el
+          simulador para no tener que apuntar tops a mano uno a uno. Solo socio, nunca gestión
+          ni profesor — a diferencia del resto de esta pantalla (canManage, jefe o socio). */}
+      {comp.isTest && window.blokesSiteData?.userRole === 'socio' && (
+        <div className="org__modo-compe">
+          <div>
+            <p className="org__modo-compe__estado">🧪 Compe de prueba</p>
+            <p className="org__hint" style={{ margin: 0 }}>
+              Nunca se activa por la vía normal — pruébala en la tele con el enlace de abajo. El simulador apunta
+              tops falsos (crea participantes de prueba en las 3 categorías la primera vez, si hacen falta).
+            </p>
+          </div>
+          <button className="org__btn" onClick={simularTop} disabled={simulando}>{simulando ? '…' : 'Simular top'}</button>
+          <button className="org__btn org__btn--ghost" onClick={simularRafaga} disabled={simulando}>{simulando ? '…' : 'Ráfaga (3 tops)'}</button>
+        </div>
+      )}
+      <a
+        className="org__link-btn"
+        href={comp.isTest ? `/blokes/compe/directo?previewCompeId=${comp.id}` : '/blokes/compe/directo'}
+        target="_blank" rel="noreferrer" style={{ display: 'inline-block', marginBottom: 16 }}
+      >
+        📺 Abrir en la tele{comp.isTest ? ' (vista previa de prueba)' : ''}
+      </a>
 
       {unplaced.length > 0 && (
         <div className="org__comp-tray">
@@ -1461,8 +3235,11 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
             style={{ left: `${b.xPct}%`, top: `${b.yPct}%`, borderColor: b.grade ? (GRADE_COLOR[b.grade] || '#fff') : undefined }}
             onPointerDown={startDrag(b.id)}
             onDoubleClick={() => unplace(b.id)}
-            title="Toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa"
-          >{b.number}</div>
+            title={b.tested ? 'Forerun hecho — toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa' : 'Toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa'}
+          >
+            {b.number}
+            {b.tested && <span className="org__comp-bubble__tested-mark" aria-hidden="true">✓</span>}
+          </div>
         ))}
         {trayDrag && (
           <div className="org__comp-bubble org__comp-bubble--ghost" style={{ left: `${trayDrag.x}%`, top: `${trayDrag.y}%` }}>
@@ -1472,16 +3249,31 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
       </div>
       <p className="org__hint">{placed.length} de {blocks.length} bloques colocados. Toca una burbuja para su ficha, doble clic para quitarla del mapa.</p>
 
+      {canManage && (
+        <div className="org__semana-actions" style={{ marginBottom: 20 }}>
+          <button className="org__link-btn" onClick={addBlock} disabled={addingBlock}>
+            {addingBlock ? 'Añadiendo...' : `Vamos bien de tiempo, añadir el ${blocks.length + 1}`}
+          </button>
+          {ultimoSinColocar && (
+            <button className="org__link-btn" onClick={undoAddBlock}>Deshacer el bloque #{ultimoSinColocar.number}</button>
+          )}
+        </div>
+      )}
+
       {editingBlockId != null && (
         <CompBlockFicha
           block={blocks.find(b => b.id === editingBlockId)}
-          config={config} holdsets={holdsets}
+          config={config} holdsets={holdsets} holdsetsError={holdsetsError} workers={workers || []} blocks={blocks}
+          onCreateHoldset={crearHoldset}
           onClose={() => setEditingBlockId(null)}
           onSaved={patch => { setBlocks(cur => cur.map(b => b.id === editingBlockId ? { ...b, ...patch } : b)) }}
+          onSwapped={(id1, numero1, id2, numero2) => {
+            setBlocks(cur => cur.map(b => b.id === id1 ? { ...b, number: numero1 } : b.id === id2 ? { ...b, number: numero2 } : b))
+          }}
         />
       )}
 
-      <CompePlanView compId={comp.id} taskTypeById={taskTypeById} workers={workers || []} />
+      <CompePlanView compId={comp.id} taskTypeById={taskTypeById} workers={workers || []} canManage={canManage} workerId={workerId} />
     </div>
   )
 }
@@ -1489,18 +3281,72 @@ function CompeMapEditor({ comp, config, workers, onBack }) {
 // Ficha de un bloque de compe: subzona, color, presas, volúmenes, equipador, foto (subida
 // desde el móvil) y probado sí/no — Álvaro la rellena tocando una burbuja del mapa (Ramiro,
 // 1/11 17:20).
-function CompBlockFicha({ block, config, holdsets, onClose, onSaved }) {
+function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, blocks, onCreateHoldset, onClose, onSaved, onSwapped }) {
+  const showToast = useToast()
+  const [fijado, setFijado] = useState(false)
+  const [swapping, setSwapping] = useState(false)
   const [subzone, setSubzone] = useState(block.subzone ?? '')
   const [grade, setGrade] = useState(block.grade || '')
   const [holdSetIds, setHoldSetIds] = useState(block.holdSetIds || [])
   const [volumes, setVolumes] = useState(block.volumes || '')
-  const [equipador, setEquipador] = useState(block.equipador || '')
   const [tested, setTested] = useState(!!block.tested)
   const [photoUrl, setPhotoUrl] = useState(block.photoUrl || '')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
+  // Ramiro 19/11: "añadir un botón para meter un color y forma de presa mediante descripción
+  // que no esté aún añadida" — Álvaro da de alta el juego de presas nuevo sin pedírselo a nadie.
+  const [nuevoHoldset, setNuevoHoldset] = useState(false)
+  const [nombreHoldset, setNombreHoldset] = useState('')
+  const [creandoHoldset, setCreandoHoldset] = useState(false)
+
+  // Equipador: desplegable de personas de equipación (activas, fijas y eventuales), más
+  // cualquier nombre "Otro…" que ya se haya usado en OTRO bloque de ESTA MISMA compe (vale
+  // solo mientras algún bloque lo siga usando — no crea una persona de equipación de verdad),
+  // y al final "Otro…" para escribir uno nuevo (Ramiro, 11/11 05:01).
+  const nombresWorkers = (workers || []).filter(w => w.active).map(w => w.name)
+  const nombresOtros = Array.from(new Set(
+    (blocks || []).map(b => b.equipador).filter(n => n && n.trim() && !nombresWorkers.includes(n))
+  ))
+  const equipadorOpciones = [...nombresWorkers, ...nombresOtros]
+  const [modoOtro, setModoOtro] = useState(!!block.equipador && !equipadorOpciones.includes(block.equipador))
+  const [equipador, setEquipador] = useState(block.equipador || '')
 
   const toggleHoldSet = id => setHoldSetIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+
+  const crearYSeleccionarHoldset = async () => {
+    const nombre = nombreHoldset.trim()
+    if (!nombre) return
+    setCreandoHoldset(true)
+    try {
+      const id = await onCreateHoldset(nombre)
+      setHoldSetIds(ids => ids.includes(id) ? ids : [...ids, id])
+      setNombreHoldset('')
+      setNuevoHoldset(false)
+    } catch (e) {
+      showToast(e.message || 'No se ha podido crear el juego de presas.')
+    } finally {
+      setCreandoHoldset(false)
+    }
+  }
+
+  // Punto 8 (Ramiro, 11/11 05:01): "Fijar bloque" — con la palanca activada el número se puede
+  // clicar para intercambiarlo con otro bloque ya puesto (p. ej. resultó demasiado difícil para
+  // su número). Solo cambia el número; burbuja, ficha y resultados ya apuntados siguen con el
+  // bloque físico (su id), no con el número.
+  // Cowork 12/11 10:20: el confirm() nativo bloquea el navegador — mismo arreglo que "Quitar
+  // foto", un input en la propia ficha en vez de un prompt() del sistema.
+  const [cambiandoNumero, setCambiandoNumero] = useState(false)
+  const [numeroDestino, setNumeroDestino] = useState('')
+  const intercambiarNumero = async () => {
+    const n = Number(numeroDestino)
+    if (!Number.isInteger(n) || n === block.number) { window.alert('Número no válido.'); return }
+    setSwapping(true)
+    try {
+      const res = await api('POST', `/equipacion/comp-blocks/${block.id}/intercambiar-numero`, { otroNumero: n })
+      onSwapped(res.data.bloqueId, res.data.nuevoNumero, res.data.otroBloqueId, res.data.otroNuevoNumero)
+      onClose()
+    } catch (e) { window.alert(e.message) } finally { setSwapping(false); setCambiandoNumero(false) }
+  }
 
   const uploadPhoto = async e => {
     const file = e.target.files?.[0]
@@ -1522,6 +3368,20 @@ function CompBlockFicha({ block, config, holdsets, onClose, onSaved }) {
     }
   }
 
+  // Cowork 12/11 09:30: no había forma de quitar una foto desde la pantalla (solo con la API a
+  // mano). Igual que subir, es inmediato — no espera al botón "Guardar" de abajo.
+  // Cowork 12/11 10:20: el confirm() nativo bloquea el navegador — confirmación en la propia
+  // pantalla en vez de un cuadro de diálogo del sistema.
+  const [confirmandoQuitarFoto, setConfirmandoQuitarFoto] = useState(false)
+  const removePhoto = async () => {
+    setConfirmandoQuitarFoto(false)
+    setUploading(true)
+    try {
+      await api('PUT', `/equipacion/comp-blocks/${block.id}`, { photoUrl: '' })
+      setPhotoUrl('')
+    } catch (e) { window.alert(e.message) } finally { setUploading(false) }
+  }
+
   const save = async () => {
     setSaving(true)
     try {
@@ -1540,9 +3400,35 @@ function CompBlockFicha({ block, config, holdsets, onClose, onSaved }) {
   return (
     <div className="org__add-form">
       <div className="org__semana-actions">
-        <p className="org__section-title" style={{ margin: 0 }}>Bloque #{block.number}</p>
+        <p className="org__comp-block-title">
+          Bloque{' '}
+          {fijado ? (
+            cambiandoNumero ? (
+              <span className="org__comp-block-numero--cambiando">
+                #{block.number} →{' '}
+                <input
+                  type="number" value={numeroDestino} autoFocus
+                  onChange={e => setNumeroDestino(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') intercambiarNumero() }}
+                />
+                <button type="button" className="org__link-btn" onClick={intercambiarNumero} disabled={swapping}>Intercambiar</button>
+                <button type="button" className="org__link-btn" onClick={() => setCambiandoNumero(false)} disabled={swapping}>Cancelar</button>
+              </span>
+            ) : (
+              <button type="button" className="org__comp-block-numero--fijado" onClick={() => { setNumeroDestino(''); setCambiandoNumero(true) }} disabled={swapping}>
+                #{block.number}
+              </button>
+            )
+          ) : (
+            <strong>#{block.number}</strong>
+          )}
+        </p>
         <button className="org__link-btn" onClick={onClose}>Cerrar</button>
       </div>
+      <label className="org__add-row org__add-row--check org__comp-block-fijar">
+        <input type="checkbox" checked={fijado} onChange={e => setFijado(e.target.checked)} />
+        <span>Fijar bloque — este bloque ya está empezado, puedes cambiar la dificultad (número) para intercambiarla con otro bloque</span>
+      </label>
       <div className="org__add-row">
         <label>Subzona</label>
         <select value={subzone} onChange={e => setSubzone(e.target.value)}>
@@ -1563,7 +3449,24 @@ function CompBlockFicha({ block, config, holdsets, onClose, onSaved }) {
           {holdsets.map(h => (
             <button key={h.id} type="button" className={`org__holdset-chip${holdSetIds.includes(h.id) ? ' org__holdset-chip--on' : ''}`} onClick={() => toggleHoldSet(h.id)}>{h.name}</button>
           ))}
+          {holdsetsError && <span className="org__hint">No se ha podido cargar ningún juego de presas — recarga la página.</span>}
         </div>
+        {nuevoHoldset ? (
+          <div className="org__add-row--holdsets">
+            <input
+              type="text" value={nombreHoldset} autoFocus
+              onChange={e => setNombreHoldset(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') crearYSeleccionarHoldset() }}
+              placeholder="Color y forma, p. ej. «Moradas BS» o «Volúmenes turquesa/negro»"
+            />
+            <button type="button" className="org__link-btn" onClick={crearYSeleccionarHoldset} disabled={creandoHoldset || !nombreHoldset.trim()}>
+              {creandoHoldset ? 'Añadiendo...' : 'Añadir y seleccionar'}
+            </button>
+            <button type="button" className="org__link-btn" onClick={() => { setNuevoHoldset(false); setNombreHoldset('') }} disabled={creandoHoldset}>Cancelar</button>
+          </div>
+        ) : (
+          <button type="button" className="org__link-btn" onClick={() => setNuevoHoldset(true)}>+ Nuevo color/forma de presa…</button>
+        )}
       </div>
       <div className="org__add-row">
         <label>Volúmenes</label>
@@ -1571,12 +3474,42 @@ function CompBlockFicha({ block, config, holdsets, onClose, onSaved }) {
       </div>
       <div className="org__add-row">
         <label>Equipador</label>
-        <input type="text" value={equipador} onChange={e => setEquipador(e.target.value)} />
+        {modoOtro ? (
+          <div className="org__add-row--holdsets">
+            <input type="text" value={equipador} onChange={e => setEquipador(e.target.value)} placeholder="Nombre" autoFocus />
+            {equipadorOpciones.length > 0 && (
+              <button type="button" className="org__link-btn" onClick={() => { setModoOtro(false); setEquipador(equipadorOpciones[0] || '') }}>← elegir de la lista</button>
+            )}
+          </div>
+        ) : (
+          <select
+            value={equipador}
+            onChange={e => { if (e.target.value === '__otro__') { setModoOtro(true); setEquipador('') } else setEquipador(e.target.value) }}
+          >
+            <option value="">Sin asignar</option>
+            {equipadorOpciones.map(n => <option key={n} value={n}>{n}</option>)}
+            <option value="__otro__">Otro…</option>
+          </select>
+        )}
       </div>
       <div className="org__add-row">
         <label>Foto</label>
-        {photoUrl && <img src={photoUrl} alt={`Bloque #${block.number}`} className="org__comp-block-photo" />}
-        <input type="file" accept="image/*" capture="environment" onChange={uploadPhoto} disabled={uploading} />
+        {photoUrl && (
+          <>
+            <img src={photoUrl} alt={`Bloque #${block.number}`} className="org__comp-block-photo" />
+            {confirmandoQuitarFoto ? (
+              <span className="org__hint">
+                ¿Seguro? Se borra también de Medios.{' '}
+                <button type="button" className="org__link-btn org__link-btn--danger" onClick={removePhoto} disabled={uploading || saving}>Sí, quitar</button>
+                {' '}
+                <button type="button" className="org__link-btn" onClick={() => setConfirmandoQuitarFoto(false)} disabled={uploading || saving}>Cancelar</button>
+              </span>
+            ) : (
+              <button type="button" className="org__link-btn org__link-btn--danger" onClick={() => setConfirmandoQuitarFoto(true)} disabled={uploading || saving}>✕ Quitar foto</button>
+            )}
+          </>
+        )}
+        <input type="file" accept="image/*" capture="environment" onChange={uploadPhoto} disabled={uploading || saving} />
         {uploading && <span className="org__hint">Subiendo...</span>}
       </div>
       <label className="org__add-row org__add-row--check">
@@ -1584,8 +3517,13 @@ function CompBlockFicha({ block, config, holdsets, onClose, onSaved }) {
         <span>Probado (forerunning)</span>
       </label>
       <div className="org__add-actions">
-        <button className="org__btn org__btn--ghost" onClick={onClose} disabled={saving}>Cancelar</button>
-        <button className="org__btn" onClick={save} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
+        {/* 🐞 Cowork 12/11 09:40: subir una foto y pulsar "Guardar" antes de que terminase la
+            subida dejaba el bloque sin foto y un adjunto huérfano. "Guardar" nunca manda
+            photoUrl (solo "Quitar foto" lo hace), pero sin esto el usuario podía cerrar la
+            ficha a medio subir — ahora no se puede pulsar ninguno de los dos mientras el otro
+            está en marcha. */}
+        <button className="org__btn org__btn--ghost" onClick={onClose} disabled={saving || uploading}>Cancelar</button>
+        <button className="org__btn" onClick={save} disabled={saving || uploading}>{saving ? 'Guardando...' : (uploading ? 'Subiendo foto...' : 'Guardar')}</button>
       </div>
     </div>
   )
