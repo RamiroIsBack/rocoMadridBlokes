@@ -337,7 +337,8 @@ function NotionSetup({ onSaved, onCancel }) {
 }
 
 // ─── Página ─────────────────────────────────────────────────────────────────
-export default function CalendarioPage() {
+// embedded: dentro del Diario (título más pequeño y sin el marco de página propia).
+export default function CalendarioPage({ embedded = false }) {
   const isSocio = window.blokesSiteData?.userRole === 'socio'
   const access  = useCalendarAccess()
   const [week, setWeek]   = useState(() => weekStart(today()))
@@ -409,8 +410,10 @@ export default function CalendarioPage() {
   const openItem   = it => { setOpen(it); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
   return (
-    <div className="sa-page">
-      <h1 className="sa-page__title">Calendario</h1>
+    <div className={embedded ? 'cal-embedded' : 'sa-page'}>
+      {embedded
+        ? <h2 className="dash__section-title">Calendario de actividades</h2>
+        : <h1 className="sa-page__title">Calendario</h1>}
 
       {data && !configured && (isSocio
         ? <NotionSetup onSaved={() => reload(true)} />

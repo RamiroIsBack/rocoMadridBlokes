@@ -23445,7 +23445,10 @@ function calendar_can_view() {
     if (in_array(blokes_get_app_role(), array('socio', 'gestion', 'profesor'))) return true;
     if (!is_user_logged_in()) return false;
     $email = strtolower(trim(wp_get_current_user()->user_email));
-    return $email !== '' && in_array($email, array_map('strtolower', calendar_access_list()));
+    if ($email === '') return false;
+    // El Diario lleva dentro el calendario: quien está en la lista del Diario también lo ve (reducido).
+    $lists = array_merge(calendar_access_list(), diario_access_list());
+    return in_array($email, array_map('strtolower', $lists));
 }
 
 add_action('rest_api_init', function() {

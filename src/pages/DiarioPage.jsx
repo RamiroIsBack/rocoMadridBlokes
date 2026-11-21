@@ -1,4 +1,5 @@
 import { useDiarioAccess } from '../hooks/useDiario'
+import CalendarioPage from './CalendarioPage'
 import './DashboardPage.css'
 
 // Diario: pequeño dashboard para los profes (y Carolina, por la lista de Acceso).
@@ -15,19 +16,17 @@ export default function DiarioPage() {
   }
 
   return (
-    <div className="dash">
+    <div className="dash dash--wide">
       <header className="dash__head">
         <h1 className="dash__title">Diario</h1>
         <p className="dash__claim">Lo de hoy, de un vistazo</p>
         <p className="dash__intro">Tu panel del día en el Roco. Aquí irán apareciendo las cosas que necesitas tener a mano cada día.</p>
       </header>
-      <div className="dash__grid">
-        <div className="dash__card dash__card--empty">
-          <span className="dash__card-icon">🧗</span>
-          <span className="dash__card-title">Muy pronto</span>
-          <span>Estamos preparando este panel.</span>
-        </div>
-      </div>
+      {/* Primer paso del traslado de Notion a Blokes: el calendario de actividades del Roco
+          (de momento se sigue leyendo de Notion + las reservas de Eventos). */}
+      <section className="dash__section">
+        <CalendarioPage embedded />
+      </section>
     </div>
   )
 }

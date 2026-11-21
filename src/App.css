@@ -1326,7 +1326,7 @@
    un único dibujo de línea en mostaza amoldado al hueco, como en la web del club.
    Los dibujos son blancos: se usan como máscara y se pintan del color que queramos.
    --col es el ancho de la columna de cada sección. */
-.app-main:has(.progreso-idx),
+.app-main:has(.progreso-idx) { --col: 960px; }   /* 4 fotos por fila en el Hall of Fame */
 .app-main:has(.league-page)  { --col: 720px; }
 .app-main:has(.compe-page)   { --col: 880px; }
 .app-main:has(.entrena)      { --col: 1000px; }
@@ -1374,8 +1374,10 @@
 }
 /* Solo cuando el hueco del lado da para el dibujo (en móvil y tablet no se ve) */
 @media (min-width: 1180px) {
-  .app-main:has(.progreso-idx)::before,
   .app-main:has(.league-page)::before { display: block; }
+}
+@media (min-width: 1420px) {
+  .app-main:has(.progreso-idx)::before { display: block; }
 }
 @media (min-width: 1340px) {
   .app-main:has(.compe-page)::before { display: block; }

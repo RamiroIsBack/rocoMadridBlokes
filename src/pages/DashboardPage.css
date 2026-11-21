@@ -49,4 +49,13 @@
   font-size: 1.05rem;
   color: var(--color-text-primary);
 }
+.dash--wide { max-width: none; }
+.dash__section { margin-top: 8px; }
+.dash__section-title {
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0 0 12px;
+}
 .dash__forbidden { text-align: center; padding: 60px 16px; color: var(--color-text-secondary); }
