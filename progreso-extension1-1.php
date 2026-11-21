@@ -880,7 +880,11 @@ add_action('rest_api_init', function() {
         'methods' => 'PUT', 'callback' => 'progreso_equip_update_competition', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)', array(
-        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_competition', 'permission_callback' => $equip_perm,
+        // 21/11 (repaso de la compe de prueba): borrar una competición ENTERA (de prueba o real)
+        // es tan destructivo como borrar una semana/tarea/asignación — mismo permiso estricto que
+        // esas, no el $equip_perm general (que incluye "profesor", pensado para dar acceso de
+        // lectura/edición de bloques a los equipadores, no para borrar competiciones).
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_competition', 'permission_callback' => $equip_jefe_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)', array(
         'methods' => 'PUT', 'callback' => 'progreso_equip_update_comp_block', 'permission_callback' => $equip_perm,
@@ -894,7 +898,9 @@ add_action('rest_api_init', function() {
         'methods' => 'POST', 'callback' => 'progreso_equip_add_comp_block', 'permission_callback' => $equip_perm,
     ));
     register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)', array(
-        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_comp_block', 'permission_callback' => $equip_perm,
+        // 21/11: igual que borrar la competición entera — destructivo, mismo permiso estricto
+        // que el resto de borrados ($equip_jefe_perm), no el $equip_perm general.
+        'methods' => 'DELETE', 'callback' => 'progreso_equip_delete_comp_block', 'permission_callback' => $equip_jefe_perm,
     ));
     // Punto 8 (Ramiro, 11/11 05:01): "Fijar bloque" — intercambiar el número de dos bloques ya
     // puestos sin mover burbujas/fichas/resultados, que van con el id del bloque físico, no con
