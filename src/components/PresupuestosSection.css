@@ -269,6 +269,36 @@
 .ps-check span { font-size: 0.82rem; color: #f0ece0; }
 .ps-check small { grid-column: 2; font-size: 0.68rem; color: #777; }
 .ps-donde { display: block; font-size: 0.72rem; color: #f5c842; }
+
+/* ── Actuaciones inmediatas ── */
+.ps-tab--inmediatas { display: inline-flex; align-items: center; gap: 6px; }
+.ps-tab__n {
+  min-width: 18px; padding: 0 5px;
+  background: #f5c842; color: #100e09;
+  font-size: 0.66rem; font-weight: 800; line-height: 18px; text-align: center;
+  border-radius: 9px;
+}
+.ps-rayo {
+  display: inline-block; margin-left: 6px;
+  font-size: 0.64rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: #f5c842;
+}
+.ps-table--inmediatas { min-width: 820px; }
+.ps-hecho {
+  width: 26px; height: 26px; padding: 0;
+  background: none;
+  border: 1px solid #3a3020;
+  color: transparent;
+  font-size: 0.86rem; font-weight: 800; line-height: 1;
+  cursor: pointer;
+}
+.ps-hecho:hover:not(:disabled) { border-color: #34d399; color: rgba(52, 211, 153, 0.5); }
+.ps-hecho--on { background: rgba(52, 211, 153, 0.12); border-color: #34d399; color: #34d399; }
+.ps-hecho--on:hover:not(:disabled) { color: #34d399; }
+.ps-hecho:disabled { cursor: default; opacity: 0.5; }
+.ps-row--hecha td { color: #888; }
+.ps-row--hecha strong { color: #a8a29e; text-decoration: line-through; text-decoration-color: #555; }
+.ps-vencida { color: #f97316; }
 .ps-modal__actions {
   grid-column: 1 / -1;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;

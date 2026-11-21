@@ -97,11 +97,12 @@
 .cal-sum__name { flex: 1 1 140px; font-size: 0.78rem; color: var(--color-text-primary); }
 .cal-sum__who { width: 100%; font-size: 0.66rem; color: var(--color-text-secondary); }
 
-/* Detalle: fondo oscuro propio para que se lea siempre */
-.cal-detail { margin: 0 0 24px; background: #100e09; color: #ddd; border-top-color: #2a2015; border-right-color: #2a2015; border-bottom-color: #2a2015; }
-.cal-detail .sa-pay-file__title { color: #f0ece0; }
-.cal-detail .cal-btn-link { color: #f5c842; border-color: #5a4a20; }
-.cal-detail .cal-btn-link:hover { color: #1a1a1a; background: #f5c842; }
+/* Detalle: con los colores del tema (claro u oscuro), la barra izquierda del color de la categoría */
+.cal-detail { margin: 0 0 24px; background: var(--color-surface); color: var(--color-text-primary); border-top-color: var(--color-border); border-right-color: var(--color-border); border-bottom-color: var(--color-border); }
+.cal-detail .sa-pay-file__title { color: var(--color-text-primary); }
+.cal-detail .cal-btn-link { color: var(--color-accent-text); border-color: var(--color-accent); }
+.cal-detail .cal-btn-link:hover { color: #1d1d1b; background: var(--color-accent); }
+.cal-detail__who { font-size: 0.75rem; align-self: center; }
 .cal-detail__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -114,9 +115,9 @@
   letter-spacing: 0.06em;
   /* #666 era casi ilegible sobre el fondo oscuro fijo de esta caja (.cal-detail, #100e09) —
      independiente del tema de la página, esta caja siempre es oscura. */
-  color: #9a9488;
+  color: var(--color-text-secondary);
 }
-.cal-detail__row > p { margin: 3px 0 0; font-size: 0.82rem; color: #ddd; white-space: pre-line; }
+.cal-detail__row > p { margin: 3px 0 0; font-size: 0.82rem; color: var(--color-text-primary); white-space: pre-line; }
 
 /* Conectar con Notion */
 .cal-setup { --card-color: #a78bfa; }

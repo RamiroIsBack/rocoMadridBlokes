@@ -16,6 +16,7 @@ import ProjectsSection from '../components/ProjectsSection'
 import BlokesMapSection from '../components/BlokesMapSection'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
 import { getCalendarAccess, saveCalendarAccess } from '../hooks/useCalendar'
+import { getDiarioAccess, saveDiarioAccess } from '../hooks/useDiario'
 import './SuperAdminPage.css'
 
 const PERIOD_OPTIONS = [
@@ -1367,10 +1368,41 @@ function PLAccordion({ live2026, lastMonth }) {
 }
 
 // ─── Main page ───────────────────────────────────────────────────────
+// Pestañas agrupadas: arriba los apartados y, dentro de Tesorería y Gestión, sus subpestañas.
+const SA_GROUPS = [
+  { key: 'tesoreria', label: 'Tesorería', tabs: [
+    { key: 'ingresos',          label: 'Ingresos' },
+    { key: 'clases',            label: 'Clases' },
+    { key: 'gastos',            label: 'Gastos banco' },
+    { key: 'presupuesto-anual', label: 'Presupuesto anual' },
+    { key: 'pl',                label: 'P&L' },
+  ] },
+  { key: 'nominas', label: 'Nóminas' },
+  { key: 'gestion', label: 'Gestión', tabs: [
+    { key: 'presupuestos', label: 'Presupuestos' },
+    { key: 'proyectos',    label: 'Proyectos' },
+  ] },
+  { key: 'acceso', label: 'Acceso' },
+  { key: 'mapa',   label: 'Mapa de Blokes' },
+]
+const SA_ALL_TABS = SA_GROUPS.flatMap(g => g.tabs ? g.tabs.map(t => t.key) : [g.key])
+// Última subpestaña abierta de cada apartado, para volver a ella al cambiar de apartado
+const lastSubTab = {}
+
+// Recordar la última pestaña abierta en este navegador (si el almacenamiento falla, se empieza en Ingresos)
+const LAST_TAB_KEY = 'sa-last-tab'
+function loadLastTab() {
+  try {
+    const t = localStorage.getItem(LAST_TAB_KEY)
+    return SA_ALL_TABS.includes(t) ? t : 'ingresos'
+  } catch { return 'ingresos' }
+}
+function saveLastTab(t) { try { localStorage.setItem(LAST_TAB_KEY, t) } catch { /* sin almacenamiento */ } }
+
 export default function SuperAdminPage() {
   const role = window.blokesSiteData?.userRole
-  const [saTab, setSaTab]               = useState('ingresos')
-  useTabParam('tab', t => ['ingresos', 'clases', 'gastos', 'pl', 'nominas', 'presupuesto-anual', 'acceso', 'presupuestos', 'proyectos', 'mapa'].includes(t), setSaTab)
+  const [saTab, setSaTab]               = useState(loadLastTab)
+  useTabParam('tab', t => SA_ALL_TABS.includes(t), t => { setSaTab(t); saveLastTab(t) })
   // Por defecto "Sin uso Rocódromo" (Ramiro 15/11 09:02 (d): la factura entre empresas infla el
   // total combinado — se puede ver con el botón, pero no es lo que sale por defecto).
   const [excludeTransfer, setExclude]   = useState(true)
@@ -1384,29 +1416,30 @@ export default function SuperAdminPage() {
     )
   }
 
-  const TABS = [
-    { key: 'ingresos', label: 'Ingresos' },
-    { key: 'clases',   label: 'Clases' },
-    { key: 'gastos',   label: 'Gastos banco' },
-    { key: 'pl',       label: 'P&L' },
-    { key: 'nominas',  label: 'Nóminas' },
-    { key: 'presupuesto-anual', label: 'Presupuesto anual' },
-    { key: 'acceso',   label: 'Acceso' },
-    { key: 'presupuestos', label: 'Presupuestos' },
-    { key: 'proyectos', label: 'Proyectos' },
-    { key: 'mapa',      label: 'Mapa de Blokes' },
-  ]
+  const group    = SA_GROUPS.find(g => g.key === saTab || g.tabs?.some(t => t.key === saTab)) || SA_GROUPS[0]
+  const openTab  = key => { setSaTab(key); saveLastTab(key) }
+  const openGroup = g => openTab(g.tabs ? (lastSubTab[g.key] || g.tabs[0].key) : g.key)
+  if (group.tabs && group.tabs.some(t => t.key === saTab)) lastSubTab[group.key] = saTab
 
   return (
     <div className="sa-page">
       <h1 className="sa-page__title">Superadmin</h1>
       <div className="sa-main-tabs">
-        {TABS.map(t => (
-          <button key={t.key} className={`sa-main-tab${saTab === t.key ? ' sa-main-tab--active' : ''}`} onClick={() => setSaTab(t.key)}>
-            {t.label}
+        {SA_GROUPS.map(g => (
+          <button key={g.key} className={`sa-main-tab${group.key === g.key ? ' sa-main-tab--active' : ''}`} onClick={() => openGroup(g)}>
+            {g.label}
           </button>
         ))}
       </div>
+      {group.tabs && (
+        <div className="sa-pl-tabs sa-sub-tabs">
+          {group.tabs.map(t => (
+            <button key={t.key} className={`sa-pl-tab${saTab === t.key ? ' sa-pl-tab--active' : ''}`} onClick={() => openTab(t.key)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
       {saTab === 'ingresos' && (
         <>
           <RevenueSection excludeTransfer={excludeTransfer} onToggleExclude={() => setExclude(x => !x)} />
@@ -1434,7 +1467,7 @@ const LISTA_CONFIG = [
   { key: 'socios',     label: 'Socios',     color: '#a78bfa', acceso: 'Todo + Superadmin' },
   { key: 'gestion',    label: 'Gestión',    color: '#34d399', acceso: 'Todo de profesores + ExcelMuerte (Supervisión)' },
   { key: 'profesores', label: 'Profesores', color: '#f5c842', acceso: 'Setter · Estadísticas · Entrenamientos · Fichaje · TimeOff' },
-  { key: 'tablets',    label: 'Tablet',     color: '#60a5fa', acceso: 'Colección, Progreso y Ligas en modo tablet, sin login personal' },
+  { key: 'tablets',    label: 'Tablet',     color: '#60a5fa', acceso: 'Los blokes, Progreso y Ligas en modo tablet, sin login personal' },
 ]
 
 const WP_URL = window.location.origin
@@ -1540,6 +1573,10 @@ function ListasSection() {
             <SectionAccessGroup
               name="Calendario" color="#a78bfa" load={getCalendarAccess} save={saveCalendarAccess}
               note="Ven el Calendario sin teléfonos, contactos ni importes (los profes ya entran así; gestión y socios lo ven entero)"
+            />
+            <SectionAccessGroup
+              name="Diario" color="#d09c01" load={getDiarioAccess} save={saveDiarioAccess}
+              note="Ven el Diario, el panel de los profes (profes, gestión y socios ya entran); p. ej. Carolina"
             />
           </div>
         </div>

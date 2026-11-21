@@ -82,3 +82,9 @@ export const CALENDAR_CATEGORIES = ['Competicion', 'Cumpleaños', 'Evento', 'Sus
 export const NO_CATEGORY = 'Sin categoría'
 
 export const NOTION_CALENDAR_URL = 'https://www.notion.so/292d5fb11f5b80129a5aef1e47cf0741'
+
+// Actividades guardadas en Blokes (traslado de Notion a Blokes, paso 1). Solo socio y gestión.
+export const ACTIVITY_STATUSES = ['Pendiente', 'En curso', 'Listo', 'Archivo']
+export const createActivity = (a)     => request('/calendar/activities', 'POST', a).then(json => json.item)
+export const updateActivity = (id, a) => request(`/calendar/activities/${id}`, 'PUT', a).then(json => json.item)
+export const deleteActivity = (id)    => request(`/calendar/activities/${id}`, 'DELETE')

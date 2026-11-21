@@ -1135,3 +1135,260 @@
     font-size: 13px;
   }
 }
+/* =====================================================================
+   IMAGEN CORPORATIVA (rediseño, 21/11/2026)
+   Va al final para mandar sobre lo de arriba sin tocar cómo funciona la cabecera
+   (estructura de Ramiro del 09/11: fila compacta en móvil, «⋯», mapa plegable).
+   Todo con variables de index.css: sirve igual en modo claro y en modo oscuro.
+   ===================================================================== */
+
+.app-header {
+  color: var(--color-text-primary);
+  padding: var(--spacing-lg) var(--spacing-xl) 0;
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: none;
+}
+
+/* Logotipo del manual: claro u oscuro según el modo; el isotipo solo en móvil */
+.app-header__logo-link { display: block; line-height: 0; }
+.app-header__logo {
+  height: auto;
+  width: 190px;
+  max-width: 60vw;
+  border-radius: 0;
+  object-fit: contain;
+}
+.app-header__logo--oscuro,
+.app-header__logo--iso { display: none; }
+:root[data-theme="dark"] .app-header__logo--claro { display: none; }
+:root[data-theme="dark"] .app-header__logo--oscuro { display: block; }
+
+/* Claim manuscrito */
+.app-header__subtitle {
+  font-family: var(--font-hand);
+  font-size: 1.65rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--color-ink);
+  margin-top: 6px;
+}
+
+/* Botones de la cabecera: píldoras con el negro de la marca y CTA en mostaza */
+.app-header__links { gap: 8px; }
+.app-header__link-wrap { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.app-header__link,
+.app-header__link--small {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  font-family: var(--font-heading);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  color: var(--color-ink);
+  background: transparent;
+}
+.app-header__link:hover { background: var(--color-ink); border-color: var(--color-ink); color: var(--color-on-ink); }
+.app-header__link--cta { background: var(--color-accent); border-color: var(--color-accent); color: #1d1d1b; }
+.app-header__link--cta:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); color: #1d1d1b; }
+
+.app-header__login-btn {
+  padding: 6px 14px;
+  margin-top: 12px;
+  border: 1.5px solid var(--color-ink);
+  border-radius: 999px;
+  color: var(--color-ink);
+}
+.app-header__login-btn:hover { background: var(--color-ink); color: var(--color-on-ink); }
+
+/* Usuario */
+.app-header__user {
+  background: var(--color-surface);
+  border-radius: 999px;
+  padding: 6px 12px 6px 6px;
+}
+.app-header__avatar-btn { border-color: var(--color-accent); }
+.app-header__avatar-placeholder { background: var(--color-border); border-color: var(--color-border); }
+.app-header__user-name { color: var(--color-text-primary); }
+.app-header__user-nick,
+.app-header__sub-name,
+.app-header__sub-class { color: var(--color-text-secondary); }
+.app-header__logout-btn { color: var(--color-text-secondary); }
+.app-header__logout-btn:hover { color: var(--color-text-primary); }
+.app-header__user-x { color: var(--color-text-secondary); }
+.app-header__user-x:hover { color: var(--color-text-primary); background: var(--color-accent-soft); }
+.app-header__renew-btn { color: var(--color-accent-text); border-color: var(--color-accent); }
+.app-header__renew-star { color: var(--color-accent); }
+
+.app-header__ver-como,
+.app-header__tema-btn,
+.app-header__menu-toggle,
+.app-header__mapa-toggle {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  border-radius: 999px;
+}
+.app-header__ver-como { border-radius: 6px; }
+.app-header__tema-btn:hover,
+.app-header__mapa-toggle:hover,
+.app-header__menu-toggle:hover { border-color: var(--color-accent); }
+
+/* Menú */
+.app-nav { border-top: 1px solid var(--color-border); }
+.app-nav__link {
+  color: var(--color-text-secondary);
+  font-family: var(--font-heading);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-bottom: 3px solid transparent;
+}
+.app-nav__link:hover { color: var(--color-text-primary); border-bottom-color: var(--color-border); }
+.app-nav__link:active,
+.app-nav__link.active { color: var(--color-text-primary); border-bottom-color: var(--color-accent); }
+.app-nav__link:focus { outline: none; }
+.app-nav__link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: 6px; }
+/* Gestión en peacock (secundario del manual); más claro en oscuro para que se lea */
+.app-nav__link--super { color: var(--brand-peacock); }
+.app-nav__link--super:hover,
+.app-nav__link--super.active { color: var(--brand-firefly); border-bottom-color: var(--brand-peacock); }
+:root[data-theme="dark"] .app-nav__link--super { color: #5fb4d6; }
+:root[data-theme="dark"] .app-nav__link--super:hover,
+:root[data-theme="dark"] .app-nav__link--super.active { color: #9fd3e8; border-bottom-color: #5fb4d6; }
+.app-nav--floating {
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 3px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* Ventana de cerrar sesión */
+.logout-dialog { background: var(--color-surface); color: var(--color-text-primary); border-color: var(--color-border); }
+.logout-dialog__title { color: var(--color-text-primary); }
+.logout-dialog__cancel { border-color: var(--color-border); color: var(--color-text-secondary); }
+.logout-dialog__cancel:hover { border-color: var(--color-text-secondary); color: var(--color-text-primary); }
+.logout-dialog__confirm { background: var(--color-accent); color: #1d1d1b; }
+.logout-dialog__confirm:hover { background: var(--color-accent-hover); }
+
+/* Tarjetas de bloke: limpias, sin marco interior */
+.event-card {
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(29, 29, 27, 0.06);
+}
+.event-card::before { display: none; }
+
+/* Pie */
+.app-footer { color: var(--color-text-secondary); border-top: 1px solid var(--color-border); }
+
+/* Ordenador: logo, claim, botones y usuario en columna a la izquierda; el plano a la derecha */
+@media (min-width: 1000px) {
+  .app-header__logo-section {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    text-align: left;
+    gap: 8px;
+    max-width: 440px;
+  }
+  .app-header__logo { height: auto; width: 190px; }
+  .app-header__extra { margin-left: 0; justify-content: flex-start; }
+  .app-header__link-wrap { justify-content: flex-start; }
+  .app-header__mapa-toggle { margin: 0; padding: 6px 14px; min-height: 0; font-size: 0.8rem; }
+}
+@media (min-width: 1125px) {
+  /* Más protagonismo al plano: más grande, misma proporción (4:1) para que las burbujas no se muevan */
+  .app-header__salas-wrap { max-width: 960px; }
+  .app-header__salas { height: 240px; }
+}
+
+/* Móvil y tablet: misma fila compacta de Ramiro, con el isotipo redondo */
+@media (max-width: 999px) {
+  .app-header { padding: 10px 14px 0; }
+  .app-header__logo--claro,
+  .app-header__logo--oscuro { display: none !important; }
+  .app-header__logo--iso { display: block; width: 40px; height: 40px; }
+  .app-header__extra { border-top-color: var(--color-border); }
+  .app-header__link,
+  .app-header__link--small { font-size: 0.8rem; padding: 6px 12px; }
+}
+
+/* Secciones de gestión a lo ancho de la pantalla, como Los blokes (tienen tablas) */
+.app-main .org,
+.app-main .stats-page,
+.app-main .sa-page,
+.app-main .sv-page,
+.app-main .tablet-yo {
+  max-width: none;
+}
+
+/* Progreso, Ligas, Compe y Entrenamientos: columna centrada y, en el margen izquierdo,
+   un único dibujo de línea en mostaza amoldado al hueco, como en la web del club.
+   Los dibujos son blancos: se usan como máscara y se pintan del color que queramos.
+   --col es el ancho de la columna de cada sección. */
+.app-main:has(.progreso-idx) { --col: 960px; }   /* 4 fotos por fila en el Hall of Fame */
+.app-main:has(.league-page)  { --col: 720px; }
+.app-main:has(.compe-page)   { --col: 880px; }
+.app-main:has(.entrena)      { --col: 1000px; }
+
+.app-main .progreso,
+.app-main .user-stats,
+.app-main .mi-clase,
+.app-main .league-page,
+.app-main .compe-page,
+.app-main .entrena {
+  max-width: var(--col);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.app-main:has(.progreso-idx)::before,
+.app-main:has(.league-page)::before,
+.app-main:has(.compe-page)::before,
+.app-main:has(.entrena)::before {
+  content: '';
+  display: none;
+  position: absolute;
+  top: calc(var(--spacing-lg) + 24px);
+  left: var(--spacing-md);
+  width: min(calc((100% - var(--col)) / 2 - 48px), 440px);
+  height: min(80vh, 760px);
+  background-color: var(--color-accent);
+  opacity: 0.5;
+  -webkit-mask: url('./assets/brand/linea-escalador-vertical.png') no-repeat left top / contain;
+          mask: url('./assets/brand/linea-escalador-vertical.png') no-repeat left top / contain;
+  pointer-events: none;
+}
+.app-main:has(.league-page)::before {
+  -webkit-mask-image: url('./assets/brand/linea-grupo-vertical.png');
+          mask-image: url('./assets/brand/linea-grupo-vertical.png');
+}
+.app-main:has(.compe-page)::before {
+  -webkit-mask-image: url('./assets/brand/linea-isotipo.png');
+          mask-image: url('./assets/brand/linea-isotipo.png');
+  opacity: 0.4;
+}
+.app-main:has(.entrena)::before {
+  -webkit-mask-image: url('./assets/brand/linea-entreno-regleta.svg');
+          mask-image: url('./assets/brand/linea-entreno-regleta.svg');
+}
+/* Solo cuando el hueco del lado da para el dibujo (en móvil y tablet no se ve) */
+@media (min-width: 1180px) {
+  .app-main:has(.league-page)::before { display: block; }
+}
+@media (min-width: 1420px) {
+  .app-main:has(.progreso-idx)::before { display: block; }
+}
+@media (min-width: 1340px) {
+  .app-main:has(.compe-page)::before { display: block; }
+}
+@media (min-width: 1460px) {
+  .app-main:has(.entrena)::before { display: block; }
+}
+
+/* Numerito de avisos en el menú (Diario) */
+.app-nav__bubble {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px; margin-left: 6px; border-radius: 999px;
+  background: var(--color-accent); color: #1d1d1b; font-size: 0.72rem; font-weight: 800; letter-spacing: 0;
+}

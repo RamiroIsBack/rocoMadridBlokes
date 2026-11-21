@@ -6,17 +6,17 @@
     <meta name="description" content="Blokes — Problemas de búlder en Rocoteca Madrid" />
     <title>Blokes — Rocoteca Madrid</title>
     <link rel="manifest" href="%BASE_URL%manifest.webmanifest" />
-    <meta name="theme-color" content="#1a1714" />
+    <meta name="theme-color" content="#e9eef6" />
     <!-- Ramiro, 13/11: 2 modos (claro/oscuro, sin automático) — se fija el data-theme aquí,
          antes del CSS, para que no haya parpadeo claro al cargar en quien tiene oscuro
-         guardado (o no ha elegido nunca: por defecto oscuro, igual que hasta ahora). -->
+         guardado. Quien no ha elegido nunca ve el claro (imagen corporativa, 21/11). -->
     <script>
       (function () {
         try {
           var t = localStorage.getItem('blokes_tema')
-          document.documentElement.setAttribute('data-theme', t === 'light' ? 'light' : 'dark')
+          document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light')
         } catch (e) {
-          document.documentElement.setAttribute('data-theme', 'dark')
+          document.documentElement.setAttribute('data-theme', 'light')
         }
       })()
     </script>
