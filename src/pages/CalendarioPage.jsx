@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   useCalendar, useCalendarAccess, saveNotionToken, notionColor,
   CATEGORY_COLORS, CALENDAR_CATEGORIES, NO_CATEGORY, NOTION_CALENDAR_URL,
+  ACTIVITY_STATUSES, createActivity, updateActivity, deleteActivity,
 } from '../hooks/useCalendar'
 import { TYPES, typeOf, statusOf } from '../hooks/useEvents'
 import { fmtEur } from '../utils/monthFormat'
@@ -59,7 +60,8 @@ function fromNotion(it) {
     time: start.time, endTime: end.time,
     title: it.title,
     category: it.category?.name || NO_CATEGORY,
-    color: notionColor(it.category?.color),
+    color: notionColor(it.category?.color || CATEGORY_COLORS[it.category?.name]),
+    blokes: it.source === 'blokes',
     ready: READY.includes(it.status?.name),
     archived: it.status?.name === 'Archivo',
   }
@@ -227,7 +229,7 @@ function MonthSummary({ items, month, order, onOpen }) {
 
 // ─── Detalle ────────────────────────────────────────────────────────────────
 // Quien no es socio ni gestión recibe del servidor menos campos: las filas vacías no salen.
-function Detail({ it, full, onClose }) {
+function Detail({ it, full, canEdit, onClose, onEdit }) {
   const r   = it.raw
   const row = (label, value) => value ? <div className="cal-detail__row"><span>{label}</span><p>{value}</p></div> : null
   const when = it.endDate !== it.date
@@ -244,6 +246,7 @@ function Detail({ it, full, onClose }) {
         {row('Cuándo', when)}
         {it.kind === 'notion' ? (
           <>
+            {row('Dónde está', it.blokes ? 'Blokes' : 'Notion')}
             {row('Categoría', it.category)}
             {row('Estado', r.status?.name)}
             {row('Encargado', r.owners?.join(', '))}
@@ -266,12 +269,88 @@ function Detail({ it, full, onClose }) {
       </div>
       {full && (
         <div className="sa-pay-actions">
-          {it.kind === 'notion'
-            ? <a className="sa-list-save__btn cal-btn-link" href={r.url} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>
-            : <Link className="sa-list-save__btn cal-btn-link" to="/eventos">Ver en Eventos</Link>}
+          {it.kind === 'booking'
+            ? <Link className="sa-list-save__btn cal-btn-link" to="/eventos">Ver en Eventos</Link>
+            : it.blokes
+              ? (canEdit && <button type="button" className="sa-list-save__btn" onClick={() => onEdit(it)}>Editar</button>)
+              : <a className="sa-list-save__btn cal-btn-link" href={r.url} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>}
+          {it.blokes && r.updated_by && <span className="sa-pay-muted cal-detail__who">Último cambio: {r.updated_by}</span>}
         </div>
       )}
     </div>
+  )
+}
+
+// ─── Crear / editar una actividad guardada en Blokes ───────────────────────
+const splitLocal = v => v ? { d: v.slice(0, 10), t: v.length > 10 ? v.slice(11, 16) : '' } : { d: '', t: '' }
+const joinLocal  = (d, t) => d ? (t ? `${d}T${t}` : d) : ''
+
+function ActivityForm({ initial, onClose, onSaved }) {
+  const r     = initial?.raw || {}
+  const start = splitLocal(r.start)
+  const end   = splitLocal(r.end)
+  const [f, setF] = useState({
+    title: r.title && r.title !== 'Sin título' ? r.title : '',
+    date: start.d || today(), time: start.t, endDate: end.d, endTime: end.t,
+    category: r.category?.name || CALENDAR_CATEGORIES[0], status: r.status?.name || 'Pendiente',
+    owners: (r.owners || []).join(', '), concept: r.concept || '', contact: r.contact || '',
+    price: r.price ?? '', comment: r.comment || '',
+  })
+  const [busy, setBusy]   = useState(false)
+  const [error, setError] = useState('')
+  const set   = (k, v) => setF(x => ({ ...x, [k]: v }))
+  const field = (label, el, wide) => <label className={`ev-field${wide ? ' ev-field--wide' : ''}`}><span>{label}</span>{el}</label>
+
+  const submit = async e => {
+    e.preventDefault()
+    if (f.endDate && f.endDate < f.date) { setError('La fecha de fin no puede ser antes que la de inicio'); return }
+    const body = {
+      title: f.title.trim(), start: joinLocal(f.date, f.time), end: joinLocal(f.endDate || (f.endTime ? f.date : ''), f.endTime),
+      category: f.category, status: f.status,
+      owners: f.owners.split(',').map(x => x.trim()).filter(Boolean),
+      concept: f.concept, contact: f.contact, comment: f.comment,
+      price: f.price === '' ? null : Number(f.price),
+    }
+    setBusy(true); setError('')
+    try {
+      if (r.bid) await updateActivity(r.bid, body)
+      else await createActivity(body)
+      onSaved()
+    } catch (err) { setError(err.message) } finally { setBusy(false) }
+  }
+  const remove = async () => {
+    if (!window.confirm('¿Borrar esta actividad? No se puede deshacer.')) return
+    setBusy(true); setError('')
+    try { await deleteActivity(r.bid); onSaved() } catch (err) { setError(err.message); setBusy(false) }
+  }
+
+  return (
+    <form className="sa-pay-file ev-form" onSubmit={submit}>
+      <div className="sa-pay-file__head">
+        <h3 className="sa-pay-file__title">{r.bid ? 'Editar actividad' : 'Nueva actividad'}</h3>
+        <button type="button" className="sa-pay-action" onClick={onClose}>Cerrar</button>
+      </div>
+      <div className="ev-form__grid">
+        {field('Título', <input className="pr-input ev-input" value={f.title} maxLength={190} onChange={e => set('title', e.target.value)} required autoFocus />, true)}
+        {field('Fecha', <input type="date" className="pr-input ev-input" value={f.date} onChange={e => set('date', e.target.value)} required />)}
+        {field('Hora (opcional)', <input type="time" className="pr-input ev-input" value={f.time} onChange={e => set('time', e.target.value)} />)}
+        {field('Hasta el día (opcional)', <input type="date" className="pr-input ev-input" value={f.endDate} min={f.date} onChange={e => set('endDate', e.target.value)} />)}
+        {field('Hora de fin (opcional)', <input type="time" className="pr-input ev-input" value={f.endTime} onChange={e => set('endTime', e.target.value)} />)}
+        {field('Categoría', <select className="pr-select ev-input" value={f.category} onChange={e => set('category', e.target.value)}>{CALENDAR_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select>)}
+        {field('Estado', <select className="pr-select ev-input" value={f.status} onChange={e => set('status', e.target.value)}>{ACTIVITY_STATUSES.map(c => <option key={c} value={c}>{c}</option>)}</select>)}
+        {field('Encargados', <input className="pr-input ev-input" placeholder="Separados por comas" value={f.owners} onChange={e => set('owners', e.target.value)} />)}
+        {field('Concepto', <input className="pr-input ev-input" value={f.concept} onChange={e => set('concept', e.target.value)} />)}
+        {field('Contacto', <input className="pr-input ev-input" placeholder="Nombre, teléfono…" value={f.contact} onChange={e => set('contact', e.target.value)} />)}
+        {field('Precio', <input type="number" min="0" step="0.01" className="pr-input ev-input" value={f.price} onChange={e => set('price', e.target.value)} />)}
+        {field('Comentario', <textarea className="sa-pay-textarea" rows={2} maxLength={2000} value={f.comment} onChange={e => set('comment', e.target.value)} />, true)}
+      </div>
+      <p className="sa-pay-muted">Los profes y la lista del Diario la ven sin contacto, precio ni comentarios.</p>
+      {error && <p className="sa-error">{error}</p>}
+      <div className="sa-pay-actions">
+        <button className="sa-list-save__btn" disabled={busy}>{busy ? 'Guardando…' : 'Guardar'}</button>
+        {r.bid && <button type="button" className="sa-pay-action pr-danger" disabled={busy} onClick={remove}>Borrar</button>}
+      </div>
+    </form>
   )
 }
 
@@ -351,6 +430,7 @@ export default function CalendarioPage({ embedded = false }) {
   })
   const [open, setOpen]   = useState(null)
   const [setup, setSetup] = useState(false)
+  const [editing, setEditing] = useState(null)   // null · {} (nueva) · item de Blokes
 
   // Se pide a Notion lo que cubren a la vez la semana y el mes que se ven
   const cells = monthCells(month)
@@ -407,7 +487,10 @@ export default function CalendarioPage({ embedded = false }) {
 
   const configured = data?.configured
   const shiftWeek  = n => setWeek(w => n === 0 ? weekStart(today()) : addDays(w, n))
-  const openItem   = it => { setOpen(it); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const openItem   = it => { setEditing(null); setOpen(it); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const canEdit    = !!data?.can_edit
+  const startEdit  = it => { setOpen(null); setEditing(it || {}); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  const afterSave  = () => { setEditing(null); setOpen(null); reload(true) }
 
   return (
     <div className={embedded ? 'cal-embedded' : 'sa-page'}>
@@ -425,6 +508,7 @@ export default function CalendarioPage({ embedded = false }) {
         <>
           <div className="sa-section cal-controls">
           <div className="ev-toolbar">
+            {canEdit && <button className="sa-list-save__btn" onClick={() => startEdit(null)}>+ Actividad</button>}
             <button className="sa-pay-action" onClick={() => reload(true)} disabled={loading}>{loading ? 'Cargando…' : 'Actualizar'}</button>
             {full && <a className="sa-pay-action cal-btn-link" href={NOTION_CALENDAR_URL} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>}
             <EventTypesDropdown selected={prefs.evTypes} onChange={evTypes => update({ evTypes })} />
@@ -446,14 +530,16 @@ export default function CalendarioPage({ embedded = false }) {
 
           {error && <div className="sa-error">Error: {error}</div>}
 
-          {open && <Detail key={open.key} it={open} full={full} onClose={() => setOpen(null)} />}
+          {editing && <ActivityForm key={editing.key || 'nueva'} initial={editing.key ? editing : null} onClose={() => setEditing(null)} onSaved={afterSave} />}
+          {open && <Detail key={open.key} it={open} full={full} canEdit={canEdit} onClose={() => setOpen(null)} onEdit={startEdit} />}
 
           <WeekSummary items={items} start={week} onShift={shiftWeek} onOpen={openItem} />
           <MonthCalendar items={items} month={month} onMonth={setMonth} onOpen={openItem} legend={legend} />
           <MonthSummary items={items} month={month} order={[...cats, ...TYPES.map(t => `${t.label} (Eventos)`)]} onOpen={openItem} />
           <p className="sa-pay-note">
-            Los datos vienen de Notion («Funciones Rocomadrid») y de Eventos, y se refrescan cada 5 minutos; «Actualizar» los trae al momento.
-            {full && ' Para cambiar una tarea, ábrela en Notion.'}
+            Estamos pasando el calendario de Notion a Blokes: salen juntas las actividades de Notion («Funciones Rocomadrid»), las ya guardadas en Blokes y las reservas de Eventos.
+            Lo de Notion se refresca cada 5 minutos; «Actualizar» lo trae al momento.
+            {canEdit && ' Las actividades nuevas, créalas con «+ Actividad»; las de Notion se siguen cambiando en Notion.'}
           </p>
         </>
       )}

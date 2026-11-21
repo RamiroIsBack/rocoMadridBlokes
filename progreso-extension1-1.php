@@ -23585,6 +23585,17 @@ function calendar_get_items($request) {
     $out = calendar_notion_items($from, $to, (bool) $request->get_param('refresh'));
     if (is_wp_error($out)) return $out;
 
+    // Traslado a Blokes: las actividades guardadas aquí, junto a las de Notion. Las de Notion
+    // que ya se copiaron a Blokes (paso 2) no se repiten.
+    $imported = array_flip(activities_imported_notion_ids());
+    if ($imported) {
+        $out['items'] = array_values(array_filter($out['items'], function($it) use ($imported) {
+            return !isset($imported[$it['id']]);
+        }));
+    }
+    $out['items']   = array_merge($out['items'], activities_items($from, $to));
+    $out['can_edit'] = activities_can_edit();
+
     events_ssa_sync();
     $bookings = array_values(array_filter(events_get_bookings(), function($b) use ($from, $to) {
         return $b['date'] >= $from && $b['date'] <= $to && $b['status'] !== 'cancelada';
@@ -23592,7 +23603,7 @@ function calendar_get_items($request) {
 
     $out['full'] = calendar_full_view();
     if (!$out['full']) {
-        $keep_task    = array_flip(array('id', 'title', 'start', 'end', 'category', 'status', 'owners'));
+        $keep_task    = array_flip(array('id', 'source', 'title', 'start', 'end', 'category', 'status', 'owners'));
         $keep_booking = array_flip(array('id', 'date', 'time', 'end_time', 'type', 'status', 'honoree', 'age', 'kids', 'monitors'));
         $out['items'] = array_map(function($it) use ($keep_task) { return array_intersect_key($it, $keep_task); }, $out['items']);
         $bookings     = array_map(function($b) use ($keep_booking) { return array_intersect_key($b, $keep_booking); }, $bookings);
@@ -23809,4 +23820,197 @@ function diario_save_access($request) {
     }
     update_option('blokes_diario_access', $clean, false);
     return rest_ensure_response(array('success' => true, 'emails' => $clean));
+}
+
+// ============================================================
+//  superadmin/v1 — Actividades del calendario guardadas en Blokes
+//  Traslado progresivo de Notion a Blokes (21/11/2026), paso 1: las
+//  actividades del calendario (Competición, Cumpleaños, Evento,
+//  Sustitución, Vacaciones) se pueden crear y editar aquí. Mientras dure
+//  el traslado, el calendario enseña juntas las de Notion y las de Blokes.
+//  Crear/editar/borrar: socio y gestión. Verlas: quien ve el Calendario
+//  (los que no son socio/gestión, en versión reducida).
+//  notion_id: para el paso 2 (copiar de Notion sin duplicar).
+// ============================================================
+
+function activities_table() { global $wpdb; return $wpdb->prefix . 'blokes_activities'; }
+
+function activities_ensure_table() {
+    if (get_option('blokes_activities_db_v') === '1') return;
+    global $wpdb;
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE " . activities_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        title       varchar(190) NOT NULL DEFAULT '',
+        start_at    varchar(16)  NOT NULL DEFAULT '',
+        end_at      varchar(16)  NOT NULL DEFAULT '',
+        category    varchar(60)  NOT NULL DEFAULT '',
+        status      varchar(60)  NOT NULL DEFAULT '',
+        owners      text         NOT NULL,
+        concept     text         NOT NULL,
+        comment     text         NOT NULL,
+        contact     text         NOT NULL,
+        price       decimal(10,2) NULL,
+        notion_id   varchar(64)  NOT NULL DEFAULT '',
+        created_by  varchar(120) NOT NULL DEFAULT '',
+        updated_by  varchar(120) NOT NULL DEFAULT '',
+        created_at  datetime     NOT NULL,
+        updated_at  datetime     NOT NULL,
+        PRIMARY KEY (id),
+        KEY start_at (start_at),
+        KEY notion_id (notion_id)
+    ) " . $wpdb->get_charset_collate() . ";");
+    update_option('blokes_activities_db_v', '1', false);
+}
+
+function activities_can_edit() {
+    return in_array(blokes_get_app_role(), array('socio', 'gestion'));
+}
+
+// Fecha "AAAA-MM-DD" o fecha y hora local "AAAA-MM-DDTHH:MM" (sin zona: hora de Madrid)
+function activities_clean_when($v) {
+    $v = trim((string) $v);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) return $v;
+    if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/', $v)) return $v;
+    return '';
+}
+
+// Mismo formato que las tareas de Notion (calendar_map_page) para que el calendario las trate igual
+function activities_to_item($r) {
+    $owners = json_decode($r['owners'] ?: '[]', true);
+    return array(
+        'id'       => 'b-' . $r['id'],
+        'bid'      => (int) $r['id'],
+        'source'   => 'blokes',
+        'url'      => '',
+        'title'    => $r['title'] !== '' ? $r['title'] : 'Sin título',
+        'start'    => $r['start_at'],
+        'end'      => $r['end_at'] !== '' ? $r['end_at'] : null,
+        'category' => $r['category'] !== '' ? array('name' => $r['category'], 'color' => '') : null,
+        'status'   => $r['status'] !== '' ? array('name' => $r['status'], 'color' => '') : null,
+        'owners'   => is_array($owners) ? $owners : array(),
+        'concept'  => $r['concept'],
+        'comment'  => $r['comment'],
+        'contact'  => $r['contact'],
+        'price'    => $r['price'] !== null ? (float) $r['price'] : null,
+        'updated_by' => $r['updated_by'],
+        'updated_at' => $r['updated_at'],
+    );
+}
+
+// Las del rango (lo que empieza hasta 60 días antes entra si termina dentro, como en Notion)
+function activities_items($from, $to) {
+    global $wpdb;
+    activities_ensure_table();
+    $since = gmdate('Y-m-d', strtotime($from) - 60 * DAY_IN_SECONDS);
+    $rows  = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . activities_table() . " WHERE start_at >= %s AND start_at <= %s ORDER BY start_at",
+        $since, $to . 'T99:99'
+    ), ARRAY_A);
+    $out = array();
+    foreach ((array) $rows as $r) {
+        $last = substr($r['end_at'] !== '' ? $r['end_at'] : $r['start_at'], 0, 10);
+        if ($last >= $from) $out[] = activities_to_item($r);
+    }
+    return $out;
+}
+
+function activities_imported_notion_ids() {
+    global $wpdb;
+    activities_ensure_table();
+    return array_filter((array) $wpdb->get_col("SELECT notion_id FROM " . activities_table() . " WHERE notion_id <> ''"));
+}
+
+function activities_fields_from_request($body, $partial = false) {
+    $f = array();
+    if (!$partial || array_key_exists('title', $body))    $f['title']    = mb_substr(sanitize_text_field($body['title'] ?? ''), 0, 190);
+    if (!$partial || array_key_exists('start', $body))    $f['start_at'] = activities_clean_when($body['start'] ?? '');
+    if (!$partial || array_key_exists('end', $body))      $f['end_at']   = activities_clean_when($body['end'] ?? '');
+    if (!$partial || array_key_exists('category', $body)) $f['category'] = mb_substr(sanitize_text_field($body['category'] ?? ''), 0, 60);
+    if (!$partial || array_key_exists('status', $body))   $f['status']   = mb_substr(sanitize_text_field($body['status'] ?? ''), 0, 60);
+    if (!$partial || array_key_exists('owners', $body)) {
+        $owners = array();
+        foreach ((is_array($body['owners'] ?? null) ? $body['owners'] : array()) as $o) {
+            $o = mb_substr(sanitize_text_field((string) $o), 0, 60);
+            if ($o !== '' && !in_array($o, $owners)) $owners[] = $o;
+        }
+        $f['owners'] = wp_json_encode($owners);
+    }
+    foreach (array('concept', 'comment', 'contact') as $k) {
+        if (!$partial || array_key_exists($k, $body)) $f[$k] = sanitize_textarea_field($body[$k] ?? '');
+    }
+    if (!$partial || array_key_exists('price', $body)) {
+        $p = $body['price'] ?? null;
+        $f['price'] = ($p === null || $p === '') ? null : round((float) $p, 2);
+    }
+    return $f;
+}
+
+function activities_who() {
+    $u = wp_get_current_user();
+    return $u && $u->ID ? ($u->display_name ?: $u->user_login) : '';
+}
+
+add_action('rest_api_init', function() {
+    register_rest_route('superadmin/v1', '/calendar/activities', array(
+        'methods'             => 'POST',
+        'callback'            => 'activities_create',
+        'permission_callback' => 'activities_can_edit',
+    ));
+    register_rest_route('superadmin/v1', '/calendar/activities/(?P<id>\d+)', array(
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'activities_update',
+            'permission_callback' => 'activities_can_edit',
+        ),
+        array(
+            'methods'             => 'DELETE',
+            'callback'            => 'activities_delete',
+            'permission_callback' => 'activities_can_edit',
+        ),
+    ));
+});
+
+function activities_get_row($id) {
+    global $wpdb;
+    return $wpdb->get_row($wpdb->prepare("SELECT * FROM " . activities_table() . " WHERE id = %d", $id), ARRAY_A);
+}
+
+function activities_create($request) {
+    global $wpdb;
+    activities_ensure_table();
+    $f = activities_fields_from_request((array) $request->get_json_params());
+    if ($f['title'] === '' || $f['start_at'] === '') {
+        return new WP_Error('bad_activity', 'Falta el título o la fecha', array('status' => 400));
+    }
+    $now = current_time('mysql');
+    $f['notion_id']  = '';
+    $f['created_by'] = $f['updated_by'] = activities_who();
+    $f['created_at'] = $f['updated_at'] = $now;
+    if ($wpdb->insert(activities_table(), $f) === false) {
+        return new WP_Error('db_error', 'No se pudo guardar la actividad', array('status' => 500));
+    }
+    return rest_ensure_response(array('success' => true, 'item' => activities_to_item(activities_get_row($wpdb->insert_id))));
+}
+
+function activities_update($request) {
+    global $wpdb;
+    activities_ensure_table();
+    $id = (int) $request['id'];
+    if (!activities_get_row($id)) return new WP_Error('not_found', 'Esa actividad ya no existe', array('status' => 404));
+    $f = activities_fields_from_request((array) $request->get_json_params(), true);
+    if ((isset($f['title']) && $f['title'] === '') || (isset($f['start_at']) && $f['start_at'] === '')) {
+        return new WP_Error('bad_activity', 'Falta el título o la fecha', array('status' => 400));
+    }
+    $f['updated_by'] = activities_who();
+    $f['updated_at'] = current_time('mysql');
+    $wpdb->update(activities_table(), $f, array('id' => $id));
+    return rest_ensure_response(array('success' => true, 'item' => activities_to_item(activities_get_row($id))));
+}
+
+function activities_delete($request) {
+    global $wpdb;
+    activities_ensure_table();
+    $wpdb->delete(activities_table(), array('id' => (int) $request['id']));
+    return rest_ensure_response(array('success' => true));
 }
