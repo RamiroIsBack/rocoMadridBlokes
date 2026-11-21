@@ -55,16 +55,25 @@ $GLOBALS['blokes_admin_emails']      = array_merge(
     $GLOBALS['blokes_profesores_emails']
 );
 
-// Devuelve las listas activas: siempre desde blog 1 (fuente de verdad única en multisite)
+// Devuelve las listas activas: siempre desde blog 1 (fuente de verdad única en multisite).
+// 🔴 Cowork, 20/11 18:55: antes, en cuanto la lista guardada en Superadmin → Acceso no estaba
+// vacía, sustituía ENTERA a la del código — un alta nueva en el código (Edu 13ac732, Isa
+// e0e77db) no tenía ningún efecto porque "Profesores" ya tenía guardados otros emails desde
+// Acceso. Ahora se UNEN las dos (nunca se quita a nadie, solo se añade) — un alta en el código
+// siempre hace efecto, y Acceso sigue pudiendo añadir gente sin tocar el código.
 function blokes_get_email_lists() {
     switch_to_blog(1);
     $saved = get_option('blokes_email_lists');
     restore_current_blog();
+    $unir = function($clave) use ($saved) {
+        $guardada = (is_array($saved) && !empty($saved[$clave])) ? $saved[$clave] : array();
+        return array_values(array_unique(array_merge($GLOBALS['blokes_' . $clave . '_emails'], $guardada)));
+    };
     return array(
-        'socios'     => (is_array($saved) && !empty($saved['socios']))     ? $saved['socios']     : $GLOBALS['blokes_socios_emails'],
-        'gestion'    => (is_array($saved) && !empty($saved['gestion']))    ? $saved['gestion']    : $GLOBALS['blokes_gestion_emails'],
-        'profesores' => (is_array($saved) && !empty($saved['profesores'])) ? $saved['profesores'] : $GLOBALS['blokes_profesores_emails'],
-        'tablets'    => (is_array($saved) && !empty($saved['tablets']))    ? $saved['tablets']    : $GLOBALS['blokes_tablets_emails'],
+        'socios'     => $unir('socios'),
+        'gestion'    => $unir('gestion'),
+        'profesores' => $unir('profesores'),
+        'tablets'    => $unir('tablets'),
     );
 }
 
