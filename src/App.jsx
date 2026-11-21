@@ -21,6 +21,8 @@ import CalendarioPage from './pages/CalendarioPage'
 import CompePage from './pages/CompePage'
 import CompeDirectoPage from './pages/CompeDirectoPage'
 import InstalarPage from './pages/InstalarPage'
+import DiarioPage from './pages/DiarioPage'
+import CherifsPage from './pages/CherifsPage'
 import { setVerComo, clearVerComo } from './utils/verComo'
 import { getTema, setTema } from './utils/theme'
 import ProfileSetupModal from './components/ProfileSetupModal'
@@ -29,6 +31,7 @@ import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import { useEventsAccess } from './hooks/useEvents'
 import { useCalendarAccess } from './hooks/useCalendar'
+import { useDiarioAccess } from './hooks/useDiario'
 import logotipo from './assets/brand/logotipo-4-tintas-iso-negro.png'
 import logotipoOscuro from './assets/brand/logotipo-4-tintas-iso-negro-oscuro.png'
 import isotipo from './assets/brand/isotipo-negro-2-tintas.png'
@@ -95,6 +98,7 @@ export default function App() {
   const sd = window.blokesSiteData || {}
   const canEvents = useEventsAccess()
   const canCalendar = useCalendarAccess().can
+  const canDiario   = useDiarioAccess()
 
   // Profile modal state
   const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto, optinWhatsapp, saveOptinWhatsapp } = useProfile()
@@ -385,6 +389,11 @@ export default function App() {
 
           <nav className={`app-nav${navFloating ? ' app-nav--floating' : ''}${navFloating && navVisible ? ' app-nav--visible' : ''}`}>
             <ul className="app-nav__list">
+              {canDiario && (
+                <li className="app-nav__item">
+                  <NavLink to="/diario" className="app-nav__link">Diario</NavLink>
+                </li>
+              )}
               <li className="app-nav__item">
                 <NavLink to="/" className="app-nav__link" end>Los blokes</NavLink>
               </li>
@@ -439,6 +448,11 @@ export default function App() {
                   <NavLink to="/playground" className="app-nav__link app-nav__link--super">Horarios Profes</NavLink>
                 </li>
               )}
+              {sd.userRole === 'socio' && (
+                <li className="app-nav__item">
+                  <NavLink to="/cherifs" className="app-nav__link app-nav__link--super">Cherifs</NavLink>
+                </li>
+              )}
             </ul>
           </nav>
         </header>
@@ -471,6 +485,8 @@ export default function App() {
             <Route path="/instalar" element={<InstalarPage />} />
             <Route path="/eventos" element={<EventosPage />} />
             <Route path="/calendario" element={<CalendarioPage />} />
+            <Route path="/diario" element={<DiarioPage />} />
+            <Route path="/cherifs" element={<CherifsPage />} />
             {/* Cowork, 09/11 07:45: una ruta inexistente (p. ej. /blokes/coleccion) dejaba el
                 contenido en blanco — sin catch-all, react-router no renderiza nada. */}
             <Route path="*" element={<PaginaNoExiste />} />

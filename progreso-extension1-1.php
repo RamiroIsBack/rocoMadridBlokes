@@ -23754,3 +23754,56 @@ function blokes_map_delete_extra($request) {
     blokes_map_store($doc);
     return rest_ensure_response(array('success' => true, 'extras' => $doc['extras']));
 }
+
+// ============================================================
+//  superadmin/v1 — Diario (dashboard de los profes)
+//  Lo ven socio, gestión y profesor por su rol, y además los emails de la
+//  lista de Diario (blokes_diario_access, la edita un socio desde
+//  Superadmin → Acceso; p. ej. Carolina). De momento solo controla el
+//  acceso: el contenido del Diario se irá añadiendo.
+// ============================================================
+
+function diario_access_list() {
+    $list = get_option('blokes_diario_access', array());
+    return is_array($list) ? array_values($list) : array();
+}
+
+function diario_can_view() {
+    if (in_array(blokes_get_app_role(), array('socio', 'gestion', 'profesor'))) return true;
+    if (!is_user_logged_in()) return false;
+    $email = strtolower(trim(wp_get_current_user()->user_email));
+    return $email !== '' && in_array($email, array_map('strtolower', diario_access_list()));
+}
+
+add_action('rest_api_init', function() {
+    register_rest_route('superadmin/v1', '/diario/access', array(
+        array(
+            'methods'             => 'GET',
+            'callback'            => 'diario_get_access',
+            'permission_callback' => '__return_true',
+        ),
+        array(
+            'methods'             => 'PUT',
+            'callback'            => 'diario_save_access',
+            'permission_callback' => function() { return blokes_get_app_role() === 'socio'; },
+        ),
+    ));
+});
+
+// Cualquiera puede preguntar si tiene acceso (para enseñar o no el menú); la lista solo la ve un socio.
+function diario_get_access() {
+    $out = array('can' => diario_can_view());
+    if (blokes_get_app_role() === 'socio') $out['emails'] = diario_access_list();
+    return rest_ensure_response($out);
+}
+
+function diario_save_access($request) {
+    $body  = $request->get_json_params();
+    $clean = array();
+    foreach ((is_array($body['emails'] ?? null) ? $body['emails'] : array()) as $email) {
+        $e = sanitize_email(strtolower(trim((string) $email)));
+        if ($e && !in_array($e, $clean)) $clean[] = $e;
+    }
+    update_option('blokes_diario_access', $clean, false);
+    return rest_ensure_response(array('success' => true, 'emails' => $clean));
+}

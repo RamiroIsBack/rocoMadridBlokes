@@ -16,6 +16,7 @@ import ProjectsSection from '../components/ProjectsSection'
 import BlokesMapSection from '../components/BlokesMapSection'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
 import { getCalendarAccess, saveCalendarAccess } from '../hooks/useCalendar'
+import { getDiarioAccess, saveDiarioAccess } from '../hooks/useDiario'
 import './SuperAdminPage.css'
 
 const PERIOD_OPTIONS = [
@@ -1572,6 +1573,10 @@ function ListasSection() {
             <SectionAccessGroup
               name="Calendario" color="#a78bfa" load={getCalendarAccess} save={saveCalendarAccess}
               note="Ven el Calendario sin teléfonos, contactos ni importes (los profes ya entran así; gestión y socios lo ven entero)"
+            />
+            <SectionAccessGroup
+              name="Diario" color="#d09c01" load={getDiarioAccess} save={saveDiarioAccess}
+              note="Ven el Diario, el panel de los profes (profes, gestión y socios ya entran); p. ej. Carolina"
             />
           </div>
         </div>

@@ -23,6 +23,8 @@ export const WHO = {
 
 // Actualizado el 20/11/2026 con todo lo que había en producción.
 export const BLOKES_MAP = [
+  { id: 'diario', title: 'Diario', who: 'profes', desc: 'Panel del día para los profes (y la lista de Acceso, p. ej. Carolina). En construcción.' },
+
   { id: 'publico', title: 'Parte pública', who: 'todos', children: [
     { id: 'cabecera', title: 'Cabecera y menú', desc: 'Logotipo, usuario y suscripción, mapa de salas con los blokes por color, menú y botón de modo claro/oscuro.' },
     { id: 'tema', title: 'Modo claro / oscuro', desc: 'Botón para cambiar entre claro y oscuro; se recuerda en cada navegador.' },
@@ -101,7 +103,7 @@ export const BLOKES_MAP = [
   ]},
 
   { id: 'superadmin', title: 'Superadmin', who: 'socios', children: [
-    { id: 'sa-tesoreria', title: 'Dinero', children: [
+    { id: 'sa-tesoreria', title: 'Tesorería', children: [
       { id: 'sa-ingresos', title: 'Ingresos', desc: 'Ventas de la tienda y del club, con o sin «Uso de Rocódromo»; desglose en gráfica por clasificación.' },
       { id: 'sa-clases', title: 'Clases', desc: 'Rentabilidad por clase (ingreso real y coste real del profe), retención por clase y por profe, alumnos por año, recomendación (promocionar, hablar con el profe, juntar o cerrar) y resumen de Bajo tarifa.' },
       { id: 'sa-gastos', title: 'Gastos banco', desc: 'Movimientos del banco clasificados, nóminas reales, IVA por trimestre y cuadre de saldo por año.' },
@@ -109,7 +111,7 @@ export const BLOKES_MAP = [
       { id: 'sa-pl', title: 'P&L', desc: 'Ventas sin IVA (con el IVA real de las facturas), costes fijos y resultado; resumen anual, variación 26/25 y cuadre de saldo del Club y la Rocoteca.' },
     ]},
     { id: 'sa-nominas', title: 'Nóminas', desc: 'Datos de los trabajadores, pagos y voluntarios (fijo o por horas).' },
-    { id: 'sa-gestion', title: 'Obras y compras', children: [
+    { id: 'sa-gestion', title: 'Gestión', children: [
       { id: 'sa-presupuestos', title: 'Presupuestos', desc: 'Presupuestos de obras y compras por zona, con actuaciones inmediatas.' },
       { id: 'sa-proyectos', title: 'Proyectos', desc: 'Parecida a Presupuestos: decidir cuál se queda.' },
     ]},
@@ -119,6 +121,8 @@ export const BLOKES_MAP = [
   ]},
 
   { id: 'horarios-profes', title: 'Horarios Profes', who: 'socios', desc: 'Playground de horarios: horario base, reasignar clases, añadir horas.' },
+
+  { id: 'cherifs', title: 'Cherifs', who: 'socios', desc: 'Dashboard para controlar todo el negocio. En construcción.' },
 ]
 
 // A dónde lleva pulsar cada elemento del mapa (ruta de la app y, si hace falta,
@@ -150,4 +154,5 @@ export const MAP_LINKS = {
   'sa-gestion': '/superadmin?tab=presupuestos', 'sa-presupuestos': '/superadmin?tab=presupuestos', 'sa-proyectos': '/superadmin?tab=proyectos',
   'sa-acceso': '/superadmin?tab=acceso',
   'horarios-profes': '/playground',
+  diario: '/diario', cherifs: '/cherifs',
 }

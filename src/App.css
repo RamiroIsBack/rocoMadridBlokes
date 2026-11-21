@@ -1352,16 +1352,16 @@
   top: calc(var(--spacing-lg) + 24px);
   left: var(--spacing-md);
   width: min(calc((100% - var(--col)) / 2 - 48px), 440px);
-  height: min(75vh, 640px);
+  height: min(80vh, 760px);
   background-color: var(--color-accent);
   opacity: 0.5;
-  -webkit-mask: url('./assets/brand/linea-escalador-cuerda.png') no-repeat left top / contain;
-          mask: url('./assets/brand/linea-escalador-cuerda.png') no-repeat left top / contain;
+  -webkit-mask: url('./assets/brand/linea-escalador-vertical.png') no-repeat left top / contain;
+          mask: url('./assets/brand/linea-escalador-vertical.png') no-repeat left top / contain;
   pointer-events: none;
 }
 .app-main:has(.league-page)::before {
-  -webkit-mask-image: url('./assets/brand/linea-grupo-saltando.png');
-          mask-image: url('./assets/brand/linea-grupo-saltando.png');
+  -webkit-mask-image: url('./assets/brand/linea-grupo-vertical.png');
+          mask-image: url('./assets/brand/linea-grupo-vertical.png');
 }
 .app-main:has(.compe-page)::before {
   -webkit-mask-image: url('./assets/brand/linea-isotipo.png');
