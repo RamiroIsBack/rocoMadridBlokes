@@ -97,10 +97,14 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
     renderList(box, st.orden[cat.id] || [], rowHeightFor(box, MAX_ROWS_ROT), MAX_ROWS_ROT, flip)
     drawTabs(false)
   }
+  // Cowork, 21/11 18:30: "Sin categoría" como 4ª columna igual de ancha que las otras tres las
+  // apretaba — aquí solo caben las 3 categorías de siempre (masculina/femenina/infantil);
+  // "Sin categoría" sigue visible igual en la vista rotativa (tabs), que sí la admite bien.
   function renderTri() {
     const tri = $(triRef)
     if (!tri) return
-    tri.innerHTML = st.cats.map(c => `<div><div class="cl-h2"><span>${c.nombre}</span><span>tops</span></div><div class="cl-list" data-cat="${c.id}"></div></div>`).join('')
+    const cats = st.cats.filter(c => c.id !== '')
+    tri.innerHTML = cats.map(c => `<div><div class="cl-h2"><span>${c.nombre}</span><span>tops</span></div><div class="cl-list" data-cat="${c.id}"></div></div>`).join('')
     tri.querySelectorAll('.cl-list').forEach(b => renderList(b, st.orden[b.dataset.cat] || [], rowHeightFor(b, MAX_ROWS_TRI), MAX_ROWS_TRI, false))
   }
 
@@ -124,7 +128,10 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
       box = $(triRef)?.querySelector(`.cl-list[data-cat="${ev.catId}"]`)
       rowH = rowHeightFor(box, MAX_ROWS_TRI); max = MAX_ROWS_TRI
     }
-    if (!box) { st.busy = false; return next() }
+    // Sin caja (p.ej. "Sin categoría" en la vista de 3 columnas, que ya no la pinta): no hay
+    // nada que animar, pero el modelo se actualiza igual — si no, al volver a la vista rotativa
+    // (que sí la admite) saldría con datos viejos hasta el próximo cambio de categorías.
+    if (!box) { st.orden[ev.catId] = ev.ordenNuevo; st.busy = false; return next() }
 
     const ordenAntes = st.orden[ev.catId] || []
     let before = ordenAntes.findIndex(x => x.clave === ev.clave)

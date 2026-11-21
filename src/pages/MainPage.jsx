@@ -63,12 +63,19 @@ function useCompeEstado() {
   const [estado, setEstado] = useState(null)
   useEffect(() => {
     // Vista previa del modo compe para un vídeo tutorial (Ramiro 12/11 16:15, NOTAS_PARA_CODE_
-    // compe_en_blokes.md): ?previewCompe=<id de una compe de prueba> en la URL — el backend solo
-    // la atiende si quien pide tiene sesión de socio, así que aquí no hace falta comprobar nada
-    // más; para cualquier otro no pasa nada, sigue mirando la compe real como siempre.
-    const previewId = new URLSearchParams(window.location.search).get('previewCompe')
+    // compe_en_blokes.md): ?previewCompeId=<id de una compe de prueba> en la URL — el backend
+    // solo la atiende si quien pide tiene sesión de socio. Cowork, 21/11 18:30: esto no
+    // funcionaba todavía con dos fallos iguales a los que ya se arreglaron en
+    // CompeDirectoPage.jsx (20/11 09:45 punto 1) pero no aquí — solo leía `?previewCompe=` (sin
+    // "Id", nunca el que de verdad se usa) y el fetch no mandaba ni credentials ni el nonce de
+    // socio, así que aunque hubiera sesión llegaba como visitante anónimo y el backend no
+    // enseñaba la compe de prueba. Mismo arreglo que allí.
+    const qs = new URLSearchParams(window.location.search)
+    const previewId = qs.get('previewCompeId') || qs.get('previewCompe')
+    const previewHeaders = previewId && window.blokesSiteData?.clubNonce ? { 'X-WP-Nonce': window.blokesSiteData.clubNonce } : {}
+    const previewFetchOpts = previewId ? { credentials: 'include', headers: previewHeaders } : {}
     const url = `${CLUB_URL}/wp-json/progreso/v1/compe/estado${previewId ? `?previewCompeId=${encodeURIComponent(previewId)}` : ''}`
-    fetch(url)
+    fetch(url, previewFetchOpts)
       .then(r => r.ok ? r.json() : null)
       .then(j => setEstado(j?.data || null))
       .catch(() => {})
