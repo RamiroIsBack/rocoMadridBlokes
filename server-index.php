@@ -125,7 +125,18 @@ header('Content-Type: text/html; charset=UTF-8');
 <title>Blokes — Rocoteca Madrid</title>
 <!-- App instalable (PWA): manifest + iconos + service worker (lo registra main.jsx) -->
 <link rel="manifest" href="<?php echo esc_url($app_url . 'manifest.webmanifest'); ?>">
-<meta name="theme-color" content="#1f1f1f">
+<meta name="theme-color" content="#e9eef6">
+<script>
+  // Modo claro/oscuro fijado antes del CSS para que no parpadee; por defecto claro (21/11).
+  (function () {
+    try {
+      var t = localStorage.getItem('blokes_tema')
+      document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light')
+    } catch (e) {
+      document.documentElement.setAttribute('data-theme', 'light')
+    }
+  })()
+</script>
 <link rel="icon" type="image/png" sizes="32x32" href="<?php echo esc_url($app_url . 'icons/favicon-32.png'); ?>">
 <link rel="apple-touch-icon" href="<?php echo esc_url($app_url . 'icons/apple-touch-icon.png'); ?>">
 <meta name="apple-mobile-web-app-capable" content="yes">

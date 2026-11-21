@@ -1,0 +1,61 @@
+/* Diario y Cherifs: dashboards. De momento, la estructura vacía que se irá rellenando. */
+.dash {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 8px 0 48px;
+}
+.dash__head { margin-bottom: 22px; }
+.dash__title {
+  font-family: var(--font-heading);
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+.dash__claim {
+  font-family: var(--font-hand);
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--color-accent-text);
+  margin: 2px 0 0;
+}
+.dash__intro { color: var(--color-text-secondary); margin: 8px 0 0; max-width: 640px; }
+.dash__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+.dash__card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 18px;
+  min-height: 130px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dash__card--empty {
+  border-style: dashed;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.dash__card-icon { font-size: 1.6rem; line-height: 1; }
+.dash__card-title {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--color-text-primary);
+}
+.dash--wide { max-width: none; }
+.dash__section { margin-top: 8px; }
+.dash__section-title {
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0 0 12px;
+}
+.dash__forbidden { text-align: center; padding: 60px 16px; color: var(--color-text-secondary); }

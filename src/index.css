@@ -4,12 +4,14 @@
    manda la IP a Google sin consentimiento — Jairo Ochoa/dixitalmedia, correo 18/11).
    Mismo resultado visual que rocomadrid.com (misma fuente de origen, Google Fonts),
    pero empaquetadas con el build, nunca una petición a terceros.
-   Playfair Display: display headings (retro serif)
-   Montserrat: headings | Inter: body text
+   Imagen corporativa (manual de RocoMadrid): Avenir Next (texto) y DIN Pro (titulares)
+   son de pago; en la web se usan Nunito Sans y Barlow Semi Condensed, que se les parecen.
+   Caveat: letra manuscrita del claim de la cabecera.
    ============================================ */
-@import '@fontsource-variable/playfair-display/wght.css';
-@import '@fontsource-variable/montserrat/wght.css';
-@import '@fontsource-variable/inter/wght.css';
+@import '@fontsource-variable/nunito-sans/wght.css';
+@import '@fontsource/barlow-semi-condensed/600.css';
+@import '@fontsource/barlow-semi-condensed/700.css';
+@import '@fontsource-variable/caveat/wght.css';
 
 /* ============================================
    GLOBAL RESET & DESIGN TOKENS
@@ -24,15 +26,26 @@
 }
 
 :root {
-  /* Brand colors — rocomadrid.com palette, warmed up for retro feel */
-  --color-bg: #f4f0e4;            /* parchment warm */
-  --color-surface: #fdfaf3;       /* warm white */
-  --color-header: #1f1f1f;        /* charcoal — matches site header */
-  --color-text-primary: #2a2520;
-  --color-text-secondary: #5e5650;
-  --color-border: #cfc9b8;        /* warm beige border */
-  --color-accent: #d19d02;        /* golden yellow — primary CTA on rocomadrid.com */
-  --color-accent-hover: #846400;  /* darker gold on hover */
+  /* Colores del manual de identidad (modo claro): mostaza y negro como principales,
+     fondos claros (blancos y grises) y los secundarios solo para detalles. */
+  --color-bg: #f5f4f0;            /* gris muy claro, cálido */
+  --color-surface: #ffffff;
+  --color-header: #e9eef6;        /* gris azulado claro de la franja superior */
+  --color-text-primary: #1d1d1b;  /* negro de la marca */
+  --color-text-secondary: #5c5b57;
+  --color-border: #dddbd3;
+  --color-accent: #d09c01;        /* MOSTAZA · Pantone 606 CP */
+  --color-accent-hover: #a87e00;
+  --color-accent-text: #bc8c00;   /* mostaza para texto sobre claro */
+  --color-accent-soft: #fbf3d9;   /* fondo mostaza muy claro (activos, avisos) */
+  --color-ink: #1d1d1b;           /* NEGRO de la marca (bordes de botones, títulos) */
+  --color-on-ink: #ffffff;        /* texto sobre un fondo --color-ink */
+
+  /* Secundarios del manual (detalles, nunca dominantes) */
+  --brand-peacock: #006b92;
+  --brand-firefly: #072d3b;
+  --brand-green:   #d1cf00;
+  --brand-mora:    #4e2952;
 
   /* Estado — contraste ≥ 4,5:1 sobre --color-bg (#f4f0e4), para KPIs/pestañas/avisos de
      Supervisión, Campañas y CTRL Time Off (NOTAS_PARA_CODE_contraste.md, 1/11 08:10): los
@@ -84,9 +97,10 @@
 
   /* Typography — nombre "Variable" primero (el que trae @fontsource-variable), con el
      nombre normal como respaldo por si alguna vez se cargara el estático por otro lado. */
-  --font-body: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-  --font-heading: 'Montserrat Variable', 'Montserrat', 'Segoe UI', system-ui, sans-serif;
-  --font-serif: 'Playfair Display Variable', 'Playfair Display', Georgia, 'Times New Roman', serif;
+  --font-body: 'Nunito Sans Variable', 'Nunito Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --font-heading: 'Barlow Semi Condensed', 'Segoe UI', system-ui, sans-serif;
+  --font-serif: 'Barlow Semi Condensed', 'Segoe UI', system-ui, sans-serif;   /* antes Playfair (retro) */
+  --font-hand: 'Caveat Variable', 'Caveat', 'Segoe Print', cursive;
   --font-size-sm: 14px;
   --font-size-base: 16px;
   --font-size-lg: 20px;
@@ -121,14 +135,18 @@
    ============================================ */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --color-bg: #1a1714;
-    --color-surface: #242019;
-    --color-header: #1f1f1f;
-    --color-text-primary: #f0ece0;
-    --color-text-secondary: #b3ab9a;
-    --color-border: #44402f;
-    --color-accent: #d19d02;
-    --color-accent-hover: #f5c842;
+    --color-bg: #1d1d1b;            /* NEGRO de la marca */
+    --color-surface: #282826;
+    --color-header: #2c2d30;        /* gris carbón, un punto azulado como el claro */
+    --color-text-primary: #f2f0ea;
+    --color-text-secondary: #b6b3aa;
+    --color-border: #3d3c38;
+    --color-accent: #d09c01;
+    --color-accent-hover: #e8b51a;
+    --color-accent-text: #e3b33a;
+    --color-accent-soft: rgba(208, 156, 1, 0.16);
+    --color-ink: #f2f0ea;
+    --color-on-ink: #1d1d1b;
     --state-ok:      #34d399;
     --state-good:    #34d399;
     --state-warn:    #f5c842;
@@ -157,14 +175,18 @@
   }
 }
 :root[data-theme="dark"] {
-  --color-bg: #1a1714;
-  --color-surface: #242019;
-  --color-header: #1f1f1f;
-  --color-text-primary: #f0ece0;
-  --color-text-secondary: #b3ab9a;
-  --color-border: #44402f;
-  --color-accent: #d19d02;
-  --color-accent-hover: #f5c842;
+  --color-bg: #1d1d1b;            /* NEGRO de la marca */
+  --color-surface: #282826;
+  --color-header: #2c2d30;        /* gris carbón, un punto azulado como el claro */
+  --color-text-primary: #f2f0ea;
+  --color-text-secondary: #b6b3aa;
+  --color-border: #3d3c38;
+  --color-accent: #d09c01;
+  --color-accent-hover: #e8b51a;
+  --color-accent-text: #e3b33a;
+  --color-accent-soft: rgba(208, 156, 1, 0.16);
+  --color-ink: #f2f0ea;
+  --color-on-ink: #1d1d1b;
   --state-ok:      #34d399;
   --state-good:    #34d399;
   --state-warn:    #f5c842;

@@ -21,6 +21,8 @@ import CalendarioPage from './pages/CalendarioPage'
 import CompePage from './pages/CompePage'
 import CompeDirectoPage from './pages/CompeDirectoPage'
 import InstalarPage from './pages/InstalarPage'
+import DiarioPage from './pages/DiarioPage'
+import CherifsPage from './pages/CherifsPage'
 import { setVerComo, clearVerComo } from './utils/verComo'
 import { getTema, setTema } from './utils/theme'
 import ProfileSetupModal from './components/ProfileSetupModal'
@@ -29,7 +31,15 @@ import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import { useEventsAccess } from './hooks/useEvents'
 import { useCalendarAccess } from './hooks/useCalendar'
+import { useDiarioAccess } from './hooks/useDiario'
+import logotipo from './assets/brand/logotipo-4-tintas-iso-negro.png'
+import logotipoOscuro from './assets/brand/logotipo-4-tintas-iso-negro-oscuro.png'
+import isotipo from './assets/brand/isotipo-negro-2-tintas.png'
 import './App.css'
+
+// Imagen corporativa: enlaces de la cabecera
+const CLASES_URL = 'https://rocomadrid.com/club/actividades-para-socios/'
+const TECNIFICACION_URL = 'https://rocomadrid.com/club/tecnificacion/'
 
 const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
 
@@ -88,6 +98,7 @@ export default function App() {
   const sd = window.blokesSiteData || {}
   const canEvents = useEventsAccess()
   const canCalendar = useCalendarAccess().can
+  const canDiario   = useDiarioAccess()
 
   // Profile modal state
   const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto, optinWhatsapp, saveOptinWhatsapp } = useProfile()
@@ -211,14 +222,14 @@ export default function App() {
         <VerComoBanner sd={sd} />
         <header className="app-header">
           <div className="app-header__logo-section">
-            <a href="https://rocomadrid.com" >
-              <img
-                src="https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-retro1.png"
-                alt="Rocoteca Madrid"
-                className="app-header__logo"
-              />
+            {/* Logotipo del manual: completo en ordenador (versión clara u oscura según el
+                modo) y solo el isotipo redondo en móvil, donde la cabecera va en una fila. */}
+            <a href="https://rocomadrid.com" className="app-header__logo-link">
+              <img src={logotipo} alt="RocoMadrid · Escuela de escalada" className="app-header__logo app-header__logo--claro" />
+              <img src={logotipoOscuro} alt="RocoMadrid · Escuela de escalada" className="app-header__logo app-header__logo--oscuro" />
+              <img src={isotipo} alt="RocoMadrid" className="app-header__logo app-header__logo--iso" />
             </a>
-            <p className="app-header__subtitle">Boulder y entrenamiento · Roco Madrid</p>
+            <p className="app-header__subtitle">¿Hay blokes que se te resisten?</p>
 
             {sd.isLoggedIn ? (
               <>
@@ -308,19 +319,10 @@ export default function App() {
                       también, dentro del mismo "⋯". */}
                   <div className="app-header__links">
                     <div className="app-header__link-wrap">
-                      {sd.subscription?.status === 'active' ? (
-                        <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta">
-                          Apúntate al curso de tecnificación
-                        </a>
-                      ) : (
-                        <>
-                          <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
-                          <a href="https://rocomadrid.com/club" className="app-header__link app-header__link--cta">Apúntate a clases</a>
-                          <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta app-header__link--small">
-                            Tecnificación
-                          </a>
-                        </>
+                      {sd.subscription?.status !== 'active' && (
+                        <a href={CLASES_URL} className="app-header__link app-header__link--cta">Apúntate a nuestras clases</a>
                       )}
+                      <a href={TECNIFICACION_URL} className="app-header__link">Mejora tu técnica · Tecnificación</a>
                       <Link to="/instalar" className="app-header__link app-header__link--small">📲 Instalar la app</Link>
                     </div>
                   </div>
@@ -341,11 +343,8 @@ export default function App() {
                 <TemaToggle />
                 <div className="app-header__links">
                   <div className="app-header__link-wrap">
-                    <span className="app-header__link-hint">¿No te salen todos los blokes que te gustaría?</span>
-                    <a href="https://rocomadrid.com/club" className="app-header__link app-header__link--cta">Apúntate a clases</a>
-                    <a href="https://rocomadrid.com/club/tecnificacion/" className="app-header__link app-header__link--cta app-header__link--small">
-                      Tecnificación
-                    </a>
+                    <a href={CLASES_URL} className="app-header__link app-header__link--cta">Apúntate a nuestras clases</a>
+                    <a href={TECNIFICACION_URL} className="app-header__link">Mejora tu técnica · Tecnificación</a>
                     <Link to="/instalar" className="app-header__link app-header__link--small">📲 Instalar la app</Link>
                   </div>
                 </div>
@@ -390,8 +389,13 @@ export default function App() {
 
           <nav className={`app-nav${navFloating ? ' app-nav--floating' : ''}${navFloating && navVisible ? ' app-nav--visible' : ''}`}>
             <ul className="app-nav__list">
+              {canDiario && (
+                <li className="app-nav__item">
+                  <NavLink to="/diario" className="app-nav__link">Diario</NavLink>
+                </li>
+              )}
               <li className="app-nav__item">
-                <NavLink to="/" className="app-nav__link" end>Colección</NavLink>
+                <NavLink to="/" className="app-nav__link" end>Los blokes</NavLink>
               </li>
               <li className="app-nav__item">
                 <NavLink to="/progreso" className="app-nav__link">Progreso</NavLink>
@@ -444,6 +448,11 @@ export default function App() {
                   <NavLink to="/playground" className="app-nav__link app-nav__link--super">Horarios Profes</NavLink>
                 </li>
               )}
+              {sd.userRole === 'socio' && (
+                <li className="app-nav__item">
+                  <NavLink to="/cherifs" className="app-nav__link app-nav__link--super">Cherifs</NavLink>
+                </li>
+              )}
             </ul>
           </nav>
         </header>
@@ -476,6 +485,8 @@ export default function App() {
             <Route path="/instalar" element={<InstalarPage />} />
             <Route path="/eventos" element={<EventosPage />} />
             <Route path="/calendario" element={<CalendarioPage />} />
+            <Route path="/diario" element={<DiarioPage />} />
+            <Route path="/cherifs" element={<CherifsPage />} />
             {/* Cowork, 09/11 07:45: una ruta inexistente (p. ej. /blokes/coleccion) dejaba el
                 contenido en blanco — sin catch-all, react-router no renderiza nada. */}
             <Route path="*" element={<PaginaNoExiste />} />
@@ -604,7 +615,7 @@ function PaginaNoExiste() {
   return (
     <div style={{ textAlign: 'center', padding: '60px 16px' }}>
       <p style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: 12 }}>Esta página no existe.</p>
-      <Link to="/" style={{ color: 'var(--color-accent)', fontWeight: 600 }}>Volver a Colección</Link>
+      <Link to="/" style={{ color: 'var(--color-accent)', fontWeight: 600 }}>Volver a Los blokes</Link>
     </div>
   )
 }

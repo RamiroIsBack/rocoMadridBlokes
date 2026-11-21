@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 540" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Regleta de entrenamiento (multipresa) con sus agujeros -->
+  <rect x="50" y="24" width="300" height="64" rx="20"/>
+  <path d="M90 64 q16 -14 32 0"/>
+  <path d="M184 64 q16 -14 32 0"/>
+  <path d="M278 64 q16 -14 32 0"/>
+  <!-- Manos agarrando -->
+  <path d="M98 60 q8 10 20 6 q6 -2 6 -8"/>
+  <path d="M302 60 q-8 10 -20 6 q-6 -2 -6 -8"/>
+  <!-- Brazos -->
+  <path d="M104 68 C 110 120, 132 160, 160 196"/>
+  <path d="M296 68 C 290 120, 268 160, 240 196"/>
+  <path d="M120 70 C 126 116, 146 150, 170 180"/>
+  <path d="M280 70 C 274 116, 254 150, 230 180"/>
+  <!-- Cabeza entre los brazos -->
+  <path d="M200 132 c 18 0 26 14 26 28 c 0 18 -12 30 -26 30 c -15 0 -26 -12 -26 -30 c 0 -14 9 -28 26 -28 z"/>
+  <path d="M180 146 q 20 -14 42 -2"/>
+  <!-- Tronco -->
+  <path d="M160 196 Q 200 210 240 196"/>
+  <path d="M162 196 C 158 250, 166 300, 178 336"/>
+  <path d="M238 196 C 242 250, 234 300, 222 336"/>
+  <path d="M178 336 Q 200 344 222 336"/>
+  <!-- Piernas: una estirada y otra con la rodilla doblada -->
+  <path d="M178 338 C 172 372, 164 396, 156 412 L 162 482"/>
+  <path d="M198 344 C 194 374, 184 398, 176 414 L 178 480"/>
+  <path d="M162 482 q 8 10 26 4 L 178 480"/>
+  <path d="M222 338 C 238 368, 256 384, 272 392 L 252 452"/>
+  <path d="M204 344 C 220 372, 238 392, 252 404 L 236 448"/>
+  <path d="M252 452 q -4 12 -22 6 L 236 448"/>
+  <!-- La línea que sigue, como en los dibujos de la web -->
+  <path d="M188 486 C 240 512, 320 470, 392 494"/>
+  <!-- Cronómetro de la suspensión -->
+  <path d="M352 150 a 26 26 0 1 1 -0.1 0 z"/>
+  <path d="M352 160 v 16 l 10 8"/>
+  <path d="M346 142 h 12"/>
+</svg>

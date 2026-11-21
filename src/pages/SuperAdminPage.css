@@ -1304,5 +1304,32 @@ details[open] .sa-collapsible__arrow {
 .bud-status--imprevisto     { color: #f97316; }
 .bud-status--sin-movimiento { color: #f5c842; }
 .bud-status--sin-datos      { color: var(--color-text-secondary); }
-.bud-rules { margin-top: 28px; border-top: 1px solid #2a2015; padding-top: 14px; }
+/* Matriz partidas × meses */
+.bud-mx-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.bud-mx-bar .bud-mx-modes { margin: 0; }
+.bud-matrix td, .bud-matrix th { padding: 5px 7px; font-size: 0.74rem; white-space: nowrap; }
+.bud-matrix .bud-mx-name { position: sticky; left: 0; z-index: 1; background: var(--color-surface); min-width: 170px; white-space: normal; }
+.bud-matrix thead .bud-mx-name, .bud-matrix tfoot .bud-mx-name { background: var(--color-surface); }
+.bud-mx-both span { display: block; line-height: 1.25; }
+.bud-mx-b { color: var(--color-text-secondary); font-size: 0.68rem; }
+.bud-mx-r { font-weight: 600; }
+.bud-mx-extra td { font-style: italic; }
+.bud-mx-shared { margin-left: 5px; color: var(--color-text-secondary); cursor: help; }
+.bud-mx-diff td { border-top: 1px solid var(--color-border); font-weight: 700; }
+.bud-mx-section td { font-size: 0.66rem !important; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-accent-text); padding-top: 12px !important; font-weight: 700; }
+.bud-mx-sec { position: sticky; left: 7px; }
+.bud-mx-income td { background: rgba(52, 211, 153, 0.04); }
+.bud-mx-income .bud-mx-name { background: var(--color-surface); }
+.bud-mx-result td { border-top: 2px solid var(--color-accent-text); }
+/* Grupo de gasto: cabecera con el subtotal del grupo; sus partidas van sangradas debajo */
+.bud-mx-group td, .bud-group-row td { border-top: 1px solid rgba(245, 200, 66, 0.35); font-weight: 700; background: rgba(245, 200, 66, 0.04); }
+.bud-mx-group .bud-mx-name { background: var(--color-surface); color: var(--color-accent-text); }
+.bud-group-row td:first-child { color: var(--color-accent-text); }
+.bud-mx-indent .bud-mx-name, .bud-indent > td:first-child { padding-left: 20px !important; }
+.bud-mx-goal td { background: rgba(245, 200, 66, 0.05); color: var(--color-accent-text); }
+.bud-mx-goal .bud-mx-name { background: var(--color-surface); font-weight: 700; }
+.bud-rules { margin-top: 28px; border-top: 1px solid var(--color-border); padding-top: 14px; }
 .bud-rules .sa-pay-table { margin-top: 8px; }
+
+/* ── Subpestañas de cada apartado (Tesorería, Gestión) ── */
+.sa-sub-tabs { margin: -14px 0 22px; }

@@ -8,13 +8,13 @@ export function getTema() {
     const t = localStorage.getItem(STORAGE_KEY)
     if (t === 'light' || t === 'dark') return t
   } catch { /* localStorage puede no estar disponible (privado/bloqueado) */ }
-  return 'dark' // quien nunca ha elegido se queda en oscuro, como hasta ahora
+  return 'light' // 21/11: quien nunca ha elegido ve el modo claro (imagen corporativa)
 }
 
 export function aplicarTema(tema) {
   document.documentElement.setAttribute('data-theme', tema)
   const meta = document.querySelector('meta[name="theme-color"]')
-  if (meta) meta.setAttribute('content', tema === 'light' ? '#f4f0e4' : '#1a1714')
+  if (meta) meta.setAttribute('content', tema === 'light' ? '#e9eef6' : '#2c2d30')
   window.dispatchEvent(new CustomEvent('blokes:tema-cambiado', { detail: tema }))
 }
 

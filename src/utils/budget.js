@@ -3,6 +3,7 @@
 // Diferencia = real − presupuesto  →  positiva = a favor (ahorro), negativa = en contra (sobrecoste).
 
 import { readFirstSheet } from './xlsxReader'
+import { autoCategory, SALES_CATEGORIES } from './expensesParser'
 
 // Margen para considerar una partida "cumplida": 5 % del presupuesto, mínimo 5 €.
 export const TOLERANCE_PCT = 0.05
@@ -44,6 +45,25 @@ const LINE_RULES = [
   [/mantenimiento|mantenmiento/,  'mantenimiento'],
   [/\bgas\b/,                     'gas'],
 ]
+
+// Grupos de gasto (decididos por Álvaro y Ramiro). Lo que no esté en la lista va a Opcionales.
+export const EXPENSE_GROUPS = [
+  ['administrativos', 'Administrativos'],
+  ['nominas',         'Nóminas'],
+  ['local',           'Gastos Local'],
+  ['impuestos',       'Impuestos'],
+  ['opcionales',      'Opcionales'],
+]
+const GROUP_OF = {
+  asesoria: 'administrativos', comisiones_banco: 'administrativos', seguro_rc: 'administrativos',
+  web: 'administrativos', dominio: 'administrativos', telecomunicaciones: 'administrativos',
+  seguridad_laboral: 'administrativos',
+  nominas: 'nominas', ss: 'nominas', socios: 'nominas',
+  alquiler: 'local', comunidad: 'local', electricidad: 'local', gas: 'local', agua: 'local',
+  tasa_residuos: 'local', gatos: 'local', eurofer: 'local',
+  iva_303: 'impuestos', mod_115: 'impuestos', mod_111: 'impuestos', hacienda: 'impuestos',
+}
+export const groupOf = cat => GROUP_OF[cat] || 'opcionales'
 
 export function guessCategory(name) {
   const n = norm(name)
@@ -172,6 +192,36 @@ function applyCarry(c, loaded) {
     const remaining = c.target[i] - c.real[i]
     return Math.abs(c.target[i]) > 0.005 && Math.sign(remaining) === Math.sign(c.target[i]) ? round2(remaining) : 0
   })
+}
+
+// Objetivo de ingresos: lo que hay que cobrar cada mes para cubrir los pagos del año.
+// Julio y agosto ingresan menos (en 2026, el 42 % y el 28 % de un mes normal), así que el resto
+// de meses tiene que cubrir ese hueco. Se añade un margen por bajas o imprevistos.
+export const INCOME_TARGET = { julio: 0.42, agosto: 0.28, margen: 0.05 }
+export const seasonFactor = i => (i === 6 ? INCOME_TARGET.julio : i === 7 ? INCOME_TARGET.agosto : 1)
+
+// monthlyPayments: 12 cifras de pagos (negativas). Devuelve 12 cifras de ingresos objetivo (positivas).
+export function incomeTargets(monthlyPayments) {
+  const yearPayments = -monthlyPayments.reduce((s, v) => s + v, 0)
+  if (yearPayments <= 0) return Array(12).fill(0)
+  const months = Array.from({ length: 12 }, (_, i) => seasonFactor(i)).reduce((s, v) => s + v, 0)
+  const normal = (yearPayments / months) * (1 + INCOME_TARGET.margen)
+  return Array.from({ length: 12 }, (_, i) => Math.round(normal * seasonFactor(i)))
+}
+
+// Ingresos reales: cobros por ventas (TPV, Bizum, Wellhub, transferencias) de cada mes, sacados de los
+// extractos del banco (respuesta de /expenses). Las devoluciones de comisiones o de Hacienda no cuentan:
+// ya restan en su partida de pagos.
+export function salesByMonth(expMonths, year) {
+  const out = Array(12).fill(0)
+  for (const m of expMonths || []) {
+    const [y, mm] = String(m.month || '').split('-').map(Number)
+    if (y !== year || !mm) continue
+    for (const it of m.ingresos_items || []) {
+      if (SALES_CATEGORIES.includes(autoCategory(it.concepto, true))) out[mm - 1] += Math.abs(Number(it.importe) || 0)
+    }
+  }
+  return out.map(v => Math.round(v * 100) / 100)
 }
 
 export const sum = arr => arr.reduce((s, v) => s + v, 0)
