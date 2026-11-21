@@ -1315,7 +1315,6 @@
 
 /* Secciones de gestión a lo ancho de la pantalla, como Los blokes (tienen tablas) */
 .app-main .org,
-.app-main .entrena,
 .app-main .stats-page,
 .app-main .sa-page,
 .app-main .sv-page,
@@ -1323,35 +1322,64 @@
   max-width: none;
 }
 
-/* Progreso y Ligas: columna centrada y un dibujo de línea en mostaza en el margen
-   izquierdo, como en la web del club. Los PNG son blancos: se usan como máscara y se
-   pintan del color que queramos. Solo en pantallas anchas (en el móvil no cabe). */
+/* Progreso, Ligas, Compe y Entrenamientos: columna centrada y, en el margen izquierdo,
+   un único dibujo de línea en mostaza amoldado al hueco, como en la web del club.
+   Los dibujos son blancos: se usan como máscara y se pintan del color que queramos.
+   --col es el ancho de la columna de cada sección. */
+.app-main:has(.progreso-idx),
+.app-main:has(.league-page)  { --col: 720px; }
+.app-main:has(.compe-page)   { --col: 880px; }
+.app-main:has(.entrena)      { --col: 1000px; }
+
 .app-main .progreso,
 .app-main .user-stats,
 .app-main .mi-clase,
-.app-main .league-page {
-  max-width: 720px;
+.app-main .league-page,
+.app-main .compe-page,
+.app-main .entrena {
+  max-width: var(--col);
   margin-left: auto;
   margin-right: auto;
 }
+
+.app-main:has(.progreso-idx)::before,
+.app-main:has(.league-page)::before,
+.app-main:has(.compe-page)::before,
+.app-main:has(.entrena)::before {
+  content: '';
+  display: none;
+  position: absolute;
+  top: calc(var(--spacing-lg) + 24px);
+  left: var(--spacing-md);
+  width: min(calc((100% - var(--col)) / 2 - 48px), 440px);
+  height: min(75vh, 640px);
+  background-color: var(--color-accent);
+  opacity: 0.5;
+  -webkit-mask: url('./assets/brand/linea-escalador-cuerda.png') no-repeat left top / contain;
+          mask: url('./assets/brand/linea-escalador-cuerda.png') no-repeat left top / contain;
+  pointer-events: none;
+}
+.app-main:has(.league-page)::before {
+  -webkit-mask-image: url('./assets/brand/linea-grupo-saltando.png');
+          mask-image: url('./assets/brand/linea-grupo-saltando.png');
+}
+.app-main:has(.compe-page)::before {
+  -webkit-mask-image: url('./assets/brand/linea-isotipo.png');
+          mask-image: url('./assets/brand/linea-isotipo.png');
+  opacity: 0.4;
+}
+.app-main:has(.entrena)::before {
+  -webkit-mask-image: url('./assets/brand/linea-entreno-regleta.svg');
+          mask-image: url('./assets/brand/linea-entreno-regleta.svg');
+}
+/* Solo cuando el hueco del lado da para el dibujo (en móvil y tablet no se ve) */
 @media (min-width: 1180px) {
   .app-main:has(.progreso-idx)::before,
-  .app-main:has(.league-page)::before {
-    content: '';
-    position: absolute;
-    top: var(--spacing-lg);
-    bottom: 0;
-    left: var(--spacing-md);
-    width: calc((100% - 720px) / 2 - 40px);
-    max-width: 520px;
-    background-color: var(--color-accent);
-    opacity: 0.45;
-    -webkit-mask: url('./assets/brand/linea-escalador-cuerda.png') repeat-y left top / 100% auto;
-            mask: url('./assets/brand/linea-escalador-cuerda.png') repeat-y left top / 100% auto;
-    pointer-events: none;
-  }
-  .app-main:has(.league-page)::before {
-    -webkit-mask-image: url('./assets/brand/linea-grupo-saltando.png');
-            mask-image: url('./assets/brand/linea-grupo-saltando.png');
-  }
+  .app-main:has(.league-page)::before { display: block; }
+}
+@media (min-width: 1340px) {
+  .app-main:has(.compe-page)::before { display: block; }
+}
+@media (min-width: 1460px) {
+  .app-main:has(.entrena)::before { display: block; }
 }
