@@ -411,8 +411,12 @@
 }
 
 @media (min-width: 1125px) {
+  /* Más protagonismo al plano: más grande, misma proporción (4:1) para que las burbujas no se muevan */
   .app-header__salas-wrap {
-    max-width: 800px;
+    max-width: 960px;
+  }
+  .app-header__salas {
+    height: 240px;
   }
 }
 
@@ -429,7 +433,11 @@
     flex-shrink: 0;
     width: auto;
     max-width: 380px;
+    align-items: flex-start;   /* logo, claim, botones y usuario alineados a la izquierda */
+    text-align: left;
   }
+  .app-header__claim { align-items: flex-start; }
+  .app-header__links { justify-content: flex-start; }
 
   .app-header__salas-wrap {
     margin: 0 0 0 var(--spacing-md);
@@ -592,6 +600,20 @@
 }
 
 /* ---- Main ---- */
+
+/* Todas las secciones a lo ancho de la pantalla, como Los blokes */
+.app-main .progreso,
+.app-main .user-stats,
+.app-main .mi-clase,
+.app-main .league-page,
+.app-main .org,
+.app-main .entrena,
+.app-main .stats-page,
+.app-main .sa-page,
+.app-main .sv-page,
+.app-main .tablet-yo {
+  max-width: none;
+}
 
 .app-main {
   flex: 1;

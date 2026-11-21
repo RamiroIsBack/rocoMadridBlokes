@@ -29,6 +29,7 @@
   --color-border: #dddbd3;
   --color-accent: #d09c01;        /* MOSTAZA · Pantone 606 CP */
   --color-accent-hover: #a87e00;
+  --color-accent-text: #bc8c00;   /* mostaza intermedio para texto sobre claro */
   --color-accent-soft: #fbf3d9;   /* fondo mostaza muy claro (activos, avisos) */
   --color-ink: #1d1d1b;           /* NEGRO de la marca */
 

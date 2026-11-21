@@ -75,7 +75,7 @@
 .ps-view-nick {
   font-size: 1rem;
   font-weight: 700;
-  color: var(--color-accent-hover);
+  color: var(--color-accent-text);
   letter-spacing: 0.03em;
   margin: 0;
 }
@@ -323,7 +323,7 @@
 .ps-nick-locked-val {
   font-size: 0.9rem;
   font-weight: 700;
-  color: var(--color-accent-hover);
+  color: var(--color-accent-text);
   letter-spacing: 0.02em;
 }
 .ps-nick-change-btn {
