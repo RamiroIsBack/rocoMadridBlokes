@@ -24029,3 +24029,205 @@ function activities_delete($request) {
     $wpdb->delete(activities_table(), array('id' => (int) $request['id']));
     return rest_ensure_response(array('success' => true));
 }
+
+// ============================================================
+//  superadmin/v1 — Diario: peticiones y sugerencias, compras y recordatorios
+//  (21/11/2026). Una sola tabla con el tipo de cada cosa.
+//  - Verlo y crear: quien ve el Diario (diario_can_view).
+//  - Peticiones/sugerencias y compras: el equipo las crea; socio y gestión
+//    cambian el estado y contestan. Quien la creó puede corregirla o
+//    borrarla mientras siga en su primer estado.
+//  - Recordatorios: para todo el equipo o para alguien; cualquiera del
+//    Diario los marca como hechos.
+//  Lo cerrado hace más de 60 días ya no se devuelve.
+// ============================================================
+
+function diario_items_table() { global $wpdb; return $wpdb->prefix . 'blokes_diario_items'; }
+
+function diario_items_ensure_table() {
+    if (get_option('blokes_diario_items_db_v') === '1') return;
+    global $wpdb;
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE " . diario_items_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        kind        varchar(20)  NOT NULL DEFAULT '',
+        title       varchar(190) NOT NULL DEFAULT '',
+        detail      text         NOT NULL,
+        status      varchar(20)  NOT NULL DEFAULT '',
+        urgent      tinyint(1)   NOT NULL DEFAULT 0,
+        qty         varchar(60)  NOT NULL DEFAULT '',
+        due_date    varchar(10)  NOT NULL DEFAULT '',
+        assignee    varchar(120) NOT NULL DEFAULT '',
+        answer      text         NOT NULL,
+        created_by  varchar(120) NOT NULL DEFAULT '',
+        created_uid bigint(20)   NOT NULL DEFAULT 0,
+        updated_by  varchar(120) NOT NULL DEFAULT '',
+        created_at  datetime     NOT NULL,
+        updated_at  datetime     NOT NULL,
+        closed_at   datetime     NULL,
+        PRIMARY KEY (id),
+        KEY kind (kind),
+        KEY status (status)
+    ) " . $wpdb->get_charset_collate() . ";");
+    update_option('blokes_diario_items_db_v', '1', false);
+}
+
+// Estados de cada tipo: el primero es el inicial; los de $closed cierran la cosa
+function diario_kinds() {
+    return array(
+        'peticion'     => array('nueva', 'en_marcha', 'hecha', 'descartada'),
+        'sugerencia'   => array('nueva', 'en_marcha', 'hecha', 'descartada'),
+        'compra'       => array('pendiente', 'aprobada', 'comprada', 'descartada'),
+        'recordatorio' => array('pendiente', 'hecho'),
+    );
+}
+function diario_closed_statuses() { return array('hecha', 'descartada', 'comprada', 'hecho'); }
+
+function diario_can_manage() { return in_array(blokes_get_app_role(), array('socio', 'gestion')); }
+
+function diario_item_out($r) {
+    return array(
+        'id'         => (int) $r['id'],
+        'kind'       => $r['kind'],
+        'title'      => $r['title'],
+        'detail'     => $r['detail'],
+        'status'     => $r['status'],
+        'urgent'     => (bool) $r['urgent'],
+        'qty'        => $r['qty'],
+        'due_date'   => $r['due_date'],
+        'assignee'   => $r['assignee'],
+        'answer'     => $r['answer'],
+        'created_by' => $r['created_by'],
+        'mine'       => (int) $r['created_uid'] === get_current_user_id(),
+        'updated_by' => $r['updated_by'],
+        'created_at' => $r['created_at'],
+        'updated_at' => $r['updated_at'],
+        'closed_at'  => $r['closed_at'],
+    );
+}
+
+function diario_get_item_row($id) {
+    global $wpdb;
+    return $wpdb->get_row($wpdb->prepare("SELECT * FROM " . diario_items_table() . " WHERE id = %d", $id), ARRAY_A);
+}
+
+add_action('rest_api_init', function() {
+    register_rest_route('superadmin/v1', '/diario/items', array(
+        array('methods' => 'GET',  'callback' => 'diario_items_list',   'permission_callback' => 'diario_can_view'),
+        array('methods' => 'POST', 'callback' => 'diario_items_create', 'permission_callback' => 'diario_can_view'),
+    ));
+    register_rest_route('superadmin/v1', '/diario/items/(?P<id>\d+)', array(
+        array('methods' => 'PUT',    'callback' => 'diario_items_update', 'permission_callback' => 'diario_can_view'),
+        array('methods' => 'DELETE', 'callback' => 'diario_items_delete', 'permission_callback' => 'diario_can_view'),
+    ));
+});
+
+function diario_items_list() {
+    global $wpdb;
+    diario_items_ensure_table();
+    $since = gmdate('Y-m-d H:i:s', time() - 60 * DAY_IN_SECONDS);
+    $rows  = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM " . diario_items_table() . " WHERE closed_at IS NULL OR closed_at >= %s ORDER BY created_at DESC LIMIT 500",
+        $since
+    ), ARRAY_A);
+    $u = wp_get_current_user();
+    return rest_ensure_response(array(
+        'items' => array_map('diario_item_out', (array) $rows),
+        'me'    => array('name' => $u && $u->ID ? ($u->display_name ?: $u->user_login) : '', 'can_manage' => diario_can_manage()),
+    ));
+}
+
+function diario_items_create($request) {
+    global $wpdb;
+    diario_items_ensure_table();
+    $b     = (array) $request->get_json_params();
+    $kinds = diario_kinds();
+    $kind  = (string) ($b['kind'] ?? '');
+    if (!isset($kinds[$kind])) return new WP_Error('bad_kind', 'Tipo no válido', array('status' => 400));
+    $title = mb_substr(sanitize_text_field($b['title'] ?? ''), 0, 190);
+    if ($title === '') return new WP_Error('bad_item', 'Falta el texto', array('status' => 400));
+    $due = (string) ($b['due_date'] ?? '');
+    $now = current_time('mysql');
+    $row = array(
+        'kind'        => $kind,
+        'title'       => $title,
+        'detail'      => sanitize_textarea_field($b['detail'] ?? ''),
+        'status'      => $kinds[$kind][0],
+        'urgent'      => !empty($b['urgent']) ? 1 : 0,
+        'qty'         => mb_substr(sanitize_text_field($b['qty'] ?? ''), 0, 60),
+        'due_date'    => preg_match('/^\d{4}-\d{2}-\d{2}$/', $due) ? $due : '',
+        'assignee'    => mb_substr(sanitize_text_field($b['assignee'] ?? ''), 0, 120),
+        'answer'      => '',
+        'created_by'  => activities_who(),
+        'created_uid' => get_current_user_id(),
+        'updated_by'  => activities_who(),
+        'created_at'  => $now,
+        'updated_at'  => $now,
+    );
+    if ($wpdb->insert(diario_items_table(), $row) === false) {
+        return new WP_Error('db_error', 'No se pudo guardar', array('status' => 500));
+    }
+    return rest_ensure_response(array('success' => true, 'item' => diario_item_out(diario_get_item_row($wpdb->insert_id))));
+}
+
+function diario_items_update($request) {
+    global $wpdb;
+    diario_items_ensure_table();
+    $r = diario_get_item_row((int) $request['id']);
+    if (!$r) return new WP_Error('not_found', 'Ya no existe', array('status' => 404));
+    $b       = (array) $request->get_json_params();
+    $kinds   = diario_kinds();
+    $manage  = diario_can_manage();
+    $mine    = (int) $r['created_uid'] === get_current_user_id();
+    $initial = $r['status'] === $kinds[$r['kind']][0];
+    $f = array();
+
+    // Cambiar el estado: socio/gestión; los recordatorios, cualquiera del Diario
+    if (array_key_exists('status', $b)) {
+        $st = (string) $b['status'];
+        if (!in_array($st, $kinds[$r['kind']], true)) return new WP_Error('bad_status', 'Estado no válido', array('status' => 400));
+        if (!$manage && $r['kind'] !== 'recordatorio') return new WP_Error('forbidden', 'Solo socios y gestión cambian el estado', array('status' => 403));
+        $f['status']    = $st;
+        $f['closed_at'] = in_array($st, diario_closed_statuses(), true) ? current_time('mysql') : null;
+    }
+    // Contestar: socio/gestión
+    if (array_key_exists('answer', $b)) {
+        if (!$manage) return new WP_Error('forbidden', 'Solo socios y gestión contestan', array('status' => 403));
+        $f['answer'] = sanitize_textarea_field($b['answer']);
+    }
+    // Corregir el contenido: socio/gestión, o quien lo creó mientras siga en su primer estado
+    $edits = array_intersect_key($b, array_flip(array('title', 'detail', 'urgent', 'qty', 'due_date', 'assignee')));
+    if ($edits) {
+        if (!$manage && !($mine && $initial)) return new WP_Error('forbidden', 'Ya no se puede cambiar', array('status' => 403));
+        if (isset($edits['title'])) {
+            $t = mb_substr(sanitize_text_field($edits['title']), 0, 190);
+            if ($t === '') return new WP_Error('bad_item', 'Falta el texto', array('status' => 400));
+            $f['title'] = $t;
+        }
+        if (array_key_exists('detail', $edits))   $f['detail']   = sanitize_textarea_field($edits['detail']);
+        if (array_key_exists('urgent', $edits))   $f['urgent']   = !empty($edits['urgent']) ? 1 : 0;
+        if (array_key_exists('qty', $edits))      $f['qty']      = mb_substr(sanitize_text_field($edits['qty']), 0, 60);
+        if (array_key_exists('assignee', $edits)) $f['assignee'] = mb_substr(sanitize_text_field($edits['assignee']), 0, 120);
+        if (array_key_exists('due_date', $edits)) $f['due_date'] = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $edits['due_date']) ? $edits['due_date'] : '';
+    }
+    if (!$f) return rest_ensure_response(array('success' => true, 'item' => diario_item_out($r)));
+    $f['updated_by'] = activities_who();
+    $f['updated_at'] = current_time('mysql');
+    $wpdb->update(diario_items_table(), $f, array('id' => (int) $r['id']));
+    return rest_ensure_response(array('success' => true, 'item' => diario_item_out(diario_get_item_row((int) $r['id']))));
+}
+
+function diario_items_delete($request) {
+    global $wpdb;
+    diario_items_ensure_table();
+    $r = diario_get_item_row((int) $request['id']);
+    if (!$r) return rest_ensure_response(array('success' => true));
+    $kinds   = diario_kinds();
+    $mine    = (int) $r['created_uid'] === get_current_user_id();
+    $initial = $r['status'] === $kinds[$r['kind']][0];
+    if (!diario_can_manage() && !($mine && $initial)) {
+        return new WP_Error('forbidden', 'Ya no se puede borrar', array('status' => 403));
+    }
+    $wpdb->delete(diario_items_table(), array('id' => (int) $r['id']));
+    return rest_ensure_response(array('success' => true));
+}

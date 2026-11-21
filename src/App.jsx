@@ -31,7 +31,7 @@ import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import { useEventsAccess } from './hooks/useEvents'
 import { useCalendarAccess } from './hooks/useCalendar'
-import { useDiarioAccess } from './hooks/useDiario'
+import { useDiarioAccess, useDiarioItems, diarioPendientes } from './hooks/useDiario'
 import logotipo from './assets/brand/logotipo-4-tintas-iso-negro.png'
 import logotipoOscuro from './assets/brand/logotipo-4-tintas-iso-negro-oscuro.png'
 import isotipo from './assets/brand/isotipo-negro-2-tintas.png'
@@ -99,6 +99,9 @@ export default function App() {
   const canEvents = useEventsAccess()
   const canCalendar = useCalendarAccess().can
   const canDiario   = useDiarioAccess()
+  // Avisos del Diario (numerito en el menú): recordatorios de hoy y, a socio/gestión, lo nuevo por revisar
+  const diarioData  = useDiarioItems(canDiario).data
+  const diarioAvisos = diarioPendientes(diarioData, new Date().toLocaleDateString('sv-SE'))
 
   // Profile modal state
   const { profileComplete, verified, fetching: profileFetching, nickname, avatarType, avatarData, saveProfile, checkNickname, uploadPhoto, optinWhatsapp, saveOptinWhatsapp } = useProfile()
@@ -391,7 +394,10 @@ export default function App() {
             <ul className="app-nav__list">
               {canDiario && (
                 <li className="app-nav__item">
-                  <NavLink to="/diario" className="app-nav__link">Diario</NavLink>
+                  <NavLink to="/diario" className="app-nav__link">
+                    Diario
+                    {diarioAvisos > 0 && <span className="app-nav__bubble" title="Cosas pendientes en el Diario">{diarioAvisos}</span>}
+                  </NavLink>
                 </li>
               )}
               <li className="app-nav__item">

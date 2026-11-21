@@ -1385,3 +1385,10 @@
 @media (min-width: 1460px) {
   .app-main:has(.entrena)::before { display: block; }
 }
+
+/* Numerito de avisos en el menú (Diario) */
+.app-nav__bubble {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px; margin-left: 6px; border-radius: 999px;
+  background: var(--color-accent); color: #1d1d1b; font-size: 0.72rem; font-weight: 800; letter-spacing: 0;
+}

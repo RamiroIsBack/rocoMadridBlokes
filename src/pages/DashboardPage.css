@@ -59,3 +59,189 @@
   margin: 0 0 12px;
 }
 .dash__forbidden { text-align: center; padding: 60px 16px; color: var(--color-text-secondary); }
+
+/* ─── Diario: panel resumido (estilo de las capturas de Álvaro, 21/11) ─── */
+.dash__date { color: var(--color-text-secondary); margin: 2px 0 0; text-transform: capitalize; }
+
+.dash-btn {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.88rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.dash-btn:hover { border-color: var(--color-accent); }
+.dash-btn:disabled { opacity: 0.5; cursor: default; }
+.dash-btn--icon { padding: 6px 10px; }
+.dash-btn--on { background: var(--color-accent-soft); border-color: var(--color-accent); font-weight: 700; }
+.dash-btn--primary { background: var(--color-accent); border-color: var(--color-accent); color: #1d1d1b; font-weight: 700; }
+.dash-btn--primary:hover { background: var(--color-accent-hover); }
+.dash-link {
+  background: none; border: none; padding: 0; cursor: pointer; font-family: inherit;
+  color: var(--color-accent-text); text-decoration: underline; text-underline-offset: 3px; font-size: 0.9rem;
+}
+.dash-link--danger { color: var(--state-bad); }
+.dash-error { color: var(--state-bad); font-size: 0.85rem; margin: 6px 0; }
+.dash-empty { color: var(--color-text-secondary); padding: 14px 4px; margin: 0; }
+
+/* Cabecera de cada tarjeta */
+.dash-card__head {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding-bottom: 14px; margin-bottom: 12px; border-bottom: 1px solid var(--color-border);
+}
+.dash-card__icon {
+  width: 40px; height: 40px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--color-bg); font-size: 1.25rem; flex-shrink: 0;
+}
+.dash-card__title { font-family: var(--font-heading); font-size: 1.3rem; font-weight: 700; margin: 0; color: var(--color-text-primary); }
+.dash-card__head .dash-link { margin-left: auto; }
+.dash-bubble {
+  min-width: 24px; height: 24px; padding: 0 7px; border-radius: 999px; background: var(--color-accent); color: #1d1d1b;
+  font-size: 0.8rem; font-weight: 800; display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* La semana del Roco: protagonista, con recuadro mostaza */
+.dash-semana {
+  background: var(--color-surface);
+  border: 2px solid var(--color-accent);
+  border-radius: 16px;
+  padding: 20px 22px;
+  margin-bottom: 20px;
+  box-shadow: 0 6px 24px rgba(208, 156, 1, 0.12);
+}
+.dash-semana__nav { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dash-semana__nav .dash-link { margin-left: 8px; }
+.dash-semana__full { margin-top: 18px; padding-top: 18px; border-top: 1px dashed var(--color-accent); }
+
+.dash-wk__row {
+  display: grid;
+  grid-template-columns: minmax(170px, 300px) 1fr;
+  gap: 12px;
+  align-items: center;
+  padding: 4px 0;
+}
+.dash-wk__row--head { padding-bottom: 6px; }
+.dash-wk__track {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+  align-items: center;
+}
+.dash-wk__day {
+  grid-row: 1; text-align: center; font-size: 0.82rem; color: var(--color-text-secondary); line-height: 1.25;
+}
+.dash-wk__day b { display: block; color: var(--color-text-primary); font-family: var(--font-heading); }
+.dash-wk__day--hoy, .dash-wk__day--hoy b { color: var(--state-bad); }
+.dash-wk__cell { grid-row: 1; height: 40px; background: var(--color-bg); border-radius: 6px; }
+.dash-wk__cell--hoy { background: var(--color-accent-soft); }
+.dash-wk__bar {
+  grid-row: 1; height: 28px; margin: 0 3px; border-radius: 7px; cursor: pointer;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--bar) 85%, #000), var(--bar));
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.dash-wk__label {
+  background: none; border: none; padding: 2px 0; text-align: left; cursor: pointer; font-family: inherit;
+  display: flex; flex-direction: column; min-width: 0;
+}
+.dash-wk__title { font-weight: 700; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-wk__sub { font-size: 0.82rem; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-wk__detail {
+  grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 18px;
+  background: var(--color-bg); border-radius: 8px; padding: 8px 12px; font-size: 0.85rem; color: var(--color-text-secondary);
+}
+.dash-wk__detail b { color: var(--color-text-primary); }
+.dash-wk__more { display: block; margin: 10px 0 0 auto; }
+
+/* Cajas resumen */
+.dash-tiles {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 20px;
+}
+.dash-tile {
+  display: flex; align-items: center; gap: 14px; text-align: left; cursor: pointer; font-family: inherit;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-left: 5px solid var(--tile, var(--color-accent));
+  border-radius: 12px; padding: 16px 18px; color: var(--color-text-primary);
+}
+.dash-tile:hover { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08); }
+.dash-tile strong { font-family: var(--font-heading); font-size: 2.2rem; line-height: 1; }
+.dash-tile span { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-secondary); font-weight: 700; }
+.dash-tile--pet  { --tile: var(--brand-peacock); }
+.dash-tile--comp { --tile: var(--color-accent); }
+.dash-tile--rec  { --tile: var(--brand-mora); }
+
+/* Tarjetas de lista */
+.dash-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; align-items: start; }
+.dash-card {
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 16px; padding: 18px 20px;
+}
+.dash-add {
+  width: 100%; text-align: left; background: none; border: 1px dashed var(--color-border); border-radius: 10px;
+  padding: 9px 12px; color: var(--color-text-secondary); cursor: pointer; font-family: inherit; margin-bottom: 8px;
+}
+.dash-add:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+.dash-list { list-style: none; margin: 0; padding: 0; }
+.dash-item { border-bottom: 1px solid var(--color-border); }
+.dash-item:last-child { border-bottom: none; }
+.dash-item--closed { opacity: 0.6; }
+.dash-item__main {
+  width: 100%; display: flex; align-items: center; gap: 12px; padding: 10px 2px; background: none; border: none;
+  text-align: left; cursor: pointer; font-family: inherit; color: var(--color-text-primary);
+}
+.dash-date {
+  width: 52px; height: 52px; flex-shrink: 0; border: 1px solid var(--color-border); border-radius: 10px;
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.05;
+  background: var(--color-surface);
+}
+.dash-date strong { font-family: var(--font-heading); font-size: 1.3rem; }
+.dash-date span { font-size: 0.68rem; color: var(--color-text-secondary); letter-spacing: 0.05em; }
+.dash-item__text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dash-item__title { font-size: 1rem; overflow: hidden; text-overflow: ellipsis; }
+.dash-item__sub { font-size: 0.82rem; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-item__side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.dash-item__when { font-size: 0.8rem; color: var(--color-text-secondary); white-space: nowrap; }
+.dash-item__when--late { color: var(--state-bad); font-weight: 700; }
+.dash-item__detail { padding: 0 4px 12px 64px; display: flex; flex-direction: column; gap: 8px; }
+.dash-item__p { margin: 0; white-space: pre-line; }
+.dash-item__answer { margin: 0; background: var(--color-accent-soft); border-radius: 8px; padding: 8px 10px; }
+.dash-item__meta { margin: 0; font-size: 0.78rem; color: var(--color-text-secondary); }
+.dash-item__actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.dash-item__reply { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+
+.dash-status {
+  font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  background: var(--color-bg); color: var(--color-text-secondary); border: 1px solid var(--color-border);
+}
+.dash-status--nueva, .dash-status--pendiente { background: var(--color-accent-soft); color: var(--color-accent-text); border-color: transparent; }
+.dash-status--en_marcha, .dash-status--aprobada { color: var(--state-info); border-color: currentColor; background: transparent; }
+.dash-status--hecha, .dash-status--comprada, .dash-status--hecho { color: var(--state-good); border-color: currentColor; background: transparent; }
+.dash-tag { font-size: 0.68rem; font-weight: 800; padding: 1px 6px; border-radius: 4px; margin-right: 6px; vertical-align: 2px; }
+.dash-tag--urgent { background: var(--state-bad); color: #fff; }
+
+/* Formulario de alta */
+.dash-form {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px; margin-bottom: 10px;
+  background: var(--color-bg); border-radius: 12px;
+}
+.dash-form__row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.dash-form__row .dash-input { flex: 1 1 140px; }
+.dash-form__seg { display: flex; gap: 6px; }
+.dash-form__actions { display: flex; gap: 8px; }
+.dash-input {
+  width: 100%; border: 1px solid var(--color-border); border-radius: 8px; padding: 8px 10px; font-family: inherit;
+  font-size: 0.95rem; background: var(--color-surface); color: var(--color-text-primary);
+}
+.dash-input:focus { outline: 2px solid var(--color-accent); outline-offset: -1px; }
+.dash-check { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; }
+
+/* Móvil: la etiqueta encima de su barra */
+@media (max-width: 700px) {
+  .dash-semana { padding: 14px; }
+  .dash-wk__row { grid-template-columns: 1fr; gap: 4px; }
+  .dash-wk__row--head > span:first-child { display: none; }
+  .dash-wk__cell { height: 26px; }
+  .dash-wk__bar { height: 18px; }
+  .dash-item__detail { padding-left: 4px; }
+  .dash-semana__nav { margin-left: 0; }
+}

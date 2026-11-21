@@ -15,15 +15,15 @@ import './CalendarioPage.css'
 const pad     = n => String(n).padStart(2, '0')
 const isoDate = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const parse   = iso => { const [y, m, d] = iso.split('-').map(Number); return new Date(y, m - 1, d) }
-const today   = () => isoDate(new Date())
-const addDays = (iso, n) => { const d = parse(iso); d.setDate(d.getDate() + n); return isoDate(d) }
+export const today = () => isoDate(new Date())
+export const addDays = (iso, n) => { const d = parse(iso); d.setDate(d.getDate() + n); return isoDate(d) }
 const monthOf = iso => iso.slice(0, 7)
 const DAYS    = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
 const dayName = iso => DAYS[(parse(iso).getDay() + 6) % 7]
 const fmtDay  = iso => `${dayName(iso)} ${parse(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}`
 const fmtMonth = m => { const [y, mo] = m.split('-').map(Number); return new Date(y, mo - 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) }
 const shiftMonth = (m, n) => { const [y, mo] = m.split('-').map(Number); const d = new Date(y, mo - 1 + n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}` }
-const weekStart = iso => addDays(iso, -((parse(iso).getDay() + 6) % 7))
+export const weekStart = iso => addDays(iso, -((parse(iso).getDay() + 6) % 7))
 // Celdas del mes: de lunes a domingo, 5 o 6 semanas
 const monthCells = month => {
   const start = weekStart(`${month}-01`)
@@ -51,7 +51,7 @@ function splitDate(s) {
   return { date: isoDate(d), time: `${pad(d.getHours())}:${pad(d.getMinutes())}` }
 }
 
-function fromNotion(it) {
+export function fromNotion(it) {
   const start = splitDate(it.start)
   const end   = it.end ? splitDate(it.end) : { date: start.date, time: '' }
   return {
@@ -67,7 +67,7 @@ function fromNotion(it) {
   }
 }
 
-function fromBooking(b) {
+export function fromBooking(b) {
   const t = typeOf(b.type)
   return {
     key: `ev-${b.id}`, kind: 'booking', raw: b,
