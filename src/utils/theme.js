@@ -8,7 +8,7 @@ export function getTema() {
     const t = localStorage.getItem(STORAGE_KEY)
     if (t === 'light' || t === 'dark') return t
   } catch { /* localStorage puede no estar disponible (privado/bloqueado) */ }
-  return 'dark' // quien nunca ha elegido se queda en oscuro, como hasta ahora
+  return 'light' // 21/11: quien nunca ha elegido ve el modo claro (imagen corporativa)
 }
 
 export function aplicarTema(tema) {
