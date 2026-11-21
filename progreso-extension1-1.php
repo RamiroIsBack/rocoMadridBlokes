@@ -24045,7 +24045,8 @@ function activities_delete($request) {
 function diario_items_table() { global $wpdb; return $wpdb->prefix . 'blokes_diario_items'; }
 
 function diario_items_ensure_table() {
-    if (get_option('blokes_diario_items_db_v') === '1') return;
+    // v2 (21/11): quién lo pide (requester), aparte de quién lo apuntó (created_by)
+    if (get_option('blokes_diario_items_db_v') === '2') return;
     global $wpdb;
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta("CREATE TABLE " . diario_items_table() . " (
@@ -24058,6 +24059,7 @@ function diario_items_ensure_table() {
         qty         varchar(60)  NOT NULL DEFAULT '',
         due_date    varchar(10)  NOT NULL DEFAULT '',
         assignee    varchar(120) NOT NULL DEFAULT '',
+        requester   varchar(120) NOT NULL DEFAULT '',
         answer      text         NOT NULL,
         created_by  varchar(120) NOT NULL DEFAULT '',
         created_uid bigint(20)   NOT NULL DEFAULT 0,
@@ -24069,7 +24071,7 @@ function diario_items_ensure_table() {
         KEY kind (kind),
         KEY status (status)
     ) " . $wpdb->get_charset_collate() . ";");
-    update_option('blokes_diario_items_db_v', '1', false);
+    update_option('blokes_diario_items_db_v', '2', false);
 }
 
 // Estados de cada tipo: el primero es el inicial; los de $closed cierran la cosa
@@ -24096,6 +24098,7 @@ function diario_item_out($r) {
         'qty'        => $r['qty'],
         'due_date'   => $r['due_date'],
         'assignee'   => $r['assignee'],
+        'requester'  => ($r['requester'] ?? '') !== '' ? $r['requester'] : $r['created_by'],
         'answer'     => $r['answer'],
         'created_by' => $r['created_by'],
         'mine'       => (int) $r['created_uid'] === get_current_user_id(),
@@ -24157,6 +24160,7 @@ function diario_items_create($request) {
         'qty'         => mb_substr(sanitize_text_field($b['qty'] ?? ''), 0, 60),
         'due_date'    => preg_match('/^\d{4}-\d{2}-\d{2}$/', $due) ? $due : '',
         'assignee'    => mb_substr(sanitize_text_field($b['assignee'] ?? ''), 0, 120),
+        'requester'   => mb_substr(sanitize_text_field($b['requester'] ?? ''), 0, 120) ?: activities_who(),
         'answer'      => '',
         'created_by'  => activities_who(),
         'created_uid' => get_current_user_id(),
@@ -24196,7 +24200,7 @@ function diario_items_update($request) {
         $f['answer'] = sanitize_textarea_field($b['answer']);
     }
     // Corregir el contenido: socio/gestión, o quien lo creó mientras siga en su primer estado
-    $edits = array_intersect_key($b, array_flip(array('title', 'detail', 'urgent', 'qty', 'due_date', 'assignee')));
+    $edits = array_intersect_key($b, array_flip(array('title', 'detail', 'urgent', 'qty', 'due_date', 'assignee', 'requester')));
     if ($edits) {
         if (!$manage && !($mine && $initial)) return new WP_Error('forbidden', 'Ya no se puede cambiar', array('status' => 403));
         if (isset($edits['title'])) {
@@ -24208,6 +24212,7 @@ function diario_items_update($request) {
         if (array_key_exists('urgent', $edits))   $f['urgent']   = !empty($edits['urgent']) ? 1 : 0;
         if (array_key_exists('qty', $edits))      $f['qty']      = mb_substr(sanitize_text_field($edits['qty']), 0, 60);
         if (array_key_exists('assignee', $edits)) $f['assignee'] = mb_substr(sanitize_text_field($edits['assignee']), 0, 120);
+        if (array_key_exists('requester', $edits)) $f['requester'] = mb_substr(sanitize_text_field($edits['requester']), 0, 120);
         if (array_key_exists('due_date', $edits)) $f['due_date'] = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $edits['due_date']) ? $edits['due_date'] : '';
     }
     if (!$f) return rest_ensure_response(array('success' => true, 'item' => diario_item_out($r)));

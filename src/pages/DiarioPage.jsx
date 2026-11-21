@@ -26,6 +26,9 @@ function relativo(iso, hoy) {
   return d < 0 ? `hace ${-d} días` : `en ${d} días`
 }
 
+const fechaCorta = iso => { const d = toDate(iso); return `${d.getDate()} ${MESES[d.getMonth()].toLowerCase()}` }
+const inicial = n => (n || '?').trim().charAt(0).toUpperCase()
+
 function DateBadge({ iso }) {
   const d = toDate(iso)
   return (
@@ -152,9 +155,9 @@ const CARDS = {
   recordatorios:{ title: 'Recordatorios',            icon: '⏰', kinds: ['recordatorio'],           nueva: 'Nuevo recordatorio' },
 }
 
-function NuevoForm({ card, onClose, onSaved }) {
+function NuevoForm({ card, me, nombres, onClose, onSaved }) {
   const conf = CARDS[card]
-  const [f, setF] = useState({ kind: conf.kinds[0], title: '', detail: '', qty: '', urgent: false, due_date: today(), assignee: '' })
+  const [f, setF] = useState({ kind: conf.kinds[0], title: '', detail: '', qty: '', urgent: false, due_date: today(), assignee: '', requester: me?.name || '' })
   const [busy, setBusy]   = useState(false)
   const [error, setError] = useState('')
   const set = (k, v) => setF(x => ({ ...x, [k]: v }))
@@ -182,11 +185,21 @@ function NuevoForm({ card, onClose, onSaved }) {
         </div>
       )}
       {card === 'recordatorios' && (
-        <div className="dash-form__row">
+        <label className="dash-form__lbl">¿Para cuándo?
           <input type="date" className="dash-input" value={f.due_date} onChange={e => set('due_date', e.target.value)} />
-          <input className="dash-input" placeholder="Para (vacío = todo el equipo)" maxLength={120} value={f.assignee} onChange={e => set('assignee', e.target.value)} />
-        </div>
+        </label>
       )}
+      <div className="dash-form__row">
+        <label className="dash-form__lbl">¿Quién lo pide?
+          <input className="dash-input" list="diario-nombres" maxLength={120} value={f.requester} onChange={e => set('requester', e.target.value)} />
+        </label>
+        <label className="dash-form__lbl">¿Para quién?
+          <input className="dash-input" list="diario-nombres" maxLength={120}
+            placeholder={card === 'recordatorios' ? 'Vacío = todo el equipo' : 'Vacío = sin asignar'}
+            value={f.assignee} onChange={e => set('assignee', e.target.value)} />
+        </label>
+      </div>
+      <datalist id="diario-nombres">{nombres.map(n => <option key={n} value={n} />)}</datalist>
       <textarea className="dash-input" rows={2} placeholder="Detalle (opcional)" value={f.detail} onChange={e => set('detail', e.target.value)} />
       {error && <p className="dash-error">{error}</p>}
       <div className="dash-form__actions">
@@ -212,10 +225,12 @@ function ItemRow({ it, me, hoy, open, onToggle, onChanged }) {
     setBusy(true); setError('')
     try { await fn(); onChanged() } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
+  const para = it.assignee || (it.kind === 'recordatorio' ? 'todo el equipo' : 'sin asignar')
   const sub = [
+    fechaCorta(it.created_at),
     it.kind === 'peticion' || it.kind === 'sugerencia' ? kind.label : '',
     it.qty,
-    it.kind === 'recordatorio' ? (it.assignee ? `para ${it.assignee}` : 'para todo el equipo') : it.created_by,
+    `${it.requester || it.created_by || '—'} → ${para}`,
   ].filter(Boolean).join(' · ')
 
   return (
@@ -238,7 +253,11 @@ function ItemRow({ it, me, hoy, open, onToggle, onChanged }) {
         <div className="dash-item__detail">
           {it.detail && <p className="dash-item__p">{it.detail}</p>}
           {it.answer && !me?.can_manage && <p className="dash-item__answer"><b>Respuesta:</b> {it.answer}</p>}
-          <p className="dash-item__meta">Creado por {it.created_by || '—'}{it.updated_by && it.updated_by !== it.created_by ? ` · último cambio: ${it.updated_by}` : ''}</p>
+          <p className="dash-item__meta">
+            Lo pide <b>{it.requester || it.created_by || '—'}</b> el {fechaCorta(it.created_at)} · para <b>{para}</b>
+            {it.created_by && it.created_by !== it.requester ? ` · apuntado por ${it.created_by}` : ''}
+            {it.updated_by && it.updated_by !== it.created_by ? ` · último cambio: ${it.updated_by}` : ''}
+          </p>
           {canStatus && (
             <div className="dash-item__actions">
               {kind.statuses.filter(s => s !== it.status).map(s => (
@@ -267,12 +286,13 @@ function ItemRow({ it, me, hoy, open, onToggle, onChanged }) {
   )
 }
 
-function ListaCard({ card, data, hoy, onChanged }) {
+function ListaCard({ card, data, hoy, persona, nombres, onChanged }) {
   const conf = CARDS[card]
   const [nuevo, setNuevo] = useState(false)
   const [todas, setTodas] = useState(false)
   const [abierta, setAbierta] = useState(null)
   const propias = (data?.items ?? []).filter(it => conf.kinds.includes(it.kind))
+    .filter(it => persona === null || (it.assignee || '') === persona)
   const abiertas = propias.filter(isOpen)
   // Recordatorios por fecha (lo más cercano primero); el resto, lo más nuevo primero
   const orden = (a, b) => card === 'recordatorios'
@@ -290,7 +310,7 @@ function ListaCard({ card, data, hoy, onChanged }) {
         <button type="button" className="dash-link" onClick={() => setTodas(t => !t)}>{todas ? 'Solo pendientes' : 'Ver todas →'}</button>
       </div>
       {nuevo
-        ? <NuevoForm card={card} onClose={() => setNuevo(false)} onSaved={() => { setNuevo(false); onChanged() }} />
+        ? <NuevoForm card={card} me={data?.me} nombres={nombres} onClose={() => setNuevo(false)} onSaved={() => { setNuevo(false); onChanged() }} />
         : <button type="button" className="dash-add" onClick={() => setNuevo(true)}>+ {conf.nueva}</button>}
       {data && shown.length === 0 && <p className="dash-empty">{todas ? 'Todavía no hay nada.' : 'Nada pendiente 👍'}</p>}
       <ul className="dash-list">
@@ -308,6 +328,7 @@ function ListaCard({ card, data, hoy, onChanged }) {
 export default function DiarioPage() {
   const can = useDiarioAccess()
   const { data, error, reload } = useDiarioItems(can)
+  const [persona, setPersona] = useState(null)   // null = todos; '' = sin asignar / todo el equipo
   const hoy = today()
 
   if (!can) {
@@ -326,6 +347,12 @@ export default function DiarioPage() {
   const nombre = (window.blokesSiteData?.userName || data?.me?.name || '').split(' ')[0]
   const fecha  = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
   const ir     = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // Por persona: lo pendiente agrupado por a quién va dirigido
+  const porPersona = {}
+  items.filter(isOpen).forEach(it => { const k = it.assignee || ''; porPersona[k] = (porPersona[k] || 0) + 1 })
+  const personas = Object.entries(porPersona).sort((a, b) => (a[0] === '') - (b[0] === '') || b[1] - a[1])
+  const nombres  = [...new Set([data?.me?.name, ...items.flatMap(it => [it.requester, it.assignee, it.created_by])].filter(Boolean))].sort()
+  const cardProps = { data, hoy, persona, nombres, onChanged: reload }
 
   return (
     <div className="dash dash--wide">
@@ -352,10 +379,23 @@ export default function DiarioPage() {
 
       {error && <p className="dash-error">No se pudo cargar: {error}</p>}
 
+      {personas.length > 0 && (
+        <div className="dash-people">
+          <span className="dash-people__lbl">Pendiente por persona</span>
+          <button type="button" className={`dash-person${persona === null ? ' dash-person--on' : ''}`} onClick={() => setPersona(null)}>Todos</button>
+          {personas.map(([n, c]) => (
+            <button key={n || '—'} type="button" className={`dash-person${persona === n ? ' dash-person--on' : ''}`} onClick={() => setPersona(persona === n ? null : n)}>
+              <span className="dash-person__av">{n ? inicial(n) : '👥'}</span>
+              {n || 'Sin asignar / equipo'} <b>{c}</b>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="dash-cards">
-        <ListaCard card="peticiones" data={data} hoy={hoy} onChanged={reload} />
-        <ListaCard card="compras" data={data} hoy={hoy} onChanged={reload} />
-        <ListaCard card="recordatorios" data={data} hoy={hoy} onChanged={reload} />
+        <ListaCard card="peticiones" {...cardProps} />
+        <ListaCard card="compras" {...cardProps} />
+        <ListaCard card="recordatorios" {...cardProps} />
       </div>
     </div>
   )

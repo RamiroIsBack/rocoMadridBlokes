@@ -1392,3 +1392,10 @@
   min-width: 20px; height: 20px; padding: 0 6px; margin-left: 6px; border-radius: 999px;
   background: var(--color-accent); color: #1d1d1b; font-size: 0.72rem; font-weight: 800; letter-spacing: 0;
 }
+
+/* «Diario» remarcado con un fondo suave mostaza (21/11) */
+.app-nav__link--diario {
+  background: var(--color-accent-soft);
+  border-radius: 10px 10px 0 0;
+  color: var(--color-text-primary);
+}

@@ -394,7 +394,7 @@ export default function App() {
             <ul className="app-nav__list">
               {canDiario && (
                 <li className="app-nav__item">
-                  <NavLink to="/diario" className="app-nav__link">
+                  <NavLink to="/diario" className="app-nav__link app-nav__link--diario">
                     Diario
                     {diarioAvisos > 0 && <span className="app-nav__bubble" title="Cosas pendientes en el Diario">{diarioAvisos}</span>}
                   </NavLink>
