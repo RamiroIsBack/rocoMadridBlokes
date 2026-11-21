@@ -324,11 +324,93 @@ function ListaCard({ card, data, hoy, persona, nombres, onChanged }) {
   )
 }
 
+// ─── Equipo: cada persona y lo que tiene asignado ───────────────────────────
+// Los nombres se apuntan a mano en «¿Para quién?», así que se comparan sin tildes ni
+// mayúsculas y basta con el nombre de pila ("Eva" = "Eva Martín").
+const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ')
+function esPersona(nombre, persona) {
+  const n = norm(nombre), p = norm(persona)
+  if (!n || !p) return false
+  if (n === p) return true
+  const pn = p.split(' ')[0], nn = n.split(' ')[0]
+  return n === pn || (nn === pn && pn.length > 2)
+}
+
+const GRUPOS = [
+  { role: 'gestion',  title: 'Gestión' },
+  { role: 'profesor', title: 'Profes' },
+  { role: 'equipo',   title: 'Equipo' },
+]
+
+function Equipo({ data, hoy, onChanged }) {
+  const [sel, setSel] = useState(null)
+  const [abierta, setAbierta] = useState(null)
+  const team  = data?.team ?? []
+  const items = data?.items ?? []
+  if (!team.length) return null
+
+  const asignadas = p => items.filter(it => esPersona(it.assignee, p.name))
+  const pedidas   = p => items.filter(it => esPersona(it.requester || it.created_by, p.name) && !esPersona(it.assignee, p.name))
+  const persona   = team.find(p => p.uid === sel)
+
+  const chip = p => {
+    const n = asignadas(p).filter(isOpen).length
+    return (
+      <button key={p.uid} type="button" className={`dash-person${sel === p.uid ? ' dash-person--on' : ''}`}
+        onClick={() => { setSel(sel === p.uid ? null : p.uid); setAbierta(null) }}>
+        <span className={`dash-person__av dash-person__av--${p.role}`}>{inicial(p.name)}</span>
+        {p.name} {n > 0 && <b>{n}</b>}
+      </button>
+    )
+  }
+  const lista = (titulo, its) => (
+    <div className="dash-team__list">
+      <h3 className="dash-team__h">{titulo} <span>{its.filter(isOpen).length} pendientes</span></h3>
+      {its.length === 0 ? <p className="dash-empty">Nada por aquí.</p> : (
+        <ul className="dash-list">
+          {its.slice().sort((a, b) => isOpen(b) - isOpen(a) || b.created_at.localeCompare(a.created_at)).map(it => (
+            <ItemRow key={it.id} it={it} me={data?.me} hoy={hoy}
+              open={abierta === it.id} onToggle={() => setAbierta(abierta === it.id ? null : it.id)} onChanged={onChanged} />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+
+  return (
+    <section className="dash-card dash-team" id="diario-equipo">
+      <div className="dash-card__head">
+        <span className="dash-card__icon">👥</span>
+        <h2 className="dash-card__title">Equipo</h2>
+        <span className="dash-team__hint">Pulsa a alguien para ver lo que tiene asignado</span>
+      </div>
+      {team.some(p => p.role === 'socio') && (
+        <div className="dash-team__group dash-team__group--socios">
+          <span className="dash-team__glbl">Socios</span>
+          {team.filter(p => p.role === 'socio').map(chip)}
+        </div>
+      )}
+      {GRUPOS.filter(g => team.some(p => p.role === g.role)).map(g => (
+        <div key={g.role} className="dash-team__group">
+          <span className="dash-team__glbl">{g.title}</span>
+          {team.filter(p => p.role === g.role).map(chip)}
+        </div>
+      ))}
+      {persona && (
+        <div className="dash-team__panel">
+          {lista(`Asignado a ${persona.name}`, asignadas(persona))}
+          {lista(`Lo que ${persona.name} ha pedido a otros`, pedidas(persona))}
+        </div>
+      )}
+      {!data?.me?.can_manage && <p className="dash-team__note">Ves solo lo que te han asignado y lo que has pedido tú; socios y gestión lo ven todo.</p>}
+    </section>
+  )
+}
+
 // ─── Página ────────────────────────────────────────────────────────────────
 export default function DiarioPage() {
   const can = useDiarioAccess()
   const { data, error, reload } = useDiarioItems(can)
-  const [persona, setPersona] = useState(null)   // null = todos; '' = sin asignar / todo el equipo
   const hoy = today()
 
   if (!can) {
@@ -347,12 +429,9 @@ export default function DiarioPage() {
   const nombre = (window.blokesSiteData?.userName || data?.me?.name || '').split(' ')[0]
   const fecha  = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
   const ir     = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  // Por persona: lo pendiente agrupado por a quién va dirigido
-  const porPersona = {}
-  items.filter(isOpen).forEach(it => { const k = it.assignee || ''; porPersona[k] = (porPersona[k] || 0) + 1 })
-  const personas = Object.entries(porPersona).sort((a, b) => (a[0] === '') - (b[0] === '') || b[1] - a[1])
-  const nombres  = [...new Set([data?.me?.name, ...items.flatMap(it => [it.requester, it.assignee, it.created_by])].filter(Boolean))].sort()
-  const cardProps = { data, hoy, persona, nombres, onChanged: reload }
+  // Nombres para «¿Quién lo pide?» y «¿Para quién?»: el equipo y los que ya se han usado
+  const nombres  = [...new Set([data?.me?.name, ...(data?.team ?? []).map(p => p.name), ...items.flatMap(it => [it.requester, it.assignee])].filter(Boolean))].sort()
+  const cardProps = { data, hoy, persona: null, nombres, onChanged: reload }
 
   return (
     <div className="dash dash--wide">
@@ -379,24 +458,13 @@ export default function DiarioPage() {
 
       {error && <p className="dash-error">No se pudo cargar: {error}</p>}
 
-      {personas.length > 0 && (
-        <div className="dash-people">
-          <span className="dash-people__lbl">Pendiente por persona</span>
-          <button type="button" className={`dash-person${persona === null ? ' dash-person--on' : ''}`} onClick={() => setPersona(null)}>Todos</button>
-          {personas.map(([n, c]) => (
-            <button key={n || '—'} type="button" className={`dash-person${persona === n ? ' dash-person--on' : ''}`} onClick={() => setPersona(persona === n ? null : n)}>
-              <span className="dash-person__av">{n ? inicial(n) : '👥'}</span>
-              {n || 'Sin asignar / equipo'} <b>{c}</b>
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="dash-cards">
         <ListaCard card="peticiones" {...cardProps} />
         <ListaCard card="compras" {...cardProps} />
         <ListaCard card="recordatorios" {...cardProps} />
       </div>
+
+      <Equipo data={data} hoy={hoy} onChanged={reload} />
     </div>
   )
 }

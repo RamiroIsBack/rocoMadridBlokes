@@ -24125,6 +24125,60 @@ add_action('rest_api_init', function() {
     ));
 });
 
+// Nombre normalizado para comparar ("Álvaro Gálvez" = "alvaro galvez")
+function diario_norm($s) {
+    return trim(preg_replace('/\s+/', ' ', strtolower(remove_accents((string) $s))));
+}
+
+// ¿Este nombre es la persona conectada? Por nombre completo o por el nombre de pila.
+function diario_name_is_me($name) {
+    $n = diario_norm($name);
+    if ($n === '') return false;
+    $u = wp_get_current_user();
+    if (!$u || !$u->ID) return false;
+    foreach (array($u->display_name, $u->first_name, $u->user_login) as $cand) {
+        $c = diario_norm($cand);
+        if ($c === '') continue;
+        if ($n === $c) return true;
+        $first = explode(' ', $c)[0];
+        if ($first !== '' && ($n === $first || explode(' ', $n)[0] === $first && strlen($first) > 2)) return true;
+    }
+    return false;
+}
+
+// Quién ve cada cosa (21/11, Álvaro): socios y gestión, todo. El resto, solo lo que le han
+// asignado, lo que ha pedido o apuntado él, y los recordatorios para todo el equipo.
+function diario_item_visible($r) {
+    if (diario_can_manage()) return true;
+    if ((int) $r['created_uid'] === get_current_user_id()) return true;
+    if (diario_name_is_me($r['assignee']) || diario_name_is_me($r['requester'] ?? '')) return true;
+    return $r['kind'] === 'recordatorio' && trim($r['assignee']) === '';
+}
+
+// El equipo para el Diario: socios, gestión, profes y la lista del Diario. Solo nombres y
+// rol (nunca emails) para el apartado Equipo y el «¿Para quién?».
+function diario_team() {
+    $lists = blokes_get_email_lists();
+    $groups = array(
+        'socio'    => $lists['socios'],
+        'gestion'  => $lists['gestion'],
+        'profesor' => $lists['profesores'],
+        'equipo'   => diario_access_list(),
+    );
+    $out  = array();
+    $seen = array();
+    foreach ($groups as $role => $emails) {
+        foreach ((array) $emails as $email) {
+            $user = get_user_by('email', strtolower(trim((string) $email)));
+            if (!$user || isset($seen[$user->ID])) continue;
+            $seen[$user->ID] = true;
+            $name = trim($user->display_name) !== '' ? $user->display_name : $user->user_login;
+            $out[] = array('uid' => (int) $user->ID, 'name' => $name, 'role' => $role);
+        }
+    }
+    return $out;
+}
+
 function diario_items_list() {
     global $wpdb;
     diario_items_ensure_table();
@@ -24133,10 +24187,12 @@ function diario_items_list() {
         "SELECT * FROM " . diario_items_table() . " WHERE closed_at IS NULL OR closed_at >= %s ORDER BY created_at DESC LIMIT 500",
         $since
     ), ARRAY_A);
+    $rows = array_values(array_filter((array) $rows, 'diario_item_visible'));
     $u = wp_get_current_user();
     return rest_ensure_response(array(
-        'items' => array_map('diario_item_out', (array) $rows),
+        'items' => array_map('diario_item_out', $rows),
         'me'    => array('name' => $u && $u->ID ? ($u->display_name ?: $u->user_login) : '', 'can_manage' => diario_can_manage()),
+        'team'  => diario_team(),
     ));
 }
 
@@ -24179,6 +24235,7 @@ function diario_items_update($request) {
     diario_items_ensure_table();
     $r = diario_get_item_row((int) $request['id']);
     if (!$r) return new WP_Error('not_found', 'Ya no existe', array('status' => 404));
+    if (!diario_item_visible($r)) return new WP_Error('forbidden', 'No tienes acceso a esto', array('status' => 403));
     $b       = (array) $request->get_json_params();
     $kinds   = diario_kinds();
     $manage  = diario_can_manage();
@@ -24227,6 +24284,7 @@ function diario_items_delete($request) {
     diario_items_ensure_table();
     $r = diario_get_item_row((int) $request['id']);
     if (!$r) return rest_ensure_response(array('success' => true));
+    if (!diario_item_visible($r)) return new WP_Error('forbidden', 'No tienes acceso a esto', array('status' => 403));
     $kinds   = diario_kinds();
     $mine    = (int) $r['created_uid'] === get_current_user_id();
     $initial = $r['status'] === $kinds[$r['kind']][0];

@@ -254,10 +254,25 @@
   display: inline-flex; align-items: center; gap: 8px; padding: 5px 14px 5px 6px; border-radius: 999px; cursor: pointer;
   background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text-primary); font-family: inherit; font-size: 0.92rem;
 }
-.dash-person:first-of-type { padding-left: 14px; }
 .dash-person b { font-weight: 800; }
 .dash-person--on { border-color: var(--color-accent); background: var(--color-accent-soft); }
 .dash-person__av {
   width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
   background: var(--brand-peacock); color: #fff; font-weight: 800; font-size: 0.85rem;
 }
+
+/* Equipo */
+.dash-team { margin-top: 20px; }
+.dash-team__hint { margin-left: auto; font-size: 0.85rem; color: var(--color-text-secondary); }
+.dash-team__group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; }
+.dash-team__group--socios { padding-bottom: 14px; margin-bottom: 6px; border-bottom: 1px dashed var(--color-border); }
+.dash-team__glbl { width: 80px; flex-shrink: 0; font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-secondary); }
+.dash-person__av--socio    { background: var(--color-accent); color: #1d1d1b; }
+.dash-person__av--gestion  { background: var(--brand-mora); }
+.dash-person__av--profesor { background: var(--brand-peacock); }
+.dash-person__av--equipo   { background: var(--brand-firefly); }
+.dash-team__panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-border); }
+.dash-team__h { font-family: var(--font-heading); font-size: 1.05rem; margin: 0 0 6px; color: var(--color-text-primary); }
+.dash-team__h span { font-family: var(--font-body); font-size: 0.8rem; font-weight: 600; color: var(--color-text-secondary); margin-left: 6px; }
+.dash-team__note { font-size: 0.8rem; color: var(--color-text-secondary); margin: 10px 0 0; }
+@media (max-width: 700px) { .dash-team__glbl { width: 100%; } .dash-team__hint { margin-left: 0; } }
