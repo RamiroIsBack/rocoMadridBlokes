@@ -623,32 +623,26 @@
   margin-right: auto;
 }
 
-.progreso-idx,
-.league-page {
-  position: relative;
-  z-index: 1;
-}
-
-@media (min-width: 1200px) {
-  .progreso-idx::before,
-  .league-page::before {
+/* El dibujo va en el margen izquierdo (fuera de la columna de 720 px, así nunca
+   tapa el texto) y se repite uno debajo de otro a lo largo de toda la página. */
+@media (min-width: 1180px) {
+  .app-main:has(.progreso-idx)::before,
+  .app-main:has(.league-page)::before {
     content: '';
-    position: fixed;
-    left: 0;
+    position: absolute;
+    top: var(--spacing-lg);
     bottom: 0;
-    width: min(30vw, 460px);
-    height: 75vh;
+    left: var(--spacing-md);
+    width: calc((100% - 720px) / 2 - 40px);
     background-color: var(--color-accent);
     opacity: 0.45;
-    -webkit-mask: url('./assets/brand/linea-escalador-cuerda.png') no-repeat left bottom / contain;
-            mask: url('./assets/brand/linea-escalador-cuerda.png') no-repeat left bottom / contain;
+    -webkit-mask: url('./assets/brand/linea-escalador-cuerda.png') repeat-y left top / 100% auto;
+            mask: url('./assets/brand/linea-escalador-cuerda.png') repeat-y left top / 100% auto;
     pointer-events: none;
-    z-index: -1;
   }
-  .league-page::before {
+  .app-main:has(.league-page)::before {
     -webkit-mask-image: url('./assets/brand/linea-grupo-saltando.png');
             mask-image: url('./assets/brand/linea-grupo-saltando.png');
-    width: min(32vw, 520px);
   }
 }
 
