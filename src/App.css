@@ -601,11 +601,7 @@
 
 /* ---- Main ---- */
 
-/* Todas las secciones a lo ancho de la pantalla, como Los blokes */
-.app-main .progreso,
-.app-main .user-stats,
-.app-main .mi-clase,
-.app-main .league-page,
+/* Secciones de gestión a lo ancho de la pantalla, como Los blokes (tienen tablas) */
 .app-main .org,
 .app-main .entrena,
 .app-main .stats-page,
@@ -613,6 +609,47 @@
 .app-main .sv-page,
 .app-main .tablet-yo {
   max-width: none;
+}
+
+/* Progreso y Ligas: columna centrada y un dibujo de línea en mostaza asomando por
+   la izquierda, como en la web del club. Los PNG son blancos: se usan como máscara
+   y se pintan del color que queramos. Solo en pantallas anchas (en el móvil no cabe). */
+.app-main .progreso,
+.app-main .user-stats,
+.app-main .mi-clase,
+.app-main .league-page {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.progreso-idx,
+.league-page {
+  position: relative;
+  z-index: 1;
+}
+
+@media (min-width: 1200px) {
+  .progreso-idx::before,
+  .league-page::before {
+    content: '';
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: min(30vw, 460px);
+    height: 75vh;
+    background-color: var(--color-accent);
+    opacity: 0.45;
+    -webkit-mask: url('./assets/brand/linea-escalador-cuerda.png') no-repeat left bottom / contain;
+            mask: url('./assets/brand/linea-escalador-cuerda.png') no-repeat left bottom / contain;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .league-page::before {
+    -webkit-mask-image: url('./assets/brand/linea-grupo-saltando.png');
+            mask-image: url('./assets/brand/linea-grupo-saltando.png');
+    width: min(32vw, 520px);
+  }
 }
 
 .app-main {
