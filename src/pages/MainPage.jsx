@@ -28,32 +28,23 @@ function getAuthHeadersCompe() {
 // Apunta un top de compe para quien eligió el picker "¿quién lo ha hecho?" (Ramiro, 09/11:
 // en modo tablet, tocar un bloque de la compe tiene que hacer lo mismo que un bloke normal —
 // abrir el picker — en vez de llevar a /compe). Siempre Top (y Zona, que ya cuenta con el top).
-async function apuntarCompeParaIdentidad(compBlockId, identity) {
+// 22/11 ("nadie sin categoría"): si el backend devuelve 'falta_categoria' (primer top de
+// alguien sin categoría y sin sub de Menores que la ponga sola), no se ha apuntado nada
+// todavía — el llamante tiene que preguntar y volver a llamar con `categoria`.
+async function apuntarCompeParaIdentidad(compBlockId, identity, categoria) {
   const target = identity.kind === 'ph' ? { targetPlaceholderId: identity.placeholder_id } : { targetUserId: identity.user_id }
   const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/resultado`, {
     method: 'POST', credentials: 'include',
     headers: { ...getAuthHeadersCompe(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ compBlockId, top: true, zona: true, ...target }),
+    body: JSON.stringify({ compBlockId, top: true, zona: true, ...target, ...(categoria ? { categoria } : {}) }),
   })
   const json = await res.json().catch(() => null)
-  if (!res.ok) throw new Error(json?.message || `Error ${res.status}`)
+  if (!res.ok) {
+    const err = new Error(json?.message || `Error ${res.status}`)
+    err.code = json?.code
+    throw err
+  }
   return json
-}
-
-// 20/11 12:10 (Ramiro, categoría automática — opción B): si el backend dice que esta persona
-// todavía no tiene categoría en esta compe (y no se la pudo poner sola, ver
-// blokes_rm_tiene_sub_menores_en_vigor), el buscador la pregunta una sola vez aquí mismo —
-// Colección en sí nunca pregunta nada, solo este prompt corto tras apuntar el top.
-async function guardarCategoriaCompe(competitionId, identity, categoria) {
-  const body = identity.kind === 'ph'
-    ? { competitionId, participanteTipo: 'placeholder', participanteId: identity.placeholder_id, categoria }
-    : { competitionId, participanteTipo: 'user', participanteId: identity.user_id, categoria }
-  const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/categoria`, {
-    method: 'POST', credentials: 'include',
-    headers: { ...getAuthHeadersCompe(), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) { const json = await res.json().catch(() => null); throw new Error(json?.message || `Error ${res.status}`) }
 }
 
 // Modo compe (NOTAS_PARA_CODE_compe_en_blokes.md, Ramiro 07/11 08:46: "Colección solo con los 16
@@ -98,8 +89,9 @@ function ColeccionModoCompe({ estado }) {
   const isTablet = window.blokesSiteData?.userRole === 'tablet'
   const [pickerBloque, setPickerBloque] = useState(null)
   const [celebration, setCelebration] = useState(null)
-  // { identity } tras un top de alguien que todavía no tiene categoría en esta compe y no se le
-  // pudo poner sola — se pregunta una sola vez, aquí, nunca en el propio picker de Colección.
+  // { bloque, identity } — 22/11 ("nadie sin categoría"): antes de apuntar el PRIMER top de
+  // alguien sin categoría todavía en esta compe y sin sub de Menores que la ponga sola. No se
+  // ha apuntado nada todavía (el backend lo rechazó) — bloqueante, sin seguir sin elegir.
   const [pidiendoCategoria, setPidiendoCategoria] = useState(null)
 
   const tocar = useCallback((e, b) => {
@@ -108,26 +100,27 @@ function ColeccionModoCompe({ estado }) {
     setPickerBloque(b)
   }, [isTablet])
 
-  const completarParaIdentidad = useCallback(async (identity) => {
+  const intentarApuntar = useCallback(async (bloque, identity, categoria) => {
+    try {
+      await apuntarCompeParaIdentidad(bloque.compBlockId, identity, categoria)
+      setCelebration({ nombre: identity.name, numero: bloque.numero })
+    } catch (e) {
+      if (e.code === 'falta_categoria') setPidiendoCategoria({ bloque, identity })
+      else console.error('Tablet compe completion failed:', e)
+    }
+  }, [])
+
+  const completarParaIdentidad = useCallback((identity) => {
     const bloque = pickerBloque
     setPickerBloque(null)
-    if (!bloque) return
-    try {
-      const result = await apuntarCompeParaIdentidad(bloque.compBlockId, identity)
-      setCelebration({ nombre: identity.name, numero: bloque.numero })
-      if (result?.data?.necesitaCategoria) setPidiendoCategoria({ identity })
-    } catch (e) {
-      console.error('Tablet compe completion failed:', e)
-    }
-  }, [pickerBloque])
+    if (bloque) intentarApuntar(bloque, identity)
+  }, [pickerBloque, intentarApuntar])
 
-  const elegirCategoriaUnaVez = useCallback(async (categoria) => {
+  const elegirCategoriaUnaVez = useCallback((categoria) => {
     const p = pidiendoCategoria
     setPidiendoCategoria(null)
-    if (!p) return
-    try { await guardarCategoriaCompe(estado.competitionId, p.identity, categoria) }
-    catch (e) { console.error('No se pudo guardar la categoría de la compe:', e) }
-  }, [pidiendoCategoria, estado.competitionId])
+    if (p) intentarApuntar(p.bloque, p.identity, categoria)
+  }, [pidiendoCategoria, intentarApuntar])
 
   return (
     <main className="app-main">
@@ -162,7 +155,7 @@ function ColeccionModoCompe({ estado }) {
           background: '#fef3c7', color: '#92400e', textAlign: 'center', fontSize: '0.9rem',
           padding: '10px 12px', borderRadius: 10, marginBottom: 16,
         }}>
-          ¿Categoría de {pidiendoCategoria.identity.name} en esta compe?{' '}
+          Elige la categoría de {pidiendoCategoria.identity.name} para apuntarle el bloque {pidiendoCategoria.bloque.numero}:{' '}
           <button type="button" onClick={() => elegirCategoriaUnaVez('masculina')} style={{ marginLeft: 8, fontWeight: 600 }}>Masculina</button>{' '}
           <button type="button" onClick={() => elegirCategoriaUnaVez('femenina')} style={{ fontWeight: 600 }}>Femenina</button>{' '}
           <button type="button" onClick={() => elegirCategoriaUnaVez('infantil')} style={{ fontWeight: 600 }}>Infantil</button>

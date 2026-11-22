@@ -20968,6 +20968,36 @@ function progreso_compe_apuntar_resultado($request) {
         if (!$existe_rapido) return new WP_Error('not_found', 'Participante rápido no encontrado en esta compe.', array('status' => 404));
     }
 
+    // 22/11 (Ramiro: "en la compe no puede quedar nadie sin categoría"): se mira y, si hace
+    // falta, se resuelve la categoría ANTES de escribir el top — nunca se guarda un primer top
+    // sin categoría. Quien tiene una sub de Menores en vigor sigue entrando solo en infantil,
+    // sin preguntar; cualquier otro necesita que esta misma llamada traiga ya `categoria`
+    // (Colección/Apuntar/Recepción la piden antes de reintentar) — si no, 409 y no se escribe
+    // nada todavía, ni el top ni la categoría.
+    $categoria_asignada = null;
+    if ($top) {
+        $tiene_categoria = (bool) progreso_compe_categoria_get($block['competition_id'], $participante_tipo, $participante_id);
+        if (!$tiene_categoria) {
+            if ($participante_tipo === 'user' && blokes_rm_tiene_sub_menores_en_vigor($participante_id)) {
+                $categoria_asignada = 'infantil';
+            } else {
+                $categoria_in = sanitize_key((string) $request->get_param('categoria'));
+                if (in_array($categoria_in, PROGRESO_COMPE_CATEGORIAS, true)) {
+                    $categoria_asignada = $categoria_in;
+                } else {
+                    return new WP_Error('falta_categoria', 'Elige la categoría antes de apuntar el primer top.', array('status' => 409));
+                }
+            }
+            $req_cat = new WP_REST_Request('POST', '/progreso/v1/compe/categoria');
+            $req_cat->set_param('competitionId', $block['competition_id']);
+            $req_cat->set_param('participanteTipo', $participante_tipo);
+            $req_cat->set_param('participanteId', $participante_id);
+            $req_cat->set_param('categoria', $categoria_asignada);
+            $resultado_cat = progreso_compe_categoria_set($req_cat);
+            if (is_wp_error($resultado_cat)) return $resultado_cat;
+        }
+    }
+
     $ahora = current_time('mysql');
     $existente = $wpdb->get_row($wpdb->prepare(
         "SELECT id FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND comp_block_id = %d AND participante_tipo = %s AND participante_id = %d",
@@ -20988,27 +21018,8 @@ function progreso_compe_apuntar_resultado($request) {
         )));
     }
 
-    // 20/11 12:10 (categoría automática, opción B): el camino de Colección no pregunta — si al
-    // apuntar un top esta persona todavía no tiene categoría en esta compe, y es una cuenta con
-    // una sub en vigor de Menores (como alumno o como la propia cuenta), se le pone "infantil"
-    // sin preguntar. Si no aplica, se avisa al frontend (necesitaCategoria) para que el buscador
-    // pregunte una sola vez — nunca se repite una vez puesta, y recepción puede cambiarla siempre.
-    $categoria_asignada = null;
-    $tiene_categoria = (bool) progreso_compe_categoria_get($block['competition_id'], $participante_tipo, $participante_id);
-    if (!$tiene_categoria && $top && $participante_tipo === 'user' && blokes_rm_tiene_sub_menores_en_vigor($participante_id)) {
-        $categoria_asignada = 'infantil';
-        $req_cat = new WP_REST_Request('POST', '/progreso/v1/compe/categoria');
-        $req_cat->set_param('competitionId', $block['competition_id']);
-        $req_cat->set_param('participanteTipo', $participante_tipo);
-        $req_cat->set_param('participanteId', $participante_id);
-        $req_cat->set_param('categoria', $categoria_asignada);
-        progreso_compe_categoria_set($req_cat);
-        $tiene_categoria = true;
-    }
-
     return rest_ensure_response(array('success' => true, 'data' => array(
         'estado' => $datos['estado'],
-        'necesitaCategoria' => $top ? !$tiene_categoria : false,
         'categoriaAsignada' => $categoria_asignada,
     )));
 }
@@ -21151,6 +21162,13 @@ function progreso_compe_simular_top($request) {
     $req_resultado->set_param('compBlockId', intval($bloque['id']));
     $req_resultado->set_param('top', true);
     $req_resultado->set_param('targetParticipanteRapidoId', intval($rapido['id']));
+    // 22/11 ("nadie sin categoría"): apuntar-resultado ya no deja pasar un primer top sin
+    // categoría — participantes de prueba viejos (de antes de la tabla comp_categorias, p. ej.
+    // los 14 de la #26) todavía no tienen fila ahí. El simulador nunca debe quedarse bloqueado
+    // por esto: si le toca a uno sin categoría, le pone una al azar antes de apuntar.
+    if (!progreso_compe_categoria_get($competition_id, 'rapido', intval($rapido['id']))) {
+        $req_resultado->set_param('categoria', PROGRESO_COMPE_CATEGORIAS[array_rand(PROGRESO_COMPE_CATEGORIAS)]);
+    }
     $resultado = progreso_compe_apuntar_resultado($req_resultado);
     if (is_wp_error($resultado)) return $resultado;
 
@@ -21386,13 +21404,11 @@ function progreso_compe_clasificacion($request) {
         usort($clasificacion_por_cat[$key], $orden);
         $categorias_out[] = array('id' => $key, 'nombre' => $label, 'clasificacion' => $clasificacion_por_cat[$key]);
     }
-    // "Sin categoría" (20/11 06:30): nadie se pierde en silencio solo por no haber elegido
-    // todavía masculina/femenina/infantil — sale aparte, visible, en vez de caer en una de las
-    // tres por defecto (eso sí sería inventar un dato que no tenemos).
-    if (!empty($clasificacion_por_cat[''])) {
-        usort($clasificacion_por_cat[''], $orden);
-        $categorias_out[] = array('id' => '', 'nombre' => 'Sin categoría', 'clasificacion' => $clasificacion_por_cat['']);
-    }
+    // 22/11 (Ramiro: "en la compe no puede quedar nadie sin categoría"): ya no puede haber un
+    // primer top sin categoría (bloqueado en progreso_compe_apuntar_resultado), así que la tele
+    // ya no necesita una columna/pestaña "Sin categoría" — lo que quede vacío de antes de este
+    // cambio es un aviso para Recepción (ver progreso_compe_mis_resultados), no una columna de
+    // la tele.
 
     $ultimos = array_slice(array_reverse($filas), 0, 10);
     $ultimos_validados = array();

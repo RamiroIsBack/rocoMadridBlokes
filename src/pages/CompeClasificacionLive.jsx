@@ -36,7 +36,7 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
 
   // Estado imperativo de la animación — no re-renderiza React, solo pinta el DOM directamente.
   const st = useRef({
-    cats: [], // [{id, nombre}] — de clasif.categorias, puede ser 3 o 4 (con "Sin categoría")
+    cats: [], // [{id, nombre}] — de clasif.categorias (masculina/femenina/infantil)
     orden: {}, // catId -> array [{clave, nombreMostrar, tops}] en el orden MOSTRADO ahora mismo
     catIdx: 0,
     rotTimer: null,
@@ -97,9 +97,8 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
     renderList(box, st.orden[cat.id] || [], rowHeightFor(box, MAX_ROWS_ROT), MAX_ROWS_ROT, flip)
     drawTabs(false)
   }
-  // Cowork, 21/11 18:30: "Sin categoría" como 4ª columna igual de ancha que las otras tres las
-  // apretaba — aquí solo caben las 3 categorías de siempre (masculina/femenina/infantil);
-  // "Sin categoría" sigue visible igual en la vista rotativa (tabs), que sí la admite bien.
+  // 22/11: el backend ya no manda nunca "Sin categoría" (nadie puede quedar sin categoría en
+  // la compe) — este filtro es solo defensivo, por si algún dato viejo la trajera de antes.
   function renderTri() {
     const tri = $(triRef)
     if (!tri) return

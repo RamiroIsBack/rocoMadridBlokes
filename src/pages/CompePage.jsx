@@ -17,7 +17,14 @@ async function api(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   })
   const json = await res.json().catch(() => null)
-  if (!res.ok) throw new Error(json?.message || `Error ${res.status}`)
+  if (!res.ok) {
+    // 22/11 ("nadie sin categoría"): /compe/resultado devuelve 'falta_categoria' cuando es el
+    // primer top de alguien sin categoría todavía — Apuntar/Recepción lo distinguen por el
+    // code, no por el texto, para enseñar un aviso claro en vez del error genérico.
+    const err = new Error(json?.message || `Error ${res.status}`)
+    err.code = json?.code
+    throw err
+  }
   return json
 }
 
@@ -110,7 +117,7 @@ export default function CompePage() {
       await api('POST', '/compe/resultado', { compBlockId, ...cambios })
       setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios, estado: 'validado' } }))
     } catch (e) {
-      setErr(e.message)
+      setErr(e.code === 'falta_categoria' ? 'Elige tu categoría ahí arriba antes de apuntar el primer top.' : e.message)
     } finally {
       setGuardando(null)
     }
@@ -305,7 +312,7 @@ function RecepcionTab({ bloques, competitionId }) {
     setGuardando(compBlockId)
     try {
       const target = seleccionado.tipo === 'rapido' ? { targetParticipanteRapidoId: seleccionado.id } : { targetUserId: seleccionado.id }
-      await api('POST', '/compe/resultado', { compBlockId, ...cambios, ...target })
+      await api('POST', '/compe/resultado', { compBlockId, ...cambios, ...target, ...(categoria ? { categoria } : {}) })
       setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios } }))
       // Aviso de confirmación (cowork, 08/11 11:15).
       const numero = bloques.find(b => b.compBlockId === compBlockId)?.numero
@@ -317,7 +324,7 @@ function RecepcionTab({ bloques, competitionId }) {
       // persona); se queda en la misma persona hasta que se pulse "Otra persona", o hasta los
       // 60 s sin tocar nada (el temporizador de abajo).
     } catch (e) {
-      setErr(e.message)
+      setErr(e.code === 'falta_categoria' ? 'Elige la categoría de esta persona ahí arriba antes de apuntar el primer top.' : e.message)
     } finally {
       setGuardando(null)
     }
@@ -333,6 +340,12 @@ function RecepcionTab({ bloques, competitionId }) {
           <button type="button" className="compe-recepcion-otra" onClick={volverABuscar}>Otra persona</button>
         </div>
         <SelectorCategoria categoria={categoria} onElegir={elegirCategoria} compacto />
+        {/* 22/11 ("nadie sin categoría"): ya no se puede apuntar un primer top sin categoría,
+            pero alguien de ANTES de este cambio puede tener tops sin ella — aviso solo aquí
+            (en Recepción), nunca en la tele ni en el Apuntar de cada uno. */}
+        {!categoria && Object.values(misResultados).some(r => r.top) && (
+          <p className="compe-page__error">⚠️ Ya tiene tops apuntados pero sin categoría — no sale en la clasificación de la tele hasta que se la pongas ahí arriba.</p>
+        )}
         {aviso && <p className="compe-recepcion-aviso">{aviso}</p>}
         {err && <p className="compe-page__error">{err}</p>}
         <div className="compe-page__grid">
