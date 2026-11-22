@@ -325,6 +325,11 @@ export default function App() {
                     </div>
                   )}
                   {/* 22/11 (Álvaro): con sesión no salen «Apúntate…» ni «Instalar la app» */}
+                  {/* Salir, discreto. En «Ver como: Tablet» no sale: cerraría la sesión REAL de
+                      quien lo simula (cowork, 09/11 09:05). */}
+                  {!(sd.userRole === 'tablet' && sd.userRoleReal !== 'tablet') && (
+                    <button type="button" className="app-header__salir" onClick={() => setLogoutOpen(true)}>Salir</button>
+                  )}
                   {/* 22/11: botón corto «Mapa» (marcado cuando está a la vista) */}
                   <button
                     type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}

@@ -1435,7 +1435,8 @@
     grid-template-columns: 1fr auto;
     grid-template-areas:
       "sub      tema"
-      "vercomo  mapa";
+      "vercomo  mapa"
+      "salir    salir";
     align-items: center;
     justify-items: start;
     text-align: left;
@@ -1492,3 +1493,13 @@
 .dificultad__color--red    { background: #dc2626; color: #fff; }
 .dificultad__color--black  { background: #1f2937; color: #fff; }
 :root[data-theme="dark"] .dificultad__color--black { box-shadow: 0 0 0 1px #6b7280; }
+
+/* Salir: discreto (22/11) */
+.app-header__salir {
+  background: none; border: none; padding: 2px 0; cursor: pointer; font-family: inherit;
+  font-size: 0.75rem; color: var(--color-text-secondary); text-decoration: underline; text-underline-offset: 2px;
+}
+.app-header__salir:hover { color: var(--color-text-primary); }
+@media (max-width: 999px) {
+  .app-header__extra--abierto .app-header__salir { grid-area: salir; justify-self: start; }
+}
