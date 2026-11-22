@@ -297,14 +297,12 @@ function MainPage() {
       <main className="app-main">
         {/* 22/11: de más fácil a más difícil */}
         <div className="dificultad" aria-label="Dificultad de los colores, de más fácil a más difícil">
-          <span className="dificultad__extremo">Más fácil</span>
-          {[['green', 'Verde'], ['blue', 'Azul'], ['yellow', 'Amarillo'], ['red', 'Rojo'], ['black', 'Negro']].map(([c, n], i) => (
-            <span key={c} className="dificultad__paso">
-              {i > 0 && <span className="dificultad__flecha" aria-hidden="true">›</span>}
-              <span className={`dificultad__color dificultad__color--${c}`}>{n}</span>
-            </span>
-          ))}
-          <span className="dificultad__extremo">Más difícil</span>
+          {/* Una sola línea: barra que pasa por los colores (verde → azul → amarillo → rojo → negro) */}
+          <span className="dificultad__extremo">Fácil</span>
+          <span className="dificultad__barra" title="Verde · Azul · Amarillo · Rojo · Negro">
+            {['green', 'blue', 'yellow', 'red', 'black'].map(c => <span key={c} className={`dificultad__punto dificultad__punto--${c}`} />)}
+          </span>
+          <span className="dificultad__extremo">Difícil</span>
         </div>
         <FilterBar
           activeSala={activeSala}

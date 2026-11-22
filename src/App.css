@@ -1503,3 +1503,18 @@
 @media (max-width: 999px) {
   .app-header__extra--abierto .app-header__salir { grid-area: salir; justify-self: start; }
 }
+
+/* Dificultad en una sola línea (22/11): barra de progresión por los colores */
+.dificultad { flex-wrap: nowrap; gap: 10px; max-width: 560px; }
+.dificultad__barra {
+  flex: 1; min-width: 120px; height: 12px; border-radius: 999px; position: relative;
+  display: flex; align-items: center; justify-content: space-between; padding: 0 2px;
+  background: linear-gradient(90deg, #15803d 0%, #2563eb 27%, #eab308 50%, #dc2626 73%, #1f2937 100%);
+}
+.dificultad__punto { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--color-surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); }
+.dificultad__punto--green  { background: #15803d; }
+.dificultad__punto--blue   { background: #2563eb; }
+.dificultad__punto--yellow { background: #eab308; }
+.dificultad__punto--red    { background: #dc2626; }
+.dificultad__punto--black  { background: #1f2937; }
+.dificultad__extremo { white-space: nowrap; }
