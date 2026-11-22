@@ -384,11 +384,12 @@ function Equipo({ data, hoy, onChanged }) {
   const [sel, setSel]         = useState(null)
   const [abierta, setAbierta] = useState(null)
   const [form, setForm]       = useState(null)    // null · 'nuevo' · persona de «Otros»
-  const [ocultos, setOcultos] = useState(false)
+  const [editar, setEditar]   = useState(false)   // modo edición del Equipo (botoncito ⚙, solo socios)
   const [error, setError]     = useState('')
   const team   = data?.team ?? []
   const items  = data?.items ?? []
   const manage = !!data?.me?.can_manage
+  const edit   = !!data?.me?.is_socio && editar
   if (!team.length) return null
 
   const visibles  = team.filter(p => !p.hidden)
@@ -446,7 +447,15 @@ function Equipo({ data, hoy, onChanged }) {
         <span className="dash-card__icon">👥</span>
         <h2 className="dash-card__title">Equipo</h2>
         <span className="dash-team__hint">Pulsa a alguien para ver lo que tiene asignado</span>
+        {data?.me?.is_socio && (
+          <button type="button" className={`dash-gear${editar ? ' dash-gear--on' : ''}`}
+            title={editar ? 'Terminar de editar el equipo' : 'Editar el equipo (solo socios)'}
+            onClick={() => { setEditar(e => !e); setForm(null) }}>
+            {editar ? '✓' : '⚙'}
+          </button>
+        )}
       </div>
+      {edit && <p className="dash-team__note dash-team__note--edit">Editando el equipo: pulsa a alguien para cambiar su nombre u ocultarlo, o añade a otra persona.</p>}
       {visibles.some(p => p.role === 'socio') && (
         <div className="dash-team__group dash-team__group--socios">
           <span className="dash-team__glbl">Socios</span>
@@ -459,17 +468,15 @@ function Equipo({ data, hoy, onChanged }) {
           {visibles.filter(p => p.role === g.role).map(chip)}
           {/* «Otros»: cualquiera fuera de las listas, al final de Profes */}
           {g.role === 'profesor' && visibles.filter(p => p.role === 'otros').map(chip)}
-          {g.role === 'profesor' && manage && (
+          {g.role === 'profesor' && edit && (
             <button type="button" className="dash-person dash-person--add" onClick={() => { setForm('nuevo'); setSel(null) }}>+ Otro</button>
           )}
         </div>
       ))}
-      {manage && ocultas.length > 0 && (
+      {edit && ocultas.length > 0 && (
         <div className="dash-team__group dash-team__group--hidden">
-          <button type="button" className="dash-link" onClick={() => setOcultos(o => !o)}>
-            {ocultos ? 'Esconder ocultos' : `Ocultos del Diario (${ocultas.length})`}
-          </button>
-          {ocultos && ocultas.map(p => (
+          <span className="dash-team__glbl">Ocultos</span>
+          {ocultas.map(p => (
             <button key={p.uid} type="button" className="dash-person dash-person--hidden" title="Volver a mostrar en el Diario"
               onClick={() => accion({ action: 'show', uid: p.uid })}>
               <span className={`dash-person__av dash-person__av--${p.role}`}>{inicial(p.name)}</span>{p.name} ↺
@@ -483,19 +490,20 @@ function Equipo({ data, hoy, onChanged }) {
 
       {persona && (
         <div className="dash-team__panel">
-          {manage && (
+          {(edit || (manage && persona.role === 'otros' && (persona.phone || persona.notes))) && (
             <div className="dash-team__admin">
-              {persona.role === 'otros' ? (
+              {persona.role === 'otros' && persona.phone && <span>📞 {persona.phone}</span>}
+              {persona.role === 'otros' && persona.notes && <span className="dash-team__notes">{persona.notes}</span>}
+              {edit && persona.role === 'otros' && (
                 <>
-                  {persona.phone && <span>📞 {persona.phone}</span>}
-                  {persona.notes && <span className="dash-team__notes">{persona.notes}</span>}
-                  <button type="button" className="dash-btn" onClick={() => setForm(persona)}>Editar datos</button>
-                  <button type="button" className="dash-link dash-link--danger" onClick={() => quitarOtro(persona)}>Quitar</button>
+                  <button type="button" className="dash-mini" onClick={() => setForm(persona)}>Editar datos</button>
+                  <button type="button" className="dash-mini dash-mini--danger" onClick={() => quitarOtro(persona)}>Quitar</button>
                 </>
-              ) : (
+              )}
+              {edit && persona.role !== 'otros' && (
                 <>
-                  <button type="button" className="dash-btn" onClick={() => renombrar(persona)}>Cambiar el nombre que sale</button>
-                  <button type="button" className="dash-link dash-link--danger" onClick={() => ocultar(persona)}>Ocultar del Diario</button>
+                  <button type="button" className="dash-mini" onClick={() => renombrar(persona)}>Cambiar nombre</button>
+                  <button type="button" className="dash-mini dash-mini--danger" onClick={() => ocultar(persona)}>Ocultar</button>
                 </>
               )}
             </div>

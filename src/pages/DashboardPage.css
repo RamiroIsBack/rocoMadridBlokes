@@ -285,3 +285,18 @@
 .dash-team__admin { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 0.9rem; }
 .dash-team__notes { color: var(--color-text-secondary); white-space: pre-line; }
 .dash-team__panel > .dash-form { grid-column: 1 / -1; }
+
+/* Edición del Equipo: un botoncito discreto (solo socios) */
+.dash-gear {
+  width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--color-border); background: var(--color-surface);
+  color: var(--color-text-secondary); font-size: 0.95rem; line-height: 1; cursor: pointer; flex-shrink: 0; margin-left: 8px;
+}
+.dash-gear:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
+.dash-gear--on { background: var(--color-accent); border-color: var(--color-accent); color: #1d1d1b; }
+.dash-team__note--edit { margin: 0 0 8px; font-style: italic; }
+.dash-mini {
+  font-size: 0.75rem; padding: 3px 10px; border-radius: 999px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--color-border); background: var(--color-surface); color: var(--color-text-secondary);
+}
+.dash-mini:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
+.dash-mini--danger:hover { color: var(--state-bad); border-color: var(--state-bad); }

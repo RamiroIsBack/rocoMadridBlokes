@@ -24256,7 +24256,7 @@ function diario_team() {
             if (!$user || isset($seen[$user->ID])) continue;
             $seen[$user->ID] = true;
             $hidden = in_array((int) $user->ID, $conf['hidden'], true);
-            if ($hidden && !$manage) continue;
+            if ($hidden && !blokes_es_socio()) continue;   // los ocultos solo los ve un socio (para volver a mostrarlos)
             $full  = trim($user->display_name) !== '' ? trim($user->display_name) : $user->user_login;
             $first = trim((string) $user->first_name) !== '' ? trim($user->first_name) : explode(' ', $full)[0];
             $alias = trim((string) ($conf['alias'][(string) $user->ID] ?? ''));
@@ -24293,11 +24293,11 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/diario/team', array(
         'methods'             => 'POST',
         'callback'            => 'diario_team_update',
-        'permission_callback' => 'diario_can_manage',
+        'permission_callback' => 'blokes_es_socio',   // editar el Equipo: solo socios (22/11)
     ));
 });
 
-// Socio y gestión: ocultar/mostrar a alguien, cambiar el nombre con que sale, y añadir,
+// Solo socios (22/11): ocultar/mostrar a alguien, cambiar el nombre con que sale, y añadir,
 // corregir o quitar a «Otros».
 function diario_team_update($request) {
     $b    = (array) $request->get_json_params();
@@ -24360,7 +24360,7 @@ function diario_items_list() {
     $u = wp_get_current_user();
     return rest_ensure_response(array(
         'items' => array_map('diario_item_out', $rows),
-        'me'    => array('name' => $u && $u->ID ? ($u->display_name ?: $u->user_login) : '', 'can_manage' => diario_can_manage()),
+        'me'    => array('name' => $u && $u->ID ? ($u->display_name ?: $u->user_login) : '', 'can_manage' => diario_can_manage(), 'is_socio' => blokes_es_socio()),
         'team'  => diario_team(),
     ));
 }
