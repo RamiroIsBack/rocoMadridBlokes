@@ -4151,11 +4151,12 @@ function VincularActividadTab() {
   return (
     <>
       <p className="sv-note">
-        Todos los alumnos manuales (adultos y niños) creados desde «Soy nuevo» en la tablet o desde Entrenamientos,
+        Todos los alumnos manuales (adultos) creados desde «Soy nuevo» en la tablet o desde Entrenamientos,
         todavía sin vincular a ninguna cuenta. «Vincular a cuenta existente» busca por nombre, teléfono o email (no
         solo email exacto). «Crear niño» crea su cuenta sin email real. Un provisional que parece de un niño nunca
         se debería vincular a la cuenta de quien paga — si no existe todavía, usa «Crear niño». Simular siempre
-        antes de confirmar.
+        antes de confirmar. Los niños creados desde «Soy nuevo» en la tablet ya salen con cuenta real (fila aparte,
+        sin acciones aquí) — solo falta engancharlos a la suscripción desde Niños.
       </p>
       {error && <p className="sv-to-warn-txt">{error}</p>}
       {filas.length === 0 ? <p className="sv-empty">Nada pendiente de vincular.</p> : (
@@ -4164,6 +4165,21 @@ function VincularActividadTab() {
             <thead><tr><th>Nombre</th><th>Clase</th><th>Creado</th><th>Tops / mediciones</th><th>Acciones</th></tr></thead>
             <tbody>
               {filas.map(f => {
+                // 22/11 (nota 20/11 07:20 punto 2, fase 2): niño con cuenta REAL creado desde
+                // "Soy nuevo" en la tablet (nunca un provisional) — no tiene "Vincular"/"Crear
+                // niño" porque ya es una cuenta de verdad, solo le falta la suscripción. Eva lo
+                // engancha desde Niños → "Usar cuenta existente" (el buscador ya lo encuentra).
+                if (f.tipo === 'nino_sin_sub') {
+                  return (
+                    <tr key={f.id}>
+                      <td>{f.nombre}<div className="sv-to-warn-txt">niño, cuenta real ya creada</div></td>
+                      <td className="sv-ot-muted">—</td>
+                      <td className="sv-ot-muted">{f.creadoPor || '—'}{f.createdAt ? <div>{f.createdAt.slice(0, 10)}</div> : null}</td>
+                      <td className="sv-ot-muted">—</td>
+                      <td className="sv-ot-muted">Sin suscripción todavía — engánchalo desde Niños, «Usar cuenta existente» (búscalo por nombre).</td>
+                    </tr>
+                  )
+                }
                 const m = modo[f.id]
                 const v = valores(f.id)
                 const p = preview[f.id]

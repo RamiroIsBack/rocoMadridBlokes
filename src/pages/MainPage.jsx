@@ -143,6 +143,7 @@ function ColeccionModoCompe({ estado }) {
       {pickerBloque && (
         <IdentityPicker
           title={`¿Quién ha hecho el bloque ${pickerBloque.numero}?`}
+          competitionId={estado.competitionId}
           onPick={completarParaIdentidad}
           onClose={() => setPickerBloque(null)}
         />

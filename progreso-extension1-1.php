@@ -682,11 +682,17 @@ add_action('rest_api_init', function() {
         'callback'            => 'progreso_create_alumno_manual',
         'permission_callback' => function() { return blokes_can_supervise(); },
         'args' => array(
-            'nombre'  => array('required' => true, 'type' => 'string'),
-            'dia'     => array('required' => false, 'type' => 'string'),
-            'horario' => array('required' => false, 'type' => 'string'),
-            'edad'    => array('required' => false, 'type' => 'string'),
-            'turno'   => array('required' => false, 'type' => 'string'),
+            'nombre'        => array('required' => true,  'type' => 'string'),
+            'dia'           => array('required' => false, 'type' => 'string'),
+            'horario'       => array('required' => false, 'type' => 'string'),
+            'edad'          => array('required' => false, 'type' => 'string'),
+            'turno'         => array('required' => false, 'type' => 'string'),
+            // 22/11 (nota 20/11 07:20 punto 2, fase 2): "Soy nuevo" en la tablet, cuando lo crea
+            // un profe o la tablet de una clase de niños, pide también apellidos y "¿es niño?" —
+            // si lo es, se crea una cuenta real (como "Crear niño"), no un provisional.
+            'apellidos'     => array('required' => false, 'type' => 'string'),
+            'esNino'        => array('required' => false, 'type' => 'boolean'),
+            'competitionId' => array('required' => false, 'type' => 'integer'),
         ),
     ));
 
@@ -4700,10 +4706,13 @@ function blokes_names_match($a, $b) {
 }
 
 function progreso_create_alumno_manual($request) {
-    $nombre = trim((string) $request->get_param('nombre'));
+    $nombre    = trim((string) $request->get_param('nombre'));
+    $apellidos = trim((string) $request->get_param('apellidos'));
+    $es_nino   = filter_var($request->get_param('esNino'), FILTER_VALIDATE_BOOLEAN);
     if ($nombre === '') {
         return new WP_Error('invalid_data', 'El nombre es obligatorio.', array('status' => 400));
     }
+    $nombre_completo = trim($nombre . ' ' . $apellidos);
 
     // Before creating, look for anyone with a similar name — real subscriptions
     // (any status) and pending manual alumnos — so the profesor can pick the
@@ -4716,7 +4725,7 @@ function progreso_create_alumno_manual($request) {
         }
         $candidates = array();
         foreach ($sources as $s) {
-            if (!blokes_names_match($nombre, $s['cliente'] ?? '')) continue;
+            if (!blokes_names_match($nombre_completo, $s['cliente'] ?? '')) continue;
             $candidates[] = array(
                 'nombre'         => $s['cliente'],
                 'status'         => $s['status'] ?? '',
@@ -4732,6 +4741,34 @@ function progreso_create_alumno_manual($request) {
                 'candidates' => $candidates,
             ));
         }
+    }
+
+    // 22/11 (nota 20/11 07:20 punto 2, fase 2): "Soy nuevo" en la tablet, cuando lo crea un
+    // profe o la tablet de una clase de niños, crea una cuenta REAL para un niño (igual que
+    // "Crear niño" de la pestaña Niños: sin email real, _rm_es_menor) en vez de un provisional
+    // — nunca pasa por la cola de "Vincular actividad" después. Para adultos se queda igual que
+    // siempre (provisional). La cuenta se marca _rm_creado_tablet_sin_sub para que "Vincular
+    // actividad" avise de que existe pero todavía no tiene ninguna suscripción enganchada —
+    // superadmin_gestion_ninos_asociar() borra esa marca en cuanto Eva la vincula de verdad.
+    if ($es_nino) {
+        if (!function_exists('wc_create_new_customer')) {
+            return new WP_Error('class_not_found', 'WooCommerce no disponible.', array('status' => 503));
+        }
+        $uid = blokes_rm_crear_nino($nombre, $apellidos, 0, '', '');
+        if (is_wp_error($uid)) return $uid;
+        update_user_meta($uid, '_rm_creado_tablet_sin_sub', 1);
+        update_user_meta($uid, '_rm_creado_tablet_por', get_current_user_id());
+        $competition_id = intval($request->get_param('competitionId'));
+        if ($competition_id) {
+            $req_cat = new WP_REST_Request('POST', '/progreso/v1/compe/categoria');
+            $req_cat->set_param('competitionId', $competition_id);
+            $req_cat->set_param('participanteTipo', 'user');
+            $req_cat->set_param('participanteId', $uid);
+            $req_cat->set_param('categoria', 'infantil');
+            progreso_compe_categoria_set($req_cat);
+        }
+        $user = get_user_by('id', $uid);
+        return rest_ensure_response(array('success' => true, 'user_id' => $uid, 'name' => $user ? $user->display_name : $nombre_completo));
     }
 
     $horario = sanitize_text_field((string) $request->get_param('horario'));
@@ -4752,7 +4789,7 @@ function progreso_create_alumno_manual($request) {
     global $wpdb;
     blokes_ensure_placeholder_table();
     $wpdb->insert(blokes_placeholder_table(), array(
-        'nombre'     => sanitize_text_field($nombre),
+        'nombre'     => sanitize_text_field($nombre_completo),
         'dia'        => sanitize_text_field((string) $request->get_param('dia')),
         'horario'    => $horario,
         'edad'       => $edad,
@@ -4943,6 +4980,27 @@ function superadmin_gestion_vincular_actividad_listado($request) {
             'pareceMenor' => ($row['edad'] !== '' && $row['edad'] !== 'Adultos'),
         );
     }
+
+    // 22/11 (nota 20/11 07:20 punto 2, fase 2): niños con cuenta REAL creados desde "Soy nuevo"
+    // en la tablet (ver progreso_create_alumno_manual) que todavía no tienen ninguna
+    // suscripción enganchada — no son provisionales, así que no salen arriba. Se marcan con
+    // 'tipo' => 'nino_sin_sub' para que el frontend no les ofrezca "Vincular"/"Crear niño"
+    // (ya son una cuenta real) — Eva los engancha desde la pestaña Niños, "Usar cuenta
+    // existente", que ya los encuentra por nombre con el buscador normal.
+    $ninos_sin_sub = get_users(array(
+        'meta_key' => '_rm_creado_tablet_sin_sub', 'meta_value' => 1, 'number' => 100,
+    ));
+    foreach ($ninos_sin_sub as $u) {
+        $creador_id = intval(get_user_meta($u->ID, '_rm_creado_tablet_por', true));
+        $creador = $creador_id ? get_user_by('id', $creador_id) : null;
+        $out[] = array(
+            'id' => 'nino-' . $u->ID, 'uid' => $u->ID, 'tipo' => 'nino_sin_sub', 'nombre' => $u->display_name,
+            'dia' => '', 'horario' => '', 'edad' => 'Menores (6-12 años)',
+            'createdAt' => $u->user_registered, 'creadoPor' => $creador ? $creador->display_name : '',
+            'nTops' => 0, 'nMediciones' => 0, 'pareceMenor' => true,
+        );
+    }
+
     return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
@@ -13833,6 +13891,9 @@ function superadmin_gestion_ninos_asociar($request) {
         $alumno_nuevo_uid = $uid_in;
         if ($uid_in === $payer_uid) delete_post_meta($sub_id, '_rm_alumno_user_id');
         else update_post_meta($sub_id, '_rm_alumno_user_id', $uid_in);
+        // 22/11: ya tiene suscripción de verdad — deja de salir en "Vincular actividad" como
+        // "creado en la tablet, sin suscripción" (ver progreso_create_alumno_manual).
+        delete_user_meta($uid_in, '_rm_creado_tablet_sin_sub');
     } else { // crear_nino
         $nuevo_uid = blokes_rm_crear_nino($nombre, $apellidos, $payer_uid, $tutor_nombre_actual, $tutor_telefono_actual);
         if (is_wp_error($nuevo_uid)) return $nuevo_uid;

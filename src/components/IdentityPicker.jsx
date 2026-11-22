@@ -26,18 +26,29 @@ function claseEnCurso(dia, horario) {
   return minutosAhora >= inicio && minutosAhora <= fin
 }
 
+// ¿Esta tablet tiene ahora mismo una clase de niños en curso? (nota 20/11 07:20 punto 2, fase
+// 2, 22/11): no hay ninguna marca fija por cuenta de tablet — se mira la propia clase en curso
+// (misma lógica que "sugeridos") y si es de Menores/Adolescentes.
+function claseEnCursoEsNinos(sugeridos) {
+  return sugeridos.some(a => a.edad && a.edad !== 'Adultos')
+}
+
 // "¿Quién eres?" — used from the shared tablet to attribute an action (mark
 // a bloke, view "Yo") to a real person instead of whoever has the tablet's
 // own session open. Searches the full roster (any horario, not just a
 // class) and, when allowCreate is true, can create a new manual alumno —
 // the same lightweight placeholder Entrenamientos uses, no WordPress
-// account, linkable later once there's an email.
-export default function IdentityPicker({ title = '¿Quién eres?', allowCreate = true, onPick, onClose }) {
+// account, linkable later once there's an email. "profe" o la tablet de una clase de niños
+// crean en cambio una cuenta real para un niño (competitionId, si se pasa, le pone ya la
+// categoría infantil en esa compe — ColeccionModoCompe lo pasa cuando hay una activa).
+export default function IdentityPicker({ title = '¿Quién eres?', allowCreate = true, competitionId = null, onPick, onClose }) {
   const [alumnos, setAlumnos]   = useState([])
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [createName, setCreateName] = useState('')
+  const [createApellidos, setCreateApellidos] = useState('')
+  const [createEsNino, setCreateEsNino] = useState(false)
   const [createDupes, setCreateDupes] = useState(null)
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState(null)
@@ -57,6 +68,11 @@ export default function IdentityPicker({ title = '¿Quién eres?', allowCreate =
     ? consolidated.filter(a => normalizeName(a.cliente || a.nombre).includes(searchNorm)).slice(0, 30)
     : sugeridos
 
+  const role = window.blokesSiteData?.userRole
+  // Profe siempre; la tablet solo si la clase que hay ahora es de niños (no hay otra forma de
+  // saber "qué tablet es" — es la clase en curso la que lo dice, no la cuenta).
+  const puedeCrearReal = role === 'profesor' || (role === 'tablet' && claseEnCursoEsNinos(sugeridos))
+
   const pick = a => {
     if (a.is_placeholder) onPick({ kind: 'ph', placeholder_id: a.placeholder_id, name: a.cliente })
     else onPick({ kind: 'user', user_id: a.user_id, name: a.cliente })
@@ -64,6 +80,8 @@ export default function IdentityPicker({ title = '¿Quién eres?', allowCreate =
 
   const openCreate = () => {
     setCreateName(search)
+    setCreateApellidos('')
+    setCreateEsNino(puedeCrearReal && claseEnCursoEsNinos(sugeridos))
     setCreateDupes(null)
     setCreateError(null)
     setShowCreate(true)
@@ -73,18 +91,23 @@ export default function IdentityPicker({ title = '¿Quién eres?', allowCreate =
     if (!createName.trim()) { setCreateError('Escribe un nombre'); return }
     setCreating(true); setCreateError(null)
     try {
+      const esNino = puedeCrearReal && createEsNino
+      const body = esNino
+        ? { nombre: createName.trim(), apellidos: createApellidos.trim(), esNino: true, ...(competitionId ? { competitionId } : {}), force }
+        : { nombre: [createName.trim(), createApellidos.trim()].filter(Boolean).join(' '), force }
       const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/alumnos/manual`, {
         method: 'POST',
         credentials: 'include',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre: createName.trim(), force }),
+        body: JSON.stringify(body),
       })
       const json = await res.json()
       if (!res.ok) {
         if (json.code === 'duplicate_candidates') { setCreateDupes(json.data?.candidates || []); return }
         throw new Error(json.message || 'Error al crear')
       }
-      onPick({ kind: 'ph', placeholder_id: json.placeholder_id, name: createName.trim() })
+      if (esNino) onPick({ kind: 'user', user_id: json.user_id, name: json.name })
+      else onPick({ kind: 'ph', placeholder_id: json.placeholder_id, name: body.nombre })
     } catch (e) {
       setCreateError(e.message || 'Error al crear')
     } finally {
@@ -144,9 +167,24 @@ export default function IdentityPicker({ title = '¿Quién eres?', allowCreate =
               autoFocus
               value={createName}
               onChange={e => { setCreateName(e.target.value); setCreateDupes(null) }}
-              placeholder="Tu nombre"
+              placeholder={puedeCrearReal ? 'Nombre' : 'Tu nombre'}
               className="idpicker__input"
             />
+            {puedeCrearReal && (
+              <>
+                <input
+                  type="text"
+                  value={createApellidos}
+                  onChange={e => { setCreateApellidos(e.target.value); setCreateDupes(null) }}
+                  placeholder="Apellidos"
+                  className="idpicker__input"
+                />
+                <label className="idpicker__hint" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="checkbox" checked={createEsNino} onChange={e => setCreateEsNino(e.target.checked)} />
+                  Es un niño
+                </label>
+              </>
+            )}
             {createDupes && createDupes.length > 0 && (
               <div className="idpicker__dupes">
                 <p className="idpicker__hint">Ya hay alguien con un nombre parecido. ¿Eres tú?</p>
