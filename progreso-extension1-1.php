@@ -24469,3 +24469,178 @@ function diario_items_delete($request) {
     $wpdb->delete(diario_items_table(), array('id' => (int) $r['id']));
     return rest_ensure_response(array('success' => true));
 }
+
+// ============================================================
+//  superadmin/v1 — Diario › Horarios y cronograma (22/11/2026)
+//  Traslado desde Notion de «Personal en el Roco» (cronograma: quién está
+//  en el Roco y haciendo qué) y del horario de clases. Un bloque por día de
+//  la semana (0 = lunes … 6 = domingo), con hora de inicio y fin.
+//  Verlo: quien ve el Diario. Cambiarlo: socio y gestión. Importar de golpe
+//  (para el traslado inicial): solo socios.
+// ============================================================
+
+function horarios_table() { global $wpdb; return $wpdb->prefix . 'blokes_horarios'; }
+
+function horarios_ensure_table() {
+    if (get_option('blokes_horarios_db_v') === '1') return;
+    global $wpdb;
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta("CREATE TABLE " . horarios_table() . " (
+        id          bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        board       varchar(20)  NOT NULL DEFAULT '',
+        day         tinyint(1)   NOT NULL DEFAULT 0,
+        start_time  varchar(5)   NOT NULL DEFAULT '',
+        end_time    varchar(5)   NOT NULL DEFAULT '',
+        person      varchar(120) NOT NULL DEFAULT '',
+        kind        varchar(40)  NOT NULL DEFAULT '',
+        note        varchar(255) NOT NULL DEFAULT '',
+        updated_by  varchar(120) NOT NULL DEFAULT '',
+        updated_at  datetime     NOT NULL,
+        PRIMARY KEY (id),
+        KEY board_day (board, day)
+    ) " . $wpdb->get_charset_collate() . ";");
+    update_option('blokes_horarios_db_v', '1', false);
+}
+
+// "9:00" → "09:00"; null si no es una hora válida
+function horarios_clean_time($v) {
+    if (!preg_match('/^(\d{1,2}):(\d{2})$/', trim((string) $v), $m)) return null;
+    $h = (int) $m[1]; $i = (int) $m[2];
+    if ($h > 23 || $i > 59) return null;
+    return sprintf('%02d:%02d', $h, $i);
+}
+
+function horarios_fields($b, $partial = false) {
+    $f = array();
+    if (!$partial || array_key_exists('board', $b)) {
+        $board = (string) ($b['board'] ?? '');
+        if (!in_array($board, array('cronograma', 'clases'), true)) return new WP_Error('bad_board', 'Tablero no válido', array('status' => 400));
+        $f['board'] = $board;
+    }
+    if (!$partial || array_key_exists('day', $b)) {
+        $day = (int) ($b['day'] ?? -1);
+        if ($day < 0 || $day > 6) return new WP_Error('bad_day', 'Día no válido', array('status' => 400));
+        $f['day'] = $day;
+    }
+    foreach (array('start' => 'start_time', 'end' => 'end_time') as $k => $col) {
+        if (!$partial || array_key_exists($k, $b)) {
+            $t = horarios_clean_time($b[$k] ?? '');
+            if ($t === null) return new WP_Error('bad_time', 'Hora no válida (usa 18:00)', array('status' => 400));
+            $f[$col] = $t;
+        }
+    }
+    if (isset($f['start_time'], $f['end_time']) && $f['end_time'] <= $f['start_time']) {
+        return new WP_Error('bad_time', 'La hora de fin tiene que ser después de la de inicio', array('status' => 400));
+    }
+    if (!$partial || array_key_exists('person', $b)) {
+        $p = mb_substr(sanitize_text_field($b['person'] ?? ''), 0, 120);
+        if ($p === '') return new WP_Error('bad_person', 'Falta quién', array('status' => 400));
+        $f['person'] = $p;
+    }
+    if (!$partial || array_key_exists('kind', $b)) $f['kind'] = mb_substr(sanitize_text_field($b['kind'] ?? ''), 0, 40);
+    if (!$partial || array_key_exists('note', $b)) $f['note'] = mb_substr(sanitize_text_field($b['note'] ?? ''), 0, 255);
+    return $f;
+}
+
+function horarios_out($r) {
+    return array(
+        'id' => (int) $r['id'], 'board' => $r['board'], 'day' => (int) $r['day'],
+        'start' => $r['start_time'], 'end' => $r['end_time'], 'person' => $r['person'],
+        'kind' => $r['kind'], 'note' => $r['note'], 'updated_by' => $r['updated_by'],
+    );
+}
+
+add_action('rest_api_init', function() {
+    register_rest_route('superadmin/v1', '/diario/horarios', array(
+        array('methods' => 'GET',  'callback' => 'horarios_list',   'permission_callback' => 'diario_can_view'),
+        array('methods' => 'POST', 'callback' => 'horarios_create', 'permission_callback' => 'diario_can_manage'),
+    ));
+    register_rest_route('superadmin/v1', '/diario/horarios/(?P<id>\d+)', array(
+        array('methods' => 'PUT',    'callback' => 'horarios_update', 'permission_callback' => 'diario_can_manage'),
+        array('methods' => 'DELETE', 'callback' => 'horarios_delete', 'permission_callback' => 'diario_can_manage'),
+    ));
+    register_rest_route('superadmin/v1', '/diario/horarios/import', array(
+        'methods'             => 'POST',
+        'callback'            => 'horarios_import',
+        'permission_callback' => 'blokes_es_socio',
+    ));
+});
+
+function horarios_list() {
+    global $wpdb;
+    horarios_ensure_table();
+    $rows = $wpdb->get_results("SELECT * FROM " . horarios_table() . " ORDER BY board, day, start_time, person", ARRAY_A);
+    return rest_ensure_response(array(
+        'items'      => array_map('horarios_out', (array) $rows),
+        'can_edit'   => diario_can_manage(),
+        'can_import' => blokes_es_socio(),
+    ));
+}
+
+function horarios_row($id) {
+    global $wpdb;
+    return $wpdb->get_row($wpdb->prepare("SELECT * FROM " . horarios_table() . " WHERE id = %d", $id), ARRAY_A);
+}
+
+function horarios_create($request) {
+    global $wpdb;
+    horarios_ensure_table();
+    $f = horarios_fields((array) $request->get_json_params());
+    if (is_wp_error($f)) return $f;
+    $f['updated_by'] = activities_who();
+    $f['updated_at'] = current_time('mysql');
+    if ($wpdb->insert(horarios_table(), $f) === false) return new WP_Error('db_error', 'No se pudo guardar', array('status' => 500));
+    return rest_ensure_response(array('success' => true, 'item' => horarios_out(horarios_row($wpdb->insert_id))));
+}
+
+function horarios_update($request) {
+    global $wpdb;
+    horarios_ensure_table();
+    $id = (int) $request['id'];
+    $r  = horarios_row($id);
+    if (!$r) return new WP_Error('not_found', 'Ya no existe', array('status' => 404));
+    $b = (array) $request->get_json_params();
+    // Para comprobar inicio < fin con los valores que queden
+    if (!array_key_exists('start', $b)) $b['start'] = $r['start_time'];
+    if (!array_key_exists('end', $b))   $b['end']   = $r['end_time'];
+    $f = horarios_fields($b, true);
+    if (is_wp_error($f)) return $f;
+    $f['updated_by'] = activities_who();
+    $f['updated_at'] = current_time('mysql');
+    $wpdb->update(horarios_table(), $f, array('id' => $id));
+    return rest_ensure_response(array('success' => true, 'item' => horarios_out(horarios_row($id))));
+}
+
+function horarios_delete($request) {
+    global $wpdb;
+    horarios_ensure_table();
+    $wpdb->delete(horarios_table(), array('id' => (int) $request['id']));
+    return rest_ensure_response(array('success' => true));
+}
+
+// Traslado inicial: {board, replace, items:[{day,start,end,person,kind,note}]}. Con replace,
+// borra antes lo que hubiera en ese tablero. Si una fila falla, no se guarda nada.
+function horarios_import($request) {
+    global $wpdb;
+    horarios_ensure_table();
+    $b     = (array) $request->get_json_params();
+    $board = (string) ($b['board'] ?? '');
+    if (!in_array($board, array('cronograma', 'clases'), true)) return new WP_Error('bad_board', 'Tablero no válido', array('status' => 400));
+    $items = is_array($b['items'] ?? null) ? $b['items'] : array();
+    if (!$items || count($items) > 500) return new WP_Error('bad_items', 'No hay nada que importar', array('status' => 400));
+    $rows = array();
+    foreach ($items as $i => $it) {
+        $f = horarios_fields(array_merge((array) $it, array('board' => $board)));
+        if (is_wp_error($f)) return new WP_Error('bad_row', 'Fila ' . ($i + 1) . ': ' . $f->get_error_message(), array('status' => 400));
+        $rows[] = $f;
+    }
+    if (!empty($b['replace'])) $wpdb->delete(horarios_table(), array('board' => $board));
+    $who = activities_who();
+    $now = current_time('mysql');
+    foreach ($rows as $f) {
+        $f['updated_by'] = $who;
+        $f['updated_at'] = $now;
+        $wpdb->insert(horarios_table(), $f);
+    }
+    return rest_ensure_response(array('success' => true, 'imported' => count($rows)));
+}

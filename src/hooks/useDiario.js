@@ -86,3 +86,19 @@ export function diarioPendientes(data, hoy) {
 
 // Equipo del Diario (socio y gestión): ocultar/mostrar, nombre con que sale y «Otros».
 export const updateDiarioTeam = (body) => request('/diario/team', 'POST', body).then(json => json.team)
+
+// ─── Horarios y cronograma (traslado de Notion, 22/11) ──────────────────────
+export function useHorarios(enabled = true) {
+  const [data, setData]   = useState(null)   // { items, can_edit, can_import }
+  const [error, setError] = useState('')
+  const load = useCallback(() => {
+    if (!enabled) return
+    request('/diario/horarios').then(json => { setData(json); setError('') }).catch(e => setError(e.message))
+  }, [enabled])
+  useEffect(() => { load() }, [load])
+  return { data, error, reload: load }
+}
+export const createHorario  = (h)     => request('/diario/horarios', 'POST', h).then(json => json.item)
+export const updateHorario  = (id, h) => request(`/diario/horarios/${id}`, 'PUT', h).then(json => json.item)
+export const deleteHorario  = (id)    => request(`/diario/horarios/${id}`, 'DELETE')
+export const importHorarios = (board, items, replace) => request('/diario/horarios/import', 'POST', { board, items, replace }).then(json => json.imported)
