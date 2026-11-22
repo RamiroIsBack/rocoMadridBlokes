@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
-import { BrowserRouter, Routes, Route, Link, NavLink, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation } from 'react-router-dom'
 import MainPage from './pages/MainPage'
 import AdminApp from './admin/AdminApp'
 import StatsPage from './pages/StatsPage'
@@ -23,6 +23,7 @@ import InstalarPage from './pages/InstalarPage'
 import DiarioPage from './pages/DiarioPage'
 import CherifsPage from './pages/CherifsPage'
 import { setVerComo, clearVerComo } from './utils/verComo'
+import { useCompletions } from './hooks/useCompletions'
 import { getTema, setTema } from './utils/theme'
 import ProfileSetupModal from './components/ProfileSetupModal'
 import UserAvatar from './components/UserAvatar'
@@ -178,6 +179,20 @@ export default function App() {
     return acc
   }, [cards])
 
+  // Pegatinas en el plano (22/11): los bloques que he completado, con su color, en su subzona
+  const { completedByMe } = useCompletions()
+  const hechosPorSubsala = useMemo(() => {
+    const acc = {}
+    if (!sd.isLoggedIn) return acc
+    cards.forEach(card => {
+      if (!completedByMe.has(Number(card.postId))) return
+      const sub = String(card.subsala || '').trim()
+      if (!sub) return
+      ;(acc[sub] = acc[sub] || []).push(card.color || 'green')
+    })
+    return acc
+  }, [cards, completedByMe, sd.isLoggedIn])
+
   // "Dónde está cada bloque" en Colección modo compe (Ramiro, 09/11 05:45, punto opcional):
   // al tocar la zona de una tarjeta, resalta esa subzona aquí en el mapa de la cabecera — un
   // evento suelto porque MainPage.jsx (quien lo dispara) y este mapa viven en componentes
@@ -195,7 +210,8 @@ export default function App() {
   // El mapa de salas se pliega por defecto en móvil/tablet (Ramiro, 09/11 06:26: "la cabecera
   // ocupa toda la primera pantalla" — el mapa era buena parte de eso, y además los círculos se
   // salían del dibujo en pantallas estrechas). En ordenador sigue siempre abierto.
-  const [mapaAbierto, setMapaAbierto] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1000)
+  // 22/11 (Álvaro): con sesión iniciada el mapa sale siempre abierto (también en el móvil)
+  const [mapaAbierto, setMapaAbierto] = useState(() => !!window.blokesSiteData?.isLoggedIn || (typeof window !== 'undefined' && window.innerWidth >= 1000))
 
   // Cabecera de una sola fila en móvil/tablet (Ramiro, 09/11 07:05): apodo, Log out, Ver como,
   // suscripción y el logo de "ver mapa" ya no se quedan siempre desplegados ahí — se pliegan en
@@ -267,17 +283,11 @@ export default function App() {
                   >⋯</button>
                 </div>
                 <div className={`app-header__extra${menuMovilAbierto ? ' app-header__extra--abierto' : ''}`}>
-                  {!profileFetching && nickname && <span className="app-header__user-nick">@{nickname}</span>}
                   {/* Cowork, 09/11 09:05 (confirmado): en "Ver como: Tablet" se esconde — cerrar
                       sesión ahí echaría la sesión REAL de quien lo simula (socio/profe/Eva), no
                       una sesión de prueba. En la cuenta tablet real (sin simular nada) se deja
                       como siempre. */}
-                  {!(sd.userRole === 'tablet' && sd.userRoleReal !== 'tablet') && (
-                    <button
-                      className="app-header__logout-btn"
-                      onClick={() => setLogoutOpen(true)}
-                    >× Log out</button>
-                  )}
+                  {/* 22/11 (Álvaro): sin apodo ni «Log out» aquí */}
                   <TemaToggle />
                   {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
                   {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
@@ -314,48 +324,40 @@ export default function App() {
                       )}
                     </div>
                   )}
-                  {/* Cowork, 09/11 07:35: "Apúntate a clases/Tecnificación/Ver mapa" seguían
-                      siempre desplegados debajo de la fila de arriba (~120 px) — entran aquí
-                      también, dentro del mismo "⋯". */}
-                  <div className="app-header__links">
-                    <div className="app-header__link-wrap">
-                      {sd.subscription?.status !== 'active' && (
-                        <a href={CLASES_URL} className="app-header__link app-header__link--cta">Apúntate a nuestras clases</a>
-                      )}
-                      <a href={TECNIFICACION_URL} className="app-header__link">Mejora tu técnica · Tecnificación</a>
-                      <Link to="/instalar" className="app-header__link app-header__link--small">📲 Instalar la app</Link>
-                    </div>
-                  </div>
-                  {/* 22/11: un ojito en vez del texto «Ver/Ocultar mapa» */}
+                  {/* 22/11 (Álvaro): con sesión no salen «Apúntate…» ni «Instalar la app» */}
+                  {/* 22/11: botón corto «Mapa» (marcado cuando está a la vista) */}
                   <button
-                    type="button" className="app-header__mapa-toggle"
+                    type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}
                     onClick={() => setMapaAbierto(v => !v)}
                     title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}
-                    aria-label={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}
                   >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
-                      <circle cx="12" cy="12" r="3" />
-                      {mapaAbierto && <path d="M3 3l18 18" />}
-                    </svg>
+                    Mapa
                   </button>
                 </div>
               </>
             ) : (
               <>
-                <a href={buildLoginUrl(sd)} className="app-header__login-btn">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M10 17l5-5-5-5v3H3v4h7v3z"/>
-                    <path d="M19 3H5c-1.1 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
-                  </svg>
-                  Acceder
-                </a>
-                <TemaToggle />
-                <div className="app-header__links">
-                  <div className="app-header__link-wrap">
-                    <a href={CLASES_URL} className="app-header__link app-header__link--cta">Apúntate a nuestras clases</a>
-                    <a href={TECNIFICACION_URL} className="app-header__link">Mejora tu técnica · Tecnificación</a>
-                    <Link to="/instalar" className="app-header__link app-header__link--small">📲 Instalar la app</Link>
+                {/* Sin usuario (22/11): todo a la izquierda, con el botón Mapa y sin «Instalar la app» */}
+                <div className="app-header__guest">
+                  <div className="app-header__guest-row">
+                    <a href={buildLoginUrl(sd)} className="app-header__login-btn">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M10 17l5-5-5-5v3H3v4h7v3z"/>
+                        <path d="M19 3H5c-1.1 0-2 .9-2 2v4h2V5h14v14H5v-4H3v4c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/>
+                      </svg>
+                      Acceder
+                    </a>
+                    <TemaToggle />
+                    <button type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}
+                      onClick={() => setMapaAbierto(v => !v)} title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}>
+                      Mapa
+                    </button>
+                  </div>
+                  <div className="app-header__links">
+                    <div className="app-header__link-wrap">
+                      <a href={CLASES_URL} className="app-header__link app-header__link--cta">Apúntate a nuestras clases</a>
+                      <a href={TECNIFICACION_URL} className="app-header__link">Apúntate a tecnificación</a>
+                    </div>
                   </div>
                 </div>
               </>
@@ -392,10 +394,19 @@ export default function App() {
                   )) : (
                     <div className="map-bubble map-bubble--marcador" />
                   )}
+                  {(hechosPorSubsala[subsala] || []).slice(0, 6).map((color, i) => (
+                    <span key={'hecho-' + i} className="map-sticker" title="Lo has completado"
+                      style={{ background: COLOR_BUBBLE[color]?.bg, color: COLOR_BUBBLE[color]?.text, '--giro': ((i % 3) - 1) * 9 + 'deg' }}>✓</span>
+                  ))}
+                  {(hechosPorSubsala[subsala] || []).length > 6 && (
+                    <span className="map-sticker map-sticker--mas">+{hechosPorSubsala[subsala].length - 6}</span>
+                  )}
                 </div>
               )
             })}
           </div>
+
+          <SaludoSeccion sd={sd} />
 
           <nav className={`app-nav${navFloating ? ' app-nav--floating' : ''}${navFloating && navVisible ? ' app-nav--visible' : ''}`}>
             <ul className="app-nav__list">
@@ -564,6 +575,29 @@ function VerComoSelector({ sd }) {
 // sobraba. Un solo botón que cambia de uno al otro, con el icono y el `title` del modo actual
 // (cowork, 11/11 09:40: "mejor un solo botón que cambie de modo, con un title que diga el modo
 // actual" — pedido cuando aún eran 3 modos, pero sigue aplicando con 2).
+// Saludo justo encima del menú (22/11): «Hola, X» si hay sesión y una frase manuscrita
+// según la sección en la que estás.
+const FRASES = [
+  ['/progreso/yo', 'El resumen de tus logros'],
+  ['/progreso',    'Mira lo fuerte que te estás poniendo'],
+  ['/ligas',       'Los blokes que consigas marcan tu liga. Rétate con gente de tu nivel'],
+  ['/compe',       'Una compe al trimestre: atrévete contra el resto del Roco'],
+  ['/',            'Bienvenido a tu espacio de Blokes'],
+]
+function SaludoSeccion({ sd }) {
+  const { pathname } = useLocation()
+  const exacta = pathname === '/' || pathname === ''
+  const frase  = exacta ? FRASES[FRASES.length - 1][1] : (FRASES.find(([p]) => p !== '/' && pathname.startsWith(p)) || [])[1]
+  const nombre = sd.isLoggedIn ? (sd.userName || '').split(' ')[0] : ''
+  if (!frase && !nombre) return null
+  return (
+    <div className="app-header__saludo">
+      {nombre && <strong className="app-header__hola">Hola, {nombre}</strong>}
+      {frase && <span className="app-header__frase">{frase}</span>}
+    </div>
+  )
+}
+
 function TemaToggle() {
   const [tema, setTemaState] = useState(getTema)
   const cambiar = () => {

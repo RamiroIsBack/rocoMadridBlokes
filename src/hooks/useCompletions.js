@@ -64,6 +64,22 @@ export function useCompletions() {
       .catch(e => console.warn('Could not load completions:', e))
   }, [])
 
+  // Si otra parte de la app marca o desmarca un top, esta copia también se entera
+  useEffect(() => {
+    const on = e => {
+      const { postId, completed } = e.detail || {}
+      if (!postId) return
+      setCompletedByMe(prev => {
+        if (prev.has(postId) === completed) return prev
+        const next = new Set(prev)
+        completed ? next.add(postId) : next.delete(postId)
+        return next
+      })
+    }
+    window.addEventListener('blokes:completado', on)
+    return () => window.removeEventListener('blokes:completado', on)
+  }, [])
+
   const toggleCompletion = useCallback(async (postId, currentCount) => {
     const { isLoggedIn, nonce, loginUrl, profileComplete } = getSiteData()
 
@@ -126,6 +142,8 @@ export function useCompletions() {
         data.completed ? next.add(postId) : next.delete(postId)
         return next
       })
+      // El plano de la cabecera pone (o quita) la pegatina de este bloque
+      window.dispatchEvent(new CustomEvent('blokes:completado', { detail: { postId, completed: !!data.completed } }))
       setCountOverrides(prev => ({ ...prev, [postId]: data.count }))
       if (data.first_ascent) {
         setFirstAscentIds(prev => new Set([...prev, postId]))
