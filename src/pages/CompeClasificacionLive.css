@@ -25,11 +25,17 @@
   font-size: clamp(0.7rem, 1.8vh, 1.2rem); color: #9ca3af; margin: 0 0 0.8vh; font-weight: 700;
   letter-spacing: .06em; text-transform: uppercase; display: flex; justify-content: space-between; flex: 0 0 auto;
 }
+/* 22/11 14:00: "página 1/2" junto al título — vacío (y sin hueco raro) cuando solo hay 1 página. */
+.cl-pag { color: #d4a017; font-weight: 600; letter-spacing: normal; text-transform: none; }
 
-.cl-list { position: relative; flex: 1; min-height: 0; }
+/* 22/11 14:00: la altura de cada fila ya no es una fracción fija (antes calc(100%/11) o /13,
+   que no dejaba sitio a más gente que esa) — la pone el JS en línea, calculada con la altura
+   real de la pantalla (ver filasPorPaginaDesde() en CompeClasificacionLive.jsx). overflow:
+   hidden es solo red de seguridad, nunca debería hacer falta si el cálculo es correcto. */
+.cl-list { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .cl-row {
   position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 1vw;
-  font-size: clamp(0.85rem, 2.6vh, 1.6rem); height: calc(100% / 11); border-bottom: 1px solid #1f2937;
+  font-size: clamp(0.85rem, 2.6vh, 1.6rem); border-bottom: 1px solid #1f2937;
   box-sizing: border-box; padding: 0 0.5vw; transition: top 1s cubic-bezier(.65,0,.35,1), opacity .4s;
   font-variant-numeric: tabular-nums;
 }
@@ -66,7 +72,7 @@
 /* 3-column variant (?vista=columnas) */
 .cl-tri { display: flex; gap: 1.4vw; flex: 1; min-height: 0; padding: 0.4vh 2vw 0; }
 .cl-tri > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.cl-tri .cl-row { font-size: clamp(0.65rem, 1.8vh, 1.1rem); height: calc(100% / 13); gap: 0.4vw; padding: 0 0.3vw; }
+.cl-tri .cl-row { font-size: clamp(0.65rem, 1.8vh, 1.1rem); gap: 0.4vw; padding: 0 0.3vw; }
 .cl-tri .cl-row .cl-pos { width: 1.6em; }
 .cl-stage.v3 .cl-tabs, .cl-stage.v3 .cl-body { display: none; }
 .cl-stage:not(.v3) .cl-tri { display: none; }
@@ -76,5 +82,13 @@
   color: #fff; width: 2.2em; height: 2.2em; border-radius: 50%; font-size: 1rem; cursor: pointer;
 }
 .cl-vista-btn:hover { opacity: .6; }
+
+/* ?debug=1 (22/11 14:05, Ramiro) — leer en la tele de verdad qué está midiendo, sin tener que
+   adivinarlo ni abrir las devtools de un televisor. */
+.cl-debug {
+  position: absolute; left: 0.5vw; bottom: 0.5vh; background: rgba(0,0,0,.65); color: #9ef01a;
+  font-family: monospace; font-size: 11px; padding: 3px 7px; border-radius: 4px; z-index: 10;
+  pointer-events: none; white-space: nowrap;
+}
 
 @media (prefers-reduced-motion: reduce) { .cl-row, .cl-hl { transition: none; } .cl-list.flip .cl-row { animation: none; } }
