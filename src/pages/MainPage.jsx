@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import CelebrationDialog from '../components/CelebrationDialog'
 import OnboardingTutorial, { tutorialSeen } from '../components/OnboardingTutorial'
 import IdentityPicker from '../components/IdentityPicker'
+import CategoriaCompeModal from '../components/CategoriaCompeModal'
 import { colorPorNumeroBloque } from '../utils/compeColorScale'
 
 const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
@@ -122,6 +123,10 @@ function ColeccionModoCompe({ estado }) {
     if (p) intentarApuntar(p.bloque, p.identity, categoria)
   }, [pidiendoCategoria, intentarApuntar])
 
+  // 22/11 13:50: Cancelar cierra el diálogo sin apuntar nada — pulsar fuera, en cambio, no
+  // hace nada (el overlay no tiene onClick), para que no se pueda saltar sin querer.
+  const cancelarCategoria = useCallback(() => setPidiendoCategoria(null), [])
+
   return (
     <main className="app-main">
       <div style={{
@@ -151,15 +156,11 @@ function ColeccionModoCompe({ estado }) {
         </div>
       )}
       {pidiendoCategoria && (
-        <div style={{
-          background: '#fef3c7', color: '#92400e', textAlign: 'center', fontSize: '0.9rem',
-          padding: '10px 12px', borderRadius: 10, marginBottom: 16,
-        }}>
-          Elige la categoría de {pidiendoCategoria.identity.name} para apuntarle el bloque {pidiendoCategoria.bloque.numero}:{' '}
-          <button type="button" onClick={() => elegirCategoriaUnaVez('masculina')} style={{ marginLeft: 8, fontWeight: 600 }}>Masculina</button>{' '}
-          <button type="button" onClick={() => elegirCategoriaUnaVez('femenina')} style={{ fontWeight: 600 }}>Femenina</button>{' '}
-          <button type="button" onClick={() => elegirCategoriaUnaVez('infantil')} style={{ fontWeight: 600 }}>Infantil</button>
-        </div>
+        <CategoriaCompeModal
+          nombre={pidiendoCategoria.identity.name}
+          onElegir={elegirCategoriaUnaVez}
+          onCancelar={cancelarCategoria}
+        />
       )}
       <div className="cards-grid compe-cards-grid">
         {(estado.bloques || []).map(b => {

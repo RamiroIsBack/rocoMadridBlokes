@@ -1,0 +1,63 @@
+.ccm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2100;
+  padding: 16px;
+}
+
+.ccm-modal {
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  padding: 28px 24px;
+  max-width: 440px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+}
+
+.ccm-titulo {
+  font-family: var(--font-serif);
+  font-size: 1.3rem;
+  margin: 0;
+  color: var(--color-text-primary);
+}
+
+.ccm-botones {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.ccm-btn {
+  background: #2a2015;
+  color: #fdf7e6;
+  border: none;
+  padding: 18px 20px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  width: 100%;
+}
+.ccm-btn:disabled { opacity: 0.6; cursor: default; }
+.ccm-btn:hover:not(:disabled) { background: #c8961e; }
+
+.ccm-cancelar {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px;
+}
+.ccm-cancelar:disabled { opacity: 0.6; cursor: default; }

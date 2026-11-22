@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { colorPorNumeroBloque } from '../utils/compeColorScale'
+import CategoriaCompeModal from '../components/CategoriaCompeModal'
 import cartelCompe from '../assets/cartel-compe-1fase-26-27.jpg'
 import './CompePage.css'
 
@@ -83,6 +84,9 @@ export default function CompePage() {
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
   const [guardando, setGuardando] = useState(null) // compBlockId en curso
+  // { compBlockId, cambios } — 22/11 13:50: ventana modal obligatoria, no un banner; no se
+  // apunta nada hasta elegir (o se cancela, sin apuntar el top).
+  const [pidiendoCategoria, setPidiendoCategoria] = useState(null)
 
   const cargar = useCallback(() => {
     setLoading(true)
@@ -111,16 +115,24 @@ export default function CompePage() {
     catch (e) { setErr(e.message) }
   }
 
-  async function guardar(compBlockId, cambios) {
+  async function guardar(compBlockId, cambios, categoria) {
     setGuardando(compBlockId)
     try {
-      await api('POST', '/compe/resultado', { compBlockId, ...cambios })
+      await api('POST', '/compe/resultado', { compBlockId, ...cambios, ...(categoria ? { categoria } : {}) })
       setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios, estado: 'validado' } }))
+      if (categoria) setMiCategoria(categoria)
     } catch (e) {
-      setErr(e.code === 'falta_categoria' ? 'Elige tu categoría ahí arriba antes de apuntar el primer top.' : e.message)
+      if (e.code === 'falta_categoria') setPidiendoCategoria({ compBlockId, cambios })
+      else setErr(e.message)
     } finally {
       setGuardando(null)
     }
+  }
+
+  function elegirCategoriaYGuardar(categoria) {
+    const p = pidiendoCategoria
+    setPidiendoCategoria(null)
+    if (p) guardar(p.compBlockId, p.cambios, categoria)
   }
 
   if (loading) return <div className="compe-page compe-page--loading">Cargando…</div>
@@ -180,6 +192,13 @@ export default function CompePage() {
         </p>
       )}
       {err && <p className="compe-page__error">{err}</p>}
+      {pidiendoCategoria && (
+        <CategoriaCompeModal
+          nombre={sd.userName || 'ti'}
+          onElegir={elegirCategoriaYGuardar}
+          onCancelar={() => setPidiendoCategoria(null)}
+        />
+      )}
 
       {puedeRecepcion && !esTablet && (
         <div className="compe-tabs">
@@ -233,9 +252,11 @@ function RecepcionTab({ bloques, competitionId }) {
   const [creando, setCreando] = useState(false)
   const [mostrarCrear, setMostrarCrear] = useState(false)
   const [aviso, setAviso] = useState(null)
+  // { compBlockId, cambios } — 22/11 13:50: ventana modal obligatoria, no un banner.
+  const [pidiendoCategoria, setPidiendoCategoria] = useState(null)
 
   function volverABuscar() {
-    setSeleccionado(null); setMisResultados({}); setCategoria(null); setQ(''); setResultados(null)
+    setSeleccionado(null); setMisResultados({}); setCategoria(null); setQ(''); setResultados(null); setPidiendoCategoria(null)
   }
 
   // Tablet de autoservicio (Ramiro, 07/11 16:35/16:36): esta misma pestaña la usa tanto
@@ -308,12 +329,14 @@ function RecepcionTab({ bloques, competitionId }) {
     }
   }
 
-  async function guardarPara(compBlockId, cambios) {
+  async function guardarPara(compBlockId, cambios, categoriaForzada) {
     setGuardando(compBlockId)
     try {
       const target = seleccionado.tipo === 'rapido' ? { targetParticipanteRapidoId: seleccionado.id } : { targetUserId: seleccionado.id }
-      await api('POST', '/compe/resultado', { compBlockId, ...cambios, ...target, ...(categoria ? { categoria } : {}) })
+      const cat = categoriaForzada || categoria
+      await api('POST', '/compe/resultado', { compBlockId, ...cambios, ...target, ...(cat ? { categoria: cat } : {}) })
       setMisResultados(prev => ({ ...prev, [compBlockId]: { ...(prev[compBlockId] || {}), ...cambios } }))
+      if (categoriaForzada) setCategoria(categoriaForzada)
       // Aviso de confirmación (cowork, 08/11 11:15).
       const numero = bloques.find(b => b.compBlockId === compBlockId)?.numero
       setAviso(`✓ ${cambios.top ? 'Top' : 'Zona'} apuntado a ${seleccionado.nombreMostrar} (bloque ${numero})`)
@@ -324,10 +347,17 @@ function RecepcionTab({ bloques, competitionId }) {
       // persona); se queda en la misma persona hasta que se pulse "Otra persona", o hasta los
       // 60 s sin tocar nada (el temporizador de abajo).
     } catch (e) {
-      setErr(e.code === 'falta_categoria' ? 'Elige la categoría de esta persona ahí arriba antes de apuntar el primer top.' : e.message)
+      if (e.code === 'falta_categoria') setPidiendoCategoria({ compBlockId, cambios })
+      else setErr(e.message)
     } finally {
       setGuardando(null)
     }
+  }
+
+  function elegirCategoriaYGuardarPara(cat) {
+    const p = pidiendoCategoria
+    setPidiendoCategoria(null)
+    if (p) guardarPara(p.compBlockId, p.cambios, cat)
   }
 
   if (seleccionado) {
@@ -345,6 +375,13 @@ function RecepcionTab({ bloques, competitionId }) {
             (en Recepción), nunca en la tele ni en el Apuntar de cada uno. */}
         {!categoria && Object.values(misResultados).some(r => r.top) && (
           <p className="compe-page__error">⚠️ Ya tiene tops apuntados pero sin categoría — no sale en la clasificación de la tele hasta que se la pongas ahí arriba.</p>
+        )}
+        {pidiendoCategoria && (
+          <CategoriaCompeModal
+            nombre={seleccionado.nombreMostrar}
+            onElegir={elegirCategoriaYGuardarPara}
+            onCancelar={() => setPidiendoCategoria(null)}
+          />
         )}
         {aviso && <p className="compe-recepcion-aviso">{aviso}</p>}
         {err && <p className="compe-page__error">{err}</p>}
