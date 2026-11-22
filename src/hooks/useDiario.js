@@ -83,3 +83,6 @@ export function diarioPendientes(data, hoy) {
     return it.status === 'nueva' || (it.kind === 'compra' && it.status === 'pendiente')
   }).length
 }
+
+// Equipo del Diario (socio y gestión): ocultar/mostrar, nombre con que sale y «Otros».
+export const updateDiarioTeam = (body) => request('/diario/team', 'POST', body).then(json => json.team)

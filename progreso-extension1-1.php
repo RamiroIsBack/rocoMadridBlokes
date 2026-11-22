@@ -24106,7 +24106,8 @@ function activities_delete($request) {
 function diario_items_table() { global $wpdb; return $wpdb->prefix . 'blokes_diario_items'; }
 
 function diario_items_ensure_table() {
-    if (get_option('blokes_diario_items_db_v') === '1') return;
+    // v2 (21/11): quién lo pide (requester), aparte de quién lo apuntó (created_by)
+    if (get_option('blokes_diario_items_db_v') === '2') return;
     global $wpdb;
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta("CREATE TABLE " . diario_items_table() . " (
@@ -24119,6 +24120,7 @@ function diario_items_ensure_table() {
         qty         varchar(60)  NOT NULL DEFAULT '',
         due_date    varchar(10)  NOT NULL DEFAULT '',
         assignee    varchar(120) NOT NULL DEFAULT '',
+        requester   varchar(120) NOT NULL DEFAULT '',
         answer      text         NOT NULL,
         created_by  varchar(120) NOT NULL DEFAULT '',
         created_uid bigint(20)   NOT NULL DEFAULT 0,
@@ -24130,7 +24132,7 @@ function diario_items_ensure_table() {
         KEY kind (kind),
         KEY status (status)
     ) " . $wpdb->get_charset_collate() . ";");
-    update_option('blokes_diario_items_db_v', '1', false);
+    update_option('blokes_diario_items_db_v', '2', false);
 }
 
 // Estados de cada tipo: el primero es el inicial; los de $closed cierran la cosa
@@ -24157,6 +24159,7 @@ function diario_item_out($r) {
         'qty'        => $r['qty'],
         'due_date'   => $r['due_date'],
         'assignee'   => $r['assignee'],
+        'requester'  => ($r['requester'] ?? '') !== '' ? $r['requester'] : $r['created_by'],
         'answer'     => $r['answer'],
         'created_by' => $r['created_by'],
         'mine'       => (int) $r['created_uid'] === get_current_user_id(),
@@ -24183,6 +24186,168 @@ add_action('rest_api_init', function() {
     ));
 });
 
+// Nombre normalizado para comparar ("Álvaro Gálvez" = "alvaro galvez")
+function diario_norm($s) {
+    return trim(preg_replace('/\s+/', ' ', strtolower(remove_accents((string) $s))));
+}
+
+// ¿Este nombre es la persona conectada? Por nombre completo o por el nombre de pila.
+function diario_name_is_me($name) {
+    $n = diario_norm($name);
+    if ($n === '') return false;
+    $u = wp_get_current_user();
+    if (!$u || !$u->ID) return false;
+    $conf  = diario_team_conf();
+    $alias = $conf['alias'][(string) $u->ID] ?? '';
+    foreach (array($alias, $u->display_name, $u->first_name, $u->user_login) as $cand) {
+        $c = diario_norm($cand);
+        if ($c === '') continue;
+        if ($n === $c) return true;
+        $first = explode(' ', $c)[0];
+        if ($first !== '' && ($n === $first || explode(' ', $n)[0] === $first && strlen($first) > 2)) return true;
+    }
+    return false;
+}
+
+// Quién ve cada cosa (21/11, Álvaro): socios y gestión, todo. El resto, solo lo que le han
+// asignado, lo que ha pedido o apuntado él, y los recordatorios para todo el equipo.
+function diario_item_visible($r) {
+    if (diario_can_manage()) return true;
+    if ((int) $r['created_uid'] === get_current_user_id()) return true;
+    if (diario_name_is_me($r['assignee']) || diario_name_is_me($r['requester'] ?? '')) return true;
+    return $r['kind'] === 'recordatorio' && trim($r['assignee']) === '';
+}
+
+// Ajustes del Equipo del Diario (21/11): a quién no enseñar (hidden, solo en el Diario: no
+// toca sus permisos), el nombre con el que sale (alias, p. ej. «alvaroprofe» → «Álvaro») y
+// «Otros» (gente fuera de las listas a la que también se le puede asignar algo).
+function diario_team_conf() {
+    $c = get_option('blokes_diario_team', array());
+    return array(
+        'hidden' => array_map('intval', (array) ($c['hidden'] ?? array())),
+        'alias'  => is_array($c['alias'] ?? null) ? $c['alias'] : array(),
+        'extras' => is_array($c['extras'] ?? null) ? array_values($c['extras']) : array(),
+    );
+}
+
+function diario_ucfirst($s) {
+    $s = trim((string) $s);
+    return $s === '' ? '' : mb_strtoupper(mb_substr($s, 0, 1)) . mb_substr($s, 1);
+}
+
+// El equipo para el Diario: socios, gestión, profes, la lista del Diario y «Otros». Solo el
+// nombre de pila con mayúscula (o el alias), el rol y un id; nunca emails. El teléfono y las
+// notas de «Otros» solo van a socio y gestión.
+function diario_team() {
+    $lists  = blokes_get_email_lists();
+    $conf   = diario_team_conf();
+    $manage = diario_can_manage();
+    $groups = array(
+        'socio'    => $lists['socios'],
+        'gestion'  => $lists['gestion'],
+        'profesor' => $lists['profesores'],
+        'equipo'   => diario_access_list(),
+    );
+    $out  = array();
+    $seen = array();
+    foreach ($groups as $role => $emails) {
+        foreach ((array) $emails as $email) {
+            $user = get_user_by('email', strtolower(trim((string) $email)));
+            if (!$user || isset($seen[$user->ID])) continue;
+            $seen[$user->ID] = true;
+            $hidden = in_array((int) $user->ID, $conf['hidden'], true);
+            if ($hidden && !$manage) continue;
+            $full  = trim($user->display_name) !== '' ? trim($user->display_name) : $user->user_login;
+            $first = trim((string) $user->first_name) !== '' ? trim($user->first_name) : explode(' ', $full)[0];
+            $alias = trim((string) ($conf['alias'][(string) $user->ID] ?? ''));
+            $out[] = array(
+                'uid'    => (string) $user->ID,
+                'name'   => diario_ucfirst($alias !== '' ? $alias : $first),
+                'full'   => $full,
+                'role'   => $role,
+                'hidden' => $hidden,
+                'alias'  => $alias !== '',
+            );
+        }
+    }
+    // Si dos que se ven comparten nombre, se añade la inicial del apellido ("Ramiro R.")
+    $count = array();
+    foreach ($out as $p) if (!$p['hidden']) $count[diario_norm($p['name'])] = ($count[diario_norm($p['name'])] ?? 0) + 1;
+    foreach ($out as &$p) {
+        if ($p['alias'] || ($count[diario_norm($p['name'])] ?? 0) < 2) continue;
+        $parts = explode(' ', $p['full']);
+        if (count($parts) > 1) $p['name'] .= ' ' . mb_strtoupper(mb_substr($parts[1], 0, 1)) . '.';
+    }
+    unset($p);
+    foreach ($conf['extras'] as $x) {
+        $row = array('uid' => 'x-' . $x['id'], 'name' => diario_ucfirst($x['name']), 'full' => $x['name'], 'role' => 'otros', 'hidden' => false, 'alias' => false);
+        if ($manage) { $row['phone'] = $x['phone'] ?? ''; $row['notes'] = $x['notes'] ?? ''; }
+        $out[] = $row;
+    }
+    foreach ($out as &$p) unset($p['full']);
+    unset($p);
+    return $out;
+}
+
+add_action('rest_api_init', function() {
+    register_rest_route('superadmin/v1', '/diario/team', array(
+        'methods'             => 'POST',
+        'callback'            => 'diario_team_update',
+        'permission_callback' => 'diario_can_manage',
+    ));
+});
+
+// Socio y gestión: ocultar/mostrar a alguien, cambiar el nombre con que sale, y añadir,
+// corregir o quitar a «Otros».
+function diario_team_update($request) {
+    $b    = (array) $request->get_json_params();
+    $conf = diario_team_conf();
+    $uid  = (string) ($b['uid'] ?? '');
+    switch ((string) ($b['action'] ?? '')) {
+        case 'hide':
+        case 'show':
+            $id = (int) $uid;
+            if ($id <= 0) return new WP_Error('bad_uid', 'Persona no válida', array('status' => 400));
+            $conf['hidden'] = array_values(array_diff($conf['hidden'], array($id)));
+            if ($b['action'] === 'hide') $conf['hidden'][] = $id;
+            break;
+        case 'alias':
+            $id = (int) $uid;
+            if ($id <= 0) return new WP_Error('bad_uid', 'Persona no válida', array('status' => 400));
+            $a = mb_substr(sanitize_text_field($b['alias'] ?? ''), 0, 60);
+            if ($a === '') unset($conf['alias'][(string) $id]); else $conf['alias'][(string) $id] = $a;
+            break;
+        case 'add_extra':
+        case 'edit_extra':
+            $name = mb_substr(sanitize_text_field($b['name'] ?? ''), 0, 60);
+            if ($name === '') return new WP_Error('bad_name', 'Falta el nombre', array('status' => 400));
+            $data = array(
+                'name'  => $name,
+                'phone' => mb_substr(sanitize_text_field($b['phone'] ?? ''), 0, 40),
+                'notes' => mb_substr(sanitize_textarea_field($b['notes'] ?? ''), 0, 500),
+            );
+            if ($b['action'] === 'add_extra') {
+                $data['id'] = substr(md5(uniqid('', true)), 0, 10);
+                $conf['extras'][] = $data;
+            } else {
+                $found = false;
+                foreach ($conf['extras'] as &$x) {
+                    if ('x-' . $x['id'] === $uid) { $x = array_merge($x, $data); $found = true; }
+                }
+                unset($x);
+                if (!$found) return new WP_Error('not_found', 'Ya no existe', array('status' => 404));
+            }
+            break;
+        case 'delete_extra':
+            $conf['extras'] = array_values(array_filter($conf['extras'], function($x) use ($uid) { return 'x-' . $x['id'] !== $uid; }));
+            break;
+        default:
+            return new WP_Error('bad_action', 'Acción no válida', array('status' => 400));
+    }
+    update_option('blokes_diario_team', $conf, false);
+    return rest_ensure_response(array('success' => true, 'team' => diario_team()));
+}
+
 function diario_items_list() {
     global $wpdb;
     diario_items_ensure_table();
@@ -24191,10 +24356,12 @@ function diario_items_list() {
         "SELECT * FROM " . diario_items_table() . " WHERE closed_at IS NULL OR closed_at >= %s ORDER BY created_at DESC LIMIT 500",
         $since
     ), ARRAY_A);
+    $rows = array_values(array_filter((array) $rows, 'diario_item_visible'));
     $u = wp_get_current_user();
     return rest_ensure_response(array(
-        'items' => array_map('diario_item_out', (array) $rows),
+        'items' => array_map('diario_item_out', $rows),
         'me'    => array('name' => $u && $u->ID ? ($u->display_name ?: $u->user_login) : '', 'can_manage' => diario_can_manage()),
+        'team'  => diario_team(),
     ));
 }
 
@@ -24218,6 +24385,7 @@ function diario_items_create($request) {
         'qty'         => mb_substr(sanitize_text_field($b['qty'] ?? ''), 0, 60),
         'due_date'    => preg_match('/^\d{4}-\d{2}-\d{2}$/', $due) ? $due : '',
         'assignee'    => mb_substr(sanitize_text_field($b['assignee'] ?? ''), 0, 120),
+        'requester'   => mb_substr(sanitize_text_field($b['requester'] ?? ''), 0, 120) ?: activities_who(),
         'answer'      => '',
         'created_by'  => activities_who(),
         'created_uid' => get_current_user_id(),
@@ -24236,6 +24404,7 @@ function diario_items_update($request) {
     diario_items_ensure_table();
     $r = diario_get_item_row((int) $request['id']);
     if (!$r) return new WP_Error('not_found', 'Ya no existe', array('status' => 404));
+    if (!diario_item_visible($r)) return new WP_Error('forbidden', 'No tienes acceso a esto', array('status' => 403));
     $b       = (array) $request->get_json_params();
     $kinds   = diario_kinds();
     $manage  = diario_can_manage();
@@ -24257,7 +24426,7 @@ function diario_items_update($request) {
         $f['answer'] = sanitize_textarea_field($b['answer']);
     }
     // Corregir el contenido: socio/gestión, o quien lo creó mientras siga en su primer estado
-    $edits = array_intersect_key($b, array_flip(array('title', 'detail', 'urgent', 'qty', 'due_date', 'assignee')));
+    $edits = array_intersect_key($b, array_flip(array('title', 'detail', 'urgent', 'qty', 'due_date', 'assignee', 'requester')));
     if ($edits) {
         if (!$manage && !($mine && $initial)) return new WP_Error('forbidden', 'Ya no se puede cambiar', array('status' => 403));
         if (isset($edits['title'])) {
@@ -24269,6 +24438,7 @@ function diario_items_update($request) {
         if (array_key_exists('urgent', $edits))   $f['urgent']   = !empty($edits['urgent']) ? 1 : 0;
         if (array_key_exists('qty', $edits))      $f['qty']      = mb_substr(sanitize_text_field($edits['qty']), 0, 60);
         if (array_key_exists('assignee', $edits)) $f['assignee'] = mb_substr(sanitize_text_field($edits['assignee']), 0, 120);
+        if (array_key_exists('requester', $edits)) $f['requester'] = mb_substr(sanitize_text_field($edits['requester']), 0, 120);
         if (array_key_exists('due_date', $edits)) $f['due_date'] = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $edits['due_date']) ? $edits['due_date'] : '';
     }
     if (!$f) return rest_ensure_response(array('success' => true, 'item' => diario_item_out($r)));
@@ -24283,6 +24453,7 @@ function diario_items_delete($request) {
     diario_items_ensure_table();
     $r = diario_get_item_row((int) $request['id']);
     if (!$r) return rest_ensure_response(array('success' => true));
+    if (!diario_item_visible($r)) return new WP_Error('forbidden', 'No tienes acceso a esto', array('status' => 403));
     $kinds   = diario_kinds();
     $mine    = (int) $r['created_uid'] === get_current_user_id();
     $initial = $r['status'] === $kinds[$r['kind']][0];

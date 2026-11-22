@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 330 740" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Copa de campeón en línea continua, a juego con los dibujos de la web -->
+  <!-- Estrella encima -->
+  <path d="M165 34 l9 19 21 3 -15 14 4 21 -19 -10 -19 10 4 -21 -15 -14 21 -3 z"/>
+  <!-- Boca y cuerpo de la copa -->
+  <path d="M80 118 C 112 108, 218 108, 250 118"/>
+  <path d="M80 118 C 78 190, 104 248, 165 262 C 226 248, 252 190, 250 118"/>
+  <path d="M104 136 C 108 186, 128 222, 158 236"/>
+  <!-- Asas -->
+  <path d="M84 140 C 40 132, 30 178, 56 200 C 70 212, 92 214, 108 206"/>
+  <path d="M246 140 C 290 132, 300 178, 274 200 C 260 212, 238 214, 222 206"/>
+  <!-- Pie -->
+  <path d="M152 262 C 150 286, 146 300, 136 312 L 194 312 C 184 300, 180 286, 178 262"/>
+  <path d="M118 312 L 212 312 L 222 346 L 108 346 Z"/>
+  <path d="M136 328 L 194 328"/>
+  <!-- Línea que sigue hacia abajo, como en los otros dibujos -->
+  <path d="M222 346 C 270 372, 300 420, 252 462 C 208 500, 92 498, 74 560 C 58 616, 132 650, 196 640 C 254 632, 300 668, 296 736"/>
+</svg>

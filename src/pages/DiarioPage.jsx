@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import {
-  useDiarioAccess, useDiarioItems, createDiarioItem, updateDiarioItem, deleteDiarioItem,
+  useDiarioAccess, useDiarioItems, createDiarioItem, updateDiarioItem, deleteDiarioItem, updateDiarioTeam,
   DIARIO_KINDS, STATUS_LABELS, isOpen,
 } from '../hooks/useDiario'
 import { useCalendar, CALENDAR_CATEGORIES } from '../hooks/useCalendar'
@@ -25,6 +25,9 @@ function relativo(iso, hoy) {
   if (d === 1) return 'mañana'
   return d < 0 ? `hace ${-d} días` : `en ${d} días`
 }
+
+const fechaCorta = iso => { const d = toDate(iso); return `${d.getDate()} ${MESES[d.getMonth()].toLowerCase()}` }
+const inicial = n => (n || '?').trim().charAt(0).toUpperCase()
 
 function DateBadge({ iso }) {
   const d = toDate(iso)
@@ -152,9 +155,9 @@ const CARDS = {
   recordatorios:{ title: 'Recordatorios',            icon: '⏰', kinds: ['recordatorio'],           nueva: 'Nuevo recordatorio' },
 }
 
-function NuevoForm({ card, onClose, onSaved }) {
+function NuevoForm({ card, me, nombres, onClose, onSaved }) {
   const conf = CARDS[card]
-  const [f, setF] = useState({ kind: conf.kinds[0], title: '', detail: '', qty: '', urgent: false, due_date: today(), assignee: '' })
+  const [f, setF] = useState({ kind: conf.kinds[0], title: '', detail: '', qty: '', urgent: false, due_date: today(), assignee: '', requester: me?.name || '' })
   const [busy, setBusy]   = useState(false)
   const [error, setError] = useState('')
   const set = (k, v) => setF(x => ({ ...x, [k]: v }))
@@ -182,11 +185,21 @@ function NuevoForm({ card, onClose, onSaved }) {
         </div>
       )}
       {card === 'recordatorios' && (
-        <div className="dash-form__row">
+        <label className="dash-form__lbl">¿Para cuándo?
           <input type="date" className="dash-input" value={f.due_date} onChange={e => set('due_date', e.target.value)} />
-          <input className="dash-input" placeholder="Para (vacío = todo el equipo)" maxLength={120} value={f.assignee} onChange={e => set('assignee', e.target.value)} />
-        </div>
+        </label>
       )}
+      <div className="dash-form__row">
+        <label className="dash-form__lbl">¿Quién lo pide?
+          <input className="dash-input" list="diario-nombres" maxLength={120} value={f.requester} onChange={e => set('requester', e.target.value)} />
+        </label>
+        <label className="dash-form__lbl">¿Para quién?
+          <input className="dash-input" list="diario-nombres" maxLength={120}
+            placeholder={card === 'recordatorios' ? 'Vacío = todo el equipo' : 'Vacío = sin asignar'}
+            value={f.assignee} onChange={e => set('assignee', e.target.value)} />
+        </label>
+      </div>
+      <datalist id="diario-nombres">{nombres.map(n => <option key={n} value={n} />)}</datalist>
       <textarea className="dash-input" rows={2} placeholder="Detalle (opcional)" value={f.detail} onChange={e => set('detail', e.target.value)} />
       {error && <p className="dash-error">{error}</p>}
       <div className="dash-form__actions">
@@ -212,10 +225,12 @@ function ItemRow({ it, me, hoy, open, onToggle, onChanged }) {
     setBusy(true); setError('')
     try { await fn(); onChanged() } catch (err) { setError(err.message) } finally { setBusy(false) }
   }
+  const para = it.assignee || (it.kind === 'recordatorio' ? 'todo el equipo' : 'sin asignar')
   const sub = [
+    fechaCorta(it.created_at),
     it.kind === 'peticion' || it.kind === 'sugerencia' ? kind.label : '',
     it.qty,
-    it.kind === 'recordatorio' ? (it.assignee ? `para ${it.assignee}` : 'para todo el equipo') : it.created_by,
+    `${it.requester || it.created_by || '—'} → ${para}`,
   ].filter(Boolean).join(' · ')
 
   return (
@@ -238,7 +253,11 @@ function ItemRow({ it, me, hoy, open, onToggle, onChanged }) {
         <div className="dash-item__detail">
           {it.detail && <p className="dash-item__p">{it.detail}</p>}
           {it.answer && !me?.can_manage && <p className="dash-item__answer"><b>Respuesta:</b> {it.answer}</p>}
-          <p className="dash-item__meta">Creado por {it.created_by || '—'}{it.updated_by && it.updated_by !== it.created_by ? ` · último cambio: ${it.updated_by}` : ''}</p>
+          <p className="dash-item__meta">
+            Lo pide <b>{it.requester || it.created_by || '—'}</b> el {fechaCorta(it.created_at)} · para <b>{para}</b>
+            {it.created_by && it.created_by !== it.requester ? ` · apuntado por ${it.created_by}` : ''}
+            {it.updated_by && it.updated_by !== it.created_by ? ` · último cambio: ${it.updated_by}` : ''}
+          </p>
           {canStatus && (
             <div className="dash-item__actions">
               {kind.statuses.filter(s => s !== it.status).map(s => (
@@ -267,12 +286,13 @@ function ItemRow({ it, me, hoy, open, onToggle, onChanged }) {
   )
 }
 
-function ListaCard({ card, data, hoy, onChanged }) {
+function ListaCard({ card, data, hoy, persona, nombres, onChanged }) {
   const conf = CARDS[card]
   const [nuevo, setNuevo] = useState(false)
   const [todas, setTodas] = useState(false)
   const [abierta, setAbierta] = useState(null)
   const propias = (data?.items ?? []).filter(it => conf.kinds.includes(it.kind))
+    .filter(it => persona === null || (it.assignee || '') === persona)
   const abiertas = propias.filter(isOpen)
   // Recordatorios por fecha (lo más cercano primero); el resto, lo más nuevo primero
   const orden = (a, b) => card === 'recordatorios'
@@ -290,7 +310,7 @@ function ListaCard({ card, data, hoy, onChanged }) {
         <button type="button" className="dash-link" onClick={() => setTodas(t => !t)}>{todas ? 'Solo pendientes' : 'Ver todas →'}</button>
       </div>
       {nuevo
-        ? <NuevoForm card={card} onClose={() => setNuevo(false)} onSaved={() => { setNuevo(false); onChanged() }} />
+        ? <NuevoForm card={card} me={data?.me} nombres={nombres} onClose={() => setNuevo(false)} onSaved={() => { setNuevo(false); onChanged() }} />
         : <button type="button" className="dash-add" onClick={() => setNuevo(true)}>+ {conf.nueva}</button>}
       {data && shown.length === 0 && <p className="dash-empty">{todas ? 'Todavía no hay nada.' : 'Nada pendiente 👍'}</p>}
       <ul className="dash-list">
@@ -300,6 +320,192 @@ function ListaCard({ card, data, hoy, onChanged }) {
         ))}
       </ul>
       {!todas && lista.length > 6 && <button type="button" className="dash-link dash-wk__more" onClick={() => setTodas(true)}>Ver las {lista.length} →</button>}
+    </section>
+  )
+}
+
+// ─── Equipo: cada persona y lo que tiene asignado ───────────────────────────
+// Los nombres se apuntan a mano en «¿Para quién?», así que se comparan sin tildes ni
+// mayúsculas y basta con el nombre de pila ("Eva" = "Eva Martín").
+const norm = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim().replace(/\s+/g, ' ')
+function esPersona(nombre, persona) {
+  const n = norm(nombre), p = norm(persona)
+  if (!n || !p) return false
+  if (n === p) return true
+  const pn = p.split(' ')[0], nn = n.split(' ')[0]
+  return n === pn || (nn === pn && pn.length > 2)
+}
+
+const GRUPOS = [
+  { role: 'gestion',  title: 'Gestión' },
+  { role: 'profesor', title: 'Profes' },
+  { role: 'equipo',   title: 'Equipo' },
+]
+
+// Alta o corrección de alguien de «Otros» (fuera de las listas de Acceso)
+function OtroForm({ initial, onClose, onSaved }) {
+  const [f, setF] = useState({ name: initial?.name || '', phone: initial?.phone || '', notes: initial?.notes || '' })
+  const [busy, setBusy]   = useState(false)
+  const [error, setError] = useState('')
+  const set = (k, v) => setF(x => ({ ...x, [k]: v }))
+  const submit = async e => {
+    e.preventDefault()
+    setBusy(true); setError('')
+    try {
+      await updateDiarioTeam(initial ? { action: 'edit_extra', uid: initial.uid, ...f } : { action: 'add_extra', ...f })
+      onSaved()
+    } catch (err) { setError(err.message); setBusy(false) }
+  }
+  return (
+    <form className="dash-form dash-team__form" onSubmit={submit}>
+      <strong>{initial ? `Datos de ${initial.name}` : 'Apuntar a otra persona'}</strong>
+      <div className="dash-form__row">
+        <label className="dash-form__lbl">Nombre
+          <input className="dash-input" required maxLength={60} autoFocus value={f.name} onChange={e => set('name', e.target.value)} />
+        </label>
+        <label className="dash-form__lbl">Teléfono
+          <input type="tel" className="dash-input" maxLength={40} value={f.phone} onChange={e => set('phone', e.target.value)} />
+        </label>
+      </div>
+      <label className="dash-form__lbl">Notas (qué hace, horario…)
+        <textarea className="dash-input" rows={2} maxLength={500} value={f.notes} onChange={e => set('notes', e.target.value)} />
+      </label>
+      <p className="dash-item__meta">El teléfono y las notas solo los ven socios y gestión.</p>
+      {error && <p className="dash-error">{error}</p>}
+      <div className="dash-form__actions">
+        <button className="dash-btn dash-btn--primary" disabled={busy}>{busy ? 'Guardando…' : 'Guardar'}</button>
+        <button type="button" className="dash-btn" onClick={onClose}>Cancelar</button>
+      </div>
+    </form>
+  )
+}
+
+function Equipo({ data, hoy, onChanged }) {
+  const [sel, setSel]         = useState(null)
+  const [abierta, setAbierta] = useState(null)
+  const [form, setForm]       = useState(null)    // null · 'nuevo' · persona de «Otros»
+  const [ocultos, setOcultos] = useState(false)
+  const [error, setError]     = useState('')
+  const team   = data?.team ?? []
+  const items  = data?.items ?? []
+  const manage = !!data?.me?.can_manage
+  if (!team.length) return null
+
+  const visibles  = team.filter(p => !p.hidden)
+  const ocultas   = team.filter(p => p.hidden)
+  const asignadas = p => items.filter(it => esPersona(it.assignee, p.name))
+  const pedidas   = p => items.filter(it => esPersona(it.requester || it.created_by, p.name) && !esPersona(it.assignee, p.name))
+  const persona   = team.find(p => p.uid === sel)
+
+  const accion = async body => {
+    setError('')
+    try { await updateDiarioTeam(body); onChanged(); return true } catch (err) { setError(err.message); return false }
+  }
+  const renombrar = p => {
+    const a = window.prompt(`¿Con qué nombre sale ${p.name} en el Diario? (vacío = el de su cuenta)`, p.name)
+    if (a !== null) accion({ action: 'alias', uid: p.uid, alias: a.trim() })
+  }
+  const ocultar = p => {
+    if (window.confirm(`¿Ocultar a ${p.name} del Diario? Solo deja de salir aquí; no cambia sus permisos.`)) {
+      accion({ action: 'hide', uid: p.uid }).then(ok => ok && setSel(null))
+    }
+  }
+  const quitarOtro = p => {
+    if (window.confirm(`¿Quitar a ${p.name} de «Otros»? Lo que tenga asignado se queda igual.`)) {
+      accion({ action: 'delete_extra', uid: p.uid }).then(ok => ok && setSel(null))
+    }
+  }
+
+  const chip = p => {
+    const n = asignadas(p).filter(isOpen).length
+    return (
+      <button key={p.uid} type="button" className={`dash-person${sel === p.uid ? ' dash-person--on' : ''}`}
+        onClick={() => { setSel(sel === p.uid ? null : p.uid); setAbierta(null); setForm(null) }}>
+        <span className={`dash-person__av dash-person__av--${p.role}`}>{inicial(p.name)}</span>
+        {p.name} {n > 0 && <b>{n}</b>}
+      </button>
+    )
+  }
+  const lista = (titulo, its) => (
+    <div className="dash-team__list">
+      <h3 className="dash-team__h">{titulo} <span>{its.filter(isOpen).length} pendientes</span></h3>
+      {its.length === 0 ? <p className="dash-empty">Nada por aquí.</p> : (
+        <ul className="dash-list">
+          {its.slice().sort((a, b) => isOpen(b) - isOpen(a) || b.created_at.localeCompare(a.created_at)).map(it => (
+            <ItemRow key={it.id} it={it} me={data?.me} hoy={hoy}
+              open={abierta === it.id} onToggle={() => setAbierta(abierta === it.id ? null : it.id)} onChanged={onChanged} />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+
+  return (
+    <section className="dash-card dash-team" id="diario-equipo">
+      <div className="dash-card__head">
+        <span className="dash-card__icon">👥</span>
+        <h2 className="dash-card__title">Equipo</h2>
+        <span className="dash-team__hint">Pulsa a alguien para ver lo que tiene asignado</span>
+      </div>
+      {visibles.some(p => p.role === 'socio') && (
+        <div className="dash-team__group dash-team__group--socios">
+          <span className="dash-team__glbl">Socios</span>
+          {visibles.filter(p => p.role === 'socio').map(chip)}
+        </div>
+      )}
+      {GRUPOS.filter(g => visibles.some(p => p.role === g.role) || g.role === 'profesor').map(g => (
+        <div key={g.role} className="dash-team__group">
+          <span className="dash-team__glbl">{g.title}</span>
+          {visibles.filter(p => p.role === g.role).map(chip)}
+          {/* «Otros»: cualquiera fuera de las listas, al final de Profes */}
+          {g.role === 'profesor' && visibles.filter(p => p.role === 'otros').map(chip)}
+          {g.role === 'profesor' && manage && (
+            <button type="button" className="dash-person dash-person--add" onClick={() => { setForm('nuevo'); setSel(null) }}>+ Otro</button>
+          )}
+        </div>
+      ))}
+      {manage && ocultas.length > 0 && (
+        <div className="dash-team__group dash-team__group--hidden">
+          <button type="button" className="dash-link" onClick={() => setOcultos(o => !o)}>
+            {ocultos ? 'Esconder ocultos' : `Ocultos del Diario (${ocultas.length})`}
+          </button>
+          {ocultos && ocultas.map(p => (
+            <button key={p.uid} type="button" className="dash-person dash-person--hidden" title="Volver a mostrar en el Diario"
+              onClick={() => accion({ action: 'show', uid: p.uid })}>
+              <span className={`dash-person__av dash-person__av--${p.role}`}>{inicial(p.name)}</span>{p.name} ↺
+            </button>
+          ))}
+        </div>
+      )}
+      {error && <p className="dash-error">{error}</p>}
+
+      {form === 'nuevo' && <OtroForm onClose={() => setForm(null)} onSaved={() => { setForm(null); onChanged() }} />}
+
+      {persona && (
+        <div className="dash-team__panel">
+          {manage && (
+            <div className="dash-team__admin">
+              {persona.role === 'otros' ? (
+                <>
+                  {persona.phone && <span>📞 {persona.phone}</span>}
+                  {persona.notes && <span className="dash-team__notes">{persona.notes}</span>}
+                  <button type="button" className="dash-btn" onClick={() => setForm(persona)}>Editar datos</button>
+                  <button type="button" className="dash-link dash-link--danger" onClick={() => quitarOtro(persona)}>Quitar</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="dash-btn" onClick={() => renombrar(persona)}>Cambiar el nombre que sale</button>
+                  <button type="button" className="dash-link dash-link--danger" onClick={() => ocultar(persona)}>Ocultar del Diario</button>
+                </>
+              )}
+            </div>
+          )}
+          {form && form !== 'nuevo' && <OtroForm initial={form} onClose={() => setForm(null)} onSaved={() => { setForm(null); onChanged() }} />}
+          {lista(`Asignado a ${persona.name}`, asignadas(persona))}
+          {lista(`Lo que ${persona.name} ha pedido a otros`, pedidas(persona))}
+        </div>
+      )}
+      {!manage && <p className="dash-team__note">Ves solo lo que te han asignado y lo que has pedido tú; socios y gestión lo ven todo.</p>}
     </section>
   )
 }
@@ -326,6 +532,9 @@ export default function DiarioPage() {
   const nombre = (window.blokesSiteData?.userName || data?.me?.name || '').split(' ')[0]
   const fecha  = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
   const ir     = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // Nombres para «¿Quién lo pide?» y «¿Para quién?»: el equipo y los que ya se han usado
+  const nombres  = [...new Set([data?.me?.name, ...(data?.team ?? []).filter(p => !p.hidden).map(p => p.name), ...items.flatMap(it => [it.requester, it.assignee])].filter(Boolean))].sort()
+  const cardProps = { data, hoy, persona: null, nombres, onChanged: reload }
 
   return (
     <div className="dash dash--wide">
@@ -353,10 +562,12 @@ export default function DiarioPage() {
       {error && <p className="dash-error">No se pudo cargar: {error}</p>}
 
       <div className="dash-cards">
-        <ListaCard card="peticiones" data={data} hoy={hoy} onChanged={reload} />
-        <ListaCard card="compras" data={data} hoy={hoy} onChanged={reload} />
-        <ListaCard card="recordatorios" data={data} hoy={hoy} onChanged={reload} />
+        <ListaCard card="peticiones" {...cardProps} />
+        <ListaCard card="compras" {...cardProps} />
+        <ListaCard card="recordatorios" {...cardProps} />
       </div>
+
+      <Equipo data={data} hoy={hoy} onChanged={reload} />
     </div>
   )
 }
