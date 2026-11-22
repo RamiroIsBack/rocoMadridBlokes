@@ -1398,3 +1398,108 @@
   border-radius: 10px 10px 0 0;
   color: var(--color-text-primary);
 }
+
+/* Botón «Mapa»: corto, en píldora; mostaza cuando el mapa está a la vista (22/11) */
+.app-header__mapa-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  min-height: 0;
+  padding: 0 14px;
+  margin: 0;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.app-header__mapa-toggle--on { background: var(--color-accent-soft); border-color: var(--color-accent); }
+
+/* Sin usuario: Acceder, ☀️/🌙 y Mapa en una fila; los botones de clases debajo, todo a la izquierda */
+.app-header__guest { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 10px; }
+.app-header__guest-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.app-header__guest-row .app-header__login-btn,
+.app-header__guest-row .app-header__tema-btn { margin-top: 0; }
+.app-header__guest .app-header__links { margin-top: 0; }
+.app-header__guest .app-header__link-wrap { justify-content: flex-start; align-items: flex-start; }
+@media (max-width: 999px) {
+  .app-header__guest { flex-basis: 100%; margin-top: 6px; }
+  .app-header__guest .app-header__link { font-size: 0.76rem; padding: 6px 12px; }
+}
+
+/* Móvil y tablet: lo que se abre con «⋯», alineado a la izquierda y repartido en dos
+   columnas (izquierda: apodo, suscripción, salir; derecha: ☀️/🌙, ojito del mapa, ver como);
+   los botones de clases y tecnificación abajo, a todo el ancho. */
+@media (max-width: 999px) {
+  .app-header__extra--abierto {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "sub      tema"
+      "vercomo  mapa"
+      "salir    salir";
+    align-items: center;
+    justify-items: start;
+    text-align: left;
+    gap: 8px 12px;
+  }
+  .app-header__extra--abierto .app-header__user-nick { grid-area: nick; }
+  .app-header__extra--abierto .app-header__sub        { grid-area: sub; margin-top: 0; }
+  .app-header__extra--abierto .app-header__logout-btn { grid-area: logout; margin-top: 0; }
+  .app-header__extra--abierto .app-header__tema-btn   { grid-area: tema; justify-self: end; margin-top: 0; height: 34px; padding: 0 10px; }
+  .app-header__extra--abierto .app-header__mapa-toggle { grid-area: mapa; justify-self: end; }
+  .app-header__extra--abierto .app-header__ver-como   { grid-area: vercomo; justify-self: start; margin-top: 0; }
+  .app-header__extra--abierto .app-header__links      { grid-area: links; justify-self: stretch; margin-top: 4px; }
+  .app-header__extra--abierto .app-header__link-wrap  { justify-content: flex-start; align-items: flex-start; }
+  .app-header__extra--abierto .app-header__link       { font-size: 0.76rem; padding: 6px 12px; }
+}
+
+/* Saludo encima del menú: «Hola, X» y la frase manuscrita de cada sección (22/11) */
+.app-header__saludo {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  text-align: left;
+  padding: 10px 0 2px;
+}
+.app-header__hola { font-family: var(--font-heading); font-size: 1.25rem; font-weight: 700; color: var(--color-text-primary); }
+.app-header__frase { font-family: var(--font-hand); font-size: 1.45rem; font-weight: 700; line-height: 1.15; color: var(--color-accent-text); }
+@media (max-width: 999px) {
+  .app-header__hola { font-size: 1.1rem; }
+  .app-header__frase { font-size: 1.25rem; }
+}
+
+/* Pegatinas en el plano: los bloques que he completado, con su color */
+.map-sticker {
+  width: 18px; height: 18px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 900; line-height: 1; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transform: rotate(var(--giro, 0deg));
+}
+.map-sticker--mas { background: var(--color-surface); color: var(--color-text-primary); width: auto; padding: 0 4px; font-size: 10px; }
+
+/* Leyenda de dificultad en Los blokes */
+.dificultad {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 14px;
+  font-size: 0.85rem;
+}
+.dificultad__extremo { font-weight: 700; color: var(--color-text-secondary); text-transform: uppercase; font-size: 0.72rem; letter-spacing: 0.06em; }
+.dificultad__paso { display: inline-flex; align-items: center; gap: 6px; }
+.dificultad__flecha { color: var(--color-text-secondary); }
+.dificultad__color { padding: 3px 10px; border-radius: 999px; font-weight: 700; font-size: 0.8rem; }
+.dificultad__color--green  { background: #15803d; color: #fff; }
+.dificultad__color--blue   { background: #2563eb; color: #fff; }
+.dificultad__color--yellow { background: #eab308; color: #1a1a1a; }
+.dificultad__color--red    { background: #dc2626; color: #fff; }
+.dificultad__color--black  { background: #1f2937; color: #fff; }
+:root[data-theme="dark"] .dificultad__color--black { box-shadow: 0 0 0 1px #6b7280; }
+
+/* Salir: discreto (22/11) */
+.app-header__salir {
+  background: none; border: none; padding: 2px 0; cursor: pointer; font-family: inherit;
+  font-size: 0.75rem; color: var(--color-text-secondary); text-decoration: underline; text-underline-offset: 2px;
+}
+.app-header__salir:hover { color: var(--color-text-primary); }
+@media (max-width: 999px) {
+  .app-header__extra--abierto .app-header__salir { grid-area: salir; justify-self: start; }
+}

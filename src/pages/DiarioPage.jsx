@@ -5,6 +5,8 @@ import {
 } from '../hooks/useDiario'
 import { useCalendar, CALENDAR_CATEGORIES } from '../hooks/useCalendar'
 import CalendarioPage, { fromNotion, fromBooking, today, addDays, weekStart } from './CalendarioPage'
+import DiarioHorarios from '../components/DiarioHorarios'
+import { useTabParam } from '../hooks/useTabParam'
 import './DashboardPage.css'
 
 // Diario: el panel del día para el equipo (profes, gestión, socios y la lista de Acceso).
@@ -286,7 +288,8 @@ function ItemRow({ it, me, hoy, open, onToggle, onChanged }) {
   )
 }
 
-function ListaCard({ card, data, hoy, persona, nombres, onChanged }) {
+// compacto (pestaña Inicio): solo 3 pendientes y «Ver todas →» lleva a Tareas
+function ListaCard({ card, data, hoy, persona, nombres, onChanged, compacto = false, onVerTodas }) {
   const conf = CARDS[card]
   const [nuevo, setNuevo] = useState(false)
   const [todas, setTodas] = useState(false)
@@ -299,7 +302,8 @@ function ListaCard({ card, data, hoy, persona, nombres, onChanged }) {
     ? (a.due_date || '9999').localeCompare(b.due_date || '9999')
     : b.created_at.localeCompare(a.created_at)
   const lista = (todas ? propias : abiertas).slice().sort(orden)
-  const shown = todas ? lista : lista.slice(0, 6)
+  const limite = compacto ? 3 : 6
+  const shown = todas ? lista : lista.slice(0, limite)
 
   return (
     <section className="dash-card" id={`diario-${card}`}>
@@ -307,7 +311,9 @@ function ListaCard({ card, data, hoy, persona, nombres, onChanged }) {
         <span className="dash-card__icon">{conf.icon}</span>
         <h2 className="dash-card__title">{conf.title}</h2>
         {abiertas.length > 0 && <span className="dash-bubble">{abiertas.length}</span>}
-        <button type="button" className="dash-link" onClick={() => setTodas(t => !t)}>{todas ? 'Solo pendientes' : 'Ver todas →'}</button>
+        {compacto
+          ? <button type="button" className="dash-link" onClick={onVerTodas}>Ver todas →</button>
+          : <button type="button" className="dash-link" onClick={() => setTodas(t => !t)}>{todas ? 'Solo pendientes' : 'Ver todas →'}</button>}
       </div>
       {nuevo
         ? <NuevoForm card={card} me={data?.me} nombres={nombres} onClose={() => setNuevo(false)} onSaved={() => { setNuevo(false); onChanged() }} />
@@ -319,7 +325,9 @@ function ListaCard({ card, data, hoy, persona, nombres, onChanged }) {
             open={abierta === it.id} onToggle={() => setAbierta(abierta === it.id ? null : it.id)} onChanged={onChanged} />
         ))}
       </ul>
-      {!todas && lista.length > 6 && <button type="button" className="dash-link dash-wk__more" onClick={() => setTodas(true)}>Ver las {lista.length} →</button>}
+      {!todas && lista.length > limite && (
+        <button type="button" className="dash-link dash-wk__more" onClick={() => compacto ? onVerTodas() : setTodas(true)}>Ver las {lista.length} →</button>
+      )}
     </section>
   )
 }
@@ -384,11 +392,12 @@ function Equipo({ data, hoy, onChanged }) {
   const [sel, setSel]         = useState(null)
   const [abierta, setAbierta] = useState(null)
   const [form, setForm]       = useState(null)    // null · 'nuevo' · persona de «Otros»
-  const [ocultos, setOcultos] = useState(false)
+  const [editar, setEditar]   = useState(false)   // modo edición del Equipo (botoncito ⚙, solo socios)
   const [error, setError]     = useState('')
   const team   = data?.team ?? []
   const items  = data?.items ?? []
   const manage = !!data?.me?.can_manage
+  const edit   = !!data?.me?.is_socio && editar
   if (!team.length) return null
 
   const visibles  = team.filter(p => !p.hidden)
@@ -446,7 +455,15 @@ function Equipo({ data, hoy, onChanged }) {
         <span className="dash-card__icon">👥</span>
         <h2 className="dash-card__title">Equipo</h2>
         <span className="dash-team__hint">Pulsa a alguien para ver lo que tiene asignado</span>
+        {data?.me?.is_socio && (
+          <button type="button" className={`dash-gear${editar ? ' dash-gear--on' : ''}`}
+            title={editar ? 'Terminar de editar el equipo' : 'Editar el equipo (solo socios)'}
+            onClick={() => { setEditar(e => !e); setForm(null) }}>
+            {editar ? '✓' : '⚙'}
+          </button>
+        )}
       </div>
+      {edit && <p className="dash-team__note dash-team__note--edit">Editando el equipo: pulsa a alguien para cambiar su nombre u ocultarlo, o añade a otra persona.</p>}
       {visibles.some(p => p.role === 'socio') && (
         <div className="dash-team__group dash-team__group--socios">
           <span className="dash-team__glbl">Socios</span>
@@ -459,17 +476,15 @@ function Equipo({ data, hoy, onChanged }) {
           {visibles.filter(p => p.role === g.role).map(chip)}
           {/* «Otros»: cualquiera fuera de las listas, al final de Profes */}
           {g.role === 'profesor' && visibles.filter(p => p.role === 'otros').map(chip)}
-          {g.role === 'profesor' && manage && (
+          {g.role === 'profesor' && edit && (
             <button type="button" className="dash-person dash-person--add" onClick={() => { setForm('nuevo'); setSel(null) }}>+ Otro</button>
           )}
         </div>
       ))}
-      {manage && ocultas.length > 0 && (
+      {edit && ocultas.length > 0 && (
         <div className="dash-team__group dash-team__group--hidden">
-          <button type="button" className="dash-link" onClick={() => setOcultos(o => !o)}>
-            {ocultos ? 'Esconder ocultos' : `Ocultos del Diario (${ocultas.length})`}
-          </button>
-          {ocultos && ocultas.map(p => (
+          <span className="dash-team__glbl">Ocultos</span>
+          {ocultas.map(p => (
             <button key={p.uid} type="button" className="dash-person dash-person--hidden" title="Volver a mostrar en el Diario"
               onClick={() => accion({ action: 'show', uid: p.uid })}>
               <span className={`dash-person__av dash-person__av--${p.role}`}>{inicial(p.name)}</span>{p.name} ↺
@@ -483,19 +498,20 @@ function Equipo({ data, hoy, onChanged }) {
 
       {persona && (
         <div className="dash-team__panel">
-          {manage && (
+          {(edit || (manage && persona.role === 'otros' && (persona.phone || persona.notes))) && (
             <div className="dash-team__admin">
-              {persona.role === 'otros' ? (
+              {persona.role === 'otros' && persona.phone && <span>📞 {persona.phone}</span>}
+              {persona.role === 'otros' && persona.notes && <span className="dash-team__notes">{persona.notes}</span>}
+              {edit && persona.role === 'otros' && (
                 <>
-                  {persona.phone && <span>📞 {persona.phone}</span>}
-                  {persona.notes && <span className="dash-team__notes">{persona.notes}</span>}
-                  <button type="button" className="dash-btn" onClick={() => setForm(persona)}>Editar datos</button>
-                  <button type="button" className="dash-link dash-link--danger" onClick={() => quitarOtro(persona)}>Quitar</button>
+                  <button type="button" className="dash-mini" onClick={() => setForm(persona)}>Editar datos</button>
+                  <button type="button" className="dash-mini dash-mini--danger" onClick={() => quitarOtro(persona)}>Quitar</button>
                 </>
-              ) : (
+              )}
+              {edit && persona.role !== 'otros' && (
                 <>
-                  <button type="button" className="dash-btn" onClick={() => renombrar(persona)}>Cambiar el nombre que sale</button>
-                  <button type="button" className="dash-link dash-link--danger" onClick={() => ocultar(persona)}>Ocultar del Diario</button>
+                  <button type="button" className="dash-mini" onClick={() => renombrar(persona)}>Cambiar nombre</button>
+                  <button type="button" className="dash-mini dash-mini--danger" onClick={() => ocultar(persona)}>Ocultar</button>
                 </>
               )}
             </div>
@@ -515,6 +531,15 @@ export default function DiarioPage() {
   const can = useDiarioAccess()
   const { data, error, reload } = useDiarioItems(can)
   const hoy = today()
+  // 3 pestañas (22/11): Inicio (por defecto), Tareas y Horarios y cronograma. Van en la
+  // dirección (?vista=tareas) para que se puedan enlazar desde el Mapa o desde un aviso.
+  const [vista, setVista] = useState('inicio')
+  useTabParam('vista', v => ['inicio', 'tareas', 'horarios'].includes(v), setVista)
+  const irA = (v, id) => {
+    setVista(v)
+    if (id) setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
+    else window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   if (!can) {
     return (
@@ -531,7 +556,6 @@ export default function DiarioPage() {
   const recHoy = abiert(['recordatorio']).filter(it => !it.due_date || it.due_date <= hoy)
   const nombre = (window.blokesSiteData?.userName || data?.me?.name || '').split(' ')[0]
   const fecha  = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
-  const ir     = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   // Nombres para «¿Quién lo pide?» y «¿Para quién?»: el equipo y los que ya se han usado
   const nombres  = [...new Set([data?.me?.name, ...(data?.team ?? []).filter(p => !p.hidden).map(p => p.name), ...items.flatMap(it => [it.requester, it.assignee])].filter(Boolean))].sort()
   const cardProps = { data, hoy, persona: null, nombres, onChanged: reload }
@@ -544,30 +568,51 @@ export default function DiarioPage() {
         <p className="dash__claim">Lo de hoy, de un vistazo</p>
       </header>
 
-      <SemanaRoco />
-
-      <div className="dash-tiles">
-        <button type="button" className="dash-tile dash-tile--pet" onClick={() => ir('diario-peticiones')}>
-          <strong>{pet.length}</strong><span>Peticiones y sugerencias abiertas</span>
-        </button>
-        <button type="button" className="dash-tile dash-tile--comp" onClick={() => ir('diario-compras')}>
-          <strong>{comp.length}</strong>
-          <span>Compras pendientes{comp.some(c => c.urgent) ? ` · ${comp.filter(c => c.urgent).length} urgentes` : ''}</span>
-        </button>
-        <button type="button" className="dash-tile dash-tile--rec" onClick={() => ir('diario-recordatorios')}>
-          <strong>{recHoy.length}</strong><span>Recordatorios para hoy</span>
-        </button>
-      </div>
+      <nav className="dash-tabs" aria-label="Secciones del Diario">
+        {[['inicio', 'Inicio'], ['tareas', 'Tareas'], ['horarios', 'Horarios y cronograma']].map(([v, l]) => (
+          <button key={v} type="button" className={`dash-tab${vista === v ? ' dash-tab--on' : ''}`} onClick={() => irA(v)}>{l}</button>
+        ))}
+      </nav>
 
       {error && <p className="dash-error">No se pudo cargar: {error}</p>}
 
-      <div className="dash-cards">
-        <ListaCard card="peticiones" {...cardProps} />
-        <ListaCard card="compras" {...cardProps} />
-        <ListaCard card="recordatorios" {...cardProps} />
-      </div>
+      {vista === 'inicio' && (
+        <>
+          <SemanaRoco />
 
-      <Equipo data={data} hoy={hoy} onChanged={reload} />
+          <div className="dash-tiles">
+            <button type="button" className="dash-tile dash-tile--pet" onClick={() => irA('tareas', 'diario-peticiones')}>
+              <strong>{pet.length}</strong><span>Peticiones y sugerencias abiertas</span>
+            </button>
+            <button type="button" className="dash-tile dash-tile--comp" onClick={() => irA('tareas', 'diario-compras')}>
+              <strong>{comp.length}</strong>
+              <span>Compras pendientes{comp.some(c => c.urgent) ? ` · ${comp.filter(c => c.urgent).length} urgentes` : ''}</span>
+            </button>
+            <button type="button" className="dash-tile dash-tile--rec" onClick={() => irA('tareas', 'diario-recordatorios')}>
+              <strong>{recHoy.length}</strong><span>Recordatorios para hoy</span>
+            </button>
+          </div>
+
+          <div className="dash-cards">
+            <ListaCard card="peticiones" {...cardProps} compacto onVerTodas={() => irA('tareas', 'diario-peticiones')} />
+            <ListaCard card="compras" {...cardProps} compacto onVerTodas={() => irA('tareas', 'diario-compras')} />
+            <ListaCard card="recordatorios" {...cardProps} compacto onVerTodas={() => irA('tareas', 'diario-recordatorios')} />
+          </div>
+        </>
+      )}
+
+      {vista === 'tareas' && (
+        <>
+          <div className="dash-cards">
+            <ListaCard card="peticiones" {...cardProps} />
+            <ListaCard card="compras" {...cardProps} />
+            <ListaCard card="recordatorios" {...cardProps} />
+          </div>
+          <Equipo data={data} hoy={hoy} onChanged={reload} />
+        </>
+      )}
+
+      {vista === 'horarios' && <DiarioHorarios nombres={nombres} />}
     </div>
   )
 }
