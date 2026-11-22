@@ -23853,9 +23853,14 @@ function blokes_map_delete_extra($request) {
 //  acceso: el contenido del Diario se irá añadiendo.
 // ============================================================
 
+// 22/11: el Calendario dejó de ser una sección aparte (está dentro del Diario), así que su
+// lista se une a la del Diario. Al guardar la del Diario, la del Calendario se vacía: ya
+// quedan todos en la del Diario, que también da acceso al calendario (calendar_can_view).
 function diario_access_list() {
     $list = get_option('blokes_diario_access', array());
-    return is_array($list) ? array_values($list) : array();
+    $cal  = get_option('blokes_calendar_access', array());
+    $all  = array_merge(is_array($list) ? $list : array(), is_array($cal) ? $cal : array());
+    return array_values(array_unique(array_map('strtolower', $all)));
 }
 
 function diario_can_view() {
@@ -23895,6 +23900,7 @@ function diario_save_access($request) {
         if ($e && !in_array($e, $clean)) $clean[] = $e;
     }
     update_option('blokes_diario_access', $clean, false);
+    update_option('blokes_calendar_access', array(), false);   // ya unida a la del Diario
     return rest_ensure_response(array('success' => true, 'emails' => $clean));
 }
 

@@ -15,7 +15,6 @@ import BudgetSection from '../components/BudgetSection'
 import ProjectsSection from '../components/ProjectsSection'
 import BlokesMapSection from '../components/BlokesMapSection'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
-import { getCalendarAccess, saveCalendarAccess } from '../hooks/useCalendar'
 import { getDiarioAccess, saveDiarioAccess } from '../hooks/useDiario'
 import './SuperAdminPage.css'
 
@@ -1571,12 +1570,8 @@ function ListasSection() {
               note="Solo la sección Eventos (gestión y socios ya entran)"
             />
             <SectionAccessGroup
-              name="Calendario" color="#a78bfa" load={getCalendarAccess} save={saveCalendarAccess}
-              note="Ven el Calendario sin teléfonos, contactos ni importes (los profes ya entran así; gestión y socios lo ven entero)"
-            />
-            <SectionAccessGroup
               name="Diario" color="#d09c01" load={getDiarioAccess} save={saveDiarioAccess}
-              note="Ven el Diario, el panel de los profes (profes, gestión y socios ya entran); p. ej. Carolina"
+              note="Ven el Diario con el calendario (sin teléfonos, contactos ni importes). Profes, gestión y socios ya entran. Aquí está ya también quien tenía acceso al antiguo Calendario"
             />
           </div>
         </div>

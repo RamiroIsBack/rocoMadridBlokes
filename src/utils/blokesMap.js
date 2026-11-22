@@ -78,7 +78,7 @@ export const BLOKES_MAP = [
       { id: 'eventos-cobros', title: 'Cobros y rentabilidad', who: 'socios', desc: 'Facturado, cobrado, pendiente y ganancia por mes; tarifas.' },
       { id: 'eventos-web', title: 'Reservas de la web (SSA)', desc: 'Las reservas web entran solas; los huecos de Eventos se bloquean en la web.' },
     ]},
-    { id: 'calendario', title: 'Calendario', who: 'profes', desc: 'Notion (Funciones Rocomadrid) + reservas de Eventos; semana, mes y resumen. Versión reducida para profes y lista de acceso.' },
+    { id: 'calendario', title: 'Calendario (dentro del Diario)', who: 'profes', desc: 'Actividades de Blokes y de Notion (en traslado) + reservas de Eventos; semana, mes y resumen. Ya no es una sección aparte: está en el Diario. Versión reducida para profes y lista del Diario.' },
   ]},
 
   { id: 'supervision', title: 'Supervisión', who: 'gestion', children: [
@@ -141,7 +141,7 @@ export const MAP_LINKS = {
   fichaje: '/fichaje', timeoff: '/time-off',
   'eventos-cal': '/eventos',
   eventos: '/eventos', 'eventos-reservas': '/eventos?tab=reservas', 'eventos-disponibilidad': '/eventos?tab=calendario', 'eventos-cobros': '/eventos?tab=cobros', 'eventos-web': '/eventos?tab=cobros',
-  calendario: '/calendario',
+  calendario: '/diario',
   supervision: '/supervision?tab=excelmuerte', 'sv-excelmuerte': '/supervision?tab=excelmuerte',
   'sv-grupos': SV + 'grupos', 'sv-g-grupos': SV + 'grupos', 'sv-g-altas-bajas': SV + 'altas-bajas', 'sv-g-pendientes': SV + 'pendientes-cobro',
   'sv-g-altas-manuales': SV + 'altas-manuales', 'sv-g-tarjeta': SV + 'tarjeta-rechazada', 'sv-g-espera': SV + 'espera', 'sv-g-revisar': SV + 'revisar-datos',

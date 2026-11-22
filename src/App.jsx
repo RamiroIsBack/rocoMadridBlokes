@@ -17,7 +17,6 @@ import FichajePage from './pages/FichajePage'
 import TimeOffPage from './pages/TimeOffPage'
 import LeaguesPage from './pages/LeaguesPage'
 import EventosPage from './pages/EventosPage'
-import CalendarioPage from './pages/CalendarioPage'
 import CompePage from './pages/CompePage'
 import CompeDirectoPage from './pages/CompeDirectoPage'
 import InstalarPage from './pages/InstalarPage'
@@ -30,7 +29,6 @@ import UserAvatar from './components/UserAvatar'
 import { useProfile } from './hooks/useProfile'
 import { useWordPressPosts } from './hooks/useWordPressPosts'
 import { useEventsAccess } from './hooks/useEvents'
-import { useCalendarAccess } from './hooks/useCalendar'
 import { useDiarioAccess, useDiarioItems, diarioPendientes } from './hooks/useDiario'
 import logotipo from './assets/brand/logotipo-4-tintas-iso-negro.png'
 import logotipoOscuro from './assets/brand/logotipo-4-tintas-iso-negro-oscuro.png'
@@ -97,7 +95,6 @@ export default function App() {
   const lastScrollY = useRef(0)
   const sd = window.blokesSiteData || {}
   const canEvents = useEventsAccess()
-  const canCalendar = useCalendarAccess().can
   const canDiario   = useDiarioAccess()
   // Avisos del Diario (numerito en el menú): recordatorios de hoy y, a socio/gestión, lo nuevo por revisar
   const diarioData  = useDiarioItems(canDiario).data
@@ -427,11 +424,6 @@ export default function App() {
                   <NavLink to="/eventos" className="app-nav__link">Eventos</NavLink>
                 </li>
               )}
-              {canCalendar && (
-                <li className="app-nav__item">
-                  <NavLink to="/calendario" className="app-nav__link">Calendario</NavLink>
-                </li>
-              )}
               {sd.userRole === 'socio' && (
                 <li className="app-nav__item">
                   <NavLink to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</NavLink>
@@ -490,7 +482,8 @@ export default function App() {
             <Route path="/compe/directo" element={<CompeDirectoPage />} />
             <Route path="/instalar" element={<InstalarPage />} />
             <Route path="/eventos" element={<EventosPage />} />
-            <Route path="/calendario" element={<CalendarioPage />} />
+            {/* 22/11: el Calendario está dentro del Diario; la dirección antigua lleva allí */}
+            <Route path="/calendario" element={<Navigate to="/diario" replace />} />
             <Route path="/diario" element={<DiarioPage />} />
             <Route path="/cherifs" element={<CherifsPage />} />
             {/* Cowork, 09/11 07:45: una ruta inexistente (p. ej. /blokes/coleccion) dejaba el
