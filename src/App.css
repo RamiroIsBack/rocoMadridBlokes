@@ -1398,3 +1398,45 @@
   border-radius: 10px 10px 0 0;
   color: var(--color-text-primary);
 }
+
+/* Ojito del mapa: botón redondo como el de ☀️/🌙 (22/11) */
+.app-header__mapa-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border-radius: 50%;
+}
+
+/* Móvil y tablet: lo que se abre con «⋯», alineado a la izquierda y repartido en dos
+   columnas (izquierda: apodo, suscripción, salir; derecha: ☀️/🌙, ojito del mapa, ver como);
+   los botones de clases y tecnificación abajo, a todo el ancho. */
+@media (max-width: 999px) {
+  .app-header__extra--abierto {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "nick     tema"
+      "logout   mapa"
+      "sub      sub"
+      "vercomo  vercomo"
+      "links    links";
+    align-items: center;
+    justify-items: start;
+    text-align: left;
+    gap: 8px 12px;
+  }
+  .app-header__extra--abierto .app-header__user-nick { grid-area: nick; }
+  .app-header__extra--abierto .app-header__sub        { grid-area: sub; margin-top: 0; }
+  .app-header__extra--abierto .app-header__logout-btn { grid-area: logout; margin-top: 0; }
+  .app-header__extra--abierto .app-header__tema-btn   { grid-area: tema; justify-self: end; margin-top: 0; width: 34px; height: 34px; padding: 0; }
+  .app-header__extra--abierto .app-header__mapa-toggle { grid-area: mapa; justify-self: end; }
+  .app-header__extra--abierto .app-header__ver-como   { grid-area: vercomo; justify-self: start; margin-top: 0; }
+  .app-header__extra--abierto .app-header__links      { grid-area: links; justify-self: stretch; margin-top: 4px; }
+  .app-header__extra--abierto .app-header__link-wrap  { justify-content: flex-start; align-items: flex-start; }
+  .app-header__extra--abierto .app-header__link       { font-size: 0.76rem; padding: 6px 12px; }
+}

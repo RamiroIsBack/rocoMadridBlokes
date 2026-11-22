@@ -326,8 +326,18 @@ export default function App() {
                       <Link to="/instalar" className="app-header__link app-header__link--small">📲 Instalar la app</Link>
                     </div>
                   </div>
-                  <button type="button" className="app-header__mapa-toggle" onClick={() => setMapaAbierto(v => !v)}>
-                    {mapaAbierto ? 'Ocultar mapa ▴' : 'Ver mapa ▾'}
+                  {/* 22/11: un ojito en vez del texto «Ver/Ocultar mapa» */}
+                  <button
+                    type="button" className="app-header__mapa-toggle"
+                    onClick={() => setMapaAbierto(v => !v)}
+                    title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}
+                    aria-label={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+                      <circle cx="12" cy="12" r="3" />
+                      {mapaAbierto && <path d="M3 3l18 18" />}
+                    </svg>
                   </button>
                 </div>
               </>
