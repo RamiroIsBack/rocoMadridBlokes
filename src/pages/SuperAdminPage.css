@@ -1344,3 +1344,35 @@ details[open] .sa-collapsible__arrow {
 .sa-hvn__leve { color: var(--color-text-secondary); }
 .sa-hvn--ok { border-color: var(--state-good); background: transparent; color: var(--state-good); font-weight: 700; }
 .sa-hvn__mal { color: var(--state-bad); font-weight: 700; }
+
+/* Nóminas más sencilla (23/11): resumen claro y lo demás plegado */
+.nomina { display: flex; flex-direction: column; gap: 14px; }
+.sa-hvn > summary { cursor: pointer; list-style: none; }
+.sa-hvn > summary::-webkit-details-marker { display: none; }
+.sa-hvn > summary::after { content: ' ▸'; color: var(--color-text-secondary); }
+.sa-hvn[open] > summary::after { content: ' ▾'; }
+.sa-hvn { padding: 10px 16px; }
+
+.nomina-resumen {
+  background: var(--color-surface); border: 2px solid var(--color-accent); border-radius: 14px;
+  padding: 16px 20px; margin: 14px 0;
+}
+.nomina-resumen__title { font-family: var(--font-heading); font-size: 1.25rem; margin: 0 0 8px; color: var(--color-text-primary); font-weight: 600; }
+.nomina-resumen__title strong { font-weight: 800; }
+.nomina-resumen__list { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.nomina-resumen__list li { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.nomina-resumen__det { color: var(--color-text-secondary); font-size: 0.9rem; }
+.nomina-resumen__ok { margin: 6px 0 0; color: var(--state-good); font-weight: 700; }
+.nomina-resumen__extra { margin: 6px 0 0; color: var(--color-text-secondary); font-size: 0.88rem; }
+
+.nomina-plegable {
+  border: 1px solid var(--color-border); border-radius: 12px; padding: 0 16px; background: var(--color-surface);
+}
+.nomina-plegable > summary {
+  cursor: pointer; padding: 12px 0; font-family: var(--font-heading); font-weight: 700; color: var(--color-text-primary); list-style: none;
+}
+.nomina-plegable > summary::-webkit-details-marker { display: none; }
+.nomina-plegable > summary::before { content: '▸ '; color: var(--color-accent-text); }
+.nomina-plegable[open] > summary::before { content: '▾ '; }
+.nomina-plegable[open] { padding-bottom: 12px; }
+.nomina-plegable--suelta > .sa-section { border: none; padding: 0; margin: 0; background: none; }
