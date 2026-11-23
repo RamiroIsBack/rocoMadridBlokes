@@ -1387,3 +1387,12 @@ details[open] .sa-collapsible__arrow {
 .gestoria__veredicto--mal { border-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-text-primary); }
 .gestoria__veredicto ul { margin: 6px 0 0 18px; padding: 0; }
 .nomina-edit { margin-left: 6px; padding: 2px 8px; }
+
+/* Nóminas › Configuración › Socios con nómina (23/11) */
+.sa-socios { margin: 0.75rem 0 1.25rem; padding: 0.75rem 1rem; border: 1px solid var(--color-border, rgba(255,255,255,0.12)); border-radius: 10px; }
+.sa-socios .sa-pay-subtitle { margin-top: 0; }
+.sa-socios__list { list-style: none; margin: 0 0 0.6rem; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.sa-socios__item { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.sa-socios__item--off { opacity: 0.6; }
+.sa-socios__add { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.sa-socios__add .sa-pay-file__input { max-width: 220px; }

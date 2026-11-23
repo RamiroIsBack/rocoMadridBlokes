@@ -6,7 +6,7 @@ import {
 import {
   usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence, movePayrollPayments, editPayrollOvertime,
   setPayrollPayment, setPayrollCash, deletePayrollPartial, addPayrollPartial,
-  typeLabel, hasBase, sortByType,
+  typeLabel, hasBase, sortByType, addOvertimePerson, updateOvertimePerson,
 } from '../hooks/useOvertime'
 import RemittanceImport from './RemittanceImport'
 import GestoriaReview from './GestoriaReview'
@@ -164,6 +164,78 @@ function StatusBadge({ status, onClick, disabled }) {
 }
 
 // ─── Configuración: nómina base + €/h extra ─────────────────────────────────
+// Socios con nómina (23/11, Álvaro): se dan de alta, renombran y desactivan solo aquí. Gestión no
+// los ve en ningún sitio (el servidor se los quita); su nómina base se pone en la tabla de abajo.
+function SociosNomina({ people, onChanged }) {
+  const socios = people.filter(p => p.type === 'socio')
+  const [name,     setName]     = useState('')
+  const [busy,     setBusy]     = useState(false)
+  const [feedback, setFeedback] = useState('')
+
+  async function run(action, okMsg) {
+    setBusy(true)
+    try {
+      await action()
+      await onChanged()
+      setFeedback(okMsg)
+      return true
+    } catch (e) {
+      setFeedback(`✗ ${e.message}`)
+      return false
+    } finally {
+      setBusy(false)
+      setTimeout(() => setFeedback(''), 2800)
+    }
+  }
+
+  async function handleAdd(e) {
+    e.preventDefault()
+    const clean = name.trim()
+    if (!clean) return
+    if (await run(() => addOvertimePerson(clean, 'socio'), `✓ ${clean} añadido`)) setName('')
+  }
+
+  function handleRename(p) {
+    const next = window.prompt('Nuevo nombre', p.name)?.trim()
+    if (!next || next === p.name) return
+    run(() => updateOvertimePerson(p.id, { name: next }), '✓ Nombre cambiado')
+  }
+
+  return (
+    <div className="sa-socios">
+      <h3 className="sa-pay-subtitle">Socios con nómina</h3>
+      <p className="sa-pay-note">
+        Solo los ven los socios: Gestión no los ve en Supervisión, ni en Horas extra, ni en ningún otro sitio.
+        Después de añadir a alguien, pon su nómina base en la tabla y pulsa «Guardar configuración».
+      </p>
+      {socios.length > 0 && (
+        <ul className="sa-socios__list">
+          {socios.map(p => (
+            <li key={p.id} className={`sa-socios__item${p.active ? '' : ' sa-socios__item--off'}`}>
+              <span className="sa-pay-dot" style={{ background: p.color }} />
+              <span>{p.name}</span>
+              {!p.active && <span className="sa-pay-muted">inactivo</span>}
+              <button type="button" className="sa-pay-action" disabled={busy} onClick={() => handleRename(p)}>Renombrar</button>
+              <button
+                type="button" className="sa-pay-action" disabled={busy}
+                onClick={() => run(() => updateOvertimePerson(p.id, { active: !p.active }), p.active ? `✓ ${p.name} desactivado` : `✓ ${p.name} activado`)}
+              >{p.active ? 'Desactivar' : 'Activar'}</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form className="sa-socios__add" onSubmit={handleAdd}>
+        <input
+          type="text" maxLength={60} placeholder="Nombre del socio" className="sa-pay-file__input"
+          value={name} onChange={e => setName(e.target.value)}
+        />
+        <button type="submit" className="sa-pay-action" disabled={busy || !name.trim()}>+ Añadir socio</button>
+        {feedback && <span className="sa-pay-feedback">{feedback}</span>}
+      </form>
+    </div>
+  )
+}
+
 function PayrollConfig({ people, config, onSaved }) {
   const active = sortByType(people.filter(p => p.active))
   const toForm = cfg => Object.fromEntries(active.map(p => [p.id, {
@@ -235,6 +307,7 @@ function PayrollConfig({ people, config, onSaved }) {
         hasta el total pactado, más las horas extra, se entrega en efectivo (si el banco paga menos, el efectivo sube).
         Al marcar horas como pagadas se guarda el €/h de ese momento, así que cambiarlo no altera lo ya pagado.
       </p>
+      <SociosNomina people={people} onChanged={onSaved} />
       <div className="sa-pay-scroll">
         <table className="sa-pay-table">
           <thead>

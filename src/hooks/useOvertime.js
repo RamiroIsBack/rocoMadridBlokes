@@ -35,7 +35,12 @@ export const PERSON_TYPES = [
   { id: 'profesor',   label: 'Profesor',   plural: 'Profesores' },
   { id: 'voluntario', label: 'Voluntario', plural: 'Voluntarios' },
   { id: 'externo',    label: 'Externo',    plural: 'Externos' },
+  // 23/11: socios con nómina. Solo los ven los socios (el servidor los quita para Gestión) y se
+  // dan de alta desde Cherifs › Nóminas › Configuración, no desde Supervisión.
+  { id: 'socio',      label: 'Socio',      plural: 'Socios' },
 ]
+// Tipos que se pueden elegir en Supervisión › Horas extra (sin Socio)
+export const PERSON_TYPES_SUPERVISION = PERSON_TYPES.filter(t => t.id !== 'socio')
 export const typeLabel = id => PERSON_TYPES.find(t => t.id === id)?.label || id
 export const hasBase   = type => type !== 'externo'
 export const sortByType = people => PERSON_TYPES.flatMap(t => people.filter(p => p.type === t.id))

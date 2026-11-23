@@ -1750,6 +1750,9 @@ function blokes_coste_real_profe_mes($month) {
             $nombre = blokes_normaliza_nombre_profe($row['name'] ?? '');
             if (!$nombre) continue;
             $bruto = floatval($row['total'] ?? 0);
+            // 23/11: la nómina de un socio no es coste de ninguna clase (y «Álvaro» socio no debe
+            // sumarse al profe). Sí cuenta en el reparto de la Seguridad Social, que también paga.
+            if (($row['type'] ?? '') === 'socio') { $total_bruto += $bruto; continue; }
             $out[$nombre] = ($out[$nombre] ?? 0) + $bruto;
             $fuentes[$nombre] = true; // tiene fila de nómina de este mes, aunque sea 0
             $total_bruto += $bruto;
@@ -16805,7 +16808,23 @@ function overtime_get_rates() {
 // Tipos de persona, en el orden en que se listan. Profesores y voluntarios pueden tener
 // nómina base; los externos cobran solo extras.
 function overtime_types() {
-    return array('profesor', 'voluntario', 'externo');
+    return array('profesor', 'voluntario', 'externo', 'socio');
+}
+
+// 23/11 (Álvaro): los socios también pueden tener nómina (tipo 'socio'), pero solo los ven los
+// socios — Gestión no debe saber lo que cobran. Todo lo que llega a quien no es socio por las
+// rutas de Horas extra (personas, registros) pasa por aquí y sale sin ellos.
+function overtime_is_hidden_person($p) {
+    return ($p['type'] ?? '') === 'socio' && blokes_get_app_role() !== 'socio';
+}
+function overtime_visible_people($people = null) {
+    if ($people === null) $people = overtime_get_people();
+    return array_values(array_filter($people, function($p) { return !overtime_is_hidden_person($p); }));
+}
+function overtime_hidden_ids() {
+    $ids = array();
+    foreach (overtime_get_people() as $p) if (overtime_is_hidden_person($p)) $ids[] = $p['id'];
+    return $ids;
 }
 
 function overtime_clean_type($type) {
@@ -16884,13 +16903,15 @@ function overtime_person_index($people, $id) {
 }
 
 function overtime_list_people() {
-    return rest_ensure_response(array('success' => true, 'people' => overtime_get_people()));
+    return rest_ensure_response(array('success' => true, 'people' => overtime_visible_people()));
 }
 
 function overtime_add_person($request) {
     $body = $request->get_json_params();
     $name = trim(sanitize_text_field($body['name'] ?? ''));
     $type = overtime_clean_type($body['type'] ?? '');
+    // Solo un socio puede dar de alta a un socio
+    if ($type === 'socio' && blokes_get_app_role() !== 'socio') $type = 'profesor';
     if ($name === '') {
         return new WP_Error('invalid_name', 'Indica el nombre', array('status' => 400));
     }
@@ -16898,6 +16919,9 @@ function overtime_add_person($request) {
     $people = overtime_get_people();
     foreach ($people as $p) {
         if (mb_strtolower($p['name']) === mb_strtolower($name)) {
+            if (overtime_is_hidden_person($p)) {
+                return new WP_Error('duplicate', 'Ese nombre no se puede usar: prueba con el apellido o una inicial', array('status' => 409));
+            }
             return new WP_Error('duplicate', "Ya existe «{$p['name']}» en la lista", array('status' => 409));
         }
     }
@@ -16917,7 +16941,7 @@ function overtime_add_person($request) {
     $people[] = $person;
     overtime_save_people($people);
 
-    return rest_ensure_response(array('success' => true, 'person' => $person, 'people' => $people));
+    return rest_ensure_response(array('success' => true, 'person' => $person, 'people' => overtime_visible_people($people)));
 }
 
 // Solo socios: renombrar, cambiar tipo o activar/desactivar. No se borra para no
@@ -16950,7 +16974,7 @@ function overtime_clean_fields($body, $current_person = null) {
 
     $people = overtime_get_people();
     $pi     = overtime_person_index($people, $professor);
-    if ($pi < 0 || (!$people[$pi]['active'] && $professor !== $current_person)) {
+    if ($pi < 0 || overtime_is_hidden_person($people[$pi]) || (!$people[$pi]['active'] && $professor !== $current_person)) {
         return new WP_Error('invalid_professor', 'Persona no válida o inactiva', array('status' => 400));
     }
     $dt = DateTime::createFromFormat('Y-m-d', $date);
@@ -17010,9 +17034,11 @@ function overtime_list($request) {
     if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
         return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
     }
-    $list = array();
+    $list   = array();
+    $hidden = overtime_hidden_ids();
     foreach (overtime_get_entries() as $entry) {
         if (strpos($entry['date'], $month) !== 0) continue;
+        if (in_array($entry['professor'], $hidden, true)) continue;
         $list[] = overtime_present($entry);
     }
     usort($list, function($a, $b) { return strcmp($a['date'], $b['date']); });
@@ -17021,7 +17047,7 @@ function overtime_list($request) {
         'success'    => true,
         'month'      => $month,
         'can_manage' => blokes_get_app_role() === 'socio',
-        'people'     => overtime_get_people(),
+        'people'     => overtime_visible_people(),
         'entries'    => $list,
     ));
 }
@@ -17055,7 +17081,7 @@ function overtime_find_index($entries, $id) {
 function overtime_update($request) {
     $entries = overtime_get_entries();
     $i       = overtime_find_index($entries, $request['id']);
-    if ($i < 0) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
+    if ($i < 0 || in_array($entries[$i]['professor'], overtime_hidden_ids(), true)) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
 
     $is_socio = blokes_get_app_role() === 'socio';
     if (!$is_socio && $entries[$i]['status'] !== 'pendiente') {
@@ -17073,7 +17099,7 @@ function overtime_update($request) {
 function overtime_delete($request) {
     $entries = overtime_get_entries();
     $i       = overtime_find_index($entries, $request['id']);
-    if ($i < 0) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
+    if ($i < 0 || in_array($entries[$i]['professor'], overtime_hidden_ids(), true)) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
 
     if (blokes_get_app_role() !== 'socio' && $entries[$i]['status'] !== 'pendiente') {
         return new WP_Error('locked', 'Solo un socio puede borrar horas ya pagadas', array('status' => 403));

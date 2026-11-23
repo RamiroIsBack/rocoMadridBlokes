@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import {
   useOvertime, createOvertime, updateOvertime, deleteOvertime,
-  addOvertimePerson, updateOvertimePerson, PERSON_TYPES, sortByType, typeLabel,
+  addOvertimePerson, updateOvertimePerson, PERSON_TYPES_SUPERVISION, sortByType, typeLabel,
 } from '../hooks/useOvertime'
 import { todayISO, currentMonth, shiftMonth, monthLabel, fmtDate, fmtHours } from '../utils/monthFormat'
 
@@ -50,7 +50,7 @@ function OvertimePeople({ people, isSocio, onChanged }) {
   }
 
   const visible = isSocio ? people : people.filter(p => p.active)
-  const groups  = PERSON_TYPES
+  const groups  = PERSON_TYPES_SUPERVISION
     .map(t => [t, visible.filter(p => p.type === t.id)])
     .filter(([, list]) => list.length > 0)
 
@@ -81,7 +81,7 @@ function OvertimePeople({ people, isSocio, onChanged }) {
                       aria-label={`Tipo de ${p.name}`}
                       onChange={e => run(() => updateOvertimePerson(p.id, { type: e.target.value }), '✓ Tipo cambiado')}
                     >
-                      {PERSON_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+                      {PERSON_TYPES_SUPERVISION.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
                     </select>
                     <button
                       className="sv-ot-action" disabled={busy}
@@ -106,7 +106,7 @@ function OvertimePeople({ people, isSocio, onChanged }) {
           onChange={e => setName(e.target.value)}
         />
         <select className="sv-tests-select" value={type} onChange={e => setType(e.target.value)}>
-          {PERSON_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+          {PERSON_TYPES_SUPERVISION.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
         <button type="submit" className="sv-tests-add" disabled={busy || !name.trim()}>+ Añadir persona</button>
         {feedback && <span className="sv-tests-feedback">{feedback}</span>}
@@ -125,8 +125,13 @@ export default function OvertimeTab() {
 
   const { data, loading, error, reload } = useOvertime(month)
   const isSocio    = !!data?.can_manage
-  const people     = data?.people || []
-  const entries    = data?.entries || []
+  // 23/11: los socios con nómina se gestionan en Cherifs › Nóminas, nunca aquí (a Gestión el
+  // servidor ya no se los manda; a un socio se le quitan aquí para que Supervisión sea igual para todos).
+  const people     = useMemo(() => (data?.people || []).filter(p => p.type !== 'socio'), [data])
+  const entries    = useMemo(() => {
+    const ids = new Set(people.map(p => p.id))
+    return (data?.entries || []).filter(e => ids.has(e.professor))
+  }, [data, people])
   const personById = useMemo(() => Object.fromEntries(people.map(p => [p.id, p])), [people])
   const active     = people.filter(p => p.active)
 
@@ -228,7 +233,7 @@ export default function OvertimeTab() {
               onChange={e => setForm(f => ({ ...f, professor: e.target.value }))}
             >
               <option value="" disabled>Elegir…</option>
-              {PERSON_TYPES.map(t => {
+              {PERSON_TYPES_SUPERVISION.map(t => {
                 // Al editar un registro de alguien ya inactivo, se sigue mostrando esa persona
                 const opts = people.filter(p => p.type === t.id && (p.active || p.id === form.professor))
                 return opts.length > 0 && (
