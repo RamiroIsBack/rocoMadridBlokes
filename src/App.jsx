@@ -423,6 +423,12 @@ export default function App() {
                   </NavLink>
                 </li>
               )}
+              {/* 23/11 (Álvaro): Cherifs justo a la derecha de Diario */}
+              {sd.userRole === 'socio' && (
+                <li className="app-nav__item">
+                  <NavLink to="/cherifs" className="app-nav__link app-nav__link--cherifs">Cherifs</NavLink>
+                </li>
+              )}
               <li className="app-nav__item">
                 <NavLink to="/" className="app-nav__link" end>Los blokes</NavLink>
               </li>
@@ -450,7 +456,7 @@ export default function App() {
                   <NavLink to="/eventos" className="app-nav__link">Eventos</NavLink>
                 </li>
               )}
-              {/* Gestión (23/11, orden de Álvaro): Supervisión → Cherifs. Superadmin y Horarios Profes
+              {/* Gestión: Supervisión (Cherifs va junto a Diario). Superadmin y Horarios Profes
                   son ahora pestañas de Cherifs. */}
               {['gestion', 'socio'].includes(sd.userRole) && (
                 <li className="app-nav__item">
@@ -462,11 +468,6 @@ export default function App() {
               {sd.userRole === 'profesor' && (
                 <li className="app-nav__item">
                   <NavLink to="/supervision" className="app-nav__link app-nav__link--super">Grupos</NavLink>
-                </li>
-              )}
-              {sd.userRole === 'socio' && (
-                <li className="app-nav__item">
-                  <NavLink to="/cherifs" className="app-nav__link app-nav__link--cherifs">Cherifs</NavLink>
                 </li>
               )}
             </ul>
