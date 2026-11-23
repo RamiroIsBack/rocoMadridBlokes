@@ -1333,3 +1333,14 @@ details[open] .sa-collapsible__arrow {
 
 /* ── Subpestañas de cada apartado (Tesorería, Gestión) ── */
 .sa-sub-tabs { margin: -14px 0 22px; }
+
+/* Nóminas: horario del Diario vs horas pactadas (23/11) */
+.sa-hvn {
+  border: 1px solid var(--color-accent); background: var(--color-accent-soft); border-radius: 12px;
+  padding: 12px 16px; color: var(--color-text-primary);
+}
+.sa-hvn ul { margin: 6px 0 6px 18px; padding: 0; }
+.sa-hvn li { margin: 2px 0; }
+.sa-hvn__leve { color: var(--color-text-secondary); }
+.sa-hvn--ok { border-color: var(--state-good); background: transparent; color: var(--state-good); font-weight: 700; }
+.sa-hvn__mal { color: var(--state-bad); font-weight: 700; }
