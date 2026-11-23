@@ -126,6 +126,111 @@ function useIsMobile() {
   return isMobile
 }
 
+// 23/11 06:40 (Ramiro vía cowork): selector de equipadores compartido entre el plan de la
+// compe y la semana — "Todos"/"Solo yo" + un chip por persona, guardado en ESTE dispositivo
+// (localStorage, igual que WHOAMI_KEY) y aplicado igual en las dos pantallas. `null` en
+// localStorage significa "Todos" (el valor por defecto, nunca se guarda una lista vacía por
+// error de carga — eso ocultaría a todo el mundo sin que nadie lo pidiera).
+const FILTRO_EQUIPADORES_KEY = 'blokes_equip_filtro_equipadores'
+function useFiltroEquipadores(nombresDisponibles, miNombre) {
+  const [seleccion, setSeleccion] = useState(() => {
+    try {
+      const raw = localStorage.getItem(FILTRO_EQUIPADORES_KEY)
+      const arr = raw ? JSON.parse(raw) : null
+      return Array.isArray(arr) ? arr : null
+    } catch { return null }
+  })
+  useEffect(() => {
+    try {
+      if (seleccion === null) localStorage.removeItem(FILTRO_EQUIPADORES_KEY)
+      else localStorage.setItem(FILTRO_EQUIPADORES_KEY, JSON.stringify(seleccion))
+    } catch {}
+  }, [seleccion])
+  const estaSeleccionado = nombre => seleccion === null || seleccion.includes(nombre)
+  const toggle = nombre => setSeleccion(cur => {
+    const base = cur === null ? nombresDisponibles : cur
+    const sinEste = base.filter(n => n !== nombre)
+    // Nunca se queda sin nadie elegido (sería una pantalla vacía sin ningún aviso) — pulsar el
+    // único chip que queda encendido no hace nada.
+    if (sinEste.length === base.length) return [...base, nombre]
+    return sinEste.length > 0 ? sinEste : base
+  })
+  const elegirTodos = () => setSeleccion(null)
+  const elegirSoloYo = () => { if (miNombre) setSeleccion([miNombre]) }
+  const esSoloYo = !!miNombre && seleccion?.length === 1 && seleccion[0] === miNombre
+  const visibles = seleccion === null ? nombresDisponibles : nombresDisponibles.filter(n => seleccion.includes(n))
+  return { estaSeleccionado, toggle, elegirTodos, elegirSoloYo, esTodos: seleccion === null, esSoloYo, visibles }
+}
+
+// Fila de chips "Todos · Solo yo · <persona>·<persona>..." — misma fila en el plan de la compe
+// y en la semana, en escritorio y en móvil (scroll horizontal si no caben todos).
+function EquipadorChips({ nombres, filtro, miNombre }) {
+  return (
+    <div className="org__equip-chips">
+      <button
+        type="button"
+        className={`org__holdset-chip${filtro.esTodos ? ' org__holdset-chip--on' : ''}`}
+        onClick={filtro.elegirTodos}
+      >Todos</button>
+      {miNombre && (
+        <button
+          type="button"
+          className={`org__holdset-chip${filtro.esSoloYo ? ' org__holdset-chip--on' : ''}`}
+          onClick={filtro.elegirSoloYo}
+        >Solo yo</button>
+      )}
+      {nombres.map(n => (
+        <button
+          key={n} type="button"
+          className={`org__holdset-chip${filtro.estaSeleccionado(n) ? ' org__holdset-chip--on' : ''}`}
+          onClick={() => filtro.toggle(n)}
+        >{n}</button>
+      ))}
+    </div>
+  )
+}
+
+// 23/11 06:40, punto 1: barra de scroll TAMBIÉN arriba del tablero, sincronizada con la de
+// abajo (mover una mueve la otra) y pegada arriba (sticky) mientras se baja por un tablero de
+// hasta 4000px de alto — sin esto, solo había barra abajo del todo, había que bajar al final
+// para poder moverla. `scrollWidth` es el ancho real del contenido (el tablero puede cambiar de
+// ancho si el filtro de equipadores oculta columnas), medido con ResizeObserver.
+function TopScrollbar({ targetRef }) {
+  const topRef = useRef(null)
+  const [medidas, setMedidas] = useState({ scrollWidth: 0, clientWidth: 0 })
+  const syncing = useRef(false)
+
+  useEffect(() => {
+    const target = targetRef.current
+    if (!target) return
+    const medir = () => setMedidas({ scrollWidth: target.scrollWidth, clientWidth: target.clientWidth })
+    medir()
+    const ro = new ResizeObserver(medir)
+    ro.observe(target)
+    Array.from(target.children).forEach(c => ro.observe(c))
+    return () => ro.disconnect()
+  }, [targetRef])
+
+  useEffect(() => {
+    const top = topRef.current, target = targetRef.current
+    if (!top || !target) return
+    const onTop = () => { if (syncing.current) return; syncing.current = true; target.scrollLeft = top.scrollLeft; syncing.current = false }
+    const onTarget = () => { if (syncing.current) return; syncing.current = true; top.scrollLeft = target.scrollLeft; syncing.current = false }
+    top.addEventListener('scroll', onTop)
+    target.addEventListener('scroll', onTarget)
+    return () => { top.removeEventListener('scroll', onTop); target.removeEventListener('scroll', onTarget) }
+  }, [targetRef])
+
+  // Nada que mover: el contenido ya cabe entero (p. ej. el tablero de la semana, que reparte en
+  // filas con grid en vez de desbordar a los lados) — ni falta ni sobra barra.
+  if (medidas.scrollWidth <= medidas.clientWidth + 1) return null
+  return (
+    <div className="org__top-scroll" ref={topRef}>
+      <div style={{ width: medidas.scrollWidth, height: 1 }} />
+    </div>
+  )
+}
+
 // Aviso visible de "algo falló" (Ramiro, 4/11 05:48: casi todas las llamadas se tragaban el error
 // con `.catch(() => {})` y no pasaba nada en pantalla — parecía que la acción "no estaba").
 // Un contexto en vez de pasar la función por props por media docena de niveles de componentes.
@@ -568,6 +673,12 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
   }
   const taskTypeById = useMemo(() => Object.fromEntries((config?.taskTypes || []).map(t => [t.id, t])), [config])
   const workerById = useMemo(() => Object.fromEntries(workers.map(w => [w.id, w])), [workers])
+  // 23/11 06:40, punto 2/5: mismo selector de equipadores (y mismo localStorage) que el plan de
+  // la compe — oculta columnas enteras del tablero, nunca tareas sueltas dentro de una visible.
+  const myName = useMemo(() => workerById[workerId]?.name || null, [workerById, workerId])
+  const nombresEquipo = useMemo(() => (workers || []).filter(w => w.active).map(w => w.name).sort(), [workers])
+  const filtroEquip = useFiltroEquipadores(nombresEquipo, myName)
+  const boardRef = useRef(null)
 
   // Tarea propuesta por el sistema, pero fijada "se puede mover si se
   // quiere" — cambiar de persona o de día, siempre dentro de esta semana.
@@ -809,6 +920,8 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
             confirmarDuplicar={confirmarDuplicar}
             duplicando={duplicando}
             onReassign={reassignTask}
+            nombresEquipo={nombresEquipo}
+            filtroEquip={filtroEquip}
           />
         ) : (
         <>
@@ -834,8 +947,13 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
             >{label}</button>
           ))}
         </div>
-        <div className="org__board" onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
-          {detail.assignments.map(a => {
+        {/* 23/11 06:40, puntos 1/2/5: mismo selector de equipadores que el plan de la compe
+            (localStorage compartido) + barra de scroll también arriba, pegada mientras se
+            baja por el tablero (puede llegar a 4000px de alto). */}
+        <EquipadorChips nombres={nombresEquipo} filtro={filtroEquip} miNombre={myName} />
+        <TopScrollbar targetRef={boardRef} />
+        <div className="org__board" ref={boardRef} onPointerMove={onBoardMove} onPointerUp={onBoardUp}>
+          {detail.assignments.filter(a => filtroEquip.estaSeleccionado(a.workerName)).map(a => {
             const worker = workerById[a.workerId]
             const effectiveDays = a.workDays?.length ? a.workDays : (worker?.workDays || [])
             const tareasOrdenadas = [...a.tasks]
@@ -1884,7 +2002,7 @@ function MisTareasMovil({
   addingBlockFor, setAddingBlockFor, addingTaskFor, setAddingTaskFor, onReload,
   postponing, onPostpone, deletingTask, onDelete, editingTask, setEditingTask, onToggleDone,
   duplicandoTask, setDuplicandoTask, duplicarSeleccion, toggleDuplicarWorker, confirmarDuplicar, duplicando,
-  onReassign,
+  onReassign, nombresEquipo, filtroEquip,
 }) {
   const [abiertos, setAbiertos] = useState(() => new Set())
   const toggleAbierto = id => setAbiertos(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -1981,7 +2099,10 @@ function MisTareasMovil({
   }
 
   const mia = assignments.find(a => String(a.workerId) === String(myWorkerId))
-  const otras = assignments.filter(a => a !== mia)
+  // 23/11 06:40, punto 2/5: el selector de equipadores (compartido con el plan de la compe)
+  // también filtra aquí quién sale en "Resto del equipo" — "Mis tareas" nunca se filtra, es
+  // justo lo contrario de "Solo yo" ocultar el resto.
+  const otras = assignments.filter(a => a !== mia && (!filtroEquip || filtroEquip.estaSeleccionado(a.workerName)))
 
   return (
     <div className="org__tm">
@@ -1994,6 +2115,7 @@ function MisTareasMovil({
         <p className="org__hint">No tienes ninguna columna esta semana — mira el resto del equipo abajo.</p>
       )}
 
+      {nombresEquipo && filtroEquip && <EquipadorChips nombres={nombresEquipo} filtro={filtroEquip} miNombre={null} />}
       {otras.length > 0 && (
         <div className="org__tm-resto">
           <p className="org__tm-mia-titulo">Resto del equipo</p>
@@ -2493,9 +2615,16 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
     bloques: blocks.filter(b => b.equipador === nombre).sort((a, b) => a.number - b.number),
   })).filter(c => c.tareas.length > 0 || c.bloques.length > 0 || (workers || []).some(w => w.name === c.nombre && w.active))
   const bloquesSinAsignar = blocks.filter(b => !b.equipador).sort((a, b) => a.number - b.number)
-  const columnasAMostrar = columnaExpandida ? columnas.filter(c => c.nombre === columnaExpandida) : columnas
+  // 23/11 06:40, punto 2: selector de equipadores compartido con la semana (mismo localStorage)
+  // — oculta columnas/filas enteras, nunca tareas sueltas dentro de una columna visible.
+  const nombresOrdenados = useMemo(() => Array.from(nombres).sort(), [plan, workers]) // eslint-disable-line react-hooks/exhaustive-deps
+  const filtroEquip = useFiltroEquipadores(nombresOrdenados, myName)
+  const columnasFiltradas = columnas.filter(c => filtroEquip.estaSeleccionado(c.nombre))
+  const columnasAMostrar = columnaExpandida ? columnasFiltradas.filter(c => c.nombre === columnaExpandida) : columnasFiltradas
   // 17/11 punto B.4: fechas únicas de las tareas del plan, para las columnas de la vista tabla.
   const diasCompeTabla = useMemo(() => Array.from(new Set(tasks.map(t => t.date))).sort(), [tasks])
+  const planBoardRef = useRef(null)
+  const tablaBoardRef = useRef(null)
 
   const chipReasignable = (b, nombreActual) => (
     <span key={b.id} className={`org__comp-plan-bloque-chip${b.tested ? ' org__comp-plan-bloque-chip--probado' : ''}`}>
@@ -2668,6 +2797,9 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
   }
 
   if (isMobile) {
+    // 23/11 06:40, punto 4: móvil con el mismo selector de "Columnas/Tabla" que escritorio (y
+    // el mismo filtro de equipadores) — antes el móvil ignoraba vistaCompe y siempre enseñaba
+    // la lista por persona, nunca una tabla.
     return (
       <div className="org__section">
         <h4 className="org__section-title">Plan de la compe</h4>
@@ -2681,23 +2813,63 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
             <button className="org__btn" onClick={generate} disabled={generating}>{generating ? 'Generando...' : (plan?.total ? 'Regenerar plan' : 'Generar plan')}</button>
           </div>
         )}
-        <CompePlanMovil
-          columnas={columnas}
-          bloquesSinAsignar={bloquesSinAsignar}
-          tasks={tasks}
-          myName={myName}
-          chipReasignable={chipReasignable}
-          renderTareaLi={renderTareaLiMovil}
-          canManage={canManage}
-          addingTareaFor={addingTareaFor}
-          nuevaTarea={nuevaTarea}
-          setNuevaTarea={setNuevaTarea}
-          compTaskTypes={compTaskTypes}
-          abrirNuevaTarea={abrirNuevaTarea}
-          guardarNuevaTarea={guardarNuevaTarea}
-          savingTarea={savingTarea}
-          onCancelNuevaTarea={() => setAddingTareaFor(null)}
-        />
+        <div className="org__board-filtro">
+          <button type="button" className={`org__switch-btn${vistaCompe === 'columnas' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('columnas')}>Columnas</button>
+          <button type="button" className={`org__switch-btn${vistaCompe === 'tabla' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('tabla')}>Tabla</button>
+        </div>
+        <EquipadorChips nombres={nombresOrdenados} filtro={filtroEquip} miNombre={myName} />
+        {vistaCompe === 'tabla' ? (
+          <div className="org__cp-tabla-wrap">
+            <table className="org__cp-tabla org__cp-tabla--movil">
+              <thead>
+                <tr>
+                  <th>Persona</th>
+                  {diasCompeTabla.map(d => <th key={d}>{dayLabel(d)}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {columnasFiltradas.map(col => (
+                  <tr key={col.nombre}>
+                    <td className="org__cp-tabla-persona">
+                      {col.nombre}
+                      {col.bloques.length > 0 && <div className="org__comp-plan-bloques">{col.bloques.map(b => chipReasignable(b, col.nombre))}</div>}
+                    </td>
+                    {diasCompeTabla.map(d => (
+                      <td key={d}>
+                        <ul className="org__task-list">{col.tareas.filter(t => t.date === d).map(t => renderTareaLiMovil(t))}</ul>
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+                {bloquesSinAsignar.length > 0 && filtroEquip.esTodos && (
+                  <tr>
+                    <td className="org__cp-tabla-persona">Sin asignar</td>
+                    <td colSpan={diasCompeTabla.length}>
+                      <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            {diasCompeTabla.length === 0 && <p className="org__hint">Todavía no hay tareas con fecha en el plan.</p>}
+          </div>
+        ) : (
+          <CompePlanMovil
+            columnas={columnasFiltradas}
+            bloquesSinAsignar={filtroEquip.esTodos ? bloquesSinAsignar : []}
+            chipReasignable={chipReasignable}
+            renderTareaLi={renderTareaLiMovil}
+            canManage={canManage}
+            addingTareaFor={addingTareaFor}
+            nuevaTarea={nuevaTarea}
+            setNuevaTarea={setNuevaTarea}
+            compTaskTypes={compTaskTypes}
+            abrirNuevaTarea={abrirNuevaTarea}
+            guardarNuevaTarea={guardarNuevaTarea}
+            savingTarea={savingTarea}
+            onCancelNuevaTarea={() => setAddingTareaFor(null)}
+          />
+        )}
       </div>
     )
   }
@@ -2725,9 +2897,14 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
           <button type="button" className={`org__switch-btn${vistaCompe === 'tabla' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('tabla')}>Tabla</button>
         </div>
       </div>
+      {/* 23/11 06:40, punto 2: mismo selector de equipadores que la semana (localStorage
+          compartido) — oculta columnas/filas enteras en las dos vistas. */}
+      <EquipadorChips nombres={nombresOrdenados} filtro={filtroEquip} miNombre={myName} />
 
       {vistaCompe === 'tabla' ? (
-        <div className="org__cp-tabla-wrap">
+        <>
+        <TopScrollbar targetRef={tablaBoardRef} />
+        <div className="org__cp-tabla-wrap" ref={tablaBoardRef}>
           <table className="org__cp-tabla">
             <thead>
               <tr>
@@ -2736,7 +2913,7 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
               </tr>
             </thead>
             <tbody>
-              {columnas.map(col => (
+              {columnasFiltradas.map(col => (
                 <tr key={col.nombre}>
                   <td className="org__cp-tabla-persona">
                     {col.nombre}
@@ -2749,7 +2926,7 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
                   ))}
                 </tr>
               ))}
-              {bloquesSinAsignar.length > 0 && (
+              {bloquesSinAsignar.length > 0 && filtroEquip.esTodos && (
                 <tr>
                   <td className="org__cp-tabla-persona">Sin asignar</td>
                   <td colSpan={diasCompeTabla.length}>
@@ -2761,8 +2938,11 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
           </table>
           {diasCompeTabla.length === 0 && <p className="org__hint">Todavía no hay tareas con fecha en el plan.</p>}
         </div>
+        </>
       ) : (
-      <div className="org__board org__board--compe-plan">
+      <>
+      <TopScrollbar targetRef={planBoardRef} />
+      <div className="org__board org__board--compe-plan" ref={planBoardRef}>
         {columnasAMostrar.map(col => (
           <div key={col.nombre} className={`org__board-col${columnaExpandida ? ' org__board-col--expandida' : ''}`}>
             <button
@@ -2805,95 +2985,72 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
             {col.tareas.length === 0 && col.bloques.length === 0 && <p className="org__hint">Sin tareas ni bloques.</p>}
           </div>
         ))}
-        {!columnaExpandida && bloquesSinAsignar.length > 0 && (
+        {!columnaExpandida && bloquesSinAsignar.length > 0 && filtroEquip.esTodos && (
           <div className="org__board-col org__board-col--sin-asignar">
             <p className="org__board-col-title">Sin asignar</p>
             <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
           </div>
         )}
       </div>
+      </>
       )}
     </div>
   )
 }
 
-// 17/11 09:40 (A4, pedido por Ramiro/Cowork como prioridad 1 para el móvil, antes que A5/B — la
-// preparación de la compe empieza el 25/11): "arriba un selector «Persona: [yo ▾] / Todos por
-// día», y debajo una sola lista vertical. Nunca columnas." — reutiliza `columnas`/`tasks` que ya
-// calcula CompePlanView y los mismos renderTareaLi()/chipReasignable() que el tablero de
-// escritorio, nunca lógica nueva de negocio.
+// 23/11 06:40, punto 4 (Ramiro vía cowork): "una columna por pantalla, que se pase deslizando
+// (scroll-snap), con el nombre fijo arriba" — sustituye al selector desplegable "Persona: [yo
+// ▾] / Todos por día" del 17/11 (A4): ahora quién se ve ya lo decide el mismo selector de
+// chips de arriba (compartido con la semana), así que aquí solo hace falta pintar, en un
+// carrusel, una tarjeta por persona VISIBLE — deslizar de una a otra es "cambiar de persona".
+// Mismos renderTareaLi()/chipReasignable() de siempre, ninguna lógica nueva de negocio.
 function CompePlanMovil({
-  columnas, bloquesSinAsignar, tasks, myName, chipReasignable, renderTareaLi, canManage,
+  columnas, bloquesSinAsignar, chipReasignable, renderTareaLi, canManage,
   addingTareaFor, nuevaTarea, setNuevaTarea, compTaskTypes, abrirNuevaTarea, guardarNuevaTarea, savingTarea, onCancelNuevaTarea,
 }) {
-  const nombresConDatos = columnas.map(c => c.nombre)
-  // 17/11 11:25 (cowork): salía "Persona: Ana" (la primera alfabética) cuando no hay miWorkerId
-  // — por defecto, la persona elegida en "¿Quién eres?" si la tiene, o si no "Todos por día",
-  // nunca una persona al azar.
-  const [modo, setModo] = useState(() => (myName && nombresConDatos.includes(myName)) ? myName : 'todos')
-  const colSeleccionada = columnas.find(c => c.nombre === modo)
-
-  const porDia = useMemo(() => {
-    const mapa = {}
-    tasks.forEach(t => { (mapa[t.date] = mapa[t.date] || []).push(t) })
-    return Object.keys(mapa).sort().map(date => ({
-      date, tareas: mapa[date].sort((a, b) => a.workerName.localeCompare(b.workerName)),
-    }))
-  }, [tasks])
-
+  if (columnas.length === 0 && bloquesSinAsignar.length === 0) {
+    return <p className="org__hint">Nadie seleccionado arriba, o sin tareas ni bloques todavía.</p>
+  }
   return (
-    <div className="org__cp-movil">
-      <select className="org__cp-movil-selector" value={modo} onChange={e => setModo(e.target.value)}>
-        {myName && nombresConDatos.includes(myName) && <option value={myName}>Persona: yo ({myName})</option>}
-        {nombresConDatos.filter(n => n !== myName).map(n => <option key={n} value={n}>Persona: {n}</option>)}
-        <option value="todos">Todos por día</option>
-      </select>
-
-      {modo === 'todos' ? (
-        <div className="org__cp-movil-dias">
-          {porDia.map(({ date, tareas }) => (
-            <div key={date} className="org__cp-movil-dia">
-              <p className="org__cp-movil-dia-titulo">{dayLabel(date)}</p>
-              <ul className="org__task-list">{tareas.map(t => renderTareaLi(t, true))}</ul>
-            </div>
-          ))}
-          {porDia.length === 0 && <p className="org__hint">Sin tareas todavía.</p>}
-          {bloquesSinAsignar.length > 0 && (
-            <div className="org__cp-movil-dia">
-              <p className="org__cp-movil-dia-titulo">Bloques sin asignar</p>
-              <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
-            </div>
-          )}
-        </div>
-      ) : colSeleccionada ? (
-        <div>
-          {colSeleccionada.bloques.length > 0 && (
-            <div className="org__comp-plan-bloques">{colSeleccionada.bloques.map(b => chipReasignable(b, colSeleccionada.nombre))}</div>
-          )}
-          <ul className="org__task-list">{colSeleccionada.tareas.map(t => renderTareaLi(t))}</ul>
-          {colSeleccionada.tareas.length === 0 && colSeleccionada.bloques.length === 0 && <p className="org__hint">Sin tareas ni bloques.</p>}
-          {canManage && (addingTareaFor === modo ? (
-            <div className="org__add-form org__add-form--compe-tarea">
-              <select value={nuevaTarea.taskTypeId} onChange={e => setNuevaTarea(n => ({ ...n, taskTypeId: e.target.value, customText: '' }))}>
-                <option value="">— Texto libre —</option>
-                {compTaskTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-              {!nuevaTarea.taskTypeId && (
-                <input type="text" placeholder="Texto de la tarea" value={nuevaTarea.customText} onChange={e => setNuevaTarea(n => ({ ...n, customText: e.target.value }))} />
-              )}
-              <input type="date" value={nuevaTarea.date} onChange={e => setNuevaTarea(n => ({ ...n, date: e.target.value }))} />
-              <input type="text" placeholder="Notas (opcional)" value={nuevaTarea.notas} onChange={e => setNuevaTarea(n => ({ ...n, notas: e.target.value }))} />
-              <div className="org__add-actions">
-                <button type="button" className="org__btn" onClick={guardarNuevaTarea} disabled={savingTarea}>{savingTarea ? 'Guardando...' : 'Añadir'}</button>
-                <button type="button" className="org__link-btn" onClick={onCancelNuevaTarea}>Cancelar</button>
+    <div className="org__cp-movil-carrusel">
+      {columnas.map(col => (
+        <div key={col.nombre} className="org__cp-movil-tarjeta">
+          <p className="org__cp-movil-tarjeta-nombre">{col.nombre}</p>
+          <div className="org__cp-movil-tarjeta-cuerpo">
+            {col.bloques.length > 0 && (
+              <div className="org__comp-plan-bloques">{col.bloques.map(b => chipReasignable(b, col.nombre))}</div>
+            )}
+            <ul className="org__task-list">{col.tareas.map(t => renderTareaLi(t))}</ul>
+            {col.tareas.length === 0 && col.bloques.length === 0 && <p className="org__hint">Sin tareas ni bloques.</p>}
+            {canManage && (addingTareaFor === col.nombre ? (
+              <div className="org__add-form org__add-form--compe-tarea">
+                <select value={nuevaTarea.taskTypeId} onChange={e => setNuevaTarea(n => ({ ...n, taskTypeId: e.target.value, customText: '' }))}>
+                  <option value="">— Texto libre —</option>
+                  {compTaskTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+                {!nuevaTarea.taskTypeId && (
+                  <input type="text" placeholder="Texto de la tarea" value={nuevaTarea.customText} onChange={e => setNuevaTarea(n => ({ ...n, customText: e.target.value }))} />
+                )}
+                <input type="date" value={nuevaTarea.date} onChange={e => setNuevaTarea(n => ({ ...n, date: e.target.value }))} />
+                <input type="text" placeholder="Notas (opcional)" value={nuevaTarea.notas} onChange={e => setNuevaTarea(n => ({ ...n, notas: e.target.value }))} />
+                <div className="org__add-actions">
+                  <button type="button" className="org__btn" onClick={guardarNuevaTarea} disabled={savingTarea}>{savingTarea ? 'Guardando...' : 'Añadir'}</button>
+                  <button type="button" className="org__link-btn" onClick={onCancelNuevaTarea}>Cancelar</button>
+                </div>
               </div>
-            </div>
-          ) : (
-            <button type="button" className="org__link-btn" onClick={() => abrirNuevaTarea(modo)}>+ Tarea</button>
-          ))}
+            ) : (
+              <button type="button" className="org__link-btn" onClick={() => abrirNuevaTarea(col.nombre)}>+ Tarea</button>
+            ))}
+          </div>
         </div>
-      ) : (
-        <p className="org__hint">Sin tareas para esa persona.</p>
+      ))}
+      {bloquesSinAsignar.length > 0 && (
+        <div className="org__cp-movil-tarjeta">
+          <p className="org__cp-movil-tarjeta-nombre">Sin asignar</p>
+          <div className="org__cp-movil-tarjeta-cuerpo">
+            <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -502,6 +502,14 @@
   padding: 8px 10px; margin-bottom: 10px; font-size: 0.82rem; font-weight: 600;
 }
 .org__board-filtro { display: flex; gap: 4px; margin-bottom: 10px; max-width: 360px; }
+/* 23/11 06:40, punto 1: barra de scroll TAMBIÉN arriba del tablero (sincronizada por JS con la
+   de abajo, ver TopScrollbar en OrganizacionPage.jsx), pegada arriba mientras se baja por un
+   tablero de hasta 4000px de alto — antes solo había barra abajo del todo, había que bajar al
+   final de la página para poder moverla. */
+.org__top-scroll {
+  position: sticky; top: 0; z-index: 5; overflow-x: auto; overflow-y: hidden;
+  height: 14px; margin-bottom: 4px; background: var(--color-bg);
+}
 .org__board {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -585,7 +593,11 @@
 }
 .org__tile-postpone:disabled { opacity: 0.6; cursor: default; }
 .org__tile-delete {
-  flex: 0 0 100%;
+  /* 23/11 06:40, punto 3: esto ya solo lo usa el plan de la compe, dentro de
+     .org__task-actions (que fuerza SU PROPIA fila entera, ver ahí) — aquí cada botón solo
+     necesita su ancho de texto, nunca el 100% (con nowrap, dos "100%" a la vez es justo lo
+     que sacaba el ✕ fuera de la tarjeta). */
+  flex: 0 0 auto;
   background: none;
   border: 1px dashed #c8928c;
   color: #a33d33;
@@ -596,7 +608,7 @@
 }
 .org__tile-delete:disabled { opacity: 0.6; cursor: default; }
 .org__tile-edit {
-  flex: 0 0 100%;
+  flex: 0 0 auto;
   background: none;
   border: 1px dashed var(--color-border);
   color: #5a4a2a;
@@ -607,8 +619,8 @@
 }
 /* 17/11 punto B.2: una línea por tarea en el tablero de escritorio (checkbox + título +
    iconos pequeños que aparecen al pasar el ratón) en vez de los 3-4 botones de ancho completo
-   de arriba (.org__tile-postpone/-edit/-delete, que siguen igual para el plan de la compe, que
-   no tenía ese problema). */
+   de arriba (.org__tile-postpone, ya sin uso real — .org__tile-edit/-delete los sigue usando
+   el plan de la compe, ajustados el 23/11 06:40 para que quepan en columnas de 280px). */
 .org__tile-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; margin-left: auto; opacity: 0; transition: opacity 0.1s; }
 .org__tile:hover .org__tile-actions, .org__tile:focus-within .org__tile-actions { opacity: 1; }
 .org__tile-icon-btn {
@@ -681,17 +693,28 @@
 .org__tm-menu__cancelar { text-align: center !important; font-weight: 700; color: var(--color-text-secondary) !important; }
 .org__tm-menu-pregunta { padding: 13px 18px; margin: 0; font-size: 0.92rem; color: var(--color-text-primary); }
 
-/* ── Plan de la compe (móvil ≤700px) — A4, NOTAS_PARA_CODE_tareas_movil.md 17/11. Selector
-   arriba + una sola lista vertical, nunca columnas. */
-.org__cp-movil-selector {
-  width: 100%; padding: 10px; margin-bottom: 12px; font-size: 0.9rem;
-  border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary);
+/* ── Plan de la compe (móvil ≤700px) — redibujado 23/11 06:40: antes un <select> "Persona:
+   [yo ▾] / Todos por día" (17/11, A4); ahora quién se ve ya lo decide EquipadorChips (arriba,
+   compartido con la semana) y aquí solo hace falta un carrusel de una tarjeta por persona
+   visible, deslizando con scroll-snap — "una columna por pantalla", con el nombre fijo
+   arriba de su propia tarjeta mientras se hace scroll vertical dentro de ella. */
+.org__equip-chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 10px; -webkit-overflow-scrolling: touch; }
+.org__equip-chips .org__holdset-chip { flex: 0 0 auto; white-space: nowrap; }
+
+.org__cp-movil-carrusel {
+  display: flex; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+  margin: 0 -16px; /* a todo el ancho de la pantalla — -16px cancela el padding de .org */
 }
-.org__cp-movil-dia { margin-bottom: 14px; }
-.org__cp-movil-dia-titulo {
-  font-weight: 700; font-size: 0.85rem; color: var(--color-text-primary);
-  margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.04em;
+.org__cp-movil-tarjeta {
+  flex: 0 0 100%; width: 100%; scroll-snap-align: start; box-sizing: border-box;
+  padding: 0 16px; max-height: calc(100vh - 220px); overflow-y: auto;
 }
+.org__cp-movil-tarjeta-nombre {
+  position: sticky; top: 0; z-index: 2; background: var(--color-bg);
+  font-weight: 700; font-size: 1.05rem; color: var(--color-text-primary);
+  margin: 0; padding: 10px 0; border-bottom: 1.5px solid var(--color-border);
+}
+.org__cp-movil-tarjeta-cuerpo { padding-top: 10px; }
 
 /* 17/11 punto B.4: vista tabla del plan de la compe (personas en filas × días en columnas). */
 .org__cp-tabla-wrap { overflow-x: auto; }
@@ -703,6 +726,14 @@
 .org__cp-tabla th { background: var(--color-surface); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--color-text-secondary); white-space: nowrap; }
 .org__cp-tabla-persona { font-weight: 700; color: var(--color-text-primary); white-space: nowrap; min-width: 120px; }
 .org__cp-tabla .org__task-list { min-width: 160px; }
+/* 23/11 06:40, punto 4: en móvil, la columna "Persona" se queda fija a la izquierda mientras
+   se hace scroll horizontal por los días — si no, en 390px se pierde de vista enseguida de
+   quién es cada fila. En escritorio no hace falta (no era el problema que reportó cowork). */
+@media (max-width: 700px) {
+  .org__cp-tabla th:first-child, .org__cp-tabla-persona {
+    position: sticky; left: 0; z-index: 1; background: var(--color-surface);
+  }
+}
 
 /* ── Semana: histórico ── */
 .org__historico {
@@ -780,12 +811,17 @@
 .org__board--compe-plan .org__task { cursor: grab; }
 .org__board--compe-plan .org__task--dragging { opacity: 0.4; }
 .org__task-check { display: flex; align-items: center; cursor: pointer; flex-shrink: 0; }
-.org__task-body { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+/* 23/11 06:40, punto 3: antes el texto compartía la fila con los botones (⇄/⧉/✕) — en una
+   columna de 280px eso dejaba el texto en una palabra por línea y el ✕ se salía de la
+   tarjeta. flex-basis 100% en .org__task-actions fuerza su PROPIA fila (el padre .org__task ya
+   tiene flex-wrap:wrap, ver más abajo) — el texto se queda a todo el ancho disponible en la
+   fila de arriba, los botones siempre en una segunda fila entera debajo. */
+.org__task-body { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; min-width: 0; }
 .org__task-title { font-weight: 600; }
 /* Cowork 12/11 11:20: la nota salía apretada al lado del título, en una columnita estrecha —
    ahora es su propia línea debajo, a todo el ancho de la tarjeta. */
 .org__task-notas { font-size: 0.78rem; color: var(--color-text-secondary); }
-.org__task-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
+.org__task-actions { display: flex; align-items: center; gap: 4px; flex: 1 0 100%; margin: 4px 0 0; }
 .org__task-actions select { font-size: 0.72rem; max-width: 110px; }
 .org__task-manual-badge {
   margin-left: 6px; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
