@@ -1,0 +1,84 @@
+.arm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2100;
+  padding: 16px;
+}
+
+.arm-modal {
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  padding: 20px 20px 24px;
+  max-width: 440px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.arm-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.arm-titulo {
+  font-family: var(--font-serif);
+  font-size: 1.2rem;
+  margin: 0;
+  color: var(--color-text-primary);
+}
+.arm-close {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  flex-shrink: 0;
+}
+
+.arm-paso { display: flex; flex-direction: column; gap: 14px; align-items: stretch; }
+.arm-pregunta { margin: 0; font-size: 1rem; color: var(--color-text-primary); text-align: center; }
+.arm-ya-apuntado { margin: 0; font-size: 0.88rem; color: var(--color-text-secondary); text-align: center; }
+
+.arm-botones-grandes { display: flex; flex-direction: column; gap: 10px; }
+.arm-btn-grande {
+  background: #2a2015;
+  color: #fdf7e6;
+  border: none;
+  padding: 16px 18px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  width: 100%;
+}
+.arm-btn-grande:disabled { opacity: 0.6; cursor: default; }
+.arm-btn-grande:hover:not(:disabled) { background: #c8961e; }
+.arm-btn-grande--activo { outline: 3px solid #d4a017; outline-offset: 2px; }
+
+.arm-quitar {
+  background: none;
+  border: none;
+  color: var(--state-bad, #a33d33);
+  font-size: 0.85rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px;
+  align-self: center;
+}
+.arm-quitar:disabled { opacity: 0.6; cursor: default; }
+
+.arm-confirm { display: flex; flex-direction: column; gap: 14px; }
+.arm-confirm p { margin: 0; font-size: 0.95rem; color: var(--color-text-primary); text-align: center; }
+.arm-confirm-botones { display: flex; gap: 10px; }
+.arm-btn {
+  flex: 1; background: #2a2015; color: #fdf7e6; border: none; padding: 12px 14px;
+  font-size: 0.9rem; font-weight: 700; cursor: pointer;
+}
+.arm-btn--ghost { background: none; color: var(--color-text-primary); border: 1.5px solid var(--color-border); }

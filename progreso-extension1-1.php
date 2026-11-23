@@ -991,6 +991,16 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/compe/categoria', array(
         'methods' => 'POST', 'callback' => 'progreso_compe_categoria_set', 'permission_callback' => 'is_user_logged_in',
     ));
+    // 23/11 06:50/06:47: tabla de puntos por bloque — visible para quien puede supervisar
+    // (Organización la enseña), editable solo por un socio (afecta a la puntuación de verdad).
+    register_rest_route('progreso/v1', '/compe/puntos-tabla', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_puntos_tabla_get_endpoint',
+        'permission_callback' => function() { return blokes_can_supervise(); },
+    ));
+    register_rest_route('progreso/v1', '/compe/puntos-tabla', array(
+        'methods' => 'PUT', 'callback' => 'progreso_compe_puntos_tabla_set_endpoint',
+        'permission_callback' => function() { return blokes_es_socio(); },
+    ));
 
     register_rest_route('progreso/v1', '/training/me', array(
         'methods'             => 'GET',
@@ -20923,18 +20933,25 @@ function blokes_rm_tiene_sub_menores_en_vigor($uid) {
     return false;
 }
 
-// POST /progreso/v1/compe/resultado — apunta/corrige el top/zona/intentos de UN bloque. Con
+// POST /progreso/v1/compe/resultado — apunta/corrige/quita el resultado de UN bloque. Con
 // sesión normal, siempre el propio usuario. targetUserId (como en blokes_toggle_completion) es
 // para recepción apuntando por otra persona (Ramiro, 07/11 08:46) — exige
-// blokes_can_supervise(), igual que el resto de "actuar en nombre de alguien". Cualquier cambio
-// vuelve a dejarlo en "pendiente" — editar algo ya validado necesita que el juez lo vuelva a
-// mirar, nunca se queda validado con datos distintos de los que vio.
+// blokes_can_supervise(), igual que el resto de "actuar en nombre de alguien".
+// 23/11 06:51/06:52 (Ramiro, "ningún camino puede apuntar un bloque sin decir si es top o
+// bonus"): `resultado` sustituye a los booleanos sueltos top/zona de antes — 'top' | 'bonus' |
+// 'ninguno' (quitar el resultado de este bloque), siempre explícito, nunca "ninguno de los
+// dos" por omisión. 'top' pone zona=1 por compatibilidad de datos con el resto del sistema
+// (ventana de la compe, histórico); 'bonus' es solo zona (la del propio Blokes), sin top.
 function progreso_compe_apuntar_resultado($request) {
     if (!is_user_logged_in()) return new WP_Error('forbidden', 'Hace falta sesión.', array('status' => 401));
     global $wpdb;
     $comp_block_id = intval($request->get_param('compBlockId'));
-    $top      = $request->get_param('top') ? 1 : 0;
-    $zona     = $request->get_param('zona') ? 1 : 0;
+    $resultado_in = sanitize_key((string) $request->get_param('resultado'));
+    if (!in_array($resultado_in, array('top', 'bonus', 'ninguno'), true)) {
+        return new WP_Error('bad_request', 'Falta decir si es top, bonus, o "ninguno" para quitar.', array('status' => 400));
+    }
+    $top      = $resultado_in === 'top' ? 1 : 0;
+    $zona     = $resultado_in === 'bonus' ? 1 : $top;
     $intentos = max(0, intval($request->get_param('intentos')));
     $target_user_id = intval($request->get_param('targetUserId'));
     // Participante rápido (Ramiro, 07/11 08:48: pase de día sin cuenta) — siempre lo crea
@@ -20968,14 +20985,16 @@ function progreso_compe_apuntar_resultado($request) {
         if (!$existe_rapido) return new WP_Error('not_found', 'Participante rápido no encontrado en esta compe.', array('status' => 404));
     }
 
-    // 22/11 (Ramiro: "en la compe no puede quedar nadie sin categoría"): se mira y, si hace
-    // falta, se resuelve la categoría ANTES de escribir el top — nunca se guarda un primer top
-    // sin categoría. Quien tiene una sub de Menores en vigor sigue entrando solo en infantil,
-    // sin preguntar; cualquier otro necesita que esta misma llamada traiga ya `categoria`
-    // (Colección/Apuntar/Recepción la piden antes de reintentar) — si no, 409 y no se escribe
-    // nada todavía, ni el top ni la categoría.
+    // 22/11 (Ramiro: "en la compe no puede quedar nadie sin categoría"), ampliado el 23/11 a
+    // top O bonus (antes solo top): se mira y, si hace falta, se resuelve la categoría ANTES de
+    // escribir el resultado — nunca se guarda un primer resultado sin categoría. Quien tiene
+    // una sub de Menores en vigor sigue entrando solo en infantil, sin preguntar; cualquier
+    // otro necesita que esta misma llamada traiga ya `categoria` (el diálogo único de
+    // Colección/Apuntar/Recepción la pide antes de reintentar) — si no, 409 y no se escribe
+    // nada todavía, ni el resultado ni la categoría. Quitar un resultado ('ninguno') nunca pide
+    // categoría — no hace falta tenerla para borrar algo.
     $categoria_asignada = null;
-    if ($top) {
+    if ($resultado_in !== 'ninguno') {
         $tiene_categoria = (bool) progreso_compe_categoria_get($block['competition_id'], $participante_tipo, $participante_id);
         if (!$tiene_categoria) {
             if ($participante_tipo === 'user' && blokes_rm_tiene_sub_menores_en_vigor($participante_id)) {
@@ -20985,7 +21004,7 @@ function progreso_compe_apuntar_resultado($request) {
                 if (in_array($categoria_in, PROGRESO_COMPE_CATEGORIAS, true)) {
                     $categoria_asignada = $categoria_in;
                 } else {
-                    return new WP_Error('falta_categoria', 'Elige la categoría antes de apuntar el primer top.', array('status' => 409));
+                    return new WP_Error('falta_categoria', 'Elige la categoría antes de apuntar el primer resultado.', array('status' => 409));
                 }
             }
             $req_cat = new WP_REST_Request('POST', '/progreso/v1/compe/categoria');
@@ -21003,10 +21022,18 @@ function progreso_compe_apuntar_resultado($request) {
         "SELECT id FROM " . progreso_equip_table('comp_resultados') . " WHERE competition_id = %d AND comp_block_id = %d AND participante_tipo = %s AND participante_id = %d",
         $block['competition_id'], $comp_block_id, $participante_tipo, $participante_id
     ), ARRAY_A);
+
+    // 23/11 06:51, punto 6: "ninguno" quita el resultado de verdad (se puede cambiar o quitar
+    // lo que ya estaba apuntado) — nunca se queda una fila a medias con top=0 y zona=0.
+    if ($resultado_in === 'ninguno') {
+        if ($existente) $wpdb->delete(progreso_equip_table('comp_resultados'), array('id' => intval($existente['id'])), array('%d'));
+        return rest_ensure_response(array('success' => true, 'data' => array('estado' => 'quitado', 'puntos' => 0, 'categoriaAsignada' => null)));
+    }
+
     // Sin validación en la app (Ramiro, 07/11): todo lo apuntado cuenta al momento, venga del
     // móvil, de la tablet o de recepción — lo validan los compañeros de palabra, fuera de la app.
     $datos = array(
-        'top' => $top, 'zona' => $zona ?: $top, 'intentos' => $intentos, 'apuntado_por' => get_current_user_id(),
+        'top' => $top, 'zona' => $zona, 'intentos' => $intentos, 'apuntado_por' => get_current_user_id(),
         'estado' => 'validado', 'validado_por' => get_current_user_id(), 'validado_at' => $ahora, 'updated_at' => $ahora,
     );
     if ($existente) {
@@ -21018,8 +21045,14 @@ function progreso_compe_apuntar_resultado($request) {
         )));
     }
 
+    // 23/11 06:50, punto 4: "+N pts · bloque X" en vez de "+1 TOP" — puntos de este resultado
+    // concreto con la tabla configurable (nunca inventados para bloques fuera de ella).
+    $puntos = blokes_compe_puntos_de_resultado($top, $zona, intval($block['number']), blokes_compe_puntos_tabla_get());
+
     return rest_ensure_response(array('success' => true, 'data' => array(
         'estado' => $datos['estado'],
+        'resultado' => $resultado_in,
+        'puntos' => $puntos,
         'categoriaAsignada' => $categoria_asignada,
     )));
 }
@@ -21160,7 +21193,7 @@ function progreso_compe_simular_top($request) {
 
     $req_resultado = new WP_REST_Request('POST', '/progreso/v1/compe/resultado');
     $req_resultado->set_param('compBlockId', intval($bloque['id']));
-    $req_resultado->set_param('top', true);
+    $req_resultado->set_param('resultado', 'top');
     $req_resultado->set_param('targetParticipanteRapidoId', intval($rapido['id']));
     // 22/11 ("nadie sin categoría"): apuntar-resultado ya no deja pasar un primer top sin
     // categoría — participantes de prueba viejos (de antes de la tabla comp_categorias, p. ej.
@@ -21188,6 +21221,91 @@ function progreso_compe_simular_top($request) {
 const PROGRESO_COMPE_VENTANA_MINUTOS = 90;
 
 const PROGRESO_COMPE_CATEGORIAS = array('masculina', 'femenina', 'infantil');
+
+// 23/11 06:50/06:47 (Ramiro vía cowork): puntuación por puntos (top/bonus) en vez de contar
+// tops. Tabla por número de bloque (1 = más fácil), editable en Superadmin — nunca fija en el
+// código, por si el club quiere retocar algún valor. "Bonus" es la zona de Blokes: top cuenta
+// sus puntos y la zona no (nunca se suman); sin top pero con zona, cuenta el bonus.
+function blokes_compe_puntos_tabla_default() {
+    return array(
+        1  => array('top' => 2,  'bonus' => 1), 2  => array('top' => 2,  'bonus' => 1),
+        3  => array('top' => 3,  'bonus' => 1), 4  => array('top' => 3,  'bonus' => 1),
+        5  => array('top' => 4,  'bonus' => 1), 6  => array('top' => 5,  'bonus' => 1),
+        7  => array('top' => 5,  'bonus' => 2), 8  => array('top' => 6,  'bonus' => 2),
+        9  => array('top' => 7,  'bonus' => 2), 10 => array('top' => 7,  'bonus' => 2),
+        11 => array('top' => 8,  'bonus' => 2), 12 => array('top' => 9,  'bonus' => 2),
+        13 => array('top' => 10, 'bonus' => 3), 14 => array('top' => 11, 'bonus' => 3),
+        15 => array('top' => 12, 'bonus' => 3), 16 => array('top' => 12, 'bonus' => 3),
+        17 => array('top' => 13, 'bonus' => 3), 18 => array('top' => 14, 'bonus' => 4),
+    );
+}
+function blokes_compe_puntos_tabla_get() {
+    $guardada = get_option('blokes_compe_puntos_tabla');
+    $tabla = (is_array($guardada) && !empty($guardada)) ? $guardada : blokes_compe_puntos_tabla_default();
+    $out = array();
+    foreach ($tabla as $n => $v) {
+        $n = intval($n);
+        if ($n > 0) $out[$n] = array('top' => intval($v['top'] ?? 0), 'bonus' => intval($v['bonus'] ?? 0));
+    }
+    ksort($out);
+    return $out ?: blokes_compe_puntos_tabla_default();
+}
+// Respuesta de Ramiro (23/11 06:47) para más de 18 bloques (o lo que tenga la tabla guardada):
+// "no se para — se sigue la misma escala. top = top del bloque anterior + 1; bonus sube 1 cada
+// 5 bloques" — se extiende siempre desde el ÚLTIMO bloque definido en la tabla (editable), no
+// desde un número fijo, para que un retoque a mano en Superadmin siga teniendo efecto arriba.
+function blokes_compe_puntos_para_bloque($numero, $tabla) {
+    $numero = intval($numero);
+    if (isset($tabla[$numero])) return $tabla[$numero];
+    if (empty($tabla)) return array('top' => 0, 'bonus' => 0);
+    $max_n = max(array_keys($tabla));
+    if ($numero < $max_n) return array('top' => 0, 'bonus' => 0); // nunca debería pasar, pero nunca se inventa hacia atrás
+    $base = $tabla[$max_n];
+    $delta = $numero - $max_n;
+    return array('top' => $base['top'] + $delta, 'bonus' => $base['bonus'] + intval(floor($delta / 5)));
+}
+// Puntos de un resultado concreto: top cuenta sus puntos y la zona no; sin top pero con zona
+// (bonus) cuenta el bonus; nada, 0. Nunca se suman top y bonus.
+function blokes_compe_puntos_de_resultado($top, $zona, $numero, $tabla) {
+    $p = blokes_compe_puntos_para_bloque($numero, $tabla);
+    if ($top) return intval($p['top']);
+    if ($zona) return intval($p['bonus']);
+    return 0;
+}
+
+function progreso_compe_puntos_tabla_get_endpoint($request) {
+    $tabla = blokes_compe_puntos_tabla_get();
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'tabla' => $tabla, 'maxDefinido' => max(array_keys($tabla)),
+    )));
+}
+// PUT /progreso/v1/compe/puntos-tabla — solo socio (23/11 06:50, punto 1: "guardarla como tabla
+// configurable, no fija en el código"). Espera { tabla: { "1": {top,bonus}, "2": {...}, ... } }.
+function progreso_compe_puntos_tabla_set_endpoint($request) {
+    $tabla_in = $request->get_param('tabla');
+    if (!is_array($tabla_in) || empty($tabla_in)) {
+        return new WP_Error('bad_request', 'Falta la tabla.', array('status' => 400));
+    }
+    $limpia = array();
+    foreach ($tabla_in as $n => $v) {
+        $n = intval($n);
+        if ($n <= 0) continue;
+        $top = intval($v['top'] ?? 0); $bonus = intval($v['bonus'] ?? 0);
+        if ($top < 0 || $bonus < 0) return new WP_Error('bad_request', "Puntos negativos en el bloque {$n}.", array('status' => 400));
+        $limpia[$n] = array('top' => $top, 'bonus' => $bonus);
+    }
+    if (empty($limpia)) return new WP_Error('bad_request', 'La tabla no tiene ninguna fila válida.', array('status' => 400));
+    ksort($limpia);
+    // Siempre consecutiva desde el 1 — una tabla con huecos no se puede extender de forma fiable
+    // para los bloques por encima del máximo (blokes_compe_puntos_para_bloque asume que el
+    // último valor definido es justo el bloque anterior al primero "inventado").
+    $claves = array_keys($limpia);
+    if ($claves[0] !== 1 || $claves !== range(1, count($claves))) {
+        return new WP_Error('bad_request', 'La tabla tiene que ser correlativa desde el bloque 1, sin huecos.', array('status' => 400));
+    }
+    update_option('blokes_compe_puntos_tabla', $limpia, false);
+    return rest_ensure_response(array('success' => true, 'data' => array('tabla' => $limpia)));
+}
 
 // 20/11 06:30 (punto 2): categoría de un participante en una compe concreta — nunca se infiere
 // de nombre, edad ni ningún otro dato, ver PROGRESO_COMPE_CATEGORIAS.
@@ -21247,16 +21365,26 @@ function progreso_compe_mis_resultados($request) {
     $participante_id = $subject_rapido_id ?: ($subject_user_id ?: get_current_user_id());
     if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
     $filas = $wpdb->get_results($wpdb->prepare(
-        "SELECT comp_block_id, top, zona, intentos, estado, created_at FROM " . progreso_equip_table('comp_resultados') . "
-         WHERE competition_id = %d AND participante_tipo = %s AND participante_id = %d",
+        "SELECT r.comp_block_id, r.top, r.zona, r.intentos, r.estado, r.created_at, b.number AS numero
+         FROM " . progreso_equip_table('comp_resultados') . " r
+         JOIN " . progreso_equip_table('comp_blocks') . " b ON b.id = r.comp_block_id
+         WHERE r.competition_id = %d AND r.participante_tipo = %s AND r.participante_id = %d",
         $competition_id, $participante_tipo, $participante_id
     ), ARRAY_A);
+    // 23/11 06:50: puntos por bloque (top O bonus, nunca los dos) en vez de solo top/zona — el
+    // total sirve para que Apuntar/Recepción puedan enseñar "llevas X pts" sin recalcular nada
+    // por su cuenta.
+    $puntos_tabla = blokes_compe_puntos_tabla_get();
     $data = array();
     $ventana_inicio = null;
+    $total_puntos = 0;
     foreach ($filas as $f) {
+        $puntos_bloque = blokes_compe_puntos_de_resultado(intval($f['top']), intval($f['zona']), intval($f['numero']), $puntos_tabla);
         $data[intval($f['comp_block_id'])] = array(
             'top' => (bool) $f['top'], 'zona' => (bool) $f['zona'], 'intentos' => intval($f['intentos']), 'estado' => $f['estado'],
+            'puntos' => $puntos_bloque,
         );
+        $total_puntos += $puntos_bloque;
         if ($f['top'] && ($ventana_inicio === null || $f['created_at'] < $ventana_inicio)) $ventana_inicio = $f['created_at'];
     }
     $ventana = null;
@@ -21273,7 +21401,10 @@ function progreso_compe_mis_resultados($request) {
         );
     }
     $categoria_actual = progreso_compe_categoria_get($competition_id, $participante_tipo, $participante_id);
-    return rest_ensure_response(array('success' => true, 'data' => $data, 'ventana' => $ventana, 'categoria' => $categoria_actual ?: null));
+    return rest_ensure_response(array(
+        'success' => true, 'data' => $data, 'ventana' => $ventana,
+        'categoria' => $categoria_actual ?: null, 'totalPuntos' => $total_puntos,
+    ));
 }
 
 // GET /progreso/v1/compe/clasificacion?competitionId=X — público (pantalla de la tele,
@@ -21288,12 +21419,17 @@ function progreso_compe_clasificacion($request) {
     $competition_id = intval($request->get_param('competitionId'));
     if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
 
+    // 23/11 06:50: todo resultado validado (top O bonus) cuenta para los puntos — ya no solo
+    // "top = 1". Una fila de verdad siempre tiene zona=1 (top la pone igual, bonus también);
+    // top=0/zona=0 no debería quedar ninguna (se borra de verdad al "quitar"), pero el filtro
+    // se deja por si queda algo de antes de este cambio.
     $filas = $wpdb->get_results($wpdb->prepare(
         "SELECT r.*, b.number AS numero, b.grade_color AS color FROM " . progreso_equip_table('comp_resultados') . " r
          JOIN " . progreso_equip_table('comp_blocks') . " b ON b.id = r.comp_block_id
-         WHERE r.competition_id = %d AND r.estado = 'validado' AND r.top = 1
+         WHERE r.competition_id = %d AND r.estado = 'validado' AND (r.top = 1 OR r.zona = 1)
          ORDER BY r.validado_at ASC", $competition_id
     ), ARRAY_A);
+    $puntos_tabla = blokes_compe_puntos_tabla_get();
 
     // Participantes rápidos (sin cuenta): su nombre ya está guardado tal cual, no hace falta
     // mirar usuarios de WordPress — una sola consulta para todos los que aparezcan.
@@ -21332,11 +21468,10 @@ function progreso_compe_clasificacion($request) {
         $clave = $f['participante_tipo'] . ':' . intval($f['participante_id']);
         if (!isset($por_participante[$clave])) {
             $por_participante[$clave] = array(
-                'tipo' => $f['participante_tipo'], 'id' => intval($f['participante_id']),
-                'tops' => 0, 'primerTop' => $f['created_at'],
+                'tipo' => $f['participante_tipo'], 'id' => intval($f['participante_id']), 'puntos' => 0,
             );
         }
-        $por_participante[$clave]['tops']++;
+        $por_participante[$clave]['puntos'] += blokes_compe_puntos_de_resultado(intval($f['top']), intval($f['zona']), intval($f['numero']), $puntos_tabla);
     }
 
     // 20/11 06:30 (punto 2): categoría de cada participante que aparece aquí, de la tabla nueva
@@ -21393,16 +21528,25 @@ function progreso_compe_clasificacion($request) {
             // de prueba con el mismo formato), lo que confundía qué fila mover.
             'clave' => $clave,
             'nombreMostrar' => $nombre_de($info['tipo'], $info['id']),
-            'tops' => $info['tops'], 'primerTop' => $info['primerTop'],
+            'puntos' => $info['puntos'],
         );
     }
-    $orden = function($a, $b) {
-        return $b['tops'] !== $a['tops'] ? $b['tops'] <=> $a['tops'] : strcmp($a['primerTop'], $b['primerTop']);
+    // 23/11 06:50, punto 3: "los empates comparten puesto" — nunca se desempata por quién llegó
+    // antes. Puesto tipo competición (1,1,1,4,5…): el hueco que deja un empate se nota en el
+    // SIGUIENTE puesto distinto, no se rellena.
+    $con_puesto = function($lista) {
+        usort($lista, function($a, $b) { return $b['puntos'] <=> $a['puntos']; });
+        $puesto_actual = 0; $puntos_anterior = null; $vistos = 0;
+        foreach ($lista as &$fila) {
+            $vistos++;
+            if ($puntos_anterior === null || $fila['puntos'] !== $puntos_anterior) { $puesto_actual = $vistos; $puntos_anterior = $fila['puntos']; }
+            $fila['puesto'] = $puesto_actual;
+        }
+        return $lista;
     };
     $categorias_out = array();
     foreach (array('masculina' => 'Masculina', 'femenina' => 'Femenina', 'infantil' => 'Infantil') as $key => $label) {
-        usort($clasificacion_por_cat[$key], $orden);
-        $categorias_out[] = array('id' => $key, 'nombre' => $label, 'clasificacion' => $clasificacion_por_cat[$key]);
+        $categorias_out[] = array('id' => $key, 'nombre' => $label, 'clasificacion' => $con_puesto($clasificacion_por_cat[$key]));
     }
     // 22/11 (Ramiro: "en la compe no puede quedar nadie sin categoría"): ya no puede haber un
     // primer top sin categoría (bloqueado en progreso_compe_apuntar_resultado), así que la tele
@@ -21422,6 +21566,10 @@ function progreso_compe_clasificacion($request) {
             'nombreMostrar' => $nombre_de($f['participante_tipo'], intval($f['participante_id'])),
             'categoria' => $categoria_por_clave[$clave] ?? '',
             'numero' => intval($f['numero']), 'color' => $f['color'], 'hace' => human_time_diff(strtotime($f['validado_at']), current_time('timestamp')),
+            // 23/11 06:50, punto 4: "+N pts · bloque X" en vez de "+1 TOP" — puntos de ESTE
+            // resultado concreto (no el total acumulado de la persona).
+            'resultado' => intval($f['top']) ? 'top' : 'bonus',
+            'puntos' => blokes_compe_puntos_de_resultado(intval($f['top']), intval($f['zona']), intval($f['numero']), $puntos_tabla),
         );
     }
     if ($es_multisite) restore_current_blog();

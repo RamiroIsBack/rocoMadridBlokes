@@ -52,10 +52,8 @@ function filasVisibles(orden, filasPorPagina, pagina) {
   const ini = 3 + (pagina - 1) * filasPorPagina
   return orden.slice(0, 3).concat(orden.slice(ini, ini + filasPorPagina))
 }
-// Puesto real (1, 2, 3, 4...) de la fila en la posición `i` de filasVisibles(), para pintarlo.
-function puestoDe(i, pagina, filasPorPagina) {
-  return i < 3 ? i + 1 : 3 + (pagina - 1) * filasPorPagina + (i - 2)
-}
+// 23/11 06:50: el puesto ya viene del backend en cada fila (`p.puesto`) — con empates que
+// comparten puesto, la posición en el array (i) ya no es lo mismo que el puesto real.
 
 export default function CompeClasificacionLive({ clasif, totalBloques }) {
   const stageRef = useRef(null)
@@ -161,7 +159,7 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
     el.style.top = (i * rowH) + 'px'
     el.style.height = rowH + 'px'
     el.style.setProperty('--i', i)
-    el.innerHTML = `<span class="cl-pos">${puesto}</span><span class="cl-nm">${label(p)}</span><span class="cl-tp">${p.tops}</span>`
+    el.innerHTML = `<span class="cl-pos">${puesto}</span><span class="cl-nm">${label(p)}</span><span class="cl-tp">${p.puntos}</span>`
     return el
   }
   // Pinta una categoría entera (podio + la página que toque) en su caja — se usa tanto para la
@@ -176,7 +174,7 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
     const filas = filasVisibles(orden, filasPorPagina, paginaFinal)
     if (box) {
       box.innerHTML = ''
-      filas.forEach((p, i) => box.appendChild(makeRow(p, i, rowH, puestoDe(i, paginaFinal, filasPorPagina))))
+      filas.forEach((p, i) => box.appendChild(makeRow(p, i, rowH, p.puesto)))
       if (flip) { box.classList.remove('flip'); void box.offsetWidth; box.classList.add('flip') }
     }
     if (pagEl) pagEl.textContent = totalPaginas > 1 ? `pág. ${paginaFinal}/${totalPaginas}` : ''
@@ -199,7 +197,7 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
     const tri = $(triRef)
     if (!tri) return
     const cats = st.cats.filter(c => c.id !== '')
-    tri.innerHTML = cats.map(c => `<div><div class="cl-h2"><span>${c.nombre}</span><span class="cl-pag"></span><span>tops</span></div><div class="cl-list" data-cat="${c.id}"></div></div>`).join('')
+    tri.innerHTML = cats.map(c => `<div><div class="cl-h2"><span>${c.nombre}</span><span class="cl-pag"></span><span>pts</span></div><div class="cl-list" data-cat="${c.id}"></div></div>`).join('')
     cats.forEach(c => {
       const box = tri.querySelector(`.cl-list[data-cat="${c.id}"]`)
       const pagEl = box?.previousElementSibling?.querySelector('.cl-pag')
@@ -253,12 +251,15 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
     const visibleDespues = filasVisibles(ordenCompletoNuevo, filasPorPagina, paginaDestino)
     const max = visibleDespues.length
 
+    const puestoNuevo = ordenCompletoNuevo[afterFull]?.puesto ?? (afterFull + 1)
+    const puntosAntes = ev.puntosTotal - ev.puntosGanados
+
     let before = visibleAntes.findIndex(x => x.clave === ev.clave)
     let row = before >= 0 ? box.querySelector(`.cl-row[data-clave="${CSS.escape(ev.clave)}"]`) : null
     if (!row) {
       // No estaba en la página destino (era nuevo, o venía de otra página) — entra con fundido,
       // nunca se intenta animar el salto de página en sí, solo la fila entrando aquí.
-      row = makeRow({ clave: ev.clave, nombreMostrar: ev.nombreMostrar, tops: ev.tops - 1 }, max, rowH, afterFull + 1)
+      row = makeRow({ clave: ev.clave, nombreMostrar: ev.nombreMostrar, puntos: puntosAntes }, max, rowH, puestoNuevo)
       row.style.opacity = '0'
       box.appendChild(row)
       void row.offsetWidth
@@ -271,14 +272,14 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
     hl.className = 'cl-hl'
     const h = rowH + 8, w = box.clientWidth + 8, per = 2 * (w + h)
     hl.style.cssText = `top:${before * rowH - 4}px;height:${h}px;--per:${per}`
-    hl.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect x="1.5" y="1.5" width="${w - 3}" height="${h - 3}" rx="4"></rect></svg><span class="cl-tag">+1 TOP${ev.numero ? ` · bloque ${ev.numero}` : ''}</span>`
+    hl.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><rect x="1.5" y="1.5" width="${w - 3}" height="${h - 3}" rx="4"></rect></svg><span class="cl-tag">+${ev.puntosGanados} pts${ev.numero ? ` · bloque ${ev.numero}` : ''}</span>`
     box.appendChild(hl)
     void hl.offsetWidth
     hl.classList.add('draw')
     await wait(750)
     hl.classList.add('tagon')
 
-    row.querySelector('.cl-tp').textContent = ev.tops
+    row.querySelector('.cl-tp').textContent = ev.puntosTotal
     row.classList.add('bump')
     await wait(450)
 
@@ -293,7 +294,7 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
       el.style.top = (slot * rowH) + 'px'
       el.className = 'cl-row' + (slot < 3 ? ` r${slot + 1}` : '') + (esMovida ? ' moving' : '')
       const posEl = el.querySelector('.cl-pos')
-      if (posEl) posEl.textContent = esMovida ? (afterFull + 1) : puestoDe(i, paginaDestino, filasPorPagina)
+      if (posEl) posEl.textContent = esMovida ? puestoNuevo : x.puesto
       if (i >= max && !esMovida) el.style.opacity = '0'
     })
     hl.style.top = (shown * rowH - 4) + 'px'
@@ -370,7 +371,10 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
       if (!nueva) return
       enqueue({
         catId, clave: u.clave, nombreMostrar: u.nombreMostrar, numero: u.numero,
-        tops: nueva.clasificacion.find(x => x.clave === u.clave)?.tops ?? 1,
+        // 23/11 06:50: puntosGanados es de ESTE resultado concreto (top o bonus, el que sea);
+        // puntosTotal es la suma acumulada de la persona, que es lo que se pinta en la fila.
+        puntosGanados: u.puntos ?? 0,
+        puntosTotal: nueva.clasificacion.find(x => x.clave === u.clave)?.puntos ?? (u.puntos ?? 0),
         ordenCompletoNuevo: nueva.clasificacion.slice(),
       })
     })
@@ -423,7 +427,7 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
       <div className="cl-tabs" ref={tabsRef}></div>
       <div className="cl-body">
         <section className="cl-col-c">
-          <div className="cl-h2"><span ref={catTitleRef}>Clasificación</span><span className="cl-pag" ref={catPagRef}></span><span>tops</span></div>
+          <div className="cl-h2"><span ref={catTitleRef}>Clasificación</span><span className="cl-pag" ref={catPagRef}></span><span>pts</span></div>
           <div className="cl-list" ref={listRef}></div>
         </section>
         <section className="cl-col-u">
@@ -432,7 +436,7 @@ export default function CompeClasificacionLive({ clasif, totalBloques }) {
             {ultimos.map((u, i) => (
               <li key={u.id ?? i}>
                 <span className="cl-dot" style={{ background: colorPorNumeroBloque(u.numero, totalBloques).bg }} />
-                <span><strong>{u.nombreMostrar}</strong> · bloque {u.numero} · {u.hace}</span>
+                <span><strong>{u.nombreMostrar}</strong> · +{u.puntos} pts · bloque {u.numero} · {u.hace}</span>
               </li>
             ))}
             {ultimos.length === 0 && <li style={{ color: '#6b7280', border: 'none' }}>Nada apuntado todavía.</li>}

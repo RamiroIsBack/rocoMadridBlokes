@@ -7,7 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner'
 import CelebrationDialog from '../components/CelebrationDialog'
 import OnboardingTutorial, { tutorialSeen } from '../components/OnboardingTutorial'
 import IdentityPicker from '../components/IdentityPicker'
-import CategoriaCompeModal from '../components/CategoriaCompeModal'
+import ApuntarResultadoModal from '../components/ApuntarResultadoModal'
 import { colorPorNumeroBloque } from '../utils/compeColorScale'
 
 const WORDPRESS_URL = import.meta.env.VITE_WORDPRESS_URL || 'https://rocomadrid.com'
@@ -26,18 +26,20 @@ function getAuthHeadersCompe() {
   return nonce ? { 'X-WP-Nonce': nonce } : {}
 }
 
-// Apunta un top de compe para quien eligió el picker "¿quién lo ha hecho?" (Ramiro, 09/11:
-// en modo tablet, tocar un bloque de la compe tiene que hacer lo mismo que un bloke normal —
-// abrir el picker — en vez de llevar a /compe). Siempre Top (y Zona, que ya cuenta con el top).
-// 22/11 ("nadie sin categoría"): si el backend devuelve 'falta_categoria' (primer top de
-// alguien sin categoría y sin sub de Menores que la ponga sola), no se ha apuntado nada
-// todavía — el llamante tiene que preguntar y volver a llamar con `categoria`.
-async function apuntarCompeParaIdentidad(compBlockId, identity, categoria) {
+// Apunta el resultado de un bloque de compe para quien eligió el picker "¿quién lo ha hecho?"
+// (Ramiro, 09/11: en modo tablet, tocar un bloque de la compe tiene que hacer lo mismo que un
+// bloke normal — abrir el picker — en vez de llevar a /compe).
+// 23/11 06:51/06:52 ("ningún camino puede apuntar un bloque sin decir si es top o bonus"):
+// `resultado` ('top' | 'bonus' | 'ninguno' para quitar) es siempre explícito, elegido en
+// ApuntarResultadoModal — ya no se asume "top" solo por tocar el bloque. Si el backend
+// devuelve 'falta_categoria' (primer resultado de alguien sin categoría y sin sub de Menores
+// que la ponga sola), no se ha apuntado nada todavía — el modal pide la categoría y reintenta.
+async function apuntarCompeParaIdentidad(compBlockId, identity, resultado, categoria) {
   const target = identity.kind === 'ph' ? { targetPlaceholderId: identity.placeholder_id } : { targetUserId: identity.user_id }
   const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/resultado`, {
     method: 'POST', credentials: 'include',
     headers: { ...getAuthHeadersCompe(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ compBlockId, top: true, zona: true, ...target, ...(categoria ? { categoria } : {}) }),
+    body: JSON.stringify({ compBlockId, resultado, ...target, ...(categoria ? { categoria } : {}) }),
   })
   const json = await res.json().catch(() => null)
   if (!res.ok) {
@@ -90,10 +92,12 @@ function ColeccionModoCompe({ estado }) {
   const isTablet = window.blokesSiteData?.userRole === 'tablet'
   const [pickerBloque, setPickerBloque] = useState(null)
   const [celebration, setCelebration] = useState(null)
-  // { bloque, identity } — 22/11 ("nadie sin categoría"): antes de apuntar el PRIMER top de
-  // alguien sin categoría todavía en esta compe y sin sub de Menores que la ponga sola. No se
-  // ha apuntado nada todavía (el backend lo rechazó) — bloqueante, sin seguir sin elegir.
-  const [pidiendoCategoria, setPidiendoCategoria] = useState(null)
+  // { bloque, identity, mostrarCategoria, resultadoElegido } — 23/11 06:51: SIEMPRE se abre
+  // tras elegir identidad (antes solo si faltaba categoría; ahora también hace falta decir Top
+  // o Bonus, nunca se asume). `mostrarCategoria` solo se pone a true si el backend la pide de
+  // verdad (reintenta con el mismo resultadoElegido). `busy` evita doble envío.
+  const [pidiendoResultado, setPidiendoResultado] = useState(null)
+  const [busy, setBusy] = useState(false)
 
   const tocar = useCallback((e, b) => {
     if (!isTablet) return
@@ -101,31 +105,42 @@ function ColeccionModoCompe({ estado }) {
     setPickerBloque(b)
   }, [isTablet])
 
-  const intentarApuntar = useCallback(async (bloque, identity, categoria) => {
-    try {
-      await apuntarCompeParaIdentidad(bloque.compBlockId, identity, categoria)
-      setCelebration({ nombre: identity.name, numero: bloque.numero })
-    } catch (e) {
-      if (e.code === 'falta_categoria') setPidiendoCategoria({ bloque, identity })
-      else console.error('Tablet compe completion failed:', e)
-    }
-  }, [])
-
   const completarParaIdentidad = useCallback((identity) => {
     const bloque = pickerBloque
     setPickerBloque(null)
-    if (bloque) intentarApuntar(bloque, identity)
-  }, [pickerBloque, intentarApuntar])
+    if (bloque) setPidiendoResultado({ bloque, identity, mostrarCategoria: false, resultadoElegido: null })
+  }, [pickerBloque])
 
-  const elegirCategoriaUnaVez = useCallback((categoria) => {
-    const p = pidiendoCategoria
-    setPidiendoCategoria(null)
-    if (p) intentarApuntar(p.bloque, p.identity, categoria)
-  }, [pidiendoCategoria, intentarApuntar])
+  const intentarGuardar = useCallback(async (resultado, categoria) => {
+    const p = pidiendoResultado
+    if (!p) return
+    setBusy(true)
+    try {
+      const r = await apuntarCompeParaIdentidad(p.bloque.compBlockId, p.identity, resultado, categoria)
+      setPidiendoResultado(null)
+      setCelebration({ nombre: p.identity.name, numero: p.bloque.numero, puntos: r?.data?.puntos ?? 0 })
+    } catch (e) {
+      if (e.code === 'falta_categoria') setPidiendoResultado({ ...p, mostrarCategoria: true, resultadoElegido: resultado })
+      else console.error('Tablet compe completion failed:', e)
+    } finally {
+      setBusy(false)
+    }
+  }, [pidiendoResultado])
 
-  // 22/11 13:50: Cancelar cierra el diálogo sin apuntar nada — pulsar fuera, en cambio, no
-  // hace nada (el overlay no tiene onClick), para que no se pueda saltar sin querer.
-  const cancelarCategoria = useCallback(() => setPidiendoCategoria(null), [])
+  const elegirResultado = useCallback(resultado => intentarGuardar(resultado, null), [intentarGuardar])
+  const elegirCategoria = useCallback(categoria => intentarGuardar(pidiendoResultado?.resultadoElegido, categoria), [intentarGuardar, pidiendoResultado])
+
+  const quitarResultado = useCallback(async () => {
+    const p = pidiendoResultado
+    if (!p) return
+    setBusy(true)
+    try { await apuntarCompeParaIdentidad(p.bloque.compBlockId, p.identity, 'ninguno') } catch (e) { console.error(e) }
+    finally { setBusy(false); setPidiendoResultado(null) }
+  }, [pidiendoResultado])
+
+  // 22/11 13:50: la X pide confirmación aparte (dentro de ApuntarResultadoModal) — pulsar fuera,
+  // en cambio, no hace nada (el overlay no tiene onClick), para que no se pueda saltar sin querer.
+  const cerrarSinApuntar = useCallback(() => setPidiendoResultado(null), [])
 
   return (
     <main className="app-main">
@@ -151,15 +166,21 @@ function ColeccionModoCompe({ estado }) {
           background: '#dcfce7', color: '#166534', textAlign: 'center', fontWeight: 700,
           padding: '10px 12px', borderRadius: 10, marginBottom: 16,
         }}>
-          ✓ Bloque {celebration.numero} apuntado a {celebration.nombre}{' '}
+          ✓ Bloque {celebration.numero} · {celebration.nombre} · +{celebration.puntos} pts{' '}
           <button type="button" onClick={() => setCelebration(null)} style={{ marginLeft: 8, background: 'none', border: 'none', color: '#166534', textDecoration: 'underline', cursor: 'pointer' }}>Vale</button>
         </div>
       )}
-      {pidiendoCategoria && (
-        <CategoriaCompeModal
-          nombre={pidiendoCategoria.identity.name}
-          onElegir={elegirCategoriaUnaVez}
-          onCancelar={cancelarCategoria}
+      {pidiendoResultado && (
+        <ApuntarResultadoModal
+          numero={pidiendoResultado.bloque.numero}
+          nombre={pidiendoResultado.identity.name}
+          mostrarCategoria={pidiendoResultado.mostrarCategoria}
+          resultadoActual={null}
+          onElegirResultado={elegirResultado}
+          onElegirCategoria={elegirCategoria}
+          onQuitar={quitarResultado}
+          onCerrar={cerrarSinApuntar}
+          busy={busy}
         />
       )}
       <div className="cards-grid compe-cards-grid">

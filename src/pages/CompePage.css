@@ -95,23 +95,19 @@
   color: #fff; font-weight: 700; font-size: 1.05rem;
 }
 .compe-bloque__cuerpo { flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; }
-.compe-bloque__toggles { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 
-.compe-toggle {
-  /* Ramiro, 09/11 07:05: los Top/Zona de Recepción salían por debajo de 36 px de alto —
-     zona táctil mínima 44 px, para pulsarlos bien con el dedo. */
-  display: inline-flex; align-items: center; gap: 6px; padding: 10px 14px; min-height: 44px;
-  border-radius: 999px; border: 1px solid var(--color-border); font-size: 0.95rem; cursor: pointer; user-select: none;
+/* 23/11 06:51: el bloque entero es un botón que abre ApuntarResultadoModal — sustituye a los
+   toggles de Top/Zona sueltos de antes (ya no existen, "ningún camino puede apuntar un bloque
+   sin decir si es top o bonus": el único camino es este diálogo). */
+.compe-bloque--boton {
+  width: 100%; text-align: left; border: 1px solid var(--color-border); cursor: pointer;
+  font-family: inherit; min-height: 60px;
 }
-.compe-toggle--on { background: #16a34a; color: #fff; border-color: #16a34a; }
-.compe-toggle input { margin: 0; }
-
-.compe-intentos { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--color-text-primary); }
-.compe-intentos input { width: 52px; padding: 4px 6px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-surface); color: var(--color-text-primary); }
-
-.compe-bloque__pie { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.compe-bloque--hecho { border-color: #16a34a; background: color-mix(in srgb, #16a34a 8%, var(--color-surface)); }
 .compe-estado { font-size: 0.8rem; color: var(--color-text-secondary); }
 .compe-estado--validado { color: #16a34a; font-weight: 600; }
+
+.compe-page__puntos { font-size: 0.9rem; color: var(--color-text-primary); margin-bottom: 10px; }
 
 .compe-bloque__guardar {
   padding: 6px 14px; border-radius: 8px; border: none; background: #2a2015; color: #f5c842;
@@ -134,11 +130,7 @@
   cursor: pointer; padding: 0;
 }
 .compe-grp-field { display: block; margin-bottom: 10px; font-size: 0.85rem; color: var(--color-text-primary); }
-/* 20/11 06:30 (punto 2): selector de categoría de la compe — nunca inferida, siempre a mano. */
-.compe-page__categoria {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 0.85rem; color: var(--color-text-secondary);
-}
-.compe-page__categoria select, .compe-grp-field select {
+.compe-grp-field select {
   padding: 8px 10px; border-radius: 8px; border: 1px solid var(--color-border);
   background: var(--color-surface); color: var(--color-text-primary); font-size: 0.95rem;
 }
