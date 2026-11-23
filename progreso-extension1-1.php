@@ -17887,7 +17887,10 @@ function progreso_equip_rules() {
 
 function progreso_equip_get_config() {
     // Al abrir Organización: asegura que la semana actual y la siguiente existan solas (paso 3
-    // del encargo del 28/10), sin esperar al cron diario.
+    // del encargo del 28/10), sin esperar al cron diario. (De paso dispara
+    // progreso_equip_ensure_tables(), que es donde vive la migración versionada — ver el
+    // comentario de progreso_equip_update_comp_block() del 23/11 16:20 sobre por qué esto solo
+    // no bastaba para que el backfill del email del jefe se aplicara solo.)
     progreso_equip_autocrear_semanas();
     return rest_ensure_response(array('success' => true, 'data' => array(
         'subzones'     => progreso_equip_subzones(),
@@ -18720,6 +18723,13 @@ function progreso_equip_create_worker($request) {
 function progreso_equip_update_worker($request) {
     global $wpdb;
     $id = intval($request['id']);
+    // 23/11 16:20 (seguridad, Ramiro): cambiar el email o el "responsable" (is_lead) de un
+    // trabajador decide quién es el jefe de equipación para progreso_equip_es_jefe_o_socio() —
+    // si cualquier profe/gestión con solo $equip_perm pudiera tocarlo, cualquiera podría
+    // escribir su propio email aquí y marcarse is_lead=1 para autonombrarse jefe.
+    if (($request->get_param('email') !== null || $request->get_param('isLead') !== null) && !progreso_equip_puede_todo_compe()) {
+        return new WP_Error('forbidden', 'Solo Álvaro, Eva o un socio puede cambiar el email o el responsable de un trabajador.', array('status' => 403));
+    }
     $upd = array(); $fmt = array();
     if ($request->get_param('name') !== null)  { $upd['name']  = sanitize_text_field($request->get_param('name'));  $fmt[] = '%s'; }
     if ($request->get_param('email') !== null) { $upd['email'] = sanitize_email($request->get_param('email'));      $fmt[] = '%s'; }
@@ -18747,10 +18757,16 @@ function progreso_equip_vincular_mi_email($request) {
     $email = strtolower(trim(wp_get_current_user()->user_email));
     if ($email === '') return new WP_Error('sin_email', 'Tu sesión no tiene un email de WordPress.', array('status' => 400));
     $table = progreso_equip_table('workers');
-    $actual = $wpdb->get_var($wpdb->prepare("SELECT email FROM $table WHERE id = %d", $id));
-    if ($actual === null) return new WP_Error('not_found', 'Persona no encontrada.', array('status' => 404));
-    if ($actual !== '') {
+    $fila = $wpdb->get_row($wpdb->prepare("SELECT email, is_lead FROM $table WHERE id = %d", $id), ARRAY_A);
+    if ($fila === null) return new WP_Error('not_found', 'Persona no encontrada.', array('status' => 404));
+    if ($fila['email'] !== '') {
         return new WP_Error('ya_vinculado', 'Esta fila ya tiene un email vinculado — pide a un socio que la desvincule primero si hace falta cambiarlo.', array('status' => 409));
+    }
+    // 23/11 16:20 (seguridad, Ramiro): la fila "responsable" (is_lead) es la que decide quién es
+    // el jefe de equipación — vincularse a ella con un clic sin ya ser jefe/gestión/socio sería
+    // autonombrarse jefe (justo el hueco que dejaba vacío el email del worker antes de hoy).
+    if ((int) $fila['is_lead'] === 1 && !progreso_equip_puede_todo_compe()) {
+        return new WP_Error('forbidden', 'Solo Álvaro, Eva o un socio puede vincularse a la fila del responsable.', array('status' => 403));
     }
     $wpdb->update($table, array('email' => $email), array('id' => $id), array('%s'), array('%d'));
     return rest_ensure_response(array('success' => true, 'data' => array('email' => $email)));
@@ -20478,6 +20494,13 @@ function progreso_compe_limpiar_blokes_prueba_antiguos($request) {
 
 function progreso_equip_update_comp_block($request) {
     global $wpdb;
+    // 23/11 16:20: esta llamada faltaba aquí — es la causa real de que el backfill del email del
+    // jefe (v17, 23/11 16:00) no se aplicara solo. `get_config` SÍ dispara
+    // progreso_equip_ensure_tables() (vía progreso_equip_autocrear_semanas()), pero solo al abrir
+    // Organización; si la pestaña ya estaba abierta de antes del despliegue, la única petición
+    // nueva de la prueba era justo este guardado del bloque, que nunca la llamaba — ninguna
+    // migración nueva se disparaba con solo guardar un bloque. Ahora sí, aquí también.
+    progreso_equip_ensure_tables();
     $id = intval($request['id']);
     // Ramiro 12/11 11:35: mover un bloque a otro equipador ("mover entre personas") es solo de
     // Álvaro, Eva o un socio — registrar el propio trabajo (presas, volúmenes, subzona, foto)
