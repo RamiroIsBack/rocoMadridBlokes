@@ -39,17 +39,62 @@ function HorarioVsNomina({ people, config }) {
     }
   })
   if (!avisos.length) return (
-    <div className="sa-section sa-hvn sa-hvn--ok">✓ Las horas del horario del Diario cuadran con las pactadas en Nóminas.</div>
+    <div className="sa-hvn sa-hvn--ok">✓ Las horas del horario del Diario cuadran con las pactadas en Nóminas.</div>
   )
+  // Plegado por defecto (23/11): una sola línea; se abre al pulsar
+  const fuertes = avisos.filter(a => !a.leve).length
   return (
-    <div className="sa-section sa-hvn">
-      <strong>Horario vs nómina</strong>
+    <details className="sa-hvn">
+      <summary>
+        ⚠ <strong>Horario vs nómina</strong>: {fuertes ? `${fuertes} no cuadran` : ''}{fuertes && avisos.length > fuertes ? ' · ' : ''}{avisos.length > fuertes ? `${avisos.length - fuertes} sin horas pactadas` : ''}
+      </summary>
       <ul>
         {avisos.map(({ p, txt, leve }) => (
           <li key={p.id} className={leve ? 'sa-hvn__leve' : ''}><b>{p.name}</b>: {txt}</li>
         ))}
       </ul>
       <span className="sa-pay-muted">El horario sale de Diario › Horarios y cronograma; las horas pactadas, de Configuración (abajo).</span>
+    </details>
+  )
+}
+
+// Resumen en lenguaje claro (23/11): qué falta por pagar este mes y a quién, y qué ya está.
+function ResumenPagos({ rows, entries, totals, month }) {
+  const pend   = rows.filter(r => r.outstanding > 0.01).sort((a, b) => b.outstanding - a.outstanding)
+  const pagado = rows.filter(r => r.outstanding <= 0.01 && (r.to_pay || 0) > 0)
+  const extrasPend = entries.filter(e => e.status !== 'pagado')
+  const detalle = r => {
+    const partes = []
+    if ((r.nomina_outstanding || 0) > 0.01) partes.push(`nómina ${fmtEur(r.nomina_outstanding)}`)
+    if ((r.extras_outstanding || 0) > 0.01) partes.push(`${fmtHours(r.hours)} h extra ${fmtEur(r.extras_outstanding)}`)
+    if (r.cash_total != null && !r.cash_paid && r.cash_due > 0) partes.push(`${fmtEur(r.cash_due)} en efectivo`)
+    return partes.join(' · ')
+  }
+  return (
+    <div className="nomina-resumen">
+      <h3 className="nomina-resumen__title">
+        {pend.length
+          ? <>{monthLabel(month)}: quedan <strong>{fmtEur(totals?.outstanding || 0)}</strong> por pagar a {pend.length} {pend.length === 1 ? 'persona' : 'personas'}</>
+          : <>{monthLabel(month)}: <strong>todo pagado</strong> ✓</>}
+      </h3>
+      {pend.length > 0 && (
+        <ul className="nomina-resumen__list">
+          {pend.map(r => (
+            <li key={r.id}>
+              <span className="sa-pay-dot" style={{ background: r.color }} />
+              <b>{r.name}</b>: {fmtEur(r.outstanding)}
+              {detalle(r) && <span className="nomina-resumen__det"> — {detalle(r)}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {pagado.length > 0 && <p className="nomina-resumen__ok">✓ Ya pagado: {pagado.map(r => r.name).join(', ')}</p>}
+      {entries.length > 0 && (
+        <p className="nomina-resumen__extra">
+          Horas extra del mes: {fmtHours(totals?.hours || 0)} h · {fmtEur(totals?.extras || 0)}
+          {extrasPend.length ? ` (${extrasPend.length} sin pagar)` : ' (todas pagadas)'} · las apunta gestión en Supervisión › Horas extra.
+        </p>
+      )}
     </div>
   )
 }
@@ -725,6 +770,9 @@ export default function PayrollSection() {
     .filter(r => !selected || r.id === selected)
     .filter(r => payFilter === 'all' || (payFilter === 'pending' ? isPending(r) : isPaid(r)))
   const shownEntries = selected ? entries.filter(e => e.professor === selected) : entries
+  // Detalle plegado (23/11); se abre solo al elegir a una persona arriba
+  const [verDetalle, setVerDetalle] = useState(false)
+  useEffect(() => { if (selected) setVerDetalle(true) }, [selected])
   const missingRate  = shownRows.some(r => r.missing_rate)
 
   // Resumen: el de la persona seleccionada (ceros si no tiene nómina ni horas este mes) o el del mes
@@ -811,7 +859,7 @@ export default function PayrollSection() {
   }
 
   return (
-    <>
+    <div className="nomina">
       {data && <HorarioVsNomina people={people} config={data.config} />}
 
       {/* ── Fichas: solo nombres; al pulsar se despliega la ficha y se filtran las tablas ── */}
@@ -883,6 +931,8 @@ export default function PayrollSection() {
                 </div>
               </div>
 
+              {!selPerson && <ResumenPagos rows={rows} entries={entries} totals={totals} month={month} />}
+
               {showRemesa && (
                 <RemittanceImport
                   month={month} people={people} rows={rows} personal={personal}
@@ -899,6 +949,9 @@ export default function PayrollSection() {
                 />
               )}
 
+              {/* ── Detalle plegado (23/11): tabla por persona y horas extra; se abre solo al elegir a alguien ── */}
+              <details className="nomina-plegable" open={verDetalle} onToggle={e => setVerDetalle(e.currentTarget.open)}>
+              <summary>Ver el detalle: nómina por persona y horas extra</summary>
               {/* ── Nómina por persona: A pagar = Banco + Efectivo + Pendiente ── */}
               <div className="sa-pay-table-head">
                 <h3 className="sa-pay-subtitle">
@@ -1055,13 +1108,20 @@ export default function PayrollSection() {
                   </div>
                 )}
               <p className="sa-pay-note">Las horas las registra gestión en Supervisión → Horas extra.</p>
+              </details>
             </>
           )}
       </div>
 
-      <PayrollHistory history={history} />
+      <details className="nomina-plegable nomina-plegable--suelta">
+        <summary>Evolución de los últimos 12 meses</summary>
+        <PayrollHistory history={history} />
+      </details>
 
-      {data && <PayrollConfig people={people} config={data.config} onSaved={refreshAll} />}
+      <details className="nomina-plegable nomina-plegable--suelta">
+        <summary>Configuración: nómina base, €/h extra y horas a la semana pactadas</summary>
+        {data && <PayrollConfig people={people} config={data.config} onSaved={refreshAll} />}
+      </details>
 
       {data && (
         <PayrollReport
@@ -1069,6 +1129,6 @@ export default function PayrollSection() {
           notes={notes} rows={shownRows} entries={shownEntries} totals={totals} byId={byId}
         />
       )}
-    </>
+    </div>
   )
 }

@@ -1518,3 +1518,24 @@
 .dificultad__punto--red    { background: #dc2626; }
 .dificultad__punto--black  { background: #1f2937; }
 .dificultad__extremo { white-space: nowrap; }
+
+/* Superadmin › Nóminas (23/11): más estrecho y con un dibujo en el margen, como Progreso */
+.app-main:has(.nomina) { --col: 1000px; }
+.app-main .sa-page:has(.nomina) { max-width: var(--col); margin-left: auto; margin-right: auto; }
+.app-main:has(.nomina)::before {
+  content: '';
+  display: none;
+  position: absolute;
+  top: calc(var(--spacing-lg) + 24px);
+  left: var(--spacing-md);
+  width: min(calc((100% - var(--col)) / 2 - 48px), 440px);
+  height: min(80vh, 760px);
+  background-color: var(--color-accent);
+  opacity: 0.5;
+  -webkit-mask: url('./assets/brand/linea-nominas.svg') no-repeat left top / contain;
+          mask: url('./assets/brand/linea-nominas.svg') no-repeat left top / contain;
+  pointer-events: none;
+}
+@media (min-width: 1460px) {
+  .app-main:has(.nomina)::before { display: block; }
+}

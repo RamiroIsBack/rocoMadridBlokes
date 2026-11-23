@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 330 740" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Nóminas: un billete, una pila de monedas con el € y la línea que baja, como los otros dibujos -->
+  <!-- Billete -->
+  <path d="M40 70 L 250 40 L 280 160 L 70 190 Z"/>
+  <path d="M62 82 L 236 57 L 258 148 L 84 173 Z"/>
+  <path d="M160 92 c 22 -4 38 10 40 30 c 2 22 -12 36 -32 38 c -22 2 -38 -12 -40 -32 c -2 -20 12 -34 32 -36 z"/>
+  <path d="M178 104 c -10 -6 -26 -2 -30 12 c -4 14 4 28 20 28 c 6 0 10 -2 14 -6"/>
+  <path d="M140 118 h 32 M 142 130 h 30"/>
+  <!-- Pila de monedas -->
+  <path d="M110 262 c 0 -14 36 -24 80 -24 c 44 0 80 10 80 24 c 0 14 -36 24 -80 24 c -44 0 -80 -10 -80 -24 z"/>
+  <path d="M110 262 v 26 c 0 14 36 24 80 24 c 44 0 80 -10 80 -24 v -26"/>
+  <path d="M110 288 v 26 c 0 14 36 24 80 24 c 44 0 80 -10 80 -24 v -26"/>
+  <path d="M110 314 v 26 c 0 14 36 24 80 24 c 44 0 80 -10 80 -24 v -26"/>
+  <path d="M110 340 v 26 c 0 14 36 24 80 24 c 44 0 80 -10 80 -24 v -26"/>
+  <!-- € en la moneda de arriba -->
+  <path d="M206 254 c -8 -6 -24 -4 -28 6 c -4 10 6 18 22 16"/>
+  <path d="M170 258 h 26 M 172 266 h 24"/>
+  <!-- Moneda suelta -->
+  <path d="M40 300 c 0 -20 14 -34 30 -34 c 16 0 30 14 30 34 c 0 20 -14 34 -30 34 c -16 0 -30 -14 -30 -34 z"/>
+  <path d="M70 282 v 36"/>
+  <!-- Línea que baja -->
+  <path d="M190 390 C 250 430, 300 480, 250 530 C 200 580, 80 570, 70 630 C 62 680, 150 700, 210 690 C 260 682, 300 700, 296 736"/>
+</svg>
