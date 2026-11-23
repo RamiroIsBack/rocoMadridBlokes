@@ -748,7 +748,9 @@ add_action('rest_api_init', function() {
     // ni Ana ni Edu ni Sara" — ni ocultando botones basta ("no basta con ocultar los botones"),
     // tiene que devolver 403 también si llega directo a la API. progreso_equip_es_jefe_o_socio()
     // está en progreso_equip_ensure_tables()/zona de funciones de abajo.
-    $equip_jefe_perm = function() { return progreso_equip_es_jefe_o_socio(); };
+    // 23/11 15:53 (Ramiro): Eva (gestión) tiene que poder cambiar lo mismo que Álvaro o un socio
+    // en la compe — progreso_equip_puede_todo_compe() añade el rol gestion sin tocar lo de arriba.
+    $equip_jefe_perm = function() { return progreso_equip_puede_todo_compe(); };
 
     register_rest_route('progreso/v1', '/equipacion/config', array(
         'methods' => 'GET', 'callback' => 'progreso_equip_get_config', 'permission_callback' => $equip_perm,
@@ -17818,6 +17820,14 @@ function progreso_equip_es_jefe_o_socio() {
     return $lead_email && $lead_email !== '' && strtolower(trim($lead_email)) === $email;
 }
 
+// 23/11 15:53 (Ramiro): "en la compe, Eva (gestión), Álvaro y los socios tienen que poder cambiar
+// TODO" — progreso_equip_es_jefe_o_socio() solo cubría socio||jefe; esta añade gestion encima,
+// sin tocar esa función (la usan otros sitios que sí deben seguir siendo solo jefe/socio).
+function progreso_equip_puede_todo_compe() {
+    if (progreso_equip_es_jefe_o_socio()) return true;
+    return blokes_get_app_role() === 'gestion';
+}
+
 // POST /equipacion/tasks — tarea suelta para un día y persona concretos, sin esperar al
 // reparto automático (p. ej. arreglar una presa, comprar tornillos) — creador de tareas de
 // Álvaro (Ramiro, 1/11 17:20). `taskTypeId` de un tipo del catálogo, o `customText` libre (se
@@ -17886,7 +17896,8 @@ function progreso_equip_get_config() {
         'rules'        => progreso_equip_rules(),
         // Ramiro 12/11 11:35: para que el frontend solo PINTE los botones de editar/mover/
         // quitar tareas con la sesión real (nunca con el selector local de "quién soy").
-        'esJefeOSocio' => progreso_equip_es_jefe_o_socio(),
+        // 23/11 15:53: incluye también a Eva (gestión), no solo jefe/socio.
+        'esJefeOSocio' => progreso_equip_puede_todo_compe(),
         // 17/11 §10:50 (cowork, sustituye el punto A.1 de §09:40): "el selector sale ya elegido
         // si el email de la cuenta coincide con el de la ficha de Nóminas. Sin campo email nuevo
         // en Gestionar personas" — se reutiliza el email que ya hay en la ficha personal de
@@ -18017,7 +18028,11 @@ function progreso_equip_ensure_tables() {
     // la compe — para que "Regenerar" nunca la toque, aunque coincida tipo+fecha con el plan).
     // v16 (20/11 06:30): tabla comp_categorias (punto 2, masculina/femenina/infantil) y
     // corrección del "16" hardcodeado en dos nombres de tarea ya sembrados (punto 4).
-    $version = '16';
+    // v17 (23/11 16:00): nada de esquema — solo para disparar
+    // progreso_equip_fijar_email_jefe_equipacion() una vez (bug real de Álvaro: el worker
+    // is_lead tenía mal/vacío el email, así que progreso_equip_es_jefe_o_socio() nunca lo
+    // reconocía y se quedaba sin permiso para asignar equipador/presas).
+    $version = '17';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -18249,6 +18264,7 @@ function progreso_equip_ensure_tables() {
     progreso_equip_marcar_eventuales_ramiro_1();
     progreso_equip_limpiar_retrasadas_global();
     progreso_equip_backfill_semanas_auto();
+    progreso_equip_fijar_email_jefe_equipacion();
 
     // Periodicidades reales de Ramiro (1/11 17:20): se habían quedado todas a 1 (cowork
     // sospecha que un reseed del 29/10 las pisó). Una sola vez, no vuelve a tocarlas si alguien
@@ -18385,6 +18401,26 @@ function progreso_equip_marcar_eventuales_ramiro_1() {
         }
     }
     update_option('blokes_equip_eventuales_ramiro_1', 1, false);
+}
+
+// 23/11 16:00 (Ramiro, bug real reportado por Álvaro — "no me deja asignar equipadores ni
+// juegos de presas"): el worker is_lead=1 ("Álvaro") tenía el email vacío o distinto del que usa
+// de verdad para entrar en Blokes (cuenta `alvaroprofe`, alobo@ymail.com, ya en Profesores de
+// Superadmin → Acceso) — progreso_equip_es_jefe_o_socio() comparaba por email y nunca coincidía,
+// así que todo lo que necesitaba ser jefe/socio le daba 403. No toca el email si ya está bien
+// puesto (por si alguien lo cambia a mano desde Equipo después).
+function progreso_equip_fijar_email_jefe_equipacion() {
+    global $wpdb;
+    $correcto = 'alobo@ymail.com';
+    $actual = $wpdb->get_var(
+        "SELECT email FROM " . progreso_equip_table('workers') . " WHERE is_lead = 1 AND active = 1 ORDER BY id ASC LIMIT 1"
+    );
+    if ($actual !== null && strtolower(trim($actual)) !== $correcto) {
+        $wpdb->query($wpdb->prepare(
+            "UPDATE " . progreso_equip_table('workers') . " SET email = %s WHERE is_lead = 1 AND active = 1 ORDER BY id ASC LIMIT 1",
+            $correcto
+        ));
+    }
 }
 
 // Migración de una sola vez (cowork, NOTAS_PARA_CODE_equipacion.md 3/11 12:00): hasta ahora
@@ -19853,8 +19889,8 @@ function progreso_equip_update_task($request) {
     // aquí dentro, no en el permission_callback de la ruta (que tiene que dejar pasar "done").
     $campos_restringidos = array('date', 'assignmentId', 'workerName', 'customText', 'notas', 'subzona');
     foreach ($campos_restringidos as $campo) {
-        if ($request->get_param($campo) !== null && !progreso_equip_es_jefe_o_socio()) {
-            return new WP_Error('forbidden', 'Solo Álvaro o un socio puede editar, mover o cambiar de día una tarea.', array('status' => 403));
+        if ($request->get_param($campo) !== null && !progreso_equip_puede_todo_compe()) {
+            return new WP_Error('forbidden', 'Solo Álvaro, Eva o un socio puede editar, mover o cambiar de día una tarea.', array('status' => 403));
         }
     }
     $upd = array(); $fmt = array();
@@ -20444,10 +20480,20 @@ function progreso_equip_update_comp_block($request) {
     global $wpdb;
     $id = intval($request['id']);
     // Ramiro 12/11 11:35: mover un bloque a otro equipador ("mover entre personas") es solo de
-    // Álvaro o un socio — registrar el propio trabajo (presas, volúmenes, subzona, foto) sigue
-    // abierto a cualquier equipador, es el supuesto pendiente de confirmar de la nota.
-    if ($request->get_param('equipador') !== null && !progreso_equip_es_jefe_o_socio()) {
-        return new WP_Error('forbidden', 'Solo Álvaro o un socio puede mover un bloque a otro equipador.', array('status' => 403));
+    // Álvaro, Eva o un socio — registrar el propio trabajo (presas, volúmenes, subzona, foto)
+    // sigue abierto a cualquier equipador.
+    // 23/11 16:00 (bug real de Álvaro): la ficha manda SIEMPRE el campo `equipador`, aunque no
+    // haya cambiado — esto tumbaba el guardado entero (presas incluidas) para cualquiera que no
+    // fuera jefe/socio, aunque no estuviera tocando el equipador. Solo rechaza si de verdad
+    // cambia de valor.
+    if ($request->get_param('equipador') !== null && !progreso_equip_puede_todo_compe()) {
+        $equipador_actual = $wpdb->get_var($wpdb->prepare(
+            "SELECT equipador FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id
+        ));
+        $equipador_nuevo = sanitize_text_field((string) $request->get_param('equipador'));
+        if ((string) $equipador_actual !== $equipador_nuevo) {
+            return new WP_Error('forbidden', 'Solo Álvaro, Eva o un socio puede mover un bloque a otro equipador.', array('status' => 403));
+        }
     }
     $upd = array(); $fmt = array();
     if ($request->get_param('unplace')) {

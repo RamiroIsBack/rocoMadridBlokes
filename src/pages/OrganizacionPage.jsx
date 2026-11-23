@@ -343,9 +343,9 @@ export default function OrganizacionPage() {
         </div>
 
         <div className="org__switch">
-          <button className={`org__switch-btn${view === 'semana' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('semana')}>Semana</button>
-          <button className={`org__switch-btn${view === 'normas' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('normas')}>Normas</button>
-          <button className={`org__switch-btn${view === 'compe' ? ' org__switch-btn--active' : ''}`} onClick={() => setView('compe')}>Compe</button>
+          <button className={`org__switch-btn${view === 'semana' ? ' org__switch-btn--active' : ''}`} aria-pressed={view === 'semana'} onClick={() => setView('semana')}>Semana</button>
+          <button className={`org__switch-btn${view === 'normas' ? ' org__switch-btn--active' : ''}`} aria-pressed={view === 'normas'} onClick={() => setView('normas')}>Normas</button>
+          <button className={`org__switch-btn${view === 'compe' ? ' org__switch-btn--active' : ''}`} aria-pressed={view === 'compe'} onClick={() => setView('compe')}>Compe</button>
         </div>
 
         <CompeResumenHoy workerId={workerId} onGoToCompe={() => setView('compe')} />
@@ -943,6 +943,7 @@ function SemanaView({ config, workers, workerId, canEdit, canManage, onWorkersCh
             <button
               key={key} type="button"
               className={`org__switch-btn${filtroTablero === key ? ' org__switch-btn--active' : ''}`}
+              aria-pressed={filtroTablero === key}
               onClick={() => setFiltroTablero(key)}
             >{label}</button>
           ))}
@@ -2814,8 +2815,8 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
           </div>
         )}
         <div className="org__board-filtro">
-          <button type="button" className={`org__switch-btn${vistaCompe === 'columnas' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('columnas')}>Columnas</button>
-          <button type="button" className={`org__switch-btn${vistaCompe === 'tabla' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('tabla')}>Tabla</button>
+          <button type="button" className={`org__switch-btn${vistaCompe === 'columnas' ? ' org__switch-btn--active' : ''}`} aria-pressed={vistaCompe === 'columnas'} onClick={() => setVistaCompe('columnas')}>Columnas</button>
+          <button type="button" className={`org__switch-btn${vistaCompe === 'tabla' ? ' org__switch-btn--active' : ''}`} aria-pressed={vistaCompe === 'tabla'} onClick={() => setVistaCompe('tabla')}>Tabla</button>
         </div>
         <EquipadorChips nombres={nombresOrdenados} filtro={filtroEquip} miNombre={myName} />
         {vistaCompe === 'tabla' ? (
@@ -2897,8 +2898,8 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
         {/* 17/11 punto B.4: columnas por persona (de siempre, con arrastre) o tabla personas ×
             días — la misma lista de tareas/bloques, solo otra forma de verlos. */}
         <div className="org__board-filtro">
-          <button type="button" className={`org__switch-btn${vistaCompe === 'columnas' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('columnas')}>Columnas</button>
-          <button type="button" className={`org__switch-btn${vistaCompe === 'tabla' ? ' org__switch-btn--active' : ''}`} onClick={() => setVistaCompe('tabla')}>Tabla</button>
+          <button type="button" className={`org__switch-btn${vistaCompe === 'columnas' ? ' org__switch-btn--active' : ''}`} aria-pressed={vistaCompe === 'columnas'} onClick={() => setVistaCompe('columnas')}>Columnas</button>
+          <button type="button" className={`org__switch-btn${vistaCompe === 'tabla' ? ' org__switch-btn--active' : ''}`} aria-pressed={vistaCompe === 'tabla'} onClick={() => setVistaCompe('tabla')}>Tabla</button>
         </div>
       </div>
       {/* 23/11 06:40, punto 2: mismo selector de equipadores que la semana (localStorage
@@ -3549,9 +3550,12 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
   const save = async () => {
     setSaving(true)
     try {
-      await api('PUT', `/equipacion/comp-blocks/${block.id}`, {
-        subzone: subzone === '' ? null : Number(subzone), grade, holdSetIds, volumes, equipador, tested,
-      })
+      // 23/11 16:00 (bug real de Álvaro): mandar siempre `equipador` tumbaba el guardado
+      // entero (presas incluidas) para cualquiera sin permiso de jefe/socio/gestión, aunque
+      // no lo hubiera tocado — ahora solo se manda si de verdad ha cambiado.
+      const payload = { subzone: subzone === '' ? null : Number(subzone), grade, holdSetIds, volumes, tested }
+      if (equipador !== (block.equipador || '')) payload.equipador = equipador
+      await api('PUT', `/equipacion/comp-blocks/${block.id}`, payload)
       onSaved({ subzone: subzone === '' ? null : Number(subzone), grade, holdSetIds, volumes, equipador, tested, photoUrl })
       onClose()
     } catch (e) {
