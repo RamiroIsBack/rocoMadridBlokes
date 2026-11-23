@@ -16761,6 +16761,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'payroll_set_payment',
         'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/payroll-payment/move', array(
+        'methods'             => 'POST',
+        'callback'            => 'payroll_move_payments',
+        'permission_callback' => $socio_perm,
+    ));
     register_rest_route('superadmin/v1', '/payroll-absence', array(
         'methods'             => 'POST',
         'callback'            => 'payroll_set_absence',
@@ -17216,6 +17221,47 @@ function payroll_set_payment($request) {
     }
     payroll_save_payments($all);
     return rest_ensure_response(array('success' => true));
+}
+
+// Pagos apuntados en un mes que en realidad son de otro (23/11, Álvaro: «pagué en noviembre las
+// nóminas de octubre»). Mueve el pago de nómina (banco o a mano) y, si lo hay, el efectivo
+// entregado de cada persona elegida de 'from' a 'to'. No pisa nada: si en 'to' ya hay un pago
+// de esa persona, la salta y lo dice. { from, to, people: [id, ...] }
+function payroll_move_payments($request) {
+    $body = $request->get_json_params();
+    $from = sanitize_text_field($body['from'] ?? '');
+    $to   = sanitize_text_field($body['to'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}$/', $to) || $from === $to) {
+        return new WP_Error('invalid_month', 'Meses no válidos', array('status' => 400));
+    }
+    $ids  = array_map('sanitize_title', is_array($body['people'] ?? null) ? $body['people'] : array());
+    $pays = payroll_get_payments();
+    $cash = payroll_get_cash_payments();
+    $moved = array();
+    $skipped = array();
+    foreach ($ids as $id) {
+        $has_pay  = isset($pays[$from][$id]);
+        $has_cash = isset($cash[$from][$id]);
+        if (!$has_pay && !$has_cash) continue;
+        if (($has_pay && isset($pays[$to][$id])) || ($has_cash && isset($cash[$to][$id]))) {
+            $skipped[] = $id;
+            continue;
+        }
+        if ($has_pay) {
+            $pays[$to][$id] = $pays[$from][$id];
+            unset($pays[$from][$id]);
+            if (empty($pays[$from])) unset($pays[$from]);
+        }
+        if ($has_cash) {
+            $cash[$to][$id] = $cash[$from][$id];
+            unset($cash[$from][$id]);
+            if (empty($cash[$from])) unset($cash[$from]);
+        }
+        $moved[] = $id;
+    }
+    payroll_save_payments($pays);
+    update_option('blokes_payroll_cash_payments', $cash, false);
+    return rest_ensure_response(array('success' => true, 'moved' => $moved, 'skipped' => $skipped));
 }
 
 function payroll_set_absence($request) {

@@ -95,3 +95,7 @@ export const addPayrollPartial = (month, fields) =>
   request('/payroll-partials', 'POST', { month, ...fields })
 export const deletePayrollPartial = (month, id) =>
   request(`/payroll-partials/${id}?month=${month}`, 'DELETE')
+
+// Pagos apuntados en un mes que son de otro (23/11): los mueve de 'from' a 'to'
+export const movePayrollPayments = (from, to, people) =>
+  request('/payroll-payment/move', 'POST', { from, to, people })

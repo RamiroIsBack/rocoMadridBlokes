@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import {
-  usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence,
+  usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence, movePayrollPayments,
   setPayrollPayment, setPayrollCash, deletePayrollPartial, addPayrollPartial,
   typeLabel, hasBase, sortByType,
 } from '../hooks/useOvertime'
@@ -55,6 +55,58 @@ function HorarioVsNomina({ people, config }) {
       </ul>
       <span className="sa-pay-muted">El horario sale de Diario › Horarios y cronograma; las horas pactadas, de Configuración (abajo).</span>
     </details>
+  )
+}
+
+// Mover pagos a otro mes (23/11): «pagué en noviembre las nóminas de octubre». Lista los pagos
+// apuntados este mes (banco/a mano y efectivo entregado) para elegir cuáles pasan al otro mes.
+function MoverPagos({ month, rows, onDone, onClose }) {
+  const conPago = rows.filter(r => r.payment || r.cash_paid)
+  const [sel, setSel]   = useState(() => conPago.map(r => r.id))
+  const [to, setTo]     = useState(shiftMonth(month, -1))
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const opciones = [-3, -2, -1, 1].map(n => shiftMonth(month, n))
+  const toggle = id => setSel(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
+  const mover = async () => {
+    if (!window.confirm(`¿Pasar ${sel.length} ${sel.length === 1 ? 'pago' : 'pagos'} de ${monthLabel(month)} a ${monthLabel(to)}? ${monthLabel(month)} volverá a salir como pendiente para esas personas.`)) return
+    setBusy(true); setError('')
+    try {
+      const res = await movePayrollPayments(month, to, sel)
+      const saltados = (res.skipped || []).map(id => rows.find(r => r.id === id)?.name || id)
+      onDone(`✓ ${res.moved.length} pagos pasados a ${monthLabel(to)}${saltados.length ? ` · no se han movido (ya tenían pago en ${monthLabel(to)}): ${saltados.join(', ')}` : ''}`)
+    } catch (e) { setError(e.message); setBusy(false) }
+  }
+  return (
+    <div className="nomina-mover">
+      <strong>Mover pagos de {monthLabel(month)} a otro mes</strong>
+      <p className="sa-pay-muted">Para los pagos que apuntaste este mes pero son de otro (por ejemplo, nóminas de octubre pagadas en noviembre). Se mueve el pago de la nómina y, si lo hay, el efectivo entregado.</p>
+      {conPago.length === 0 ? <p className="sa-pay-muted">No hay pagos apuntados en {monthLabel(month)}.</p> : (
+        <>
+          <div className="nomina-mover__list">
+            {conPago.map(r => (
+              <label key={r.id} className="nomina-mover__item">
+                <input type="checkbox" checked={sel.includes(r.id)} onChange={() => toggle(r.id)} />
+                <span className="sa-pay-dot" style={{ background: r.color }} />{r.name}
+                <span className="sa-pay-muted">
+                  {r.payment ? (r.payment.amount != null ? ` banco ${fmtEur(r.payment.amount)}` : ' marcado a mano') : ''}
+                  {r.cash_paid ? ` · efectivo ${fmtEur(r.cash_paid.amount)}` : ''}
+                </span>
+              </label>
+            ))}
+          </div>
+          <div className="nomina-mover__actions">
+            <span>Son de</span>
+            <select className="sa-pay-input" value={to} onChange={e => setTo(e.target.value)}>
+              {opciones.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+            </select>
+            <button className="sa-list-save__btn" disabled={busy || !sel.length} onClick={mover}>{busy ? 'Moviendo…' : `Mover ${sel.length} ${sel.length === 1 ? 'pago' : 'pagos'}`}</button>
+            <button className="sa-pay-action" onClick={onClose}>Cancelar</button>
+          </div>
+        </>
+      )}
+      {error && <p className="sa-error">{error}</p>}
+    </div>
   )
 }
 
@@ -759,6 +811,7 @@ export default function PayrollSection() {
   const [selected, setSelected] = useState(null)
   const [showRemesa, setShowRemesa] = useState(false)
   const [showPartial, setShowPartial] = useState(false)
+  const [showMover, setShowMover] = useState(false)
   const cardPeople   = sortByType(people.filter(p => p.active || rows.some(r => r.id === p.id)))
   const rowById      = Object.fromEntries(rows.map(r => [r.id, r]))
   const selPerson    = selected ? byId[selected] : null
@@ -893,6 +946,11 @@ export default function PayrollSection() {
               </button>
             )}
             {data && (
+              <button className="sa-pay-action sa-pay-print" onClick={() => setShowMover(s => !s)} title="Para pagos apuntados este mes que son de otro mes">
+                ↔ Mover pagos a otro mes
+              </button>
+            )}
+            {data && (
               <button className="sa-pay-action sa-pay-print" onClick={handlePrint}>
                 ⎙ {selPerson ? `Informe de ${selPerson.name}` : 'Informe del mes'} (PDF)
               </button>
@@ -907,6 +965,14 @@ export default function PayrollSection() {
           : error ? <p className="sa-error">Error: {error}</p>
           : (
             <>
+              {showMover && (
+                <MoverPagos
+                  key={month} month={month} rows={rows}
+                  onDone={async msg => { setShowMover(false); await refreshAll(); setFeedback(msg); setTimeout(() => setFeedback(''), 6000) }}
+                  onClose={() => setShowMover(false)}
+                />
+              )}
+              {feedback && !verDetalle && <p className="sa-pay-feedback">{feedback}</p>}
               {/* ── Resumen ── */}
               <div className="sa-kpis">
                 <div className="sa-kpi" style={{ '--kpi-color': BASE_COLOR }}>
