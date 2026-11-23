@@ -286,7 +286,6 @@ export default function App() {
                       una sesión de prueba. En la cuenta tablet real (sin simular nada) se deja
                       como siempre. */}
                   {/* 22/11 (Álvaro): sin apodo ni «Log out» aquí */}
-                  <TemaToggle />
                   {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
                   {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
                       EFECTIVO para que vean exactamente el mismo botón): su único "ver como"
@@ -328,14 +327,17 @@ export default function App() {
                   {!(sd.userRole === 'tablet' && sd.userRoleReal !== 'tablet') && (
                     <button type="button" className="app-header__salir" onClick={() => setLogoutOpen(true)}>Salir</button>
                   )}
-                  {/* 22/11: botón corto «Mapa» (marcado cuando está a la vista) */}
-                  <button
-                    type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}
-                    onClick={() => setMapaAbierto(v => !v)}
-                    title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}
-                  >
-                    Mapa
-                  </button>
+                  {/* 22/11: botón corto «Mapa» (marcado cuando está a la vista); 23/11: ☀️/🌙 a su derecha */}
+                  <span className="app-header__mapa-tema">
+                    <button
+                      type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}
+                      onClick={() => setMapaAbierto(v => !v)}
+                      title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}
+                    >
+                      Mapa
+                    </button>
+                    <TemaToggle />
+                  </span>
                 </div>
               </>
             ) : (
@@ -350,11 +352,11 @@ export default function App() {
                       </svg>
                       Acceder
                     </a>
-                    <TemaToggle />
                     <button type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}
                       onClick={() => setMapaAbierto(v => !v)} title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}>
                       Mapa
                     </button>
+                    <TemaToggle />
                   </div>
                   <div className="app-header__links">
                     <div className="app-header__link-wrap">

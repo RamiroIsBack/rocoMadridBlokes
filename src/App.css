@@ -1441,8 +1441,8 @@
     display: grid;
     grid-template-columns: 1fr auto;
     grid-template-areas:
-      "sub      tema"
-      "vercomo  mapa"
+      "sub      mapa"
+      "vercomo  vercomo"
       "salir    salir";
     align-items: center;
     justify-items: start;
@@ -1545,4 +1545,11 @@
 }
 @media (min-width: 1460px) {
   .app-main:has(.nomina)::before { display: block; }
+}
+
+/* ☀️/🌙 a la derecha de «Mapa» (23/11) */
+.app-header__mapa-tema { display: inline-flex; align-items: center; gap: 6px; }
+.app-header__mapa-tema .app-header__tema-btn { margin-top: 0; }
+@media (max-width: 999px) {
+  .app-header__extra--abierto .app-header__mapa-tema { grid-area: mapa; justify-self: end; }
 }
