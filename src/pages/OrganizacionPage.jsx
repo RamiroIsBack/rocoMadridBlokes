@@ -2841,7 +2841,11 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
                     ))}
                   </tr>
                 ))}
-                {bloquesSinAsignar.length > 0 && filtroEquip.esTodos && (
+                {/* 23/11 (Álvaro, bug real): "Sin asignar" NUNCA se filtra por equipador — no
+                    es la columna de ninguna persona, es justo lo que falta por asignar. Si se
+                    escondía al elegir "Solo yo" o un chip, no había ninguna forma de ver (ni
+                    asignar) los bloques todavía sin equipador. */}
+                {bloquesSinAsignar.length > 0 && (
                   <tr>
                     <td className="org__cp-tabla-persona">Sin asignar</td>
                     <td colSpan={diasCompeTabla.length}>
@@ -2856,7 +2860,7 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
         ) : (
           <CompePlanMovil
             columnas={columnasFiltradas}
-            bloquesSinAsignar={filtroEquip.esTodos ? bloquesSinAsignar : []}
+            bloquesSinAsignar={bloquesSinAsignar}
             chipReasignable={chipReasignable}
             renderTareaLi={renderTareaLiMovil}
             canManage={canManage}
@@ -2926,7 +2930,9 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
                   ))}
                 </tr>
               ))}
-              {bloquesSinAsignar.length > 0 && filtroEquip.esTodos && (
+              {/* 23/11 (Álvaro, bug real): "Sin asignar" nunca se filtra — ver la nota igual
+                  en la vista Tabla de arriba. */}
+              {bloquesSinAsignar.length > 0 && (
                 <tr>
                   <td className="org__cp-tabla-persona">Sin asignar</td>
                   <td colSpan={diasCompeTabla.length}>
@@ -2985,7 +2991,8 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
             {col.tareas.length === 0 && col.bloques.length === 0 && <p className="org__hint">Sin tareas ni bloques.</p>}
           </div>
         ))}
-        {!columnaExpandida && bloquesSinAsignar.length > 0 && filtroEquip.esTodos && (
+        {/* 23/11 (Álvaro, bug real): "Sin asignar" nunca se filtra — igual en las otras vistas. */}
+        {!columnaExpandida && bloquesSinAsignar.length > 0 && (
           <div className="org__board-col org__board-col--sin-asignar">
             <p className="org__board-col-title">Sin asignar</p>
             <div className="org__comp-plan-bloques">{bloquesSinAsignar.map(b => chipReasignable(b, ''))}</div>
