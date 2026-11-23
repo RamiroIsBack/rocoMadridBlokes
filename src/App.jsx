@@ -370,6 +370,8 @@ export default function App() {
           </div>
 
           <div className="app-header__salas-wrap">
+            {/* 23/11: con el mapa oculto, en su sitio queda el isotipo (solo en ordenador) */}
+            {!mapaAbierto && <img src={isotipo} alt="" aria-hidden="true" className="app-header__salas-iso" />}
             {mapaAbierto && <img
               src="https://rocomadrid.com/wp-content/uploads/2026/03/salas-rocomadrid-estilo-retro.png"
               alt="Salas Rocoteca Madrid"
@@ -426,7 +428,9 @@ export default function App() {
               {/* 23/11 (Álvaro): Cherifs justo a la derecha de Diario */}
               {sd.userRole === 'socio' && (
                 <li className="app-nav__item">
-                  <NavLink to="/cherifs" className="app-nav__link app-nav__link--cherifs">Cherifs</NavLink>
+                  <NavLink to="/cherifs" className="app-nav__link app-nav__link--cherifs">
+                    <span className="app-nav__estrella" aria-hidden="true">✶</span>Cherifs<span className="app-nav__estrella" aria-hidden="true">✶</span>
+                  </NavLink>
                 </li>
               )}
               <li className="app-nav__item">

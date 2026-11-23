@@ -1553,3 +1553,13 @@
 @media (max-width: 999px) {
   .app-header__extra--abierto .app-header__mapa-tema { grid-area: mapa; justify-self: end; }
 }
+
+/* Cherifs: estrellas de sheriff a los lados (23/11) */
+.app-nav__estrella { color: var(--color-accent); font-size: 0.95em; margin: 0 4px; display: inline-block; transform: translateY(-1px); }
+
+/* Con el mapa oculto, el isotipo en su sitio (solo ordenador; en el móvil ya está a la izquierda) */
+.app-header__salas-iso { display: none; }
+@media (min-width: 1000px) {
+  .app-header__salas-wrap:has(.app-header__salas-iso) { justify-content: center; }
+  .app-header__salas-iso { display: block; width: 150px; height: 150px; margin: 10px auto; opacity: 0.9; }
+}
