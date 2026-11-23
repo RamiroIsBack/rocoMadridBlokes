@@ -6,7 +6,7 @@ import {
 import {
   usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence, movePayrollPayments, editPayrollOvertime,
   setPayrollPayment, setPayrollCash, deletePayrollPartial, addPayrollPartial,
-  typeLabel, hasBase, sortByType, addOvertimePerson, updateOvertimePerson,
+  typeLabel, hasBase, sortByType, addOvertimePerson, updateOvertimePerson, PERSON_TYPES,
 } from '../hooks/useOvertime'
 import RemittanceImport from './RemittanceImport'
 import GestoriaReview from './GestoriaReview'
@@ -116,11 +116,31 @@ function ResumenPagos({ rows, entries, totals, month }) {
   const pend   = rows.filter(r => r.outstanding > 0.01).sort((a, b) => b.outstanding - a.outstanding)
   const pagado = rows.filter(r => r.outstanding <= 0.01 && (r.to_pay || 0) > 0)
   const extrasPend = entries.filter(e => e.status !== 'pagado')
+  // 23/11 (Álvaro): agrupado por tipo (profesores, voluntarios, externos, socios) para no confundir
+  const grupos = PERSON_TYPES
+    .map(t => [t, pend.filter(r => r.type === t.id)])
+    .filter(([, list]) => list.length > 0)
   const detalle = r => {
     const partes = []
+    if (r.cash_total != null) {
+      // Pago mixto (p. ej. Sigurd): el servidor guarda TODO el efectivo pendiente (lo que falta
+      // hasta el total pactado + las horas extra) en extras_outstanding. Antes salía como si
+      // fueran solo horas extra («4 h extra 317,91 €») y además repetido como efectivo.
+      if ((r.nomina_outstanding || 0) > 0.01) partes.push(`nómina ${fmtEur(r.nomina_outstanding)} por banco`)
+      const efectivo = r.extras_outstanding || 0
+      if (efectivo > 0.01) {
+        const extras  = r.pending_extras || 0
+        const pactado = efectivo - extras
+        const sinParciales = !((r.partial_nomina || 0) + (r.partial_extras || 0))
+        const desglose = sinParciales && extras > 0.01 && pactado > 0.01
+          ? ` (${fmtEur(pactado)} del total pactado + ${fmtHours(r.hours)} h extra ${fmtEur(extras)})`
+          : sinParciales && extras > 0.01 ? ` (${fmtHours(r.hours)} h extra)` : ''
+        partes.push(`${fmtEur(efectivo)} en efectivo${desglose}`)
+      }
+      return partes.join(' · ')
+    }
     if ((r.nomina_outstanding || 0) > 0.01) partes.push(`nómina ${fmtEur(r.nomina_outstanding)}`)
     if ((r.extras_outstanding || 0) > 0.01) partes.push(`${fmtHours(r.hours)} h extra ${fmtEur(r.extras_outstanding)}`)
-    if (r.cash_total != null && !r.cash_paid && r.cash_due > 0) partes.push(`${fmtEur(r.cash_due)} en efectivo`)
     return partes.join(' · ')
   }
   return (
@@ -130,17 +150,22 @@ function ResumenPagos({ rows, entries, totals, month }) {
           ? <>{monthLabel(month)}: quedan <strong>{fmtEur(totals?.outstanding || 0)}</strong> por pagar a {pend.length} {pend.length === 1 ? 'persona' : 'personas'}</>
           : <>{monthLabel(month)}: <strong>todo pagado</strong> ✓</>}
       </h3>
-      {pend.length > 0 && (
-        <ul className="nomina-resumen__list">
-          {pend.map(r => (
-            <li key={r.id}>
-              <span className="sa-pay-dot" style={{ background: r.color }} />
-              <b>{r.name}</b>: {fmtEur(r.outstanding)}
-              {detalle(r) && <span className="nomina-resumen__det"> — {detalle(r)}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
+      {grupos.map(([t, list]) => (
+        <div key={t.id} className="nomina-resumen__grupo">
+          <p className="nomina-resumen__grupo-title">
+            {t.plural} · {fmtEur(list.reduce((s, r) => s + r.outstanding, 0))}
+          </p>
+          <ul className="nomina-resumen__list">
+            {list.map(r => (
+              <li key={r.id}>
+                <span className="sa-pay-dot" style={{ background: r.color }} />
+                <b>{r.name}</b>: {fmtEur(r.outstanding)}
+                {detalle(r) && <span className="nomina-resumen__det"> — {detalle(r)}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
       {pagado.length > 0 && <p className="nomina-resumen__ok">✓ Ya pagado: {pagado.map(r => r.name).join(', ')}</p>}
       {entries.length > 0 && (
         <p className="nomina-resumen__extra">
