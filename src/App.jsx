@@ -583,11 +583,11 @@ function VerComoSelector({ sd }) {
 // Saludo justo encima del menú (22/11): «Hola, X» si hay sesión y una frase manuscrita
 // según la sección en la que estás.
 const FRASES = [
-  ['/progreso/yo', 'El resumen de tus logros'],
-  ['/progreso',    'Mira lo fuerte que te estás poniendo'],
-  ['/ligas',       'Los blokes que consigas marcan tu liga. Rétate con gente de tu nivel'],
-  ['/compe',       'Una compe al trimestre: atrévete contra el resto del Roco'],
-  ['/',            'Bienvenido a tu espacio de Blokes'],
+  ['/progreso/yo', 'Todo lo que ya has encadenado'],
+  ['/progreso',    'Cada top cuenta: mira cuánto has subido'],
+  ['/ligas',       'Suma tops, sube de liga y mídete con los de tu nivel'],
+  ['/compe',       'Cada trimestre, una compe. ¿Te atreves con el resto del Roco?'],
+  ['/',            '¿Qué bloke te llevas hoy?'],
 ]
 function SaludoSeccion({ sd }) {
   const { pathname } = useLocation()
