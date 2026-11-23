@@ -17460,12 +17460,20 @@ function payroll_get_notes() {
     return is_array($stored) ? $stored : array();
 }
 
+// Horas a la semana pactadas por persona (23/11, Álvaro): para compararlas con el cronograma
+// del Diario y detectar errores antes de pagar. { id: horas }
+function payroll_get_weekly_hours() {
+    $stored = get_option('blokes_payroll_weekly_hours', array());
+    return is_array($stored) ? $stored : array();
+}
+
 function payroll_config_response($base, $rates) {
     return array(
-        'base'       => (object) $base,
-        'rates'      => (object) $rates,
-        'notes'      => (object) payroll_get_notes(),
-        'cash_total' => (object) payroll_get_cash_totals(),
+        'base'         => (object) $base,
+        'rates'        => (object) $rates,
+        'notes'        => (object) payroll_get_notes(),
+        'cash_total'   => (object) payroll_get_cash_totals(),
+        'weekly_hours' => (object) payroll_get_weekly_hours(),
     );
 }
 
@@ -17631,6 +17639,9 @@ function payroll_save_config($request) {
     }
     if (isset($body['cash_total'])) {
         update_option('blokes_payroll_cash_total', $merge(payroll_get_cash_totals(), $body['cash_total']), false);
+    }
+    if (isset($body['weekly_hours'])) {
+        update_option('blokes_payroll_weekly_hours', $merge(payroll_get_weekly_hours(), $body['weekly_hours']), false);
     }
     if (isset($body['notes']) && is_array($body['notes'])) {
         $notes = payroll_get_notes();

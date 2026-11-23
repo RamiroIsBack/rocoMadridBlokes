@@ -11,6 +11,48 @@ import {
 import RemittanceImport from './RemittanceImport'
 import PartialPayment from './PartialPayment'
 import { todayISO, currentMonth, shiftMonth, monthLabel, monthShort, fmtDate, fmtHours, fmtEur } from '../utils/monthFormat'
+import { useHorarios } from '../hooks/useDiario'
+import { horasSemanaPorPersona, nombreDePila } from '../utils/horasHorario'
+
+// Horas a la semana de cada persona de Nóminas según el cronograma del Diario (por nombre de pila)
+function useHorasHorario() {
+  const { data } = useHorarios(true)
+  if (!data) return null
+  return horasSemanaPorPersona(data.items || [])
+}
+const horasDe = (horario, p) => horario?.[nombreDePila(p.name)]?.hours ?? 0
+
+// Aviso arriba de Nóminas (23/11): quién no cuadra entre lo pactado y lo que dice el horario
+function HorarioVsNomina({ people, config }) {
+  const horario = useHorasHorario()
+  if (!horario) return null
+  const pactadas = config?.weekly_hours || {}
+  const activos  = people.filter(p => p.active)
+  const avisos   = []
+  activos.forEach(p => {
+    const pac = parseFloat(pactadas[p.id]) || 0
+    const hor = horasDe(horario, p)
+    if (pac > 0 && Math.abs(hor - pac) >= 0.5) {
+      avisos.push({ p, txt: `el horario suma ${fmtHours(hor)} h/sem y tiene pactadas ${fmtHours(pac)} h/sem (${hor > pac ? '+' : ''}${fmtHours(Math.round((hor - pac) * 10) / 10)} h)` })
+    } else if (!pac && hor > 0 && hasBase(p.type)) {
+      avisos.push({ p, txt: `sale ${fmtHours(hor)} h/sem en el horario pero no tiene horas pactadas en Configuración`, leve: true })
+    }
+  })
+  if (!avisos.length) return (
+    <div className="sa-section sa-hvn sa-hvn--ok">✓ Las horas del horario del Diario cuadran con las pactadas en Nóminas.</div>
+  )
+  return (
+    <div className="sa-section sa-hvn">
+      <strong>Horario vs nómina</strong>
+      <ul>
+        {avisos.map(({ p, txt, leve }) => (
+          <li key={p.id} className={leve ? 'sa-hvn__leve' : ''}><b>{p.name}</b>: {txt}</li>
+        ))}
+      </ul>
+      <span className="sa-pay-muted">El horario sale de Diario › Horarios y cronograma; las horas pactadas, de Configuración (abajo).</span>
+    </div>
+  )
+}
 
 const BASE_COLOR  = '#a78bfa'
 const EXTRA_COLOR = '#f5c842'
@@ -31,7 +73,9 @@ function PayrollConfig({ people, config, onSaved }) {
     rate: cfg.rates?.[p.id] ?? '',
     note: cfg.notes?.[p.id] ?? '',
     cash: cfg.cash_total?.[p.id] ?? '',
+    hours: cfg.weekly_hours?.[p.id] ?? '',
   }]))
+  const horario = useHorasHorario()
 
   const [form,     setForm]     = useState(() => toForm(config))
   const [saving,   setSaving]   = useState(false)
@@ -61,13 +105,15 @@ function PayrollConfig({ people, config, onSaved }) {
       const rates = {}
       const notes = {}
       const cash  = {}
+      const hours = {}
       for (const p of active) {
         if (hasBase(p.type)) base[p.id] = form[p.id]?.base ?? ''
         if (hasBase(p.type)) cash[p.id] = form[p.id]?.cash ?? ''
         rates[p.id] = form[p.id]?.rate ?? ''
         notes[p.id] = form[p.id]?.note ?? ''
+        hours[p.id] = form[p.id]?.hours ?? ''
       }
-      const saved = await savePayrollConfig({ base, rates, notes, cash_total: cash })
+      const saved = await savePayrollConfig({ base, rates, notes, cash_total: cash, weekly_hours: hours })
       setForm(toForm(saved))
       setFeedback('✓ Guardado')
       onSaved()
@@ -100,6 +146,8 @@ function PayrollConfig({ people, config, onSaved }) {
               <th className="sa-pay-num">Nómina base / mes</th>
               <th className="sa-pay-num" title="Solo si cobra parte en efectivo">Total pactado</th>
               <th className="sa-pay-num">€/h extra</th>
+              <th className="sa-pay-num" title="Horas a la semana pactadas">Horas/sem pactadas</th>
+              <th className="sa-pay-num" title="Lo que suma el cronograma del Diario">Según horario</th>
               <th>Justificación de la base</th>
             </tr>
           </thead>
@@ -130,6 +178,22 @@ function PayrollConfig({ people, config, onSaved }) {
                     type="number" min="0" step="0.01" placeholder="—" className="sa-pay-input"
                     value={form[p.id]?.rate ?? ''} onChange={e => set(p.id, 'rate', e.target.value)}
                   />
+                </td>
+                <td className="sa-pay-num">
+                  <input
+                    type="number" min="0" step="0.5" placeholder="—" className="sa-pay-input"
+                    value={form[p.id]?.hours ?? ''} onChange={e => set(p.id, 'hours', e.target.value)}
+                  />
+                </td>
+                <td className="sa-pay-num">
+                  {(() => {
+                    const hor = horasDe(horario, p)
+                    const pac = parseFloat(form[p.id]?.hours) || 0
+                    const mal = pac > 0 && Math.abs(hor - pac) >= 0.5
+                    return horario
+                      ? <span className={mal ? 'sa-hvn__mal' : hor ? '' : 'sa-pay-muted'} title={mal ? 'No cuadra con lo pactado' : ''}>{hor ? `${fmtHours(hor)} h` : '—'}{mal ? ' ⚠' : ''}</span>
+                      : <span className="sa-pay-muted">…</span>
+                  })()}
                 </td>
                 <td className="sa-pay-note-cell">
                   <textarea
@@ -748,6 +812,8 @@ export default function PayrollSection() {
 
   return (
     <>
+      {data && <HorarioVsNomina people={people} config={data.config} />}
+
       {/* ── Fichas: solo nombres; al pulsar se despliega la ficha y se filtran las tablas ── */}
       {data && (
         <div className="sa-section sa-pay-people">
