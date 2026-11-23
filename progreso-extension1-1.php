@@ -22059,13 +22059,16 @@ function progreso_equip_get_competition_plan($request) {
 
     // Punto 7 (Ramiro, 11/11 05:01): el plan de la compe en columnas por equipador necesita
     // también los bloques, no solo las tareas — antes solo salían en el mapa.
+    // 23/11 17:15, punto 3: hold_set_ids también, para enseñar qué presas lleva cada bloque en
+    // el chip del plan sin tener que abrir la ficha — antes no se pedía en esta consulta.
     $blocks = $wpdb->get_results($wpdb->prepare(
-        "SELECT id, number, equipador, subzone, tested FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $id
+        "SELECT id, number, equipador, subzone, tested, hold_set_ids FROM " . progreso_equip_table('comp_blocks') . " WHERE competition_id = %d ORDER BY number ASC", $id
     ), ARRAY_A);
     $out_blocks = array_map(function($b) {
         return array(
             'id' => intval($b['id']), 'number' => intval($b['number']), 'equipador' => $b['equipador'],
             'subzone' => $b['subzone'] !== null ? intval($b['subzone']) : null, 'tested' => (bool) $b['tested'],
+            'holdSetIds' => array_values(array_filter(array_map('intval', explode(',', $b['hold_set_ids'])))),
         );
     }, $blocks);
 

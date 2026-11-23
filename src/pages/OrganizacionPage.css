@@ -29,7 +29,9 @@
   letter-spacing: 0.04em;
   color: var(--color-text-primary);
   cursor: pointer;
+  transition: transform 150ms, background 150ms, color 150ms;
 }
+.org__switch-btn:active { transform: translateY(1px); }
 .org__switch-btn--active {
   background: #2a2015;
   color: #f5c842;
@@ -204,8 +206,51 @@
   font-size: 0.78rem;
   cursor: pointer;
   color: var(--color-text-primary);
+  transition: transform 150ms, opacity 150ms;
 }
+.org__holdset-chip:active { transform: translateY(1px); }
 .org__holdset-chip--on { background: #2a2015; color: #f5c842; border-color: #2a2015; }
+/* 23/11 17:15 (bug real: en modo oscuro no se veía cuál juego de presas/equipador estaba
+   seleccionado — se pulsaba a ciegas). Activo: dorado relleno + ✓ delante, igual en los dos
+   temas (la regla de arriba ya no la pisa el modo oscuro, ver más abajo el :not(--on) añadido a
+   esas reglas). Inactivo: mismo fondo de siempre pero apagado (opacidad), sin pelearse con la
+   especificidad del modo oscuro porque la opacidad no la toca ninguna otra regla. */
+.org__ficha-holdsets .org__holdset-chip,
+.org__equip-chips .org__holdset-chip {
+  opacity: 0.55;
+}
+.org__ficha-holdsets .org__holdset-chip--on,
+.org__equip-chips .org__holdset-chip--on {
+  opacity: 1;
+  font-weight: 700;
+}
+.org__ficha-holdsets .org__holdset-chip--on::before,
+.org__equip-chips .org__holdset-chip--on::before {
+  content: '✓ ';
+}
+
+/* 23/11 17:15, punto 2: "Lleva: …" arriba del todo con lo ya seleccionado (quitar con ✕ sin
+   buscar el chip entre los 58), y buscador para filtrar la lista antes de los chips. */
+.org__holdset-lleva { font-size: 0.85rem; margin: 0 0 8px; color: var(--color-text-primary); }
+.org__holdset-lleva-item {
+  display: inline-flex; align-items: center; gap: 4px; background: #2a2015; color: #f5c842;
+  border-radius: 999px; padding: 3px 4px 3px 10px; margin: 0 4px 4px 0; font-weight: 600; font-size: 0.8rem;
+}
+.org__holdset-lleva-item button {
+  background: none; border: none; color: #f5c842; cursor: pointer; font-size: 0.85rem; padding: 0 4px;
+}
+.org__holdset-buscador {
+  display: block; width: 100%; max-width: 320px; margin-bottom: 8px; padding: 7px 10px;
+  border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary);
+  font-size: 0.85rem;
+}
+/* Punto 4: propuesta de presas sacada de "PRESAS: …" en Volúmenes, para que Álvaro la confirme
+   bloque a bloque — nunca se aplica sola (solo rellena la selección sin guardar, hace falta
+   pulsar "Usar esta selección" y luego Guardar). */
+.org__holdset-sugerencia {
+  font-size: 0.85rem; color: var(--state-warn); background: color-mix(in srgb, var(--state-warn) 14%, transparent);
+  border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
+}
 
 .org__warning { color: var(--state-warn); font-size: 0.82rem; }
 .org__error { color: var(--state-bad); font-size: 0.82rem; }
@@ -799,6 +844,12 @@
   background: none; border: none; cursor: pointer; font-size: 0.85rem; padding: 0 0 0 2px; color: var(--color-text-secondary);
 }
 .org__comp-plan-bloque-chip select { font-size: 0.72rem; max-width: 110px; }
+/* 23/11 17:15, punto 3: qué juegos de presas lleva ya el bloque, visible sin abrir la ficha —
+   truncado para no romper el ajuste de línea de la fila de chips. */
+.org__comp-plan-bloque-presas {
+  color: var(--color-text-secondary); font-weight: 400; font-size: 0.7rem;
+  max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .org__board-col--sin-asignar { background: var(--color-bg); border-style: dashed; }
 /* 🐞 Cowork 11/11 10:15: "el checkbox se monta encima de la primera letra" — el plan de la
    compe reutiliza .org__task-list, pero .org__task label más abajo en este mismo fichero pone
@@ -855,8 +906,8 @@
   :root:not([data-theme="light"]) .org__historico-title,
   :root:not([data-theme="light"]) .org__block-info,
   :root:not([data-theme="light"]) .org__whoami-btn,
-  :root:not([data-theme="light"]) .org__switch-btn,
-  :root:not([data-theme="light"]) .org__holdset-chip,
+  :root:not([data-theme="light"]) .org__switch-btn:not(.org__switch-btn--active),
+  :root:not([data-theme="light"]) .org__holdset-chip:not(.org__holdset-chip--on),
   :root:not([data-theme="light"]) .org__modo-compe__estado,
   :root:not([data-theme="light"]) .org__modo-compe {
     color: var(--color-text-primary);
@@ -872,7 +923,7 @@
   :root:not([data-theme="light"]) .org__tile-edit { color: var(--color-text-secondary); }
   :root:not([data-theme="light"]) .org__tile-delete,
   :root:not([data-theme="light"]) .org__remove-btn { color: var(--state-bad); }
-  :root:not([data-theme="light"]) .org__switch-btn,
+  :root:not([data-theme="light"]) .org__switch-btn:not(.org__switch-btn--active),
   :root:not([data-theme="light"]) .org__whoami-btn,
   :root:not([data-theme="light"]) .org__board-col,
   :root:not([data-theme="light"]) .org__tile,
@@ -881,7 +932,7 @@
   :root:not([data-theme="light"]) .org__week-row,
   :root:not([data-theme="light"]) .org__historico-row,
   :root:not([data-theme="light"]) .org__compe-card,
-  :root:not([data-theme="light"]) .org__holdset-chip,
+  :root:not([data-theme="light"]) .org__holdset-chip:not(.org__holdset-chip--on),
   :root:not([data-theme="light"]) .org__add-form,
   :root:not([data-theme="light"]) .org__modo-compe {
     background: var(--color-surface);
@@ -911,8 +962,8 @@
 :root[data-theme="dark"] .org__historico-title,
 :root[data-theme="dark"] .org__block-info,
 :root[data-theme="dark"] .org__whoami-btn,
-:root[data-theme="dark"] .org__switch-btn,
-:root[data-theme="dark"] .org__holdset-chip,
+:root[data-theme="dark"] .org__switch-btn:not(.org__switch-btn--active),
+:root[data-theme="dark"] .org__holdset-chip:not(.org__holdset-chip--on),
 :root[data-theme="dark"] .org__modo-compe__estado,
 :root[data-theme="dark"] .org__modo-compe {
   color: var(--color-text-primary);
@@ -925,7 +976,7 @@
 :root[data-theme="dark"] .org__tile-edit { color: var(--color-text-secondary); }
 :root[data-theme="dark"] .org__tile-delete,
 :root[data-theme="dark"] .org__remove-btn { color: var(--state-bad); }
-:root[data-theme="dark"] .org__switch-btn,
+:root[data-theme="dark"] .org__switch-btn:not(.org__switch-btn--active),
 :root[data-theme="dark"] .org__whoami-btn,
 :root[data-theme="dark"] .org__board-col,
 :root[data-theme="dark"] .org__tile,
@@ -934,7 +985,7 @@
 :root[data-theme="dark"] .org__week-row,
 :root[data-theme="dark"] .org__historico-row,
 :root[data-theme="dark"] .org__compe-card,
-:root[data-theme="dark"] .org__holdset-chip,
+:root[data-theme="dark"] .org__holdset-chip:not(.org__holdset-chip--on),
 :root[data-theme="dark"] .org__add-form,
 :root[data-theme="dark"] .org__modo-compe {
   background: var(--color-surface);

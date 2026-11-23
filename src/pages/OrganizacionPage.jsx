@@ -170,12 +170,14 @@ function EquipadorChips({ nombres, filtro, miNombre }) {
       <button
         type="button"
         className={`org__holdset-chip${filtro.esTodos ? ' org__holdset-chip--on' : ''}`}
+        aria-pressed={filtro.esTodos}
         onClick={filtro.elegirTodos}
       >Todos</button>
       {miNombre && (
         <button
           type="button"
           className={`org__holdset-chip${filtro.esSoloYo ? ' org__holdset-chip--on' : ''}`}
+          aria-pressed={filtro.esSoloYo}
           onClick={filtro.elegirSoloYo}
         >Solo yo</button>
       )}
@@ -183,6 +185,7 @@ function EquipadorChips({ nombres, filtro, miNombre }) {
         <button
           key={n} type="button"
           className={`org__holdset-chip${filtro.estaSeleccionado(n) ? ' org__holdset-chip--on' : ''}`}
+          aria-pressed={filtro.estaSeleccionado(n)}
           onClick={() => filtro.toggle(n)}
         >{n}</button>
       ))}
@@ -2496,6 +2499,11 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
   // solo otra forma de verlos.
   const [vistaCompe, setVistaCompe] = useState('columnas')
   const showToast = useToast()
+  // 23/11 17:15, punto 3: qué presas lleva cada bloque, visible en el chip del plan sin tener
+  // que abrir la ficha — mismo fetch independiente que ya hacen SemanaView/CompeMapEditor.
+  const [holdsets, setHoldsets] = useState([])
+  useEffect(() => { api('GET', '/equipacion/holdsets').then(r => setHoldsets(r.data || [])).catch(() => {}) }, [])
+  const nombresPresas = ids => (ids || []).map(id => holdsets.find(h => h.id === id)?.name).filter(Boolean)
 
   const compTaskTypes = useMemo(
     () => Object.values(taskTypeById || {}).filter(t => t.id?.startsWith('comp_')).sort((a, b) => a.name.localeCompare(b.name)),
@@ -2627,10 +2635,17 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
   const planBoardRef = useRef(null)
   const tablaBoardRef = useRef(null)
 
-  const chipReasignable = (b, nombreActual) => (
-    <span key={b.id} className={`org__comp-plan-bloque-chip${b.tested ? ' org__comp-plan-bloque-chip--probado' : ''}`}>
+  const chipReasignable = (b, nombreActual) => {
+    const presas = nombresPresas(b.holdSetIds)
+    return (
+    <span
+      key={b.id}
+      className={`org__comp-plan-bloque-chip${b.tested ? ' org__comp-plan-bloque-chip--probado' : ''}`}
+      title={presas.length ? `Presas: ${presas.join(', ')}` : 'Sin presas asignadas'}
+    >
       <span className="org__comp-plan-bloque-color" style={{ background: colorPorNumeroBloque(b.number, totalBloques).bg }} />
       #{b.number}
+      {presas.length > 0 && <span className="org__comp-plan-bloque-presas">{presas.join(', ')}</span>}
       {canManage && (reasignando === b.id ? (
         <select autoFocus value={nombreActual} onChange={e => reasignarBloque(b.id, e.target.value)} onBlur={() => setReasignando(null)}>
           <option value="">Sin asignar</option>
@@ -2640,7 +2655,8 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
         <button type="button" className="org__comp-plan-bloque-mover" onClick={() => setReasignando(b.id)} title="Mover a otro equipador">⇄</button>
       ))}
     </span>
-  )
+    )
+  }
 
   // 17/11 09:40 (A4): sacado del bucle de columnas del tablero para reutilizarlo igual en la
   // lista vertical del móvil (NOTAS_PARA_CODE_tareas_movil.md) — ninguna lógica nueva, los
@@ -3393,19 +3409,25 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
         onClick={onWrapClick}
       >
         <img src={mapaEquipacion} alt="Mapa del rocódromo" className="org__comp-map-img" draggable={false} />
-        {placed.map(b => (
+        {placed.map(b => {
+          // 23/11 17:15, punto 3: la burbuja es de 34px, no cabe texto — las presas que lleva
+          // van en el tooltip (hover/toque largo), junto con las instrucciones de siempre.
+          const presasBurbuja = (b.holdSetIds || []).map(id => holdsets.find(h => h.id === id)?.name).filter(Boolean)
+          const tituloBase = b.tested ? 'Forerun hecho — toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa' : 'Toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa'
+          return (
           <div
             key={b.id}
             className={`org__comp-bubble${b.tested ? ' org__comp-bubble--tested' : ''}`}
             style={{ left: `${b.xPct}%`, top: `${b.yPct}%`, borderColor: b.grade ? (GRADE_COLOR[b.grade] || '#fff') : undefined }}
             onPointerDown={startDrag(b.id)}
             onDoubleClick={() => unplace(b.id)}
-            title={b.tested ? 'Forerun hecho — toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa' : 'Toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa'}
+            title={presasBurbuja.length ? `Presas: ${presasBurbuja.join(', ')} — ${tituloBase}` : tituloBase}
           >
             {b.number}
             {b.tested && <span className="org__comp-bubble__tested-mark" aria-hidden="true">✓</span>}
           </div>
-        ))}
+          )
+        })}
         {trayDrag && (
           <div className="org__comp-bubble org__comp-bubble--ghost" style={{ left: `${trayDrag.x}%`, top: `${trayDrag.y}%` }}>
             {blocks.find(b => b.id === trayDrag.id)?.number}
@@ -3458,6 +3480,38 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
   const [photoUrl, setPhotoUrl] = useState(block.photoUrl || '')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
+  // 23/11 17:15, punto 2: lista de presas en orden alfabético con buscador, en vez de los 58
+  // chips siempre en el mismo orden sin forma de filtrar.
+  const [buscarHoldset, setBuscarHoldset] = useState('')
+  const holdsetsOrdenados = useMemo(
+    () => [...holdsets].sort((a, b) => a.name.localeCompare(b.name)),
+    [holdsets]
+  )
+  const holdsetsFiltrados = useMemo(() => {
+    const q = buscarHoldset.trim().toLowerCase()
+    return q ? holdsetsOrdenados.filter(h => h.name.toLowerCase().includes(q)) : holdsetsOrdenados
+  }, [holdsetsOrdenados, buscarHoldset])
+  // Punto 4: propuesta de presas sacada de "PRESAS: …" en Volúmenes (dato escrito a mano por
+  // Álvaro antes de que existiera el selector), para corregir los bloques con presas mal
+  // apuntadas sin tocar ni borrar ese texto — Álvaro confirma bloque a bloque, nunca se aplica
+  // sola (solo rellena la selección sin guardar).
+  const presasSugeridas = useMemo(() => {
+    const m = /PRESAS:\s*([^\n]+)/i.exec(block.volumes || '')
+    if (!m) return null
+    const nombresSugeridos = m[1].split(',').map(s => s.trim()).filter(Boolean)
+    if (!nombresSugeridos.length) return null
+    const ids = []
+    const sinMatch = []
+    nombresSugeridos.forEach(n => {
+      const h = holdsets.find(h => h.name.toLowerCase() === n.toLowerCase())
+      if (h) ids.push(h.id); else sinMatch.push(n)
+    })
+    if (!ids.length) return null
+    return { ids, sinMatch }
+  }, [block.volumes, holdsets])
+  const presasSugeridasAplicadas = !!presasSugeridas
+    && presasSugeridas.ids.length === holdSetIds.length
+    && presasSugeridas.ids.every(id => holdSetIds.includes(id))
   // Ramiro 19/11: "añadir un botón para meter un color y forma de presa mediante descripción
   // que no esté aún añadida" — Álvaro da de alta el juego de presas nuevo sin pedírselo a nadie.
   const [nuevoHoldset, setNuevoHoldset] = useState(false)
@@ -3613,10 +3667,44 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
       </div>
       <div className="org__add-row org__add-row--holdsets">
         <label>Juego(s) de presas</label>
-        <div className="org__holdset-chips">
-          {holdsets.map(h => (
-            <button key={h.id} type="button" className={`org__holdset-chip${holdSetIds.includes(h.id) ? ' org__holdset-chip--on' : ''}`} onClick={() => toggleHoldSet(h.id)}>{h.name}</button>
+        {presasSugeridas && !presasSugeridasAplicadas && (
+          <p className="org__holdset-sugerencia">
+            Según «Volúmenes» («PRESAS: …»), este bloque debería llevar{' '}
+            <strong>{presasSugeridas.ids.map(id => holdsets.find(h => h.id === id)?.name).join(', ')}</strong>
+            {presasSugeridas.sinMatch.length > 0 && <> (no encontrado en la lista: {presasSugeridas.sinMatch.join(', ')})</>}.
+            {' '}
+            <button type="button" className="org__link-btn" onClick={() => setHoldSetIds(presasSugeridas.ids)}>Usar esta selección</button>
+          </p>
+        )}
+        {holdSetIds.length > 0 && (
+          <p className="org__holdset-lleva">
+            Lleva:{' '}
+            {holdSetIds.map(id => {
+              const nombre = holdsets.find(h => h.id === id)?.name || `#${id}`
+              return (
+                <span key={id} className="org__holdset-lleva-item">
+                  {nombre}
+                  <button type="button" onClick={() => toggleHoldSet(id)} aria-label={`Quitar ${nombre}`}>✕</button>
+                </span>
+              )
+            })}
+          </p>
+        )}
+        <input
+          type="text" className="org__holdset-buscador" value={buscarHoldset}
+          onChange={e => setBuscarHoldset(e.target.value)}
+          placeholder="Buscar juego de presas…"
+        />
+        <div className="org__holdset-chips org__ficha-holdsets">
+          {holdsetsFiltrados.map(h => (
+            <button
+              key={h.id} type="button"
+              className={`org__holdset-chip${holdSetIds.includes(h.id) ? ' org__holdset-chip--on' : ''}`}
+              aria-pressed={holdSetIds.includes(h.id)}
+              onClick={() => toggleHoldSet(h.id)}
+            >{h.name}</button>
           ))}
+          {holdsetsFiltrados.length === 0 && <span className="org__hint">Ningún juego de presas coincide con «{buscarHoldset}».</span>}
           {holdsetsError && <span className="org__hint">No se ha podido cargar ningún juego de presas — recarga la página.</span>}
         </div>
         {nuevoHoldset ? (
