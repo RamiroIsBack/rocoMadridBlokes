@@ -9,6 +9,7 @@ import {
   typeLabel, hasBase, sortByType,
 } from '../hooks/useOvertime'
 import RemittanceImport from './RemittanceImport'
+import GestoriaReview from './GestoriaReview'
 import PartialPayment from './PartialPayment'
 import { todayISO, currentMonth, shiftMonth, monthLabel, monthShort, fmtDate, fmtHours, fmtEur } from '../utils/monthFormat'
 import { useHorarios } from '../hooks/useDiario'
@@ -812,6 +813,7 @@ export default function PayrollSection() {
   const [showRemesa, setShowRemesa] = useState(false)
   const [showPartial, setShowPartial] = useState(false)
   const [showMover, setShowMover] = useState(false)
+  const [showGestoria, setShowGestoria] = useState(false)
   const cardPeople   = sortByType(people.filter(p => p.active || rows.some(r => r.id === p.id)))
   const rowById      = Object.fromEntries(rows.map(r => [r.id, r]))
   const selPerson    = selected ? byId[selected] : null
@@ -936,6 +938,11 @@ export default function PayrollSection() {
           <h2 className="sa-section-title">Nóminas</h2>
           <div className="sa-header-controls">
             {data && (
+              <button className="sa-pay-action sa-pay-print" onClick={() => setShowGestoria(s => !s)} title="Compara lo que va a pagar la gestoría con lo pactado, sin marcar nada">
+                🔍 Revisar nóminas de la gestoría
+              </button>
+            )}
+            {data && (
               <button className="sa-pay-action sa-pay-print" onClick={() => setShowRemesa(s => !s)}>
                 ⬆ Cargar remesa (PDF)
               </button>
@@ -965,6 +972,12 @@ export default function PayrollSection() {
           : error ? <p className="sa-error">Error: {error}</p>
           : (
             <>
+              {showGestoria && (
+                <GestoriaReview
+                  key={month} month={month} people={people} personal={personal} config={data.config}
+                  onConfigSaved={refreshAll} onClose={() => setShowGestoria(false)}
+                />
+              )}
               {showMover && (
                 <MoverPagos
                   key={month} month={month} rows={rows}
