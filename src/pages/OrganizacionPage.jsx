@@ -3465,6 +3465,39 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
   )
 }
 
+// 23/11 17:45 (cowork: "el asistente solo propone en 7 de los 18 bloques, busca el nombre
+// exacto"): normaliza un trozo de texto de presas para comparar sin tildes, mayúsculas,
+// paréntesis ni plurales simples — "Azules BS (asas)" y "Azules BS" deben dar lo mismo que
+// "Turquesa" y "Turquesas".
+function singularizarPalabra(p) {
+  if (p.length > 4 && /[^aeiou]es$/.test(p)) return p.slice(0, -2) // azules -> azul
+  if (p.length > 3 && /[aeiou]s$/.test(p)) return p.slice(0, -1) // turquesas -> turquesa, rosas -> rosa
+  return p
+}
+function normalizarPresa(s) {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+    .map(singularizarPalabra)
+    .join(' ')
+}
+// Compara por conjunto de palabras en vez de texto exacto, para que "Chorreras BS" encuentre
+// "Chorreras azules BS" (subconjunto de palabras en cualquiera de los dos sentidos) — se marca
+// como "¿es esta?" porque no es una coincidencia exacta.
+function presaCoincideAproximada(segNorm, nombreNorm) {
+  const segWords = segNorm.split(' ').filter(Boolean)
+  const nombreWords = nombreNorm.split(' ').filter(Boolean)
+  if (!segWords.length || !nombreWords.length) return false
+  const nombreSet = new Set(nombreWords)
+  const segSet = new Set(segWords)
+  return segWords.every(w => nombreSet.has(w)) || nombreWords.every(w => segSet.has(w))
+}
+
 // Ficha de un bloque de compe: subzona, color, presas, volúmenes, equipador, foto (subida
 // desde el móvil) y probado sí/no — Álvaro la rellena tocando una burbuja del mapa (Ramiro,
 // 1/11 17:20).
@@ -3495,23 +3528,45 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
   // Álvaro antes de que existiera el selector), para corregir los bloques con presas mal
   // apuntadas sin tocar ni borrar ese texto — Álvaro confirma bloque a bloque, nunca se aplica
   // sola (solo rellena la selección sin guardar).
+  // 23/11 17:45: solo encontraba 7 de 18 bloques porque comparaba el texto exacto. Ahora separa
+  // también por «+»/«/», compara sin tildes/mayúsculas/plurales/paréntesis (coincidencia exacta
+  // normalizada → se propone directo) y, si no hay exacta, por subconjunto de palabras
+  // («Chorreras BS» ⊆ «Chorreras azules BS») → se marca como «¿es esta?», nunca se aplica sola.
   const presasSugeridas = useMemo(() => {
     const m = /PRESAS:\s*([^\n]+)/i.exec(block.volumes || '')
     if (!m) return null
-    const nombresSugeridos = m[1].split(',').map(s => s.trim()).filter(Boolean)
-    if (!nombresSugeridos.length) return null
-    const ids = []
+    const segmentos = m[1].split(/[,+/]/).map(s => s.trim()).filter(Boolean)
+    if (!segmentos.length) return null
+    const confirmados = []
+    const dudosos = []
     const sinMatch = []
-    nombresSugeridos.forEach(n => {
-      const h = holdsets.find(h => h.name.toLowerCase() === n.toLowerCase())
-      if (h) ids.push(h.id); else sinMatch.push(n)
+    segmentos.forEach(seg => {
+      const segNorm = normalizarPresa(seg)
+      if (!segNorm) return
+      const exacto = holdsets.find(h => normalizarPresa(h.name) === segNorm)
+      if (exacto) { confirmados.push({ original: seg, id: exacto.id, nombre: exacto.name }); return }
+      const aproximado = holdsets.find(h => presaCoincideAproximada(segNorm, normalizarPresa(h.name)))
+      if (aproximado) { dudosos.push({ original: seg, id: aproximado.id, nombre: aproximado.name }); return }
+      sinMatch.push(seg)
     })
-    if (!ids.length) return null
-    return { ids, sinMatch }
+    if (!confirmados.length && !dudosos.length && !sinMatch.length) return null
+    return { confirmados, dudosos, sinMatch }
   }, [block.volumes, holdsets])
-  const presasSugeridasAplicadas = !!presasSugeridas
-    && presasSugeridas.ids.length === holdSetIds.length
-    && presasSugeridas.ids.every(id => holdSetIds.includes(id))
+  const [dudososDescartados, setDudososDescartados] = useState(() => new Set())
+  const confirmadosPendientes = (presasSugeridas?.confirmados || []).filter(c => !holdSetIds.includes(c.id))
+  const dudososPendientes = (presasSugeridas?.dudosos || []).filter(d => !holdSetIds.includes(d.id) && !dudososDescartados.has(d.original))
+  const [creandoDesdeSugerencia, setCreandoDesdeSugerencia] = useState(null)
+  const crearYSeleccionarNombrado = async nombre => {
+    setCreandoDesdeSugerencia(nombre)
+    try {
+      const id = await onCreateHoldset(nombre)
+      setHoldSetIds(ids => ids.includes(id) ? ids : [...ids, id])
+    } catch (e) {
+      showToast(e.message || 'No se ha podido crear el juego de presas.')
+    } finally {
+      setCreandoDesdeSugerencia(null)
+    }
+  }
   // Ramiro 19/11: "añadir un botón para meter un color y forma de presa mediante descripción
   // que no esté aún añadida" — Álvaro da de alta el juego de presas nuevo sin pedírselo a nadie.
   const [nuevoHoldset, setNuevoHoldset] = useState(false)
@@ -3667,14 +3722,31 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
       </div>
       <div className="org__add-row org__add-row--holdsets">
         <label>Juego(s) de presas</label>
-        {presasSugeridas && !presasSugeridasAplicadas && (
-          <p className="org__holdset-sugerencia">
-            Según «Volúmenes» («PRESAS: …»), este bloque debería llevar{' '}
-            <strong>{presasSugeridas.ids.map(id => holdsets.find(h => h.id === id)?.name).join(', ')}</strong>
-            {presasSugeridas.sinMatch.length > 0 && <> (no encontrado en la lista: {presasSugeridas.sinMatch.join(', ')})</>}.
-            {' '}
-            <button type="button" className="org__link-btn" onClick={() => setHoldSetIds(presasSugeridas.ids)}>Usar esta selección</button>
-          </p>
+        {presasSugeridas && (confirmadosPendientes.length > 0 || dudososPendientes.length > 0 || presasSugeridas.sinMatch.length > 0) && (
+          <div className="org__holdset-sugerencia">
+            <p style={{ margin: '0 0 4px' }}>Según «Volúmenes» («PRESAS: …»):</p>
+            {confirmadosPendientes.length > 0 && (
+              <p style={{ margin: '0 0 4px' }}>
+                Debería llevar <strong>{confirmadosPendientes.map(c => c.nombre).join(', ')}</strong>.{' '}
+                <button type="button" className="org__link-btn" onClick={() => setHoldSetIds(ids => [...new Set([...ids, ...confirmadosPendientes.map(c => c.id)])])}>Usar esta selección</button>
+              </p>
+            )}
+            {dudososPendientes.map(d => (
+              <p key={d.original} style={{ margin: '0 0 4px' }}>
+                «{d.original}» → ¿es esta? <strong>{d.nombre}</strong>{' '}
+                <button type="button" className="org__link-btn" onClick={() => setHoldSetIds(ids => ids.includes(d.id) ? ids : [...ids, d.id])}>Sí, usar</button>{' '}
+                <button type="button" className="org__link-btn" onClick={() => setDudososDescartados(s => new Set([...s, d.original]))}>No</button>
+              </p>
+            ))}
+            {presasSugeridas.sinMatch.map(nombre => (
+              <p key={nombre} style={{ margin: '0 0 4px' }}>
+                No encontrado en la lista: «{nombre}».{' '}
+                <button type="button" className="org__link-btn" onClick={() => crearYSeleccionarNombrado(nombre)} disabled={creandoDesdeSugerencia === nombre}>
+                  {creandoDesdeSugerencia === nombre ? 'Creando…' : `Crear "${nombre}" y seleccionarlo`}
+                </button>
+              </p>
+            ))}
+          </div>
         )}
         {holdSetIds.length > 0 && (
           <p className="org__holdset-lleva">

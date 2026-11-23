@@ -1998,17 +1998,29 @@ function superadmin_get_expenses($request) {
         $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0; $nom_con_voluntarios = 0;
         $row_concepto  = array(); // expense concept totals for this entity-month
         $row_ingresos  = array(); // income items for this entity-month
+        // 23/11 17:35: traspasos "Uso de Rocódromo" de este mes (Club: sale, negativo; Rocoteca:
+        // entra, positivo) — igual que blokes_expenses_cuadre() pero mes a mes, para que el
+        // frontend pueda construir el saldo acumulado real (apertura + Σ neto − Σ traspasos) sin
+        // tener que sumar todo el año de golpe. Se calcula SIEMPRE, independiente de
+        // exclude_internal (el saldo del banco se mueve con el traspaso pase lo que pase con ese
+        // filtro, que solo decide qué se ve en las barras de gastos/ingresos).
+        $traspasos_salida_mes = 0.0; $traspasos_entrada_mes = 0.0;
         foreach ($saved['items'] as $item) {
             $concepto_norm = function_exists('iconv')
                 ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
                 : strtolower($item['concepto'] ?? '');
+            $es_rocodromo = strpos($concepto_norm, 'rocodromo') !== false;
+            if ($es_rocodromo) {
+                $amt_r = abs(floatval($item['importe'] ?? 0));
+                if (($item['section'] ?? 'costes') === 'costes') $traspasos_salida_mes += $amt_r; else $traspasos_entrada_mes += $amt_r;
+            }
             // "Uso de Rocódromo" (Club → Rocoteca) NUNCA es gasto/ingreso real, en ninguna vista
             // (Ramiro, 15/11 11:00, anula el 10:55: los gastos de la Rocoteca de ese dinero YA
             // se contabilizan en la Rocoteca — contarlo también como gasto del Club sería
             // contarlo dos veces). Solo se ve aparte, como traspaso, en el cuadre de saldo del
             // Club (blokes_expenses_cuadre_club), nunca aquí en "gastos".
             $is_internal = $item['excluded']
-                || strpos($concepto_norm, 'rocodromo') !== false
+                || $es_rocodromo
                 || strpos($concepto_norm, 'transferencia entre cuentas') !== false;
             if ($exclude_internal && $is_internal) continue;
             $amt  = abs(floatval($item['importe']));
@@ -2070,6 +2082,7 @@ function superadmin_get_expenses($request) {
                 ? (abs($nom_con_voluntarios - $nominas_real) > 50) : false,
             'by_concepto'     => $row_concepto,
             'ingresos_items'  => $row_ingresos,
+            'traspasos_rocodromo' => round($traspasos_entrada_mes - $traspasos_salida_mes, 2),
         );
     }
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import {
   BarChart, Bar, ComposedChart, Line, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
 } from 'recharts'
 import { parseExpensesCSV, CATEGORIES, CATEGORY_IVA, autoCategory, detectClubCaixaFormat } from '../utils/expensesParser'
 import { useExpenses, gestionExpenseSendersGet, gestionExpenseSenderSet, gestionExpenseVariacionesGet, gestionExpenseVariacionSet } from '../hooks/useSuperAdmin'
@@ -14,6 +14,22 @@ const IVA_RATES = [0, 4, 10, 21]
 
 function fmtEur(v) {
   return `${Math.abs(Number(v)).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €`
+}
+// 23/11 17:35, punto 4: fmtEur() siempre quita el signo (Math.abs) — para el tooltip del
+// "Resultado neto mensual", que sí necesita mostrar el signo de verdad, se añadía un "-" a mano
+// delante y salía doble. En vez de mezclar los dos, un formateador que deja que toLocaleString
+// ponga su propio signo (nunca se le añade otro a mano).
+function fmtEurSigned(v) {
+  return `${Number(v).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €`
+}
+// 23/11 17:35, punto 3: marca visible en la propia línea para el mes en curso (parcial), no
+// solo en el tooltip — un punto hueco en vez del habitual dot={false}.
+function dotParcial(color) {
+  return props => {
+    const { cx, cy, payload } = props
+    if (!payload?.parcial) return null
+    return <circle cx={cx} cy={cy} r={4} fill="none" stroke={color} strokeWidth={2} strokeDasharray="2 2" />
+  }
 }
 function fmtMonth(m) {
   if (!m) return ''
@@ -645,7 +661,7 @@ function HistoryView({ period, onDeleted }) {
     return next
   })
   const effectiveExclude = excludeInternal
-  const { data, breakdown, saldoReal, loading, error } = useExpenses(from, entity, effectiveExclude)
+  const { data, breakdown, saldoReal, cuadre, cuadreRocoteca, loading, error } = useExpenses(from, entity, effectiveExclude)
 
   const handleDelete = async (month, ent) => {
     const key = `${month}·${ent}`
@@ -671,9 +687,15 @@ function HistoryView({ period, onDeleted }) {
     if (!data) return []
     const acc = {}
     data.forEach(r => {
-      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, iva_r_real: 0, nominas: 0, nominas_real: null, nominas_descuadre: false, ss: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {}, ingresos_items: [] }
+      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, iva_r_real: 0, nominas: 0, nominas_real: null, nominas_descuadre: false, ss: 0, traspasos: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {}, ingresos_items: [] }
       acc[r.month].costes   += Math.abs(r.total_costes    || 0)
       acc[r.month].ingresos += Math.abs(r.total_ingresos  || 0)
+      // 23/11 17:35: traspasos "Uso de Rocódromo" de este mes — SIEMPRE se suman (al margen del
+      // filtro "Movimientos internos"), hacen falta para el saldo acumulado real. Con «Todos»,
+      // lo que sale del Club (negativo) y lo que entra en la Rocoteca (positivo) por el MISMO
+      // traspaso se cancelan al sumar las dos filas de ese mes — correcto, es dinero que no sale
+      // del conjunto.
+      acc[r.month].traspasos += (r.traspasos_rocodromo || 0)
       acc[r.month].iva_s    += Math.abs(r.iva_soportado   || 0)
       acc[r.month].iva_r    += Math.abs(r.iva_repercutido || 0)
       acc[r.month].iva_r_real += Math.abs(r.iva_repercutido_real || 0)
@@ -703,14 +725,43 @@ function HistoryView({ period, onDeleted }) {
     return Object.values(acc).sort((a, b) => a.month.localeCompare(b.month))
   }, [data])
 
+  // 23/11 17:35: apertura/saldo real de la cuenta seleccionada en el selector de arriba (Club,
+  // Rocoteca o Todos — suma de las dos, solo si las dos tienen apertura puesta; si no, null, en
+  // vez de fingir un saldo con solo la mitad de los datos).
+  const entityApertura = entity === 'club' ? (cuadre?.apertura ?? null)
+    : entity === 'rocoteca' ? (cuadreRocoteca?.apertura ?? null)
+    : (cuadre?.apertura != null && cuadreRocoteca?.apertura != null) ? cuadre.apertura + cuadreRocoteca.apertura : null
+  const entitySaldoHoy = entity === 'club' ? (cuadre?.saldoHoy ?? null)
+    : entity === 'rocoteca' ? (cuadreRocoteca?.saldoHoy ?? null)
+    : (cuadre?.saldoHoy != null && cuadreRocoteca?.saldoHoy != null) ? cuadre.saldoHoy + cuadreRocoteca.saldoHoy : null
+  const entityFechaApertura = entity === 'rocoteca' ? cuadreRocoteca?.fechaApertura : cuadre?.fechaApertura
+
+  // Mes en curso, para marcarlo como parcial (punto 3) — nunca hardcodeado a "noviembre",
+  // funciona igual el mes que sea.
+  const currentMonthStr = useMemo(() => new Date().toISOString().slice(0, 7), [])
+
   const netData = useMemo(() => {
-    let cum = 0
+    // Línea principal: saldo acumulado REAL (lo que de verdad queda en el banco), no un
+    // resultado operativo suelto — apertura + Σ neto − Σ traspasos al Rocódromo, mes a mes
+    // (Ramiro, 23/11 17:35: antes sumaba solo el neto, sin restar los traspasos, así que llegaba
+    // a ≈49.568 € en el Club cuando en el banco hay ≈13.661 €). Si falta la apertura de esta
+    // vista, no se puede calcular un saldo real — se deja en null (sin fingir un punto de
+    // partida) y se avisa debajo del gráfico.
+    let cum = entityApertura ?? 0
+    let cumSinTraspasos = entityApertura ?? 0
     return byMonth.map(r => {
       const net = r.ingresos - r.costes
-      cum += net
-      return { month: fmtMonth(r.month), net: Math.round(net), acumulado: Math.round(cum) }
+      cum += net - (r.traspasos || 0)
+      cumSinTraspasos += net
+      return {
+        month: fmtMonth(r.month),
+        net: Math.round(net),
+        acumulado: entityApertura != null ? Math.round(cum) : null,
+        acumuladoSinTraspasos: Math.round(cumSinTraspasos),
+        parcial: r.month === currentMonthStr,
+      }
     })
-  }, [byMonth])
+  }, [byMonth, entityApertura, currentMonthStr])
 
   const nominasData = useMemo(() =>
     byMonth.map(r => ({
@@ -884,7 +935,7 @@ function HistoryView({ period, onDeleted }) {
       {netData.length > 0 && (
         <>
           <p className="exp-chart-title" style={{ marginTop: 16 }}>Resultado neto mensual (ingresos − gastos)</p>
-          <ResponsiveContainer width="100%" height={180}>
+          <ResponsiveContainer width="100%" height={200}>
             <ComposedChart data={netData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
               <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
@@ -892,16 +943,17 @@ function HistoryView({ period, onDeleted }) {
               <Tooltip
                     content={({ active, payload, label }) => {
                   if (!active || !payload?.length) return null
+                  const LABELS = { net: 'Neto mes', acumulado: 'Saldo acumulado (banco)', acumuladoSinTraspasos: 'Resultado acumulado (sin traspasos)' }
+                  const esParcial = payload[0]?.payload?.parcial
                   return (
                     <div style={{ background: '#1b1710', border: '1px solid #3a3020', borderRadius: 6, padding: '8px 12px', fontSize: 12 }}>
-                      <p style={{ color: '#f5c842', margin: '0 0 6px', fontWeight: 700 }}>{label}</p>
+                      <p style={{ color: '#f5c842', margin: '0 0 6px', fontWeight: 700 }}>{label}{esParcial ? ' (parcial)' : ''}</p>
                       {payload.map(p => {
-                        const isNeg = p.value < 0
-                        const color = isNeg ? '#ef4444' : (p.dataKey === 'acumulado' ? '#f5c842' : '#c8a87a')
-                        const display = `${isNeg ? '-' : ''}${fmtEur(p.value)}`
+                        if (p.value == null) return null
+                        const color = p.dataKey === 'net' ? (p.value < 0 ? '#ef4444' : '#c8a87a') : p.dataKey === 'acumulado' ? '#f5c842' : '#c8a87a'
                         return (
                           <p key={p.dataKey} style={{ color, margin: '2px 0' }}>
-                            {p.dataKey === 'net' ? 'Neto mes' : 'Acumulado'}: {display}
+                            {LABELS[p.dataKey] || p.dataKey}: {fmtEurSigned(p.value)}
                           </p>
                         )
                       })}
@@ -909,15 +961,32 @@ function HistoryView({ period, onDeleted }) {
                   )
                 }}
               />
-              <Legend formatter={k => k === 'net' ? 'Neto mes' : 'Acumulado'} />
-              <Bar dataKey="net" fill="#c8a87a" radius={[3, 3, 0, 0]}>
+              <Legend formatter={k => ({ net: 'Neto mes', acumulado: 'Saldo acumulado (banco)', acumuladoSinTraspasos: 'Resultado (sin traspasos)' }[k] || k)} />
+              <Bar dataKey="net" radius={[3, 3, 0, 0]}>
                 {netData.map((e, i) => (
-                  <Cell key={i} fill={e.net >= 0 ? '#c8a87a' : '#7c5c3e'} />
+                  <Cell key={i} fill={e.net >= 0 ? '#c8a87a' : '#7c5c3e'} opacity={e.parcial ? 0.55 : 1} />
                 ))}
               </Bar>
-              <Line type="monotone" dataKey="acumulado" stroke="#f5c842" strokeWidth={2} dot={false} />
+              {/* Punto 2: línea secundaria discontinua, sin traspasos — nunca como la principal. */}
+              <Line type="monotone" dataKey="acumuladoSinTraspasos" stroke="#8a7355" strokeWidth={1.5} strokeDasharray="5 5" dot={dotParcial('#8a7355')} />
+              {/* Línea principal: saldo acumulado real (apertura + Σ neto − Σ traspasos). */}
+              <Line type="monotone" dataKey="acumulado" stroke="#f5c842" strokeWidth={2} dot={dotParcial('#f5c842')} connectNulls />
+              {entitySaldoHoy != null && (
+                <ReferenceLine
+                  y={entitySaldoHoy}
+                  stroke="#60a5fa"
+                  strokeDasharray="4 4"
+                  label={{ value: `Banco: ${fmtEur(entitySaldoHoy)}`, position: 'insideBottomRight', fill: '#60a5fa', fontSize: 10 }}
+                />
+              )}
             </ComposedChart>
           </ResponsiveContainer>
+          <p className="exp-hint" style={{ fontSize: '0.75rem' }}>
+            {entityApertura == null
+              ? <>Falta el saldo de apertura a 1/1 (se pone en <strong>P&L</strong>) para calcular el saldo acumulado real — de momento solo se ve el resultado sin traspasos (línea discontinua).</>
+              : <>Saldo acumulado (banco) = apertura{entityFechaApertura ? ` (${entityFechaApertura.slice(8,10)}/${entityFechaApertura.slice(5,7)}/${entityFechaApertura.slice(0,4)})` : ''} + Σ neto − traspasos al Rocódromo. Línea azul: saldo real del banco hoy.</>}
+            {' '}El mes en curso tiene barra y punto más claros — datos parciales, no el mes cerrado.
+          </p>
         </>
       )}
 
