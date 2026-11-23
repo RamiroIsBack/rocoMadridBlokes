@@ -450,11 +450,7 @@ export default function App() {
                   <NavLink to="/eventos" className="app-nav__link">Eventos</NavLink>
                 </li>
               )}
-              {sd.userRole === 'socio' && (
-                <li className="app-nav__item">
-                  <NavLink to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</NavLink>
-                </li>
-              )}
+              {/* Gestión (23/11, orden de Álvaro): Supervisión → Horarios Profes → Superadmin → Cherifs */}
               {['gestion', 'socio'].includes(sd.userRole) && (
                 <li className="app-nav__item">
                   <NavLink to="/supervision" className="app-nav__link app-nav__link--super">Supervisión</NavLink>
@@ -470,6 +466,11 @@ export default function App() {
               {sd.userRole === 'socio' && (
                 <li className="app-nav__item">
                   <NavLink to="/playground" className="app-nav__link app-nav__link--super">Horarios Profes</NavLink>
+                </li>
+              )}
+              {sd.userRole === 'socio' && (
+                <li className="app-nav__item">
+                  <NavLink to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</NavLink>
                 </li>
               )}
               {sd.userRole === 'socio' && (
