@@ -6,12 +6,41 @@ import { useHorarios, createHorario, updateHorario, deleteHorario, importHorario
 // de la semana, como el tablero de Notion. Socio y gestión lo cambian; el resto lo ve.
 
 const DIAS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+const LETRAS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
+// En el cronograma no se ponen «Clase» a mano: salen solas del Horario de clases (23/11)
 const TIPOS = {
-  cronograma: ['Clase', 'Equipamiento', 'Recepción', 'Otro'],
+  cronograma: ['Equipamiento', 'Recepción', 'Otro'],
   clases:     ['Adultos', 'Infantil', 'Pilates', 'Yoga'],
 }
+
+const aMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m }
+// Las clases de cada profe en cada día, juntando las seguidas (hueco de 1 h o menos) en una
+// sola franja «Clase» del cronograma: así el cronograma nunca se desincroniza del horario.
+export function clasesComoCronograma(items) {
+  const grupos = {}
+  items.filter(it => it.board === 'clases').forEach(it => {
+    const k = `${it.day}|${it.person}`
+    ;(grupos[k] = grupos[k] || []).push(it)
+  })
+  const out = []
+  Object.values(grupos).forEach(lista => {
+    lista.sort((a, b) => a.start.localeCompare(b.start))
+    let cur = null
+    lista.forEach(it => {
+      if (cur && aMin(it.start) <= aMin(cur.end) + 60) {
+        if (it.end > cur.end) cur.end = it.end
+        cur.n++
+      } else {
+        if (cur) out.push(cur)
+        cur = { id: `auto-${it.day}-${it.person}-${it.start}`, board: 'cronograma', day: it.day, start: it.start, end: it.end, person: it.person, kind: 'Clase', auto: true, n: 1 }
+      }
+    })
+    if (cur) out.push(cur)
+  })
+  return out
+}
 const BOARDS = [
-  { id: 'cronograma', label: 'Cronograma', hint: 'Quién está en el Roco y haciendo qué' },
+  { id: 'cronograma', label: 'Cronograma', hint: 'Quién está en el Roco y haciendo qué (las clases salen solas del horario de clases)' },
   { id: 'clases',     label: 'Horario de clases', hint: 'Cada clase con su profe' },
 ]
 
@@ -33,7 +62,9 @@ function HorarioForm({ board, day, initial, nombres, onClose, onSaved }) {
   })
   const [busy, setBusy]   = useState(false)
   const [error, setError] = useState('')
+  const [copias, setCopias] = useState([])   // «Copiar también a…»: otros días con el mismo bloque
   const set = (k, v) => setF(x => ({ ...x, [k]: v }))
+  const toggleCopia = i => setCopias(c => c.includes(i) ? c.filter(x => x !== i) : [...c, i])
   const submit = async e => {
     e.preventDefault()
     setBusy(true); setError('')
@@ -41,6 +72,7 @@ function HorarioForm({ board, day, initial, nombres, onClose, onSaved }) {
       const body = { ...f, day: Number(f.day), board }
       if (initial) await updateHorario(initial.id, body)
       else await createHorario(body)
+      for (const d of copias) await createHorario({ ...body, day: d })
       onSaved()
     } catch (err) { setError(err.message); setBusy(false) }
   }
@@ -67,6 +99,15 @@ function HorarioForm({ board, day, initial, nombres, onClose, onSaved }) {
         </select>
       </div>
       <input className="dash-input" placeholder="Nota (opcional)" maxLength={255} value={f.note} onChange={e => set('note', e.target.value)} />
+      <div className="hor-copias">
+        <span>Copiar también a</span>
+        {DIAS.map((d, i) => i !== Number(f.day) && (
+          <label key={d} className={`hor-copia${copias.includes(i) ? ' hor-copia--on' : ''}`} title={d}>
+            <input type="checkbox" checked={copias.includes(i)} onChange={() => toggleCopia(i)} />
+            {LETRAS[i]}
+          </label>
+        ))}
+      </div>
       {error && <p className="dash-error">{error}</p>}
       <div className="dash-form__actions">
         <button className="dash-btn dash-btn--primary" disabled={busy}>{busy ? '…' : 'Guardar'}</button>
@@ -115,16 +156,24 @@ export default function DiarioHorarios({ nombres = [] }) {
   const canEdit = !!data?.can_edit
   const hoy = hoyIdx()
 
+  // Cronograma = lo puesto a mano (Equipamiento, Recepción, Otro) + las clases, que salen solas
+  // del Horario de clases. Las «Clase» que entraron a mano con la importación de Notion ya no
+  // se usan (el horario de clases manda).
+  const cronoItems = useMemo(() => [
+    ...items.filter(it => it.board === 'cronograma' && it.kind !== 'Clase'),
+    ...clasesComoCronograma(items),
+  ], [items])
+
   // Ahora en el Roco: lo del cronograma de hoy que está pasando en este momento
   const ahora = useMemo(() => {
     const t = ahoraHHMM()
-    const deHoy = items.filter(it => it.board === 'cronograma' && it.day === hoy)
+    const deHoy = cronoItems.filter(it => it.day === hoy)
     const ya = deHoy.filter(it => it.start <= t && t < it.end)
     const prox = deHoy.filter(it => it.start > t).sort((a, b) => a.start.localeCompare(b.start))[0]
     return { ya, prox }
-  }, [items, hoy])
+  }, [cronoItems, hoy])
 
-  const delBoard = items.filter(it => it.board === board)
+  const delBoard = board === 'cronograma' ? cronoItems : items.filter(it => it.board === board)
   const dias = DIAS.map((nombre, i) => ({ i, nombre, its: delBoard.filter(it => it.day === i).sort((a, b) => a.start.localeCompare(b.start) || a.person.localeCompare(b.person)) }))
     .filter(d => d.i < 5 || d.its.length > 0)
   const todosNombres = [...new Set([...nombres, ...items.map(it => it.person)])].sort()
@@ -173,14 +222,17 @@ export default function DiarioHorarios({ nombres = [] }) {
               editando?.id === it.id ? (
                 <HorarioForm key={it.id} board={board} initial={it} nombres={todosNombres} onClose={() => setEditando(null)} onSaved={guardado} />
               ) : (
-                <button key={it.id} type="button" className={`hor-card hor-card--${board}`} disabled={!canEdit}
+                <button key={it.id} type="button" className={`hor-card hor-card--${board}${it.auto ? ' hor-card--auto' : ''}`}
+                  disabled={!canEdit && !it.auto}
+                  title={it.auto ? 'Sale solo del Horario de clases: cámbialo allí' : undefined}
                   style={board === 'clases' ? { background: colorDe(it.person) } : undefined}
-                  onClick={() => canEdit && setEditando(it)}>
+                  onClick={() => it.auto ? setBoard('clases') : canEdit && setEditando(it)}>
                   <span className="hor-card__quien">{it.person}</span>
                   {board === 'cronograma' && it.kind && <span className={`hor-tag hor-tag--${it.kind.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')}`}>{it.kind}</span>}
                   {board === 'clases' && it.kind && <span className="hor-card__tipo">{it.kind}</span>}
                   <span className="hor-card__hora">{it.start.replace(/^0/, '')}–{it.end.replace(/^0/, '')}</span>
                   {it.note && <span className="hor-card__nota">{it.note}</span>}
+                  {it.auto && <span className="hor-card__nota">del horario de clases{it.n > 1 ? ` · ${it.n} clases` : ''}</span>}
                 </button>
               )
             ))}
