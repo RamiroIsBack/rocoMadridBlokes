@@ -4,7 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 import {
-  usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence, movePayrollPayments,
+  usePayroll, usePayrollHistory, savePayrollConfig, savePayrollPersonal, setOvertimeStatus, setPayrollAbsence, movePayrollPayments, editPayrollOvertime,
   setPayrollPayment, setPayrollCash, deletePayrollPartial, addPayrollPartial,
   typeLabel, hasBase, sortByType,
 } from '../hooks/useOvertime'
@@ -825,6 +825,17 @@ export default function PayrollSection() {
     .filter(r => !selected || r.id === selected)
     .filter(r => payFilter === 'all' || (payFilter === 'pending' ? isPending(r) : isPaid(r)))
   const shownEntries = selected ? entries.filter(e => e.professor === selected) : entries
+  // ✎ en el detalle de horas extra (23/11): horas y €/h puntual de una línea
+  const rates = data?.config?.rates || {}
+  const [editEntry, setEditEntry] = useState(null)   // { id, hours, rate }
+  const guardarEntry = e => run(async () => {
+    const body = {}
+    if (parseFloat(editEntry.hours) !== e.hours) body.hours = parseFloat(editEntry.hours)
+    const nuevo = editEntry.rate === '' ? '' : parseFloat(editEntry.rate)
+    if (nuevo !== (e.rate_custom ? e.rate : '')) body.rate = nuevo
+    if (Object.keys(body).length) await editPayrollOvertime(e.id, body)
+    setEditEntry(null)
+  })
   // Detalle plegado (23/11); se abre solo al elegir a una persona arriba
   const [verDetalle, setVerDetalle] = useState(false)
   useEffect(() => { if (selected) setVerDetalle(true) }, [selected])
@@ -1165,19 +1176,43 @@ export default function PayrollSection() {
                       <tbody>
                         {shownEntries.map(e => {
                           const p = byId[e.professor]
+                          const editando = editEntry?.id === e.id
                           return (
                             <tr key={e.id}>
                               <td className="sa-pay-nowrap">{fmtDate(e.date)}</td>
                               <td className="sa-pay-nowrap"><span className="sa-pay-dot" style={{ background: p?.color }} />{p?.name || e.professor}</td>
-                              <td className="sa-pay-num">{fmtHours(e.hours)}</td>
+                              <td className="sa-pay-num">
+                                {editando
+                                  ? <input type="number" min="0.25" step="0.25" className="sa-pay-input" value={editEntry.hours}
+                                      onChange={ev => setEditEntry(x => ({ ...x, hours: ev.target.value }))} />
+                                  : fmtHours(e.hours)}
+                              </td>
                               <td className="sa-pay-reason">{e.reason}</td>
-                              <td className="sa-pay-num">{e.rate == null ? <span className="sa-pay-muted">sin precio</span> : fmtEur(e.rate)}</td>
+                              <td className="sa-pay-num">
+                                {editando
+                                  ? <input type="number" min="0" step="0.5" className="sa-pay-input" placeholder={`general ${rates?.[e.professor] ?? '—'}`}
+                                      title="Vacío = el €/h general de la persona" value={editEntry.rate}
+                                      onChange={ev => setEditEntry(x => ({ ...x, rate: ev.target.value }))} />
+                                  : e.rate == null ? <span className="sa-pay-muted">sin precio</span>
+                                  : <>{fmtEur(e.rate)}{e.rate_custom && <div className="sa-pay-paid" title="Precio solo para esta línea">puntual</div>}</>}
+                              </td>
                               <td className="sa-pay-num">{fmtEur(e.amount)}</td>
-                              <td>
-                                <StatusBadge
-                                  status={e.status} disabled={busy}
-                                  onClick={() => run(() => setOvertimeStatus({ id: e.id }, e.status === 'pagado' ? 'pendiente' : 'pagado'))}
-                                />
+                              <td className="sa-pay-nowrap">
+                                {editando ? (
+                                  <>
+                                    <button className="sa-list-save__btn" disabled={busy} onClick={() => guardarEntry(e)}>Guardar</button>
+                                    <button className="sa-pay-action" onClick={() => setEditEntry(null)}>Cancelar</button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <StatusBadge
+                                      status={e.status} disabled={busy}
+                                      onClick={() => run(() => setOvertimeStatus({ id: e.id }, e.status === 'pagado' ? 'pendiente' : 'pagado'))}
+                                    />
+                                    <button className="sa-pay-action nomina-edit" title="Cambiar las horas o el €/h solo de esta línea"
+                                      onClick={() => setEditEntry({ id: e.id, hours: e.hours, rate: e.rate_custom ? e.rate : '' })}>✎</button>
+                                  </>
+                                )}
                               </td>
                             </tr>
                           )
@@ -1186,7 +1221,10 @@ export default function PayrollSection() {
                     </table>
                   </div>
                 )}
-              <p className="sa-pay-note">Las horas las registra gestión en Supervisión → Horas extra.</p>
+              <p className="sa-pay-note">
+                Las horas las registra gestión en Supervisión → Horas extra. Con ✎ puedes cambiar las horas (se ve igual en Supervisión,
+                es el mismo registro) o poner un €/h solo para esa línea; vacío vuelve al €/h general de Configuración.
+              </p>
               </details>
             </>
           )}

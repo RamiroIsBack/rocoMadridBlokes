@@ -16766,6 +16766,11 @@ add_action('rest_api_init', function() {
         'callback'            => 'payroll_move_payments',
         'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/payroll-overtime/(?P<id>[a-z0-9-]+)', array(
+        'methods'             => 'PUT',
+        'callback'            => 'payroll_edit_overtime',
+        'permission_callback' => $socio_perm,
+    ));
     register_rest_route('superadmin/v1', '/payroll-absence', array(
         'methods'             => 'POST',
         'callback'            => 'payroll_set_absence',
@@ -16966,9 +16971,16 @@ function overtime_clean_fields($body, $current_person = null) {
     );
 }
 
-// €/h aplicable: las pagadas conservan el €/h con el que se pagaron.
+// €/h aplicable: las pagadas conservan el €/h con el que se pagaron. Una línea puede llevar su
+// propio €/h puntual (rate_override, 23/11: p. ej. las horas de una compe a otro precio); si
+// no, el €/h general de la persona (Nóminas → Configuración).
 function overtime_entry_rate($entry, $rates) {
     if ($entry['status'] === 'pagado' && isset($entry['paid_rate'])) return $entry['paid_rate'];
+    return overtime_unpaid_rate($entry, $rates);
+}
+
+function overtime_unpaid_rate($entry, $rates) {
+    if (isset($entry['rate_override']) && $entry['rate_override'] !== null) return (float) $entry['rate_override'];
     return $rates[$entry['professor']] ?? null;
 }
 
@@ -16986,6 +16998,7 @@ function overtime_present($entry, $rates = null) {
     if ($rates !== null) {
         $rate = overtime_entry_rate($entry, $rates);
         $out['rate']    = $rate;
+        $out['rate_custom'] = isset($entry['rate_override']) && $entry['rate_override'] !== null;
         $out['amount']  = $rate !== null ? round($rate * $entry['hours'], 2) : null;
         $out['paid_at'] = $entry['paid_at'] ?? null;
     }
@@ -17099,7 +17112,7 @@ function overtime_set_status($request) {
         $entries[$i]['updated_at'] = $now;
         if ($status === 'pagado') {
             $entries[$i]['paid_at']   = $now;
-            $entries[$i]['paid_rate'] = $rates[$entry['professor']] ?? null;
+            $entries[$i]['paid_rate'] = overtime_unpaid_rate($entry, $rates);
         } else {
             unset($entries[$i]['paid_at'], $entries[$i]['paid_rate']);
         }
@@ -17151,7 +17164,7 @@ function payroll_mark_extras_paid($month, $person_id) {
         $entries[$i]['status']     = 'pagado';
         $entries[$i]['updated_at'] = $now;
         $entries[$i]['paid_at']    = $now;
-        $entries[$i]['paid_rate']  = $rates[$person_id] ?? null;
+        $entries[$i]['paid_rate']  = overtime_unpaid_rate($e, $rates);
         $changed++;
     }
     if ($changed) overtime_save_entries($entries);
@@ -17221,6 +17234,40 @@ function payroll_set_payment($request) {
     }
     payroll_save_payments($all);
     return rest_ensure_response(array('success' => true));
+}
+
+// Desde Nóminas (solo socio, 23/11): cambiar las horas de una línea de horas extra y/o ponerle
+// un €/h puntual solo a esa línea. Es el MISMO registro que ve gestión en Supervisión → Horas
+// extra (ahí sin dinero), así que las horas quedan coordinadas. { hours?, rate? } — rate vacío o
+// null quita el precio puntual y vuelve al €/h general. Si la línea ya está pagada, el precio
+// puntual pasa a ser el precio con el que se pagó.
+function payroll_edit_overtime($request) {
+    $entries = overtime_get_entries();
+    $i       = overtime_find_index($entries, $request['id']);
+    if ($i < 0) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
+    $body = $request->get_json_params();
+    if (array_key_exists('hours', $body)) {
+        $h = round(floatval($body['hours']), 2);
+        if ($h <= 0 || $h > 24) return new WP_Error('invalid_hours', 'Horas no válidas', array('status' => 400));
+        $entries[$i]['hours'] = $h;
+    }
+    if (array_key_exists('rate', $body)) {
+        $r = $body['rate'];
+        if ($r === null || $r === '') {
+            unset($entries[$i]['rate_override']);
+            if ($entries[$i]['status'] === 'pagado') {
+                $entries[$i]['paid_rate'] = overtime_get_rates()[$entries[$i]['professor']] ?? null;
+            }
+        } else {
+            $r = round(floatval($r), 2);
+            if ($r < 0 || $r > 500) return new WP_Error('invalid_rate', '€/h no válido', array('status' => 400));
+            $entries[$i]['rate_override'] = $r;
+            if ($entries[$i]['status'] === 'pagado') $entries[$i]['paid_rate'] = $r;
+        }
+    }
+    $entries[$i]['updated_at'] = (new DateTime())->format('c');
+    overtime_save_entries($entries);
+    return rest_ensure_response(array('success' => true, 'entry' => overtime_present($entries[$i], overtime_get_rates())));
 }
 
 // Pagos apuntados en un mes que en realidad son de otro (23/11, Álvaro: «pagué en noviembre las

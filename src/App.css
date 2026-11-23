@@ -1258,6 +1258,13 @@
 :root[data-theme="dark"] .app-nav__link--super { color: #5fb4d6; }
 :root[data-theme="dark"] .app-nav__link--super:hover,
 :root[data-theme="dark"] .app-nav__link--super.active { color: #9fd3e8; border-bottom-color: #5fb4d6; }
+/* Cherifs en amarillo mostaza (23/11, Álvaro); más claro en oscuro para que se lea */
+.app-nav__link--cherifs { color: #b8860b; border-bottom-color: transparent; }
+.app-nav__link--cherifs:hover,
+.app-nav__link--cherifs.active { color: #8f6a08; border-bottom-color: #c9a227; }
+:root[data-theme="dark"] .app-nav__link--cherifs { color: #e1b530; }
+:root[data-theme="dark"] .app-nav__link--cherifs:hover,
+:root[data-theme="dark"] .app-nav__link--cherifs.active { color: #f0cc5a; border-bottom-color: #e1b530; }
 .app-nav--floating {
   border-bottom: 1px solid var(--color-border);
   box-shadow: 0 3px 16px rgba(0, 0, 0, 0.12);

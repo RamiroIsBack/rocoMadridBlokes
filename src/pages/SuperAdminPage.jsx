@@ -14,6 +14,8 @@ import PresupuestosSection from '../components/PresupuestosSection'
 import BudgetSection from '../components/BudgetSection'
 import ProjectsSection from '../components/ProjectsSection'
 import BlokesMapSection from '../components/BlokesMapSection'
+import PlaygroundPage from './PlaygroundPage'
+import CherifsDashboard from './CherifsPage'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
 import { getDiarioAccess, saveDiarioAccess } from '../hooks/useDiario'
 import './SuperAdminPage.css'
@@ -1368,7 +1370,10 @@ function PLAccordion({ live2026, lastMonth }) {
 
 // ─── Main page ───────────────────────────────────────────────────────
 // Pestañas agrupadas: arriba los apartados y, dentro de Tesorería y Gestión, sus subpestañas.
+// 23/11 (Álvaro): esta página es ahora «Cherifs» (ruta /cherifs); Dashboard delante y Horarios Profes
+// (antes /playground) como una pestaña más.
 const SA_GROUPS = [
+  { key: 'dashboard', label: 'Dashboard' },
   { key: 'tesoreria', label: 'Tesorería', tabs: [
     { key: 'ingresos',          label: 'Ingresos' },
     { key: 'clases',            label: 'Clases' },
@@ -1383,18 +1388,19 @@ const SA_GROUPS = [
   ] },
   { key: 'acceso', label: 'Acceso' },
   { key: 'mapa',   label: 'Mapa de Blokes' },
+  { key: 'horarios', label: 'Horarios Profes' },
 ]
 const SA_ALL_TABS = SA_GROUPS.flatMap(g => g.tabs ? g.tabs.map(t => t.key) : [g.key])
 // Última subpestaña abierta de cada apartado, para volver a ella al cambiar de apartado
 const lastSubTab = {}
 
-// Recordar la última pestaña abierta en este navegador (si el almacenamiento falla, se empieza en Ingresos)
+// Recordar la última pestaña abierta en este navegador (si el almacenamiento falla, se empieza en Dashboard)
 const LAST_TAB_KEY = 'sa-last-tab'
 function loadLastTab() {
   try {
     const t = localStorage.getItem(LAST_TAB_KEY)
-    return SA_ALL_TABS.includes(t) ? t : 'ingresos'
-  } catch { return 'ingresos' }
+    return SA_ALL_TABS.includes(t) ? t : 'dashboard'
+  } catch { return 'dashboard' }
 }
 function saveLastTab(t) { try { localStorage.setItem(LAST_TAB_KEY, t) } catch { /* sin almacenamiento */ } }
 
@@ -1422,7 +1428,7 @@ export default function SuperAdminPage() {
 
   return (
     <div className="sa-page">
-      <h1 className="sa-page__title">Superadmin</h1>
+      <h1 className="sa-page__title">Cherifs</h1>
       <div className="sa-main-tabs">
         {SA_GROUPS.map(g => (
           <button key={g.key} className={`sa-main-tab${group.key === g.key ? ' sa-main-tab--active' : ''}`} onClick={() => openGroup(g)}>
@@ -1457,6 +1463,8 @@ export default function SuperAdminPage() {
       {saTab === 'presupuestos' && <PresupuestosSection />}
       {saTab === 'proyectos' && <ProjectsSection />}
       {saTab === 'mapa'      && <BlokesMapSection />}
+      {saTab === 'dashboard' && <CherifsDashboard />}
+      {saTab === 'horarios'  && <PlaygroundPage />}
     </div>
   )
 }

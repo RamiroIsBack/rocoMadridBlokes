@@ -99,3 +99,7 @@ export const deletePayrollPartial = (month, id) =>
 // Pagos apuntados en un mes que son de otro (23/11): los mueve de 'from' a 'to'
 export const movePayrollPayments = (from, to, people) =>
   request('/payroll-payment/move', 'POST', { from, to, people })
+
+// Desde Nóminas (socio): cambiar las horas de una línea y/o su €/h puntual (rate: '' = quitarlo)
+export const editPayrollOvertime = (id, body) =>
+  request(`/payroll-overtime/${id}`, 'PUT', body).then(json => json.entry)

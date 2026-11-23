@@ -1386,3 +1386,4 @@ details[open] .sa-collapsible__arrow {
 .gestoria__veredicto { border: 2px solid var(--state-good); border-radius: 12px; padding: 10px 14px; margin: 10px 0 4px; color: var(--state-good); }
 .gestoria__veredicto--mal { border-color: var(--color-accent); background: var(--color-accent-soft); color: var(--color-text-primary); }
 .gestoria__veredicto ul { margin: 6px 0 0 18px; padding: 0; }
+.nomina-edit { margin-left: 6px; padding: 2px 8px; }

@@ -12,7 +12,6 @@ import MiClaseTab from './pages/MiClaseTab'
 import EntrenamientosPage from './pages/EntrenamientosPage'
 import SuperAdminPage from './pages/SuperAdminPage'
 import SupervisionPage from './pages/SupervisionPage'
-import PlaygroundPage from './pages/PlaygroundPage'
 import FichajePage from './pages/FichajePage'
 import TimeOffPage from './pages/TimeOffPage'
 import LeaguesPage from './pages/LeaguesPage'
@@ -21,7 +20,6 @@ import CompePage from './pages/CompePage'
 import CompeDirectoPage from './pages/CompeDirectoPage'
 import InstalarPage from './pages/InstalarPage'
 import DiarioPage from './pages/DiarioPage'
-import CherifsPage from './pages/CherifsPage'
 import { setVerComo, clearVerComo } from './utils/verComo'
 import { useCompletions } from './hooks/useCompletions'
 import { getTema, setTema } from './utils/theme'
@@ -55,7 +53,7 @@ const SUBSALA_POSITIONS = {
   '8': { top: '44.5%', right: '18%', transform: 'translateX(50%)' },
 }
 
-const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground', '/eventos', '/calendario', '/compe', '/instalar']
+const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground', '/eventos', '/calendario', '/compe', '/instalar', '/cherifs', '/diario']
 
 function detectBasename() {
   const injected = window.blokesSiteData?.appBasename
@@ -450,7 +448,8 @@ export default function App() {
                   <NavLink to="/eventos" className="app-nav__link">Eventos</NavLink>
                 </li>
               )}
-              {/* Gestión (23/11, orden de Álvaro): Supervisión → Horarios Profes → Superadmin → Cherifs */}
+              {/* Gestión (23/11, orden de Álvaro): Supervisión → Cherifs. Superadmin y Horarios Profes
+                  son ahora pestañas de Cherifs. */}
               {['gestion', 'socio'].includes(sd.userRole) && (
                 <li className="app-nav__item">
                   <NavLink to="/supervision" className="app-nav__link app-nav__link--super">Supervisión</NavLink>
@@ -465,17 +464,7 @@ export default function App() {
               )}
               {sd.userRole === 'socio' && (
                 <li className="app-nav__item">
-                  <NavLink to="/playground" className="app-nav__link app-nav__link--super">Horarios Profes</NavLink>
-                </li>
-              )}
-              {sd.userRole === 'socio' && (
-                <li className="app-nav__item">
-                  <NavLink to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</NavLink>
-                </li>
-              )}
-              {sd.userRole === 'socio' && (
-                <li className="app-nav__item">
-                  <NavLink to="/cherifs" className="app-nav__link app-nav__link--super">Cherifs</NavLink>
+                  <NavLink to="/cherifs" className="app-nav__link app-nav__link--cherifs">Cherifs</NavLink>
                 </li>
               )}
             </ul>
@@ -501,9 +490,10 @@ export default function App() {
             <Route path="/entrenamientos" element={<EntrenamientosPage />} />
             <Route path="/fichaje" element={<FichajePage />} />
             <Route path="/time-off" element={<TimeOffPage />} />
-            <Route path="/superadmin" element={<SuperAdminPage />} />
+            {/* 23/11: Superadmin y Horarios Profes viven dentro de Cherifs; las direcciones antiguas llevan allí */}
+            <Route path="/superadmin" element={<RedirigeACherifs />} />
             <Route path="/supervision" element={<SupervisionPage />} />
-            <Route path="/playground" element={<PlaygroundPage />} />
+            <Route path="/playground" element={<Navigate to="/cherifs?tab=horarios" replace />} />
             <Route path="/ligas" element={<LeaguesPage />} />
             <Route path="/compe" element={<CompePage />} />
             <Route path="/compe/directo" element={<CompeDirectoPage />} />
@@ -512,7 +502,7 @@ export default function App() {
             {/* 22/11: el Calendario está dentro del Diario; la dirección antigua lleva allí */}
             <Route path="/calendario" element={<Navigate to="/diario" replace />} />
             <Route path="/diario" element={<DiarioPage />} />
-            <Route path="/cherifs" element={<CherifsPage />} />
+            <Route path="/cherifs" element={<SuperAdminPage />} />
             {/* Cowork, 09/11 07:45: una ruta inexistente (p. ej. /blokes/coleccion) dejaba el
                 contenido en blanco — sin catch-all, react-router no renderiza nada. */}
             <Route path="*" element={<PaginaNoExiste />} />
@@ -658,6 +648,12 @@ function ModoTabletToggleSimple({ sd }) {
       {pulsando ? 'Manteniendo…' : '🔒 Modo tablet — mantén pulsado para salir'}
     </button>
   )
+}
+
+// /superadmin?tab=… → /cherifs?tab=… (conserva la pestaña de los enlaces y marcadores antiguos)
+function RedirigeACherifs() {
+  const { search } = useLocation()
+  return <Navigate to={`/cherifs${search}`} replace />
 }
 
 function PaginaNoExiste() {
