@@ -1861,21 +1861,51 @@ function superadmin_save_expenses($request) {
     if ($replace) {
         $merged = $clean;
     } else {
-        $vecino_keys = array();
+        // 24/11 18:55/19:05 (bug real, confirmado en ingresos_items: dos transferencias iguales
+        // de Chulkin el mismo día se guardaban como una sola): esto usaba un array asociativo
+        // por clave (`$by_key[$k] = $it`), que FUNDE en una sola fila dos movimientos reales
+        // idénticos del MISMO fichero — nunca hay que juntar filas iguales dentro del mismo
+        // fichero. Ahora se cuenta cuántas veces aparece cada clave, no solo si "existe".
+        $vecino_counts = array(); // clave => veces que ya está contada en el mes de al lado
         $dt = DateTime::createFromFormat('Y-m-d', $month . '-01');
         foreach (array('-1 month', '+1 month') as $delta) {
             $vecino = $dt ? (clone $dt)->modify($delta)->format('Y-m') : null;
             if (!$vecino) continue;
-            foreach (blokes_exp_load_month($vecino, $entity) as $it) { $vecino_keys[blokes_exp_item_key($it)] = true; }
+            foreach (blokes_exp_load_month($vecino, $entity) as $it) {
+                $k = blokes_exp_item_key($it);
+                $vecino_counts[$k] = ($vecino_counts[$k] ?? 0) + 1;
+            }
         }
-        $by_key = array();
-        foreach (blokes_exp_load_month($month, $entity) as $it) { $by_key[blokes_exp_item_key($it)] = $it; }
-        foreach ($clean as $it) {
-            $k = blokes_exp_item_key($it);
-            if (isset($vecino_keys[$k]) && !isset($by_key[$k])) continue; // ya guardado en el mes de al lado
-            $by_key[$k] = $it; // nuevo, o ya existía aquí: se actualiza categoría/IVA/excluido
+        $existentes_por_key = array();
+        foreach (blokes_exp_load_month($month, $entity) as $it) { $existentes_por_key[blokes_exp_item_key($it)][] = $it; }
+        $clean_por_key = array();
+        foreach ($clean as $it) { $clean_por_key[blokes_exp_item_key($it)][] = $it; }
+
+        $merged = array();
+        // 1. Lo que ya hubiera guardado en ESTE mes se mantiene siempre (nunca se borra al
+        //    volver a subir) — refrescando categoría/IVA/excluido con la fila nueva si el
+        //    fichero que se sube ahora trae esa misma clave (p. ej. al corregir una categoría y
+        //    volver a guardar el mes entero).
+        foreach ($existentes_por_key as $k => $filas_existentes) {
+            $nuevas_de_esta_key = $clean_por_key[$k] ?? array();
+            foreach ($filas_existentes as $i => $it) {
+                $merged[] = $nuevas_de_esta_key[$i] ?? $it;
+            }
         }
-        $merged = array_values($by_key);
+        // 2. De lo nuevo, solo se añade lo que de verdad falta: si esa clave ya suma, entre este
+        //    mes y el vecino, tantas repeticiones como trae el fichero que se sube ahora, es el
+        //    mismo movimiento real repetido por el solape de los CSV — no hace falta ninguna
+        //    más. Si trae MÁS, las de más son reales (p. ej. dos pagos iguales el mismo día) y
+        //    se añaden, nunca se funden entre sí ("si hay 2 en un fichero y 2 en el otro,
+        //    quedan 2").
+        foreach ($clean_por_key as $k => $filas_nuevas) {
+            $ya_aqui   = count($existentes_por_key[$k] ?? array());
+            $ya_vecino = $vecino_counts[$k] ?? 0;
+            $de_mas    = max(0, count($filas_nuevas) - $ya_aqui - $ya_vecino);
+            for ($i = count($filas_nuevas) - $de_mas; $i < count($filas_nuevas); $i++) {
+                $merged[] = $filas_nuevas[$i];
+            }
+        }
     }
 
     $key = blokes_exp_option_key($month, $entity);
@@ -6198,34 +6228,43 @@ function blokes_exp_net_dedup_key($item) {
 // de cada movimiento, no por el mes del option donde esté guardado (que puede traer movimientos
 // de otro mes por el solape de los CSV). Histórico completo, sin recortar por el selector de
 // meses.
-// 24/11 17:25: el dedup solo vale entre FICHEROS distintos que se solapan (p. ej. el de octubre
-// trae una fila del 02/11 que vuelve a venir en el de noviembre) — dos movimientos iguales el
-// mismo día dentro del MISMO fichero son reales (dos pagos distintos) y no se funden. Por eso se
-// usa el mes del option (`$saved['month']`, uno por fichero subido) como "de qué fichero viene":
-// solo se descarta una repetición si ya se vio ese mismo movimiento en un fichero CON OTRO mes.
+// 24/11 18:55: el dedup entre FICHEROS distintos que se solapan (p. ej. el de octubre trae una
+// fila del 02/11 que vuelve a venir en el de noviembre) cuenta, no solo mira si "ya se vio" —
+// si una clave aparece 2 veces en un fichero y 2 en el otro, son 2 movimientos reales (no 4):
+// se usa el MÁXIMO de ocurrencias de esa clave entre los ficheros (`$saved['month']`, uno por
+// fichero subido), nunca la suma. Dos movimientos iguales el mismo día DENTRO del mismo fichero
+// son reales y nunca se funden entre sí (ver superadmin_save_expenses, mismo criterio al
+// guardar).
 function blokes_expenses_neto_mensual_real($entity) {
     global $wpdb;
     $rows = $wpdb->get_results($wpdb->prepare(
         "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
         'blokes_exp_%_' . $entity
     ), ARRAY_A);
-    $visto_en_fichero = array(); // dedup_key => mes del fichero donde se vio la primera vez
-    $por_mes = array();
+    $max_por_key = array();   // dedup_key => máximo de veces vista en UN fichero
+    $ejemplo_por_key = array(); // dedup_key => un item de muestra (fecha/importe/section)
     foreach ($rows as $row) {
         $saved = json_decode($row['option_value'], true);
         if (!$saved || !is_array($saved['items'] ?? null)) continue;
-        $fichero = $saved['month'] ?? '';
+        $cuenta_fichero = array();
         foreach ($saved['items'] as $item) {
             $k = blokes_exp_net_dedup_key($item);
-            if (isset($visto_en_fichero[$k]) && $visto_en_fichero[$k] !== $fichero) continue;
-            $visto_en_fichero[$k] = $fichero;
-            $fecha = $item['fecha'] ?? '';
-            if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
-            $month  = $m[3] . '-' . str_pad($m[2], 2, '0', STR_PAD_LEFT);
-            $amt    = abs(floatval($item['importe'] ?? 0));
-            $signed = (($item['section'] ?? 'costes') === 'costes') ? -$amt : $amt;
-            $por_mes[$month] = ($por_mes[$month] ?? 0) + $signed;
+            $cuenta_fichero[$k] = ($cuenta_fichero[$k] ?? 0) + 1;
+            if (!isset($ejemplo_por_key[$k])) $ejemplo_por_key[$k] = $item;
         }
+        foreach ($cuenta_fichero as $k => $n) {
+            $max_por_key[$k] = max($max_por_key[$k] ?? 0, $n);
+        }
+    }
+    $por_mes = array();
+    foreach ($max_por_key as $k => $n) {
+        $item = $ejemplo_por_key[$k];
+        $fecha = $item['fecha'] ?? '';
+        if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
+        $month  = $m[3] . '-' . str_pad($m[2], 2, '0', STR_PAD_LEFT);
+        $amt    = abs(floatval($item['importe'] ?? 0));
+        $signed = (($item['section'] ?? 'costes') === 'costes') ? -$amt : $amt;
+        $por_mes[$month] = ($por_mes[$month] ?? 0) + $signed * $n;
     }
     ksort($por_mes);
     foreach ($por_mes as $month => $v) $por_mes[$month] = round($v, 2);
@@ -6975,7 +7014,10 @@ function superadmin_gestion_grupos($request) {
         if (!isset($grupos[$gkey])) {
             // La edad va DENTRO del label (no solo como campo aparte): dos grupos con el mismo
             // día+horario pero distinta edad (adultos y niños a la misma hora) se veían
-            // idénticos en el selector si solo el frontend decidía si añadir el sufijo.
+            // idénticos en el selector si solo el frontend decidía si añadir el sufijo. Este
+            // label es el mismo que el título del bloque en la pestaña Grupos (sv-grp-bloque__
+            // titulo) — 24/11 18:45 pide la edad SIEMPRE pero solo en "Cambiar de grupo"/"Crear
+            // cliente" (gruposParaSelector), no aquí; ver etiquetaSelector() en el frontend.
             $edad_suffix = '';
             if (!$es_pilates_yoga && $edad !== 'Adultos') {
                 $edad_suffix = ' · ' . (stripos($edad, 'Menores') !== false ? 'Niños' : (stripos($edad, 'Adolescentes') !== false ? 'Adol.' : $edad));
