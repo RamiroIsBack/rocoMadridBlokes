@@ -245,12 +245,28 @@
   font-size: 0.85rem;
 }
 /* Punto 4: propuesta de presas sacada de "PRESAS: …" en Volúmenes, para que Álvaro la confirme
-   bloque a bloque — nunca se aplica sola (solo rellena la selección sin guardar, hace falta
-   pulsar "Usar esta selección" y luego Guardar). */
+   bloque a bloque — nunca se aplica sola (24/11 17:10: "Usar esta selección"/"Sí, usar" guardan
+   al momento, igual que cualquier otro chip de presas — ver org__holdset-guardado). */
 .org__holdset-sugerencia {
   font-size: 0.85rem; color: var(--state-warn); background: color-mix(in srgb, var(--state-warn) 14%, transparent);
   border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
 }
+/* 24/11 17:10: guardado automático de presas (punto 1) — mismo "✓ Guardado" que ya usa la foto. */
+.org__holdset-guardado { color: var(--state-ok, #4ade80); font-size: 0.8rem; font-weight: 600; }
+.org__comp-block-ultimo-cambio { margin-top: -4px; }
+.org__comp-block-historial {
+  list-style: none; margin: 4px 0 10px; padding: 8px 10px; font-size: 0.8rem;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px;
+  max-height: 180px; overflow-y: auto;
+}
+.org__comp-block-historial li { margin-bottom: 6px; }
+.org__comp-block-historial-cambio { margin-right: 6px; }
+/* Punto 2: diálogo propio de "cambios sin guardar" al cerrar — nunca un confirm() nativo. */
+.org__comp-block-sin-guardar {
+  background: color-mix(in srgb, var(--state-warn) 16%, transparent); border-radius: 8px;
+  padding: 10px; margin-bottom: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+}
+.org__comp-block-sin-guardar p { margin: 0; width: 100%; font-size: 0.85rem; }
 
 .org__warning { color: var(--state-warn); font-size: 0.82rem; }
 .org__error { color: var(--state-bad); font-size: 0.82rem; }

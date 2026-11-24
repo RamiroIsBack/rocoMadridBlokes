@@ -3593,6 +3593,7 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
         <CompBlockFicha
           block={blocks.find(b => b.id === editingBlockId)}
           config={config} holdsets={holdsets} holdsetsError={holdsetsError} workers={workers || []} blocks={blocks}
+          workerId={workerId}
           onCreateHoldset={crearHoldset}
           onClose={() => setEditingBlockId(null)}
           onSaved={patch => { setBlocks(cur => cur.map(b => b.id === editingBlockId ? { ...b, ...patch } : b)) }}
@@ -3641,10 +3642,34 @@ function presaCoincideAproximada(segNorm, nombreNorm) {
   return segWords.every(w => nombreSet.has(w)) || nombreWords.every(w => segSet.has(w))
 }
 
+// 24/11 17:10, punto 3: historial de la ficha de un bloque — "DD/MM HH:MM" en local (el dato que
+// manda el backend ya es la hora del sitio, nunca se reinterpreta como UTC con `new Date(...)`).
+function fmtFechaHora(mysqlDatetime) {
+  if (!mysqlDatetime) return ''
+  const [datePart, timePart] = mysqlDatetime.split(' ')
+  const [y, m, d] = (datePart || '').split('-')
+  return `${d}/${m} ${(timePart || '').slice(0, 5)}`
+}
+function nombresPresasDeString(str, holdsets) {
+  return (str ?? '').toString().split(',').map(s => s.trim()).filter(Boolean)
+    .map(id => holdsets.find(h => h.id === Number(id))?.name || `#${id}`)
+}
+const CAMPO_LOG_LABEL = { subzone: 'Subzona', grade_color: 'Color', hold_set_ids: 'Presas', volumes: 'Volúmenes', equipador: 'Equipador', tested: 'Probado' }
+function describeCambioFicha(campo, antes, despues, holdsets) {
+  const fmt = v => {
+    if (campo === 'hold_set_ids') { const n = nombresPresasDeString(v, holdsets); return n.length ? n.join(', ') : 'ninguna' }
+    if (campo === 'subzone') return (v === null || v === '') ? 'sin asignar' : `#${v}`
+    if (campo === 'tested') return (v === 1 || v === '1' || v === true) ? 'sí' : 'no'
+    if (campo === 'volumes') return v ? `"${v}"` : '(vacío)'
+    return (v === null || v === '') ? '(vacío)' : String(v)
+  }
+  return `${CAMPO_LOG_LABEL[campo] || campo}: ${fmt(antes)} → ${fmt(despues)}. `
+}
+
 // Ficha de un bloque de compe: subzona, color, presas, volúmenes, equipador, foto (subida
 // desde el móvil) y probado sí/no — Álvaro la rellena tocando una burbuja del mapa (Ramiro,
 // 1/11 17:20).
-function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, blocks, onCreateHoldset, onClose, onSaved, onSwapped }) {
+function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, blocks, workerId, onCreateHoldset, onClose, onSaved, onSwapped }) {
   const showToast = useToast()
   const [fijado, setFijado] = useState(false)
   const [swapping, setSwapping] = useState(false)
@@ -3656,6 +3681,34 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
   const [photoUrl, setPhotoUrl] = useState(block.photoUrl || '')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
+  // 24/11 17:10 (Álvaro perdió las presas que asignó el 23/11: "Cerrar" las tiraba sin avisar):
+  // punto 1, cada chip de presas guarda al momento (solo holdSetIds), con su propio estado.
+  const [presasEstado, setPresasEstado] = useState('idle') // idle | saving | saved | error
+  const [presasErrorMsg, setPresasErrorMsg] = useState(null)
+  const guardarPresasRef = useRef(0)
+  // Punto 3: historial de cambios de este bloque (quién, cuándo, antes→después) y "Último
+  // cambio" en la cabecera — así la próxima vez sí se puede ver y recuperar.
+  const [historial, setHistorial] = useState([])
+  const [verHistorial, setVerHistorial] = useState(false)
+  useEffect(() => {
+    api('GET', `/equipacion/comp-blocks/${block.id}/historial`)
+      .then(res => setHistorial(res.data || []))
+      .catch(() => {})
+  }, [block.id])
+  // Punto 2: si queda algún cambio de subzona/color/volúmenes/equipador/probado sin guardar al
+  // cerrar, diálogo propio «Guardar / Descartar» — presas y foto ya se guardan solas, esos dos
+  // nunca cuentan aquí como "sin guardar".
+  const [confirmandoCierre, setConfirmandoCierre] = useState(false)
+  const haySinGuardar = () =>
+    (subzone === '' ? null : Number(subzone)) !== (block.subzone ?? null)
+    || grade !== (block.grade || '')
+    || volumes !== (block.volumes || '')
+    || tested !== !!block.tested
+    || equipador !== (block.equipador || '')
+  const intentarCerrar = () => { haySinGuardar() ? setConfirmandoCierre(true) : onClose() }
+  // Punto 4: si el guardado falla, mensaje dentro de la ficha (nunca window.alert) — y la ficha
+  // no se cierra, para que no se vuelva a perder nada.
+  const [saveError, setSaveError] = useState(null)
   // 23/11 17:15, punto 2: lista de presas en orden alfabético con buscador, en vez de los 58
   // chips siempre en el mismo orden sin forma de filtrar.
   const [buscarHoldset, setBuscarHoldset] = useState('')
@@ -3703,7 +3756,7 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
     setCreandoDesdeSugerencia(nombre)
     try {
       const id = await onCreateHoldset(nombre)
-      setHoldSetIds(ids => ids.includes(id) ? ids : [...ids, id])
+      if (!holdSetIds.includes(id)) await guardarPresas([...holdSetIds, id])
     } catch (e) {
       showToast(e.message || 'No se ha podido crear el juego de presas.')
     } finally {
@@ -3728,7 +3781,25 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
   const [modoOtro, setModoOtro] = useState(!!block.equipador && !equipadorOpciones.includes(block.equipador))
   const [equipador, setEquipador] = useState(block.equipador || '')
 
-  const toggleHoldSet = id => setHoldSetIds(ids => ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id])
+  // Punto 1: cada chip guarda solo, en el momento — nunca espera al botón "Guardar" de abajo.
+  const guardarPresas = async (newIds) => {
+    setHoldSetIds(newIds)
+    setPresasEstado('saving')
+    setPresasErrorMsg(null)
+    const token = ++guardarPresasRef.current
+    try {
+      const res = await api('PUT', `/equipacion/comp-blocks/${block.id}`, { holdSetIds: newIds, byWorkerId: workerId })
+      if (token !== guardarPresasRef.current) return
+      setPresasEstado('saved')
+      onSaved({ holdSetIds: newIds })
+      if (res?.lastChange) setHistorial(h => [res.lastChange, ...h].slice(0, 20))
+    } catch (e) {
+      if (token !== guardarPresasRef.current) return
+      setPresasEstado('error')
+      setPresasErrorMsg(e.message || 'No se ha podido guardar.')
+    }
+  }
+  const toggleHoldSet = id => guardarPresas(holdSetIds.includes(id) ? holdSetIds.filter(x => x !== id) : [...holdSetIds, id])
 
   const crearYSeleccionarHoldset = async () => {
     const nombre = nombreHoldset.trim()
@@ -3736,7 +3807,7 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
     setCreandoHoldset(true)
     try {
       const id = await onCreateHoldset(nombre)
-      setHoldSetIds(ids => ids.includes(id) ? ids : [...ids, id])
+      if (!holdSetIds.includes(id)) await guardarPresas([...holdSetIds, id])
       setNombreHoldset('')
       setNuevoHoldset(false)
     } catch (e) {
@@ -3801,17 +3872,20 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
 
   const save = async () => {
     setSaving(true)
+    setSaveError(null)
     try {
       // 23/11 16:00 (bug real de Álvaro): mandar siempre `equipador` tumbaba el guardado
       // entero (presas incluidas) para cualquiera sin permiso de jefe/socio/gestión, aunque
       // no lo hubiera tocado — ahora solo se manda si de verdad ha cambiado.
-      const payload = { subzone: subzone === '' ? null : Number(subzone), grade, holdSetIds, volumes, tested }
+      const payload = { subzone: subzone === '' ? null : Number(subzone), grade, holdSetIds, volumes, tested, byWorkerId: workerId }
       if (equipador !== (block.equipador || '')) payload.equipador = equipador
-      await api('PUT', `/equipacion/comp-blocks/${block.id}`, payload)
+      const res = await api('PUT', `/equipacion/comp-blocks/${block.id}`, payload)
       onSaved({ subzone: subzone === '' ? null : Number(subzone), grade, holdSetIds, volumes, equipador, tested, photoUrl })
+      if (res?.lastChange) setHistorial(h => [res.lastChange, ...h].slice(0, 20))
+      setConfirmandoCierre(false)
       onClose()
     } catch (e) {
-      window.alert(e.message)
+      setSaveError(e.message || 'No se ha podido guardar.')
     } finally {
       setSaving(false)
     }
@@ -3843,8 +3917,39 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
             <strong>#{block.number}</strong>
           )}
         </p>
-        <button className="org__link-btn" onClick={onClose}>Cerrar</button>
+        <button className="org__link-btn" onClick={intentarCerrar}>Cerrar</button>
       </div>
+      {historial.length > 0 && (
+        <p className="org__hint org__comp-block-ultimo-cambio">
+          Último cambio: {historial[0].nombre || 'alguien'}, {fmtFechaHora(historial[0].fecha)}
+          {' · '}
+          <button type="button" className="org__link-btn" onClick={() => setVerHistorial(v => !v)}>
+            {verHistorial ? 'ocultar historial' : 'ver historial'}
+          </button>
+        </p>
+      )}
+      {verHistorial && (
+        <ul className="org__comp-block-historial">
+          {historial.map((h, i) => (
+            <li key={i}>
+              <strong>{h.nombre || 'alguien'}</strong>, {fmtFechaHora(h.fecha)}:{' '}
+              {Object.entries(h.cambios || {}).map(([campo, { antes, despues }]) => (
+                <span key={campo} className="org__comp-block-historial-cambio">
+                  {describeCambioFicha(campo, antes, despues, holdsets)}
+                </span>
+              ))}
+            </li>
+          ))}
+        </ul>
+      )}
+      {confirmandoCierre && (
+        <div className="org__comp-block-sin-guardar">
+          <p>Tienes cambios sin guardar (subzona, color, volúmenes, equipador o probado).</p>
+          <button type="button" className="org__btn" onClick={save} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
+          <button type="button" className="org__btn org__btn--ghost" onClick={onClose}>Descartar</button>
+          <button type="button" className="org__link-btn" onClick={() => setConfirmandoCierre(false)}>Seguir editando</button>
+        </div>
+      )}
       <label className="org__add-row org__add-row--check org__comp-block-fijar">
         <input type="checkbox" checked={fijado} onChange={e => setFijado(e.target.checked)} />
         <span>Fijar bloque — este bloque ya está empezado, puedes cambiar la dificultad (número) para intercambiarla con otro bloque</span>
@@ -3864,20 +3969,25 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
         </select>
       </div>
       <div className="org__add-row org__add-row--holdsets">
-        <label>Juego(s) de presas</label>
+        <label>
+          Juego(s) de presas{' '}
+          {presasEstado === 'saving' && <span className="org__hint">Guardando…</span>}
+          {presasEstado === 'saved' && <span className="org__holdset-guardado">✓ Guardado</span>}
+          {presasEstado === 'error' && <span className="org__error">⚠ {presasErrorMsg}</span>}
+        </label>
         {presasSugeridas && (confirmadosPendientes.length > 0 || dudososPendientes.length > 0 || presasSugeridas.sinMatch.length > 0) && (
           <div className="org__holdset-sugerencia">
             <p style={{ margin: '0 0 4px' }}>Según «Volúmenes» («PRESAS: …»):</p>
             {confirmadosPendientes.length > 0 && (
               <p style={{ margin: '0 0 4px' }}>
                 Debería llevar <strong>{confirmadosPendientes.map(c => c.nombre).join(', ')}</strong>.{' '}
-                <button type="button" className="org__link-btn" onClick={() => setHoldSetIds(ids => [...new Set([...ids, ...confirmadosPendientes.map(c => c.id)])])}>Usar esta selección</button>
+                <button type="button" className="org__link-btn" onClick={() => guardarPresas([...new Set([...holdSetIds, ...confirmadosPendientes.map(c => c.id)])])}>Usar esta selección</button>
               </p>
             )}
             {dudososPendientes.map(d => (
               <p key={d.original} style={{ margin: '0 0 4px' }}>
                 «{d.original}» → ¿es esta? <strong>{d.nombre}</strong>{' '}
-                <button type="button" className="org__link-btn" onClick={() => setHoldSetIds(ids => ids.includes(d.id) ? ids : [...ids, d.id])}>Sí, usar</button>{' '}
+                <button type="button" className="org__link-btn" onClick={() => guardarPresas(holdSetIds.includes(d.id) ? holdSetIds : [...holdSetIds, d.id])}>Sí, usar</button>{' '}
                 <button type="button" className="org__link-btn" onClick={() => setDudososDescartados(s => new Set([...s, d.original]))}>No</button>
               </p>
             ))}
@@ -3987,13 +4097,14 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
         <input type="checkbox" checked={tested} onChange={e => setTested(e.target.checked)} />
         <span>Probado (forerunning)</span>
       </label>
+      {saveError && <p className="org__error">⚠ {saveError}</p>}
       <div className="org__add-actions">
         {/* 🐞 Cowork 12/11 09:40: subir una foto y pulsar "Guardar" antes de que terminase la
             subida dejaba el bloque sin foto y un adjunto huérfano. "Guardar" nunca manda
             photoUrl (solo "Quitar foto" lo hace), pero sin esto el usuario podía cerrar la
             ficha a medio subir — ahora no se puede pulsar ninguno de los dos mientras el otro
             está en marcha. */}
-        <button className="org__btn org__btn--ghost" onClick={onClose} disabled={saving || uploading}>Cancelar</button>
+        <button className="org__btn org__btn--ghost" onClick={intentarCerrar} disabled={saving || uploading}>Cancelar</button>
         <button className="org__btn" onClick={save} disabled={saving || uploading}>{saving ? 'Guardando...' : (uploading ? 'Subiendo foto...' : 'Guardar')}</button>
       </div>
     </div>

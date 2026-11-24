@@ -917,6 +917,11 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)/photo', array(
         'methods' => 'POST', 'callback' => 'progreso_equip_upload_comp_block_photo', 'permission_callback' => $equip_perm,
     ));
+    // 24/11 17:10, punto 3: historial del bloque (quién, cuándo, antes→después) — mismo permiso
+    // de lectura/edición que el resto de la ficha.
+    register_rest_route('progreso/v1', '/equipacion/comp-blocks/(?P<id>\d+)/historial', array(
+        'methods' => 'GET', 'callback' => 'progreso_equip_get_comp_block_historial', 'permission_callback' => $equip_perm,
+    ));
     // "Vamos bien de tiempo, añadir el 17 y 18" (Ramiro, 11/11 05:01) — nunca dar por hecho que
     // una compe tiene 16 bloques fijos.
     register_rest_route('progreso/v1', '/equipacion/competitions/(?P<id>\d+)/comp-blocks', array(
@@ -18404,7 +18409,11 @@ function progreso_equip_ensure_tables() {
     // comp_categoria_log — una vez que un participante ya tiene categoría en una compe, solo se
     // puede corregir desde Organización → Compe → Participantes (profes/gestión/socio), y queda
     // registrado aquí quién la cambió y cuándo.
-    $version = '18';
+    // v19 (24/11 17:10, Álvaro perdió las presas que asignó el 23/11 porque "Cerrar" tiraba los
+    // cambios sin avisar): tabla comp_block_log — quién, cuándo y antes→después de cada PUT a
+    // comp-blocks (presas, subzona, color, volúmenes, equipador, probado), para poder verlo y
+    // recuperarlo la próxima vez.
+    $version = '19';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -18617,6 +18626,17 @@ function progreso_equip_ensure_tables() {
         changed_at          datetime            NOT NULL,
         PRIMARY KEY (id),
         KEY por_compe (competition_id)
+    ) {$charset};");
+
+    dbDelta("CREATE TABLE " . progreso_equip_table('comp_block_log') . " (
+        id                  bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        comp_block_id       bigint(20) UNSIGNED NOT NULL,
+        changed_by_user_id  bigint(20) UNSIGNED NOT NULL DEFAULT 0,
+        changed_by_nombre   varchar(190)        NOT NULL DEFAULT '',
+        changed_at          datetime            NOT NULL,
+        cambios             longtext            NOT NULL,
+        PRIMARY KEY (id),
+        KEY por_bloque (comp_block_id)
     ) {$charset};");
 
     // Catálogo de tareas en tabla propia (antes hardcoded) para que la
@@ -20885,6 +20905,17 @@ function progreso_equip_update_comp_block($request) {
     // migración nueva se disparaba con solo guardar un bloque. Ahora sí, aquí también.
     progreso_equip_ensure_tables();
     $id = intval($request['id']);
+    // 24/11 17:10 (Álvaro perdió las presas que asignó el 23/11): "Cerrar"/"Cancelar" tiraban
+    // los cambios sin avisar — antes esto solo comprobaba que el bloque existiera con un SELECT
+    // aparte. Ahora se trae la fila entera una vez, para esa comprobación, para el permiso de
+    // equipador (ya no hace falta un SELECT propio) y para el historial de cambios (antes→
+    // después) de más abajo.
+    $bloque_antes = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id
+    ), ARRAY_A);
+    if (!$bloque_antes) {
+        return new WP_Error('not_found', 'Este bloque ya no existe (puede que se haya regenerado el plan) — cierra la ficha y vuelve a abrirla desde el mapa.', array('status' => 404));
+    }
     // Ramiro 12/11 11:35: mover un bloque a otro equipador ("mover entre personas") es solo de
     // Álvaro, Eva o un socio — registrar el propio trabajo (presas, volúmenes, subzona, foto)
     // sigue abierto a cualquier equipador.
@@ -20893,11 +20924,8 @@ function progreso_equip_update_comp_block($request) {
     // fuera jefe/socio, aunque no estuviera tocando el equipador. Solo rechaza si de verdad
     // cambia de valor.
     if ($request->get_param('equipador') !== null && !progreso_equip_puede_todo_compe()) {
-        $equipador_actual = $wpdb->get_var($wpdb->prepare(
-            "SELECT equipador FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id
-        ));
         $equipador_nuevo = sanitize_text_field((string) $request->get_param('equipador'));
-        if ((string) $equipador_actual !== $equipador_nuevo) {
+        if ((string) $bloque_antes['equipador'] !== $equipador_nuevo) {
             return new WP_Error('forbidden', 'Solo Álvaro, Eva o un socio puede mover un bloque a otro equipador.', array('status' => 403));
         }
     }
@@ -20917,13 +20945,8 @@ function progreso_equip_update_comp_block($request) {
         $upd['photo_url'] = $nueva_url; $fmt[] = '%s';
         // "✕ Quitar foto" (Ramiro 12/11 09:11): además de quitar la referencia, borrar de
         // verdad el adjunto de Medios — nunca dejarlo huérfano.
-        if ($nueva_url === '') {
-            $bloque_actual = $wpdb->get_row($wpdb->prepare(
-                "SELECT photo_attachment_id FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id
-            ), ARRAY_A);
-            if ($bloque_actual && !empty($bloque_actual['photo_attachment_id'])) {
-                wp_delete_attachment(intval($bloque_actual['photo_attachment_id']), true);
-            }
+        if ($nueva_url === '' && !empty($bloque_antes['photo_attachment_id'])) {
+            wp_delete_attachment(intval($bloque_antes['photo_attachment_id']), true);
             $upd['photo_attachment_id'] = null; $fmt[] = '%d';
         }
     }
@@ -20939,22 +20962,71 @@ function progreso_equip_update_comp_block($request) {
     if ($request->get_param('status') !== null) { $upd['status'] = sanitize_text_field($request->get_param('status')); $fmt[] = '%s'; }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
     // 24/11 (Álvaro: "asigno presas y no se guarda, lo de ayer no está"): antes esto respondía
-    // "guardado" aunque el UPDATE no tocara ninguna fila de verdad (bloque ya borrado, o un id
-    // de una ficha abierta desde antes de un cambio de plan) — fallaba en silencio, sin avisar
-    // nunca en el móvil. Ahora comprueba que el bloque existe antes y que el UPDATE no dio un
-    // error real de SQL (0 filas por no haber cambiado nada SÍ es normal, eso no se bloquea).
-    $existe = $wpdb->get_var($wpdb->prepare(
-        "SELECT id FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id
-    ));
-    if (!$existe) {
-        return new WP_Error('not_found', 'Este bloque ya no existe (puede que se haya regenerado el plan) — cierra la ficha y vuelve a abrirla desde el mapa.', array('status' => 404));
-    }
+    // "guardado" aunque el UPDATE no tocara ninguna fila de verdad — fallaba en silencio, sin
+    // avisar nunca en el móvil. Ahora revisa que el UPDATE no dé un error real de SQL (0 filas
+    // por no haber cambiado nada de verdad SÍ es normal, eso no se bloquea).
     $wpdb->update(progreso_equip_table('comp_blocks'), $upd, array('id' => $id), $fmt, array('%d'));
     if ($wpdb->last_error) {
         error_log('Blokes progreso_equip_update_comp_block: fallo al guardar el bloque ' . $id . ': ' . $wpdb->last_error);
         return new WP_Error('db_error', 'No se ha podido guardar: ' . $wpdb->last_error, array('status' => 500));
     }
-    return rest_ensure_response(array('success' => true));
+    $last_change = progreso_equip_log_comp_block_change($request, $id, $bloque_antes, $upd);
+    return rest_ensure_response(array('success' => true, 'lastChange' => $last_change));
+}
+
+// 24/11 17:10, punto 3: historial de cada PUT a comp-blocks que de verdad cambie algo de
+// contenido (presas, subzona, color, volúmenes, equipador, probado — nunca la posición del
+// mapa ni la foto, que ya tienen su propio rastro visual y no es lo que Álvaro puede "perder").
+// Solo registra los campos cuyo valor nuevo sea distinto del que había antes.
+function progreso_equip_log_comp_block_change($request, $comp_block_id, $bloque_antes, $upd) {
+    global $wpdb;
+    $campos_log = array(
+        'subzone'     => 'subzone',
+        'grade_color' => 'grade_color',
+        'hold_set_ids' => 'hold_set_ids',
+        'volumes'     => 'volumes',
+        'equipador'   => 'equipador',
+        'tested'      => 'tested',
+    );
+    $cambios = array();
+    foreach ($campos_log as $col => $clave) {
+        if (!array_key_exists($col, $upd)) continue;
+        $antes = $bloque_antes[$col] ?? null;
+        $despues = $upd[$col];
+        if ((string) $antes === (string) $despues) continue;
+        $cambios[$clave] = array('antes' => $antes, 'despues' => $despues);
+    }
+    if (empty($cambios)) return null;
+    $nombre = progreso_equip_actor($request);
+    $fecha  = current_time('mysql');
+    $user   = wp_get_current_user();
+    $wpdb->insert(progreso_equip_table('comp_block_log'), array(
+        'comp_block_id'      => $comp_block_id,
+        'changed_by_user_id' => ($user && $user->ID) ? $user->ID : 0,
+        'changed_by_nombre'  => $nombre,
+        'changed_at'         => $fecha,
+        'cambios'            => wp_json_encode($cambios),
+    ), array('%d', '%d', '%s', '%s', '%s'));
+    return array('nombre' => $nombre, 'fecha' => $fecha, 'cambios' => $cambios);
+}
+
+// GET /equipacion/comp-blocks/{id}/historial — últimos cambios de este bloque, para "Último
+// cambio: Álvaro, 23/11 18:40" y la lista desplegable en la ficha.
+function progreso_equip_get_comp_block_historial($request) {
+    global $wpdb;
+    $id = intval($request['id']);
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT changed_by_nombre, changed_at, cambios FROM " . progreso_equip_table('comp_block_log') . "
+         WHERE comp_block_id = %d ORDER BY changed_at DESC, id DESC LIMIT 20", $id
+    ), ARRAY_A);
+    $data = array_map(function($r) {
+        return array(
+            'nombre'  => $r['changed_by_nombre'],
+            'fecha'   => $r['changed_at'],
+            'cambios' => json_decode($r['cambios'], true) ?: array(),
+        );
+    }, $rows);
+    return rest_ensure_response(array('success' => true, 'data' => $data));
 }
 
 // POST /equipacion/comp-blocks/{id}/intercambiar-numero — punto 8 (Ramiro, 11/11 05:01): un
