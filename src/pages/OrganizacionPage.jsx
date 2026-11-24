@@ -2635,6 +2635,27 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
   const planBoardRef = useRef(null)
   const tablaBoardRef = useRef(null)
 
+  // 24/11: aviso de numeración de bloques antes de la compe (pendiente de la nota 23/11 06:50) —
+  // duplicados, huecos o bloques sin número rompen la puntuación, que busca cada bloque por su
+  // `number` en la tabla de puntos (blokes_compe_puntos_para_bloque).
+  const avisoNumeracion = useMemo(() => {
+    if (!blocks.length) return null
+    const sinNumero = blocks.filter(b => b.number == null || !Number.isInteger(b.number)).length
+    const vistos = new Map()
+    blocks.forEach(b => { if (Number.isInteger(b.number)) vistos.set(b.number, (vistos.get(b.number) || 0) + 1) })
+    const duplicados = Array.from(vistos.entries()).filter(([, c]) => c > 1).map(([n]) => n).sort((a, b) => a - b)
+    const numerosValidos = Array.from(vistos.keys())
+    const max = numerosValidos.length ? Math.max(...numerosValidos) : 0
+    const huecos = []
+    for (let i = 1; i <= max; i++) { if (!vistos.has(i)) huecos.push(i) }
+    if (!sinNumero && !duplicados.length && !huecos.length) return null
+    const partes = []
+    if (sinNumero) partes.push(`${sinNumero} bloque(s) sin número`)
+    if (duplicados.length) partes.push(`número repetido: ${duplicados.join(', ')}`)
+    if (huecos.length) partes.push(`falta el número ${huecos.join(', ')}`)
+    return partes.join(' · ')
+  }, [blocks])
+
   const chipReasignable = (b, nombreActual) => {
     const presas = nombresPresas(b.holdSetIds)
     return (
@@ -2903,6 +2924,9 @@ function CompePlanView({ compId, taskTypeById, workers, canManage, workerId }) {
       ) : (
         <p className="org__hint">{plan.pctHecho}% hecho ({plan.hechas}/{plan.total}) · {plan.retrasadas} retrasada(s)</p>
       )}
+      {avisoNumeracion && (
+        <p className="org__warning">⚠️ Numeración de bloques: {avisoNumeracion}. Corrígelo antes de la compe — la puntuación busca cada bloque por su número.</p>
+      )}
       <div className="org__add-actions">
         {/* Ramiro 12/11 11:35: generar/regenerar el plan es solo de Álvaro o un socio. */}
         {canManage && (
@@ -3098,6 +3122,124 @@ const SUBZONA_RECTS = [
 function subzonaDesdePosicion(xPct, yPct) {
   const r = SUBZONA_RECTS.find(z => xPct >= z.x[0] && xPct <= z.x[1] && yPct >= z.y[0] && yPct <= z.y[1])
   return r ? r.subzona : null
+}
+
+const CATEGORIA_LABEL = { masculina: 'Masculina', femenina: 'Femenina', infantil: 'Infantil' }
+const ERROR_LABEL = {
+  sin_categoria: 'Sin categoría',
+  adulto_en_infantil: 'Adulto en Infantil',
+  menor_fuera_de_infantil: 'Menor fuera de Infantil',
+}
+
+// Organización → Compe → Participantes (nota 23/11 06:57): único sitio donde se corrige la
+// categoría de alguien después de elegida — en ningún otro sitio (ni Recepción, ni la
+// clasificación, ni el propio usuario) se puede cambiar una vez puesta; lo hace cumplir
+// progreso_compe_puede_corregir_categoria() en el backend, esto es solo la pantalla.
+function CompeParticipantesView({ compId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [buscar, setBuscar] = useState('')
+  const [soloErrores, setSoloErrores] = useState(false)
+  const [guardandoClave, setGuardandoClave] = useState(null)
+  const showToast = useToast()
+
+  const reload = useCallback(() => {
+    setLoading(true)
+    return api('GET', `/compe/participantes?competitionId=${compId}`)
+      .then(r => { setData(r.data); setError(null) })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [compId])
+  useEffect(() => { reload() }, [reload])
+
+  const cambiarCategoria = async (p, categoria) => {
+    setGuardandoClave(p.clave)
+    try {
+      await api('POST', '/compe/categoria', { competitionId: compId, participanteTipo: p.tipo, participanteId: p.id, categoria })
+      await reload()
+    } catch (e) { showToast(e.message || 'No se ha podido cambiar la categoría.') } finally { setGuardandoClave(null) }
+  }
+
+  if (loading && !data) return <p className="org__hint">Cargando participantes...</p>
+  if (error && !data) return <p className="org__error">{error}</p>
+  if (!data) return null
+
+  const q = buscar.trim().toLowerCase()
+  const filtrados = data.participantes.filter(p => {
+    if (soloErrores && p.errores.length === 0) return false
+    if (!q) return true
+    return p.nombre.toLowerCase().includes(q) || (p.alias || '').toLowerCase().includes(q) || (p.telefono || '').includes(q)
+  })
+  const nombrePorClave = clave => data.participantes.find(p => p.clave === clave)?.nombre || clave
+
+  return (
+    <div className="org__section">
+      <h4 className="org__section-title">Participantes</h4>
+      <p className="org__hint">
+        Buscador, filtro de posibles errores y corrección de categoría — una vez elegida, solo se
+        corrige aquí (profes, gestión o un socio). Queda registrado quién la cambió y cuándo.
+      </p>
+      <div className="org__add-actions">
+        <input
+          type="text" className="org__part-buscador" placeholder="Buscar por nombre, alias o teléfono..."
+          value={buscar} onChange={e => setBuscar(e.target.value)}
+        />
+        <label className="org__add-row--check" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <input type="checkbox" checked={soloErrores} onChange={e => setSoloErrores(e.target.checked)} />
+          <span>Solo posibles errores</span>
+        </label>
+      </div>
+      <div className="org__cp-tabla-wrap">
+        <table className="org__cp-tabla org__part-tabla">
+          <thead>
+            <tr>
+              <th>Nombre</th><th>Teléfono</th><th>Categoría</th><th>Puntos</th><th>Bloques</th><th>Posible error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtrados.map(p => (
+              <tr key={p.clave}>
+                <td className="org__cp-tabla-persona">{p.nombre}{p.alias ? ` (${p.alias})` : ''}</td>
+                <td>{p.telefono || '—'}</td>
+                <td>
+                  <select
+                    value={p.categoria} disabled={guardandoClave === p.clave}
+                    onChange={e => cambiarCategoria(p, e.target.value)}
+                  >
+                    <option value="">Sin categoría</option>
+                    <option value="masculina">Masculina</option>
+                    <option value="femenina">Femenina</option>
+                    <option value="infantil">Infantil</option>
+                  </select>
+                </td>
+                <td>{p.puntos}</td>
+                <td>{p.nBloques}</td>
+                <td>
+                  {p.errores.map(e => <span key={e} className="org__part-error-badge">{ERROR_LABEL[e] || e}</span>)}
+                </td>
+              </tr>
+            ))}
+            {filtrados.length === 0 && (
+              <tr><td colSpan={6}><p className="org__hint">Nadie coincide con el filtro.</p></td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {data.historialCambios.length > 0 && (
+        <details className="org__part-historial">
+          <summary>Últimas correcciones de categoría ({data.historialCambios.length})</summary>
+          <ul className="org__hint">
+            {data.historialCambios.map((h, i) => (
+              <li key={i}>
+                {nombrePorClave(`${h.participante_tipo}:${h.participante_id}`)}: {CATEGORIA_LABEL[h.categoria_anterior] || h.categoria_anterior || 'sin categoría'} → {CATEGORIA_LABEL[h.categoria_nueva] || h.categoria_nueva} — {h.changed_by_nombre || '—'}, {h.changed_at}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  )
 }
 
 // Arrastra una burbuja ya colocada para moverla, o toca un número sin
@@ -3461,6 +3603,7 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
       )}
 
       <CompePlanView compId={comp.id} taskTypeById={taskTypeById} workers={workers || []} canManage={canManage} workerId={workerId} />
+      <CompeParticipantesView compId={comp.id} />
     </div>
   )
 }

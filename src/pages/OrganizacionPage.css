@@ -255,6 +255,22 @@
 .org__warning { color: var(--state-warn); font-size: 0.82rem; }
 .org__error { color: var(--state-bad); font-size: 0.82rem; }
 
+/* 24/11, nota 23/11 06:57: Organización → Compe → Participantes */
+.org__part-buscador {
+  display: block; width: 100%; max-width: 320px; padding: 7px 10px;
+  border: 1.5px solid var(--color-border); background: var(--color-surface); color: var(--color-text-primary);
+  font-size: 0.85rem;
+}
+.org__part-tabla select { font-size: 0.8rem; padding: 3px 4px; }
+.org__part-error-badge {
+  display: inline-block; font-size: 0.72rem; font-weight: 700; color: var(--state-warn);
+  background: color-mix(in srgb, var(--state-warn) 14%, transparent);
+  border-radius: 999px; padding: 2px 8px; margin: 0 4px 4px 0;
+}
+.org__part-historial { margin-top: 14px; font-size: 0.82rem; }
+.org__part-historial summary { cursor: pointer; color: var(--color-text-secondary); }
+.org__part-historial ul { margin: 8px 0 0; padding-left: 18px; }
+
 .org__add-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .org__btn {
   background: #2a2015; color: #fdf7e6; border: none; padding: 10px 18px;

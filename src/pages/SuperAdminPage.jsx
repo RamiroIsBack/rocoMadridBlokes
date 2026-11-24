@@ -14,6 +14,7 @@ import PresupuestosSection from '../components/PresupuestosSection'
 import BudgetSection from '../components/BudgetSection'
 import ProjectsSection from '../components/ProjectsSection'
 import BlokesMapSection from '../components/BlokesMapSection'
+import CompePuntosTablaSection from '../components/CompePuntosTablaSection'
 import PlaygroundPage from './PlaygroundPage'
 import CherifsDashboard from './CherifsPage'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
@@ -1385,6 +1386,7 @@ const SA_GROUPS = [
   { key: 'gestion', label: 'Gestión', tabs: [
     { key: 'presupuestos', label: 'Presupuestos' },
     { key: 'proyectos',    label: 'Proyectos' },
+    { key: 'compe-puntos', label: 'Puntos compe' },
   ] },
   { key: 'acceso', label: 'Acceso' },
   { key: 'mapa',   label: 'Mapa de Blokes' },
@@ -1462,6 +1464,7 @@ export default function SuperAdminPage() {
       {saTab === 'acceso'   && <ListasSection />}
       {saTab === 'presupuestos' && <PresupuestosSection />}
       {saTab === 'proyectos' && <ProjectsSection />}
+      {saTab === 'compe-puntos' && <CompePuntosTablaSection />}
       {saTab === 'mapa'      && <BlokesMapSection />}
       {saTab === 'dashboard' && <CherifsDashboard />}
       {saTab === 'horarios'  && <PlaygroundPage />}

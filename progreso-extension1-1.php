@@ -139,6 +139,14 @@ function blokes_can_supervise() {
     return in_array(blokes_get_app_role(), array('profesor', 'gestion', 'socio', 'tablet'));
 }
 
+// 23/11 06:57 ("Corregir la categoría de un participante"): un sitio único — Organización →
+// Compe → Participantes. A diferencia de blokes_can_supervise(), 'tablet' NO vale aquí: la
+// tablet pone la categoría la primera vez (cuando todavía no la tiene), pero corregirla después
+// es cosa de una persona con nombre, nunca del modo quiosco.
+function progreso_compe_puede_corregir_categoria() {
+    return in_array(blokes_get_app_role(), array('profesor', 'gestion', 'socio'), true);
+}
+
 // Dinero AGREGADO del club (ingresos, ganancias, P&L, gastos, sueldos) es solo para socio —
 // nunca para gestion, profesor, tablet ni acceso de Eventos, aunque vean esa pantalla por otro
 // motivo (31/10, regla de Ramiro). Lo que debe/paga CADA alumno o reserva sí lo necesita
@@ -999,6 +1007,12 @@ add_action('rest_api_init', function() {
     // recepción — el callback comprueba cuál de los dos casos es.
     register_rest_route('progreso/v1', '/compe/categoria', array(
         'methods' => 'POST', 'callback' => 'progreso_compe_categoria_set', 'permission_callback' => 'is_user_logged_in',
+    ));
+    // 23/11 06:57 ("Corregir la categoría de un participante"): pantalla única en Organización →
+    // Compe → Participantes, solo profes/gestión/socio (ver progreso_compe_puede_corregir_categoria).
+    register_rest_route('progreso/v1', '/compe/participantes', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_participantes_listar',
+        'permission_callback' => function() { return progreso_compe_puede_corregir_categoria(); },
     ));
     // 23/11 06:50/06:47: tabla de puntos por bloque — visible para quien puede supervisar
     // (Organización la enseña), editable solo por un socio (afecta a la puntuación de verdad).
@@ -18256,7 +18270,11 @@ function progreso_equip_ensure_tables() {
     // progreso_equip_fijar_email_jefe_equipacion() una vez (bug real de Álvaro: el worker
     // is_lead tenía mal/vacío el email, así que progreso_equip_es_jefe_o_socio() nunca lo
     // reconocía y se quedaba sin permiso para asignar equipador/presas).
-    $version = '17';
+    // v18 (24/11, nota 23/11 06:57 "Corregir la categoría de un participante"): tabla
+    // comp_categoria_log — una vez que un participante ya tiene categoría en una compe, solo se
+    // puede corregir desde Organización → Compe → Participantes (profes/gestión/socio), y queda
+    // registrado aquí quién la cambió y cuándo.
+    $version = '18';
     if (get_option('blokes_equip_tables_version') === $version) return;
     $charset = $wpdb->get_charset_collate();
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -18455,6 +18473,20 @@ function progreso_equip_ensure_tables() {
         updated_at         datetime            NOT NULL,
         PRIMARY KEY (id),
         UNIQUE KEY categoria_unica (competition_id, participante_tipo, participante_id)
+    ) {$charset};");
+
+    dbDelta("CREATE TABLE " . progreso_equip_table('comp_categoria_log') . " (
+        id                  bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        competition_id      bigint(20) UNSIGNED NOT NULL,
+        participante_tipo   varchar(12)         NOT NULL,
+        participante_id     bigint(20) UNSIGNED NOT NULL,
+        categoria_anterior   varchar(20)         NOT NULL DEFAULT '',
+        categoria_nueva      varchar(20)         NOT NULL,
+        changed_by_user_id  bigint(20) UNSIGNED NOT NULL,
+        changed_by_nombre   varchar(190)        NOT NULL DEFAULT '',
+        changed_at          datetime            NOT NULL,
+        PRIMARY KEY (id),
+        KEY por_compe (competition_id)
     ) {$charset};");
 
     // Catálogo de tareas en tabla propia (antes hardcoded) para que la
@@ -21636,26 +21668,148 @@ function progreso_compe_categoria_set($request) {
     if (!in_array($categoria, PROGRESO_COMPE_CATEGORIAS, true)) {
         return new WP_Error('categoria_no_valida', 'La categoría debe ser masculina, femenina o infantil.', array('status' => 400));
     }
-    $es_uno_mismo = ($tipo === 'user' && $id === get_current_user_id());
-    if (!$es_uno_mismo && !blokes_can_supervise()) {
-        return new WP_Error('forbidden', 'Solo recepción puede poner la categoría de otra persona.', array('status' => 403));
-    }
     global $wpdb;
     progreso_equip_ensure_tables();
     $table = progreso_equip_table('comp_categorias');
-    $existe = $wpdb->get_var($wpdb->prepare(
-        "SELECT id FROM $table WHERE competition_id = %d AND participante_tipo = %s AND participante_id = %d",
+    $existe = $wpdb->get_row($wpdb->prepare(
+        "SELECT id, categoria FROM $table WHERE competition_id = %d AND participante_tipo = %s AND participante_id = %d",
         $competition_id, $tipo, $id
     ));
-    $datos = array('categoria' => $categoria, 'updated_at' => current_time('mysql'));
+    // 23/11 06:57: "en ningún otro sitio se cambia la categoría después de elegirla (ni
+    // Recepción, ni la clasificación de la app, ni el propio usuario)" — la primera vez (todavía
+    // sin fila) sigue el camino de siempre (uno mismo, o recepción si es por otra persona); una
+    // vez puesta, solo Organización → Compe → Participantes (profes/gestión/socio) la toca, y
+    // queda en el log quién y cuándo.
     if ($existe) {
-        $wpdb->update($table, $datos, array('id' => intval($existe)));
-    } else {
-        $wpdb->insert($table, array_merge($datos, array(
+        if ($existe->categoria === $categoria) {
+            return rest_ensure_response(array('success' => true, 'data' => array('categoria' => $categoria)));
+        }
+        if (!progreso_compe_puede_corregir_categoria()) {
+            return new WP_Error('forbidden', 'Esta persona ya tiene categoría: solo un profe, gestión o un socio puede corregirla, desde Organización → Compe → Participantes.', array('status' => 403));
+        }
+        $quien = wp_get_current_user();
+        $wpdb->insert(progreso_equip_table('comp_categoria_log'), array(
             'competition_id' => $competition_id, 'participante_tipo' => $tipo, 'participante_id' => $id,
-        )));
+            'categoria_anterior' => $existe->categoria, 'categoria_nueva' => $categoria,
+            'changed_by_user_id' => get_current_user_id(), 'changed_by_nombre' => $quien ? $quien->display_name : '',
+            'changed_at' => current_time('mysql'),
+        ));
+        $wpdb->update($table, array('categoria' => $categoria, 'updated_at' => current_time('mysql')), array('id' => intval($existe->id)));
+    } else {
+        $es_uno_mismo = ($tipo === 'user' && $id === get_current_user_id());
+        if (!$es_uno_mismo && !blokes_can_supervise()) {
+            return new WP_Error('forbidden', 'Solo recepción puede poner la categoría de otra persona.', array('status' => 403));
+        }
+        $wpdb->insert($table, array(
+            'competition_id' => $competition_id, 'participante_tipo' => $tipo, 'participante_id' => $id,
+            'categoria' => $categoria, 'updated_at' => current_time('mysql'),
+        ));
     }
     return rest_ensure_response(array('success' => true, 'data' => array('categoria' => $categoria)));
+}
+
+// GET /progreso/v1/compe/participantes?competitionId=X — Organización → Compe → Participantes
+// (nota 23/11 06:57): lista interna (nombre completo, no acortado como en la tele; teléfono y
+// alias para el buscador), con puntos/nº de bloques y un filtro de "posibles errores" (adultos
+// en Infantil, menores con cuenta marcada _rm_es_menor fuera de Infantil, sin categoría).
+function progreso_compe_participantes_listar($request) {
+    global $wpdb;
+    $competition_id = intval($request->get_param('competitionId'));
+    if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
+    progreso_equip_ensure_tables();
+    $puntos_tabla = blokes_compe_puntos_tabla_get();
+
+    $filas = $wpdb->get_results($wpdb->prepare(
+        "SELECT r.participante_tipo, r.participante_id, r.top, r.zona, b.number AS numero
+         FROM " . progreso_equip_table('comp_resultados') . " r
+         JOIN " . progreso_equip_table('comp_blocks') . " b ON b.id = r.comp_block_id
+         WHERE r.competition_id = %d AND r.estado = 'validado' AND (r.top = 1 OR r.zona = 1)",
+        $competition_id
+    ), ARRAY_A);
+    $por = array();
+    foreach ($filas as $f) {
+        $clave = $f['participante_tipo'] . ':' . intval($f['participante_id']);
+        if (!isset($por[$clave])) $por[$clave] = array('tipo' => $f['participante_tipo'], 'id' => intval($f['participante_id']), 'puntos' => 0, 'nBloques' => 0);
+        $por[$clave]['puntos'] += blokes_compe_puntos_de_resultado(intval($f['top']), intval($f['zona']), intval($f['numero']), $puntos_tabla);
+        $por[$clave]['nBloques']++;
+    }
+    // También quien ya tiene categoría puesta aunque todavía no haya apuntado ningún bloque.
+    $filas_cat = $wpdb->get_results($wpdb->prepare(
+        "SELECT participante_tipo, participante_id, categoria FROM " . progreso_equip_table('comp_categorias') . " WHERE competition_id = %d",
+        $competition_id
+    ), ARRAY_A);
+    $categoria_por_clave = array();
+    foreach ($filas_cat as $fc) {
+        $clave = $fc['participante_tipo'] . ':' . intval($fc['participante_id']);
+        $categoria_por_clave[$clave] = $fc['categoria'];
+        if (!isset($por[$clave])) $por[$clave] = array('tipo' => $fc['participante_tipo'], 'id' => intval($fc['participante_id']), 'puntos' => 0, 'nBloques' => 0);
+    }
+
+    $rapido_ids = array(); $placeholder_ids = array();
+    foreach ($por as $info) {
+        if ($info['tipo'] === 'rapido') $rapido_ids[intval($info['id'])] = true;
+        elseif ($info['tipo'] === 'placeholder') $placeholder_ids[intval($info['id'])] = true;
+    }
+    $rapido_ids = array_keys($rapido_ids);
+    $placeholder_ids = array_keys($placeholder_ids);
+    $nombres_rapidos = array();
+    if ($rapido_ids) {
+        $ph = implode(',', array_fill(0, count($rapido_ids), '%d'));
+        $r = $wpdb->get_results($wpdb->prepare("SELECT id, nombre FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE id IN ($ph)", ...$rapido_ids), ARRAY_A);
+        foreach ($r as $row) $nombres_rapidos[intval($row['id'])] = $row['nombre'];
+    }
+    $nombres_placeholder = array();
+    if ($placeholder_ids) {
+        $ph = implode(',', array_fill(0, count($placeholder_ids), '%d'));
+        $r = $wpdb->get_results($wpdb->prepare("SELECT id, nombre FROM " . blokes_placeholder_table() . " WHERE id IN ($ph)", ...$placeholder_ids), ARRAY_A);
+        foreach ($r as $row) $nombres_placeholder[intval($row['id'])] = $row['nombre'];
+    }
+
+    $es_multisite = is_multisite();
+    if ($es_multisite) switch_to_blog(1);
+    $out = array();
+    foreach ($por as $clave => $info) {
+        $tipo = $info['tipo']; $id = $info['id'];
+        $nombre = 'Alguien'; $telefono = ''; $alias = ''; $esMenorCuenta = null;
+        if ($tipo === 'rapido') {
+            $nombre = $nombres_rapidos[$id] ?? 'Alguien (sin cuenta)';
+        } elseif ($tipo === 'placeholder') {
+            $nombre = $nombres_placeholder[$id] ?? 'Alguien (sin cuenta)';
+        } else {
+            $u = get_userdata($id);
+            if ($u) {
+                $nombre = trim($u->first_name . ' ' . $u->last_name) ?: $u->display_name;
+                $telefono = (string) get_user_meta($id, 'billing_phone', true);
+                $alias = (string) blokes_get_user_nickname($id);
+                $esMenorCuenta = (bool) get_user_meta($id, '_rm_es_menor', true);
+            }
+        }
+        $categoria = $categoria_por_clave[$clave] ?? '';
+        $errores = array();
+        if ($categoria === '') $errores[] = 'sin_categoria';
+        if ($esMenorCuenta === true && $categoria !== '' && $categoria !== 'infantil') $errores[] = 'menor_fuera_de_infantil';
+        if ($esMenorCuenta === false && $categoria === 'infantil') $errores[] = 'adulto_en_infantil';
+        $out[] = array(
+            'clave' => $clave, 'tipo' => $tipo, 'id' => $id,
+            'nombre' => $nombre, 'telefono' => $telefono, 'alias' => $alias,
+            'categoria' => $categoria, 'puntos' => $info['puntos'], 'nBloques' => $info['nBloques'],
+            'errores' => $errores,
+        );
+    }
+    usort($out, function($a, $b) { return strcasecmp($a['nombre'], $b['nombre']); });
+
+    // Últimas correcciones de categoría de esta compe (quién y cuándo) — solo informativo.
+    $log = $wpdb->get_results($wpdb->prepare(
+        "SELECT participante_tipo, participante_id, categoria_anterior, categoria_nueva, changed_by_nombre, changed_at
+         FROM " . progreso_equip_table('comp_categoria_log') . " WHERE competition_id = %d ORDER BY changed_at DESC LIMIT 20",
+        $competition_id
+    ), ARRAY_A);
+    if ($es_multisite) restore_current_blog();
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'participantes' => $out,
+        'historialCambios' => $log,
+    )));
 }
 
 function progreso_compe_mis_resultados($request) {

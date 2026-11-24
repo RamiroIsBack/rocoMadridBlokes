@@ -832,6 +832,15 @@ details[open] .sa-collapsible__arrow {
 .sa-pay-feedback { font-size: 0.75rem; color: #34d399; margin: 8px 0 0; }
 .sa-pay-empty    { font-size: 0.8rem; font-style: italic; margin: 0; }
 
+/* 24/11: editor de la tabla de puntos de la compe (CompePuntosTablaSection) */
+.sa-puntos-tabla-wrap { overflow-x: auto; max-height: 420px; }
+.sa-puntos-tabla th, .sa-puntos-tabla td { text-align: left; }
+.sa-puntos-tabla input {
+  width: 64px; padding: 4px 6px; font-size: 0.82rem;
+  background: var(--color-surface); color: var(--color-text-primary);
+  border: 1px solid var(--color-border); border-radius: 4px;
+}
+
 .sa-pay-scroll { overflow-x: auto; }
 .sa-pay-table {
   width: 100%;
