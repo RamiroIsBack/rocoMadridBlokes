@@ -1998,22 +1998,17 @@ function superadmin_get_expenses($request) {
         $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0; $nom_con_voluntarios = 0;
         $row_concepto  = array(); // expense concept totals for this entity-month
         $row_ingresos  = array(); // income items for this entity-month
-        // 23/11 17:35: traspasos "Uso de Rocódromo" de este mes (Club: sale, negativo; Rocoteca:
-        // entra, positivo) — igual que blokes_expenses_cuadre() pero mes a mes, para que el
-        // frontend pueda construir el saldo acumulado real (apertura + Σ neto − Σ traspasos) sin
-        // tener que sumar todo el año de golpe. Se calcula SIEMPRE, independiente de
-        // exclude_internal (el saldo del banco se mueve con el traspaso pase lo que pase con ese
-        // filtro, que solo decide qué se ve en las barras de gastos/ingresos).
-        $traspasos_salida_mes = 0.0; $traspasos_entrada_mes = 0.0;
+        // 24/11 07:35/07:55: "Resultado neto mensual" necesita el neto SIN movimientos internos
+        // (sobre todo «Uso de Rocódromo», que se anula con lo que recibía la Rocoteca — no es
+        // gasto/ingreso real) pase lo que pase con el filtro "Movimientos internos" de la
+        // pantalla, que solo decide qué se ve en las barras de gastos/ingresos de ARRIBA. Se
+        // acumula aparte, siempre sin internos, independiente de $exclude_internal.
+        $tc_neto = 0.0; $ti_neto = 0.0;
         foreach ($saved['items'] as $item) {
             $concepto_norm = function_exists('iconv')
                 ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
                 : strtolower($item['concepto'] ?? '');
             $es_rocodromo = strpos($concepto_norm, 'rocodromo') !== false;
-            if ($es_rocodromo) {
-                $amt_r = abs(floatval($item['importe'] ?? 0));
-                if (($item['section'] ?? 'costes') === 'costes') $traspasos_salida_mes += $amt_r; else $traspasos_entrada_mes += $amt_r;
-            }
             // "Uso de Rocódromo" (Club → Rocoteca) NUNCA es gasto/ingreso real, en ninguna vista
             // (Ramiro, 15/11 11:00, anula el 10:55: los gastos de la Rocoteca de ese dinero YA
             // se contabilizan en la Rocoteca — contarlo también como gasto del Club sería
@@ -2022,6 +2017,10 @@ function superadmin_get_expenses($request) {
             $is_internal = $item['excluded']
                 || $es_rocodromo
                 || strpos($concepto_norm, 'transferencia entre cuentas') !== false;
+            if (!$is_internal) {
+                $amt_neto = abs(floatval($item['importe'] ?? 0));
+                if (($item['section'] ?? 'costes') === 'costes') $tc_neto += $amt_neto; else $ti_neto += $amt_neto;
+            }
             if ($exclude_internal && $is_internal) continue;
             $amt  = abs(floatval($item['importe']));
             // 15/11 09:18 punto 3: antes el Club siempre daba IVA 0 pasara lo que pasara — desde
@@ -2082,7 +2081,8 @@ function superadmin_get_expenses($request) {
                 ? (abs($nom_con_voluntarios - $nominas_real) > 50) : false,
             'by_concepto'     => $row_concepto,
             'ingresos_items'  => $row_ingresos,
-            'traspasos_rocodromo' => round($traspasos_entrada_mes - $traspasos_salida_mes, 2),
+            'total_costes_neto'   => round($tc_neto, 2),
+            'total_ingresos_neto' => round($ti_neto, 2),
         );
     }
 
