@@ -661,7 +661,7 @@ function HistoryView({ period, onDeleted }) {
     return next
   })
   const effectiveExclude = excludeInternal
-  const { data, breakdown, saldoReal, cuadre, cuadreRocoteca, loading, error } = useExpenses(from, entity, effectiveExclude)
+  const { data, breakdown, saldoReal, saldoMensualClub, saldoMensualRocoteca, loading, error } = useExpenses(from, entity, effectiveExclude)
 
   const handleDelete = async (month, ent) => {
     const key = `${month}·${ent}`
@@ -724,44 +724,35 @@ function HistoryView({ period, onDeleted }) {
     return Object.values(acc).sort((a, b) => a.month.localeCompare(b.month))
   }, [data])
 
-  // 24/11 07:35: apertura/saldo real de la cuenta seleccionada en el selector de arriba (Club,
-  // Rocoteca o Todas — suma de las dos, solo si las dos tienen apertura puesta; si no, null, en
-  // vez de fingir un saldo con solo la mitad de los datos).
-  const entityApertura = entity === 'club' ? (cuadre?.apertura ?? null)
-    : entity === 'rocoteca' ? (cuadreRocoteca?.apertura ?? null)
-    : (cuadre?.apertura != null && cuadreRocoteca?.apertura != null) ? cuadre.apertura + cuadreRocoteca.apertura : null
-  const entitySaldoHoy = entity === 'club' ? (cuadre?.saldoHoy ?? null)
-    : entity === 'rocoteca' ? (cuadreRocoteca?.saldoHoy ?? null)
-    : (cuadre?.saldoHoy != null && cuadreRocoteca?.saldoHoy != null) ? cuadre.saldoHoy + cuadreRocoteca.saldoHoy : null
-
   // Mes en curso, para marcarlo como parcial — nunca hardcodeado a "noviembre", funciona igual
   // el mes que sea.
   const currentMonthStr = useMemo(() => new Date().toISOString().slice(0, 7), [])
 
-  // 24/11 07:35/07:55: "olvídate de todo lo que hay, vuelve a ingresos − gastos que da el
-  // acumulado" — rehecho simple. Barras = neto del mes (ingresos − gastos, ya sin movimientos
-  // internos tipo "Uso de Rocódromo"). Línea = saldo en el banco: apertura + suma de los netos
-  // mes a mes, sin ninguna resta de traspasos aparte (eso ya está fuera del neto desde el
-  // backend). Nada de segunda línea ni de línea de referencia del banco.
+  // 24/11 11:50 (Ramiro: "la línea tiene que ser el saldo REAL del banco", c6baf08 no sirve):
+  // nada de apertura+netos (eso nunca cuadraba, porque el neto quita los traspasos internos que
+  // sí movieron la cuenta de verdad) — la línea es el "Saldo Posterior" real del CSV al cierre de
+  // cada mes (saldoMensualClub/Rocoteca, histórico completo del backend). La Rocoteca ya no sube
+  // CSV, así que arrastra su último saldo conocido mes a mes; con "Todas" se suma Club + el
+  // último saldo conocido de Rocoteca a esa fecha. Barras y línea ya NO tienen por qué cuadrar
+  // entre sí (el neto de las barras sigue sin los traspasos internos) — eso está bien.
   const netData = useMemo(() => {
-    let cum = entityApertura ?? 0
+    let ultimoClub = null, ultimoRoco = null
     return byMonth.map(r => {
       const net = r.ingresosNeto - r.costesNeto
-      cum += net
+      if (saldoMensualClub?.[r.month] != null) ultimoClub = saldoMensualClub[r.month]
+      if (saldoMensualRocoteca?.[r.month] != null) ultimoRoco = saldoMensualRocoteca[r.month]
+      let saldo = null
+      if (entity === 'club') saldo = ultimoClub
+      else if (entity === 'rocoteca') saldo = ultimoRoco
+      else if (ultimoClub != null || ultimoRoco != null) saldo = (ultimoClub || 0) + (ultimoRoco || 0)
       return {
         month: fmtMonth(r.month),
         net: Math.round(net),
-        saldo: entityApertura != null ? Math.round(cum) : null,
+        saldo: saldo != null ? Math.round(saldo) : null,
         parcial: r.month === currentMonthStr,
       }
     })
-  }, [byMonth, entityApertura, currentMonthStr])
-  // Comprobación (24/11 07:35/07:55): con "Todas", el último punto tiene que dar el saldo real
-  // (Club + Rocoteca) — ahí sí tiene que cuadrar, porque los traspasos internos se cancelan al
-  // juntar las dos entidades. Si no cuadra, NO se maquilla: se avisa con la diferencia.
-  const ultimoSaldo = netData.length ? netData[netData.length - 1].saldo : null
-  const descuadreSaldo = (entity === 'all' && ultimoSaldo != null && entitySaldoHoy != null)
-    ? Math.round(ultimoSaldo - entitySaldoHoy) : 0
+  }, [byMonth, entity, saldoMensualClub, saldoMensualRocoteca, currentMonthStr])
 
   const nominasData = useMemo(() =>
     byMonth.map(r => ({
@@ -963,15 +954,8 @@ function HistoryView({ period, onDeleted }) {
             </ComposedChart>
           </ResponsiveContainer>
           <p className="exp-hint" style={{ fontSize: '0.75rem' }}>
-            {entityApertura == null
-              ? <>Falta el saldo de apertura a 1/1 de esta vista (se pone en <strong>P&L</strong>) para calcular el saldo — de momento solo se ven las barras de neto mensual.</>
-              : <>Barras: neto del mes (verde/rojo). Línea: saldo en el banco (apertura + netos acumulados). Mes en curso más claro, datos parciales.</>}
+            Barras: neto del mes sin movimientos internos (verde/rojo). Línea: saldo real del banco al cierre de cada mes (Rocoteca arrastra su último saldo conocido, ya sin CSV nuevo). Mes en curso más claro, datos parciales — no tienen por qué cuadrar entre sí.
           </p>
-          {descuadreSaldo !== 0 && (
-            <p className="exp-error" style={{ fontSize: '0.75rem' }}>
-              ⚠ No cuadra con el saldo del banco por {fmtEurSigned(descuadreSaldo)}.
-            </p>
-          )}
         </>
       )}
 

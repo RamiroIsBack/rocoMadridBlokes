@@ -2134,6 +2134,11 @@ function superadmin_get_expenses($request) {
         // saldo consolidada, no solo el Club.
         'cuadre' => blokes_expenses_cuadre(),
         'cuadreRocoteca' => blokes_expenses_cuadre(null, 'rocoteca'),
+        // 24/11 11:50: histórico completo (nunca recortado por $from) para la LÍNEA del
+        // "Resultado neto mensual" — el frontend arrastra el último saldo conocido en los meses
+        // sin CSV nuevo (la Rocoteca, desde que dejó de tener movimientos).
+        'saldoMensualClub' => blokes_expenses_saldo_mensual('club'),
+        'saldoMensualRocoteca' => blokes_expenses_saldo_mensual('rocoteca'),
     ));
 }
 
@@ -6139,6 +6144,40 @@ function blokes_expenses_iva_repercutido_real($from) {
 // Ramiro 09:25): el "Saldo Posterior" del movimiento más reciente de la entidad — no un
 // acumulado de ingresos−gastos reconstruido desde el primer mes (eso nunca va a cuadrar con el
 // banco de verdad). Solo tiene sentido para el Club (la única cuenta que importa, según Ramiro).
+// 24/11 11:50 (Ramiro, "la línea tiene que ser el saldo REAL del banco"): saldo "Posterior" del
+// banco al CIERRE de cada mes (el movimiento más reciente de ESE mes), para TODOS los meses que
+// tengan dato — nunca limitado por el "from" del gráfico, porque el frontend necesita el
+// histórico completo para poder arrastrar el último saldo conocido de un mes sin CSV nuevo (la
+// Rocoteca, que ya no tiene movimientos). Nada de apertura ni de sumar netos — eso nunca cuadra
+// con el banco de verdad (el neto quita traspasos internos que sí movieron la cuenta).
+function blokes_expenses_saldo_mensual($entity) {
+    global $wpdb;
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
+        'blokes_exp_%_' . $entity
+    ), ARRAY_A);
+    $por_mes = array(); // month => ['ts' => mejor_ts, 'saldo' => valor]
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!$saved || !isset($saved['month']) || !is_array($saved['items'] ?? null)) continue;
+        $month = $saved['month'];
+        foreach ($saved['items'] as $item) {
+            $saldo_raw = (string) ($item['saldo'] ?? '');
+            if ($saldo_raw === '') continue;
+            $fecha = $item['fechaValor'] ?? $item['fecha'] ?? '';
+            if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
+            $ts = mktime(0, 0, 0, intval($m[2]), intval($m[1]), intval($m[3]));
+            if (isset($por_mes[$month]) && $ts < $por_mes[$month]['ts']) continue; // a igual mes, el movimiento más tardío gana
+            $saldo = floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', $saldo_raw)));
+            $por_mes[$month] = array('ts' => $ts, 'saldo' => $saldo);
+        }
+    }
+    $out = array();
+    foreach ($por_mes as $month => $v) $out[$month] = round($v['saldo'], 2);
+    ksort($out);
+    return $out;
+}
+
 function blokes_expenses_saldo_real($entity) {
     global $wpdb;
     $rows = $wpdb->get_results($wpdb->prepare(

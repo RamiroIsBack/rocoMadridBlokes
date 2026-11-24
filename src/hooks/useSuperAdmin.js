@@ -293,6 +293,10 @@ export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [saldoReal, setSaldoReal] = useState(null)
   const [cuadre,    setCuadre]    = useState(null)
   const [cuadreRocoteca, setCuadreRocoteca] = useState(null)
+  // 24/11 11:50: histórico completo mes->saldo real del banco (nunca recortado por `from`), una
+  // entidad y la otra — para la línea del "Resultado neto mensual".
+  const [saldoMensualClub, setSaldoMensualClub] = useState(null)
+  const [saldoMensualRocoteca, setSaldoMensualRocoteca] = useState(null)
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -304,11 +308,16 @@ export function useExpenses(from, entity = 'all', excludeInternal = true) {
     setError(null)
     fetchWithNonceRetry(() => fetch(url, { headers: { 'X-WP-Nonce': window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || '' } }))
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() })
-      .then(json => { setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setSaldoReal(json.saldoReal ?? null); setCuadre(json.cuadre ?? null); setCuadreRocoteca(json.cuadreRocoteca ?? null); setLoading(false) })
+      .then(json => {
+        setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setSaldoReal(json.saldoReal ?? null)
+        setCuadre(json.cuadre ?? null); setCuadreRocoteca(json.cuadreRocoteca ?? null)
+        setSaldoMensualClub(json.saldoMensualClub ?? null); setSaldoMensualRocoteca(json.saldoMensualRocoteca ?? null)
+        setLoading(false)
+      })
       .catch(e  => { setError(e.message); setLoading(false) })
   }, [url, reloadKey])
 
-  return { data, breakdown, saldoReal, cuadre, cuadreRocoteca, loading, error, refetch: () => setReloadKey(k => k + 1) }
+  return { data, breakdown, saldoReal, cuadre, cuadreRocoteca, saldoMensualClub, saldoMensualRocoteca, loading, error, refetch: () => setReloadKey(k => k + 1) }
 }
 
 // POST /expenses/apertura -- saldo de apertura (1/1) editable de una entidad/año (Club por
