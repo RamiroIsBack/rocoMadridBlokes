@@ -35,6 +35,7 @@ import {
   usePendientesCobro, gestionPendienteCobroViene, gestionPendienteCobroRecordado,
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
   useBajas, gestionBajaMotivoSet, gestionBajaContacto,
+  gestionAltaContacto, gestionAltasContactosGet,
 } from '../hooks/useSuperAdmin'
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
@@ -2922,6 +2923,63 @@ function ReintentarCobroExcel() {
   )
 }
 
+// Fila de la pestaña Altas (Ramiro, 24/11): "¿Qué tal vas?" por WhatsApp a quien se ha dado de
+// alta hace poco — mismo patrón que BajaRow (de abajo), sin motivo/categoría (no aplica aquí).
+function AltaRow({ a, contactos, onContactado }) {
+  const [respuesta, setRespuesta] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const [abierto, setAbierto] = useState(false)
+  const esMenor = a.edad && a.edad !== 'Adultos'
+
+  function whatsapp() {
+    const texto = esMenor
+      ? `Hola, somos de RocoMadrid. ¿Qué tal las primeras semanas de ${a.name} en la clase de ${a.dia} ${a.horario}? Estamos muy contentos de que esté con nosotros 💛`
+      : `Hola ${a.name?.split(' ')[0] || ''}, ¿qué tal tus primeras semanas en la clase de ${a.dia} ${a.horario}? Estamos muy contentos de que estés con nosotros 💛`
+    window.open(pcWhatsappUrl(a.phone, texto), 'blokes_whatsapp')
+    setAbierto(true)
+  }
+  async function guardarContacto() {
+    setGuardando(true)
+    try {
+      await gestionAltaContacto({ sub_id: a.subId, respuesta })
+      setRespuesta(''); setAbierto(false)
+      onContactado?.()
+    } finally { setGuardando(false) }
+  }
+
+  return (
+    <>
+      <tr>
+        <td>{a.name || <span className="sv-ot-muted">—</span>}</td>
+        <td className="sv-ot-muted">{a.dia} {a.horario}{a.edad !== 'Adultos' ? ` · ${a.edad}` : ''}</td>
+        <td className="sv-ot-muted">{a.phone || '—'}</td>
+        <td className="sv-ot-muted">{a.altaMes ? mesLabelGrp(a.altaMes) : '—'}</td>
+        <td>
+          {!a.phone ? <span className="sv-ot-muted">Sin teléfono</span> : (
+            <button className="sv-tests-select" onClick={whatsapp} disabled={guardando}>💬 ¿Qué tal vas?</button>
+          )}
+          {contactos?.length > 0 && (
+            <div className="sv-ot-muted" title={contactos.map(c => `${c.fecha.slice(0, 10)} · ${c.user_login}: ${c.respuesta || '(sin respuesta)'}`).join('\n')}>
+              {contactos.length} contacto{contactos.length > 1 ? 's' : ''} ya hecho{contactos.length > 1 ? 's' : ''}
+            </div>
+          )}
+        </td>
+      </tr>
+      {abierto && (
+        <tr>
+          <td colSpan={5}>
+            <div className="sv-grp-field">
+              <input className="sv-tests-input" type="text" value={respuesta} onChange={e => setRespuesta(e.target.value)} placeholder="¿Qué respondió? (opcional)" style={{ width: 280 }} />
+              <button className="sv-tests-select" onClick={guardarContacto} disabled={guardando}>Guardar contacto</button>
+              <button className="sv-tests-select" onClick={() => setAbierto(false)} disabled={guardando}>Cerrar</button>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
 const BAJA_ORIGEN_LABEL = { cancelo: 'Canceló en la web', impago: 'Impago (se canceló sola)', no_viene: 'No viene (sin cancelar aún)', duplicado: 'Duplicado' }
 
 // Fila de la pestaña Bajas (Ramiro, 15/11 08:45 punto B.2): WhatsApp "¿por qué lo has dejado?",
@@ -3111,15 +3169,27 @@ function GruposTab() {
   // suscripción — 07/50 punto B), no uno nuevo. Altas = members_active.new de /classes, de
   // cualquier grupo; Bajas = /gestion/bajas (ya junta las canceladas de verdad con el "No
   // viene" marcado en Pendientes de cobro que todavía no se ha cancelado en WooCommerce).
-  const altas = useMemo(() => {
+  // 24/11 (Ramiro): "¿Qué tal vas?" necesita los contactos ya hechos por sub_id, igual que
+  // Bajas — pero Altas se calcula aquí mismo (no viene ya incluido en un GET como en Bajas), así
+  // que se pide aparte. Sobre la lista SIN filtrar por buscador (altasTodas): si se pidiera sobre
+  // `altas` ya filtrada, cada letra del buscador dispararía una petición nueva.
+  const altasTodas = useMemo(() => {
     const out = []
     for (const c of (classesData || [])) {
       for (const m of c.members_active) {
         if (m.new) out.push({ ...m, dia: c.dia, horario: c.horario, edad: c.edad, grupoLabel: c.label + (c.edad !== 'Adultos' ? ` (${c.edad})` : '') })
       }
     }
-    return out.filter(a => coincide({ alumno: a.name, telefono: a.phone }))
-  }, [classesData, terminoBusq, telBusq])
+    return out
+  }, [classesData])
+  const altas = useMemo(() => altasTodas.filter(a => coincide({ alumno: a.name, telefono: a.phone })), [altasTodas, terminoBusq, telBusq])
+  const [altasContactos, setAltasContactos] = useState({})
+  const cargarAltasContactos = useCallback(() => {
+    const ids = altasTodas.map(a => a.subId).filter(Boolean)
+    if (!ids.length) { setAltasContactos({}); return }
+    gestionAltasContactosGet(ids).then(setAltasContactos).catch(() => {})
+  }, [altasTodas])
+  useEffect(() => { cargarAltasContactos() }, [cargarAltasContactos])
   const bajasLista = useMemo(() =>
     (bajasData || []).filter(f => coincide({ alumno: f.nombre, telefono: f.telefono })),
     [bajasData, terminoBusq, telBusq])
@@ -3382,15 +3452,10 @@ function GruposTab() {
           <h3 className="sv-grp-subtitle">Altas ({altas.length})</h3>
           <div className="sv-tests-scroll">
             <table className="sv-tests-table">
-              <thead><tr><th>Alumno</th><th>Clase</th><th>Teléfono</th><th>Mes de alta</th></tr></thead>
+              <thead><tr><th>Alumno</th><th>Clase</th><th>Teléfono</th><th>Mes de alta</th><th>Contacto</th></tr></thead>
               <tbody>
                 {altas.map(a => (
-                  <tr key={a.subId}>
-                    <td>{a.name || <span className="sv-ot-muted">—</span>}</td>
-                    <td className="sv-ot-muted">{a.dia} {a.horario}{a.edad !== 'Adultos' ? ` · ${a.edad}` : ''}</td>
-                    <td className="sv-ot-muted">{a.phone || '—'}</td>
-                    <td className="sv-ot-muted">{a.altaMes ? mesLabelGrp(a.altaMes) : '—'}</td>
-                  </tr>
+                  <AltaRow key={a.subId} a={a} contactos={altasContactos[a.subId]} onContactado={cargarAltasContactos} />
                 ))}
               </tbody>
             </table>

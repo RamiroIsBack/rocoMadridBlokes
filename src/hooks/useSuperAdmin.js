@@ -154,6 +154,12 @@ export function useBajas() {
 export const gestionBajaMotivoSet   = body => gestionPost('/gestion/bajas/motivo', body)
 export const gestionBajaContacto    = body => gestionPost('/gestion/bajas/contacto', body)
 
+// 24/11 (Ramiro): mismo seguimiento de contacto que Bajas, pero para Altas ("¿qué tal vas?").
+// Altas no tiene GET propio (se calcula en el frontend desde /classes) — se piden los contactos
+// ya hechos aparte, por lista de sub_id.
+export const gestionAltaContacto      = body    => gestionPost('/gestion/altas/contacto', body)
+export const gestionAltasContactosGet = subIds  => gestionCall('GET', `/gestion/altas/contactos?subIds=${subIds.join(',')}`)
+
 // Superadmin › Clases: retención + rentabilidad real (15/11 08:45 punto D + 09:10).
 export function useClasesRetencion(months = 12, mes = '') {
   return useEndpoint('/clases-retencion', { months, ...(mes ? { mes } : {}) })

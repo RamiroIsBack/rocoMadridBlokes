@@ -1699,6 +1699,14 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/bajas/contacto', array(
         'methods' => 'POST', 'callback' => 'superadmin_gestion_bajas_contacto', 'permission_callback' => $sa_perm,
     ));
+    // 24/11 (Ramiro): mismo seguimiento de contacto que Bajas, pero para Altas — "¿qué tal vas?"
+    // en vez de "¿por qué lo has dejado?".
+    register_rest_route('superadmin/v1', '/gestion/altas/contacto', array(
+        'methods' => 'POST', 'callback' => 'superadmin_gestion_altas_contacto', 'permission_callback' => $sa_perm,
+    ));
+    register_rest_route('superadmin/v1', '/gestion/altas/contactos', array(
+        'methods' => 'GET', 'callback' => 'superadmin_gestion_altas_contactos_get', 'permission_callback' => $sa_perm,
+    ));
     // Pestaña Superadmin › Clases: retención por clase/profe (15/11 08:45 punto D) — solo
     // socios, como el resto de dinero/estadísticas agregadas del club.
     register_rest_route('superadmin/v1', '/clases-retencion', array(
@@ -3556,6 +3564,69 @@ function blokes_bajas_contactos_de_varios($sub_ids) {
     $out = array();
     foreach ($rows as $r) $out[intval($r['sub_id'])][] = $r;
     return $out;
+}
+
+// ─── 24/11: mismo registro de contacto que las bajas, pero para Altas ("¿qué tal vas?") ──────
+// Altas no tiene tabla/endpoint propio de listado (se calcula en el frontend desde /classes) —
+// solo el registro de contactos necesita guardarse en el servidor, así que es tabla + 2
+// endpoints (guardar uno, leer varios por sub_id) en vez de ir metido en una respuesta ya
+// existente como en Bajas.
+function blokes_altas_contactos_table() {
+    global $wpdb;
+    return $wpdb->prefix . 'blokes_altas_contactos';
+}
+function blokes_ensure_altas_contactos_table() {
+    global $wpdb;
+    $table = blokes_altas_contactos_table();
+    if ($wpdb->get_var($wpdb->prepare('SHOW TABLES LIKE %s', $table)) === $table) return;
+    $charset = $wpdb->get_charset_collate();
+    $sql = "CREATE TABLE {$table} (
+        id         bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        sub_id     bigint(20) UNSIGNED NOT NULL,
+        fecha      datetime             NOT NULL,
+        user_login varchar(100)         NOT NULL DEFAULT '',
+        respuesta  text                 NULL,
+        PRIMARY KEY (id),
+        KEY sub_id (sub_id)
+    ) {$charset};";
+    require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+    dbDelta($sql);
+}
+function blokes_altas_contactos_de_varios($sub_ids) {
+    global $wpdb;
+    if (empty($sub_ids)) return array();
+    blokes_ensure_altas_contactos_table();
+    $placeholders = implode(',', array_fill(0, count($sub_ids), '%d'));
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT sub_id, fecha, user_login, respuesta FROM " . blokes_altas_contactos_table() . " WHERE sub_id IN ({$placeholders}) ORDER BY fecha DESC",
+        $sub_ids
+    ), ARRAY_A);
+    $out = array();
+    foreach ($rows as $r) $out[intval($r['sub_id'])][] = $r;
+    return $out;
+}
+// POST /gestion/altas/contacto — registra un intento de contacto ("¿qué tal vas?") con la
+// respuesta, igual que el de bajas pero sin "aceptaPromos" (no aplica aquí).
+function superadmin_gestion_altas_contacto($request) {
+    $sub_id = intval($request->get_param('sub_id'));
+    $respuesta = sanitize_textarea_field((string) $request->get_param('respuesta'));
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    blokes_ensure_altas_contactos_table();
+    global $wpdb;
+    $user = wp_get_current_user();
+    $wpdb->insert(blokes_altas_contactos_table(), array(
+        'sub_id' => $sub_id, 'fecha' => current_time('mysql'),
+        'user_login' => $user ? $user->user_login : '', 'respuesta' => $respuesta,
+    ));
+    return rest_ensure_response(array('success' => true));
+}
+// GET /gestion/altas/contactos?subIds=1,2,3 — contactos ya hechos, para pintarlos en la fila sin
+// tener que ir uno a uno (Altas se calcula en el frontend, no tiene un GET propio donde venir ya
+// incluidos como en Bajas).
+function superadmin_gestion_altas_contactos_get($request) {
+    $sub_ids_raw = (string) $request->get_param('subIds');
+    $sub_ids = array_values(array_filter(array_map('intval', explode(',', $sub_ids_raw))));
+    return rest_ensure_response(array('success' => true, 'data' => blokes_altas_contactos_de_varios($sub_ids)));
 }
 
 // POST /gestion/bajas/contacto — registra un intento de contacto (normalmente tras abrir el
