@@ -61,6 +61,14 @@
 .arm-btn-grande:disabled { opacity: 0.6; cursor: default; }
 .arm-btn-grande:hover:not(:disabled) { background: #c8961e; }
 .arm-btn-grande--activo { outline: 3px solid #d4a017; outline-offset: 2px; }
+/* 23/11 15:45 punto 1 (cowork): "Bonus sale resaltado, parece la opción por defecto" — ninguna
+   regla de aquí distingue Top de Bonus sin --activo, así que lo más probable es el foco por
+   defecto del navegador/táctil quedándose en el segundo botón. Neutraliza el anillo de foco en
+   los dos salvo que de verdad sea el --activo (el resultado ya guardado). */
+.arm-btn-grande:focus,
+.arm-btn-grande:focus-visible { outline: none; }
+.arm-btn-grande--activo:focus,
+.arm-btn-grande--activo:focus-visible { outline: 3px solid #d4a017; outline-offset: 2px; }
 
 .arm-quitar {
   background: none;

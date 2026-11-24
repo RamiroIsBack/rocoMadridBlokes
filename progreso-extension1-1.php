@@ -978,6 +978,13 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/compe/buscar-participante', array(
         'methods' => 'GET', 'callback' => 'progreso_compe_buscar_participante', 'permission_callback' => 'is_user_logged_in',
     ));
+    // 23/11 15:45 punto 2 (cowork): "¿Quién eres?" del tablet (IdentityPicker) carga toda la
+    // lista de /alumnos de una vez y busca en local — nunca incluía a quien se apuntó solo para
+    // la compe (sin cuenta, de Recepción), que solo vivía en buscar-participante (búsqueda en
+    // vivo, no una lista completa). Lista simple, sin buscador, para fusionar en el picker.
+    register_rest_route('progreso/v1', '/compe/participantes-rapidos', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_listar_participantes_rapidos', 'permission_callback' => 'is_user_logged_in',
+    ));
     register_rest_route('progreso/v1', '/compe/participante-rapido', array(
         'methods' => 'POST', 'callback' => 'progreso_compe_crear_participante_rapido', 'permission_callback' => 'is_user_logged_in',
     ));
@@ -21319,6 +21326,20 @@ function progreso_compe_buscar_participante($request) {
         }
     }
     return rest_ensure_response(array('success' => true, 'data' => $resultado));
+}
+
+// GET /progreso/v1/compe/participantes-rapidos — lista completa (sin buscador) de quien se
+// apuntó solo para esta compe, sin cuenta — para fusionar en IdentityPicker (23/11 15:45 punto 2).
+function progreso_compe_listar_participantes_rapidos($request) {
+    global $wpdb;
+    $competition_id = intval($request->get_param('competitionId'));
+    if (!$competition_id) return new WP_Error('bad_request', 'Falta competitionId.', array('status' => 400));
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT id, nombre FROM " . progreso_equip_table('comp_participantes_rapidos') . " WHERE competition_id = %d ORDER BY nombre ASC", $competition_id
+    ), ARRAY_A);
+    return rest_ensure_response(array('success' => true, 'data' => array_map(function($r) {
+        return array('id' => intval($r['id']), 'nombre' => $r['nombre']);
+    }, $rows)));
 }
 
 // POST /progreso/v1/compe/participante-rapido — crea un participante sin cuenta (pase de día,

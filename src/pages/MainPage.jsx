@@ -35,7 +35,14 @@ function getAuthHeadersCompe() {
 // devuelve 'falta_categoria' (primer resultado de alguien sin categoría y sin sub de Menores
 // que la ponga sola), no se ha apuntado nada todavía — el modal pide la categoría y reintenta.
 async function apuntarCompeParaIdentidad(compBlockId, identity, resultado, categoria) {
-  const target = identity.kind === 'ph' ? { targetPlaceholderId: identity.placeholder_id } : { targetUserId: identity.user_id }
+  // 23/11 15:45 punto 2 (cowork): el buscador de "¿Quién eres?" no encontraba a quien se apuntó
+  // solo para la compe (sin cuenta, dado de alta en Recepción) — kind: 'rapido' es ese caso.
+  // 23/11 15:45 punto 3: con sesión propia (no tablet) no se pasa ningún target — el backend
+  // apunta a quien tiene la sesión, igual que ya hace el "Apuntar" de uno mismo en /compe.
+  const target = identity.kind === 'ph' ? { targetPlaceholderId: identity.placeholder_id }
+    : identity.kind === 'rapido' ? { targetParticipanteRapidoId: identity.participante_rapido_id }
+    : identity.kind === 'self' ? {}
+    : { targetUserId: identity.user_id }
   const res = await fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/resultado`, {
     method: 'POST', credentials: 'include',
     headers: { ...getAuthHeadersCompe(), 'Content-Type': 'application/json' },
@@ -100,9 +107,17 @@ function ColeccionModoCompe({ estado }) {
   const [busy, setBusy] = useState(false)
 
   const tocar = useCallback((e, b) => {
-    if (!isTablet) return
     e.preventDefault()
-    setPickerBloque(b)
+    if (isTablet) { setPickerBloque(b); return }
+    // 23/11 15:45 punto 3 (Ramiro): con sesión propia el enlace navegaba a /blokes/compe sin
+    // preguntar nada (y con ?previewCompeId se perdía la compe de prueba al navegar de verdad) —
+    // ahora abre el mismo diálogo Top/Bonus directamente para uno mismo, sin pasar por el picker
+    // (ya se sabe quién es: la propia sesión).
+    setPidiendoResultado({
+      bloque: b,
+      identity: { kind: 'self', name: window.blokesSiteData?.userName || 'ti' },
+      mostrarCategoria: false, resultadoElegido: null,
+    })
   }, [isTablet])
 
   const completarParaIdentidad = useCallback((identity) => {

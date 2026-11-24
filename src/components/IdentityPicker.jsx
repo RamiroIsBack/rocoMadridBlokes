@@ -43,6 +43,11 @@ function claseEnCursoEsNinos(sugeridos) {
 // categoría infantil en esa compe — ColeccionModoCompe lo pasa cuando hay una activa).
 export default function IdentityPicker({ title = '¿Quién eres?', allowCreate = true, competitionId = null, onPick, onClose }) {
   const [alumnos, setAlumnos]   = useState([])
+  // 23/11 15:45 punto 2 (cowork): el buscador solo miraba /alumnos — quien se apuntó solo para
+  // la compe (sin cuenta, de Recepción) no aparecía y se podía duplicar al intentar apuntarse en
+  // la tablet. Solo se pide cuando hay una compe (competitionId), y solo entran en la búsqueda
+  // por texto, nunca en "sugeridos" (no tienen día/horario de clase).
+  const [rapidos, setRapidos] = useState([])
   const [loading, setLoading]   = useState(true)
   const [search, setSearch]     = useState('')
   const [showCreate, setShowCreate] = useState(false)
@@ -61,11 +66,26 @@ export default function IdentityPicker({ title = '¿Quién eres?', allowCreate =
       .finally(() => setLoading(false))
   }, [])
 
+  useEffect(() => {
+    if (!competitionId) { setRapidos([]); return }
+    fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/participantes-rapidos?competitionId=${competitionId}`, { credentials: 'include', headers: getAuthHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(json => { if (json?.data) setRapidos(json.data) })
+      .catch(() => {})
+  }, [competitionId])
+
   const consolidated = useMemo(() => consolidateAlumnos(alumnos), [alumnos])
   const sugeridos = useMemo(() => consolidated.filter(a => claseEnCurso(a.dia, a.horario)).slice(0, 20), [consolidated])
   const searchNorm = normalizeName(search)
+  const rapidosFiltrados = useMemo(
+    () => searchNorm ? rapidos.filter(r => normalizeName(r.nombre).includes(searchNorm)) : [],
+    [rapidos, searchNorm]
+  )
   const results = searchNorm
-    ? consolidated.filter(a => normalizeName(a.cliente || a.nombre).includes(searchNorm)).slice(0, 30)
+    ? [
+        ...consolidated.filter(a => normalizeName(a.cliente || a.nombre).includes(searchNorm)),
+        ...rapidosFiltrados.map(r => ({ is_rapido: true, participante_rapido_id: r.id, cliente: r.nombre + ' (sin cuenta, solo compe)' })),
+      ].slice(0, 30)
     : sugeridos
 
   const role = window.blokesSiteData?.userRole
@@ -74,7 +94,8 @@ export default function IdentityPicker({ title = '¿Quién eres?', allowCreate =
   const puedeCrearReal = role === 'profesor' || (role === 'tablet' && claseEnCursoEsNinos(sugeridos))
 
   const pick = a => {
-    if (a.is_placeholder) onPick({ kind: 'ph', placeholder_id: a.placeholder_id, name: a.cliente })
+    if (a.is_rapido) onPick({ kind: 'rapido', participante_rapido_id: a.participante_rapido_id, name: a.cliente })
+    else if (a.is_placeholder) onPick({ kind: 'ph', placeholder_id: a.placeholder_id, name: a.cliente })
     else onPick({ kind: 'user', user_id: a.user_id, name: a.cliente })
   }
 
