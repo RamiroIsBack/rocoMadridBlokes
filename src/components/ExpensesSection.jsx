@@ -770,6 +770,38 @@ function HistoryView({ period, onDeleted }) {
     })
   }, [byMonth, entity, netoMensualClub, netoMensualRocoteca, saldoLineaClub, saldoLineaRocoteca, saldoMensualClub, saldoMensualRocoteca, currentMonthStr])
 
+  // 24/11 17:25: el aviso de descuadre tiene que salir en TODOS los meses con saldo guardado
+  // (no solo en los que entran en el selector de meses de arriba, como hacía netData con
+  // byMonth) — para ver en cuál empieza el hueco, aunque esté fuera del periodo que se ve ahora.
+  const descuadreTodos = useMemo(() => {
+    const meses = [...new Set([...Object.keys(saldoMensualClub || {}), ...Object.keys(saldoMensualRocoteca || {})])].sort()
+    let ultimoLineaClub = null, ultimoLineaRoco = null
+    let ultimoBancoClub = null, ultimoBancoRoco = null
+    const out = []
+    meses.forEach(month => {
+      if (saldoLineaClub?.[month] != null) ultimoLineaClub = saldoLineaClub[month]
+      if (saldoLineaRocoteca?.[month] != null) ultimoLineaRoco = saldoLineaRocoteca[month]
+      let saldo = null
+      if (entity === 'club') saldo = ultimoLineaClub
+      else if (entity === 'rocoteca') saldo = ultimoLineaRoco
+      else if (ultimoLineaClub != null || ultimoLineaRoco != null) saldo = (ultimoLineaClub || 0) + (ultimoLineaRoco || 0)
+
+      const tieneSaldoPropio = (entity !== 'rocoteca' && saldoMensualClub?.[month] != null)
+        || (entity !== 'club' && saldoMensualRocoteca?.[month] != null)
+      if (saldoMensualClub?.[month] != null) ultimoBancoClub = saldoMensualClub[month]
+      if (saldoMensualRocoteca?.[month] != null) ultimoBancoRoco = saldoMensualRocoteca[month]
+      if (!tieneSaldoPropio) return // solo avisar en meses con CSV propio, no en los que arrastran
+      let saldoBanco = null
+      if (entity === 'club') saldoBanco = ultimoBancoClub
+      else if (entity === 'rocoteca') saldoBanco = ultimoBancoRoco
+      else if (ultimoBancoClub != null || ultimoBancoRoco != null) saldoBanco = (ultimoBancoClub || 0) + (ultimoBancoRoco || 0)
+
+      const diferencia = (saldo != null && saldoBanco != null) ? Math.round(saldo - saldoBanco) : null
+      if (diferencia != null && Math.abs(diferencia) > 1) out.push({ month: fmtMonth(month), diferencia })
+    })
+    return out
+  }, [entity, saldoLineaClub, saldoLineaRocoteca, saldoMensualClub, saldoMensualRocoteca])
+
   const nominasData = useMemo(() =>
     byMonth.map(r => ({
       month: fmtMonth(r.month),
@@ -975,9 +1007,9 @@ function HistoryView({ period, onDeleted }) {
           <p className="exp-hint" style={{ fontSize: '0.75rem' }}>
             Barras: neto real del mes, todos los movimientos (verde/rojo). Línea: saldo de apertura + acumulado de esas mismas barras — cuadra con ellas por definición. Mes en curso más claro, datos parciales.
           </p>
-          {netData.some(r => r.diferencia != null && Math.abs(r.diferencia) > 1) && (
+          {descuadreTodos.length > 0 && (
             <p className="exp-hint" style={{ fontSize: '0.75rem', color: '#ef4444' }}>
-              ⚠ La línea no coincide con el "Saldo Posterior" real del banco en: {netData.filter(r => r.diferencia != null && Math.abs(r.diferencia) > 1).map(r => `${r.month} (${fmtEurSigned(r.diferencia)})`).join(', ')}. Suele ser un CSV que falta o está repetido.
+              ⚠ La línea no coincide con el "Saldo Posterior" real del banco en: {descuadreTodos.map(r => `${r.month} (${fmtEurSigned(r.diferencia)})`).join(', ')}. Suele ser un CSV que falta o está repetido. (Mira todos los meses con saldo guardado, no solo los del periodo elegido arriba.)
             </p>
           )}
         </>

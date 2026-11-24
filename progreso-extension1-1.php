@@ -6156,16 +6156,20 @@ function blokes_expenses_saldo_mensual($entity) {
         "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
         'blokes_exp_%_' . $entity
     ), ARRAY_A);
-    $por_mes = array(); // month => ['ts' => mejor_ts, 'saldo' => valor]
+    $por_mes = array(); // mes (de la propia "Fecha" del movimiento) => ['ts' => mejor_ts, 'saldo' => valor]
     foreach ($rows as $row) {
         $saved = json_decode($row['option_value'], true);
-        if (!$saved || !isset($saved['month']) || !is_array($saved['items'] ?? null)) continue;
-        $month = $saved['month'];
+        if (!$saved || !is_array($saved['items'] ?? null)) continue;
         foreach ($saved['items'] as $item) {
             $saldo_raw = (string) ($item['saldo'] ?? '');
             if ($saldo_raw === '') continue;
-            $fecha = $item['fechaValor'] ?? $item['fecha'] ?? '';
+            // 24/11 17:25: por "Fecha" (columna del banco), nunca "fecha valor" ni el mes del
+            // option donde esté guardado — un movimiento de otro mes guardado aquí por el
+            // solape de los CSV (p. ej. uno del 02/11 dentro del fichero de octubre) no puede
+            // contaminar el cierre de ESE mes.
+            $fecha = $item['fecha'] ?? '';
             if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
+            $month = $m[3] . '-' . str_pad($m[2], 2, '0', STR_PAD_LEFT);
             $ts = mktime(0, 0, 0, intval($m[2]), intval($m[1]), intval($m[3]));
             if (isset($por_mes[$month]) && $ts < $por_mes[$month]['ts']) continue; // a igual mes, el movimiento más tardío gana
             $saldo = floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', $saldo_raw)));
@@ -6190,25 +6194,31 @@ function blokes_exp_net_dedup_key($item) {
 
 // Neto real del mes de una entidad para "Resultado neto mensual" (24/11 13:30, regla única): TODOS
 // los movimientos, sin excluir nada (ni "Uso de Rocódromo" ni transferencias entre cuentas — con
-// "Todas" se anulan solos, sumando Club+Rocoteca). Deduplicado globalmente entre todos los CSV
-// subidos (no solo dentro de su propio mes) y agrupado por el mes real de la columna "Fecha" de
-// cada movimiento, no por el mes del option donde esté guardado (que puede traer movimientos de
-// otro mes por el solape de los CSV). Histórico completo, sin recortar por el selector de meses.
+// "Todas" se anulan solos, sumando Club+Rocoteca). Agrupado por el mes real de la columna "Fecha"
+// de cada movimiento, no por el mes del option donde esté guardado (que puede traer movimientos
+// de otro mes por el solape de los CSV). Histórico completo, sin recortar por el selector de
+// meses.
+// 24/11 17:25: el dedup solo vale entre FICHEROS distintos que se solapan (p. ej. el de octubre
+// trae una fila del 02/11 que vuelve a venir en el de noviembre) — dos movimientos iguales el
+// mismo día dentro del MISMO fichero son reales (dos pagos distintos) y no se funden. Por eso se
+// usa el mes del option (`$saved['month']`, uno por fichero subido) como "de qué fichero viene":
+// solo se descarta una repetición si ya se vio ese mismo movimiento en un fichero CON OTRO mes.
 function blokes_expenses_neto_mensual_real($entity) {
     global $wpdb;
     $rows = $wpdb->get_results($wpdb->prepare(
         "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
         'blokes_exp_%_' . $entity
     ), ARRAY_A);
-    $seen = array();
+    $visto_en_fichero = array(); // dedup_key => mes del fichero donde se vio la primera vez
     $por_mes = array();
     foreach ($rows as $row) {
         $saved = json_decode($row['option_value'], true);
         if (!$saved || !is_array($saved['items'] ?? null)) continue;
+        $fichero = $saved['month'] ?? '';
         foreach ($saved['items'] as $item) {
             $k = blokes_exp_net_dedup_key($item);
-            if (isset($seen[$k])) continue;
-            $seen[$k] = true;
+            if (isset($visto_en_fichero[$k]) && $visto_en_fichero[$k] !== $fichero) continue;
+            $visto_en_fichero[$k] = $fichero;
             $fecha = $item['fecha'] ?? '';
             if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
             $month  = $m[3] . '-' . str_pad($m[2], 2, '0', STR_PAD_LEFT);
