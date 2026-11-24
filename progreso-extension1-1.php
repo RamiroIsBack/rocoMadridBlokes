@@ -6180,34 +6180,67 @@ function blokes_expenses_iva_repercutido_real($from) {
 // histórico completo para poder arrastrar el último saldo conocido de un mes sin CSV nuevo (la
 // Rocoteca, que ya no tiene movimientos). Nada de apertura ni de sumar netos — eso nunca cuadra
 // con el banco de verdad (el neto quita traspasos internos que sí movieron la cuenta).
+function blokes_exp_parsear_saldo($saldo_raw) {
+    return floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', (string) $saldo_raw)));
+}
+
+// 24/11 18:55 punto 4: con varios movimientos el mismo día, "el último" no es el que venga
+// último en el array (depende del orden en que MySQL devuelva las filas, no del banco) — se
+// resuelve encadenando saldos: el saldo de ANTES de un movimiento es su saldo posterior menos
+// su propio importe con signo. El último del día es el único cuyo saldo posterior no es el
+// "saldo de antes" de ningún otro movimiento de ese mismo día (nadie viene después de él).
+function blokes_exp_elegir_ultimo_del_dia($items_del_dia) {
+    if (count($items_del_dia) <= 1) return $items_del_dia[0] ?? null;
+    $info = array();
+    foreach ($items_del_dia as $it) {
+        $saldo  = round(blokes_exp_parsear_saldo($it['saldo'] ?? ''), 2);
+        $amt    = abs(floatval($it['importe'] ?? 0));
+        $signed = (($it['section'] ?? 'costes') === 'costes') ? -$amt : $amt;
+        $info[] = array('saldo' => $saldo, 'antes' => round($saldo - $signed, 2), 'item' => $it);
+    }
+    foreach ($info as $i => $a) {
+        $tiene_sucesor = false;
+        foreach ($info as $j => $b) {
+            if ($i === $j) continue;
+            if ($b['antes'] === $a['saldo']) { $tiene_sucesor = true; break; }
+        }
+        if (!$tiene_sucesor) return $a['item'];
+    }
+    return end($items_del_dia); // empate que no se puede resolver por la cadena: último visto
+}
+
 function blokes_expenses_saldo_mensual($entity) {
     global $wpdb;
     $rows = $wpdb->get_results($wpdb->prepare(
         "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
         'blokes_exp_%_' . $entity
     ), ARRAY_A);
-    $por_mes = array(); // mes (de la propia "Fecha" del movimiento) => ['ts' => mejor_ts, 'saldo' => valor]
+    $por_dia = array(); // 'YYYY-MM-DD' (de la propia "Fecha" del movimiento) => items de ese día
     foreach ($rows as $row) {
         $saved = json_decode($row['option_value'], true);
         if (!$saved || !is_array($saved['items'] ?? null)) continue;
         foreach ($saved['items'] as $item) {
-            $saldo_raw = (string) ($item['saldo'] ?? '');
-            if ($saldo_raw === '') continue;
+            if ((string) ($item['saldo'] ?? '') === '') continue;
             // 24/11 17:25: por "Fecha" (columna del banco), nunca "fecha valor" ni el mes del
             // option donde esté guardado — un movimiento de otro mes guardado aquí por el
             // solape de los CSV (p. ej. uno del 02/11 dentro del fichero de octubre) no puede
             // contaminar el cierre de ESE mes.
             $fecha = $item['fecha'] ?? '';
             if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
-            $month = $m[3] . '-' . str_pad($m[2], 2, '0', STR_PAD_LEFT);
-            $ts = mktime(0, 0, 0, intval($m[2]), intval($m[1]), intval($m[3]));
-            if (isset($por_mes[$month]) && $ts < $por_mes[$month]['ts']) continue; // a igual mes, el movimiento más tardío gana
-            $saldo = floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', $saldo_raw)));
-            $por_mes[$month] = array('ts' => $ts, 'saldo' => $saldo);
+            $dia_key = $m[3] . '-' . str_pad($m[2], 2, '0', STR_PAD_LEFT) . '-' . str_pad($m[1], 2, '0', STR_PAD_LEFT);
+            $por_dia[$dia_key][] = $item;
         }
     }
+    ksort($por_dia);
     $out = array();
-    foreach ($por_mes as $month => $v) $out[$month] = round($v['saldo'], 2);
+    // Al recorrer los días en orden, el último día visto de cada mes es su cierre — se
+    // sobreescribe sin más, sin comparar timestamps.
+    foreach ($por_dia as $dia_key => $items_del_dia) {
+        $month = substr($dia_key, 0, 7);
+        $elegido = blokes_exp_elegir_ultimo_del_dia($items_del_dia);
+        if (!$elegido) continue;
+        $out[$month] = round(blokes_exp_parsear_saldo($elegido['saldo'] ?? ''), 2);
+    }
     ksort($out);
     return $out;
 }
