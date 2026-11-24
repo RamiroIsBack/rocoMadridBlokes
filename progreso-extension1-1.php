@@ -25601,3 +25601,245 @@ function horarios_import($request) {
     }
     return rest_ensure_response(array('success' => true, 'imported' => count($rows)));
 }
+
+// ============================================================
+//  superadmin/v1 — Cherifs › Dashboard (24/11/2026), solo socios
+//  · Tablón: mensajes motivantes y canciones de la semana.
+//  · Calendario de Google: se lee por su «Dirección secreta en formato iCal» (solo lectura).
+//    La dirección vive solo en el servidor; al navegador nunca se le devuelve.
+// ============================================================
+
+function cherifs_get() {
+    $c = get_option('blokes_cherifs', array());
+    return array(
+        'messages' => is_array($c['messages'] ?? null) ? $c['messages'] : array(),
+        'songs'    => is_array($c['songs'] ?? null) ? $c['songs'] : array(),
+        'ical'     => (string) ($c['ical'] ?? ''),
+    );
+}
+function cherifs_put($c) { update_option('blokes_cherifs', $c, false); }
+
+function cherifs_who() {
+    $u = wp_get_current_user();
+    if (!$u || !$u->ID) return '';
+    $first = trim((string) $u->first_name);
+    return $first !== '' ? $first : explode(' ', trim($u->display_name ?: $u->user_login))[0];
+}
+
+add_action('rest_api_init', function() {
+    $socio = function() { return blokes_get_app_role() === 'socio'; };
+    register_rest_route('superadmin/v1', '/cherifs/board', array(
+        'methods' => 'GET', 'callback' => 'cherifs_board', 'permission_callback' => $socio,
+    ));
+    register_rest_route('superadmin/v1', '/cherifs/message', array(
+        'methods' => 'POST', 'callback' => 'cherifs_add_message', 'permission_callback' => $socio,
+    ));
+    register_rest_route('superadmin/v1', '/cherifs/song', array(
+        'methods' => 'POST', 'callback' => 'cherifs_add_song', 'permission_callback' => $socio,
+    ));
+    register_rest_route('superadmin/v1', '/cherifs/item/(?P<kind>message|song)/(?P<id>[a-z0-9]+)', array(
+        'methods' => 'DELETE', 'callback' => 'cherifs_delete_item', 'permission_callback' => $socio,
+    ));
+    register_rest_route('superadmin/v1', '/cherifs/ical', array(
+        'methods' => 'PUT', 'callback' => 'cherifs_save_ical', 'permission_callback' => $socio,
+    ));
+    register_rest_route('superadmin/v1', '/cherifs/calendar', array(
+        'methods' => 'GET', 'callback' => 'cherifs_calendar', 'permission_callback' => $socio,
+    ));
+});
+
+function cherifs_board() {
+    $c = cherifs_get();
+    return rest_ensure_response(array(
+        'messages'        => array_slice(array_reverse($c['messages']), 0, 20),
+        'songs'           => array_slice(array_reverse($c['songs']), 0, 30),
+        'ical_configured' => $c['ical'] !== '',
+    ));
+}
+
+function cherifs_add_message($request) {
+    $text = mb_substr(sanitize_textarea_field((string) ($request->get_json_params()['text'] ?? '')), 0, 400);
+    if ($text === '') return new WP_Error('bad_text', 'Escribe el mensaje', array('status' => 400));
+    $c = cherifs_get();
+    $c['messages'][] = array('id' => substr(md5(uniqid('', true)), 0, 10), 'text' => $text, 'by' => cherifs_who(), 'at' => current_time('mysql'));
+    $c['messages'] = array_slice($c['messages'], -100);
+    cherifs_put($c);
+    return cherifs_board();
+}
+
+function cherifs_add_song($request) {
+    $b     = (array) $request->get_json_params();
+    $title = mb_substr(sanitize_text_field((string) ($b['title'] ?? '')), 0, 150);
+    $url   = esc_url_raw(trim((string) ($b['url'] ?? '')));
+    if ($title === '' && $url === '') return new WP_Error('bad_song', 'Pon el título o el enlace', array('status' => 400));
+    if ($url !== '' && !preg_match('#^https://#i', $url)) return new WP_Error('bad_url', 'El enlace tiene que empezar por https://', array('status' => 400));
+    $c = cherifs_get();
+    $c['songs'][] = array(
+        'id' => substr(md5(uniqid('', true)), 0, 10), 'title' => $title, 'url' => $url,
+        'by' => cherifs_who(), 'at' => current_time('mysql'), 'week' => current_time('o-\WW'),
+    );
+    $c['songs'] = array_slice($c['songs'], -200);
+    cherifs_put($c);
+    return cherifs_board();
+}
+
+function cherifs_delete_item($request) {
+    $key = $request['kind'] === 'song' ? 'songs' : 'messages';
+    $id  = (string) $request['id'];
+    $c   = cherifs_get();
+    $c[$key] = array_values(array_filter($c[$key], function($x) use ($id) { return ($x['id'] ?? '') !== $id; }));
+    cherifs_put($c);
+    return cherifs_board();
+}
+
+function cherifs_save_ical($request) {
+    $url = trim((string) ($request->get_json_params()['url'] ?? ''));
+    if ($url !== '' && !preg_match('#^https://calendar\.google\.com/calendar/ical/.+\.ics$#i', $url)) {
+        return new WP_Error('bad_ical', 'Tiene que ser la «Dirección secreta en formato iCal» de Google Calendar (acaba en .ics)', array('status' => 400));
+    }
+    $c = cherifs_get();
+    $c['ical'] = $url;
+    cherifs_put($c);
+    delete_transient('blokes_cherifs_ical');
+    return rest_ensure_response(array('success' => true, 'ical_configured' => $url !== ''));
+}
+
+// ── Lectura mínima de iCal (VEVENT con fecha/hora, zona, repeticiones sencillas) ──
+function cherifs_ical_date($value, $params) {
+    $tz = wp_timezone();
+    if (preg_match('/^(\d{8})$/', $value, $m)) {
+        return array(DateTime::createFromFormat('Ymd H:i:s', $m[1] . ' 00:00:00', $tz), true);
+    }
+    if (preg_match('/^(\d{8}T\d{6})(Z?)$/', $value, $m)) {
+        if ($m[2] === 'Z') {
+            $d = DateTime::createFromFormat('Ymd\THis', $m[1], new DateTimeZone('UTC'));
+            if ($d) $d->setTimezone($tz);
+            return array($d, false);
+        }
+        $zone = $tz;
+        if (preg_match('/TZID=([^;:]+)/', $params, $z)) {
+            try { $zone = new DateTimeZone($z[1]); } catch (Exception $e) { $zone = $tz; }
+        }
+        $d = DateTime::createFromFormat('Ymd\THis', $m[1], $zone);
+        if ($d) $d->setTimezone($tz);
+        return array($d, false);
+    }
+    return array(null, false);
+}
+
+function cherifs_ical_events($ics, $from, $to) {
+    $ics   = preg_replace("/\r\n[ \t]/", '', str_replace("\r\n", "\r\n", $ics));
+    $ics   = preg_replace("/\n[ \t]/", '', $ics);
+    $lines = preg_split("/\r?\n/", $ics);
+    $out = array();
+    $ev  = null;
+    foreach ($lines as $line) {
+        if ($line === 'BEGIN:VEVENT') { $ev = array('exdate' => array()); continue; }
+        if ($line === 'END:VEVENT') {
+            if ($ev && !empty($ev['start'])) {
+                foreach (cherifs_ical_expand($ev, $from, $to) as $occ) $out[] = $occ;
+            }
+            $ev = null;
+            continue;
+        }
+        if ($ev === null || strpos($line, ':') === false) continue;
+        list($left, $value) = explode(':', $line, 2);
+        $parts = explode(';', $left, 2);
+        $name  = strtoupper($parts[0]);
+        $params = $parts[1] ?? '';
+        $value = str_replace(array('\\,', '\\;', '\\n', '\\N'), array(',', ';', ' ', ' '), $value);
+        if ($name === 'DTSTART') { list($ev['start'], $ev['allday']) = cherifs_ical_date($value, $params); }
+        elseif ($name === 'DTEND') { list($ev['end']) = cherifs_ical_date($value, $params); }
+        elseif ($name === 'SUMMARY') { $ev['title'] = $value; }
+        elseif ($name === 'LOCATION') { $ev['location'] = $value; }
+        elseif ($name === 'RRULE') { $ev['rrule'] = $value; }
+        elseif ($name === 'STATUS') { $ev['status'] = strtoupper($value); }
+        elseif ($name === 'EXDATE') {
+            foreach (explode(',', $value) as $x) { list($d) = cherifs_ical_date($x, $params); if ($d) $ev['exdate'][] = $d->format('Y-m-d'); }
+        }
+    }
+    usort($out, function($a, $b) { return strcmp($a['start'], $b['start']); });
+    return $out;
+}
+
+// Una ocurrencia (o las de una repetición DAILY/WEEKLY/MONTHLY/YEARLY) dentro de [from, to]
+function cherifs_ical_expand($ev, $from, $to) {
+    if (($ev['status'] ?? '') === 'CANCELLED') return array();
+    $start = $ev['start'];
+    $end   = $ev['end'] ?? null;
+    $dur   = $end ? $end->getTimestamp() - $start->getTimestamp() : 0;
+    $mk = function($d) use ($ev, $dur) {
+        $e = (clone $d)->modify('+' . max(0, $dur) . ' seconds');
+        return array(
+            'title'    => $ev['title'] ?? '(sin título)',
+            'location' => $ev['location'] ?? '',
+            'allday'   => !empty($ev['allday']),
+            'start'    => $d->format('Y-m-d\TH:i'),
+            'end'      => $e->format('Y-m-d\TH:i'),
+        );
+    };
+    $out = array();
+    if (empty($ev['rrule'])) {
+        if ($start <= $to && ($end ?: $start) >= $from) $out[] = $mk($start);
+        return $out;
+    }
+    $r = array();
+    foreach (explode(';', $ev['rrule']) as $kv) { $p = explode('=', $kv, 2); if (count($p) === 2) $r[strtoupper($p[0])] = $p[1]; }
+    $freq  = $r['FREQ'] ?? '';
+    $step  = max(1, (int) ($r['INTERVAL'] ?? 1));
+    $count = isset($r['COUNT']) ? (int) $r['COUNT'] : null;
+    $until = null;
+    if (!empty($r['UNTIL'])) { list($until) = cherifs_ical_date($r['UNTIL'], ''); }
+    $days  = array();
+    if ($freq === 'WEEKLY' && !empty($r['BYDAY'])) {
+        $map = array('MO' => 1, 'TU' => 2, 'WE' => 3, 'TH' => 4, 'FR' => 5, 'SA' => 6, 'SU' => 7);
+        foreach (explode(',', $r['BYDAY']) as $d) { $d = substr($d, -2); if (isset($map[$d])) $days[] = $map[$d]; }
+    }
+    $mod = array('DAILY' => 'day', 'WEEKLY' => 'week', 'MONTHLY' => 'month', 'YEARLY' => 'year');
+    if (!isset($mod[$freq])) return $out;
+    $n = 0;
+    $cur = clone $start;
+    for ($guard = 0; $guard < 1500; $guard++) {
+        if ($until && $cur > $until) break;
+        if ($cur > $to) break;
+        $cands = array($cur);
+        if ($days) {
+            $cands = array();
+            $monday = (clone $cur)->modify('-' . ((int) $cur->format('N') - 1) . ' days');
+            foreach ($days as $dn) {
+                $c2 = (clone $monday)->modify('+' . ($dn - 1) . ' days');
+                $c2->setTime((int) $start->format('H'), (int) $start->format('i'));
+                if ($c2 >= $start) $cands[] = $c2;
+            }
+            usort($cands, function($a, $b) { return $a <=> $b; });
+        }
+        foreach ($cands as $c) {
+            if ($until && $c > $until) break 2;
+            $n++;
+            if ($count !== null && $n > $count) break 2;
+            if (in_array($c->format('Y-m-d'), $ev['exdate'], true)) continue;
+            $cEnd = (clone $c)->modify('+' . max(0, $dur) . ' seconds');
+            if ($c <= $to && $cEnd >= $from) $out[] = $mk($c);
+        }
+        $cur->modify('+' . $step . ' ' . $mod[$freq]);
+    }
+    return $out;
+}
+
+// Próximos 14 días del calendario de Google (guardado 15 minutos)
+function cherifs_calendar() {
+    $c = cherifs_get();
+    if ($c['ical'] === '') return rest_ensure_response(array('configured' => false, 'events' => array()));
+    $cached = get_transient('blokes_cherifs_ical');
+    if (is_array($cached)) return rest_ensure_response(array('configured' => true, 'events' => $cached));
+    $res = wp_remote_get($c['ical'], array('timeout' => 12));
+    if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) {
+        return new WP_Error('ical_error', 'No se pudo leer el calendario de Google', array('status' => 502));
+    }
+    $tz   = wp_timezone();
+    $from = new DateTime('today', $tz);
+    $to   = (clone $from)->modify('+14 days')->setTime(23, 59);
+    $events = array_slice(cherifs_ical_events(wp_remote_retrieve_body($res), $from, $to), 0, 60);
+    set_transient('blokes_cherifs_ical', $events, 15 * MINUTE_IN_SECONDS);
+    return rest_ensure_response(array('configured' => true, 'events' => $events));
+}

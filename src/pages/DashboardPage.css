@@ -361,3 +361,64 @@
 }
 .hor-copia input { display: none; }
 .hor-copia--on { background: var(--color-accent); border-color: var(--color-accent); color: #1d1d1b; }
+
+/* ─── Cherifs › Dashboard (24/11) ─── */
+.chf { display: flex; flex-direction: column; gap: 18px; max-width: 1200px; }
+.chf .dash__head { margin-bottom: 0; }
+.chf-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 18px; align-items: start; }
+.chf-card .dash-card__head { margin-bottom: 10px; }
+.chf-nota { font-size: 0.78rem; color: var(--color-text-secondary); margin: 10px 0 0; }
+.chf-lista { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.chf-lista li { display: flex; justify-content: space-between; gap: 10px; font-size: 0.9rem; padding: 4px 0; border-bottom: 1px solid var(--color-border); }
+.chf-lista li:last-child { border-bottom: none; }
+.chf-lista em { font-style: normal; color: var(--color-text-secondary); font-size: 0.82rem; }
+.chf-lista b { white-space: nowrap; font-weight: 700; }
+.chf-lista--late b { color: var(--state-bad); }
+
+/* Tablón: mensaje y canciones */
+.chf-tablon { display: grid; grid-template-columns: 1.3fr 1fr; gap: 24px; border: 2px solid var(--color-accent); }
+.chf-tablon__lbl { font-size: 0.75rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-secondary); }
+.chf-tablon__frase { font-family: var(--font-hand); font-size: 2rem; line-height: 1.15; margin: 6px 0 4px; color: var(--color-text-primary); }
+.chf-tablon__frase--vacio { color: var(--color-text-secondary); font-size: 1.5rem; }
+.chf-tablon__quien { font-size: 0.85rem; color: var(--color-text-secondary); display: inline-flex; gap: 10px; align-items: center; }
+.chf-tablon__form { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.chf-tablon__form .dash-input { flex: 1 1 160px; width: auto; }
+.chf-songs { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.chf-songs li { font-size: 0.92rem; }
+.chf-songs a { color: var(--color-text-primary); font-weight: 700; }
+.chf-songs__by { color: var(--color-text-secondary); font-size: 0.8rem; }
+.chf-x { background: none; border: none; color: var(--color-text-secondary); cursor: pointer; margin-left: 4px; }
+.chf-anteriores { margin-top: 8px; font-size: 0.85rem; }
+.chf-anteriores summary { cursor: pointer; color: var(--color-text-secondary); }
+
+/* Indicadores */
+.chf-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.chf-tiles .dash-tile { text-decoration: none; }
+.chf-tiles .dash-tile strong { font-size: 1.6rem; }
+.chf-tiles .dash-tile span { text-transform: none; letter-spacing: 0; font-size: 0.85rem; }
+
+/* Dinero */
+.chf-dinero { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.chf-dinero div { background: var(--color-bg); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.chf-dinero span { font-size: 0.75rem; color: var(--color-text-secondary); font-weight: 700; }
+.chf-dinero strong { font-family: var(--font-heading); font-size: 1.35rem; color: var(--color-text-primary); }
+.chf-dinero em { font-style: normal; font-size: 0.72rem; color: var(--color-text-secondary); }
+.chf-aviso { margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; color: var(--state-good); border: 1px solid currentColor; font-weight: 700; font-size: 0.9rem; }
+.chf-aviso--mal { color: var(--state-bad); background: rgba(185, 28, 28, 0.06); }
+
+/* Tareas y profes */
+.chf-mini-tiles { display: flex; flex-wrap: wrap; gap: 8px; }
+.chf-mini-tiles span { background: var(--color-bg); border-radius: 999px; padding: 4px 12px; font-size: 0.85rem; }
+.chf-pide { margin-bottom: 10px; }
+.chf-pide > strong { font-family: var(--font-heading); }
+.chf-pide > strong span { background: var(--color-accent); color: #1d1d1b; border-radius: 999px; padding: 0 7px; font-size: 0.75rem; margin-left: 4px; }
+
+/* Calendario de Google */
+.chf-gcal { margin-bottom: 8px; }
+.chf-gcal__dia { font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-accent-text); }
+.chf-ical { display: flex; flex-direction: column; gap: 8px; }
+
+@media (max-width: 760px) {
+  .chf-tablon { grid-template-columns: 1fr; }
+  .chf-dinero { grid-template-columns: 1fr; }
+}
