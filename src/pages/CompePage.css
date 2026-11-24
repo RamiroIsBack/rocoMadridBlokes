@@ -28,6 +28,16 @@
   background: #2a2015; color: #f5c842; text-decoration: none; font-weight: 600;
 }
 
+/* Clasificación de temporada (nota 23/11 06:50, punto 6) */
+.compe-temporada-cat { margin-top: 20px; }
+.compe-temporada-cat h2 { font-size: 1.1rem; margin: 0 0 8px; }
+.compe-temporada-scroll { overflow-x: auto; }
+.compe-temporada-tabla { border-collapse: collapse; width: 100%; min-width: 420px; font-size: 0.85rem; }
+.compe-temporada-tabla th, .compe-temporada-tabla td { padding: 6px 10px; text-align: center; white-space: nowrap; }
+.compe-temporada-tabla th { color: var(--color-text-secondary); font-size: 0.72rem; text-transform: uppercase; }
+.compe-temporada-tabla td:nth-child(2), .compe-temporada-tabla th:nth-child(2) { text-align: left; }
+.compe-temporada-tabla tr { border-bottom: 1px solid var(--color-border); }
+
 /* Precompe: mientras no hay compe activa pero hay una real programada (cowork, 11/11 05:40) —
    antes esto era un callejón sin salida durante los 19 días previos. Con cartel y animación
    (Ramiro, 11/11 05:01: "hay que mejorarla"). */

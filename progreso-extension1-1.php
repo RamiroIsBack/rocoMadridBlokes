@@ -982,6 +982,11 @@ add_action('rest_api_init', function() {
     register_rest_route('progreso/v1', '/compe/clasificacion', array(
         'methods' => 'GET', 'callback' => 'progreso_compe_clasificacion', 'permission_callback' => '__return_true',
     ));
+    // 23/11 06:50, punto 5/6: clasificación acumulada de la temporada — igual de pública que la
+    // de una sola compe (la ve la tele cuando no hay compe en marcha, y la app en Compe).
+    register_rest_route('progreso/v1', '/compe/clasificacion-temporada', array(
+        'methods' => 'GET', 'callback' => 'progreso_compe_clasificacion_temporada', 'permission_callback' => '__return_true',
+    ));
     // Recepción (Ramiro, punto 6): "¿quién eres?" + participante rápido sin cuenta.
     register_rest_route('progreso/v1', '/compe/buscar-participante', array(
         'methods' => 'GET', 'callback' => 'progreso_compe_buscar_participante', 'permission_callback' => 'is_user_logged_in',
@@ -22035,6 +22040,121 @@ function progreso_compe_clasificacion($request) {
     return rest_ensure_response(array('success' => true, 'data' => array(
         'categorias' => $categorias_out,
         'ultimosValidados' => $ultimos_validados,
+    )));
+}
+
+// GET /progreso/v1/compe/clasificacion-temporada — clasificación acumulada de la temporada
+// 2026/27 (nota 23/11 06:50, puntos 5 y 6): cada competición que NO es de prueba (is_test = 0)
+// es una "prueba" numerada por orden de fecha (PRUEBA 1 = la más antigua). Cada persona cuenta
+// por su usuario real — nunca por el nombre escrito, así que un participante rápido o un alumno
+// manual (sin cuenta) no entra aquí: no hay forma fiable de saber que es la misma persona en la
+// siguiente prueba.
+function progreso_compe_clasificacion_temporada($request) {
+    global $wpdb;
+    progreso_equip_ensure_tables();
+    $puntos_tabla = blokes_compe_puntos_tabla_get();
+
+    $competiciones = $wpdb->get_results(
+        "SELECT id, name, comp_date FROM " . progreso_equip_table('competitions') . "
+         WHERE is_test = 0 ORDER BY comp_date ASC, id ASC", ARRAY_A
+    );
+    if (!$competiciones) {
+        return rest_ensure_response(array('success' => true, 'data' => array('pruebas' => array(), 'categorias' => array())));
+    }
+
+    $pruebas = array();
+    $competicion_a_prueba = array();
+    foreach ($competiciones as $i => $c) {
+        $numero = $i + 1;
+        $pruebas[] = array('numero' => $numero, 'id' => intval($c['id']), 'nombre' => $c['name'], 'fecha' => $c['comp_date']);
+        $competicion_a_prueba[intval($c['id'])] = $numero;
+    }
+    $ids_sql = implode(',', array_map('intval', array_column($competiciones, 'id')));
+
+    $filas = $wpdb->get_results(
+        "SELECT r.competition_id, r.participante_id AS user_id, r.top, r.zona, b.number AS numero
+         FROM " . progreso_equip_table('comp_resultados') . " r
+         JOIN " . progreso_equip_table('comp_blocks') . " b ON b.id = r.comp_block_id
+         WHERE r.competition_id IN ($ids_sql) AND r.participante_tipo = 'user'
+           AND r.estado = 'validado' AND (r.top = 1 OR r.zona = 1)",
+        ARRAY_A
+    );
+    $por_usuario = array(); // user_id => [ numeroPrueba => puntos ]
+    foreach ($filas as $f) {
+        $uid = intval($f['user_id']);
+        $num = $competicion_a_prueba[intval($f['competition_id'])] ?? null;
+        if (!$num) continue;
+        if (!isset($por_usuario[$uid])) $por_usuario[$uid] = array();
+        if (!isset($por_usuario[$uid][$num])) $por_usuario[$uid][$num] = 0;
+        $por_usuario[$uid][$num] += blokes_compe_puntos_de_resultado(intval($f['top']), intval($f['zona']), intval($f['numero']), $puntos_tabla);
+    }
+
+    // Categoría de cada usuario: se agrupa con la más reciente que tenga puesta (si cambia de
+    // categoría entre una prueba y la siguiente, cuenta la última — no hay un criterio mejor
+    // sin que Ramiro lo diga, y es el caso raro, no el normal).
+    $filas_cat = $wpdb->get_results(
+        "SELECT competition_id, participante_id AS user_id, categoria FROM " . progreso_equip_table('comp_categorias') . "
+         WHERE competition_id IN ($ids_sql) AND participante_tipo = 'user'", ARRAY_A
+    );
+    $categoria_por_usuario = array();
+    foreach ($filas_cat as $fc) {
+        $uid = intval($fc['user_id']);
+        $num = $competicion_a_prueba[intval($fc['competition_id'])] ?? 0;
+        if (!isset($categoria_por_usuario[$uid]) || $num >= $categoria_por_usuario[$uid]['num']) {
+            $categoria_por_usuario[$uid] = array('num' => $num, 'categoria' => $fc['categoria']);
+        }
+    }
+
+    $es_multisite = is_multisite();
+    if ($es_multisite) switch_to_blog(1);
+    // Mismo formato de nombre que ya usa /compe/clasificacion para un participante tipo "user"
+    // (nombre + inicial del primer apellido + alias entre paréntesis si lo tiene).
+    $nombre_usuario = function($user_id) {
+        $u = get_userdata($user_id);
+        if (!$u) return 'Alguien';
+        $nombre = $u->first_name ?: explode(' ', trim($u->display_name))[0];
+        $apellido = trim((string) $u->last_name);
+        if ($apellido !== '') $nombre .= ' ' . mb_strtoupper(mb_substr($apellido, 0, 1, 'UTF-8'), 'UTF-8') . '.';
+        $nick = blokes_get_user_nickname($user_id);
+        return $nick ? "{$nombre} ({$nick})" : $nombre;
+    };
+
+    $num_pruebas = count($pruebas);
+    $por_categoria = array('masculina' => array(), 'femenina' => array(), 'infantil' => array());
+    foreach ($por_usuario as $uid => $puntosPorPrueba) {
+        $cat = $categoria_por_usuario[$uid]['categoria'] ?? '';
+        if (!isset($por_categoria[$cat])) continue; // sin categoría válida en ninguna prueba: no entra en ninguna liga
+        $serie = array();
+        $total = 0;
+        for ($n = 1; $n <= $num_pruebas; $n++) {
+            $pts = $puntosPorPrueba[$n] ?? 0;
+            $serie[] = $pts;
+            $total += $pts;
+        }
+        $por_categoria[$cat][] = array(
+            'clave' => 'user:' . $uid, 'nombreMostrar' => $nombre_usuario($uid),
+            'puntosPorPrueba' => $serie, 'total' => $total,
+        );
+    }
+    // Mismo "empates comparten puesto" que en la clasificación de una sola compe.
+    $con_puesto = function($lista) {
+        usort($lista, function($a, $b) { return $b['total'] <=> $a['total']; });
+        $puesto_actual = 0; $anterior = null; $vistos = 0;
+        foreach ($lista as &$fila) {
+            $vistos++;
+            if ($anterior === null || $fila['total'] !== $anterior) { $puesto_actual = $vistos; $anterior = $fila['total']; }
+            $fila['puesto'] = $puesto_actual;
+        }
+        return $lista;
+    };
+    $categorias_out = array();
+    foreach (array('masculina' => 'Masculina', 'femenina' => 'Femenina', 'infantil' => 'Infantil') as $key => $label) {
+        $categorias_out[] = array('id' => $key, 'nombre' => $label, 'clasificacion' => $con_puesto($por_categoria[$key]));
+    }
+    if ($es_multisite) restore_current_blog();
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'pruebas' => $pruebas, 'categorias' => $categorias_out,
     )));
 }
 

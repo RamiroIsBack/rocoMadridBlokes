@@ -52,6 +52,65 @@ function cuentaAtrasCompe(compDate, compEndDate) {
   return dias === 1 ? 'Empieza mañana' : `Empieza en ${dias} días`
 }
 
+const CATEGORIA_LABEL_TEMPORADA = { masculina: 'Masculina', femenina: 'Femenina', infantil: 'Infantil' }
+
+// Clasificación de temporada (nota 23/11 06:50, punto 6: "en la app, Compe → «Clasificación de
+// la temporada»") — pública, no depende de que haya una compe activa: cada compe NO de prueba
+// es una "prueba" numerada por fecha, sumadas por categoría. Mismo endpoint que usa la tele.
+function CompeTemporadaView({ onVolver }) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  useEffect(() => {
+    api('GET', '/compe/clasificacion-temporada')
+      .then(r => setData(r.data))
+      .catch(e => setError(e.message))
+  }, [])
+
+  return (
+    <div className="compe-page">
+      <button type="button" className="compe-page__tele-link" onClick={onVolver}>← Volver a la compe</button>
+      <h1>Clasificación de temporada</h1>
+      <p className="compe-page__muted">
+        Suma de puntos de cada compe de la temporada (las de prueba no cuentan). Solo cuenta
+        quien participa con su propia cuenta — un pase de día sin cuenta no se puede seguir de
+        una prueba a la siguiente.
+      </p>
+      {error && <p className="compe-page__error">{error}</p>}
+      {!data && !error && <p className="compe-page__muted">Cargando…</p>}
+      {data && data.pruebas.length === 0 && <p className="compe-page__muted">Todavía no hay ninguna prueba de la temporada.</p>}
+      {data && data.pruebas.length > 0 && data.categorias.map(cat => (
+        <section key={cat.id} className="compe-temporada-cat">
+          <h2>{CATEGORIA_LABEL_TEMPORADA[cat.id] || cat.nombre}</h2>
+          {cat.clasificacion.length === 0 ? (
+            <p className="compe-page__muted">Todavía nadie en esta categoría.</p>
+          ) : (
+            <div className="compe-temporada-scroll">
+              <table className="compe-temporada-tabla">
+                <thead>
+                  <tr>
+                    <th>#</th><th>Nombre</th>
+                    {data.pruebas.map(p => <th key={p.numero}>Prueba {p.numero}</th>)}
+                    <th>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cat.clasificacion.map(f => (
+                    <tr key={f.clave}>
+                      <td>{f.puesto}</td><td>{f.nombreMostrar}</td>
+                      {f.puntosPorPrueba.map((pts, i) => <td key={i}>{pts}</td>)}
+                      <td><strong>{f.total}</strong></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      ))}
+    </div>
+  )
+}
+
 // "La compe en Blokes" (NOTAS_PARA_CODE_compe_en_blokes.md). Parte 1: apuntar top/zona/intentos.
 // Parte 4 (Ramiro, 07/11 08:46/08:48): recepción apuntando por otra persona (profe/Eva/socio) +
 // participante rápido sin cuenta. Sin validación en la app (Ramiro, 07/11 más tarde): todo lo
@@ -77,6 +136,7 @@ export default function CompePage() {
   // tocar un bloque SIEMPRE abre este diálogo único, nunca se guarda nada por adelantado.
   // { compBlockId, numero, mostrarCategoria, resultadoElegido }
   const [pidiendoResultado, setPidiendoResultado] = useState(null)
+  const [mostrarTemporada, setMostrarTemporada] = useState(false)
 
   const cargar = useCallback(() => {
     setLoading(true)
@@ -129,6 +189,8 @@ export default function CompePage() {
   const elegirCategoria = categoria => intentarGuardar(pidiendoResultado?.resultadoElegido, categoria)
   const quitarResultado = () => intentarGuardar('ninguno', null)
 
+  if (mostrarTemporada) return <CompeTemporadaView onVolver={() => setMostrarTemporada(false)} />
+
   if (loading) return <div className="compe-page compe-page--loading">Cargando…</div>
 
   if (err && !estado) return <div className="compe-page"><p className="compe-page__error">{err}</p></div>
@@ -136,6 +198,7 @@ export default function CompePage() {
   if (!estado?.activo) {
     return (
       <div className="compe-page">
+        <button type="button" className="compe-page__tele-link" onClick={() => setMostrarTemporada(true)}>🏅 Clasificación de temporada</button>
         {proxima ? (
           <div className="compe-precompe">
             <p className="compe-precompe__proximamente">Próximamente</p>
@@ -168,6 +231,7 @@ export default function CompePage() {
         <h1>{estado.nombre}</h1>
         <p className="compe-page__muted">Entra con tu cuenta para apuntar tus resultados.</p>
         <a className="compe-page__login" href={sd.loginUrl}>Entrar</a>
+        <button type="button" className="compe-page__tele-link" style={{ display: 'block', marginTop: 10 }} onClick={() => setMostrarTemporada(true)}>🏅 Clasificación de temporada</button>
       </div>
     )
   }
@@ -175,6 +239,7 @@ export default function CompePage() {
   return (
     <div className="compe-page">
       <h1>{estado.nombre}</h1>
+      <button type="button" className="compe-page__tele-link" onClick={() => setMostrarTemporada(true)}>🏅 Clasificación de temporada</button>
       <p className="compe-page__muted">
         Norma de honor: lo que apuntes cuenta al momento — que un compañero o profe te haya visto hacerlo.
       </p>

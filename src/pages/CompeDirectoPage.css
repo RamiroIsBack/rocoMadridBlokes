@@ -163,6 +163,21 @@
 
 .td-sin-conexion { font-size: clamp(1rem, 3vh, 2rem); color: #9ca3af; margin: 0; }
 
+/* Clasificación de temporada (nota 23/11 06:50, punto 6) — tabla simple, una categoría a la vez. */
+.td-temporada-tabla {
+  border-collapse: collapse;
+  font-size: clamp(0.8rem, 2.4vh, 1.3rem);
+  max-width: 92vw;
+}
+.td-temporada-tabla th, .td-temporada-tabla td {
+  padding: 0.5vh 1vw;
+  text-align: center;
+  white-space: nowrap;
+}
+.td-temporada-tabla th { color: #9ca3af; font-weight: 700; }
+.td-temporada-tabla td:nth-child(2) { text-align: left; }
+.td-temporada-tabla tr { border-bottom: 1px solid #1f2937; }
+
 /* Vista "compe en marcha": mismo tratamiento — cabecera fija + cuerpo flexible, nada en px. */
 .td-live-header {
   flex: 0 0 auto;

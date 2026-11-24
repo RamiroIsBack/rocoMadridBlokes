@@ -18,6 +18,9 @@ const LOGO_URL = 'https://rocomadrid.com/wp-content/uploads/2026/03/logo-estilo-
 // (NOTAS_PARA_CODE_tele_roco.md, 14/11 17:25 — antes se cortaba por abajo sin más).
 const LIGA_POR_PAGINA = 6
 const LIGA_PAGINA_MS = 6000
+// Clasificación de temporada (nota 23/11 06:50, punto 6): una categoría a la vez, rotando cada
+// TEMPORADA_CAT_MS mientras la fase "temporada" esté en pantalla.
+const TEMPORADA_CAT_MS = 8000
 
 // Recorte en círculo (cowork, 11/11 05:15: el PNG tiene las esquinas blancas, no transparentes
 // — sobre el fondo oscuro de la tele se ve como un cuadrado blanco feo). `flexShrink: 0` es
@@ -56,6 +59,38 @@ function renderSlide(slide, onImgError) {
 // la rotación que una diapositiva normal. Repartida en páginas de LIGA_POR_PAGINA filas, para
 // no cortarla por abajo si hay más gente de la que cabe (cowork, 14/11 17:25: con 960×540 solo
 // se veía la primera fila).
+// Clasificación de temporada (nota 23/11 06:50, punto 6: "en la tele, como una fase más de la
+// rotación cuando no hay compe en marcha") — una categoría a la vez (ver TEMPORADA_CAT_MS en
+// CompeDirectoPage), topado a 10 filas para que quepa sin cortarse; el detalle completo está en
+// la app o en Organización → Compe → Participantes.
+function renderTemporada(categoria, numPruebas) {
+  const filas = (categoria?.clasificacion || []).slice(0, 10)
+  return (
+    <div className="td-content-inner">
+      <p className="td-liga-title">🏅 Clasificación de temporada — {categoria?.nombre}</p>
+      <table className="td-temporada-tabla">
+        <thead>
+          <tr>
+            <th>#</th><th>Nombre</th>
+            {Array.from({ length: numPruebas }).map((_, i) => <th key={i}>P{i + 1}</th>)}
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map(f => (
+            <tr key={f.clave}>
+              <td>{f.puesto}</td><td>{f.nombreMostrar}</td>
+              {f.puntosPorPrueba.map((p, i) => <td key={i}>{p}</td>)}
+              <td><strong>{f.total}</strong></td>
+            </tr>
+          ))}
+          {filas.length === 0 && <tr><td colSpan={numPruebas + 3}>Todavía nadie en esta categoría.</td></tr>}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function renderLigaSemana(pagina, totalPaginas, paginaIdx) {
   return (
     <div className="td-content-inner">
@@ -170,6 +205,11 @@ export default function CompeDirectoPage() {
   // misma rotación que las diapositivas.
   const [ligaSemana, setLigaSemana] = useState([])
   const [ligaPageIdx, setLigaPageIdx] = useState(0)
+  // Clasificación de temporada (nota 23/11 06:50, punto 6) — misma idea que "liga": una fase más
+  // de la rotación cuando no hay compe en marcha, cargada aparte y poco frecuente (no hace falta
+  // más: solo cambia cuando se valida un top de una compe NO de prueba).
+  const [temporada, setTemporada] = useState(null)
+  const [temporadaCatIdx, setTemporadaCatIdx] = useState(0)
   // ?escala=0.8 en la URL de la tele (Ramiro, 14/11 17:25) — para ajustar desde la propia tele
   // sin tocar código, sin tener que esperar a un redeploy cada vez que cambia la TV.
   const [escala] = useState(() => {
@@ -183,11 +223,13 @@ export default function CompeDirectoPage() {
   // Cowork, 15/11 18:35: el avance se saca a su propia función para poder llamarlo también
   // desde el "onError" del cartel (saltar de fase ya mismo si la imagen no carga, en vez de
   // esperar los 22 s completos con el hueco roto en pantalla).
+  const temporadaCatsConGente = (temporada?.categorias || []).filter(c => (c.clasificacion || []).length > 0)
   const avanzarFase = () => {
     setVistaPrecompe(v => {
       const fases = ['cuenta', 'mapa']
       if (slides.length > 0) fases.push('slide')
       if (ligaSemana.length > 0) fases.push('liga')
+      if (temporadaCatsConGente.length > 0) fases.push('temporada')
       const i = fases.indexOf(v)
       return fases[(i + 1) % fases.length] ?? 'cuenta'
     })
@@ -195,7 +237,28 @@ export default function CompeDirectoPage() {
   useEffect(() => {
     const id = setInterval(avanzarFase, ROTACION_MS)
     return () => clearInterval(id)
-  }, [slides.length, ligaSemana.length])
+  }, [slides.length, ligaSemana.length, temporadaCatsConGente.length])
+
+  useEffect(() => {
+    let activo = true
+    const cargarTemporada = () => {
+      fetch(`${CLUB_URL}/wp-json/progreso/v1/compe/clasificacion-temporada`)
+        .then(r => r.json())
+        .then(j => { if (activo) setTemporada(j.data || null) })
+        .catch(() => {})
+    }
+    cargarTemporada()
+    const id = setInterval(cargarTemporada, 5 * 60000)
+    return () => { activo = false; clearInterval(id) }
+  }, [])
+
+  // Mientras la fase "temporada" está en pantalla, rota entre las categorías que tengan a
+  // alguien (nunca una vacía) cada TEMPORADA_CAT_MS.
+  useEffect(() => {
+    if (vistaPrecompe !== 'temporada' || temporadaCatsConGente.length < 2) return
+    const id = setInterval(() => setTemporadaCatIdx(i => (i + 1) % temporadaCatsConGente.length), TEMPORADA_CAT_MS)
+    return () => clearInterval(id)
+  }, [vistaPrecompe, temporadaCatsConGente.length])
 
   useEffect(() => {
     let activo = true
@@ -313,6 +376,8 @@ export default function CompeDirectoPage() {
     const slideActual = slides[slideIndex] || null
     const mostrarLiga = vistaPrecompe === 'liga' && ligaSemana.length > 0
     const ligaPaginaActual = ligaPaginas[ligaPageIdx % ligaPaginas.length] || []
+    const mostrarTemporada = vistaPrecompe === 'temporada' && temporadaCatsConGente.length > 0
+    const temporadaCatActual = temporadaCatsConGente[temporadaCatIdx % temporadaCatsConGente.length] || null
 
     if (err && !proxima) {
       return (
@@ -336,7 +401,7 @@ export default function CompeDirectoPage() {
         <div className="td-page" style={pageStyle}>
           <BotonPantallaCompleta />
           <div className="td-content">
-            {mostrarLiga ? renderLigaSemana(ligaPaginaActual, ligaPaginas.length, ligaPageIdx % ligaPaginas.length) : slide ? renderSlide(slide, avanzarSlide) : (
+            {mostrarTemporada ? renderTemporada(temporadaCatActual, (temporada?.pruebas || []).length) : mostrarLiga ? renderLigaSemana(ligaPaginaActual, ligaPaginas.length, ligaPageIdx % ligaPaginas.length) : slide ? renderSlide(slide, avanzarSlide) : (
               <div className="td-content-inner">
                 <Logo className="td-logo" style={{ height: 'min(12vh,110px)', width: 'min(12vh,110px)' }} />
                 <p className="td-sin-conexion">No hay compe activa ahora mismo.</p>
@@ -358,7 +423,9 @@ export default function CompeDirectoPage() {
           </div>
         </header>
         <div className="td-content">
-          {mostrarLiga ? (
+          {mostrarTemporada ? (
+            renderTemporada(temporadaCatActual, (temporada?.pruebas || []).length)
+          ) : mostrarLiga ? (
             renderLigaSemana(ligaPaginaActual, ligaPaginas.length, ligaPageIdx % ligaPaginas.length)
           ) : mostrarSlide && slideActual ? (
             renderSlide(slideActual, avanzarSlide)
