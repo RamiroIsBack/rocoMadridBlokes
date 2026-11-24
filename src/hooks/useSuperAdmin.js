@@ -293,8 +293,14 @@ export function useExpenses(from, entity = 'all', excludeInternal = true) {
   const [saldoReal, setSaldoReal] = useState(null)
   const [cuadre,    setCuadre]    = useState(null)
   const [cuadreRocoteca, setCuadreRocoteca] = useState(null)
-  // 24/11 11:50: histórico completo mes->saldo real del banco (nunca recortado por `from`), una
-  // entidad y la otra — para la línea del "Resultado neto mensual".
+  // 24/11 13:30: histórico completo (nunca recortado por `from`) para "Resultado neto mensual".
+  // netoMensual* = barras (TODOS los movimientos, deduplicados, sin excluir nada). saldoLinea* =
+  // línea (apertura + acumulado de ese neto). saldoMensual* = "Saldo Posterior" real del CSV,
+  // solo para comprobar que la línea cuadra con el banco.
+  const [netoMensualClub, setNetoMensualClub] = useState(null)
+  const [netoMensualRocoteca, setNetoMensualRocoteca] = useState(null)
+  const [saldoLineaClub, setSaldoLineaClub] = useState(null)
+  const [saldoLineaRocoteca, setSaldoLineaRocoteca] = useState(null)
   const [saldoMensualClub, setSaldoMensualClub] = useState(null)
   const [saldoMensualRocoteca, setSaldoMensualRocoteca] = useState(null)
   const [loading,   setLoading]   = useState(true)
@@ -311,13 +317,20 @@ export function useExpenses(from, entity = 'all', excludeInternal = true) {
       .then(json => {
         setData(json.data ?? null); setBreakdown(json.breakdown ?? null); setSaldoReal(json.saldoReal ?? null)
         setCuadre(json.cuadre ?? null); setCuadreRocoteca(json.cuadreRocoteca ?? null)
+        setNetoMensualClub(json.netoMensualClub ?? null); setNetoMensualRocoteca(json.netoMensualRocoteca ?? null)
+        setSaldoLineaClub(json.saldoLineaClub ?? null); setSaldoLineaRocoteca(json.saldoLineaRocoteca ?? null)
         setSaldoMensualClub(json.saldoMensualClub ?? null); setSaldoMensualRocoteca(json.saldoMensualRocoteca ?? null)
         setLoading(false)
       })
       .catch(e  => { setError(e.message); setLoading(false) })
   }, [url, reloadKey])
 
-  return { data, breakdown, saldoReal, cuadre, cuadreRocoteca, saldoMensualClub, saldoMensualRocoteca, loading, error, refetch: () => setReloadKey(k => k + 1) }
+  return {
+    data, breakdown, saldoReal, cuadre, cuadreRocoteca,
+    netoMensualClub, netoMensualRocoteca, saldoLineaClub, saldoLineaRocoteca,
+    saldoMensualClub, saldoMensualRocoteca,
+    loading, error, refetch: () => setReloadKey(k => k + 1),
+  }
 }
 
 // POST /expenses/apertura -- saldo de apertura (1/1) editable de una entidad/año (Club por

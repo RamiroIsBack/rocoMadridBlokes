@@ -661,7 +661,12 @@ function HistoryView({ period, onDeleted }) {
     return next
   })
   const effectiveExclude = excludeInternal
-  const { data, breakdown, saldoReal, saldoMensualClub, saldoMensualRocoteca, loading, error } = useExpenses(from, entity, effectiveExclude)
+  const {
+    data, breakdown, saldoReal,
+    netoMensualClub, netoMensualRocoteca, saldoLineaClub, saldoLineaRocoteca,
+    saldoMensualClub, saldoMensualRocoteca,
+    loading, error,
+  } = useExpenses(from, entity, effectiveExclude)
 
   const handleDelete = async (month, ent) => {
     const key = `${month}·${ent}`
@@ -687,14 +692,9 @@ function HistoryView({ period, onDeleted }) {
     if (!data) return []
     const acc = {}
     data.forEach(r => {
-      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, costesNeto: 0, ingresosNeto: 0, iva_s: 0, iva_r: 0, iva_r_real: 0, nominas: 0, nominas_real: null, nominas_descuadre: false, ss: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {}, ingresos_items: [] }
+      if (!acc[r.month]) acc[r.month] = { month: r.month, costes: 0, ingresos: 0, iva_s: 0, iva_r: 0, iva_r_real: 0, nominas: 0, nominas_real: null, nominas_descuadre: false, ss: 0, nominas_by_entity: {}, by_concepto: {}, retiradas_by_entity: {}, ingresos_items: [] }
       acc[r.month].costes   += Math.abs(r.total_costes    || 0)
       acc[r.month].ingresos += Math.abs(r.total_ingresos  || 0)
-      // 24/11 07:35/07:55: "sin internos" (sobre todo "Uso de Rocódromo") para el neto real del
-      // "Resultado neto mensual" — SIEMPRE, al margen del filtro "Movimientos internos" de arriba
-      // (ese filtro solo decide qué se ve en las barras de gastos/ingresos del gráfico de arriba).
-      acc[r.month].costesNeto   += Math.abs(r.total_costes_neto   || 0)
-      acc[r.month].ingresosNeto += Math.abs(r.total_ingresos_neto || 0)
       acc[r.month].iva_s    += Math.abs(r.iva_soportado   || 0)
       acc[r.month].iva_r    += Math.abs(r.iva_repercutido || 0)
       acc[r.month].iva_r_real += Math.abs(r.iva_repercutido_real || 0)
@@ -728,31 +728,47 @@ function HistoryView({ period, onDeleted }) {
   // el mes que sea.
   const currentMonthStr = useMemo(() => new Date().toISOString().slice(0, 7), [])
 
-  // 24/11 11:50 (Ramiro: "la línea tiene que ser el saldo REAL del banco", c6baf08 no sirve):
-  // nada de apertura+netos (eso nunca cuadraba, porque el neto quita los traspasos internos que
-  // sí movieron la cuenta de verdad) — la línea es el "Saldo Posterior" real del CSV al cierre de
-  // cada mes (saldoMensualClub/Rocoteca, histórico completo del backend). La Rocoteca ya no sube
-  // CSV, así que arrastra su último saldo conocido mes a mes; con "Todas" se suma Club + el
-  // último saldo conocido de Rocoteca a esa fecha. Barras y línea ya NO tienen por qué cuadrar
-  // entre sí (el neto de las barras sigue sin los traspasos internos) — eso está bien.
+  // 24/11 13:30 — DEFINITIVO (sustituye a las notas de 07:35, 07:55, 11:50 y 13:05): regla
+  // única, sin exclusiones. Barras = neto real del mes (netoMensualClub/Rocoteca — TODOS los
+  // movimientos, ya deduplicados y sin excluir nada en el backend; con "Todas" los traspasos
+  // Club↔Rocoteca se anulan solos al sumar las dos). Línea = apertura + acumulado de ese mismo
+  // neto (saldoLineaClub/Rocoteca, también del backend) — por definición cuadra con las barras.
+  // El "Saldo Posterior" real del CSV (saldoMensualClub/Rocoteca) ya no se dibuja: solo sirve
+  // para comprobar la línea y avisar si no coincide (CSV que falta o está repetido).
   const netData = useMemo(() => {
-    let ultimoClub = null, ultimoRoco = null
+    let ultimoLineaClub = null, ultimoLineaRoco = null
+    let ultimoBancoClub = null, ultimoBancoRoco = null
     return byMonth.map(r => {
-      const net = r.ingresosNeto - r.costesNeto
-      if (saldoMensualClub?.[r.month] != null) ultimoClub = saldoMensualClub[r.month]
-      if (saldoMensualRocoteca?.[r.month] != null) ultimoRoco = saldoMensualRocoteca[r.month]
+      let net = 0
+      if (entity === 'club' || entity === 'all') net += netoMensualClub?.[r.month] || 0
+      if (entity === 'rocoteca' || entity === 'all') net += netoMensualRocoteca?.[r.month] || 0
+
+      if (saldoLineaClub?.[r.month] != null) ultimoLineaClub = saldoLineaClub[r.month]
+      if (saldoLineaRocoteca?.[r.month] != null) ultimoLineaRoco = saldoLineaRocoteca[r.month]
       let saldo = null
-      if (entity === 'club') saldo = ultimoClub
-      else if (entity === 'rocoteca') saldo = ultimoRoco
-      else if (ultimoClub != null || ultimoRoco != null) saldo = (ultimoClub || 0) + (ultimoRoco || 0)
+      if (entity === 'club') saldo = ultimoLineaClub
+      else if (entity === 'rocoteca') saldo = ultimoLineaRoco
+      else if (ultimoLineaClub != null || ultimoLineaRoco != null) saldo = (ultimoLineaClub || 0) + (ultimoLineaRoco || 0)
+
+      if (saldoMensualClub?.[r.month] != null) ultimoBancoClub = saldoMensualClub[r.month]
+      if (saldoMensualRocoteca?.[r.month] != null) ultimoBancoRoco = saldoMensualRocoteca[r.month]
+      let saldoBanco = null
+      if (entity === 'club') saldoBanco = ultimoBancoClub
+      else if (entity === 'rocoteca') saldoBanco = ultimoBancoRoco
+      else if (ultimoBancoClub != null || ultimoBancoRoco != null) saldoBanco = (ultimoBancoClub || 0) + (ultimoBancoRoco || 0)
+
+      const diferencia = (saldo != null && saldoBanco != null) ? Math.round(saldo - saldoBanco) : null
+
       return {
         month: fmtMonth(r.month),
+        monthKey: r.month,
         net: Math.round(net),
         saldo: saldo != null ? Math.round(saldo) : null,
+        diferencia,
         parcial: r.month === currentMonthStr,
       }
     })
-  }, [byMonth, entity, saldoMensualClub, saldoMensualRocoteca, currentMonthStr])
+  }, [byMonth, entity, netoMensualClub, netoMensualRocoteca, saldoLineaClub, saldoLineaRocoteca, saldoMensualClub, saldoMensualRocoteca, currentMonthStr])
 
   const nominasData = useMemo(() =>
     byMonth.map(r => ({
@@ -922,7 +938,7 @@ function HistoryView({ period, onDeleted }) {
         </>
       )}
 
-      {/* ─── Resultado neto mensual (rehecho simple, 24/11 07:35/07:55) ─── */}
+      {/* ─── Resultado neto mensual (DEFINITIVO, 24/11 13:30) ─── */}
       {netData.length > 0 && (
         <>
           <p className="exp-chart-title" style={{ marginTop: 16 }}>Resultado neto mensual (ingresos − gastos)</p>
@@ -941,6 +957,9 @@ function HistoryView({ period, onDeleted }) {
                       <p style={{ color: '#f5c842', margin: '0 0 6px', fontWeight: 700 }}>{label}{fila.parcial ? ' (parcial)' : ''}</p>
                       <p style={{ color: fila.net < 0 ? '#ef4444' : '#4ade80', margin: '2px 0' }}>Neto mes: {fmtEurSigned(fila.net)}</p>
                       {fila.saldo != null && <p style={{ color: '#f5c842', margin: '2px 0' }}>Saldo a fin de mes: {fmtEurSigned(fila.saldo)}</p>}
+                      {fila.diferencia != null && Math.abs(fila.diferencia) > 1 && (
+                        <p style={{ color: '#ef4444', margin: '2px 0' }}>⚠ No cuadra con el banco: {fmtEurSigned(fila.diferencia)}</p>
+                      )}
                     </div>
                   )
                 }}
@@ -954,8 +973,13 @@ function HistoryView({ period, onDeleted }) {
             </ComposedChart>
           </ResponsiveContainer>
           <p className="exp-hint" style={{ fontSize: '0.75rem' }}>
-            Barras: neto del mes sin movimientos internos (verde/rojo). Línea: saldo real del banco al cierre de cada mes (Rocoteca arrastra su último saldo conocido, ya sin CSV nuevo). Mes en curso más claro, datos parciales — no tienen por qué cuadrar entre sí.
+            Barras: neto real del mes, todos los movimientos (verde/rojo). Línea: saldo de apertura + acumulado de esas mismas barras — cuadra con ellas por definición. Mes en curso más claro, datos parciales.
           </p>
+          {netData.some(r => r.diferencia != null && Math.abs(r.diferencia) > 1) && (
+            <p className="exp-hint" style={{ fontSize: '0.75rem', color: '#ef4444' }}>
+              ⚠ La línea no coincide con el "Saldo Posterior" real del banco en: {netData.filter(r => r.diferencia != null && Math.abs(r.diferencia) > 1).map(r => `${r.month} (${fmtEurSigned(r.diferencia)})`).join(', ')}. Suele ser un CSV que falta o está repetido.
+            </p>
+          )}
         </>
       )}
 

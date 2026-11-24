@@ -2035,12 +2035,6 @@ function superadmin_get_expenses($request) {
         $tc = 0; $ti = 0; $iva_s = 0; $iva_r = 0; $nom = 0; $nom_con_voluntarios = 0;
         $row_concepto  = array(); // expense concept totals for this entity-month
         $row_ingresos  = array(); // income items for this entity-month
-        // 24/11 07:35/07:55: "Resultado neto mensual" necesita el neto SIN movimientos internos
-        // (sobre todo «Uso de Rocódromo», que se anula con lo que recibía la Rocoteca — no es
-        // gasto/ingreso real) pase lo que pase con el filtro "Movimientos internos" de la
-        // pantalla, que solo decide qué se ve en las barras de gastos/ingresos de ARRIBA. Se
-        // acumula aparte, siempre sin internos, independiente de $exclude_internal.
-        $tc_neto = 0.0; $ti_neto = 0.0;
         foreach ($saved['items'] as $item) {
             $concepto_norm = function_exists('iconv')
                 ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
@@ -2054,10 +2048,6 @@ function superadmin_get_expenses($request) {
             $is_internal = $item['excluded']
                 || $es_rocodromo
                 || strpos($concepto_norm, 'transferencia entre cuentas') !== false;
-            if (!$is_internal) {
-                $amt_neto = abs(floatval($item['importe'] ?? 0));
-                if (($item['section'] ?? 'costes') === 'costes') $tc_neto += $amt_neto; else $ti_neto += $amt_neto;
-            }
             if ($exclude_internal && $is_internal) continue;
             $amt  = abs(floatval($item['importe']));
             // 15/11 09:18 punto 3: antes el Club siempre daba IVA 0 pasara lo que pasara — desde
@@ -2118,8 +2108,6 @@ function superadmin_get_expenses($request) {
                 ? (abs($nom_con_voluntarios - $nominas_real) > 50) : false,
             'by_concepto'     => $row_concepto,
             'ingresos_items'  => $row_ingresos,
-            'total_costes_neto'   => round($tc_neto, 2),
-            'total_ingresos_neto' => round($ti_neto, 2),
         );
     }
 
@@ -2134,9 +2122,16 @@ function superadmin_get_expenses($request) {
         // saldo consolidada, no solo el Club.
         'cuadre' => blokes_expenses_cuadre(),
         'cuadreRocoteca' => blokes_expenses_cuadre(null, 'rocoteca'),
-        // 24/11 11:50: histórico completo (nunca recortado por $from) para la LÍNEA del
-        // "Resultado neto mensual" — el frontend arrastra el último saldo conocido en los meses
-        // sin CSV nuevo (la Rocoteca, desde que dejó de tener movimientos).
+        // 24/11 13:30 — DEFINITIVO: "Resultado neto mensual" ya no reconstruye nada. Barras =
+        // neto real mes a mes (netoMensualClub/Rocoteca, TODOS los movimientos deduplicados
+        // entre CSV que se solapan, sin excluir nada). Línea = apertura + acumulado de ese neto
+        // (saldoLineaClub/Rocoteca). saldoMensualClub/Rocoteca (el "Saldo Posterior" real del
+        // CSV) se queda solo para comprobar que la línea cuadra con el banco. Todo histórico
+        // completo, sin recortar por $from — el frontend arrastra el último valor conocido.
+        'netoMensualClub' => blokes_expenses_neto_mensual_real('club'),
+        'netoMensualRocoteca' => blokes_expenses_neto_mensual_real('rocoteca'),
+        'saldoLineaClub' => blokes_expenses_linea_saldo('club'),
+        'saldoLineaRocoteca' => blokes_expenses_linea_saldo('rocoteca'),
         'saldoMensualClub' => blokes_expenses_saldo_mensual('club'),
         'saldoMensualRocoteca' => blokes_expenses_saldo_mensual('rocoteca'),
     ));
@@ -6175,6 +6170,97 @@ function blokes_expenses_saldo_mensual($entity) {
     $out = array();
     foreach ($por_mes as $month => $v) $out[$month] = round($v['saldo'], 2);
     ksort($out);
+    return $out;
+}
+
+// Dedup SOLO para "Resultado neto mensual" (barras+línea): fecha+concepto+importe, sin saldo —
+// los CSV del banco se solapan (el de un mes trae alguna fila del mes siguiente) y el mismo
+// movimiento real puede traer un "Saldo Posterior" distinto según en qué extracto venga (24/11
+// 13:30), así que el saldo no sirve de desambiguador aquí (al revés que blokes_exp_item_key, que
+// sí lo usa para no fusionar al guardar dos pagos reales iguales el mismo día).
+function blokes_exp_net_dedup_key($item) {
+    $fecha = $item['fecha'] ?? '';
+    return $fecha . '|' . trim((string) ($item['concepto'] ?? '')) . '|' . round(floatval($item['importe'] ?? 0), 2);
+}
+
+// Neto real del mes de una entidad para "Resultado neto mensual" (24/11 13:30, regla única): TODOS
+// los movimientos, sin excluir nada (ni "Uso de Rocódromo" ni transferencias entre cuentas — con
+// "Todas" se anulan solos, sumando Club+Rocoteca). Deduplicado globalmente entre todos los CSV
+// subidos (no solo dentro de su propio mes) y agrupado por el mes real de la columna "Fecha" de
+// cada movimiento, no por el mes del option donde esté guardado (que puede traer movimientos de
+// otro mes por el solape de los CSV). Histórico completo, sin recortar por el selector de meses.
+function blokes_expenses_neto_mensual_real($entity) {
+    global $wpdb;
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
+        'blokes_exp_%_' . $entity
+    ), ARRAY_A);
+    $seen = array();
+    $por_mes = array();
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!$saved || !is_array($saved['items'] ?? null)) continue;
+        foreach ($saved['items'] as $item) {
+            $k = blokes_exp_net_dedup_key($item);
+            if (isset($seen[$k])) continue;
+            $seen[$k] = true;
+            $fecha = $item['fecha'] ?? '';
+            if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
+            $month  = $m[3] . '-' . str_pad($m[2], 2, '0', STR_PAD_LEFT);
+            $amt    = abs(floatval($item['importe'] ?? 0));
+            $signed = (($item['section'] ?? 'costes') === 'costes') ? -$amt : $amt;
+            $por_mes[$month] = ($por_mes[$month] ?? 0) + $signed;
+        }
+    }
+    ksort($por_mes);
+    foreach ($por_mes as $month => $v) $por_mes[$month] = round($v, 2);
+    return $por_mes;
+}
+
+// Apertura para la línea de "Resultado neto mensual": la guardada en P&L (incluida la semilla
+// del Club 2026 = 39,68 €) o, si la entidad no tiene ninguna, la del primer movimiento con saldo
+// guardado (24/11 13:30 punto 2): su saldo posterior menos su propio importe.
+function blokes_expenses_apertura_linea($year, $entity) {
+    $ap = blokes_expenses_apertura_get($year, $entity);
+    if ($ap['saldo'] !== null) return floatval($ap['saldo']);
+    global $wpdb;
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
+        'blokes_exp_%_' . $entity
+    ), ARRAY_A);
+    $mejor = null;
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!$saved || !is_array($saved['items'] ?? null)) continue;
+        foreach ($saved['items'] as $item) {
+            $saldo_raw = (string) ($item['saldo'] ?? '');
+            if ($saldo_raw === '') continue;
+            $fecha = $item['fecha'] ?? '';
+            if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
+            $ts = mktime(0, 0, 0, intval($m[2]), intval($m[1]), intval($m[3]));
+            if ($mejor !== null && $ts >= $mejor['ts']) continue;
+            $saldo  = floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', $saldo_raw)));
+            $amt    = abs(floatval($item['importe'] ?? 0));
+            $signed = (($item['section'] ?? 'costes') === 'costes') ? -$amt : $amt;
+            $mejor  = array('ts' => $ts, 'apertura' => $saldo - $signed);
+        }
+    }
+    return $mejor !== null ? $mejor['apertura'] : null;
+}
+
+// Línea de "Resultado neto mensual": apertura + acumulado del neto real mes a mes (histórico
+// completo, sin recortar por el selector de meses, igual que blokes_expenses_saldo_mensual).
+function blokes_expenses_linea_saldo($entity) {
+    $neto = blokes_expenses_neto_mensual_real($entity);
+    if (empty($neto)) return array();
+    $primer_mes = array_key_first($neto);
+    $apertura   = blokes_expenses_apertura_linea(intval(substr($primer_mes, 0, 4)), $entity);
+    $acum = $apertura !== null ? $apertura : 0.0;
+    $out = array();
+    foreach ($neto as $month => $n) {
+        $acum += $n;
+        $out[$month] = round($acum, 2);
+    }
     return $out;
 }
 
