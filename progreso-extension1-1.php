@@ -1750,6 +1750,9 @@ function blokes_coste_real_profe_mes($month) {
             $nombre = blokes_normaliza_nombre_profe($row['name'] ?? '');
             if (!$nombre) continue;
             $bruto = floatval($row['total'] ?? 0);
+            // 23/11: la nómina de un socio no es coste de ninguna clase (y «Álvaro» socio no debe
+            // sumarse al profe). Sí cuenta en el reparto de la Seguridad Social, que también paga.
+            if (($row['type'] ?? '') === 'socio') { $total_bruto += $bruto; continue; }
             $out[$nombre] = ($out[$nombre] ?? 0) + $bruto;
             $fuentes[$nombre] = true; // tiene fila de nómina de este mes, aunque sea 0
             $total_bruto += $bruto;
@@ -16761,6 +16764,16 @@ add_action('rest_api_init', function() {
         'callback'            => 'payroll_set_payment',
         'permission_callback' => $socio_perm,
     ));
+    register_rest_route('superadmin/v1', '/payroll-payment/move', array(
+        'methods'             => 'POST',
+        'callback'            => 'payroll_move_payments',
+        'permission_callback' => $socio_perm,
+    ));
+    register_rest_route('superadmin/v1', '/payroll-overtime/(?P<id>[a-z0-9-]+)', array(
+        'methods'             => 'PUT',
+        'callback'            => 'payroll_edit_overtime',
+        'permission_callback' => $socio_perm,
+    ));
     register_rest_route('superadmin/v1', '/payroll-absence', array(
         'methods'             => 'POST',
         'callback'            => 'payroll_set_absence',
@@ -16795,7 +16808,23 @@ function overtime_get_rates() {
 // Tipos de persona, en el orden en que se listan. Profesores y voluntarios pueden tener
 // nómina base; los externos cobran solo extras.
 function overtime_types() {
-    return array('profesor', 'voluntario', 'externo');
+    return array('profesor', 'voluntario', 'externo', 'socio');
+}
+
+// 23/11 (Álvaro): los socios también pueden tener nómina (tipo 'socio'), pero solo los ven los
+// socios — Gestión no debe saber lo que cobran. Todo lo que llega a quien no es socio por las
+// rutas de Horas extra (personas, registros) pasa por aquí y sale sin ellos.
+function overtime_is_hidden_person($p) {
+    return ($p['type'] ?? '') === 'socio' && blokes_get_app_role() !== 'socio';
+}
+function overtime_visible_people($people = null) {
+    if ($people === null) $people = overtime_get_people();
+    return array_values(array_filter($people, function($p) { return !overtime_is_hidden_person($p); }));
+}
+function overtime_hidden_ids() {
+    $ids = array();
+    foreach (overtime_get_people() as $p) if (overtime_is_hidden_person($p)) $ids[] = $p['id'];
+    return $ids;
 }
 
 function overtime_clean_type($type) {
@@ -16874,13 +16903,15 @@ function overtime_person_index($people, $id) {
 }
 
 function overtime_list_people() {
-    return rest_ensure_response(array('success' => true, 'people' => overtime_get_people()));
+    return rest_ensure_response(array('success' => true, 'people' => overtime_visible_people()));
 }
 
 function overtime_add_person($request) {
     $body = $request->get_json_params();
     $name = trim(sanitize_text_field($body['name'] ?? ''));
     $type = overtime_clean_type($body['type'] ?? '');
+    // Solo un socio puede dar de alta a un socio
+    if ($type === 'socio' && blokes_get_app_role() !== 'socio') $type = 'profesor';
     if ($name === '') {
         return new WP_Error('invalid_name', 'Indica el nombre', array('status' => 400));
     }
@@ -16888,6 +16919,9 @@ function overtime_add_person($request) {
     $people = overtime_get_people();
     foreach ($people as $p) {
         if (mb_strtolower($p['name']) === mb_strtolower($name)) {
+            if (overtime_is_hidden_person($p)) {
+                return new WP_Error('duplicate', 'Ese nombre no se puede usar: prueba con el apellido o una inicial', array('status' => 409));
+            }
             return new WP_Error('duplicate', "Ya existe «{$p['name']}» en la lista", array('status' => 409));
         }
     }
@@ -16907,7 +16941,7 @@ function overtime_add_person($request) {
     $people[] = $person;
     overtime_save_people($people);
 
-    return rest_ensure_response(array('success' => true, 'person' => $person, 'people' => $people));
+    return rest_ensure_response(array('success' => true, 'person' => $person, 'people' => overtime_visible_people($people)));
 }
 
 // Solo socios: renombrar, cambiar tipo o activar/desactivar. No se borra para no
@@ -16940,7 +16974,7 @@ function overtime_clean_fields($body, $current_person = null) {
 
     $people = overtime_get_people();
     $pi     = overtime_person_index($people, $professor);
-    if ($pi < 0 || (!$people[$pi]['active'] && $professor !== $current_person)) {
+    if ($pi < 0 || overtime_is_hidden_person($people[$pi]) || (!$people[$pi]['active'] && $professor !== $current_person)) {
         return new WP_Error('invalid_professor', 'Persona no válida o inactiva', array('status' => 400));
     }
     $dt = DateTime::createFromFormat('Y-m-d', $date);
@@ -16961,9 +16995,16 @@ function overtime_clean_fields($body, $current_person = null) {
     );
 }
 
-// €/h aplicable: las pagadas conservan el €/h con el que se pagaron.
+// €/h aplicable: las pagadas conservan el €/h con el que se pagaron. Una línea puede llevar su
+// propio €/h puntual (rate_override, 23/11: p. ej. las horas de una compe a otro precio); si
+// no, el €/h general de la persona (Nóminas → Configuración).
 function overtime_entry_rate($entry, $rates) {
     if ($entry['status'] === 'pagado' && isset($entry['paid_rate'])) return $entry['paid_rate'];
+    return overtime_unpaid_rate($entry, $rates);
+}
+
+function overtime_unpaid_rate($entry, $rates) {
+    if (isset($entry['rate_override']) && $entry['rate_override'] !== null) return (float) $entry['rate_override'];
     return $rates[$entry['professor']] ?? null;
 }
 
@@ -16981,6 +17022,7 @@ function overtime_present($entry, $rates = null) {
     if ($rates !== null) {
         $rate = overtime_entry_rate($entry, $rates);
         $out['rate']    = $rate;
+        $out['rate_custom'] = isset($entry['rate_override']) && $entry['rate_override'] !== null;
         $out['amount']  = $rate !== null ? round($rate * $entry['hours'], 2) : null;
         $out['paid_at'] = $entry['paid_at'] ?? null;
     }
@@ -16992,9 +17034,11 @@ function overtime_list($request) {
     if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
         return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
     }
-    $list = array();
+    $list   = array();
+    $hidden = overtime_hidden_ids();
     foreach (overtime_get_entries() as $entry) {
         if (strpos($entry['date'], $month) !== 0) continue;
+        if (in_array($entry['professor'], $hidden, true)) continue;
         $list[] = overtime_present($entry);
     }
     usort($list, function($a, $b) { return strcmp($a['date'], $b['date']); });
@@ -17003,7 +17047,7 @@ function overtime_list($request) {
         'success'    => true,
         'month'      => $month,
         'can_manage' => blokes_get_app_role() === 'socio',
-        'people'     => overtime_get_people(),
+        'people'     => overtime_visible_people(),
         'entries'    => $list,
     ));
 }
@@ -17037,7 +17081,7 @@ function overtime_find_index($entries, $id) {
 function overtime_update($request) {
     $entries = overtime_get_entries();
     $i       = overtime_find_index($entries, $request['id']);
-    if ($i < 0) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
+    if ($i < 0 || in_array($entries[$i]['professor'], overtime_hidden_ids(), true)) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
 
     $is_socio = blokes_get_app_role() === 'socio';
     if (!$is_socio && $entries[$i]['status'] !== 'pendiente') {
@@ -17055,7 +17099,7 @@ function overtime_update($request) {
 function overtime_delete($request) {
     $entries = overtime_get_entries();
     $i       = overtime_find_index($entries, $request['id']);
-    if ($i < 0) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
+    if ($i < 0 || in_array($entries[$i]['professor'], overtime_hidden_ids(), true)) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
 
     if (blokes_get_app_role() !== 'socio' && $entries[$i]['status'] !== 'pendiente') {
         return new WP_Error('locked', 'Solo un socio puede borrar horas ya pagadas', array('status' => 403));
@@ -17094,7 +17138,7 @@ function overtime_set_status($request) {
         $entries[$i]['updated_at'] = $now;
         if ($status === 'pagado') {
             $entries[$i]['paid_at']   = $now;
-            $entries[$i]['paid_rate'] = $rates[$entry['professor']] ?? null;
+            $entries[$i]['paid_rate'] = overtime_unpaid_rate($entry, $rates);
         } else {
             unset($entries[$i]['paid_at'], $entries[$i]['paid_rate']);
         }
@@ -17146,7 +17190,7 @@ function payroll_mark_extras_paid($month, $person_id) {
         $entries[$i]['status']     = 'pagado';
         $entries[$i]['updated_at'] = $now;
         $entries[$i]['paid_at']    = $now;
-        $entries[$i]['paid_rate']  = $rates[$person_id] ?? null;
+        $entries[$i]['paid_rate']  = overtime_unpaid_rate($e, $rates);
         $changed++;
     }
     if ($changed) overtime_save_entries($entries);
@@ -17216,6 +17260,81 @@ function payroll_set_payment($request) {
     }
     payroll_save_payments($all);
     return rest_ensure_response(array('success' => true));
+}
+
+// Desde Nóminas (solo socio, 23/11): cambiar las horas de una línea de horas extra y/o ponerle
+// un €/h puntual solo a esa línea. Es el MISMO registro que ve gestión en Supervisión → Horas
+// extra (ahí sin dinero), así que las horas quedan coordinadas. { hours?, rate? } — rate vacío o
+// null quita el precio puntual y vuelve al €/h general. Si la línea ya está pagada, el precio
+// puntual pasa a ser el precio con el que se pagó.
+function payroll_edit_overtime($request) {
+    $entries = overtime_get_entries();
+    $i       = overtime_find_index($entries, $request['id']);
+    if ($i < 0) return new WP_Error('not_found', 'Registro no encontrado', array('status' => 404));
+    $body = $request->get_json_params();
+    if (array_key_exists('hours', $body)) {
+        $h = round(floatval($body['hours']), 2);
+        if ($h <= 0 || $h > 24) return new WP_Error('invalid_hours', 'Horas no válidas', array('status' => 400));
+        $entries[$i]['hours'] = $h;
+    }
+    if (array_key_exists('rate', $body)) {
+        $r = $body['rate'];
+        if ($r === null || $r === '') {
+            unset($entries[$i]['rate_override']);
+            if ($entries[$i]['status'] === 'pagado') {
+                $entries[$i]['paid_rate'] = overtime_get_rates()[$entries[$i]['professor']] ?? null;
+            }
+        } else {
+            $r = round(floatval($r), 2);
+            if ($r < 0 || $r > 500) return new WP_Error('invalid_rate', '€/h no válido', array('status' => 400));
+            $entries[$i]['rate_override'] = $r;
+            if ($entries[$i]['status'] === 'pagado') $entries[$i]['paid_rate'] = $r;
+        }
+    }
+    $entries[$i]['updated_at'] = (new DateTime())->format('c');
+    overtime_save_entries($entries);
+    return rest_ensure_response(array('success' => true, 'entry' => overtime_present($entries[$i], overtime_get_rates())));
+}
+
+// Pagos apuntados en un mes que en realidad son de otro (23/11, Álvaro: «pagué en noviembre las
+// nóminas de octubre»). Mueve el pago de nómina (banco o a mano) y, si lo hay, el efectivo
+// entregado de cada persona elegida de 'from' a 'to'. No pisa nada: si en 'to' ya hay un pago
+// de esa persona, la salta y lo dice. { from, to, people: [id, ...] }
+function payroll_move_payments($request) {
+    $body = $request->get_json_params();
+    $from = sanitize_text_field($body['from'] ?? '');
+    $to   = sanitize_text_field($body['to'] ?? '');
+    if (!preg_match('/^\d{4}-\d{2}$/', $from) || !preg_match('/^\d{4}-\d{2}$/', $to) || $from === $to) {
+        return new WP_Error('invalid_month', 'Meses no válidos', array('status' => 400));
+    }
+    $ids  = array_map('sanitize_title', is_array($body['people'] ?? null) ? $body['people'] : array());
+    $pays = payroll_get_payments();
+    $cash = payroll_get_cash_payments();
+    $moved = array();
+    $skipped = array();
+    foreach ($ids as $id) {
+        $has_pay  = isset($pays[$from][$id]);
+        $has_cash = isset($cash[$from][$id]);
+        if (!$has_pay && !$has_cash) continue;
+        if (($has_pay && isset($pays[$to][$id])) || ($has_cash && isset($cash[$to][$id]))) {
+            $skipped[] = $id;
+            continue;
+        }
+        if ($has_pay) {
+            $pays[$to][$id] = $pays[$from][$id];
+            unset($pays[$from][$id]);
+            if (empty($pays[$from])) unset($pays[$from]);
+        }
+        if ($has_cash) {
+            $cash[$to][$id] = $cash[$from][$id];
+            unset($cash[$from][$id]);
+            if (empty($cash[$from])) unset($cash[$from]);
+        }
+        $moved[] = $id;
+    }
+    payroll_save_payments($pays);
+    update_option('blokes_payroll_cash_payments', $cash, false);
+    return rest_ensure_response(array('success' => true, 'moved' => $moved, 'skipped' => $skipped));
 }
 
 function payroll_set_absence($request) {

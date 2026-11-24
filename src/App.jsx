@@ -12,7 +12,6 @@ import MiClaseTab from './pages/MiClaseTab'
 import EntrenamientosPage from './pages/EntrenamientosPage'
 import SuperAdminPage from './pages/SuperAdminPage'
 import SupervisionPage from './pages/SupervisionPage'
-import PlaygroundPage from './pages/PlaygroundPage'
 import FichajePage from './pages/FichajePage'
 import TimeOffPage from './pages/TimeOffPage'
 import LeaguesPage from './pages/LeaguesPage'
@@ -21,7 +20,6 @@ import CompePage from './pages/CompePage'
 import CompeDirectoPage from './pages/CompeDirectoPage'
 import InstalarPage from './pages/InstalarPage'
 import DiarioPage from './pages/DiarioPage'
-import CherifsPage from './pages/CherifsPage'
 import { setVerComo, clearVerComo } from './utils/verComo'
 import { useCompletions } from './hooks/useCompletions'
 import { getTema, setTema } from './utils/theme'
@@ -55,7 +53,7 @@ const SUBSALA_POSITIONS = {
   '8': { top: '44.5%', right: '18%', transform: 'translateX(50%)' },
 }
 
-const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground', '/eventos', '/calendario', '/compe', '/instalar']
+const KNOWN_ROUTES = ['/progreso', '/tareas', '/setter', '/stats', '/entrenamientos', '/fichaje', '/time-off', '/superadmin', '/supervision', '/mis-blokes', '/ligas', '/playground', '/eventos', '/calendario', '/compe', '/instalar', '/cherifs', '/diario']
 
 function detectBasename() {
   const injected = window.blokesSiteData?.appBasename
@@ -288,7 +286,6 @@ export default function App() {
                       una sesión de prueba. En la cuenta tablet real (sin simular nada) se deja
                       como siempre. */}
                   {/* 22/11 (Álvaro): sin apodo ni «Log out» aquí */}
-                  <TemaToggle />
                   {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
                   {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
                       EFECTIVO para que vean exactamente el mismo botón): su único "ver como"
@@ -330,14 +327,17 @@ export default function App() {
                   {!(sd.userRole === 'tablet' && sd.userRoleReal !== 'tablet') && (
                     <button type="button" className="app-header__salir" onClick={() => setLogoutOpen(true)}>Salir</button>
                   )}
-                  {/* 22/11: botón corto «Mapa» (marcado cuando está a la vista) */}
-                  <button
-                    type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}
-                    onClick={() => setMapaAbierto(v => !v)}
-                    title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}
-                  >
-                    Mapa
-                  </button>
+                  {/* 22/11: botón corto «Mapa» (marcado cuando está a la vista); 23/11: ☀️/🌙 a su derecha */}
+                  <span className="app-header__mapa-tema">
+                    <button
+                      type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}
+                      onClick={() => setMapaAbierto(v => !v)}
+                      title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}
+                    >
+                      Mapa
+                    </button>
+                    <TemaToggle />
+                  </span>
                 </div>
               </>
             ) : (
@@ -352,11 +352,11 @@ export default function App() {
                       </svg>
                       Acceder
                     </a>
-                    <TemaToggle />
                     <button type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}
                       onClick={() => setMapaAbierto(v => !v)} title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}>
                       Mapa
                     </button>
+                    <TemaToggle />
                   </div>
                   <div className="app-header__links">
                     <div className="app-header__link-wrap">
@@ -370,6 +370,8 @@ export default function App() {
           </div>
 
           <div className="app-header__salas-wrap">
+            {/* 23/11: con el mapa oculto, en su sitio queda el isotipo (solo en ordenador) */}
+            {!mapaAbierto && <img src={isotipo} alt="" aria-hidden="true" className="app-header__salas-iso" />}
             {mapaAbierto && <img
               src="https://rocomadrid.com/wp-content/uploads/2026/03/salas-rocomadrid-estilo-retro.png"
               alt="Salas Rocoteca Madrid"
@@ -423,6 +425,14 @@ export default function App() {
                   </NavLink>
                 </li>
               )}
+              {/* 23/11 (Álvaro): Cherifs justo a la derecha de Diario */}
+              {sd.userRole === 'socio' && (
+                <li className="app-nav__item">
+                  <NavLink to="/cherifs" className="app-nav__link app-nav__link--cherifs">
+                    <span className="app-nav__estrella" aria-hidden="true">✶</span>Cherifs<span className="app-nav__estrella" aria-hidden="true">✶</span>
+                  </NavLink>
+                </li>
+              )}
               <li className="app-nav__item">
                 <NavLink to="/" className="app-nav__link" end>Los blokes</NavLink>
               </li>
@@ -450,7 +460,8 @@ export default function App() {
                   <NavLink to="/eventos" className="app-nav__link">Eventos</NavLink>
                 </li>
               )}
-              {/* Gestión (23/11, orden de Álvaro): Supervisión → Horarios Profes → Superadmin → Cherifs */}
+              {/* Gestión: Supervisión (Cherifs va junto a Diario). Superadmin y Horarios Profes
+                  son ahora pestañas de Cherifs. */}
               {['gestion', 'socio'].includes(sd.userRole) && (
                 <li className="app-nav__item">
                   <NavLink to="/supervision" className="app-nav__link app-nav__link--super">Supervisión</NavLink>
@@ -461,21 +472,6 @@ export default function App() {
               {sd.userRole === 'profesor' && (
                 <li className="app-nav__item">
                   <NavLink to="/supervision" className="app-nav__link app-nav__link--super">Grupos</NavLink>
-                </li>
-              )}
-              {sd.userRole === 'socio' && (
-                <li className="app-nav__item">
-                  <NavLink to="/playground" className="app-nav__link app-nav__link--super">Horarios Profes</NavLink>
-                </li>
-              )}
-              {sd.userRole === 'socio' && (
-                <li className="app-nav__item">
-                  <NavLink to="/superadmin" className="app-nav__link app-nav__link--super">Superadmin</NavLink>
-                </li>
-              )}
-              {sd.userRole === 'socio' && (
-                <li className="app-nav__item">
-                  <NavLink to="/cherifs" className="app-nav__link app-nav__link--super">Cherifs</NavLink>
                 </li>
               )}
             </ul>
@@ -501,9 +497,10 @@ export default function App() {
             <Route path="/entrenamientos" element={<EntrenamientosPage />} />
             <Route path="/fichaje" element={<FichajePage />} />
             <Route path="/time-off" element={<TimeOffPage />} />
-            <Route path="/superadmin" element={<SuperAdminPage />} />
+            {/* 23/11: Superadmin y Horarios Profes viven dentro de Cherifs; las direcciones antiguas llevan allí */}
+            <Route path="/superadmin" element={<RedirigeACherifs />} />
             <Route path="/supervision" element={<SupervisionPage />} />
-            <Route path="/playground" element={<PlaygroundPage />} />
+            <Route path="/playground" element={<Navigate to="/cherifs?tab=horarios" replace />} />
             <Route path="/ligas" element={<LeaguesPage />} />
             <Route path="/compe" element={<CompePage />} />
             <Route path="/compe/directo" element={<CompeDirectoPage />} />
@@ -512,7 +509,7 @@ export default function App() {
             {/* 22/11: el Calendario está dentro del Diario; la dirección antigua lleva allí */}
             <Route path="/calendario" element={<Navigate to="/diario" replace />} />
             <Route path="/diario" element={<DiarioPage />} />
-            <Route path="/cherifs" element={<CherifsPage />} />
+            <Route path="/cherifs" element={<SuperAdminPage />} />
             {/* Cowork, 09/11 07:45: una ruta inexistente (p. ej. /blokes/coleccion) dejaba el
                 contenido en blanco — sin catch-all, react-router no renderiza nada. */}
             <Route path="*" element={<PaginaNoExiste />} />
@@ -658,6 +655,12 @@ function ModoTabletToggleSimple({ sd }) {
       {pulsando ? 'Manteniendo…' : '🔒 Modo tablet — mantén pulsado para salir'}
     </button>
   )
+}
+
+// /superadmin?tab=… → /cherifs?tab=… (conserva la pestaña de los enlaces y marcadores antiguos)
+function RedirigeACherifs() {
+  const { search } = useLocation()
+  return <Navigate to={`/cherifs${search}`} replace />
 }
 
 function PaginaNoExiste() {

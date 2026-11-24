@@ -1,5 +1,5 @@
 // Mapa de Blokes: esquema de todo lo que hay en la app, para revisarlo desde
-// Superadmin y decidir qué se queda, qué se mejora y qué sobra. Las decisiones y
+// Cherifs y decidir qué se queda, qué se mejora y qué sobra. Las decisiones y
 // notas se guardan en el servidor (superadmin/v1/blokes-map) por id: si cambias
 // un id aquí, se pierde lo que se hubiera apuntado en él.
 //
@@ -102,7 +102,9 @@ export const BLOKES_MAP = [
     { id: 'sv-historico', title: 'Histórico', who: 'socios' },
   ]},
 
-  { id: 'superadmin', title: 'Superadmin', who: 'socios', children: [
+  // 23/11: Superadmin y Horarios Profes pasan a ser pestañas de Cherifs
+  { id: 'cherifs', title: 'Cherifs', who: 'socios', desc: 'Antes «Superadmin»: todo el negocio, bajo control.', children: [
+    { id: 'cherifs-dashboard', title: 'Dashboard', desc: 'Indicadores del negocio. En construcción.' },
     { id: 'sa-tesoreria', title: 'Tesorería', children: [
       { id: 'sa-ingresos', title: 'Ingresos', desc: 'Ventas de la tienda y del club, con o sin «Uso de Rocódromo»; desglose en gráfica por clasificación.' },
       { id: 'sa-clases', title: 'Clases', desc: 'Rentabilidad por clase (ingreso real y coste real del profe), retención por clase y por profe, alumnos por año, recomendación (promocionar, hablar con el profe, juntar o cerrar) y resumen de Bajo tarifa.' },
@@ -118,11 +120,8 @@ export const BLOKES_MAP = [
     { id: 'sa-acceso', title: 'Acceso', desc: 'Listas de socios, gestión, profes, tablets, Eventos y Calendario.' },
     { id: 'sa-vercomo', title: 'Ver como…', desc: 'Un socio puede ver la web como otro rol.' },
     { id: 'sa-mapa', title: 'Mapa de Blokes', desc: 'Este esquema.' },
+    { id: 'horarios-profes', title: 'Horarios Profes', desc: 'Playground de horarios: horario base, reasignar clases, añadir horas.' },
   ]},
-
-  { id: 'horarios-profes', title: 'Horarios Profes', who: 'socios', desc: 'Playground de horarios: horario base, reasignar clases, añadir horas.' },
-
-  { id: 'cherifs', title: 'Cherifs', who: 'socios', desc: 'Dashboard para controlar todo el negocio. En construcción.' },
 ]
 
 // A dónde lleva pulsar cada elemento del mapa (ruta de la app y, si hace falta,
@@ -148,11 +147,10 @@ export const MAP_LINKS = {
   'sv-g-bajo-tarifa': SV + 'bajo-tarifa', 'sv-g-excel': SV + 'excel', 'sv-g-nombres': SV + 'nombres',
   'sv-campanas': '/supervision?tab=campanas', 'sv-horasextra': '/supervision?tab=horasextra', 'sv-tele': '/supervision?tab=tele',
   'sv-timeoff': '/supervision?tab=timeoff', 'sv-historico': '/supervision?tab=historico',
-  superadmin: '/superadmin?tab=ingresos',
-  'sa-tesoreria': '/superadmin?tab=ingresos', 'sa-ingresos': '/superadmin?tab=ingresos', 'sa-clases': '/superadmin?tab=clases', 'sa-gastos': '/superadmin?tab=gastos',
-  'sa-presupuesto-anual': '/superadmin?tab=presupuesto-anual', 'sa-pl': '/superadmin?tab=pl', 'sa-nominas': '/superadmin?tab=nominas',
-  'sa-gestion': '/superadmin?tab=presupuestos', 'sa-presupuestos': '/superadmin?tab=presupuestos', 'sa-proyectos': '/superadmin?tab=proyectos',
-  'sa-acceso': '/superadmin?tab=acceso',
-  'horarios-profes': '/playground',
-  diario: '/diario', cherifs: '/cherifs',
+  'sa-tesoreria': '/cherifs?tab=ingresos', 'sa-ingresos': '/cherifs?tab=ingresos', 'sa-clases': '/cherifs?tab=clases', 'sa-gastos': '/cherifs?tab=gastos',
+  'sa-presupuesto-anual': '/cherifs?tab=presupuesto-anual', 'sa-pl': '/cherifs?tab=pl', 'sa-nominas': '/cherifs?tab=nominas',
+  'sa-gestion': '/cherifs?tab=presupuestos', 'sa-presupuestos': '/cherifs?tab=presupuestos', 'sa-proyectos': '/cherifs?tab=proyectos',
+  'sa-acceso': '/cherifs?tab=acceso',
+  'horarios-profes': '/cherifs?tab=horarios',
+  diario: '/diario', cherifs: '/cherifs?tab=dashboard', 'cherifs-dashboard': '/cherifs?tab=dashboard',
 }

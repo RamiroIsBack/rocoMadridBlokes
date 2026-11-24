@@ -40,7 +40,7 @@ const BASE = `${SITE}/${SLUG}`;
 // Rutas a comprobar tras el login. Añadir aquí cualquier ruta nueva protegida por rol.
 const ROUTES = [
     '/', '/entrenamientos', '/setter', '/stats',
-    '/supervision', '/superadmin', '/playground',
+    '/supervision', '/cherifs',
     '/ligas', '/progreso',
 ];
 

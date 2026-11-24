@@ -17,7 +17,7 @@ let pdfjsPromise = null
 
 // Carga pdf.js una sola vez. El worker se descarga con fetch+SRI y se usa como blob
 // (un Worker no puede cargarse directamente desde otro dominio).
-function loadPdfjs() {
+export function loadPdfjs() {
   if (pdfjsPromise) return pdfjsPromise
   pdfjsPromise = new Promise((resolve, reject) => {
     if (window.pdfjsLib) return resolve(window.pdfjsLib)

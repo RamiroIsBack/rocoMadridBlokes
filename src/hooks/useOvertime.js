@@ -35,7 +35,12 @@ export const PERSON_TYPES = [
   { id: 'profesor',   label: 'Profesor',   plural: 'Profesores' },
   { id: 'voluntario', label: 'Voluntario', plural: 'Voluntarios' },
   { id: 'externo',    label: 'Externo',    plural: 'Externos' },
+  // 23/11: socios con nómina. Solo los ven los socios (el servidor los quita para Gestión) y se
+  // dan de alta desde Cherifs › Nóminas › Configuración, no desde Supervisión.
+  { id: 'socio',      label: 'Socio',      plural: 'Socios' },
 ]
+// Tipos que se pueden elegir en Supervisión › Horas extra (sin Socio)
+export const PERSON_TYPES_SUPERVISION = PERSON_TYPES.filter(t => t.id !== 'socio')
 export const typeLabel = id => PERSON_TYPES.find(t => t.id === id)?.label || id
 export const hasBase   = type => type !== 'externo'
 export const sortByType = people => PERSON_TYPES.flatMap(t => people.filter(p => p.type === t.id))
@@ -95,3 +100,11 @@ export const addPayrollPartial = (month, fields) =>
   request('/payroll-partials', 'POST', { month, ...fields })
 export const deletePayrollPartial = (month, id) =>
   request(`/payroll-partials/${id}?month=${month}`, 'DELETE')
+
+// Pagos apuntados en un mes que son de otro (23/11): los mueve de 'from' a 'to'
+export const movePayrollPayments = (from, to, people) =>
+  request('/payroll-payment/move', 'POST', { from, to, people })
+
+// Desde Nóminas (socio): cambiar las horas de una línea y/o su €/h puntual (rate: '' = quitarlo)
+export const editPayrollOvertime = (id, body) =>
+  request(`/payroll-overtime/${id}`, 'PUT', body).then(json => json.entry)
