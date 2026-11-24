@@ -20938,7 +20938,22 @@ function progreso_equip_update_comp_block($request) {
     }
     if ($request->get_param('status') !== null) { $upd['status'] = sanitize_text_field($request->get_param('status')); $fmt[] = '%s'; }
     if (empty($upd)) return new WP_Error('invalid_data', 'Nada que actualizar.', array('status' => 400));
+    // 24/11 (Álvaro: "asigno presas y no se guarda, lo de ayer no está"): antes esto respondía
+    // "guardado" aunque el UPDATE no tocara ninguna fila de verdad (bloque ya borrado, o un id
+    // de una ficha abierta desde antes de un cambio de plan) — fallaba en silencio, sin avisar
+    // nunca en el móvil. Ahora comprueba que el bloque existe antes y que el UPDATE no dio un
+    // error real de SQL (0 filas por no haber cambiado nada SÍ es normal, eso no se bloquea).
+    $existe = $wpdb->get_var($wpdb->prepare(
+        "SELECT id FROM " . progreso_equip_table('comp_blocks') . " WHERE id = %d", $id
+    ));
+    if (!$existe) {
+        return new WP_Error('not_found', 'Este bloque ya no existe (puede que se haya regenerado el plan) — cierra la ficha y vuelve a abrirla desde el mapa.', array('status' => 404));
+    }
     $wpdb->update(progreso_equip_table('comp_blocks'), $upd, array('id' => $id), $fmt, array('%d'));
+    if ($wpdb->last_error) {
+        error_log('Blokes progreso_equip_update_comp_block: fallo al guardar el bloque ' . $id . ': ' . $wpdb->last_error);
+        return new WP_Error('db_error', 'No se ha podido guardar: ' . $wpdb->last_error, array('status' => 500));
+    }
     return rest_ensure_response(array('success' => true));
 }
 
