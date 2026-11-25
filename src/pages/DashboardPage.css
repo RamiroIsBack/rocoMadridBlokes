@@ -471,3 +471,37 @@
   .chf-tablero { grid-template-columns: 1fr; }
   .chf-tablon__frase { font-size: 2rem; }
 }
+
+/* ─── Cherifs › Dashboard v3 (25/11) ─── */
+.chf-tablon__edit {
+  position: absolute; top: 8px; right: 44px; z-index: 3; margin: 0;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 999px;
+  padding: 4px 12px; font-size: 0.8rem; font-weight: 700; color: var(--color-text-secondary); cursor: pointer; font-family: inherit;
+}
+.chf-tablon__edit:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+.chf-tablon__edit--on { background: var(--color-accent); border-color: var(--color-accent); color: #1d1d1b; }
+.chf-tablon__frase { cursor: pointer; }
+/* Canciones con portada */
+.chf-songs--grandes li { align-items: center; gap: 12px; }
+.chf-songs__cover { width: 56px; height: 56px; border-radius: 8px; overflow: hidden; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; background: var(--color-bg); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15); }
+.chf-songs__cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chf-songs__cover--vacia { color: var(--color-accent-text); font-size: 1.6rem; box-shadow: none; }
+.chf-songs__txt { display: flex; flex-direction: column; min-width: 0; }
+.chf-songs__txt .chf-songs__by { font-size: 0.78rem; }
+/* Dinero: explicación plegada */
+.chf-explica__btn { display: block; margin: 8px 0 4px; font-size: 0.85rem; }
+/* Tareas: una línea por tarea, detalle al pulsar, por fecha o por persona */
+.chf-tareas__bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.chf-tareas__bar .chf-fuente { margin: 0; }
+.chf-on { background: var(--color-accent); border-color: var(--color-accent); color: #1d1d1b; }
+.chf-tareas__grupo { display: block; margin: 10px 0 0; font-family: var(--font-heading); font-weight: 700; font-size: 0.95rem; color: var(--color-text-primary); }
+.chf-tareas__grupo i { font-style: normal; background: var(--color-bg); border-radius: 999px; padding: 0 7px; font-size: 0.75rem; margin-left: 4px; }
+.chf-tarea { flex-direction: column; padding: 0 !important; }
+.chf-tarea__main { display: flex; align-items: baseline; gap: 8px; width: 100%; background: none; border: none; padding: 6px 0; text-align: left; cursor: pointer; font-family: inherit; color: var(--color-text-primary); font-size: 0.9rem; }
+.chf-tarea__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chf-tarea--open .chf-tarea__t { white-space: normal; }
+.chf-tarea__quien { font-size: 0.75rem; color: var(--color-text-secondary); white-space: nowrap; }
+.chf-tarea__main b { white-space: nowrap; }
+.chf-lista--late .chf-tarea__main b { color: var(--state-bad); }
+.chf-tarea__det { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 0 0 8px; font-size: 0.8rem; color: var(--color-text-secondary); }
+.chf-tarea__det a { color: var(--color-accent-text); }
