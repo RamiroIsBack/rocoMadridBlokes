@@ -25996,8 +25996,10 @@ function cherifs_delete_item($request) {
 }
 
 function cherifs_save_ical($request) {
-    $url = trim((string) ($request->get_json_params()['url'] ?? ''));
-    if ($url !== '' && !preg_match('#^https://calendar\.google\.com/calendar/ical/.+\.ics$#i', $url)) {
+    // 25/11: se aceptan también la forma webcal:// y espacios o saltos de línea al pegar
+    $url = preg_replace('/\s+/', '', (string) ($request->get_json_params()['url'] ?? ''));
+    $url = preg_replace('#^webcals?://#i', 'https://', $url);
+    if ($url !== '' && !preg_match('#^https://calendar\.google\.com/calendar/ical/.+\.ics(\?.*)?$#i', $url)) {
         return new WP_Error('bad_ical', 'Tiene que ser la «Dirección secreta en formato iCal» de Google Calendar (acaba en .ics)', array('status' => 400));
     }
     $c = cherifs_get();
