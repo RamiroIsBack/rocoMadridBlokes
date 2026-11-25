@@ -3531,6 +3531,32 @@ function blokes_onhold_diagnostico_calcular() {
     // Activas por teléfono — para detectar "mismo teléfono, misma clase, otro cliente"
     // (hermanos en el mismo grupo) sin confundirlo con un duplicado de verdad.
     $por_tel = blokes_sync_grupos_subs_por_telefono();
+    // Cowork, 25/11 17:15 (M-J niños, cambio de clase): una vieja en espera y la nueva activa
+    // pueden no compartir NI cliente (la nueva queda a nombre de la madre) NI clase (es justo lo
+    // que cambió) — ni el cruce por cliente ni el de teléfono+misma clase de arriba las
+    // encuentra, y la vieja cae en pagaron*/sinPago como si fuera un impago de verdad. Empareja
+    // además por el nombre del alumno y por el tutor (_rm_tutor_nombre/_rm_tutor_telefono) de
+    // CUALQUIER activa, sin exigir ni mismo cliente ni misma clase — nunca cancela sola, solo
+    // evita que se trate como impago sin revisar primero.
+    $activas_por_alumno_nombre = array(); $activas_por_tutor_tel = array(); $activas_por_tutor_nombre = array();
+    foreach ($todas as $s) {
+        if (($s['status'] ?? '') !== 'active') continue;
+        $sid_act = intval($s['id'] ?? 0);
+        if (!$sid_act) continue;
+        $uid_act = blokes_alumno_customer_id_de_sub($s);
+        $n_act = blokes_externos_normaliza_nombre(blokes_alumno_nombre_de_sub($s, $uid_act));
+        if ($n_act !== '' && strpos($n_act, ' ') !== false) $activas_por_alumno_nombre[$n_act][] = $s;
+        $tn_act = get_post_meta($sid_act, '_rm_tutor_nombre', true);
+        $tt_act = get_post_meta($sid_act, '_rm_tutor_telefono', true);
+        if ($tn_act) {
+            $tn_act_norm = blokes_externos_normaliza_nombre($tn_act);
+            if ($tn_act_norm !== '' && strpos($tn_act_norm, ' ') !== false) $activas_por_tutor_nombre[$tn_act_norm][] = $s;
+        }
+        if ($tt_act) {
+            $tt_act_norm = blokes_externos_normaliza_telefono($tt_act);
+            if ($tt_act_norm) $activas_por_tutor_tel[$tt_act_norm][] = $s;
+        }
+    }
 
     // Precálculo de cada on-hold (una vez) + agrupación entre ELLAS MISMAS por cliente/teléfono
     // + clase — cowork, 14/11 17:55: las 3 Cendejas salían dos veces cada una en
@@ -3712,6 +3738,30 @@ function blokes_onhold_diagnostico_calcular() {
         if ($activa_otra_clase) {
             $info['activaId'] = intval($activa_otra_clase['id'] ?? 0);
             $info['motivo'] = 'El mismo cliente tiene otra activa, pero en otra clase — puede ir a dos clases, o ser el teléfono de un familiar. No es duplicado.';
+            $asignar('revisar', $info);
+            continue;
+        }
+
+        // Cowork, 25/11 17:15: ni mismo cliente ni mismo teléfono — último intento por alumno o
+        // tutor, de cualquier activa, sin exigir misma clase (ver nota más arriba).
+        $activa_por_alumno = null;
+        $n_alumno = blokes_externos_normaliza_nombre($nombre);
+        if ($n_alumno !== '' && strpos($n_alumno, ' ') !== false && !empty($activas_por_alumno_nombre[$n_alumno])) {
+            $activa_por_alumno = $activas_por_alumno_nombre[$n_alumno][0];
+        }
+        $tutor_nombre_this = $sub_id ? get_post_meta($sub_id, '_rm_tutor_nombre', true) : '';
+        $tutor_tel_this    = $sub_id ? get_post_meta($sub_id, '_rm_tutor_telefono', true) : '';
+        if (!$activa_por_alumno && $tutor_tel_this) {
+            $tt_norm = blokes_externos_normaliza_telefono($tutor_tel_this);
+            if ($tt_norm && !empty($activas_por_tutor_tel[$tt_norm])) $activa_por_alumno = $activas_por_tutor_tel[$tt_norm][0];
+        }
+        if (!$activa_por_alumno && $tutor_nombre_this) {
+            $tn_norm = blokes_externos_normaliza_nombre($tutor_nombre_this);
+            if ($tn_norm !== '' && strpos($tn_norm, ' ') !== false && !empty($activas_por_tutor_nombre[$tn_norm])) $activa_por_alumno = $activas_por_tutor_nombre[$tn_norm][0];
+        }
+        if ($activa_por_alumno) {
+            $info['activaId'] = intval($activa_por_alumno['id'] ?? 0);
+            $info['motivo'] = 'Mismo alumno o tutor que otra suscripción activa, aunque la cuenta y/o la clase sean distintas — probablemente un cambio de clase a nombre de otra cuenta. No cancelar sin mirarlo.';
             $asignar('revisar', $info);
             continue;
         }
@@ -13700,6 +13750,13 @@ function blokes_buscar_sub_mas_nueva($sub_id_viejo) {
     if (!$viejo) return null;
 
     $uid_viejo = blokes_alumno_customer_id_de_sub($viejo);
+    // 25/11 (cowork, M-J niños): un cambio de clase puede quedar a nombre de otra cuenta (la
+    // madre, en vez de la del alumno) — ni customer_id ni email coinciden entonces. Empareja
+    // también por el nombre del alumno y por el tutor (_rm_tutor_nombre/_rm_tutor_telefono),
+    // igual que blokes_onhold_diagnostico_calcular() para que "Revisar datos".
+    $nombre_viejo = blokes_externos_normaliza_nombre(blokes_alumno_nombre_de_sub($viejo, $uid_viejo));
+    $tutor_nombre_viejo = blokes_externos_normaliza_nombre(get_post_meta($sub_id_viejo, '_rm_tutor_nombre', true));
+    $tutor_tel_viejo = blokes_externos_normaliza_telefono(get_post_meta($sub_id_viejo, '_rm_tutor_telefono', true));
     $misma_clase = null; $otra_clase = null;
     foreach ($all as $s) {
         if (intval($s['id']) === $sub_id_viejo) continue;
@@ -13707,6 +13764,17 @@ function blokes_buscar_sub_mas_nueva($sub_id_viejo) {
         if (!$en_vigor) continue;
         $mismo_cliente = $uid_viejo && blokes_alumno_customer_id_de_sub($s) === $uid_viejo;
         if (!$mismo_cliente) $mismo_cliente = !empty($viejo['email']) && !empty($s['email']) && strcasecmp($s['email'], $viejo['email']) === 0;
+        if (!$mismo_cliente && $nombre_viejo !== '' && strpos($nombre_viejo, ' ') !== false) {
+            $uid_s = blokes_alumno_customer_id_de_sub($s);
+            if (blokes_externos_normaliza_nombre(blokes_alumno_nombre_de_sub($s, $uid_s)) === $nombre_viejo) $mismo_cliente = true;
+        }
+        if (!$mismo_cliente && ($tutor_nombre_viejo !== '' || $tutor_tel_viejo !== '')) {
+            $sid_s = intval($s['id'] ?? 0);
+            if ($tutor_nombre_viejo !== '' && strpos($tutor_nombre_viejo, ' ') !== false
+                && blokes_externos_normaliza_nombre(get_post_meta($sid_s, '_rm_tutor_nombre', true)) === $tutor_nombre_viejo) $mismo_cliente = true;
+            if (!$mismo_cliente && $tutor_tel_viejo !== ''
+                && blokes_externos_normaliza_telefono(get_post_meta($sid_s, '_rm_tutor_telefono', true)) === $tutor_tel_viejo) $mismo_cliente = true;
+        }
         if (!$mismo_cliente) continue;
         $misma_horario_edad_dia = ($s['horario'] ?? '') === ($viejo['horario'] ?? '')
             && ($s['edad'] ?? 'Adultos') === ($viejo['edad'] ?? 'Adultos')
