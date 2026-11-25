@@ -21546,14 +21546,29 @@ function progreso_equip_get_comp_block_historial($request) {
     global $wpdb;
     $id = intval($request['id']);
     $rows = $wpdb->get_results($wpdb->prepare(
-        "SELECT changed_by_nombre, changed_at, cambios FROM " . progreso_equip_table('comp_block_log') . "
+        "SELECT changed_by_nombre, changed_by_user_id, changed_at, cambios FROM " . progreso_equip_table('comp_block_log') . "
          WHERE comp_block_id = %d ORDER BY changed_at DESC, id DESC LIMIT 20", $id
     ), ARRAY_A);
-    $data = array_map(function($r) {
+    // 25/11 (cowork: "los cambios de Álvaro salen como Sara porque en ese ordenador estaba
+    // elegida Sara"): `changed_by_nombre` es el selector "¿quién eres?", no la sesión real.
+    // `changed_by_user_id` ya se guardaba pero no se devolvía — ahora se resuelve a un nombre
+    // y se manda aparte como `usuarioSesion`, para poder mostrar los dos cuando no coinciden.
+    $nombres_user_id = array();
+    $data = array_map(function($r) use (&$nombres_user_id) {
+        $uid = intval($r['changed_by_user_id']);
+        $usuario_sesion = null;
+        if ($uid) {
+            if (!array_key_exists($uid, $nombres_user_id)) {
+                $u = get_userdata($uid);
+                $nombres_user_id[$uid] = $u ? ($u->display_name ?: $u->user_login) : null;
+            }
+            $usuario_sesion = $nombres_user_id[$uid];
+        }
         return array(
-            'nombre'  => $r['changed_by_nombre'],
-            'fecha'   => $r['changed_at'],
-            'cambios' => json_decode($r['cambios'], true) ?: array(),
+            'nombre'        => $r['changed_by_nombre'],
+            'usuarioSesion' => $usuario_sesion,
+            'fecha'         => $r['changed_at'],
+            'cambios'       => json_decode($r['cambios'], true) ?: array(),
         );
     }, $rows);
     return rest_ensure_response(array('success' => true, 'data' => $data));

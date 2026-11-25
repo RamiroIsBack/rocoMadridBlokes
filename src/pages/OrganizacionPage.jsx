@@ -303,11 +303,14 @@ export default function OrganizacionPage() {
   // chooseWorker(null) deja en localStorage el texto "null" (no borra la clave), así que se
   // distingue de "nunca se ha tocado esto" (clave ausente) — si ya elegiste "— elige —" a
   // propósito, eso se respeta y no se vuelve a autorellenar en cada carga.
+  // 25/11 17:xx (cowork): en un dispositivo compartido esto se quedaba con el último elegido EN
+  // ESE ORDENADOR (Sara), así que los cambios de otra persona (Álvaro) se firmaban como Sara.
+  // Ahora, si la sesión real (login de WordPress) corresponde a un trabajador, se preselecciona
+  // siempre al cargar la página — por delante de lo recordado en localStorage, no solo la
+  // primera vez — en vez de depender de que cada uno se acuerde de cambiarlo a mano.
   useEffect(() => {
-    if (!config?.miWorkerId || workerId) return
-    let yaElegido = true
-    try { yaElegido = localStorage.getItem(WHOAMI_KEY) !== null } catch {}
-    if (!yaElegido) chooseWorker(config.miWorkerId)
+    if (!config?.miWorkerId) return
+    if (workerId !== config.miWorkerId) chooseWorker(config.miWorkerId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config?.miWorkerId])
   // Ramiro, 12/11 11:35: "ni Ana ni Edu ni Sara" pueden crear, editar, mover ni quitar tareas —
@@ -3591,6 +3594,7 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
 
       {editingBlockId != null && (
         <CompBlockFicha
+          key={editingBlockId}
           block={blocks.find(b => b.id === editingBlockId)}
           config={config} holdsets={holdsets} holdsetsError={holdsetsError} workers={workers || []} blocks={blocks}
           workerId={workerId}
@@ -3649,6 +3653,14 @@ function fmtFechaHora(mysqlDatetime) {
   const [datePart, timePart] = mysqlDatetime.split(' ')
   const [y, m, d] = (datePart || '').split('-')
   return `${d}/${m} ${(timePart || '').slice(0, 5)}`
+}
+// 25/11 (cowork: "los cambios de Álvaro salen como Sara"): `nombre` es quién estaba elegido en
+// el selector "¿quién eres?" de ESE dispositivo, no necesariamente quien hizo el cambio de
+// verdad — `usuarioSesion` (sesión real de WordPress) sí lo es. Se muestran los dos cuando no
+// coinciden, para poder ver el caso de un selector mal puesto.
+function etiquetaActor(h) {
+  const nombre = h.nombre || 'alguien'
+  return (h.usuarioSesion && h.usuarioSesion !== h.nombre) ? `${nombre} (sesión: ${h.usuarioSesion})` : nombre
 }
 function nombresPresasDeString(str, holdsets) {
   return (str ?? '').toString().split(',').map(s => s.trim()).filter(Boolean)
@@ -3921,7 +3933,7 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
       </div>
       {historial.length > 0 && (
         <p className="org__hint org__comp-block-ultimo-cambio">
-          Último cambio: {historial[0].nombre || 'alguien'}, {fmtFechaHora(historial[0].fecha)}
+          Último cambio: {etiquetaActor(historial[0])}, {fmtFechaHora(historial[0].fecha)}
           {' · '}
           <button type="button" className="org__link-btn" onClick={() => setVerHistorial(v => !v)}>
             {verHistorial ? 'ocultar historial' : 'ver historial'}
@@ -3932,7 +3944,7 @@ function CompBlockFicha({ block, config, holdsets, holdsetsError, workers, block
         <ul className="org__comp-block-historial">
           {historial.map((h, i) => (
             <li key={i}>
-              <strong>{h.nombre || 'alguien'}</strong>, {fmtFechaHora(h.fecha)}:{' '}
+              <strong>{etiquetaActor(h)}</strong>, {fmtFechaHora(h.fecha)}:{' '}
               {Object.entries(h.cambios || {}).map(([campo, { antes, despues }]) => (
                 <span key={campo} className="org__comp-block-historial-cambio">
                   {describeCambioFicha(campo, antes, despues, holdsets)}
