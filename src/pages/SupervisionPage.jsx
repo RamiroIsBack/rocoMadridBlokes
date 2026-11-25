@@ -3560,7 +3560,9 @@ function GruposTab() {
                       {a.otrasSubs?.length > 0
                         ? `Duplicado: también #${a.otrasSubs.map(s => s.subId).join(', #')}`
                         : a.otraActivaFuera
-                        ? `Se cambió de clase: activa #${a.otraActivaFuera.subId} en ${a.otraActivaFuera.dia} ${a.otraActivaFuera.horario}`
+                        ? (a.otraActivaFuera.dia === a.dia && a.otraActivaFuera.horario === a.horario && a.otraActivaFuera.edad === a.edad
+                          ? `Duplicado: también activa #${a.otraActivaFuera.subId} (misma clase)`
+                          : `Se cambió de clase: activa #${a.otraActivaFuera.subId} en ${a.otraActivaFuera.dia} ${a.otraActivaFuera.horario}`)
                         : [!a.telefono && 'teléfono', a.sinNombre && 'nombre'].filter(Boolean).join(' y ')}
                     </td>
                     <td><button className="sv-tests-remove" onClick={() => setMenuFor(a)} title="Acciones">⋯</button></td>

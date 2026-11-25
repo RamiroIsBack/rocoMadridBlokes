@@ -1278,6 +1278,23 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_nombre_omitir',
         'permission_callback' => $sa_perm,
     ));
+    // 25/11 (Ramiro, caso "pacocanillas" uid 1126 — no salía en Nombres por revisar): si alguien
+    // omitió este usuario antes por error (o un "omitir" en masa de hace tiempo), no había forma
+    // de deshacerlo sin tocar la base de datos a mano.
+    register_rest_route('superadmin/v1', '/gestion/nombres-por-revisar/(?P<uid>\d+)/deshacer-omitir', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_nombre_deshacer_omitir',
+        'permission_callback' => $sa_perm,
+    ));
+    // 25/11 (Eva/Ramiro): informe de solo lectura — nunca cambia ningún precio — de las
+    // suscripciones activas de Adolescentes en una franja de 1 hora (p. ej. 18:30-19:30) que
+    // están pagando la tarifa de 1h30 (55/65 €) en vez de la de 1h (47/57 €). Antes de meter el
+    // ajuste en Settings, Ramiro quiere ver a quién afectaría.
+    register_rest_route('superadmin/v1', '/gestion/informe-precio-adolescentes-1h', array(
+        'methods'             => 'GET',
+        'callback'            => 'superadmin_informe_precio_adolescentes_1h',
+        'permission_callback' => $socio_perm,
+    ));
     // 20/11 07:20: pestaña "Niños" — confirmar, asociar a una cuenta existente o crear la del
     // niño para una suscripción de Menores/Adolescentes. Nunca toca precio ni facturación.
     register_rest_route('superadmin/v1', '/gestion/ninos-asociar', array(
@@ -7523,9 +7540,17 @@ function superadmin_gestion_grupos($request) {
                 // Sin duplicado EN ESTE grupo, pero puede tener otra activa en OTRO (se cambió de
                 // clase y la vieja se quedó en espera, cowork 14/11 18:40 punto 4) — para la
                 // "Revisar datos" del frontend, que ya no tiene que adivinarlo ella sola.
+                // 25/11 (Ramiro, caso Sergio Esteban Ramos #6935/#6680): antes esto se saltaba a
+                // propósito cuando la otra activa era de la MISMA clase, asumiendo que esa
+                // combinación ya habría entrado por `otrasSubs` (mismo $gkey + mismo
+                // persona_key). Si el uid de esta suscripción vieja no resuelve igual que el de
+                // la activa (p. ej. no está enlazada a la misma cuenta), el persona_key no casa
+                // y ninguno de los dos caminos lo pillaba — se queda sin salir en "Revisar
+                // datos" aunque sea un duplicado real. Ahora solo se descarta la propia
+                // suscripción (self-match), nunca por ser "la misma clase".
                 $uid_principal = $uid_por_sub[$principal['subId']] ?? 0;
                 foreach (($uid_principal ? ($activas_por_uid[$uid_principal] ?? array()) : array()) as $otra_activa) {
-                    if ($otra_activa['dia'] === $g['dia'] && $otra_activa['horario'] === $g['horario'] && $otra_activa['edad'] === $g['edad']) continue;
+                    if ($otra_activa['subId'] === $principal['subId']) continue;
                     $principal['otraActivaFuera'] = $otra_activa;
                     break;
                 }
@@ -14133,6 +14158,60 @@ function superadmin_gestion_nombre_omitir($request) {
     update_user_meta($uid, '_rm_nombre_revisado', 1);
     blokes_gestion_log(0, 'nombre_omitido', null, array('uid' => $uid));
     return rest_ensure_response(array('success' => true));
+}
+// 25/11: deshace un "omitir" anterior (a propósito o por error) — vuelve a salir en "Nombres
+// por revisar" si de verdad le falta el nombre o el teléfono.
+function superadmin_gestion_nombre_deshacer_omitir($request) {
+    $uid = intval($request['uid']);
+    if (!$uid || !get_user_by('id', $uid)) return new WP_Error('not_found', 'Usuario no encontrado.', array('status' => 404));
+    delete_user_meta($uid, '_rm_nombre_revisado');
+    blokes_gestion_log(0, 'nombre_omitir_deshecho', null, array('uid' => $uid));
+    return rest_ensure_response(array('success' => true));
+}
+
+// 25/11 (Eva, precio de Adolescentes de 1h — NOTAS_PARA_CODE_pestanas_grupos.md): informe de
+// SOLO LECTURA, nunca toca ningún precio ni suscripción. `RocoMadrid_SF_Pricing::calculate_plan_prices`
+// (rocomadrid-step-form/includes/class-pricing.php) usa el mismo precio para cualquier horario
+// de Adolescentes (teenagers_1day/2days), sin mirar la duración — las de 1h30 (19:30-21:00)
+// cobran bien 55/65 €, pero las de 1h (p. ej. 18:30-19:30) deberían ser 47/57 € y están pagando
+// 55/65. Esto solo LISTA a quién afecta; el ajuste en Settings (y tocar precios de verdad) se
+// hace en otro commit, con el OK de Ramiro.
+function blokes_horario_duracion_horas($horario) {
+    if (!preg_match('/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/', trim((string) $horario), $m)) return null;
+    $ini = intval($m[1]) * 60 + intval($m[2]);
+    $fin = intval($m[3]) * 60 + intval($m[4]);
+    return ($fin > $ini) ? ($fin - $ini) / 60 : null;
+}
+function superadmin_informe_precio_adolescentes_1h($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $out = array();
+    foreach (blokes_get_all_subscription_data() as $sub) {
+        $status = $sub['status'] ?? '';
+        if (!in_array($status, array('active', 'on-hold'), true)) continue;
+        $edad = $sub['edad'] ?? '';
+        if (stripos($edad, 'Adolescentes') === false && stripos($edad, 'Teenagers') === false) continue;
+        $horario = $sub['horario'] ?? '';
+        if (blokes_horario_duracion_horas($horario) !== 1.0) continue; // solo la franja de 1h, nunca la de 1h30
+        $id = intval($sub['id'] ?? 0);
+        if (!$id) continue;
+        $sub_obj = wcs_get_subscription($id);
+        if (!$sub_obj) continue;
+        $total = floatval($sub_obj->get_total());
+        $out[] = array(
+            'subId'        => $id,
+            'alumno'       => trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()),
+            'dia'          => blokes_dia_a_pareja($sub['dia'] ?? ''),
+            'horario'      => $horario,
+            'status'       => $status,
+            'precioActual' => $total,
+            // Correcto de 1h: 47 € (1 día) / 57 € (2 días). Está cobrando la de 1h30: 55 € / 65 €.
+            'pagaDeMas'    => ($total >= 54.5), // 55 € o 65 € — con margen de redondeo
+        );
+    }
+    usort($out, function($a, $b) { return $b['pagaDeMas'] <=> $a['pagaDeMas']; });
+    return rest_ensure_response(array('success' => true, 'data' => $out));
 }
 
 // 20/11 07:20 (Ramiro, «Niños como alumnos en Blokes»): el que va a clase (el niño) y el que
