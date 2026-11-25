@@ -6819,8 +6819,14 @@ function blokes_horario_agrupable($horario) {
 // ─── Wellhub + «Bajo tarifa» en Grupos (Ramiro, 16/11 07:35) ──────────────────────────────
 define('BLOKES_TARIFA_MENORES_2D', 57.0);
 define('BLOKES_TARIFA_MENORES_1D', 47.0);
-define('BLOKES_TARIFA_ADOL_2D', 65.0);
-define('BLOKES_TARIFA_ADOL_1D', 55.0);
+// 25/11 (Eva, caso M-J 18:30-19:30): Adolescentes tiene DOS tarifas distintas según la
+// duración de la clase, no solo según 1/2 días — antes esto usaba siempre la de 1h30 (55/65),
+// así que una clase de 1h (p. ej. 18:30-19:30) salía "bajo tarifa" aunque pagara bien 47/57, y
+// la de 1h30 (19:30-21:00) parecía "bien pagada" con 55/65 sin comprobar de verdad su duración.
+define('BLOKES_TARIFA_ADOL_1H_2D',   57.0);
+define('BLOKES_TARIFA_ADOL_1H_1D',   47.0);
+define('BLOKES_TARIFA_ADOL_1H30_2D', 65.0);
+define('BLOKES_TARIFA_ADOL_1H30_1D', 55.0);
 define('BLOKES_TARIFA_YOGA', 30.0);
 define('BLOKES_WELLHUB_POR_CHECKIN', 4.88);
 
@@ -6925,7 +6931,13 @@ function blokes_tarifa_mensual_esperada($edad, $notas, $dia, $horario, $es_2dias
     if ($es_yoga) return BLOKES_TARIFA_YOGA;
     $cat = blokes_tarifa_categoria($edad, $notas);
     if ($cat === 'menor') return $es_2dias ? BLOKES_TARIFA_MENORES_2D : BLOKES_TARIFA_MENORES_1D;
-    if ($cat === 'adolescente') return $es_2dias ? BLOKES_TARIFA_ADOL_2D : BLOKES_TARIFA_ADOL_1D;
+    if ($cat === 'adolescente') {
+        // Duración desconocida (horario sin formato HH:MM-HH:MM): se mantiene la de 1h30, que
+        // era el comportamiento de siempre — nunca se adivina a la baja sin saber la duración.
+        $duracion_1h = blokes_horario_duracion_horas($horario) === 1.0;
+        if ($duracion_1h) return $es_2dias ? BLOKES_TARIFA_ADOL_1H_2D : BLOKES_TARIFA_ADOL_1H_1D;
+        return $es_2dias ? BLOKES_TARIFA_ADOL_1H30_2D : BLOKES_TARIFA_ADOL_1H30_1D;
+    }
     if (!$es_2dias) return blokes_tarifa_adultos_1dia($dia, $horario);
     $clave = blokes_dia_a_pareja($dia) . '|' . blokes_horario_agrupable($horario);
     return $precios_adultos_por_franja[$clave] ?? null;
@@ -14176,24 +14188,36 @@ function superadmin_gestion_nombre_deshacer_omitir($request) {
 // cobran bien 55/65 €, pero las de 1h (p. ej. 18:30-19:30) deberían ser 47/57 € y están pagando
 // 55/65. Esto solo LISTA a quién afecta; el ajuste en Settings (y tocar precios de verdad) se
 // hace en otro commit, con el OK de Ramiro.
+// Busca HH:MM-HH:MM en cualquier parte del texto (no exige que sea todo el string — un
+// horario con algo pegado delante/detrás no debe hacer perder la franja) y con guion normal,
+// guion largo (–) o raya (—), que a veces llegan pegados de un copy-paste.
 function blokes_horario_duracion_horas($horario) {
-    if (!preg_match('/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/', trim((string) $horario), $m)) return null;
+    if (!preg_match('/(\d{1,2}):(\d{2})\s*[–—-]\s*(\d{1,2}):(\d{2})/u', trim((string) $horario), $m)) return null;
     $ini = intval($m[1]) * 60 + intval($m[2]);
     $fin = intval($m[3]) * 60 + intval($m[4]);
     return ($fin > $ini) ? ($fin - $ini) / 60 : null;
 }
+// 25/11 (Eva: "devuelve [] y no debería" — M-J 18:30-19:30 tiene 6 alumnos a 65 €): sin acceso
+// a los datos de producción no se pudo reproducir aquí, así que además de hacer el filtro de
+// horario/status más tolerante, esta respuesta trae un diagnóstico (`diagnostico`) con cuántos
+// Adolescentes activos se encontraron ANTES de filtrar por duración y qué horarios tienen de
+// verdad — para ver de un vistazo si el problema es el filtro de edad, el de estado o el de
+// horario, en vez de tener que adivinarlo otra vez a ciegas.
 function superadmin_informe_precio_adolescentes_1h($request) {
     if (!function_exists('wcs_get_subscription')) {
         return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
     }
     $out = array();
+    $todos_adolescentes = array(); // diagnóstico: todos los activos/en espera de esta edad, filtrados o no
     foreach (blokes_get_all_subscription_data() as $sub) {
         $status = $sub['status'] ?? '';
-        if (!in_array($status, array('active', 'on-hold'), true)) continue;
+        if (!in_array($status, array('active', 'on-hold', 'pending', 'pending-cancel'), true)) continue;
         $edad = $sub['edad'] ?? '';
         if (stripos($edad, 'Adolescentes') === false && stripos($edad, 'Teenagers') === false) continue;
         $horario = $sub['horario'] ?? '';
-        if (blokes_horario_duracion_horas($horario) !== 1.0) continue; // solo la franja de 1h, nunca la de 1h30
+        $duracion = blokes_horario_duracion_horas($horario);
+        $todos_adolescentes[] = array('subId' => intval($sub['id'] ?? 0), 'dia' => blokes_dia_a_pareja($sub['dia'] ?? ''), 'horario' => $horario, 'edad' => $edad, 'status' => $status, 'duracionHoras' => $duracion);
+        if ($duracion !== 1.0) continue; // solo la franja de 1h, nunca la de 1h30
         $id = intval($sub['id'] ?? 0);
         if (!$id) continue;
         $sub_obj = wcs_get_subscription($id);
@@ -14211,7 +14235,10 @@ function superadmin_informe_precio_adolescentes_1h($request) {
         );
     }
     usort($out, function($a, $b) { return $b['pagaDeMas'] <=> $a['pagaDeMas']; });
-    return rest_ensure_response(array('success' => true, 'data' => $out));
+    return rest_ensure_response(array('success' => true, 'data' => $out, 'diagnostico' => array(
+        'totalAdolescentesEncontrados' => count($todos_adolescentes),
+        'detalle' => $todos_adolescentes,
+    )));
 }
 
 // 20/11 07:20 (Ramiro, «Niños como alumnos en Blokes»): el que va a clase (el niño) y el que
