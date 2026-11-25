@@ -1407,3 +1407,7 @@ details[open] .sa-collapsible__arrow {
 .sa-socios__item--off { opacity: 0.6; }
 .sa-socios__add { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .sa-socios__add .sa-pay-file__input { max-width: 220px; }
+
+/* Configuración de nóminas: «Cómo cobra» e importes calculados (25/11) */
+.sa-pay-mode { min-width: 104px; }
+.sa-pay-auto { display: block; font-size: 0.8rem; color: var(--color-text-secondary, #9a9a9a); white-space: nowrap; margin-top: 2px; }

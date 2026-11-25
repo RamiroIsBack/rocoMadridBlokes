@@ -50,7 +50,9 @@ export default function GestoriaReview({ month, people, personal, config, onConf
   })
   const conDif   = comparadas.filter(l => l.person && Math.abs(l.diff) > 0.01)
   const sinPers  = comparadas.filter(l => !l.person)
-  const faltan   = people.filter(p => p.active && hasBase(p.type) && (parseFloat(base[p.id]) || 0) > 0 && !comparadas.some(l => l.person === p.id))
+  // 25/11: solo se echa en falta a quien cobra por nómina (los «por horas» y «fijo» van por transferencia)
+  const enNomina = p => (config?.pay_mode?.[p.id] || (p.type === 'profesor' ? 'nomina' : 'otro')) === 'nomina'
+  const faltan   = people.filter(p => p.active && hasBase(p.type) && enNomina(p) && (parseFloat(base[p.id]) || 0) > 0 && !comparadas.some(l => l.person === p.id))
   const otroMes  = result && result.months.length && !result.months.includes(month)
 
   return (
