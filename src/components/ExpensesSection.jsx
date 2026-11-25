@@ -1026,49 +1026,9 @@ function HistoryView({ period, onDeleted }) {
         </BarChart>
       </ResponsiveContainer>
 
-      <p className="exp-chart-title" style={{ marginTop: 16 }}>IVA soportado vs repercutido (repercutido real, de las facturas de WooCommerce)</p>
-      <ResponsiveContainer width="100%" height={140}>
-        <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
-          <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
-          <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={52} />
-          <Tooltip
-            contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
-            labelStyle={{ color: '#f97316' }}
-            formatter={(v, name) => [fmtEur(v), name === 'iva_soportado' ? 'IVA soportado (gastos)' : 'IVA repercutido (ventas, real)']}
-          />
-          <Legend formatter={k => k === 'iva_soportado' ? 'IVA soportado' : 'IVA repercutido (real)'} />
-          <Bar dataKey="iva_repercutido" fill="#f97316" radius={[3,3,0,0]} />
-          <Bar dataKey="iva_soportado"   fill="#6366f1" radius={[3,3,0,0]} />
-        </BarChart>
-      </ResponsiveContainer>
-
-      {ivaTrimestral.length > 0 && (
-        <>
-          {/* Cowork, 15/11 18:00: los 4 trimestres de 2026 salían "a devolver" — no es creíble
-              con ~100.000 € de TPV al año. El repercutido real solo cuenta las facturas de
-              WooCommerce (desde mayo); falta taquilla/TPV/bar/tienda y los meses de antes de
-              mayo, así que el resultado por trimestre no es de fiar todavía. Se quita el
-              veredicto "a pagar/a devolver" (y el verde/rojo que lo acompañaba) hasta que esto
-              cuadre con el banco — se deja el desglose repercutido/soportado en el ⓘ para quien
-              quiera mirarlo, pero ya no como un resultado. */}
-          <p className="exp-hint" style={{ fontSize: '0.78rem', marginTop: 8 }}>
-            Estimación incompleta de IVA por trimestre: el repercutido solo cuenta facturas de WooCommerce (desde mayo-2026) — falta taquilla/TPV, bar, tienda y los meses de antes de mayo. No es un resultado real todavía.
-          </p>
-          <div className="exp-kpis" style={{ marginTop: 8 }}>
-            {ivaTrimestral.map(tr => (
-              <div key={tr.key} className="exp-kpi" style={{ '--c': 'var(--color-text-secondary)' }}>
-                <span className="exp-kpi__val">{fmtEur(Math.abs(tr.resultado))}</span>
-                <span className="exp-kpi__lbl" title={`Repercutido (solo WooCommerce) ${fmtEur(tr.repercutido)} − soportado ${fmtEur(tr.soportado)} (soportado por categoría, editable en «Gestionar») — estimación incompleta, no es el resultado real del trimestre.`}>
-                  {tr.year} T{tr.t}: estimación incompleta ⓘ
-                </span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
       {/* ─── Resultado neto mensual (DEFINITIVO, 24/11 13:30) ─── */}
+      {/* 25/11 (Ramiro): justo debajo de "Gastos e ingresos banco por mes" — no después del
+          IVA, que antes se quedaba en medio de las dos. */}
       {netData.length > 0 && (
         <>
           <p className="exp-chart-title" style={{ marginTop: 16 }}>Resultado neto mensual (ingresos − gastos)</p>
@@ -1110,6 +1070,48 @@ function HistoryView({ period, onDeleted }) {
               ⚠ La línea no coincide con el "Saldo Posterior" real del banco en: {descuadreTodos.map(r => `${r.month} (${fmtEurSigned(r.diferencia)})`).join(', ')}. Suele ser un CSV que falta o está repetido. (Mira todos los meses con saldo guardado, no solo los del periodo elegido arriba.)
             </p>
           )}
+        </>
+      )}
+
+      <p className="exp-chart-title" style={{ marginTop: 16 }}>IVA soportado vs repercutido (repercutido real, de las facturas de WooCommerce)</p>
+      <ResponsiveContainer width="100%" height={140}>
+        <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#2a2015" />
+          <XAxis dataKey="month" tick={{ fill: '#888', fontSize: 10 }} />
+          <YAxis tickFormatter={v => `${v}€`} tick={{ fill: '#888', fontSize: 10 }} width={52} />
+          <Tooltip
+            contentStyle={{ background: '#1b1710', border: '1px solid #3a3020', fontSize: 12 }}
+            labelStyle={{ color: '#f97316' }}
+            formatter={(v, name) => [fmtEur(v), name === 'iva_soportado' ? 'IVA soportado (gastos)' : 'IVA repercutido (ventas, real)']}
+          />
+          <Legend formatter={k => k === 'iva_soportado' ? 'IVA soportado' : 'IVA repercutido (real)'} />
+          <Bar dataKey="iva_repercutido" fill="#f97316" radius={[3,3,0,0]} />
+          <Bar dataKey="iva_soportado"   fill="#6366f1" radius={[3,3,0,0]} />
+        </BarChart>
+      </ResponsiveContainer>
+
+      {ivaTrimestral.length > 0 && (
+        <>
+          {/* Cowork, 15/11 18:00: los 4 trimestres de 2026 salían "a devolver" — no es creíble
+              con ~100.000 € de TPV al año. El repercutido real solo cuenta las facturas de
+              WooCommerce (desde mayo); falta taquilla/TPV/bar/tienda y los meses de antes de
+              mayo, así que el resultado por trimestre no es de fiar todavía. Se quita el
+              veredicto "a pagar/a devolver" (y el verde/rojo que lo acompañaba) hasta que esto
+              cuadre con el banco — se deja el desglose repercutido/soportado en el ⓘ para quien
+              quiera mirarlo, pero ya no como un resultado. */}
+          <p className="exp-hint" style={{ fontSize: '0.78rem', marginTop: 8 }}>
+            Estimación incompleta de IVA por trimestre: el repercutido solo cuenta facturas de WooCommerce (desde mayo-2026) — falta taquilla/TPV, bar, tienda y los meses de antes de mayo. No es un resultado real todavía.
+          </p>
+          <div className="exp-kpis" style={{ marginTop: 8 }}>
+            {ivaTrimestral.map(tr => (
+              <div key={tr.key} className="exp-kpi" style={{ '--c': 'var(--color-text-secondary)' }}>
+                <span className="exp-kpi__val">{fmtEur(Math.abs(tr.resultado))}</span>
+                <span className="exp-kpi__lbl" title={`Repercutido (solo WooCommerce) ${fmtEur(tr.repercutido)} − soportado ${fmtEur(tr.soportado)} (soportado por categoría, editable en «Gestionar») — estimación incompleta, no es el resultado real del trimestre.`}>
+                  {tr.year} T{tr.t}: estimación incompleta ⓘ
+                </span>
+              </div>
+            ))}
+          </div>
         </>
       )}
 
