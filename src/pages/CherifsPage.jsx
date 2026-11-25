@@ -39,12 +39,14 @@ function Card({ icon, title, link, linkLabel = 'Ver →', children, className = 
 }
 
 // ─── Mensajes y canciones de la semana ──────────────────────────────────────
+// 25/11: protagonistas la frase y las canciones; lo de rellenar, tras un botoncito «✎ Cambiar».
 function Tablon() {
   const { data, error, setData } = useCherifsBoard()
   const [msg, setMsg] = useState('')
   const [song, setSong] = useState({ title: '', url: '' })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [editar, setEditar] = useState(false)
   const semana = (() => {
     const d = new Date(); const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
     const day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day)
@@ -58,39 +60,46 @@ function Tablon() {
 
   return (
     <section className="dash-card chf-tablon">
+      <button type="button" className={`dash-gear chf-tablon__edit${editar ? ' dash-gear--on' : ''}`}
+        title={editar ? 'Terminar' : 'Cambiar la frase o las canciones'} onClick={() => setEditar(e => !e)}>{editar ? '✓' : '✎'}</button>
       <div className="chf-tablon__msg">
-        <span className="chf-tablon__lbl">Mensaje de la semana</span>
+        <span className="chf-tablon__lbl">Frase de la semana</span>
         {ultimo
           ? <>
               <p className="chf-tablon__frase">«{ultimo.text}»</p>
               <span className="chf-tablon__quien">— {ultimo.by || 'un socio'} · {fechaCorta(ultimo.at)}
-                <button type="button" className="dash-mini dash-mini--danger" onClick={() => window.confirm('¿Borrar este mensaje?') && run(() => deleteCherifsItem('message', ultimo.id))}>Borrar</button>
+                {editar && <button type="button" className="dash-mini dash-mini--danger" onClick={() => window.confirm('¿Borrar esta frase?') && run(() => deleteCherifsItem('message', ultimo.id))}>Borrar</button>}
               </span>
             </>
-          : <p className="chf-tablon__frase chf-tablon__frase--vacio">Deja aquí un mensaje para el equipo de socios 💪</p>}
-        <form className="chf-tablon__form" onSubmit={e => { e.preventDefault(); if (msg.trim()) run(async () => { const r = await addCherifsMessage(msg.trim()); setMsg(''); return r }) }}>
-          <input className="dash-input" maxLength={400} placeholder="Nuevo mensaje motivante…" value={msg} onChange={e => setMsg(e.target.value)} />
-          <button className="dash-btn dash-btn--primary" disabled={busy || !msg.trim()}>Publicar</button>
-        </form>
+          : <p className="chf-tablon__frase chf-tablon__frase--vacio">Todavía no hay frase esta semana. Pulsa ✎ para poner una 💪</p>}
+        {editar && (
+          <form className="chf-tablon__form" onSubmit={e => { e.preventDefault(); if (msg.trim()) run(async () => { const r = await addCherifsMessage(msg.trim()); setMsg(''); return r }) }}>
+            <input className="dash-input" maxLength={400} placeholder="Nueva frase motivante…" value={msg} onChange={e => setMsg(e.target.value)} autoFocus />
+            <button className="dash-btn dash-btn--primary" disabled={busy || !msg.trim()}>Publicar</button>
+          </form>
+        )}
       </div>
       <div className="chf-tablon__songs">
         <span className="chf-tablon__lbl">🎵 Canciones de la semana</span>
-        {deLaSemana.length === 0 && <p className="dash-empty">Todavía ninguna esta semana.</p>}
-        <ul className="chf-songs">
+        {deLaSemana.length === 0 && <p className="chf-tablon__vacio">Ninguna todavía. Pulsa ✎ para añadir.</p>}
+        <ul className="chf-songs chf-songs--grandes">
           {deLaSemana.map(s => (
             <li key={s.id}>
-              {s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a> : s.title}
-              <span className="chf-songs__by"> · {s.by}</span>
-              <button type="button" className="chf-x" title="Quitar" onClick={() => run(() => deleteCherifsItem('song', s.id))}>×</button>
+              <span className="chf-songs__icon" aria-hidden="true">♪</span>
+              {s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title || 'Escuchar'}</a> : <span className="chf-songs__t">{s.title}</span>}
+              <span className="chf-songs__by">{s.by}</span>
+              {editar && <button type="button" className="chf-x" title="Quitar" onClick={() => run(() => deleteCherifsItem('song', s.id))}>×</button>}
             </li>
           ))}
         </ul>
-        <form className="chf-tablon__form" onSubmit={e => { e.preventDefault(); if (song.title.trim() || song.url.trim()) run(async () => { const r = await addCherifsSong(song.title.trim(), song.url.trim()); setSong({ title: '', url: '' }); return r }) }}>
-          <input className="dash-input" maxLength={150} placeholder="Canción · artista" value={song.title} onChange={e => setSong(s => ({ ...s, title: e.target.value }))} />
-          <input className="dash-input" placeholder="Enlace de Spotify o YouTube (opcional)" value={song.url} onChange={e => setSong(s => ({ ...s, url: e.target.value }))} />
-          <button className="dash-btn dash-btn--primary" disabled={busy}>Añadir</button>
-        </form>
-        {anteriores.length > 0 && (
+        {editar && (
+          <form className="chf-tablon__form" onSubmit={e => { e.preventDefault(); if (song.title.trim() || song.url.trim()) run(async () => { const r = await addCherifsSong(song.title.trim(), song.url.trim()); setSong({ title: '', url: '' }); return r }) }}>
+            <input className="dash-input" maxLength={150} placeholder="Canción · artista" value={song.title} onChange={e => setSong(s => ({ ...s, title: e.target.value }))} />
+            <input className="dash-input" placeholder="Enlace de Spotify o YouTube (opcional)" value={song.url} onChange={e => setSong(s => ({ ...s, url: e.target.value }))} />
+            <button className="dash-btn dash-btn--primary" disabled={busy}>Añadir</button>
+          </form>
+        )}
+        {editar && anteriores.length > 0 && (
           <details className="chf-anteriores"><summary>Semanas anteriores</summary>
             <ul className="chf-songs">{anteriores.map(s => <li key={s.id}>{s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a> : s.title}<span className="chf-songs__by"> · {s.by}</span></li>)}</ul>
           </details>
@@ -102,6 +111,7 @@ function Tablon() {
 }
 
 // ─── Dinero: banco frente a lo que falta por pagar este mes ────────────────
+// 25/11: cada cifra lleva a su origen, y se explica de dónde sale «Falta por pagar».
 function Dinero() {
   const hoy = new Date()
   const year = hoy.getFullYear(), mIdx = hoy.getMonth()
@@ -109,21 +119,24 @@ function Dinero() {
   const { data: budget, loading: lb } = useBudget(year)
   const { cuadre, cuadreRocoteca, loading: le } = useExpenses(`${year}-01`, 'all')
   const { data: payroll } = usePayroll(month)
+  const [verPartidas, setVerPartidas] = useState(false)
 
   const pendiente = useMemo(() => {
     if (!budget) return null
-    const { cats } = buildComparison(budget.budget, budget.items || [], budget.months_loaded || [], year)
-    let total = 0
+    const { cats, loaded } = buildComparison(budget.budget, budget.items || [], budget.months_loaded || [], year)
+    let total = 0, previsto = 0, pagado = 0
     const partidas = []
     Object.entries(cats).forEach(([cat, c]) => {
       const t = c.target[mIdx], r = c.real[mIdx]
       if (t < -0.005) {
         const falta = Math.max(0, -(t - r))
-        if (falta > 0.5) { total += falta; partidas.push([cat, falta]) }
+        previsto += -t
+        pagado += Math.max(0, -r)
+        if (falta > 0.5) { total += falta; partidas.push({ cat, previsto: -t, pagado: Math.max(0, -r), falta }) }
       }
     })
-    partidas.sort((a, b) => b[1] - a[1])
-    return { total, partidas: partidas.slice(0, 4) }
+    partidas.sort((a, b) => b.falta - a.falta)
+    return { total, previsto, pagado, partidas, extractoDelMes: loaded.has(mIdx), hayPresupuesto: !!budget.budget }
   }, [budget, year, mIdx])
 
   const saldos = [cuadre?.saldoHoy, cuadreRocoteca?.saldoHoy].filter(v => v != null)
@@ -131,14 +144,24 @@ function Dinero() {
   const fechaSaldo = cuadre?.fechaHoy || cuadreRocoteca?.fechaHoy
   const nominas = payroll?.totals?.outstanding ?? null
   const noLlega = saldo != null && pendiente && saldo < pendiente.total
+  const MES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'][mIdx]
 
   return (
-    <Card icon="💶" title="Dinero este mes" link="/cherifs?tab=presupuesto-anual" linkLabel="Presupuesto →">
+    <Card icon="💶" title="Dinero este mes">
       {(lb || le) && !pendiente && <p className="dash-empty">Cargando…</p>}
       <div className="chf-dinero">
-        <div><span>En el banco</span><strong>{saldo != null ? fmtEur(saldo) : '—'}</strong>{fechaSaldo && <em>a {fechaCorta(fechaSaldo)}{saldos.length < 2 ? ' (falta una cuenta)' : ''}</em>}</div>
-        <div><span>Falta por pagar (presupuesto)</span><strong>{pendiente ? fmtEur(pendiente.total) : '—'}</strong></div>
-        <div><span>Nóminas pendientes</span><strong>{nominas != null ? fmtEur(nominas) : '—'}</strong></div>
+        <Link to="/cherifs?tab=gastos" title="Sale de Gastos banco (último extracto cargado)">
+          <span>En el banco ↗</span><strong>{saldo != null ? fmtEur(saldo) : '—'}</strong>
+          {fechaSaldo && <em>a {fechaCorta(fechaSaldo)}{saldos.length < 2 ? ' · falta una cuenta' : ''}</em>}
+        </Link>
+        <Link to="/cherifs?tab=presupuesto-anual" title="Sale del Presupuesto anual menos lo ya pagado en el banco">
+          <span>Falta por pagar ↗</span><strong>{pendiente ? fmtEur(pendiente.total) : '—'}</strong>
+          <em>según el presupuesto</em>
+        </Link>
+        <Link to="/cherifs?tab=nominas" title="Sale de Nóminas">
+          <span>Nóminas pendientes ↗</span><strong>{nominas != null ? fmtEur(nominas) : '—'}</strong>
+          <em>de Nóminas</em>
+        </Link>
       </div>
       {pendiente && saldo != null && (
         <p className={`chf-aviso${noLlega ? ' chf-aviso--mal' : ''}`}>
@@ -147,12 +170,32 @@ function Dinero() {
             : `✓ El banco cubre lo que queda por pagar este mes (sobran ${fmtEur(saldo - pendiente.total)}).`}
         </p>
       )}
-      {pendiente?.partidas.length > 0 && (
-        <ul className="chf-lista">
-          {pendiente.partidas.map(([cat, v]) => <li key={cat}><span>{cat.replace(/_/g, ' ')}</span><b>{fmtEur(v)}</b></li>)}
-        </ul>
+      {pendiente && (
+        <div className="chf-explica">
+          <p>
+            <b>¿De dónde sale «Falta por pagar»?</b> Del <Link to="/cherifs?tab=presupuesto-anual">Presupuesto anual</Link>: lo previsto para {MES}
+            ({fmtEur(pendiente.previsto)}, con lo que se arrastra de meses anteriores) menos lo que ya ha salido del banco en {MES}
+            ({fmtEur(pendiente.pagado)}).
+          </p>
+          {!pendiente.hayPresupuesto && <p className="chf-aviso chf-aviso--mal">⚠ No hay presupuesto cargado para {year}.</p>}
+          {pendiente.hayPresupuesto && !pendiente.extractoDelMes && (
+            <p className="chf-aviso chf-aviso--mal">⚠ Todavía no hay extracto del banco de {MES} en Gastos banco, así que todo lo previsto cuenta como pendiente. Carga el extracto para que sea real.</p>
+          )}
+          {pendiente.partidas.length > 0 && (
+            <button type="button" className="dash-link" onClick={() => setVerPartidas(v => !v)}>{verPartidas ? 'Ocultar partidas' : `Ver las ${pendiente.partidas.length} partidas pendientes`}</button>
+          )}
+          {verPartidas && (
+            <ul className="chf-lista">
+              {pendiente.partidas.map(p => (
+                <li key={p.cat}>
+                  <span>{p.cat.replace(/_/g, ' ')}<em> · previsto {fmtEur(p.previsto)} · pagado {fmtEur(p.pagado)}</em></span>
+                  <b>{fmtEur(p.falta)}</b>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       )}
-      <p className="chf-nota">Lo pendiente sale del Presupuesto anual menos lo ya pagado en el banco; el saldo, de Gastos banco.</p>
     </Card>
   )
 }
@@ -200,34 +243,44 @@ function Indicadores() {
 }
 
 // ─── Tareas: Diario + tareas de Notion que no son del calendario ───────────
+// 25/11: se dice de dónde sale cada cosa y cada una lleva a su sitio.
 function Tareas({ items }) {
   const hoy = isoHoy()
   const { data: cal } = useCalendar(sumarDias(hoy, -30), sumarDias(hoy, 30), true)
   const abiertas = items.filter(isOpen)
   const notion = (cal?.items || [])
-    .filter(it => !CALENDAR_CATEGORIES.includes(it.category?.name) && !['Listo', 'Archivo'].includes(it.status?.name))
+    .filter(it => it.source !== 'blokes' && !CALENDAR_CATEGORIES.includes(it.category?.name) && !['Listo', 'Archivo'].includes(it.status?.name))
     .sort((a, b) => (a.start || '').localeCompare(b.start || ''))
   const atrasadas = notion.filter(it => (it.start || '').slice(0, 10) < hoy)
   const porKind = k => abiertas.filter(it => k.includes(it.kind)).length
 
   return (
-    <Card icon="✅" title="Tareas" link="/diario?vista=tareas" linkLabel="Diario →">
+    <Card icon="✅" title="Tareas">
+      <span className="chf-fuente">Del Diario (abiertas)</span>
       <div className="chf-mini-tiles">
-        <span><b>{porKind(['peticion', 'sugerencia'])}</b> peticiones</span>
-        <span><b>{porKind(['compra'])}</b> compras</span>
-        <span><b>{porKind(['recordatorio'])}</b> recordatorios</span>
-        <span><b>{notion.length}</b> en Notion{atrasadas.length ? ` (${atrasadas.length} atrasadas)` : ''}</span>
+        <Link to="/diario?vista=tareas"><b>{porKind(['peticion', 'sugerencia'])}</b> peticiones y sugerencias</Link>
+        <Link to="/diario?vista=tareas"><b>{porKind(['compra'])}</b> compras</Link>
+        <Link to="/diario?vista=tareas"><b>{porKind(['recordatorio'])}</b> recordatorios</Link>
       </div>
+      <span className="chf-fuente">
+        De Notion · «Funciones Rocomadrid» ({notion.length}{atrasadas.length ? `, ${atrasadas.length} atrasadas` : ''})
+      </span>
       <ul className="chf-lista">
-        {notion.slice(0, 7).map(it => (
+        {notion.slice(0, 8).map(it => (
           <li key={it.id} className={(it.start || '').slice(0, 10) < hoy ? 'chf-lista--late' : ''}>
-            <span>{it.title}<em> · {it.category?.name || 'Sin categoría'}{it.owners?.length ? ` · ${it.owners.join(', ')}` : ''}</em></span>
+            <span>
+              {it.url ? <a href={it.url} target="_blank" rel="noreferrer">{it.title}</a> : it.title}
+              <em> · {it.category?.name || 'Sin categoría'}{it.status?.name ? ` · ${it.status.name}` : ''}{it.owners?.length ? ` · ${it.owners.join(', ')}` : ''}</em>
+            </span>
             <b>{it.start ? fechaCorta(it.start) : ''}</b>
           </li>
         ))}
       </ul>
       {notion.length === 0 && <p className="dash-empty">Nada pendiente en Notion para estas semanas.</p>}
-      <p className="chf-nota">Las de Notion son las que no van al calendario (mantenimiento, mejoras, reuniones…), de hace 30 días a dentro de 30.</p>
+      <p className="chf-nota">
+        Las de Notion son las tareas de la base «Funciones Rocomadrid» que no van al calendario (mantenimiento, mejoras,
+        reuniones…), sin terminar («Listo» o «Archivo» no salen) y con fecha entre hace 30 días y dentro de 30. Pulsa una para abrirla en Notion.
+      </p>
     </Card>
   )
 }
@@ -308,23 +361,72 @@ function CalendarioGoogle() {
   )
 }
 
+// ─── Página: cajas que se pueden ordenar arrastrándolas (25/11) ─────────────
+// El orden se guarda en este navegador. Las cajas «anchas» ocupan toda la fila.
+const ORDEN_KEY = 'blokes-cherifs-orden'
+const CAJAS = ['tablon', 'indicadores', 'dinero', 'calendario', 'tareas', 'profes']
+const ANCHAS = new Set(['tablon', 'indicadores'])
+
+function leerOrden() {
+  try {
+    const o = JSON.parse(localStorage.getItem(ORDEN_KEY) || '[]')
+    if (Array.isArray(o)) return [...o.filter(c => CAJAS.includes(c)), ...CAJAS.filter(c => !o.includes(c))]
+  } catch { /* sin almacenamiento */ }
+  return CAJAS
+}
+
 export default function CherifsDashboard() {
   const { data: diario } = useDiarioItems(true)
   const items = diario?.items ?? []
   const fecha = new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
+  const [orden, setOrden] = useState(leerOrden)
+  const [arrastrando, setArrastrando] = useState(null)
+  const [sobre, setSobre] = useState(null)
+
+  const guardar = o => { setOrden(o); try { localStorage.setItem(ORDEN_KEY, JSON.stringify(o)) } catch { /* sin almacenamiento */ } }
+  const soltar = destino => {
+    if (!arrastrando || arrastrando === destino) return
+    const o = orden.filter(c => c !== arrastrando)
+    o.splice(o.indexOf(destino), 0, arrastrando)
+    guardar(o)
+  }
+  const contenido = {
+    tablon: <Tablon />,
+    indicadores: <Indicadores />,
+    dinero: <Dinero />,
+    calendario: <CalendarioGoogle />,
+    tareas: <Tareas items={items} />,
+    profes: <PidenProfes items={items} />,
+  }
+
   return (
     <div className="dash chf">
-      <header className="dash__head">
-        <p className="dash__date">{fecha}</p>
-        <p className="dash__claim">Todo el negocio, bajo control</p>
+      <header className="dash__head chf-head">
+        <div>
+          <p className="dash__date">{fecha}</p>
+          <p className="dash__claim">Todo el negocio, bajo control</p>
+        </div>
+        <span className="chf-head__hint">Arrastra las cajas por <b>⠿</b> para ordenarlas
+          {orden.join() !== CAJAS.join() && <button type="button" className="dash-link" onClick={() => guardar(CAJAS)}> · volver al orden inicial</button>}
+        </span>
       </header>
-      <Tablon />
-      <Indicadores />
-      <div className="chf-grid">
-        <Dinero />
-        <CalendarioGoogle />
-        <Tareas items={items} />
-        <PidenProfes items={items} />
+      <div className="chf-tablero">
+        {orden.map(id => (
+          <div
+            key={id}
+            className={`chf-caja${ANCHAS.has(id) ? ' chf-caja--ancha' : ''}${arrastrando === id ? ' chf-caja--moviendo' : ''}${sobre === id && arrastrando && arrastrando !== id ? ' chf-caja--destino' : ''}`}
+            onDragOver={e => { if (arrastrando) { e.preventDefault(); setSobre(id) } }}
+            onDragLeave={() => setSobre(s => (s === id ? null : s))}
+            onDrop={e => { e.preventDefault(); soltar(id); setArrastrando(null); setSobre(null) }}
+          >
+            <span
+              className="chf-asa" draggable title="Arrastra para mover esta caja"
+              onDragStart={e => { setArrastrando(id); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', id) } catch { /* algunos navegadores */ } }}
+              onDragEnd={() => { setArrastrando(null); setSobre(null) }}
+            >⠿</span>
+            {contenido[id]}
+          </div>
+        ))}
       </div>
     </div>
   )
