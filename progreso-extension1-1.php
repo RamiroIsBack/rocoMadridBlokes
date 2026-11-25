@@ -7280,6 +7280,11 @@ function superadmin_gestion_grupos($request) {
     // activa EN OTRA CLASE (no solo en la misma, que ya lo resuelve la fusión de más abajo) —
     // mismo cliente, cualquier clase, usado al construir "Revisar datos" en el frontend.
     $uid_por_sub = array(); $activas_por_uid = array();
+    // 25/11 20:45 (cowork, Luisa/Matilde Sabido #6678/#6676): "Cancelar la vieja" en Grupos
+    // (otraActivaFuera, más abajo) emparejaba solo por $uid (mismo cliente) — igual que
+    // blokes_onhold_diagnostico_calcular() antes de arreglarlo (commit 7b75d8f), se queda ciego
+    // cuando la nueva activa queda a nombre de otra cuenta (la madre/tutor). Mismo criterio aquí.
+    $activas_por_alumno_nombre_grp = array(); $activas_por_tutor_tel_grp = array(); $activas_por_tutor_nombre_grp = array();
     // Para fusionar un "externo" (8.4) con su cuenta web cuando son la misma persona (cowork,
     // 15/11 11:45/12:30: "Francisco Márquez · Fuera de la web" y "franciscomarquez · Activo"
     // salen en dos filas con el mismo pago" → fusionar) — por grupo (mismo día/horario/edad),
@@ -7491,6 +7496,23 @@ function superadmin_gestion_grupos($request) {
             }
         }
         $alumno_nombre = $nombre_fact !== '' ? $nombre_fact : ($sub['cliente'] ?? '');
+
+        // Ver nota junto a $activas_por_alumno_nombre_grp más arriba.
+        if ($en_vigor) {
+            $fila_idx = array('subId' => intval($sub['id']), 'dia' => $pareja, 'horario' => $horario_agrupa, 'edad' => $edad);
+            $n_act_grp = blokes_externos_normaliza_nombre($alumno_nombre);
+            if ($n_act_grp !== '' && strpos($n_act_grp, ' ') !== false) $activas_por_alumno_nombre_grp[$n_act_grp][] = $fila_idx;
+            $tn_act_grp = get_post_meta($sub_obj->get_id(), '_rm_tutor_nombre', true);
+            $tt_act_grp = get_post_meta($sub_obj->get_id(), '_rm_tutor_telefono', true);
+            if ($tn_act_grp) {
+                $tn_act_grp_norm = blokes_externos_normaliza_nombre($tn_act_grp);
+                if ($tn_act_grp_norm !== '' && strpos($tn_act_grp_norm, ' ') !== false) $activas_por_tutor_nombre_grp[$tn_act_grp_norm][] = $fila_idx;
+            }
+            if ($tt_act_grp) {
+                $tt_act_grp_norm = blokes_externos_normaliza_telefono($tt_act_grp);
+                if ($tt_act_grp_norm) $activas_por_tutor_tel_grp[$tt_act_grp_norm][] = $fila_idx;
+            }
+        }
 
         // Wellhub + «Bajo tarifa» (16/11 07:35, corregido 16/11 09:30) — ver las funciones
         // blokes_tarifa_*() de arriba.
@@ -7781,6 +7803,27 @@ function superadmin_gestion_grupos($request) {
                     if ($otra_activa['subId'] === $principal['subId']) continue;
                     $principal['otraActivaFuera'] = $otra_activa;
                     break;
+                }
+                // 25/11 20:45 (cowork, Luisa/Matilde Sabido): ni siquiera el uid encuentra la
+                // nueva cuando queda a nombre de otra cuenta (la madre/tutor) — último intento
+                // por alumno o tutor, ver nota junto a $activas_por_alumno_nombre_grp arriba.
+                if (empty($principal['otraActivaFuera'])) {
+                    $candidata = null;
+                    $n_principal = blokes_externos_normaliza_nombre($principal['alumno'] ?? '');
+                    if ($n_principal !== '' && strpos($n_principal, ' ') !== false && !empty($activas_por_alumno_nombre_grp[$n_principal])) {
+                        $candidata = $activas_por_alumno_nombre_grp[$n_principal][0];
+                    }
+                    $tutor_tel_principal = $principal['tutorTelefono'] ?? '';
+                    $tutor_nombre_principal = $principal['tutorNombre'] ?? '';
+                    if (!$candidata && $tutor_tel_principal) {
+                        $tt_norm = blokes_externos_normaliza_telefono($tutor_tel_principal);
+                        if ($tt_norm && !empty($activas_por_tutor_tel_grp[$tt_norm])) $candidata = $activas_por_tutor_tel_grp[$tt_norm][0];
+                    }
+                    if (!$candidata && $tutor_nombre_principal) {
+                        $tn_norm = blokes_externos_normaliza_nombre($tutor_nombre_principal);
+                        if ($tn_norm !== '' && strpos($tn_norm, ' ') !== false && !empty($activas_por_tutor_nombre_grp[$tn_norm])) $candidata = $activas_por_tutor_nombre_grp[$tn_norm][0];
+                    }
+                    if ($candidata && $candidata['subId'] !== $principal['subId']) $principal['otraActivaFuera'] = $candidata;
                 }
             }
             $alumnos[] = $principal;
