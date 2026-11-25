@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 330 740" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Mano haciendo los cuernos (🤘) en línea continua, a juego con los dibujos de la web -->
+  <!-- Índice levantado -->
+  <path d="M104 318 L 98 96 C 97 70, 134 66, 136 94 L 142 300"/>
+  <!-- Meñique levantado -->
+  <path d="M224 318 L 236 150 C 238 124, 272 126, 270 152 L 258 330"/>
+  <!-- Corazón y anular doblados sobre la palma -->
+  <path d="M142 300 C 144 262, 184 262, 184 298"/>
+  <path d="M184 298 C 186 266, 224 270, 224 318"/>
+  <path d="M150 304 C 160 318, 176 318, 182 306"/>
+  <path d="M190 306 C 200 320, 214 320, 220 310"/>
+  <!-- Pulgar cruzado por delante -->
+  <path d="M100 360 C 90 336, 110 320, 132 330 C 160 342, 190 346, 212 342 C 230 340, 236 364, 216 370 C 186 378, 150 376, 124 372"/>
+  <!-- Palma y dorso -->
+  <path d="M98 318 C 86 360, 86 410, 100 450 C 112 486, 140 500, 176 500 C 214 500, 244 482, 254 444 C 262 410, 262 370, 258 330"/>
+  <!-- Muñeca y antebrazo -->
+  <path d="M120 494 L 112 600"/>
+  <path d="M232 488 L 240 590"/>
+  <path d="M112 600 C 130 612, 220 606, 240 590"/>
+  <!-- La línea que sigue hacia abajo -->
+  <path d="M176 604 C 160 640, 90 640, 80 680 C 72 712, 140 720, 200 712 C 250 706, 290 716, 300 738"/>
+</svg>
