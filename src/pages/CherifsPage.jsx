@@ -7,7 +7,7 @@ import { useExpenses, usePendientesCobro } from '../hooks/useSuperAdmin'
 import { usePayroll } from '../hooks/useOvertime'
 import { useBookings, depositDue } from '../hooks/useEvents'
 import {
-  useCherifsBoard, useCherifsCalendar, addCherifsMessage, addCherifsSong, deleteCherifsItem, saveCherifsIcal,
+  useCherifsBoard, useCherifsCalendar, addCherifsMessage, addCherifsSong, deleteCherifsItem, saveCherifsIcal, deleteCherifsIcal,
 } from '../hooks/useCherifs'
 import { buildComparison } from '../utils/budget'
 import { clasesComoCronograma } from '../components/DiarioHorarios'
@@ -410,10 +410,18 @@ function CalendarioGoogle() {
   const [url, setUrl] = useState('')
   const [editar, setEditar] = useState(false)
   const [msg, setMsg] = useState('')
+  const [nombre, setNombre] = useState('')
+  // 25/11: varios calendarios; cada uno con su nombre, que sale junto a sus eventos
   const guardar = async e => {
     e.preventDefault(); setMsg('')
-    try { await saveCherifsIcal(url.trim()); setUrl(''); setEditar(false); reload() } catch (err) { setMsg(err.message) }
+    try { await saveCherifsIcal(url.trim(), nombre.trim()); setUrl(''); setNombre(''); setEditar(false); reload() } catch (err) { setMsg(err.message) }
   }
+  const quitar = async cal => {
+    if (!window.confirm(`¿Quitar «${cal.name}» de Blokes? (En Google no se borra nada.)`)) return
+    try { await deleteCherifsIcal(cal.id); reload() } catch (err) { setMsg(err.message) }
+  }
+  const calendarios = data?.calendars || []
+  const varios = calendarios.length > 1
   // 25/11: «Pegar» lee lo copiado; arrastrar la dirección al recuadro también vale
   // 25/11 (2): Google a veces copia la dirección solo como HTML o con texto alrededor,
   // así que se busca la dirección .ics dentro de todo lo copiado (texto y HTML)
@@ -460,9 +468,19 @@ function CalendarioGoogle() {
         <form className="chf-ical" onSubmit={guardar}>
           <p className="chf-nota">
             En Google Calendar: ⚙ Configuración → tu calendario → «Integrar el calendario» → copia la <b>Dirección secreta en formato iCal</b> y pégala aquí.
-            Solo sirve para leer los eventos; se guarda en el servidor y no se enseña a nadie.
+            Un calendario cada vez (el de «Cumpleaños» no tiene esa dirección). Solo sirve para leer los eventos; se guarda en el servidor y no se enseña a nadie.
           </p>
           {error && !data && <p className="dash-error">No se pudo leer el calendario ({error}). Vuelve a poner la dirección.</p>}
+          {calendarios.length > 0 && (
+            <ul className="chf-lista chf-ical__cals">
+              {calendarios.map(cal => (
+                <li key={cal.id}><span>📅 {cal.name}</span>
+                  <button type="button" className="dash-mini dash-mini--danger" onClick={() => quitar(cal)}>Quitar</button></li>
+              ))}
+            </ul>
+          )}
+          <span className="chf-tablon__lbl">{calendarios.length ? 'Añadir otro calendario' : 'Añadir calendario'}</span>
+          <input className="dash-input" maxLength={40} placeholder="Nombre (p. ej. Recordatorios Roco)" value={nombre} onChange={e => setNombre(e.target.value)} />
           <div className="chf-ical__fila">
             <input ref={inputRef} className="dash-input" placeholder="Pulsa aquí y pega con Ctrl+V" value={url}
               onChange={e => setUrl(e.target.value)} onPaste={alPegar} onDrop={soltar} onDragOver={e => e.preventDefault()} />
@@ -470,25 +488,26 @@ function CalendarioGoogle() {
           </div>
           <div className="dash-form__actions">
             <button className="dash-btn dash-btn--primary" disabled={!url.trim()}>Guardar</button>
-            {editar && <button type="button" className="dash-btn" onClick={() => setEditar(false)}>Cancelar</button>}
+            {editar && <button type="button" className="dash-btn" onClick={() => { setEditar(false); setMsg('') }}>{calendarios.length ? 'Cerrar' : 'Cancelar'}</button>}
           </div>
           {msg && <p className="dash-error">{msg}</p>}
         </form>
       ) : (
         <>
           {error && <p className="dash-error">{error}</p>}
+          {data?.failed?.length > 0 && <p className="chf-aviso chf-aviso--mal">⚠ No se pudo leer: {data.failed.join(', ')}. Quítalo y vuelve a ponerlo en «Calendarios».</p>}
           {data && data.events.length === 0 && <p className="dash-empty">Nada en los próximos 14 días.</p>}
           {Object.entries(porDia).slice(0, 8).map(([dia, evs]) => (
             <div key={dia} className="chf-gcal">
               <span className="chf-gcal__dia">{diaSemana(dia)} {fechaCorta(dia)}</span>
               <ul className="chf-lista">
                 {evs.map((ev, i) => (
-                  <li key={i}><span>{ev.title}{ev.location && <em> · {ev.location}</em>}</span><b>{ev.allday ? 'todo el día' : ev.start.slice(11, 16)}</b></li>
+                  <li key={i}><span>{ev.title}{ev.location && <em> · {ev.location}</em>}{varios && ev.cal && <small className="chf-ical__tag">{ev.cal}</small>}</span><b>{ev.allday ? 'todo el día' : ev.start.slice(11, 16)}</b></li>
                 ))}
               </ul>
             </div>
           ))}
-          {data?.configured && <button type="button" className="dash-mini" onClick={() => setEditar(true)}>Cambiar calendario</button>}
+          {data?.configured && <button type="button" className="dash-mini" onClick={() => setEditar(true)}>Calendarios ({calendarios.length}) · + Añadir otro</button>}
         </>
       )}
     </Card>

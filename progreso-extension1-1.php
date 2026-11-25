@@ -26050,10 +26050,13 @@ function horarios_import($request) {
 
 function cherifs_get() {
     $c = get_option('blokes_cherifs', array());
+    // 25/11: varios calendarios ('icals' = [{id, name, url}]); la dirección suelta de antes pasa a la lista
+    $icals = is_array($c['icals'] ?? null) ? $c['icals'] : array();
+    if (!$icals && !empty($c['ical'])) $icals[] = array('id' => 'c1', 'name' => 'Calendario', 'url' => (string) $c['ical']);
     return array(
         'messages' => is_array($c['messages'] ?? null) ? $c['messages'] : array(),
         'songs'    => is_array($c['songs'] ?? null) ? $c['songs'] : array(),
-        'ical'     => (string) ($c['ical'] ?? ''),
+        'icals'    => $icals,
     );
 }
 function cherifs_put($c) { update_option('blokes_cherifs', $c, false); }
@@ -26081,6 +26084,9 @@ add_action('rest_api_init', function() {
     ));
     register_rest_route('superadmin/v1', '/cherifs/ical', array(
         'methods' => 'PUT', 'callback' => 'cherifs_save_ical', 'permission_callback' => $socio,
+    ));
+    register_rest_route('superadmin/v1', '/cherifs/ical/(?P<id>c[a-z0-9]+)', array(
+        'methods' => 'DELETE', 'callback' => 'cherifs_delete_ical', 'permission_callback' => $socio,
     ));
     register_rest_route('superadmin/v1', '/cherifs/calendar', array(
         'methods' => 'GET', 'callback' => 'cherifs_calendar', 'permission_callback' => $socio,
@@ -26125,7 +26131,7 @@ function cherifs_board() {
     return rest_ensure_response(array(
         'messages'        => array_slice(array_reverse($c['messages']), 0, 20),
         'songs'           => array_slice(array_reverse($c['songs']), 0, 30),
-        'ical_configured' => $c['ical'] !== '',
+        'ical_configured' => count($c['icals']) > 0,
     ));
 }
 
@@ -26170,14 +26176,35 @@ function cherifs_save_ical($request) {
     // 25/11: se aceptan también la forma webcal:// y espacios o saltos de línea al pegar
     $url = preg_replace('/\s+/', '', (string) ($request->get_json_params()['url'] ?? ''));
     $url = preg_replace('#^webcals?://#i', 'https://', $url);
-    if ($url !== '' && !preg_match('#^https://calendar\.google\.com/calendar/ical/.+\.ics(\?.*)?$#i', $url)) {
+    if (!preg_match('#^https://calendar\.google\.com/calendar/ical/.+\.ics(\?.*)?$#i', $url)) {
         return new WP_Error('bad_ical', 'Tiene que ser la «Dirección secreta en formato iCal» de Google Calendar (acaba en .ics)', array('status' => 400));
     }
+    // 25/11: se añade a la lista (si ya estaba, solo se cambia el nombre)
+    $name = sanitize_text_field((string) ($request->get_json_params()['name'] ?? ''));
     $c = cherifs_get();
-    $c['ical'] = $url;
+    $hecho = false;
+    foreach ($c['icals'] as &$cal) {
+        if ($cal['url'] === $url) { if ($name !== '') $cal['name'] = $name; $hecho = true; }
+    }
+    unset($cal);
+    if (!$hecho) {
+        if (count($c['icals']) >= 6) return new WP_Error('too_many', 'Como mucho 6 calendarios', array('status' => 400));
+        $c['icals'][] = array('id' => 'c' . substr(md5($url . microtime()), 0, 8), 'name' => $name !== '' ? mb_substr($name, 0, 40) : 'Calendario ' . (count($c['icals']) + 1), 'url' => $url);
+    }
+    unset($c['ical']);
     cherifs_put($c);
     delete_transient('blokes_cherifs_ical');
-    return rest_ensure_response(array('success' => true, 'ical_configured' => $url !== ''));
+    return rest_ensure_response(array('success' => true, 'ical_configured' => true));
+}
+
+function cherifs_delete_ical($request) {
+    $id = (string) $request['id'];
+    $c = cherifs_get();
+    $c['icals'] = array_values(array_filter($c['icals'], function ($cal) use ($id) { return $cal['id'] !== $id; }));
+    unset($c['ical']);
+    cherifs_put($c);
+    delete_transient('blokes_cherifs_ical');
+    return rest_ensure_response(array('success' => true));
 }
 
 // ── Lectura mínima de iCal (VEVENT con fecha/hora, zona, repeticiones sencillas) ──
@@ -26305,17 +26332,28 @@ function cherifs_ical_expand($ev, $from, $to) {
 // Próximos 14 días del calendario de Google (guardado 15 minutos)
 function cherifs_calendar() {
     $c = cherifs_get();
-    if ($c['ical'] === '') return rest_ensure_response(array('configured' => false, 'events' => array()));
+    // Al navegador solo van el id y el nombre de cada calendario, nunca la dirección
+    $cals = array_map(function ($cal) { return array('id' => $cal['id'], 'name' => $cal['name']); }, $c['icals']);
+    if (!$cals) return rest_ensure_response(array('configured' => false, 'calendars' => array(), 'events' => array()));
     $cached = get_transient('blokes_cherifs_ical');
-    if (is_array($cached)) return rest_ensure_response(array('configured' => true, 'events' => $cached));
-    $res = wp_remote_get($c['ical'], array('timeout' => 12));
-    if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) {
-        return new WP_Error('ical_error', 'No se pudo leer el calendario de Google', array('status' => 502));
+    if (is_array($cached) && isset($cached['events'])) {
+        return rest_ensure_response(array('configured' => true, 'calendars' => $cals, 'events' => $cached['events'], 'failed' => $cached['failed']));
     }
     $tz   = wp_timezone();
     $from = new DateTime('today', $tz);
     $to   = (clone $from)->modify('+14 days')->setTime(23, 59);
-    $events = array_slice(cherifs_ical_events(wp_remote_retrieve_body($res), $from, $to), 0, 60);
-    set_transient('blokes_cherifs_ical', $events, 15 * MINUTE_IN_SECONDS);
-    return rest_ensure_response(array('configured' => true, 'events' => $events));
+    $events = array();
+    $failed = array();
+    foreach ($c['icals'] as $cal) {
+        $res = wp_remote_get($cal['url'], array('timeout' => 12));
+        if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) { $failed[] = $cal['name']; continue; }
+        foreach (cherifs_ical_events(wp_remote_retrieve_body($res), $from, $to) as $ev) { $ev['cal'] = $cal['name']; $events[] = $ev; }
+    }
+    if (count($failed) === count($c['icals'])) {
+        return new WP_Error('ical_error', 'No se pudo leer el calendario de Google', array('status' => 502));
+    }
+    usort($events, function ($a, $b) { return strcmp($a['start'], $b['start']); });
+    $events = array_slice($events, 0, 80);
+    set_transient('blokes_cherifs_ical', array('events' => $events, 'failed' => $failed), 15 * MINUTE_IN_SECONDS);
+    return rest_ensure_response(array('configured' => true, 'calendars' => $cals, 'events' => $events, 'failed' => $failed));
 }

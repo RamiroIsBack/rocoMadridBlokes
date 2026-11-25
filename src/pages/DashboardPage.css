@@ -520,3 +520,7 @@
 /* Pegar la dirección iCal */
 .chf-ical__fila { display: flex; gap: 6px; }
 .chf-ical__fila .dash-input { flex: 1; }
+.chf-ical__cals { margin: 4px 0 10px; }
+.chf-ical__cals li { align-items: center; }
+.chf-ical__tag { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--color-accent-soft); color: var(--color-text-secondary); font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+.chf-ical > .dash-input { margin: 4px 0 6px; width: 100%; }
