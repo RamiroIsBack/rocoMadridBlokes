@@ -626,3 +626,6 @@
 .chf-cal__ev b { font-weight: 700; margin-right: 2px; }
 .chf-cal__ev--cumple { font-weight: 700; }
 .chf-cal__pie { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+/* 7 días en una sola fila en pantallas anchas; en móvil, los que quepan */
+.chf-cal { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+@media (max-width: 900px) { .chf-cal { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); } }
