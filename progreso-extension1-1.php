@@ -25916,8 +25916,41 @@ add_action('rest_api_init', function() {
     ));
 });
 
+// Portada y título de una canción (25/11) con el oEmbed público de Spotify o YouTube (sin claves).
+// array('title' => ..., 'thumb' => ...) o vacíos si no se puede.
+function cherifs_song_meta($url) {
+    $api = '';
+    if (preg_match('#^https://open\.spotify\.com/#i', $url)) {
+        $api = 'https://open.spotify.com/oembed?url=' . rawurlencode($url);
+    } elseif (preg_match('#^https://(www\.|m\.|music\.)?(youtube\.com|youtu\.be)/#i', $url)) {
+        $api = 'https://www.youtube.com/oembed?format=json&url=' . rawurlencode($url);
+    }
+    if ($api === '') return array('title' => '', 'thumb' => '');
+    $res = wp_remote_get($api, array('timeout' => 6));
+    if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) return array('title' => '', 'thumb' => '');
+    $j = json_decode(wp_remote_retrieve_body($res), true);
+    $thumb = esc_url_raw((string) ($j['thumbnail_url'] ?? ''));
+    return array(
+        'title' => mb_substr(sanitize_text_field((string) ($j['title'] ?? '')), 0, 150),
+        'thumb' => preg_match('#^https://#i', $thumb) ? $thumb : '',
+    );
+}
+
 function cherifs_board() {
     $c = cherifs_get();
+    // Las canciones que aún no tienen portada se completan poco a poco (3 por visita)
+    $hechas = 0;
+    foreach ($c['songs'] as &$s) {
+        if ($hechas >= 3) break;
+        if (!array_key_exists('thumb', $s) && !empty($s['url'])) {
+            $m = cherifs_song_meta($s['url']);
+            $s['thumb'] = $m['thumb'];
+            if (($s['title'] ?? '') === '' && $m['title'] !== '') $s['title'] = $m['title'];
+            $hechas++;
+        }
+    }
+    unset($s);
+    if ($hechas) cherifs_put($c);
     return rest_ensure_response(array(
         'messages'        => array_slice(array_reverse($c['messages']), 0, 20),
         'songs'           => array_slice(array_reverse($c['songs']), 0, 30),
@@ -25941,9 +25974,11 @@ function cherifs_add_song($request) {
     $url   = esc_url_raw(trim((string) ($b['url'] ?? '')));
     if ($title === '' && $url === '') return new WP_Error('bad_song', 'Pon el título o el enlace', array('status' => 400));
     if ($url !== '' && !preg_match('#^https://#i', $url)) return new WP_Error('bad_url', 'El enlace tiene que empezar por https://', array('status' => 400));
+    $meta = $url !== '' ? cherifs_song_meta($url) : array('title' => '', 'thumb' => '');
+    if ($title === '') $title = $meta['title'];
     $c = cherifs_get();
     $c['songs'][] = array(
-        'id' => substr(md5(uniqid('', true)), 0, 10), 'title' => $title, 'url' => $url,
+        'id' => substr(md5(uniqid('', true)), 0, 10), 'title' => $title, 'url' => $url, 'thumb' => $meta['thumb'],
         'by' => cherifs_who(), 'at' => current_time('mysql'), 'week' => current_time('o-\WW'),
     );
     $c['songs'] = array_slice($c['songs'], -200);

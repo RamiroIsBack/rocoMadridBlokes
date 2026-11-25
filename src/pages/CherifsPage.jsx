@@ -39,7 +39,40 @@ function Card({ icon, title, link, linkLabel = 'Ver →', children, className = 
 }
 
 // ─── Mensajes y canciones de la semana ──────────────────────────────────────
-// 25/11: protagonistas la frase y las canciones; lo de rellenar, tras un botoncito «✎ Cambiar».
+// 25/11: protagonistas la frase y las canciones; lo de rellenar, tras «✎ Cambiar» (o pulsando
+// la frase). Si nadie ha puesto frase esta semana, sale una del banco que cambia cada día.
+const BANCO_FRASES = [
+  'Hoy no hace falta encadenar: basta con volver a intentarlo.',
+  'Lo que hoy parece imposible, mañana es tu calentamiento.',
+  'Cada caída es información. Lee la pared y vuelve a subir.',
+  'El Roco lo hacemos entre todos: un bloque, una clase, una sonrisa cada día.',
+  'Despacio también se llega arriba.',
+  'Las ideas también se equipan: prueba, ajusta y vuelve a probar.',
+  'Un buen equipo es como una buena cordada: nadie sube solo.',
+  'Hoy, una cosa bien hecha vale más que diez a medias.',
+  'La constancia gana a la fuerza bruta. En la pared y en el negocio.',
+  'Si cuesta, es que estás aprendiendo.',
+  'Celebrad los pequeños tops: también cuentan.',
+  'Mira cuánto has subido antes de mirar lo que te falta.',
+  'Los mejores bloques salen de los peores días de equipar.',
+  'Escuchar al cliente es leer la vía antes de empezarla.',
+  'Que el ánimo se contagie como la magnesia.',
+  'El reposo también es parte del plan.',
+  'Hoy toca disfrutar del proceso.',
+  'Un problema grande es solo un bloque con muchos movimientos: de uno en uno.',
+  'La pared no tiene prisa. Nosotros tampoco.',
+  'Sin miedo a caer: abajo está la colchoneta (y el equipo).',
+  'Lo importante no es el grado: es seguir viniendo.',
+  'Cada alumno que repite es un top del equipo entero.',
+  'Respira, confía en los pies y suelta la mano.',
+  'Hacemos sitio para que la gente se enganche a escalar.',
+  'Pequeñas mejoras cada semana: así se construye un gran rocódromo.',
+  'Hoy, un poco más que ayer.',
+  'Si no sale a la primera, tenemos toda la sesión.',
+  'La mejor vía es la que te hace sonreír al bajar.',
+]
+const diaDelAño = () => { const d = new Date(); return Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000) }
+
 function Tablon() {
   const { data, error, setData } = useCherifsBoard()
   const [msg, setMsg] = useState('')
@@ -54,28 +87,38 @@ function Tablon() {
     return `${t.getUTCFullYear()}-W${pad(Math.ceil(((t - y0) / 86400000 + 1) / 7))}`
   })()
   const run = async fn => { setBusy(true); setErr(''); try { setData(await fn()) } catch (e) { setErr(e.message) } finally { setBusy(false) } }
-  const ultimo = data?.messages?.[0]
+  const [desfase, setDesfase] = useState(0)   // «↻ Otra» del banco
+  // La frase de un socio vale para la semana en que se publicó; si no hay, la del banco del día
+  const lunes = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d })()
+  const ultimo = (data?.messages || []).find(m => new Date(m.at.replace(' ', 'T')) >= lunes)
+  const delBanco = BANCO_FRASES[(diaDelAño() + desfase) % BANCO_FRASES.length]
   const deLaSemana = (data?.songs || []).filter(s => s.week === semana)
   const anteriores = (data?.songs || []).filter(s => s.week !== semana).slice(0, 5)
 
   return (
     <section className="dash-card chf-tablon">
-      <button type="button" className={`dash-gear chf-tablon__edit${editar ? ' dash-gear--on' : ''}`}
-        title={editar ? 'Terminar' : 'Cambiar la frase o las canciones'} onClick={() => setEditar(e => !e)}>{editar ? '✓' : '✎'}</button>
+      <button type="button" className={`chf-tablon__edit${editar ? ' chf-tablon__edit--on' : ''}`}
+        title={editar ? 'Terminar' : 'Cambiar la frase o las canciones'} onClick={() => setEditar(e => !e)}>{editar ? '✓ Listo' : '✎ Cambiar'}</button>
       <div className="chf-tablon__msg">
-        <span className="chf-tablon__lbl">Frase de la semana</span>
+        <span className="chf-tablon__lbl">{ultimo ? 'Frase de la semana' : 'Frase del día'}</span>
         {ultimo
           ? <>
-              <p className="chf-tablon__frase">«{ultimo.text}»</p>
+              <p className="chf-tablon__frase" onClick={() => setEditar(true)} title="Pulsa para cambiarla">«{ultimo.text}»</p>
               <span className="chf-tablon__quien">— {ultimo.by || 'un socio'} · {fechaCorta(ultimo.at)}
-                {editar && <button type="button" className="dash-mini dash-mini--danger" onClick={() => window.confirm('¿Borrar esta frase?') && run(() => deleteCherifsItem('message', ultimo.id))}>Borrar</button>}
+                {editar && <button type="button" className="dash-mini dash-mini--danger" onClick={() => window.confirm('¿Borrar esta frase? Volverá a salir la del día.') && run(() => deleteCherifsItem('message', ultimo.id))}>Borrar</button>}
               </span>
             </>
-          : <p className="chf-tablon__frase chf-tablon__frase--vacio">Todavía no hay frase esta semana. Pulsa ✎ para poner una 💪</p>}
+          : <>
+              <p className="chf-tablon__frase" onClick={() => setEditar(true)} title="Pulsa para poner la vuestra">«{delBanco}»</p>
+              <span className="chf-tablon__quien">— del banco de frases
+                <button type="button" className="dash-mini" onClick={() => setDesfase(d => d + 1)} title="Ver otra del banco">↻ Otra</button>
+              </span>
+            </>}
         {editar && (
           <form className="chf-tablon__form" onSubmit={e => { e.preventDefault(); if (msg.trim()) run(async () => { const r = await addCherifsMessage(msg.trim()); setMsg(''); return r }) }}>
-            <input className="dash-input" maxLength={400} placeholder="Nueva frase motivante…" value={msg} onChange={e => setMsg(e.target.value)} autoFocus />
+            <input className="dash-input" maxLength={400} placeholder="Escribe la frase de esta semana…" value={msg} onChange={e => setMsg(e.target.value)} autoFocus />
             <button className="dash-btn dash-btn--primary" disabled={busy || !msg.trim()}>Publicar</button>
+            {!ultimo && <button type="button" className="dash-btn" onClick={() => setMsg(delBanco)} title="Copiar la del banco para retocarla">Usar la del día</button>}
           </form>
         )}
       </div>
@@ -85,9 +128,13 @@ function Tablon() {
         <ul className="chf-songs chf-songs--grandes">
           {deLaSemana.map(s => (
             <li key={s.id}>
-              <span className="chf-songs__icon" aria-hidden="true">♪</span>
-              {s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title || 'Escuchar'}</a> : <span className="chf-songs__t">{s.title}</span>}
-              <span className="chf-songs__by">{s.by}</span>
+              {s.thumb
+                ? <a href={s.url} target="_blank" rel="noreferrer" className="chf-songs__cover"><img src={s.thumb} alt="" loading="lazy" /></a>
+                : <span className="chf-songs__cover chf-songs__cover--vacia" aria-hidden="true">♪</span>}
+              <span className="chf-songs__txt">
+                {s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title || 'Escuchar'}</a> : <span className="chf-songs__t">{s.title}</span>}
+                <span className="chf-songs__by">puesta por {s.by}</span>
+              </span>
               {editar && <button type="button" className="chf-x" title="Quitar" onClick={() => run(() => deleteCherifsItem('song', s.id))}>×</button>}
             </li>
           ))}
@@ -120,6 +167,7 @@ function Dinero() {
   const { cuadre, cuadreRocoteca, loading: le } = useExpenses(`${year}-01`, 'all')
   const { data: payroll } = usePayroll(month)
   const [verPartidas, setVerPartidas] = useState(false)
+  const [verExplica, setVerExplica] = useState(false)
 
   const pendiente = useMemo(() => {
     if (!budget) return null
@@ -172,11 +220,16 @@ function Dinero() {
       )}
       {pendiente && (
         <div className="chf-explica">
-          <p>
-            <b>¿De dónde sale «Falta por pagar»?</b> Del <Link to="/cherifs?tab=presupuesto-anual">Presupuesto anual</Link>: lo previsto para {MES}
-            ({fmtEur(pendiente.previsto)}, con lo que se arrastra de meses anteriores) menos lo que ya ha salido del banco en {MES}
-            ({fmtEur(pendiente.pagado)}).
-          </p>
+          <button type="button" className="dash-link chf-explica__btn" onClick={() => setVerExplica(v => !v)}>
+            {verExplica ? 'Ocultar' : '¿De dónde sale «Falta por pagar»?'}
+          </button>
+          {verExplica && (
+            <p>
+              Del <Link to="/cherifs?tab=presupuesto-anual">Presupuesto anual</Link>: lo previsto para {MES}
+              ({fmtEur(pendiente.previsto)}, con lo que se arrastra de meses anteriores) menos lo que ya ha salido del banco en {MES}
+              ({fmtEur(pendiente.pagado)}).
+            </p>
+          )}
           {!pendiente.hayPresupuesto && <p className="chf-aviso chf-aviso--mal">⚠ No hay presupuesto cargado para {year}.</p>}
           {pendiente.hayPresupuesto && !pendiente.extractoDelMes && (
             <p className="chf-aviso chf-aviso--mal">⚠ Todavía no hay extracto del banco de {MES} en Gastos banco, así que todo lo previsto cuenta como pendiente. Carga el extracto para que sea real.</p>
@@ -253,6 +306,39 @@ function Tareas({ items }) {
     .sort((a, b) => (a.start || '').localeCompare(b.start || ''))
   const atrasadas = notion.filter(it => (it.start || '').slice(0, 10) < hoy)
   const porKind = k => abiertas.filter(it => k.includes(it.kind)).length
+  // 25/11: ordenar por fecha o por persona encargada; cada tarea en una línea, detalle al pulsar
+  const [orden, setOrden] = useState('fecha')
+  const [abierta, setAbierta] = useState(null)
+  const [todas, setTodas] = useState(false)
+  const [verOrigen, setVerOrigen] = useState(false)
+  const lista = todas ? notion : notion.slice(0, 10)
+  const grupos = orden === 'persona'
+    ? Object.entries(lista.reduce((acc, it) => {
+        const quienes = it.owners?.length ? it.owners : ['Sin encargado']
+        quienes.forEach(q => { (acc[q] = acc[q] || []).push(it) })
+        return acc
+      }, {})).sort((a, b) => (a[0] === 'Sin encargado') - (b[0] === 'Sin encargado') || a[0].localeCompare(b[0]))
+    : [[null, lista]]
+
+  const fila = it => {
+    const tarde = (it.start || '').slice(0, 10) < hoy
+    const open = abierta === it.id
+    return (
+      <li key={`${it.id}-${orden}`} className={`chf-tarea${tarde ? ' chf-lista--late' : ''}${open ? ' chf-tarea--open' : ''}`}>
+        <button type="button" className="chf-tarea__main" onClick={() => setAbierta(open ? null : it.id)}>
+          <span className="chf-tarea__t">{it.title}</span>
+          {orden === 'fecha' && it.owners?.length > 0 && <span className="chf-tarea__quien">{it.owners.join(', ')}</span>}
+          <b>{it.start ? fechaCorta(it.start) : ''}</b>
+        </button>
+        {open && (
+          <div className="chf-tarea__det">
+            <span>{it.category?.name || 'Sin categoría'}{it.status?.name ? ` · ${it.status.name}` : ''}{it.owners?.length ? ` · ${it.owners.join(', ')}` : ''}{tarde ? ' · atrasada' : ''}</span>
+            {it.url && <a href={it.url} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>}
+          </div>
+        )}
+      </li>
+    )
+  }
 
   return (
     <Card icon="✅" title="Tareas">
@@ -262,25 +348,30 @@ function Tareas({ items }) {
         <Link to="/diario?vista=tareas"><b>{porKind(['compra'])}</b> compras</Link>
         <Link to="/diario?vista=tareas"><b>{porKind(['recordatorio'])}</b> recordatorios</Link>
       </div>
-      <span className="chf-fuente">
-        De Notion · «Funciones Rocomadrid» ({notion.length}{atrasadas.length ? `, ${atrasadas.length} atrasadas` : ''})
-      </span>
-      <ul className="chf-lista">
-        {notion.slice(0, 8).map(it => (
-          <li key={it.id} className={(it.start || '').slice(0, 10) < hoy ? 'chf-lista--late' : ''}>
-            <span>
-              {it.url ? <a href={it.url} target="_blank" rel="noreferrer">{it.title}</a> : it.title}
-              <em> · {it.category?.name || 'Sin categoría'}{it.status?.name ? ` · ${it.status.name}` : ''}{it.owners?.length ? ` · ${it.owners.join(', ')}` : ''}</em>
-            </span>
-            <b>{it.start ? fechaCorta(it.start) : ''}</b>
-          </li>
-        ))}
-      </ul>
+      <div className="chf-tareas__bar">
+        <span className="chf-fuente">De Notion ({notion.length}{atrasadas.length ? `, ${atrasadas.length} atrasadas` : ''})</span>
+        <div className="dash-form__seg">
+          <button type="button" className={`dash-mini${orden === 'fecha' ? ' chf-on' : ''}`} onClick={() => setOrden('fecha')}>Por fecha</button>
+          <button type="button" className={`dash-mini${orden === 'persona' ? ' chf-on' : ''}`} onClick={() => setOrden('persona')}>Por persona</button>
+        </div>
+      </div>
+      {grupos.map(([quien, its]) => (
+        <div key={quien || 'todas'}>
+          {quien && <span className="chf-tareas__grupo">{quien} <i>{its.length}</i></span>}
+          <ul className="chf-lista">{its.map(fila)}</ul>
+        </div>
+      ))}
       {notion.length === 0 && <p className="dash-empty">Nada pendiente en Notion para estas semanas.</p>}
-      <p className="chf-nota">
-        Las de Notion son las tareas de la base «Funciones Rocomadrid» que no van al calendario (mantenimiento, mejoras,
-        reuniones…), sin terminar («Listo» o «Archivo» no salen) y con fecha entre hace 30 días y dentro de 30. Pulsa una para abrirla en Notion.
-      </p>
+      {notion.length > 10 && (
+        <button type="button" className="dash-link" onClick={() => setTodas(t => !t)}>{todas ? 'Ver menos' : `Ver las ${notion.length}`}</button>
+      )}
+      <button type="button" className="dash-link chf-explica__btn" onClick={() => setVerOrigen(v => !v)}>{verOrigen ? 'Ocultar' : '¿De dónde salen?'}</button>
+      {verOrigen && (
+        <p className="chf-nota">
+          De la base «Funciones Rocomadrid» de Notion: las tareas que no van al calendario (mantenimiento, mejoras, reuniones…),
+          sin terminar («Listo» o «Archivo» no salen) y con fecha entre hace 30 días y dentro de 30. Pulsa una para ver el detalle y abrirla en Notion.
+        </p>
+      )}
     </Card>
   )
 }
