@@ -1532,6 +1532,16 @@ add_action('rest_api_init', function() {
         ),
     ));
 
+    // 25/11 (Ramiro): movimientos guardados en el option del mes equivocado — el CSV del banco
+    // decide el mes por "fecha valor", el xlsx de reconciliación (y el banco de verdad) por
+    // "fecha de operación", así que algún movimiento de fin de mes quedó en el mes de al lado.
+    // Simular primero por defecto (`aplicar` aparte) — nunca mueve nada sin pedirlo explícito.
+    register_rest_route('superadmin/v1', '/expenses/reubicar-mes', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_reubicar_expenses_mes',
+        'permission_callback' => $socio_perm,
+    ));
+
     // Saldo de apertura del Club a 1/1 de un año, editable (NOTAS_PARA_CODE_gastos_banco.md,
     // 15/11 11:15 punto 4): el cuadre de saldo lo necesita como punto de partida fijo.
     register_rest_route('superadmin/v1', '/expenses/apertura', array(
@@ -2003,6 +2013,86 @@ function superadmin_save_expenses($request) {
     )), false);
 
     return rest_ensure_response(array('success' => true, 'month' => $month, 'total' => count($merged), 'nuevos' => count($nuevos)));
+}
+
+// 25/11 (Ramiro): el CSV del banco decide en qué option (mes) guardar un movimiento por su
+// "fecha valor" (comentario de blokes_exp_option_key / blokes_save_expenses histórico), pero el
+// xlsx de reconciliación (y el cierre real del banco) lo decide por su propia "fecha" (de
+// operación) — un movimiento de fin de mes puede así quedar guardado en el mes de al lado
+// (ej.: fecha 02/11, fecha valor 30/10 → guardado en octubre, cuando es de noviembre). Busca,
+// para una entidad, todo lo guardado cuyo mes no es el de su propia "fecha", y solo si
+// `aplicar` es true los mueve de verdad al mes correcto (por defecto simula y no toca nada).
+function superadmin_reubicar_expenses_mes($request) {
+    $body    = $request->get_json_params();
+    $entity  = sanitize_text_field($body['entity'] ?? 'club') ?: 'club';
+    $aplicar = !empty($body['aplicar']);
+
+    global $wpdb;
+    $like = $wpdb->esc_like('blokes_exp_') . '%' . $wpdb->esc_like('_' . $entity);
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_name, option_value FROM {$wpdb->options} WHERE option_name LIKE %s", $like
+    ), ARRAY_A);
+
+    $items_por_mes = array(); // 'YYYY-MM' (option donde está guardado) => items
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!is_array($saved) || empty($saved['month']) || ($saved['entity'] ?? '') !== $entity || !is_array($saved['items'] ?? null)) continue;
+        $items_por_mes[$saved['month']] = $saved['items'];
+    }
+
+    $mal_ubicados = array(); // mes guardado => [{item, mesReal}]
+    foreach ($items_por_mes as $mes_guardado => $items) {
+        foreach ($items as $it) {
+            $fecha = $it['fecha'] ?? '';
+            if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
+            $mes_real = $m[3] . '-' . str_pad($m[2], 2, '0', STR_PAD_LEFT);
+            if ($mes_real !== $mes_guardado) {
+                $mal_ubicados[$mes_guardado][] = array('item' => $it, 'mesReal' => $mes_real);
+            }
+        }
+    }
+
+    $detalle = array();
+    foreach ($mal_ubicados as $mes_guardado => $filas) {
+        foreach ($filas as $f) {
+            $detalle[] = array(
+                'mesGuardado' => $mes_guardado, 'mesReal' => $f['mesReal'],
+                'fecha' => $f['item']['fecha'], 'concepto' => $f['item']['concepto'], 'importe' => $f['item']['importe'],
+            );
+        }
+    }
+
+    if (!$aplicar || empty($mal_ubicados)) {
+        return rest_ensure_response(array('success' => true, 'aplicado' => false, 'data' => array('malUbicados' => $detalle)));
+    }
+
+    // Aplicar de verdad: quita de cada mes guardado SOLO las filas mal ubicadas (nunca todas las
+    // de esa clave, por si hubiera otra fila real distinta con la misma clave que sí es de ese
+    // mes) y las añade al mes real.
+    foreach ($mal_ubicados as $mes_guardado => $filas) {
+        $restantes = $items_por_mes[$mes_guardado];
+        foreach ($filas as $f) {
+            $k = blokes_exp_item_key($f['item']);
+            foreach ($restantes as $i => $it) {
+                if (blokes_exp_item_key($it) === $k) { unset($restantes[$i]); break; }
+            }
+        }
+        update_option(blokes_exp_option_key($mes_guardado, $entity), wp_json_encode(array(
+            'month' => $mes_guardado, 'entity' => $entity, 'items' => array_values($restantes), 'saved' => (new DateTime())->format('c'),
+        )), false);
+    }
+    $destinos = array(); // mes real => items a añadir
+    foreach ($mal_ubicados as $filas) {
+        foreach ($filas as $f) { $destinos[$f['mesReal']][] = $f['item']; }
+    }
+    foreach ($destinos as $mes_real => $items_nuevos) {
+        $existentes = $items_por_mes[$mes_real] ?? blokes_exp_load_month($mes_real, $entity);
+        update_option(blokes_exp_option_key($mes_real, $entity), wp_json_encode(array(
+            'month' => $mes_real, 'entity' => $entity, 'items' => array_merge($existentes, $items_nuevos), 'saved' => (new DateTime())->format('c'),
+        )), false);
+    }
+
+    return rest_ensure_response(array('success' => true, 'aplicado' => true, 'data' => array('malUbicados' => $detalle)));
 }
 
 // `from`: primer mes a incluir ('YYYY-MM', incluido) o vacío para no limitar ("Todo"). Se

@@ -155,6 +155,11 @@ function UploadPanel({ onSaved }) {
   const hasFixedEntity = items.length > 0 && items.every(i => i.entityFixed)
   const [simPreview,    setSimPreview]     = useState(null) // [{entity, month, existentesAntes, totalTrasGuardar, nuevos}]
   const [simulando,     setSimulando]      = useState(false)
+  // 25/11 (Ramiro): guardar por lote (entidad + mes) tras «Comprobar» — si un bloque de la
+  // entidad no casa (p. ej. Rocoteca) no hay que esperar a arreglarlo para guardar ya el resto
+  // (p. ej. el Club) que sí está bien.
+  const [selectedLotes, setSelectedLotes]  = useState(new Set()) // Set de `${entity}||${month}`
+  const [saveMsg,       setSaveMsg]        = useState(null)
 
   const uniqueMonths = useMemo(() => {
     const s = new Set(items.filter(i => i.month).map(i => i.month))
@@ -217,8 +222,10 @@ function UploadPanel({ onSaved }) {
     setPreviewMonth('all')
     setPreviewAccount('all')
     setSaved(false)
+    setSaveMsg(null)
     setLearnedCount(0)
     setSimPreview(null)
+    setSelectedLotes(new Set())
     setError(dupCount > 0 ? `Se eliminaron ${dupCount} movimiento${dupCount > 1 ? 's' : ''} duplicado${dupCount > 1 ? 's' : ''} (mismo día, concepto e importe).` : null)
     return deduped
   }
@@ -313,14 +320,30 @@ function UploadPanel({ onSaved }) {
       }
       resultados.sort((a, b) => (a.entity + a.month).localeCompare(b.entity + b.month))
       setSimPreview(resultados)
+      // Por defecto, todos los lotes marcados — se desmarcan a mano los que no casen bien.
+      setSelectedLotes(new Set(resultados.map(r => `${r.entity}||${r.month}`)))
     } catch (e) { setError(e.message) }
     finally { setSimulando(false) }
   }
 
+  function toggleLote(key) {
+    setSelectedLotes(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
+
   const handleSave = async () => {
     if (!items.length) return
-    setSaving(true); setError(null); setSaved(false)
-    const lotes = buildLotes()
+    const allLotes = buildLotes()
+    // Con «Comprobar» de por medio, solo se guardan los lotes marcados — para guardar ya los
+    // que casan bien aunque otros (p. ej. una entidad que no case) se queden pendientes.
+    const lotes = (hasFixedEntity && simPreview)
+      ? allLotes.filter(l => selectedLotes.has(`${l.entity}||${l.month}`))
+      : allLotes
+    if (!lotes.length) { setError('Marca al menos un lote para guardar.'); return }
+    setSaving(true); setError(null); setSaved(false); setSaveMsg(null)
     let count = 0
     try {
       for (const lote of lotes) {
@@ -333,9 +356,12 @@ function UploadPanel({ onSaved }) {
         })
         if (!res.ok) throw new Error(`HTTP ${res.status} al guardar ${fmtMonth(lote.month)} (${lote.entity})`)
       }
-      // Recordar las categorías cambiadas a mano para las próximas importaciones
+      const guardadosSet = new Set(lotes.map(l => `${l.entity}||${l.month}`))
+      const guardadosItems = items.filter(i => i.month && guardadosSet.has(`${entityOf(i)}||${i.month}`))
+      // Recordar las categorías cambiadas a mano para las próximas importaciones (solo de lo
+      // que de verdad se guardó, no de lotes que se dejan pendientes).
       const newRules = {}
-      items.forEach(i => {
+      guardadosItems.forEach(i => {
         if (i.excluded || !i.ruleCat || i.category === i.ruleCat) return
         const key = conceptKey(i.concepto, i.section === 'ingresos')
         if (key) newRules[key] = i.category
@@ -346,7 +372,16 @@ function UploadPanel({ onSaved }) {
           setLearnedCount(Object.keys(newRules).length)
         } catch { /* los movimientos ya están guardados; la regla se puede corregir luego */ }
       }
-      setSaved(true); setSimPreview(null)
+      const quedan = allLotes.length - lotes.length
+      if (quedan > 0) {
+        // Deja solo lo que falta por guardar — para poder volver a "Comprobar" con el resto.
+        setItems(prev => prev.filter(i => !(i.month && guardadosSet.has(`${entityOf(i)}||${i.month}`))))
+        setSimPreview(null)
+        setSelectedLotes(new Set())
+        setSaveMsg(`✓ Guardados ${lotes.length} ${lotes.length === 1 ? 'lote' : 'lotes'}. Quedan ${quedan} ${quedan === 1 ? 'lote' : 'lotes'} sin guardar — vuelve a «Comprobar» cuando estén listos.`)
+      } else {
+        setSaved(true); setSimPreview(null)
+      }
       if (onSaved) onSaved()
     } catch (e) { setError(e.message) }
     finally { setSaving(false); setSaveProgress('') }
@@ -415,21 +450,31 @@ function UploadPanel({ onSaved }) {
                 </button>
               ) : (
                 <div className="exp-field" style={{ width: '100%' }}>
-                  <label>Qué añadiría cada mes (nada escrito todavía)</label>
+                  <label>Qué añadiría cada mes (nada escrito todavía) — marca qué lotes guardar</label>
                   <div className="exp-table-wrap">
                     <table className="exp-table">
-                      <thead><tr><th>Entidad</th><th>Mes</th><th>Ya había</th><th>Añadiría</th><th>Total tras guardar</th></tr></thead>
+                      <thead><tr><th></th><th>Entidad</th><th>Mes</th><th>Ya había</th><th>Añadiría</th><th>Total tras guardar</th></tr></thead>
                       <tbody>
-                        {simPreview.map(r => (
-                          <tr key={`${r.entity}-${r.month}`} className={r.nuevos?.length > 3 ? 'exp-row--excluded' : ''}>
-                            <td>{r.entity}</td><td>{fmtMonth(r.month)}</td>
-                            <td>{r.existentesAntes}</td>
-                            <td style={r.nuevos?.length ? { fontWeight: 600 } : undefined}>{r.nuevos?.length || 0}</td>
-                            <td>{r.totalTrasGuardar}</td>
-                          </tr>
-                        ))}
+                        {simPreview.map(r => {
+                          const key = `${r.entity}||${r.month}`
+                          return (
+                            <tr key={key} className={r.nuevos?.length > 3 ? 'exp-row--excluded' : ''}>
+                              <td>
+                                <input type="checkbox" checked={selectedLotes.has(key)} onChange={() => toggleLote(key)} title="Guardar este lote" />
+                              </td>
+                              <td>{r.entity}</td><td>{fmtMonth(r.month)}</td>
+                              <td>{r.existentesAntes}</td>
+                              <td style={r.nuevos?.length ? { fontWeight: 600 } : undefined}>{r.nuevos?.length || 0}</td>
+                              <td>{r.totalTrasGuardar}</td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+                    <button type="button" className="exp-link-btn" onClick={() => setSelectedLotes(new Set(simPreview.map(r => `${r.entity}||${r.month}`)))}>Marcar todos</button>
+                    <button type="button" className="exp-link-btn" onClick={() => setSelectedLotes(new Set())}>Marcar ninguno</button>
                   </div>
                   {simPreview.some(r => r.nuevos?.length > 0) && (
                     <details style={{ marginTop: 6 }}>
@@ -453,8 +498,12 @@ function UploadPanel({ onSaved }) {
                   </p>
                   <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
                     <button className="exp-save-btn" onClick={() => setSimPreview(null)} disabled={saving}>Volver a comprobar / cancelar</button>
-                    <button className={`exp-save-btn${saved ? ' exp-save-btn--ok' : ''}`} onClick={handleSave} disabled={saving}>
-                      {saving ? `Guardando ${saveProgress}…` : saved ? `✓ ${totalLotes} ${totalLotes === 1 ? 'lote guardado' : 'lotes guardados'}` : `Confirmar y guardar ${totalLotes} ${totalLotes === 1 ? 'lote' : 'lotes'}`}
+                    <button className={`exp-save-btn${saved ? ' exp-save-btn--ok' : ''}`} onClick={handleSave} disabled={saving || selectedLotes.size === 0}>
+                      {saving
+                        ? `Guardando ${saveProgress}…`
+                        : saved
+                          ? `✓ ${totalLotes} ${totalLotes === 1 ? 'lote guardado' : 'lotes guardados'}`
+                          : `Confirmar y guardar ${selectedLotes.size} ${selectedLotes.size === 1 ? 'lote' : 'lotes'} marcado${selectedLotes.size === 1 ? '' : 's'}`}
                     </button>
                   </div>
                 </div>
@@ -472,6 +521,7 @@ function UploadPanel({ onSaved }) {
         )}
       </div>
 
+      {saveMsg && <p className="exp-hint">{saveMsg}</p>}
       {saved && learnedCount > 0 && <p className="exp-hint">ⓘ Se recordaron {learnedCount} {learnedCount === 1 ? 'categoría cambiada' : 'categorías cambiadas'} a mano para las próximas importaciones.</p>}
       {error && <p className={error.startsWith('Se eliminaron') ? 'exp-hint' : 'exp-error'}>{error.startsWith('Se eliminaron') ? `ⓘ ${error}` : `Error: ${error}`}</p>}
 
@@ -743,6 +793,11 @@ function HistoryView({ period, onDeleted }) {
   const [excludeInternal, setExcludeInternal] = useState(true)
   const [showManager, setShowManager]         = useState(false)
   const [deletingKey, setDeletingKey]         = useState(null)
+  // 25/11 (Ramiro): movimientos guardados en el mes equivocado (el CSV decide el mes por fecha
+  // valor, el xlsx/banco real por fecha de operación) — comprobar y, si se confirma, mover.
+  const [reubicarPreview, setReubicarPreview] = useState(null) // null | []malUbicados
+  const [reubicarLoading, setReubicarLoading] = useState(false)
+  const [reubicarMsg,     setReubicarMsg]     = useState(null)
   const [expandedMonths, setExpandedMonths]   = useState(new Set())
   const [expandedCats,   setExpandedCats]     = useState(new Set())
   // Compartido entre todos los superadmin (wp_option), no por navegador: Eva y Ramiro ven y
@@ -792,6 +847,37 @@ function HistoryView({ period, onDeleted }) {
     } finally {
       setDeletingKey(null)
     }
+  }
+
+  async function handleReubicarComprobar() {
+    setReubicarLoading(true); setReubicarMsg(null)
+    try {
+      const res = await fetch(`${CLUB_URL}/wp-json/superadmin/v1/expenses/reubicar-mes`, {
+        method: 'POST', headers: getAuthHeaders(),
+        body: JSON.stringify({ entity, aplicar: false }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const r = await res.json()
+      setReubicarPreview(r.data?.malUbicados || [])
+      if (!r.data?.malUbicados?.length) setReubicarMsg('Nada mal ubicado — todo está en el mes de su propia fecha.')
+    } catch (e) { setReubicarMsg(`Error: ${e.message}`) }
+    finally { setReubicarLoading(false) }
+  }
+
+  async function handleReubicarAplicar() {
+    if (!window.confirm(`¿Mover ${reubicarPreview.length} movimiento${reubicarPreview.length === 1 ? '' : 's'} al mes de su propia fecha?`)) return
+    setReubicarLoading(true); setReubicarMsg(null)
+    try {
+      const res = await fetch(`${CLUB_URL}/wp-json/superadmin/v1/expenses/reubicar-mes`, {
+        method: 'POST', headers: getAuthHeaders(),
+        body: JSON.stringify({ entity, aplicar: true }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      setReubicarPreview(null)
+      setReubicarMsg('✓ Movimientos reubicados en su mes correcto.')
+      if (onDeleted) onDeleted()
+    } catch (e) { setReubicarMsg(`Error: ${e.message}`) }
+    finally { setReubicarLoading(false) }
   }
 
   // PHP may return multiple rows per month (one per account upload) — merge them
@@ -1425,6 +1511,28 @@ function HistoryView({ period, onDeleted }) {
                 }}
               >{deletingKey === '__all__' ? 'Borrando…' : '× Borrar todos los datos'}</button>
             )}
+            <div className="exp-reubicar" style={{ marginTop: 14, borderTop: '1px solid #3a3020', paddingTop: 10 }}>
+              <p className="exp-hint" style={{ margin: '0 0 6px' }}>
+                Movimientos guardados en el mes equivocado ({entity}): el banco decide el mes por
+                fecha valor, pero el real es el de la propia fecha del movimiento.
+              </p>
+              <button className="exp-manager-del" disabled={reubicarLoading} onClick={handleReubicarComprobar}>
+                {reubicarLoading ? '…' : 'Comprobar movimientos mal ubicados'}
+              </button>
+              {reubicarPreview?.length > 0 && (
+                <>
+                  <ul style={{ fontSize: '0.78rem', margin: '8px 0' }}>
+                    {reubicarPreview.map((m, i) => (
+                      <li key={i}>{m.fecha} · {m.concepto} · {m.importe} € — guardado en {fmtMonth(m.mesGuardado)}, debería estar en {fmtMonth(m.mesReal)}</li>
+                    ))}
+                  </ul>
+                  <button className="exp-manager-del" disabled={reubicarLoading} onClick={handleReubicarAplicar}>
+                    {reubicarLoading ? 'Moviendo…' : `Mover ${reubicarPreview.length} ${reubicarPreview.length === 1 ? 'movimiento' : 'movimientos'} a su mes`}
+                  </button>
+                </>
+              )}
+              {reubicarMsg && <p className="exp-hint" style={{ margin: '6px 0 0' }}>{reubicarMsg}</p>}
+            </div>
           </div>
         )}
       </div>

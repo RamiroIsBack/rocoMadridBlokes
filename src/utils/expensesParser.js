@@ -369,6 +369,21 @@ export function isExpensesXLSXFile(fileName) {
   return /\.xlsx$/i.test(fileName || '')
 }
 
+// 25/11 (Ramiro, hoja Rocoteca del xlsx): algunas celdas vienen con las tildes mal codificadas
+// ("Uso rocÃ³dromo" en vez de "Uso rocódromo") — UTF-8 reinterpretado como Latin-1 al guardar el
+// Excel en algún momento de su historial. Si se detecta el patrón, se decodifica de vuelta; si
+// el texto no es en realidad mojibake (una "Ã" suelta que es de verdad), se deja igual.
+export function arreglaMojibake(s) {
+  if (typeof s !== 'string' || !/[ÃÂ]/.test(s)) return s
+  const codes = [...s].map(c => c.codePointAt(0))
+  if (codes.some(c => c > 255)) return s
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(codes))
+  } catch {
+    return s
+  }
+}
+
 function fmtFechaDDMMYYYY(d) {
   if (!(d instanceof Date) || isNaN(d.getTime())) return ''
   // 25/11 (Ramiro, probado en vivo: "04/01/2026" en vez de "05/01/2026"): con cellDates:true,
@@ -404,7 +419,7 @@ export function parseExpensesXLSX(arrayBuffer, learned = null) {
       const mesTxt     = String(row[2] || '').trim().toLowerCase()
       // 25/11 (Ramiro, probado en vivo): espacios dobles en el concepto del xlsx no casaban con
       // el texto ya guardado (solo recortado al extremo, sin colapsar espacios de en medio).
-      const concepto   = String(row[3] || '').trim().replace(/\s+/g, ' ')
+      const concepto   = arreglaMojibake(String(row[3] || '').trim().replace(/\s+/g, ' '))
       // Redondeado a 2 decimales: Excel puede guardar el float con ruido (1.0799999999999998)
       // que no cuadraría con el importe ya guardado al compararlo en PHP.
       const importeRaw = Number(row[4])
