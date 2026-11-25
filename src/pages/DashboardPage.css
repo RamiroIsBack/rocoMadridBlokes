@@ -524,3 +524,13 @@
 .chf-ical__cals li { align-items: center; }
 .chf-ical__tag { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--color-accent-soft); color: var(--color-text-secondary); font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
 .chf-ical > .dash-input { margin: 4px 0 6px; width: 100%; }
+/* Calendario: la semana arriba y lo demás por meses (25/11) */
+.chf-semana { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 14px; }
+.chf-semana__dia { display: grid; grid-template-columns: 92px 1fr; gap: 10px; align-items: baseline; padding: 5px 8px; border-radius: 8px; }
+.chf-semana__dia .chf-lista { margin: 0; }
+.chf-semana__dia--hoy { background: var(--color-accent-soft); }
+.chf-semana__dia--hoy .chf-gcal__dia { color: var(--color-text-primary); font-weight: 800; }
+.chf-semana__dia--pasado { opacity: 0.5; }
+.chf-semana__nada { color: var(--color-text-secondary); font-size: 0.85rem; }
+.chf-gcal__mes { margin-top: 10px; }
+.chf-gcal__cumple span { font-weight: 700; }

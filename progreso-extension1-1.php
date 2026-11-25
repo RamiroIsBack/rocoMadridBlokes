@@ -26354,26 +26354,52 @@ function cherifs_calendar() {
     $c = cherifs_get();
     // Al navegador solo van el id y el nombre de cada calendario, nunca la dirección
     $cals = array_map(function ($cal) { return array('id' => $cal['id'], 'name' => $cal['name']); }, $c['icals']);
-    if (!$cals) return rest_ensure_response(array('configured' => false, 'calendars' => array(), 'events' => array()));
-    $cached = get_transient('blokes_cherifs_ical');
-    if (is_array($cached) && isset($cached['events'])) {
-        return rest_ensure_response(array('configured' => true, 'calendars' => $cals, 'events' => $cached['events'], 'failed' => $cached['failed']));
-    }
+    // 25/11: desde el lunes de esta semana hasta dentro de ~2 meses (la semana arriba, lo demás por meses)
     $tz   = wp_timezone();
     $from = new DateTime('today', $tz);
-    $to   = (clone $from)->modify('+14 days')->setTime(23, 59);
+    $from->modify('-' . ((int) $from->format('N') - 1) . ' days');
+    $to   = (new DateTime('today', $tz))->modify('+62 days')->setTime(23, 59);
+    $cumples = cherifs_birthdays($from, $to);
     $events = array();
     $failed = array();
-    foreach ($c['icals'] as $cal) {
-        $res = wp_remote_get($cal['url'], array('timeout' => 12));
-        if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) { $failed[] = $cal['name']; continue; }
-        foreach (cherifs_ical_events(wp_remote_retrieve_body($res), $from, $to) as $ev) { $ev['cal'] = $cal['name']; $events[] = $ev; }
+    $cached = $cals ? get_transient('blokes_cherifs_ical') : array('events' => array(), 'failed' => array());
+    if (is_array($cached) && isset($cached['events'])) {
+        $events = $cached['events']; $failed = $cached['failed'];
+    } else {
+        foreach ($c['icals'] as $cal) {
+            $res = wp_remote_get($cal['url'], array('timeout' => 12));
+            if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) { $failed[] = $cal['name']; continue; }
+            foreach (cherifs_ical_events(wp_remote_retrieve_body($res), $from, $to) as $ev) { $ev['cal'] = $cal['name']; $events[] = $ev; }
+        }
+        if (!$cumples && count($failed) === count($c['icals'])) {
+            return new WP_Error('ical_error', 'No se pudo leer el calendario de Google', array('status' => 502));
+        }
+        set_transient('blokes_cherifs_ical', array('events' => $events, 'failed' => $failed), 15 * MINUTE_IN_SECONDS);
     }
-    if (count($failed) === count($c['icals'])) {
-        return new WP_Error('ical_error', 'No se pudo leer el calendario de Google', array('status' => 502));
-    }
+    $events = array_merge($cumples, $events);
     usort($events, function ($a, $b) { return strcmp($a['start'], $b['start']); });
-    $events = array_slice($events, 0, 80);
-    set_transient('blokes_cherifs_ical', array('events' => $events, 'failed' => $failed), 15 * MINUTE_IN_SECONDS);
-    return rest_ensure_response(array('configured' => true, 'calendars' => $cals, 'events' => $events, 'failed' => $failed));
+    $events = array_slice($events, 0, 200);
+    return rest_ensure_response(array(
+        'configured' => count($cals) > 0, 'calendars' => $cals, 'events' => $events, 'failed' => $failed,
+        'from' => $from->format('Y-m-d'),
+    ));
+}
+
+// Cumpleaños de las personas activas de Nóminas con fecha de nacimiento en su ficha.
+// Solo sale el nombre y el día (sin año ni edad).
+function cherifs_birthdays($from, $to) {
+    $personal = payroll_get_personal();
+    $out = array();
+    foreach (overtime_visible_people() as $p) {
+        if (isset($p['active']) && !$p['active']) continue;
+        $bd = $personal[$p['id']]['birth_date'] ?? '';
+        if (!preg_match('/^\d{4}-(\d{2})-(\d{2})$/', $bd, $m)) continue;
+        for ($y = (int) $from->format('Y'); $y <= (int) $to->format('Y'); $y++) {
+            $md = ($m[1] === '02' && $m[2] === '29' && !checkdate(2, 29, $y)) ? '02-28' : $m[1] . '-' . $m[2];
+            $dia = $y . '-' . $md;
+            if ($dia < $from->format('Y-m-d') || $dia > $to->format('Y-m-d')) continue;
+            $out[] = array('title' => '🎂 Cumpleaños de ' . $p['name'], 'start' => $dia . 'T00:00', 'end' => '', 'allday' => true, 'location' => '', 'cal' => 'Cumpleaños', 'cumple' => true);
+        }
+    }
+    return $out;
 }

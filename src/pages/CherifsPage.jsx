@@ -21,6 +21,7 @@ const pad = n => String(n).padStart(2, '0')
 const isoHoy = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` }
 const sumarDias = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); const x = new Date(y, m - 1, d + n); return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}` }
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 const fechaCorta = iso => { const [, m, d] = iso.slice(0, 10).split('-').map(Number); return `${d} ${MESES[m - 1]}` }
 const DIAS_SEM = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
 const diaSemana = iso => { const [y, m, d] = iso.slice(0, 10).split('-').map(Number); return DIAS_SEM[new Date(y, m - 1, d).getDay()] }
@@ -461,9 +462,22 @@ function CalendarioGoogle() {
   const sinConfigurar = (data && !data.configured) || (!data && !!error)
   const porDia = {}
   ;(data?.events || []).forEach(ev => { (porDia[ev.start.slice(0, 10)] = porDia[ev.start.slice(0, 10)] || []).push(ev) })
+  // 25/11: arriba la semana (lunes a domingo) y debajo lo demás, agrupado por meses
+  const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  const hoy = iso(new Date())
+  const semana = (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return Array.from({ length: 7 }, (_, i) => { const x = new Date(d); x.setDate(d.getDate() + i); return iso(x) }) })()
+  const porMes = {}
+  Object.keys(porDia).sort().filter(dia => dia > semana[6]).forEach(dia => { (porMes[dia.slice(0, 7)] = porMes[dia.slice(0, 7)] || []).push(dia) })
+  const nombreMes = ym => { const m = Number(ym.slice(5, 7)); const t = MESES_LARGOS[m - 1]; return ym.slice(0, 7) === hoy.slice(0, 7) ? `Resto de ${t}` : t[0].toUpperCase() + t.slice(1) }
+  const Evento = ({ ev }) => (
+    <li className={ev.cumple ? 'chf-gcal__cumple' : ''}>
+      <span>{ev.title}{ev.location && <em> · {ev.location}</em>}{varios && ev.cal && !ev.cumple && <small className="chf-ical__tag">{ev.cal}</small>}</span>
+      <b>{ev.allday ? (ev.cumple ? '' : 'todo el día') : ev.start.slice(11, 16)}</b>
+    </li>
+  )
 
   return (
-    <Card icon="📅" title="Calendario de Google">
+    <Card icon="📅" title="Calendario">
       {(sinConfigurar || editar) ? (
         <form className="chf-ical" onSubmit={guardar}>
           <p className="chf-nota">
@@ -492,22 +506,34 @@ function CalendarioGoogle() {
           </div>
           {msg && <p className="dash-error">{msg}</p>}
         </form>
-      ) : (
+      ) : null}
+      {!editar && data && (
         <>
           {error && <p className="dash-error">{error}</p>}
-          {data?.failed?.length > 0 && <p className="chf-aviso chf-aviso--mal">⚠ No se pudo leer: {data.failed.join(', ')}. Quítalo y vuelve a ponerlo en «Calendarios».</p>}
-          {data && data.events.length === 0 && <p className="dash-empty">Nada en los próximos 14 días.</p>}
-          {Object.entries(porDia).slice(0, 8).map(([dia, evs]) => (
-            <div key={dia} className="chf-gcal">
-              <span className="chf-gcal__dia">{diaSemana(dia)} {fechaCorta(dia)}</span>
-              <ul className="chf-lista">
-                {evs.map((ev, i) => (
-                  <li key={i}><span>{ev.title}{ev.location && <em> · {ev.location}</em>}{varios && ev.cal && <small className="chf-ical__tag">{ev.cal}</small>}</span><b>{ev.allday ? 'todo el día' : ev.start.slice(11, 16)}</b></li>
-                ))}
-              </ul>
+          {data.failed?.length > 0 && <p className="chf-aviso chf-aviso--mal">⚠ No se pudo leer: {data.failed.join(', ')}. Quítalo y vuelve a ponerlo en «Calendarios».</p>}
+          <span className="chf-tablon__lbl">Esta semana</span>
+          <div className="chf-semana">
+            {semana.map(dia => (
+              <div key={dia} className={`chf-semana__dia${dia === hoy ? ' chf-semana__dia--hoy' : ''}${dia < hoy ? ' chf-semana__dia--pasado' : ''}`}>
+                <span className="chf-gcal__dia">{dia === hoy ? 'Hoy' : diaSemana(dia)} {fechaCorta(dia)}</span>
+                {porDia[dia]
+                  ? <ul className="chf-lista">{porDia[dia].map((ev, i) => <Evento key={i} ev={ev} />)}</ul>
+                  : <span className="chf-semana__nada">—</span>}
+              </div>
+            ))}
+          </div>
+          {Object.keys(porMes).length > 0 && Object.entries(porMes).map(([ym, dias]) => (
+            <div key={ym} className="chf-gcal__mes">
+              <span className="chf-tablon__lbl">{nombreMes(ym)}</span>
+              {dias.map(dia => (
+                <div key={dia} className="chf-gcal">
+                  <span className="chf-gcal__dia">{diaSemana(dia)} {fechaCorta(dia)}</span>
+                  <ul className="chf-lista">{porDia[dia].map((ev, i) => <Evento key={i} ev={ev} />)}</ul>
+                </div>
+              ))}
             </div>
           ))}
-          {data?.configured && <button type="button" className="dash-mini" onClick={() => setEditar(true)}>Calendarios ({calendarios.length}) · + Añadir otro</button>}
+          {data.configured && <button type="button" className="dash-mini" onClick={() => setEditar(true)}>Calendarios ({calendarios.length}) · + Añadir otro</button>}
         </>
       )}
     </Card>
