@@ -12949,6 +12949,7 @@ function superadmin_gestion_vuelve_tras_lesion($request) {
     if ($motivo === '') $motivo = 'Vuelve tras lesión/ausencia';
     $fecha   = sanitize_text_field((string) $request->get_param('fecha')); // Y-m-d, opcional: hoy por defecto
     $simular = (bool) $request->get_param('simular');
+    $confirmar_bug_1711 = (bool) $request->get_param('confirmarRevisionBug1711');
     // Pedidos que Eva quiere anular sin cobrar (los meses que no vino) — si no dice cuáles,
     // se anulan solos todos los pendientes salvo el que se va a cobrar (nunca se quedan
     // colgando generando otro aviso de impago).
@@ -12960,6 +12961,15 @@ function superadmin_gestion_vuelve_tras_lesion($request) {
     }
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    // 25/11 (Ramiro, caso Sergio Díaz #6526/#7151): comprobar el bloqueo del bug del
+    // auto-aplicado (17/11) ANTES de anular o redatar ningún pedido — si no, al chocar contra
+    // el 409 de dentro de marcar_cobrado esto ya había escrito cosas y se quedaba a medias
+    // (pedidos anulados sin que se llegara a cobrar el que tocaba).
+    $bloqueado_bug_1711 = blokes_sync_grupos_sub_afectada_bug_1711($sub_id);
+    if (!$simular && $bloqueado_bug_1711 && !$confirmar_bug_1711) {
+        return new WP_Error('revisar_antes_1711', 'Esta suscripción fue completada por el bug del auto-aplicado (17/11) — antes de cobrarla de verdad, mira la simulación en "Informe celdas escritas por error" o confirma a propósito (confirmarRevisionBug1711).', array('status' => 409));
+    }
 
     $order_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
     $pendientes = array();
@@ -12983,6 +12993,7 @@ function superadmin_gestion_vuelve_tras_lesion($request) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'subId' => $sub_id, 'pedidoACobrar' => $order_a_cobrar->get_id(), 'pedidosAAnular' => $ids_a_anular,
             'importe' => $importe, 'metodo' => $metodo, 'motivo' => $motivo, 'fecha' => $fecha_ymd,
+            'bloqueadoBug1711' => $bloqueado_bug_1711,
             'aviso' => sprintf(
                 'Simulación: no se ha escrito nada. Se anularían %d pedido(s) sin factura, se redataría el pedido #%d a %s y se marcaría cobrado (%s €, %s, ajustarPrecio=solo_este_mes si el importe no es el del catálogo).',
                 count($ids_a_anular), $order_a_cobrar->get_id(), date_i18n('d/m/Y', $fecha_ts), number_format($importe, 2, ',', '.'), $metodo
@@ -13010,6 +13021,7 @@ function superadmin_gestion_vuelve_tras_lesion($request) {
     $req->set_param('ajustarPrecio', 'solo_este_mes');
     $req->set_param('motivoExcepcion', $motivo);
     $req->set_param('confirmarDuplicado', true);
+    $req->set_param('confirmarRevisionBug1711', $confirmar_bug_1711);
     $req->set_param('simular', false);
     $resultado = superadmin_gestion_marcar_cobrado($req);
     if (is_wp_error($resultado)) return $resultado;

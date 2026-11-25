@@ -1094,12 +1094,17 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
   // así que si hay otra suscripción en vigor el botón de confirmar se queda bloqueado hasta que
   // alguien elija a propósito "sí, quiero las dos/sigo con esta".
   const [confirmarDuplicado, setConfirmarDuplicado] = useState(false)
+  // 25/11 (Ramiro, caso Sergio Díaz #6526/#7151): casilla para que Gestión/socios puedan
+  // desbloquear aquí mismo el bug del auto-aplicado (17/11), sin tener que pasar por "Informe
+  // celdas escritas por error" — también sirve para "Vuelve tras lesión".
+  const [confirmarRevisionBug1711, setConfirmarRevisionBug1711] = useState(false)
   const [preview, setPreview] = useState(null)
   const [busy, setBusy]       = useState(false)
   const [err, setErr]         = useState(null)
   // 19/11 (cowork §06:25 punto 4): "no deje cancelar a rol gestión" — puede simular/ver el
   // aviso, pero cancelar un duplicado de verdad queda para Ramiro; gestión avisa en su lugar.
   const esGestion = window.blokesSiteData?.userRole === 'gestion'
+  const puedeRevisarBug1711 = ['gestion', 'socio'].includes(window.blokesSiteData?.userRole)
   async function avisarRamiro() {
     setBusy(true); setErr(null)
     try {
@@ -1145,6 +1150,7 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
           sub_id: alumno.subId, importe: Number(importe), metodo, fecha, parcial, nota, mantener_pausa: mantenerPausa, simular: sim,
           ...(preview?.importeDistinto ? { ajustarPrecio, motivoExcepcion: motivoExcepcionPrecio } : {}),
           ...(preview?.posibleDuplicadoSub ? { confirmarDuplicado } : {}),
+          ...(preview?.bloqueadoBug1711 && puedeRevisarBug1711 ? { confirmarRevisionBug1711 } : {}),
         })
       } else if (tipo === 'pausar') {
         if (!motivo.trim()) throw new Error('Pon un motivo.')
@@ -1158,7 +1164,10 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
         res = await gestionCongelarMes({ sub_id: alumno.subId, meses: Number(mesesCongelar) || 1, nota, simular: sim })
       } else if (tipo === 'vuelve_tras_lesion') {
         if (!importe || Number(importe) <= 0) throw new Error('Pon un importe mayor que 0.')
-        res = await gestionVuelveTrasLesion({ sub_id: alumno.subId, importe: Number(importe), metodo, fecha, motivo, simular: sim })
+        res = await gestionVuelveTrasLesion({
+          sub_id: alumno.subId, importe: Number(importe), metodo, fecha, motivo, simular: sim,
+          ...(preview?.bloqueadoBug1711 && puedeRevisarBug1711 ? { confirmarRevisionBug1711 } : {}),
+        })
       } else if (tipo === 'nota') {
         res = await gestionNota({ sub_id: alumno.subId, nota })
       } else if (tipo === 'dar_de_baja') {
@@ -1219,9 +1228,17 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
                   <li key={k}><span>{previewLabel(k)}</span><span>{previewValor(v)}</span></li>
                 ))}
             </ul>
-            {tipo === 'marcar_cobrado' && preview.bloqueadoBug1711 && (
+            {(tipo === 'marcar_cobrado' || tipo === 'vuelve_tras_lesion') && preview.bloqueadoBug1711 && (
               <div className="sv-grp-field sv-to-warn-txt sv-dup-aviso">
-                <p>🔴 <strong>Bloqueado: esta suscripción fue completada por el bug del auto-aplicado (17/11)</strong> — tiene (o tuvo) una celda «tarjeta 17/11/2026» escrita por error en el Excel, no por Eva. Antes de cobrarla de verdad hay que revisarlo (ver «Informe celdas escritas por error» en Supervisión → Cambios del Excel). No se puede confirmar desde aquí mientras siga el bloqueo.</p>
+                <p>🔴 <strong>Bloqueado: esta suscripción fue completada por el bug del auto-aplicado (17/11)</strong> — tiene (o tuvo) una celda «tarjeta 17/11/2026» escrita por error en el Excel, no por Eva. Antes de cobrarla de verdad hay que revisarlo (ver «Informe celdas escritas por error» en Supervisión → Cambios del Excel).</p>
+                {puedeRevisarBug1711 ? (
+                  <label className="sv-grp-field sv-grp-field--check">
+                    <input type="checkbox" checked={confirmarRevisionBug1711} onChange={e => setConfirmarRevisionBug1711(e.target.checked)} />
+                    He revisado este caso (fallo del 17/11)
+                  </label>
+                ) : (
+                  <p>No se puede confirmar desde aquí mientras siga el bloqueo — solo Gestión o un socio puede marcar que lo ha revisado.</p>
+                )}
               </div>
             )}
             {(tipo === 'marcar_cobrado' || tipo === 'cambiar_grupo') && preview.posibleDuplicadoSub && (
@@ -1576,15 +1593,15 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
               <button
                 className="sv-tests-danger sv-tests-danger--confirm"
                 onClick={() => submit(true)}
-                disabled={busy || !!preview.bloqueadoBug1711 || !!preview.adelantadoYaGuardado || (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim())) || (preview.posibleDuplicadoSub && !confirmarDuplicado)}
-                title={preview.bloqueadoBug1711
-                  ? 'Bloqueado por el bug del auto-aplicado (17/11) — revísalo en "Informe celdas escritas por error" antes de cobrar.'
+                disabled={busy || (!!preview.bloqueadoBug1711 && !(puedeRevisarBug1711 && confirmarRevisionBug1711)) || !!preview.adelantadoYaGuardado || (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim())) || (preview.posibleDuplicadoSub && !confirmarDuplicado)}
+                title={(preview.bloqueadoBug1711 && !(puedeRevisarBug1711 && confirmarRevisionBug1711))
+                  ? (puedeRevisarBug1711 ? 'Marca "He revisado este caso" para poder confirmar.' : 'Bloqueado por el bug del auto-aplicado (17/11) — revísalo en "Informe celdas escritas por error" antes de cobrar.')
                   : (preview.adelantadoYaGuardado
                     ? 'Ya hay un pago adelantado guardado para este mes — anúlalo primero si quieres cambiarlo.'
                     : (preview.importeDistinto && (!ajustarPrecio || !motivoExcepcionPrecio.trim()) ? 'Elige una opción y pon el motivo de la excepción de precio.'
                       : (preview.posibleDuplicadoSub && !confirmarDuplicado ? 'Marca la casilla si quieres seguir adelante con el duplicado.' : undefined)))}
               >
-                {busy ? 'Guardando…' : (preview.bloqueadoBug1711 ? 'Bloqueado (revisar primero)' : (preview.adelantadoYaGuardado ? 'Ya hay un adelantado guardado' : 'Confirmar de verdad'))}
+                {busy ? 'Guardando…' : ((preview.bloqueadoBug1711 && !(puedeRevisarBug1711 && confirmarRevisionBug1711)) ? 'Bloqueado (revisar primero)' : (preview.adelantadoYaGuardado ? 'Ya hay un adelantado guardado' : 'Confirmar de verdad'))}
               </button>
               )}
             </>
@@ -3714,6 +3731,7 @@ function GruposTab() {
       )}
       {accion && (
         <AccionModal
+          key={`${accion.tipo}-${accion.targetId ?? accion.alumno.subId}`}
           alumno={accion.alumno}
           tipo={accion.tipo}
           targetId={accion.targetId ?? accion.alumno.subId}
@@ -4607,6 +4625,7 @@ function PendientesCobroTab({ busquedaExterna = '' } = {}) {
 
       {accion && (
         <AccionModal
+          key={`${accion.tipo}-${accion.targetId ?? accion.alumno.subId}`}
           alumno={accion.alumno} tipo={accion.tipo} targetId={accion.targetId}
           onClose={() => setAccion(null)}
           onDone={() => { setAccion(null); refetch() }}
