@@ -422,3 +422,52 @@
   .chf-tablon { grid-template-columns: 1fr; }
   .chf-dinero { grid-template-columns: 1fr; }
 }
+
+/* ─── Cherifs › Dashboard v2 (25/11): cajas ordenables, tablón protagonista ─── */
+.chf-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.chf-head__hint { font-size: 0.8rem; color: var(--color-text-secondary); }
+.chf-tablero { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+.chf-caja { position: relative; min-width: 0; border-radius: 16px; transition: opacity 0.15s, box-shadow 0.15s; }
+.chf-caja--ancha { grid-column: 1 / -1; }
+.chf-caja--moviendo { opacity: 0.4; }
+.chf-caja--destino { box-shadow: 0 0 0 3px var(--color-accent); }
+.chf-asa {
+  position: absolute; top: 8px; right: 10px; z-index: 2; cursor: grab; user-select: none;
+  font-size: 1.1rem; line-height: 1; padding: 4px 6px; border-radius: 6px; color: var(--color-text-secondary);
+}
+.chf-asa:hover { background: var(--color-bg); color: var(--color-text-primary); }
+.chf-asa:active { cursor: grabbing; }
+.chf-caja > .dash-card { height: 100%; }
+.chf-caja .dash-card__head { padding-right: 34px; }
+.chf-caja > .chf-tiles { padding-top: 30px; }
+
+/* Tablón: frase y canciones grandes; formularios solo al pulsar ✎ */
+.chf-tablon { position: relative; padding: 24px 28px; }
+.chf-tablon__edit { position: absolute; top: 8px; right: 44px; margin: 0; }
+.chf-tablon__frase { font-size: 2.6rem; }
+.chf-tablon__vacio { color: var(--color-text-secondary); margin: 6px 0; }
+.chf-songs--grandes li { display: flex; align-items: baseline; gap: 8px; font-size: 1.15rem; padding: 4px 0; }
+.chf-songs--grandes a, .chf-songs__t { font-family: var(--font-heading); font-weight: 700; color: var(--color-text-primary); }
+.chf-songs--grandes a { text-decoration: underline; text-decoration-color: var(--color-accent); text-underline-offset: 3px; }
+.chf-songs__icon { color: var(--color-accent-text); font-size: 1.2rem; }
+
+/* Dinero: cifras que llevan a su origen */
+.chf-dinero a { text-decoration: none; color: inherit; background: var(--color-bg); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; border: 1px solid transparent; }
+.chf-dinero a:hover { border-color: var(--color-accent); }
+.chf-dinero a span { font-size: 0.75rem; color: var(--color-text-secondary); font-weight: 700; }
+.chf-dinero a strong { font-family: var(--font-heading); font-size: 1.35rem; color: var(--color-text-primary); }
+.chf-dinero a em { font-style: normal; font-size: 0.72rem; color: var(--color-text-secondary); }
+.chf-explica { margin-top: 10px; font-size: 0.85rem; color: var(--color-text-secondary); }
+.chf-explica p { margin: 0 0 6px; }
+.chf-explica a { color: var(--color-accent-text); }
+
+/* Tareas: de dónde sale cada cosa */
+.chf-fuente { display: block; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-secondary); margin: 10px 0 4px; }
+.chf-mini-tiles a { background: var(--color-bg); border-radius: 999px; padding: 4px 12px; font-size: 0.85rem; color: var(--color-text-primary); text-decoration: none; border: 1px solid transparent; }
+.chf-mini-tiles a:hover { border-color: var(--color-accent); }
+.chf-lista a { color: var(--color-text-primary); text-decoration: underline; text-decoration-color: var(--color-border); text-underline-offset: 2px; }
+
+@media (max-width: 900px) {
+  .chf-tablero { grid-template-columns: 1fr; }
+  .chf-tablon__frase { font-size: 2rem; }
+}
