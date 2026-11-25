@@ -412,7 +412,18 @@ function CalendarioGoogle() {
     e.preventDefault(); setMsg('')
     try { await saveCherifsIcal(url.trim()); setUrl(''); setEditar(false); reload() } catch (err) { setMsg(err.message) }
   }
-  const sinConfigurar = data && !data.configured
+  // 25/11: «Pegar» lee lo copiado; arrastrar la dirección al recuadro también vale
+  const pegar = async () => {
+    setMsg('')
+    try { const t = await navigator.clipboard.readText(); if (t) setUrl(t.trim()); else setMsg('No hay nada copiado.') }
+    catch { setMsg('El navegador no deja leer lo copiado: pulsa en el recuadro y usa Ctrl+V.') }
+  }
+  const soltar = e => {
+    const t = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
+    if (t) { e.preventDefault(); setUrl(t.trim()) }
+  }
+  // Si la lectura falla (o no hay dirección), se enseña el recuadro para poner la dirección
+  const sinConfigurar = (data && !data.configured) || (!data && !!error)
   const porDia = {}
   ;(data?.events || []).forEach(ev => { (porDia[ev.start.slice(0, 10)] = porDia[ev.start.slice(0, 10)] || []).push(ev) })
 
@@ -424,7 +435,12 @@ function CalendarioGoogle() {
             En Google Calendar: ⚙ Configuración → tu calendario → «Integrar el calendario» → copia la <b>Dirección secreta en formato iCal</b> y pégala aquí.
             Solo sirve para leer los eventos; se guarda en el servidor y no se enseña a nadie.
           </p>
-          <input className="dash-input" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" value={url} onChange={e => setUrl(e.target.value)} />
+          {error && !data && <p className="dash-error">No se pudo leer el calendario ({error}). Vuelve a poner la dirección.</p>}
+          <div className="chf-ical__fila">
+            <input className="dash-input" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" value={url}
+              onChange={e => setUrl(e.target.value)} onDrop={soltar} onDragOver={e => e.preventDefault()} />
+            <button type="button" className="dash-btn" onClick={pegar} title="Pegar lo que has copiado">📋 Pegar</button>
+          </div>
           <div className="dash-form__actions">
             <button className="dash-btn dash-btn--primary" disabled={!url.trim()}>Guardar</button>
             {editar && <button type="button" className="dash-btn" onClick={() => setEditar(false)}>Cancelar</button>}
