@@ -2139,6 +2139,41 @@ function superadmin_expenses_apertura_set($request) {
     return rest_ensure_response(blokes_expenses_apertura_get($year, $entity));
 }
 
+// Movimientos deduplicados de una entidad — mismo criterio que "la línea" (ver
+// blokes_expenses_neto_mensual_real): el MÁXIMO de ocurrencias de cada blokes_exp_item_key()
+// entre ficheros/meses guardados, nunca la suma (dos iguales el mismo día DENTRO de un mismo
+// fichero son reales y no se funden). $year_prefix (opcional, "YYYY") filtra a los options de ese
+// año, para el cuadre de P&L; sin filtro, para "la línea" (histórico completo).
+function blokes_exp_items_dedup($entity, $year_prefix = null) {
+    global $wpdb;
+    $like = $year_prefix
+        ? $wpdb->esc_like('blokes_exp_' . $year_prefix . '_') . '%_' . $wpdb->esc_like($entity)
+        : 'blokes_exp_%_' . $wpdb->esc_like($entity);
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s", $like
+    ), ARRAY_A);
+    $max_por_key = array();
+    $ejemplo_por_key = array();
+    foreach ($rows as $row) {
+        $saved = json_decode($row['option_value'], true);
+        if (!$saved || !is_array($saved['items'] ?? null)) continue;
+        $cuenta_fichero = array();
+        foreach ($saved['items'] as $item) {
+            $k = blokes_exp_item_key($item);
+            $cuenta_fichero[$k] = ($cuenta_fichero[$k] ?? 0) + 1;
+            if (!isset($ejemplo_por_key[$k])) $ejemplo_por_key[$k] = $item;
+        }
+        foreach ($cuenta_fichero as $k => $n) {
+            $max_por_key[$k] = max($max_por_key[$k] ?? 0, $n);
+        }
+    }
+    $out = array();
+    foreach ($max_por_key as $k => $n) {
+        $out[] = array('item' => $ejemplo_por_key[$k], 'n' => $n);
+    }
+    return $out;
+}
+
 // Cuadre saldo↔resultado de una entidad, por AÑO (NOTAS_PARA_CODE_gastos_banco.md, 15/11
 // 11:00/11:15, corrige el 10:55 que Ramiro anuló; generalizado a Rocoteca en 11:45): apertura del
 // año + ingresos − gastos (SIN "Uso de Rocódromo", que no es gasto/ingreso real — los gastos de
@@ -2146,36 +2181,40 @@ function superadmin_expenses_apertura_set($request) {
 // Rocódromo" (línea aparte, informativa — SALE del Club, ENTRA en la Rocoteca) = saldo de hoy.
 // Solo sobre el año en curso (no todo el histórico — usar todo el histórico fue el bug del
 // 10:55/11:15: ancla mal el saldo inicial).
+// 25/11 10:25: usa los MISMOS movimientos que "la línea" (blokes_exp_items_dedup, sin excluir
+// nada salvo Uso de Rocódromo, que ya se separa aparte) — antes, un movimiento marcado "excluido"
+// (casilla manual al revisar, o "transferencia entre cuentas") se descartaba del todo aquí pero
+// SÍ contaba en la línea, dejando resultado/saldoEsperado por debajo del real (Carolina Materiales
+// Octubre, −400 € del 06/11, es uno de ellos). Se siguen listando en "excluidosNoRocodromo" (ya
+// no afecta al resultado, es solo para ver qué eran sin adivinar).
 function blokes_expenses_cuadre($year = null, $entity = 'club') {
     $year   = $year ?: intval((new DateTime())->format('Y'));
     $entity = sanitize_key($entity) ?: 'club';
-    global $wpdb;
-    $like = $wpdb->esc_like('blokes_exp_' . $year . '_') . '%_' . $wpdb->esc_like($entity);
-    $rows = $wpdb->get_results($wpdb->prepare(
-        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s", $like
-    ), ARRAY_A);
     $resultado = 0.0; $traspasos_salida = 0.0; $traspasos_entrada = 0.0;
-    foreach ($rows as $row) {
-        $saved = json_decode($row['option_value'], true);
-        if (!$saved || !is_array($saved['items'] ?? null)) continue;
-        foreach ($saved['items'] as $item) {
-            $concepto_norm = function_exists('iconv')
-                ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
-                : strtolower($item['concepto'] ?? '');
-            $amt = abs(floatval($item['importe'] ?? 0));
-            // "Uso de Rocódromo": sale de la cuenta del Club y entra en la de la Rocoteca, pero
-            // NO es gasto del Club ni ingreso de la Rocoteca (Ramiro, 15/11 11:00: los gastos de
-            // la Rocoteca con ese dinero ya se contabilizan ahí) — se aparta en su propia línea
-            // para el cuadre de saldo de cada entidad, nunca en "gastos"/"ingresos".
-            if (strpos($concepto_norm, 'rocodromo') !== false) {
-                $seccion = $item['section'] ?? 'costes';
-                if ($seccion === 'costes') $traspasos_salida += $amt; else $traspasos_entrada += $amt;
-                continue;
-            }
-            $es_interno = strpos($concepto_norm, 'transferencia entre cuentas') !== false || $item['excluded'];
-            if ($es_interno) continue;
-            if (($item['section'] ?? 'costes') === 'costes') $resultado -= $amt; else $resultado += $amt;
+    $excluidos_no_rocodromo = array();
+    foreach (blokes_exp_items_dedup($entity, (string) $year) as $row) {
+        $item = $row['item']; $n = $row['n'];
+        $concepto_norm = function_exists('iconv')
+            ? strtolower(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $item['concepto'] ?? ''))
+            : strtolower($item['concepto'] ?? '');
+        $amt = abs(floatval($item['importe'] ?? 0)) * $n;
+        // "Uso de Rocódromo": sale de la cuenta del Club y entra en la de la Rocoteca, pero
+        // NO es gasto del Club ni ingreso de la Rocoteca (Ramiro, 15/11 11:00: los gastos de
+        // la Rocoteca con ese dinero ya se contabilizan ahí) — se aparta en su propia línea
+        // para el cuadre de saldo de cada entidad, nunca en "gastos"/"ingresos".
+        if (strpos($concepto_norm, 'rocodromo') !== false) {
+            $seccion = $item['section'] ?? 'costes';
+            if ($seccion === 'costes') $traspasos_salida += $amt; else $traspasos_entrada += $amt;
+            continue;
         }
+        $es_interno = strpos($concepto_norm, 'transferencia entre cuentas') !== false || !empty($item['excluded']);
+        if ($es_interno) {
+            $excluidos_no_rocodromo[] = array(
+                'fecha' => $item['fecha'] ?? '', 'concepto' => $item['concepto'] ?? '',
+                'importe' => round(floatval($item['importe'] ?? 0), 2), 'n' => $n,
+            );
+        }
+        if (($item['section'] ?? 'costes') === 'costes') $resultado -= $amt; else $resultado += $amt;
     }
     $apertura       = blokes_expenses_apertura_get($year, $entity);
     $saldo_hoy_data = blokes_expenses_saldo_real($entity);
@@ -2191,6 +2230,7 @@ function blokes_expenses_cuadre($year = null, $entity = 'club') {
         'saldoEsperado' => $saldo_esperado,
         'saldoHoy' => $saldo_hoy, 'fechaHoy' => $saldo_hoy_data['fecha'],
         'diferencia' => $diferencia,
+        'excluidosNoRocodromo' => $excluidos_no_rocodromo,
     );
 }
 
@@ -6441,29 +6481,9 @@ function blokes_expenses_saldo_mensual($entity) {
 // son reales y nunca se funden entre sí (ver superadmin_save_expenses, mismo criterio al
 // guardar).
 function blokes_expenses_neto_mensual_real($entity) {
-    global $wpdb;
-    $rows = $wpdb->get_results($wpdb->prepare(
-        "SELECT option_value FROM {$wpdb->options} WHERE option_name LIKE %s",
-        'blokes_exp_%_' . $entity
-    ), ARRAY_A);
-    $max_por_key = array();   // dedup_key => máximo de veces vista en UN fichero
-    $ejemplo_por_key = array(); // dedup_key => un item de muestra (fecha/importe/section)
-    foreach ($rows as $row) {
-        $saved = json_decode($row['option_value'], true);
-        if (!$saved || !is_array($saved['items'] ?? null)) continue;
-        $cuenta_fichero = array();
-        foreach ($saved['items'] as $item) {
-            $k = blokes_exp_item_key($item);
-            $cuenta_fichero[$k] = ($cuenta_fichero[$k] ?? 0) + 1;
-            if (!isset($ejemplo_por_key[$k])) $ejemplo_por_key[$k] = $item;
-        }
-        foreach ($cuenta_fichero as $k => $n) {
-            $max_por_key[$k] = max($max_por_key[$k] ?? 0, $n);
-        }
-    }
     $por_mes = array();
-    foreach ($max_por_key as $k => $n) {
-        $item = $ejemplo_por_key[$k];
+    foreach (blokes_exp_items_dedup($entity) as $row) {
+        $item = $row['item']; $n = $row['n'];
         $fecha = $item['fecha'] ?? '';
         if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
         $month  = $m[3] . '-' . str_pad($m[2], 2, '0', STR_PAD_LEFT);

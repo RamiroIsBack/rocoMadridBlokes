@@ -1185,6 +1185,18 @@ function PLTab() {
                 {Math.abs(c.diferencia ?? 0) > 50 ? ` · diferencia ${fmtPLVal(c.diferencia)} sin explicar` : ' · cuadra ✓'}
               </>
             )}
+            {c.excluidosNoRocodromo?.length > 0 && (
+              <details style={{ marginTop: 2 }}>
+                <summary className="sa-link" style={{ cursor: 'pointer', display: 'inline' }}>
+                  {c.excluidosNoRocodromo.length} movimiento{c.excluidosNoRocodromo.length === 1 ? '' : 's'} marcado{c.excluidosNoRocodromo.length === 1 ? '' : 's'} "excluido"/"transferencia entre cuentas" (ya cuentan en el resultado, igual que en la línea)
+                </summary>
+                <ul style={{ margin: '4px 0', paddingLeft: 18, fontSize: '0.85em' }}>
+                  {c.excluidosNoRocodromo.map((it, i) => (
+                    <li key={i}>{it.fecha} · {it.concepto} · {fmtPLVal(it.importe)}{it.n > 1 ? ` ×${it.n}` : ''}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
           </p>
         )
       ))}
