@@ -605,3 +605,13 @@
 .chf-gcal__mes > .chf-tablon__lbl { grid-column: 1 / -1; }
 .chf-gcal__mes .chf-gcal { margin: 0; border: 1px solid var(--color-border); border-radius: 8px; padding: 8px 10px; }
 .chf-semana .chf-lista li, .chf-gcal__mes .chf-lista li { flex-wrap: wrap; gap: 2px 8px; font-size: 0.85rem; }
+/* Tareas: selección múltiple (25/11) */
+.chf-agrupar__sel { margin-left: auto; }
+.chf-bloque { position: sticky; bottom: 10px; z-index: 5; order: 99; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px; background: var(--color-surface); border: 2px solid var(--color-accent); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15); }
+.chf-bloque__fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.chf-bloque__fila .dash-input { width: auto; flex: 0 1 150px; }
+.chf-bloque__grupo { display: inline-flex; gap: 4px; }
+.chf-t__check--sel { border-radius: 50%; }
+.chf-t__check--on { background: var(--color-accent); border-color: var(--color-accent); color: #1d1d1b; }
+.chf-t--sel { background: var(--color-accent-soft); }
+.chf-tareas__gtit .dash-mini { margin-left: auto; }

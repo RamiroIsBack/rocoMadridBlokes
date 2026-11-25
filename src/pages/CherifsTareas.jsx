@@ -29,6 +29,10 @@ export default function CherifsTareas() {
   const [abierta, setAbierta] = useState(null)      // id de la tarea desplegada, o 'nueva'
   const [aviso, setAviso] = useState('')
   const [copiando, setCopiando] = useState(false)
+  // 25/11: selección múltiple para ordenar de golpe lo que vino de Notion
+  const [sel, setSel] = useState(null)              // null = modo normal; Set de bids = seleccionando
+  const [progreso, setProgreso] = useState('')
+  const [fechaNueva, setFechaNueva] = useState('')
   useEffect(() => { try { localStorage.setItem(FILTROS_KEY, JSON.stringify(f)) } catch { /* sin almacenamiento */ } }, [f])
   const cambia = (k, v) => setF(x => ({ ...x, [k]: v }))
 
@@ -98,6 +102,32 @@ export default function CherifsTareas() {
     } catch (e) { setAviso(e.message) } finally { setCopiando(false) }
   }
 
+  const toggleSel = bids => setSel(s => {
+    const n = new Set(s)
+    const todas = bids.every(b => n.has(b))
+    bids.forEach(b => (todas ? n.delete(b) : n.add(b)))
+    return n
+  })
+  // Aplica el cambio a cada seleccionada (de 6 en 6); cambio = objeto o función (tarea) → objeto
+  const aplicar = async (cambio, texto) => {
+    const lista = items.filter(t => sel?.has(t.bid))
+    if (!lista.length) return
+    if (lista.length > 5 && !window.confirm(`${texto} en ${lista.length} tareas. ¿Seguimos?`)) return
+    setAviso(''); let hechas = 0; const fallos = []
+    for (let i = 0; i < lista.length; i += 6) {
+      setProgreso(`Cambiando ${Math.min(i + 6, lista.length)} de ${lista.length}…`)
+      await Promise.all(lista.slice(i, i + 6).map(async t => {
+        try { guardada(await updateActivity(t.bid, typeof cambio === 'function' ? cambio(t) : cambio)); hechas++ }
+        catch (e) { fallos.push(`${t.title}: ${e.message}`) }
+      }))
+    }
+    setProgreso('')
+    setAviso(`✓ ${texto}: ${hechas} tareas.${fallos.length ? ` No se pudo con ${fallos.length}: ${fallos.slice(0, 3).join(' · ')}` : ''}`)
+    setSel(new Set())
+  }
+  const visibles = grupos.flatMap(([, l]) => l.map(t => t.bid)).filter((b, i, a) => a.indexOf(b) === i)
+  const nSel = sel ? sel.size : 0
+
   const abiertasTotal = items.filter(t => !HECHAS.has(t.status?.name)).length
   const atrasadas = items.filter(t => t.start && t.start.slice(0, 10) < hoy && !HECHAS.has(t.status?.name)).length
 
@@ -163,22 +193,73 @@ export default function CherifsTareas() {
           ))}
           {(f.quien || f.area || f.prio || f.cuando || f.estado !== 'abiertas' || f.texto) &&
             <button type="button" className="dash-mini" onClick={() => setF(x => ({ ...FILTROS_INICIALES, agrupar: x.agrupar }))}>Quitar filtros</button>}
+          <button type="button" className={`dash-mini chf-agrupar__sel${sel ? ' dash-mini--on' : ''}`} onClick={() => { setSel(sel ? null : new Set()); setAbierta(null) }}>
+            {sel ? '✕ Terminar selección' : '☑ Seleccionar varias'}
+          </button>
         </div>
       </section>
+
+      {sel && (
+        <div className="chf-bloque">
+          <div className="chf-bloque__fila">
+            <b>{nSel} seleccionadas</b>
+            <button type="button" className="dash-mini" onClick={() => toggleSel(visibles)}>
+              {visibles.length && visibles.every(b => sel.has(b)) ? 'Quitar todas' : `Todas las que se ven (${visibles.length})`}
+            </button>
+            {progreso && <span className="chf-nota">{progreso}</span>}
+          </div>
+          {nSel > 0 && !progreso && (
+            <div className="chf-bloque__fila">
+              <button type="button" className="dash-btn" onClick={() => aplicar({ status: 'Listo' }, 'Marcadas como Listo')}>✓ Listo</button>
+              <button type="button" className="dash-btn" onClick={() => aplicar({ status: 'Archivo' }, 'Archivadas')}>Archivar</button>
+              <button type="button" className="dash-btn" onClick={() => aplicar({ start: '', end: '' }, 'Sin fecha')}>Quitar fecha</button>
+              <span className="chf-bloque__grupo">
+                <input type="date" className="dash-input" value={fechaNueva} onChange={e => setFechaNueva(e.target.value)} />
+                <button type="button" className="dash-btn" disabled={!fechaNueva} onClick={() => aplicar({ start: fechaNueva, end: '' }, `Movidas al ${fechaCorta(fechaNueva)}`)}>Poner fecha</button>
+              </span>
+              <select className="dash-input" value="" onChange={e => e.target.value && aplicar({ priority: e.target.value === '—' ? '' : e.target.value }, `Prioridad ${e.target.value}`)}>
+                <option value="">Prioridad…</option>
+                {PRIORIDADES.map(p => <option key={p} value={p}>{p}</option>)}
+                <option value="—">Sin prioridad</option>
+              </select>
+              <select className="dash-input" value="" onChange={e => {
+                const o = e.target.value
+                if (o === '—') aplicar({ owners: [] }, 'Sin encargado')
+                else if (o) aplicar(t => ({ owners: t.owners.includes(o) ? t.owners : [...t.owners, o] }), `Encargado ${o}`)
+              }}>
+                <option value="">Encargado…</option>
+                {(data?.owners || []).map(o => <option key={o} value={o}>+ {o}</option>)}
+                <option value="—">Quitar encargados</option>
+              </select>
+              <select className="dash-input" value="" onChange={e => e.target.value && aplicar({ category: e.target.value }, `Área ${e.target.value}`)}>
+                <option value="">Área…</option>
+                {(data?.categories || []).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
 
       {!data && !error && <p className="dash-empty">Cargando…</p>}
       {data && filtradas.length === 0 && <p className="dash-empty">No hay tareas con estos filtros.</p>}
       {grupos.map(([g, lista]) => (
         <section key={g} className="dash-card chf-tareas__seccion">
-          <h3 className={`chf-tareas__gtit${g === 'Atrasadas' ? ' chf-tareas__gtit--mal' : ''}`}>{g} <small>{lista.length}</small></h3>
+          <h3 className={`chf-tareas__gtit${g === 'Atrasadas' ? ' chf-tareas__gtit--mal' : ''}`}>{g} <small>{lista.length}</small>
+            {sel && <button type="button" className="dash-mini" onClick={() => toggleSel(lista.map(t => t.bid))}>
+              {lista.every(t => sel.has(t.bid)) ? 'Quitar el grupo' : 'Seleccionar el grupo'}</button>}
+          </h3>
           <ul className="chf-tareas__lista">
             {lista.map(t => (
-              <li key={`${g}-${t.bid}`} className={HECHAS.has(t.status?.name) ? 'chf-t--hecha' : ''}>
+              <li key={`${g}-${t.bid}`} className={`${HECHAS.has(t.status?.name) ? 'chf-t--hecha' : ''}${sel?.has(t.bid) ? ' chf-t--sel' : ''}`}>
                 <div className="chf-t">
-                  <button type="button" className="chf-t__check" title={HECHAS.has(t.status?.name) ? 'Volver a abrir' : 'Marcar como hecha'} onClick={() => marcarHecha(t)}>
-                    {HECHAS.has(t.status?.name) ? '✓' : ''}
-                  </button>
-                  <button type="button" className="chf-t__main" onClick={() => setAbierta(abierta === t.bid ? null : t.bid)}>
+                  {sel
+                    ? <button type="button" className={`chf-t__check chf-t__check--sel${sel.has(t.bid) ? ' chf-t__check--on' : ''}`} title="Seleccionar" onClick={() => toggleSel([t.bid])}>
+                        {sel.has(t.bid) ? '✓' : ''}
+                      </button>
+                    : <button type="button" className="chf-t__check" title={HECHAS.has(t.status?.name) ? 'Volver a abrir' : 'Marcar como hecha'} onClick={() => marcarHecha(t)}>
+                        {HECHAS.has(t.status?.name) ? '✓' : ''}
+                      </button>}
+                  <button type="button" className="chf-t__main" onClick={() => sel ? toggleSel([t.bid]) : setAbierta(abierta === t.bid ? null : t.bid)}>
                     {t.priority && <span className={`chf-prio chf-prio--${t.priority.toLowerCase()}`}>{t.priority}</span>}
                     <span className="chf-t__titulo">{t.title}</span>
                     {t.category?.name && f.agrupar !== 'area' && <span className="chf-ical__tag">{t.category.name}</span>}
