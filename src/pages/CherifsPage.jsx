@@ -21,7 +21,6 @@ const pad = n => String(n).padStart(2, '0')
 const isoHoy = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` }
 const sumarDias = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); const x = new Date(y, m - 1, d + n); return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}` }
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
-const MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 const fechaCorta = iso => { const [, m, d] = iso.slice(0, 10).split('-').map(Number); return `${d} ${MESES[m - 1]}` }
 const DIAS_SEM = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
 const diaSemana = iso => { const [y, m, d] = iso.slice(0, 10).split('-').map(Number); return DIAS_SEM[new Date(y, m - 1, d).getDay()] }
@@ -421,6 +420,7 @@ function CalendarioGoogle() {
   const [editar, setEditar] = useState(false)
   const [msg, setMsg] = useState('')
   const [nombre, setNombre] = useState('')
+  const [verTodo, setVerTodo] = useState(false)
   // 25/11: varios calendarios; cada uno con su nombre, que sale junto a sus eventos
   const guardar = async e => {
     e.preventDefault(); setMsg('')
@@ -471,19 +471,13 @@ function CalendarioGoogle() {
   const sinConfigurar = (data && !data.configured) || (!data && !!error)
   const porDia = {}
   ;(data?.events || []).forEach(ev => { (porDia[ev.start.slice(0, 10)] = porDia[ev.start.slice(0, 10)] || []).push(ev) })
-  // 25/11: arriba la semana (lunes a domingo) y debajo lo demás, agrupado por meses
+  // 25/11 (tarde, Álvaro: «más sintético»): una sola fila con los próximos días que tienen algo,
+  // desde hoy; cada evento en una línea (el texto entero y el lugar, al pasar el ratón).
   const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
   const hoy = iso(new Date())
-  const semana = (() => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return Array.from({ length: 7 }, (_, i) => { const x = new Date(d); x.setDate(d.getDate() + i); return iso(x) }) })()
-  const porMes = {}
-  Object.keys(porDia).sort().filter(dia => dia > semana[6]).forEach(dia => { (porMes[dia.slice(0, 7)] = porMes[dia.slice(0, 7)] || []).push(dia) })
-  const nombreMes = ym => { const m = Number(ym.slice(5, 7)); const t = MESES_LARGOS[m - 1]; return ym.slice(0, 7) === hoy.slice(0, 7) ? `Resto de ${t}` : t[0].toUpperCase() + t.slice(1) }
-  const Evento = ({ ev }) => (
-    <li className={ev.cumple ? 'chf-gcal__cumple' : ''}>
-      <span>{ev.title}{ev.location && <em> · {ev.location}</em>}{varios && ev.cal && !ev.cumple && <small className="chf-ical__tag">{ev.cal}</small>}</span>
-      <b>{ev.allday ? (ev.cumple ? '' : 'todo el día') : ev.start.slice(11, 16)}</b>
-    </li>
-  )
+  const VISIBLES = 7
+  const proximos = Object.keys(porDia).sort().filter(dia => dia >= hoy)
+  const visibles = verTodo ? proximos : proximos.slice(0, VISIBLES)
 
   return (
     <Card icon="📅" title="Calendario">
@@ -520,29 +514,28 @@ function CalendarioGoogle() {
         <>
           {error && <p className="dash-error">{error}</p>}
           {data.failed?.length > 0 && <p className="chf-aviso chf-aviso--mal">⚠ No se pudo leer: {data.failed.join(', ')}. Quítalo y vuelve a ponerlo en «Calendarios».</p>}
-          <span className="chf-tablon__lbl">Esta semana</span>
-          <div className="chf-semana">
-            {/* 25/11: solo los días con algo */}
-            {semana.filter(dia => porDia[dia]).map(dia => (
-              <div key={dia} className={`chf-semana__dia${dia === hoy ? ' chf-semana__dia--hoy' : ''}${dia < hoy ? ' chf-semana__dia--pasado' : ''}`}>
-                <span className="chf-gcal__dia">{dia === hoy ? 'Hoy' : diaSemana(dia)} {fechaCorta(dia)}</span>
-                <ul className="chf-lista">{porDia[dia].map((ev, i) => <Evento key={i} ev={ev} />)}</ul>
+          <div className="chf-cal">
+            {visibles.map(dia => (
+              <div key={dia} className={`chf-cal__dia${dia === hoy ? ' chf-cal__dia--hoy' : ''}`}>
+                <span className="chf-cal__fecha">{dia === hoy ? 'Hoy' : diaSemana(dia)} {fechaCorta(dia)}</span>
+                {porDia[dia].map((ev, i) => (
+                  <span key={i} className={`chf-cal__ev${ev.cumple ? ' chf-cal__ev--cumple' : ''}`}
+                    title={`${ev.title}${ev.location ? ` · ${ev.location}` : ''}${varios && ev.cal && !ev.cumple ? ` (${ev.cal})` : ''}`}>
+                    {!ev.allday && <b>{ev.start.slice(11, 16)}</b>} {ev.title}
+                  </span>
+                ))}
               </div>
             ))}
-            {!semana.some(dia => porDia[dia]) && <span className="chf-semana__nada">Nada esta semana.</span>}
+            {!proximos.length && <span className="chf-semana__nada">Nada en los próximos días.</span>}
           </div>
-          {Object.keys(porMes).length > 0 && Object.entries(porMes).map(([ym, dias]) => (
-            <div key={ym} className="chf-gcal__mes">
-              <span className="chf-tablon__lbl">{nombreMes(ym)}</span>
-              {dias.map(dia => (
-                <div key={dia} className="chf-gcal">
-                  <span className="chf-gcal__dia">{diaSemana(dia)} {fechaCorta(dia)}</span>
-                  <ul className="chf-lista">{porDia[dia].map((ev, i) => <Evento key={i} ev={ev} />)}</ul>
-                </div>
-              ))}
-            </div>
-          ))}
-          {data.configured && <button type="button" className="dash-mini" onClick={() => setEditar(true)}>Calendarios ({calendarios.length}) · + Añadir otro</button>}
+          <div className="chf-cal__pie">
+            {proximos.length > VISIBLES && (
+              <button type="button" className="dash-mini" onClick={() => setVerTodo(v => !v)}>
+                {verTodo ? 'Ver menos' : `Ver ${proximos.length - VISIBLES} días más`}
+              </button>
+            )}
+            {data.configured && <button type="button" className="dash-mini" onClick={() => setEditar(true)}>Calendarios ({calendarios.length}) · + Añadir otro</button>}
+          </div>
         </>
       )}
     </Card>
