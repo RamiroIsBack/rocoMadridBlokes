@@ -3,6 +3,28 @@ import { fetchWithNonceRetry } from '../utils/wpNonce'
 
 const CLUB_URL = import.meta.env.VITE_CLUB_WORDPRESS_URL || 'https://rocomadrid.com/club'
 
+// 25/11 (Ramiro, caso Sergio Díaz): el reloj del ordenador de recepción puede ir mal (iba al
+// 17/11) — en vez de montar un endpoint aparte para "la hora del servidor", se lee la cabecera
+// Date que ya trae CUALQUIER respuesta HTTP y se guarda la diferencia con el reloj del
+// navegador. horaServidorAhora() la usan los sitios que necesitan "hoy" de verdad (p. ej. la
+// Fecha de Marcar cobrado/Vuelve tras lesión), y se puede avisar si la diferencia es grande.
+export let relojServidorSkewMs = null // ahora_servidor − ahora_navegador, en ms; null = aún no se sabe
+function registrarRelojServidor(res) {
+  try {
+    const cabecera = res?.headers?.get?.('date')
+    if (!cabecera) return
+    const servidorMs = new Date(cabecera).getTime()
+    if (!isNaN(servidorMs)) relojServidorSkewMs = servidorMs - Date.now()
+  } catch { /* nunca bloquea la respuesta real por esto */ }
+}
+export function horaServidorAhora() {
+  return new Date(Date.now() + (relojServidorSkewMs || 0))
+}
+// true si el reloj del navegador difiere del servidor en más de 1 día (reloj mal puesto).
+export function relojDesincronizado() {
+  return relojServidorSkewMs != null && Math.abs(relojServidorSkewMs) > 24 * 60 * 60 * 1000
+}
+
 function useEndpoint(path, params = {}) {
   const [data, setData]       = useState(null)
   const [raw, setRaw]         = useState(null)
@@ -20,6 +42,7 @@ function useEndpoint(path, params = {}) {
     // tras refrescarlo (sesión abierta muchas horas — Ramiro, 5/11) use el nuevo de verdad.
     fetchWithNonceRetry(() => fetch(url, { headers: { 'X-WP-Nonce': window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || '' } }))
       .then(r => {
+        registrarRelojServidor(r)
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
       })
@@ -76,6 +99,7 @@ async function gestionCall(method, path, body) {
     headers: { 'Content-Type': 'application/json', 'X-WP-Nonce': window.blokesSiteData?.clubNonce || window.blokesSiteData?.nonce || '' },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   }))
+  registrarRelojServidor(res)
   const json = await res.json().catch(() => null)
   if (!res.ok) {
     const err = new Error(json?.message || `HTTP ${res.status}`)

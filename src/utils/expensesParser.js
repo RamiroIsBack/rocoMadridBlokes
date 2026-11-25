@@ -1,3 +1,5 @@
+import * as XLSX from 'xlsx'
+
 // ── Auto-exclusion: intra-entity transfers + inter-company payments ───
 // These cancel out in a consolidated view of both companies.
 // They are auto-marked excluded so the "Sin internos" toggle hides them,
@@ -341,4 +343,87 @@ export function parseExpensesCSV(text, learned = null) {
   const lines = clean.split('\n').filter(l => l.trim())
   const fmt = detectFormat(lines)
   return fmt === 'flat' ? parseFlat(lines, learned) : parseSectioned(lines, learned)
+}
+
+// ── xlsx de reconciliación bancaria (Ramiro, 25/11) ────────────────────
+// Excel ya revisado movimiento a movimiento contra los CSV del banco
+// (datos_privados/Movimientos_bancarios_*.xlsx — nunca se sube al repo público), con una hoja
+// "Resumen" (solo para comprobar a ojo) y una hoja por cuenta: "Fecha", "Fecha valor", "Mes",
+// "Concepto", "Importe", "Saldo". A diferencia del CSV, el mes de cada fila es el de la columna
+// "Mes" (decidido a mano, verificado contra el Resumen), no el que saldría de recalcular desde
+// la fecha valor.
+const MESES_ES = {
+  enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6,
+  julio: 7, agosto: 8, septiembre: 9, octubre: 10, noviembre: 11, diciembre: 12,
+}
+
+// Nombre de hoja → entidad. Las dos cuentas de la Rocoteca (Laboral Kutxa + BBVA) son la misma
+// entidad a efectos de Gastos, igual que al subir sus CSV por separado.
+const XLSX_SHEET_ENTITY = {
+  'Club - Laboral Kutxa':     'club',
+  'Rocoteca - Laboral Kutxa': 'rocoteca',
+  'Rocoteca - BBVA':          'rocoteca',
+}
+
+export function isExpensesXLSXFile(fileName) {
+  return /\.xlsx$/i.test(fileName || '')
+}
+
+function fmtFechaDDMMYYYY(d) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return ''
+  // getUTC*, no getDate()/getMonth(): XLSX con cellDates:true representa el día de la celda en
+  // UTC — usar los getters locales desplazaría la fecha un día según la zona del navegador.
+  const dd = String(d.getUTCDate()).padStart(2, '0')
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}/${d.getUTCFullYear()}`
+}
+
+// Mismo formato que ya trae el CSV del banco (punto de los miles, coma decimal) — tiene que
+// coincidir con el texto que ya está guardado para que blokes_exp_item_key() (fecha|concepto|
+// importe|saldo) case bien con movimientos ya existentes y no se dupliquen.
+function fmtSaldoEs(n) {
+  if (n === '' || n == null || isNaN(n)) return ''
+  return Number(n).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+export function parseExpensesXLSX(arrayBuffer, learned = null) {
+  const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true })
+  const ingresos = [], costes = []
+  let id = 0
+  for (const sheetName of wb.SheetNames) {
+    const entity = XLSX_SHEET_ENTITY[sheetName]
+    if (!entity) continue
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, defval: '' })
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i]
+      const fechaDate  = row[0]
+      const fecha      = fmtFechaDDMMYYYY(fechaDate)
+      const fechaValor = fmtFechaDDMMYYYY(row[1]) || fecha
+      const mesTxt     = String(row[2] || '').trim().toLowerCase()
+      const concepto   = String(row[3] || '').trim()
+      const importe    = Number(row[4])
+      const saldo      = fmtSaldoEs(row[5])
+      if (!fecha || !concepto || !importe || isNaN(importe)) continue
+      const mesNum = MESES_ES[mesTxt]
+      const anio   = fechaDate instanceof Date ? fechaDate.getUTCFullYear() : null
+      const month  = (mesNum && anio) ? `${anio}-${String(mesNum).padStart(2, '0')}` : (parseMonth(fechaValor) || parseMonth(fecha))
+      const isIncome = importe > 0
+      const cat = autoCategory(concepto, isIncome, learned)
+      const item = {
+        id: `xlsx-${entity}-${id++}`,
+        fecha, fechaValor, month, concepto,
+        cuenta: '', // el Excel no trae número de cuenta — la hoja ya dice la entidad
+        entityFixed: entity,
+        importe, saldo,
+        category: cat, ruleCat: cat,
+        iva: CATEGORY_IVA[cat] ?? 21,
+        excluded: isExcluded(concepto),
+        needsReview: needsReview(concepto),
+        section: isIncome ? 'ingresos' : 'costes',
+      }
+      if (isIncome) ingresos.push(item)
+      else costes.push(item)
+    }
+  }
+  return { ingresos, costes }
 }

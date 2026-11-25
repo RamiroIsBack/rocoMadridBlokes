@@ -36,6 +36,7 @@ import {
   gestionProfesTelefonosGet, gestionProfesTelefonoSet,
   useBajas, gestionBajaMotivoSet, gestionBajaContacto,
   gestionAltaContacto, gestionAltasContactosGet,
+  horaServidorAhora, relojDesincronizado,
 } from '../hooks/useSuperAdmin'
 import OvertimeTab from './OvertimeTab'
 import TimeOffTab from './TimeOffTab'
@@ -84,6 +85,28 @@ const DAY_NORM  = { lunes: 0, martes: 1, miercoles: 2, jueves: 3, viernes: 4 }
 
 function normStr(s) {
   return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+// 24/11 18:45 / 25/11 (Ramiro): solo para "Cambiar de grupo"/"Crear cliente" (gruposParaSelector)
+// — la edad va siempre en la etiqueta, a diferencia del título de la pestaña Grupos
+// (progreso-extension1-1.php, superadmin_gestion_grupos(), que solo la añade si no es Adultos).
+// Añade el sufijo solo si el label todavía no lo trae (evita duplicarlo en los grupos que ya
+// vienen con "· Niños"/"· Adol." del backend).
+function etiquetaSufijoEdad(edad) {
+  if (!edad || edad === 'Adultos') return 'Adultos'
+  if (/menores/i.test(edad)) return 'Niños'
+  if (/adolescentes/i.test(edad)) return 'Adol.'
+  return edad
+}
+function etiquetaSelector(g) {
+  const sufijo = ` · ${etiquetaSufijoEdad(g.edad)}`
+  return g.label.endsWith(sufijo) ? g.label : `${g.label}${sufijo}`
+}
+const DIA_BUCKET_SELECTOR = { 'Lunes-Miércoles': 0, 'Martes-Jueves': 1, 'Viernes': 2 }
+function diaBucketSelector(dia) { return DIA_BUCKET_SELECTOR[dia] ?? 3 }
+function minutosInicioSelector(horario) {
+  const m = String(horario || '').match(/(\d{1,2}):(\d{2})/)
+  return m ? (+m[1]) * 60 + (+m[2]) : 9999
 }
 
 function parseClassMeta(label) {
@@ -1045,7 +1068,15 @@ const METODO_CONSECUENCIA = {
   bizum: 'Se completará el pedido y se emitirá factura real (Verifactu/AEAT), con la fecha de hoy.',
   wellhub: 'Se completará el pedido y se emitirá factura real (Verifactu/AEAT), con la fecha de hoy.',
 }
-const hoyISO = () => new Date().toISOString().slice(0, 10)
+// 25/11 (Ramiro, caso Sergio Díaz): "hoy" según el reloj del SERVIDOR (corregido con la
+// diferencia de la cabecera Date de cualquier respuesta — ver horaServidorAhora), no el del
+// ordenador local (el de recepción iba al 17/11 sin que nadie se diera cuenta). Y nunca
+// toISOString(), que da el día en UTC — entre las 00:00 y la 1-2 de la madrugada en hora local
+// seguiría mostrando el día de ayer.
+const hoyISO = () => {
+  const d = horaServidorAhora()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
   const [importe, setImporte] = useState(alumno.importeCatalogo ? String(alumno.importeCatalogo) : '')
@@ -1217,6 +1248,9 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
     <div className="sv-grp-overlay" onClick={onClose}>
       <div className="sv-grp-modal" onClick={e => e.stopPropagation()}>
         <h3>{titulos[tipo]}{alumno.subId ? ` — ${alumno.alumno || `Suscripción #${alumno.subId}`}` : ''}</h3>
+        {relojDesincronizado() && (
+          <p className="sv-to-warn-txt">⚠ El reloj de este ordenador no coincide con el del servidor — las fechas de aquí usan la fecha del servidor, comprueba el reloj del ordenador.</p>
+        )}
 
         {preview ? (
           <>
@@ -3144,11 +3178,16 @@ function GruposTab() {
       // 20/11 (cowork, prueba en producción): salían variaciones privadas/sin publicar (p. ej.
       // Miércoles 09:00-10:30 y 21:00-22:30) — no son clases reales que se puedan ofrecer.
       .filter(c => c.tipo === 'single' && c.dia && c.horario && c.status === 'publish')
-      .map(c => ({
-        dia: c.dia, horario: c.horario, edad: c.edad || 'Adultos',
-        label: `${c.dia} · ${c.horario}${c.edad && c.edad !== 'Adultos' ? ` (${c.edad})` : ''} — solo ${c.dia}`,
-      }))
-    return [...grupos, ...sueltos]
+      .map(c => {
+        const edad = c.edad || 'Adultos'
+        return { dia: c.dia, horario: c.horario, edad, label: `${etiquetaSelector({ label: `${c.dia} · ${c.horario}`, edad })} — solo ${c.dia}` }
+      })
+    // 24/11 18:45 / 25/11 (Ramiro): solo aquí (Cambiar de grupo / Crear cliente) la edad va
+    // SIEMPRE en la etiqueta y el orden es por día (Lunes-Miércoles, Martes-Jueves, Viernes,
+    // sueltos y otros) y hora de inicio — nunca por nº de alumnos (eso lo sigue haciendo el
+    // backend solo para el listado real de la pestaña Grupos, que no se toca).
+    return [...grupos.map(g => ({ ...g, label: etiquetaSelector(g) })), ...sueltos]
+      .sort((a, b) => diaBucketSelector(a.dia) - diaBucketSelector(b.dia) || minutosInicioSelector(a.horario) - minutosInicioSelector(b.horario))
   }, [grupos, catalogoClases])
 
   // dia/horario/edad del grupo se cuelgan de cada fila (no solo el label) para que "Cambiar de

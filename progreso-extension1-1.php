@@ -1838,6 +1838,12 @@ function superadmin_save_expenses($request) {
     $entity  = sanitize_text_field($body['entity'] ?? 'rocoteca');
     $items   = is_array($body['items'] ?? null) ? $body['items'] : array();
     $replace = !empty($body['replace']);
+    // 25/11 (Ramiro, reconciliación con datos_privados/Movimientos_bancarios_2026…): antes de
+    // escribir de verdad al re-subir un fichero grande (p. ej. el xlsx de todo el año), poder
+    // ver cuántas filas añadiría de verdad sin tocar nada — si un mes que ya estaba bien
+    // "añadiría" decenas de filas en vez de 0-1, es que algo no casa (p. ej. el formato del
+    // saldo) y hay que pararse antes de duplicar datos reales.
+    $simular = !empty($body['simular']);
 
     if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
         return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
@@ -1858,8 +1864,11 @@ function superadmin_save_expenses($request) {
         );
     }
 
+    $nuevos = array(); // filas que se añaden de verdad (para el modo simular)
+    $existentes_antes = 0;
     if ($replace) {
         $merged = $clean;
+        $nuevos = $clean;
     } else {
         // 24/11 18:55/19:05 (bug real, confirmado en ingresos_items: dos transferencias iguales
         // de Chulkin el mismo día se guardaban como una sola): esto usaba un array asociativo
@@ -1877,7 +1886,7 @@ function superadmin_save_expenses($request) {
             }
         }
         $existentes_por_key = array();
-        foreach (blokes_exp_load_month($month, $entity) as $it) { $existentes_por_key[blokes_exp_item_key($it)][] = $it; }
+        foreach (blokes_exp_load_month($month, $entity) as $it) { $existentes_por_key[blokes_exp_item_key($it)][] = $it; $existentes_antes++; }
         $clean_por_key = array();
         foreach ($clean as $it) { $clean_por_key[blokes_exp_item_key($it)][] = $it; }
 
@@ -1904,8 +1913,19 @@ function superadmin_save_expenses($request) {
             $de_mas    = max(0, count($filas_nuevas) - $ya_aqui - $ya_vecino);
             for ($i = count($filas_nuevas) - $de_mas; $i < count($filas_nuevas); $i++) {
                 $merged[] = $filas_nuevas[$i];
+                $nuevos[] = $filas_nuevas[$i];
             }
         }
+    }
+
+    if ($simular) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'month' => $month, 'entity' => $entity,
+            'existentesAntes' => $existentes_antes, 'totalTrasGuardar' => count($merged),
+            'nuevos' => array_map(function($it) {
+                return array('fecha' => $it['fecha'], 'concepto' => $it['concepto'], 'importe' => $it['importe'], 'saldo' => $it['saldo']);
+            }, $nuevos),
+        )));
     }
 
     $key = blokes_exp_option_key($month, $entity);
@@ -1916,7 +1936,7 @@ function superadmin_save_expenses($request) {
         'saved'  => (new DateTime())->format('c'),
     )), false);
 
-    return rest_ensure_response(array('success' => true, 'month' => $month, 'total' => count($merged)));
+    return rest_ensure_response(array('success' => true, 'month' => $month, 'total' => count($merged), 'nuevos' => count($nuevos)));
 }
 
 // `from`: primer mes a incluir ('YYYY-MM', incluido) o vacío para no limitar ("Todo"). Se

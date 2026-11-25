@@ -3,7 +3,7 @@ import {
   BarChart, Bar, ComposedChart, Line, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
-import { parseExpensesCSV, CATEGORIES, CATEGORY_IVA, autoCategory, detectClubCaixaFormat } from '../utils/expensesParser'
+import { parseExpensesCSV, CATEGORIES, CATEGORY_IVA, autoCategory, detectClubCaixaFormat, parseExpensesXLSX, isExpensesXLSXFile } from '../utils/expensesParser'
 import { useExpenses, gestionExpenseSendersGet, gestionExpenseSenderSet, gestionExpenseVariacionesGet, gestionExpenseVariacionSet } from '../hooks/useSuperAdmin'
 import { getExpenseRules, saveExpenseRules } from '../hooks/useBudget'
 import { conceptKey } from '../utils/expensesParser'
@@ -147,6 +147,14 @@ function UploadPanel({ onSaved }) {
   const [entityHint,     setEntityHint]    = useState(null)
   const [learned,        setLearned]       = useState(null) // reglas aprendidas concepto → categoría
   const [learnedCount,   setLearnedCount]  = useState(0)
+  // 25/11 (Ramiro): xlsx de reconciliación bancaria — ya trae la entidad fija por hoja (sin
+  // columna Cuenta que adivinar) y, antes de guardar de verdad, hay que ver cuántas filas
+  // añadiría cada mes (si un mes que ya estaba bien "añadiera" decenas de filas en vez de 0-1,
+  // algo no casa — p. ej. el formato del saldo — y hay que pararse antes de duplicar datos
+  // reales). Los CSV de toda la vida siguen guardando directo, sin este paso de más.
+  const hasFixedEntity = items.length > 0 && items.every(i => i.entityFixed)
+  const [simPreview,    setSimPreview]     = useState(null) // [{entity, month, existentesAntes, totalTrasGuardar, nuevos}]
+  const [simulando,     setSimulando]      = useState(false)
 
   const uniqueMonths = useMemo(() => {
     const s = new Set(items.filter(i => i.month).map(i => i.month))
@@ -158,29 +166,27 @@ function UploadPanel({ onSaved }) {
     return [...s].sort()
   }, [items])
 
+  // El xlsx de reconciliación ya trae la entidad fija por hoja (entityFixed) — nunca se adivina
+  // por cuenta ni por el selector único, a diferencia de un CSV suelto.
+  const entityOf = useCallback(item => item.entityFixed || (uniqueAccounts.length > 0
+    ? (accountMap[item.cuenta] || 'rocoteca')
+    : singleEntity), [uniqueAccounts, accountMap, singleEntity])
+
   // actual lotes = unique (entity, month) groups — what will actually be POSTed
   const totalLotes = useMemo(() => {
     const groups = new Set()
     items.forEach(item => {
       if (!item.month) return
-      const entity = uniqueAccounts.length > 0
-        ? (accountMap[item.cuenta] || 'rocoteca')
-        : singleEntity
-      groups.add(`${entity}||${item.month}`)
+      groups.add(`${entityOf(item)}||${item.month}`)
     })
     return groups.size || 0
-  }, [items, uniqueAccounts, accountMap, singleEntity])
+  }, [items, entityOf])
 
   const clubItemIds = useMemo(() => {
     const s = new Set()
-    items.forEach(item => {
-      const entity = uniqueAccounts.length > 0
-        ? (accountMap[item.cuenta] || 'rocoteca')
-        : singleEntity
-      if (entity === 'club') s.add(item.id)
-    })
+    items.forEach(item => { if (entityOf(item) === 'club') s.add(item.id) })
     return s
-  }, [items, uniqueAccounts, accountMap, singleEntity])
+  }, [items, entityOf])
 
   const visibleItems = useMemo(() => {
     let filtered = items
@@ -188,6 +194,34 @@ function UploadPanel({ onSaved }) {
     if (previewAccount !== 'all') filtered = filtered.filter(i => i.cuenta  === previewAccount)
     return filtered
   }, [items, previewMonth, previewAccount])
+
+  function afterParse(all) {
+    if (all.length === 0) {
+      setError('No se encontraron movimientos. Comprueba que es el fichero correcto.')
+      setItems([])
+      return
+    }
+    // Deduplicate: same (fecha, concepto, importe, saldo) → keep first occurrence. El saldo
+    // (si el CSV lo trae) va en la clave porque dos movimientos reales y distintos pueden
+    // coincidir en fecha+concepto+importe (p. ej. dos alumnos transfiriendo la misma cuota
+    // el mismo día) y no por eso son el mismo — el saldo posterior sí es único por fila.
+    const seen = new Set()
+    let dupCount = 0
+    const deduped = all.filter(item => {
+      const sig = `${item.fecha}||${item.concepto}||${item.importe}||${item.saldo || ''}`
+      if (seen.has(sig)) { dupCount++; return false }
+      seen.add(sig)
+      return true
+    })
+    setItems(deduped)
+    setPreviewMonth('all')
+    setPreviewAccount('all')
+    setSaved(false)
+    setLearnedCount(0)
+    setSimPreview(null)
+    setError(dupCount > 0 ? `Se eliminaron ${dupCount} movimiento${dupCount > 1 ? 's' : ''} duplicado${dupCount > 1 ? 's' : ''} (mismo día, concepto e importe).` : null)
+    return deduped
+  }
 
   const handleFile = async e => {
     const file = e.target.files[0]
@@ -198,34 +232,27 @@ function UploadPanel({ onSaved }) {
       rules = await getExpenseRules().catch(() => ({}))
       setLearned(rules)
     }
+    // xlsx de reconciliación (datos_privados/Movimientos_bancarios_*.xlsx): ya trae la entidad
+    // fija por hoja, nunca pasa por el selector de cuenta/entidad de los CSV sueltos.
+    if (isExpensesXLSXFile(file.name)) {
+      try {
+        const buf = await file.arrayBuffer()
+        const { ingresos, costes } = parseExpensesXLSX(buf, rules)
+        const deduped = afterParse([...ingresos, ...costes])
+        if (deduped) { setAccountMap({}); setEntityHint(null) }
+      } catch (err) {
+        setError(`Error al leer el Excel: ${err.message}`)
+      } finally {
+        if (fileRef.current) fileRef.current.value = ''
+      }
+      return
+    }
     const reader = new FileReader()
     reader.onload = ev => {
       try {
         const { ingresos, costes } = parseExpensesCSV(ev.target.result, rules)
-        const all = [...ingresos, ...costes]
-        if (all.length === 0) {
-          setError('No se encontraron movimientos. Comprueba que es el extracto correcto del banco.')
-          setItems([])
-          return
-        }
-        // Deduplicate: same (fecha, concepto, importe, saldo) → keep first occurrence. El saldo
-        // (si el CSV lo trae) va en la clave porque dos movimientos reales y distintos pueden
-        // coincidir en fecha+concepto+importe (p. ej. dos alumnos transfiriendo la misma cuota
-        // el mismo día) y no por eso son el mismo — el saldo posterior sí es único por fila.
-        const seen = new Set()
-        let dupCount = 0
-        const deduped = all.filter(item => {
-          const sig = `${item.fecha}||${item.concepto}||${item.importe}||${item.saldo || ''}`
-          if (seen.has(sig)) { dupCount++; return false }
-          seen.add(sig)
-          return true
-        })
-        setItems(deduped)
-        setPreviewMonth('all')
-        setPreviewAccount('all')
-        setSaved(false)
-        setLearnedCount(0)
-        setError(dupCount > 0 ? `Se eliminaron ${dupCount} movimiento${dupCount > 1 ? 's' : ''} duplicado${dupCount > 1 ? 's' : ''} (mismo día, concepto e importe).` : null)
+        const deduped = afterParse([...ingresos, ...costes])
+        if (!deduped) return
         // auto-map known accounts, unknown → rocoteca
         const accounts = [...new Set(deduped.filter(i => i.cuenta).map(i => i.cuenta))]
         const map = {}
@@ -254,23 +281,46 @@ function UploadPanel({ onSaved }) {
   ))
   const changeIva = (id, iva) => setItems(prev => prev.map(i => i.id === id ? { ...i, iva } : i))
 
-  const handleSave = async () => {
-    if (!items.length) return
-    setSaving(true); setError(null); setSaved(false)
-
-    // Group by (entity, month) — prevents overwrite when two accounts share the same entity
+  // Group by (entity, month) — prevents overwrite when two accounts share the same entity
+  function buildLotes() {
     const groupMap = {}
     items.forEach(item => {
       if (!item.month) return
-      const entity = uniqueAccounts.length > 0
-        ? (accountMap[item.cuenta] || 'rocoteca')
-        : singleEntity
+      const entity = entityOf(item)
       const key = `${entity}||${item.month}`
       if (!groupMap[key]) groupMap[key] = { entity, month: item.month, items: [] }
       groupMap[key].items.push(item)
     })
-    const lotes = Object.values(groupMap).filter(g => g.items.length)
+    return Object.values(groupMap).filter(g => g.items.length)
+  }
 
+  // xlsx de reconciliación (Ramiro, 25/11): antes de escribir de verdad, comprobar cuántas filas
+  // añadiría cada mes — si uno que ya estaba bien "añadiera" muchas en vez de 0-1, el saldo no
+  // está casando con lo ya guardado y hay que pararse, no duplicar.
+  async function handleSimular() {
+    setSimulando(true); setError(null)
+    try {
+      const lotes = buildLotes()
+      const resultados = []
+      for (const lote of lotes) {
+        const res = await fetch(`${CLUB_URL}/wp-json/superadmin/v1/expenses`, {
+          method: 'POST', headers: getAuthHeaders(),
+          body: JSON.stringify({ month: lote.month, entity: lote.entity, items: lote.items, simular: true }),
+        })
+        if (!res.ok) throw new Error(`HTTP ${res.status} al comprobar ${fmtMonth(lote.month)} (${lote.entity})`)
+        const r = await res.json()
+        resultados.push({ entity: lote.entity, month: lote.month, ...(r.data || {}) })
+      }
+      resultados.sort((a, b) => (a.entity + a.month).localeCompare(b.entity + b.month))
+      setSimPreview(resultados)
+    } catch (e) { setError(e.message) }
+    finally { setSimulando(false) }
+  }
+
+  const handleSave = async () => {
+    if (!items.length) return
+    setSaving(true); setError(null); setSaved(false)
+    const lotes = buildLotes()
     let count = 0
     try {
       for (const lote of lotes) {
@@ -296,7 +346,7 @@ function UploadPanel({ onSaved }) {
           setLearnedCount(Object.keys(newRules).length)
         } catch { /* los movimientos ya están guardados; la regla se puede corregir luego */ }
       }
-      setSaved(true)
+      setSaved(true); setSimPreview(null)
       if (onSaved) onSaved()
     } catch (e) { setError(e.message) }
     finally { setSaving(false); setSaveProgress('') }
@@ -309,8 +359,8 @@ function UploadPanel({ onSaved }) {
     <div className="exp-upload-panel">
       <div className="exp-upload-controls">
         <div className="exp-file-btn" onClick={() => fileRef.current?.click()}>
-          <input ref={fileRef} type="file" accept=".csv,.txt" onChange={handleFile} style={{ display: 'none' }} />
-          <span>📂</span> Subir CSV del banco
+          <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx" onChange={handleFile} style={{ display: 'none' }} />
+          <span>📂</span> Subir CSV del banco o xlsx de reconciliación
         </div>
         {items.length > 0 && (
           <>
@@ -325,7 +375,9 @@ function UploadPanel({ onSaved }) {
                 </p>
               )}
             </div>
-            {uniqueAccounts.length > 0 ? (
+            {hasFixedEntity ? (
+              <p className="exp-hint" style={{ margin: 0 }}>ⓘ Entidad fija por hoja del Excel — Club y Rocoteca a la vez, sin selector.</p>
+            ) : uniqueAccounts.length > 0 ? (
               <div className="exp-field">
                 <label>Cuentas detectadas</label>
                 <div className="exp-accounts">
@@ -354,13 +406,59 @@ function UploadPanel({ onSaved }) {
                 {entityHint && <p className="exp-hint" style={{ margin: '4px 0 0' }}>ⓘ {entityHint}</p>}
               </div>
             )}
-            <button className={`exp-save-btn${saved ? ' exp-save-btn--ok' : ''}`} onClick={handleSave} disabled={saving}>
-              {saving
-                ? `Guardando ${saveProgress}…`
-                : saved
-                  ? `✓ ${totalLotes} ${totalLotes === 1 ? 'lote guardado' : 'lotes guardados'}`
-                  : `Guardar ${totalLotes} ${totalLotes === 1 ? 'lote' : 'lotes'}`}
-            </button>
+            {hasFixedEntity ? (
+              !simPreview ? (
+                <button className="exp-save-btn" onClick={handleSimular} disabled={simulando}>
+                  {simulando ? 'Comprobando…' : `Comprobar ${totalLotes} ${totalLotes === 1 ? 'mes' : 'meses'} antes de guardar`}
+                </button>
+              ) : (
+                <div className="exp-field" style={{ width: '100%' }}>
+                  <label>Qué añadiría cada mes (nada escrito todavía)</label>
+                  <div className="exp-table-wrap">
+                    <table className="exp-table">
+                      <thead><tr><th>Entidad</th><th>Mes</th><th>Ya había</th><th>Añadiría</th><th>Total tras guardar</th></tr></thead>
+                      <tbody>
+                        {simPreview.map(r => (
+                          <tr key={`${r.entity}-${r.month}`} className={r.nuevos?.length > 3 ? 'exp-row--excluded' : ''}>
+                            <td>{r.entity}</td><td>{fmtMonth(r.month)}</td>
+                            <td>{r.existentesAntes}</td>
+                            <td style={r.nuevos?.length ? { fontWeight: 600 } : undefined}>{r.nuevos?.length || 0}</td>
+                            <td>{r.totalTrasGuardar}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {simPreview.some(r => r.nuevos?.length > 0) && (
+                    <details style={{ marginTop: 6 }}>
+                      <summary className="exp-hint" style={{ cursor: 'pointer' }}>Ver el detalle de las filas que se añadirían</summary>
+                      <ul style={{ fontSize: '0.78rem', margin: '4px 0 0' }}>
+                        {simPreview.flatMap(r => r.nuevos.map((it, i) => (
+                          <li key={`${r.entity}-${r.month}-${i}`}>{r.entity} · {fmtMonth(r.month)} · {it.fecha} · {it.concepto} · {it.importe} € · saldo {it.saldo}</li>
+                        )))}
+                      </ul>
+                    </details>
+                  )}
+                  <p className="exp-hint" style={{ marginTop: 6 }}>
+                    Si un mes que ya estaba bien «añadiría» muchas filas en vez de 0-1-2, no guardes — algo no casa (avisa).
+                  </p>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button className="exp-save-btn" onClick={() => setSimPreview(null)} disabled={saving}>Volver a comprobar / cancelar</button>
+                    <button className={`exp-save-btn${saved ? ' exp-save-btn--ok' : ''}`} onClick={handleSave} disabled={saving}>
+                      {saving ? `Guardando ${saveProgress}…` : saved ? `✓ ${totalLotes} ${totalLotes === 1 ? 'lote guardado' : 'lotes guardados'}` : `Confirmar y guardar ${totalLotes} ${totalLotes === 1 ? 'lote' : 'lotes'}`}
+                    </button>
+                  </div>
+                </div>
+              )
+            ) : (
+              <button className={`exp-save-btn${saved ? ' exp-save-btn--ok' : ''}`} onClick={handleSave} disabled={saving}>
+                {saving
+                  ? `Guardando ${saveProgress}…`
+                  : saved
+                    ? `✓ ${totalLotes} ${totalLotes === 1 ? 'lote guardado' : 'lotes guardados'}`
+                    : `Guardar ${totalLotes} ${totalLotes === 1 ? 'lote' : 'lotes'}`}
+              </button>
+            )}
           </>
         )}
       </div>
