@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { createPortal } from 'react-dom'
+import { createPortal, flushSync } from 'react-dom'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
@@ -277,6 +277,43 @@ function SociosNomina({ people, onChanged }) {
   )
 }
 
+// Alta de profesores, voluntarios y externos desde Cherifs (25/11, Álvaro), sin pasar por
+// Supervisión. Es la misma lista de personas; renombrar o desactivar sigue en Supervisión › Horas extra.
+function AltaPersona({ onChanged }) {
+  const [name, setName] = useState('')
+  const [type, setType] = useState('profesor')
+  const [busy, setBusy] = useState(false)
+  const [msg,  setMsg]  = useState('')
+  async function handleAdd(e) {
+    e.preventDefault()
+    const clean = name.trim()
+    if (!clean) return
+    setBusy(true); setMsg('')
+    try {
+      await addOvertimePerson(clean, type)
+      await onChanged()
+      setName('')
+      setMsg(`✓ ${clean} añadido: rellena su fila en la tabla y pulsa «Guardar configuración»`)
+    } catch (err) {
+      setMsg(`✗ ${err.message}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form className="sa-socios sa-socios__add sa-alta" onSubmit={handleAdd}>
+      <b>Añadir persona</b>
+      <input type="text" maxLength={60} placeholder="Nombre (si se repite, añade una inicial)" className="sa-pay-file__input"
+        value={name} onChange={e => setName(e.target.value)} />
+      <select className="sa-pay-file__input sa-pay-mode" value={type} onChange={e => setType(e.target.value)}>
+        {PERSON_TYPES.filter(t => t.id !== 'socio').map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
+      </select>
+      <button type="submit" className="sa-pay-action" disabled={busy || !name.trim()}>+ Añadir</button>
+      {msg && <span className="sa-pay-feedback">{msg}</span>}
+    </form>
+  )
+}
+
 // Cómo cobra cada persona (25/11). Igual que payroll_pay_mode() del servidor.
 const PAY_MODES = [
   { id: 'nomina', label: 'Nómina' },
@@ -378,6 +415,7 @@ function PayrollConfig({ people, config, onSaved }) {
         por un importe acordado). «Total pactado» solo en nómina, para quien cobra parte en efectivo: el efectivo es lo que
         falta hasta ese total. Al marcar horas como pagadas se guarda el €/h de ese momento, así que cambiarlo no altera lo ya pagado.
       </p>
+      <AltaPersona onChanged={onSaved} />
       <SociosNomina people={people} onChanged={onSaved} />
       <div className="sa-pay-scroll">
         <table className="sa-pay-table">
@@ -748,7 +786,97 @@ function reportRef(month, person) {
   return `NOM-${month}-${person ? person.id.toUpperCase() : 'GENERAL'}`
 }
 
-function PayrollReport({ month, person, personal, notes, rows, entries, totals, byId }) {
+// Informe del mes (general): todos agrupados por cómo cobran, con el cálculo de cada importe, y
+// al final cuánto sale por remesa (nóminas), por transferencias y en efectivo.
+const GRUPOS_COBRO = [
+  { id: 'nomina', title: 'Por nómina (gestoría)', desc: 'Neto del recibo + horas fuera de contrato + horas extra (dentro de la nómina, a €/h brutos: el neto real será algo menor).' },
+  { id: 'horas',  title: 'Por transferencia · por horas', desc: 'Horas/semana pactadas × €/h × 4 semanas + horas extra.' },
+  { id: 'fijo',   title: 'Por transferencia · importe fijo', desc: 'Importe acordado + horas extra.' },
+]
+
+function InformePorFormaDeCobro({ rows, config }) {
+  const efectivoDe = r => r.cash_total != null ? (r.cash_paid ? r.cash_paid.amount : (r.cash_due || 0)) : 0
+  const vias = { remesa: 0, transferencia: 0, efectivo: 0 }
+  rows.forEach(r => {
+    const ef = efectivoDe(r)
+    vias.efectivo += ef
+    if (r.pay_mode === 'nomina') vias.remesa += Math.max(0, r.total - ef)
+    else vias.transferencia += r.total
+  })
+  const calculo = r => {
+    if (r.pay_mode === 'horas') {
+      const w = parseFloat(config?.weekly_hours?.[r.id]) || 0
+      return w && r.rate != null ? `${fmtHours(w)} h × ${fmtEur(r.rate)} × 4` : 'sin horas pactadas'
+    }
+    if (r.pay_mode === 'fijo') return 'acuerdo'
+    const partes = []
+    if (r.cash_total != null) partes.push(`banco ${fmtEur(Math.max(0, r.total - efectivoDe(r)))} + efectivo ${fmtEur(efectivoDe(r))} (total pactado ${fmtEur(r.cash_total)})`)
+    if (r.absent) partes.push('sin asistencia')
+    return partes.join(' · ')
+  }
+
+  return (
+    <section className="pr-section">
+      <h2 className="pr-title">1. Qué se paga a cada persona y cómo</h2>
+      {GRUPOS_COBRO.map(g => {
+        const lista = rows.filter(r => (r.pay_mode || 'nomina') === g.id)
+        if (!lista.length) return null
+        const sub = lista.reduce((s, r) => s + r.total, 0)
+        return (
+          <div key={g.id} className="pr-grupo">
+            <h3 className="pr-subtitle">{g.title} · {fmtEur(sub)}</h3>
+            <p className="pr-muted">{g.desc}</p>
+            <table className="pr-table">
+              <thead>
+                <tr>
+                  <th>Persona</th>
+                  <th className="num">{g.id === 'nomina' ? 'Nómina' : 'Importe'}</th>
+                  {g.id === 'nomina' && <th className="num">Fuera de contrato</th>}
+                  <th className="num">Horas extra</th>
+                  <th className="num">Extras</th>
+                  <th className="num">Total</th>
+                  <th>Cálculo / cómo se paga</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lista.map(r => (
+                  <tr key={r.id}>
+                    <td className="nowrap">{r.name}{r.type !== 'profesor' && <span className="pr-tag">{typeLabel(r.type)}</span>}</td>
+                    <td className="num">{r.base == null ? '—' : fmtEur(r.base - (r.contract_extra || 0))}</td>
+                    {g.id === 'nomina' && <td className="num">{r.contract_extra ? fmtEur(r.contract_extra) : '—'}</td>}
+                    <td className="num">{r.hours ? fmtHours(r.hours) : '—'}</td>
+                    <td className="num">{r.extras ? fmtEur(r.extras) : '—'}</td>
+                    <td className="num"><strong>{fmtEur(r.total)}</strong></td>
+                    <td>{calculo(r)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      })}
+
+      <h2 className="pr-title">2. Cuánto sale por cada vía</h2>
+      <table className="pr-table pr-vias">
+        <tbody>
+          <tr><td>Remesa de nóminas (gestoría, por banco)</td><td className="num">{fmtEur(vias.remesa)}</td></tr>
+          <tr><td>Transferencias (por horas y fijos)</td><td className="num">{fmtEur(vias.transferencia)}</td></tr>
+          <tr><td>Efectivo</td><td className="num">{fmtEur(vias.efectivo)}</td></tr>
+        </tbody>
+        <tfoot>
+          <tr><td>Total del mes</td><td className="num">{fmtEur(vias.remesa + vias.transferencia + vias.efectivo)}</td></tr>
+        </tfoot>
+      </table>
+      <p className="pr-note">
+        La remesa real puede ser algo menor: las horas extra y las horas fuera de contrato se piden en bruto y la gestoría
+        descuenta la Seguridad Social del trabajador. Si alguien tiene huelga o baja, su nómina también baja: compruébalo con
+        «Revisar nóminas de la gestoría».
+      </p>
+    </section>
+  )
+}
+
+function PayrollReport({ month, person, personal, notes, rows, entries, totals, byId, config }) {
   const today = fmtDate(new Date().toISOString().slice(0, 10))
   const row   = person ? rows[0] : null
   // Cifras del informe: las de la persona o las totales del mes
@@ -816,10 +944,13 @@ function PayrollReport({ month, person, personal, notes, rows, entries, totals, 
         </section>
       )}
 
+      {/* ── Informe general (25/11): por forma de cobro y cuánto sale por cada vía ── */}
+      {!person && <InformePorFormaDeCobro rows={rows} config={config} />}
+
       {/* ── Nómina ── */}
-      <section className="pr-section">
-        <h2 className="pr-title">{person ? '2. Liquidación del mes' : '1. Nómina por persona'}</h2>
-        {person && !row ? <p className="pr-empty">Sin nómina ni horas extra este mes.</p> : (
+      {person && <section className="pr-section">
+        <h2 className="pr-title">2. Liquidación del mes</h2>
+        {!row ? <p className="pr-empty">Sin nómina ni horas extra este mes.</p> : (
           <table className="pr-table">
             <thead>
               <tr>
@@ -876,14 +1007,14 @@ function PayrollReport({ month, person, personal, notes, rows, entries, totals, 
           <p className="pr-note">
             <strong>Pago mixto:</strong> total pactado {fmtEur(row.cash_total)} · banco {fmtEur(row.payment?.amount ?? row.base)}
             {row.payment?.amount == null ? ' (previsto)' : ''} · efectivo {fmtEur(row.cash_paid ? row.cash_paid.amount : row.cash_due)}
-            {' '}(incluye horas extra){row.cash_paid ? ` · entregado el ${fmtDate(row.cash_paid.date)}` : ' · pendiente de entregar'}
+            {row.extras_in_bank ? ' (las horas extra van en la nómina)' : ' (incluye horas extra)'}{row.cash_paid ? ` · entregado el ${fmtDate(row.cash_paid.date)}` : ' · pendiente de entregar'}
           </p>
         )}
-      </section>
+      </section>}
 
       {/* ── Detalle de horas extra ── */}
       <section className="pr-section">
-        <h2 className="pr-title">{person ? '3.' : '2.'} Detalle de horas extra</h2>
+        <h2 className="pr-title">{person ? '3.' : '3.'} Detalle de horas extra (con su motivo)</h2>
         {entries.length === 0 ? <p className="pr-empty">No hay horas extra registradas este mes.</p> : (
           <>
             <table className="pr-table">
@@ -936,6 +1067,124 @@ function PayrollReport({ month, person, personal, notes, rows, entries, totals, 
       <footer className="pr-footer">
         <span>{CLUB_NAME} · {reportRef(month, person)}</span>
         <span>Documento confidencial{person ? ' · contiene datos personales' : ''} · uso interno</span>
+      </footer>
+    </div></div>,
+    document.body,
+  )
+}
+
+// ─── Pedido a la gestoría (25/11, Álvaro) ───────────────────────────────────
+// Lo que se manda a la gestoría ANTES de que haga las nóminas: por cada persona que cobra por
+// nómina, qué hay que añadir este mes (horas fuera de contrato y horas extra pendientes, con
+// fecha y motivo), y los criterios fijos. Así las nóminas vienen bien y no hay que explicar
+// variaciones después. Quien cobra por transferencia no aparece.
+function lineasGestoria(r, entries, config) {
+  const lineas = []
+  if ((r.contract_extra || 0) > 0.01) {
+    const w = parseFloat(config?.weekly_hours?.[r.id]) || 0
+    const c = parseFloat(config?.contract_hours?.[r.id]) || 0
+    lineas.push({
+      key: 'contrato',
+      que: `Horas fuera de contrato: da ${fmtHours(w)} h/semana y su contrato cubre ${fmtHours(c)} h → ${fmtHours(w - c)} h × 4 semanas`,
+      horas: (w - c) * 4, rate: r.rate, importe: r.contract_extra,
+    })
+  }
+  entries.filter(e => e.professor === r.id && e.status !== 'pagado').forEach(e => lineas.push({
+    key: e.id, que: `Horas extra del ${fmtDate(e.date)}${e.reason ? ` · ${e.reason}` : ''}`,
+    horas: e.hours, rate: e.rate, importe: e.amount || 0,
+  }))
+  return lineas
+}
+
+function GestoriaPedido({ month, rows, entries, config, personal }) {
+  const today = fmtDate(new Date().toISOString().slice(0, 10))
+  const enNomina = rows.filter(r => r.pay_mode === 'nomina' && r.type !== 'socio')
+  const datos = enNomina.map(r => ({ r, lineas: lineasGestoria(r, entries, config) }))
+  const total = datos.reduce((s, d) => s + d.lineas.reduce((t, l) => t + l.importe, 0), 0)
+
+  return createPortal(
+    <div className="pay-report-root" aria-hidden="true"><div className="pay-report">
+      <header className="pr-header">
+        <div className="pr-header__brand">
+          <img src={CLUB_LOGO} alt="" className="pr-header__logo" />
+          <div>
+            <p className="pr-header__org">{CLUB_NAME}</p>
+            <p className="pr-header__dept">Administración · Nóminas</p>
+          </div>
+        </div>
+        <div className="pr-header__doc">
+          <p className="pr-header__kind">Pedido de nóminas a la gestoría</p>
+          <p className="pr-header__period">{monthLabel(month)}</p>
+        </div>
+      </header>
+
+      <dl className="pr-meta">
+        <div><dt>Para</dt><dd>Gestoría</dd></div>
+        <div><dt>Nóminas de</dt><dd>{monthLabel(month)}</dd></div>
+        <div><dt>Referencia</dt><dd>PED-{month}</dd></div>
+        <div><dt>Fecha</dt><dd>{today}</dd></div>
+      </dl>
+
+      <p className="pr-note">
+        Os pedimos que en las nóminas de {monthLabel(month).toLowerCase()} incluyáis lo siguiente. Todo va a <b>€/hora en bruto</b> y
+        como <b>«Plus Productividad»</b>. Quien no aparece en la tabla lleva su nómina habitual sin cambios.
+      </p>
+
+      <section className="pr-section">
+        <h2 className="pr-title">1. Qué añadir a cada nómina</h2>
+        <table className="pr-table">
+          <thead>
+            <tr>
+              <th>Trabajador/a</th>
+              <th>Concepto</th>
+              <th className="num">Horas</th>
+              <th className="num">€/h</th>
+              <th className="num">Importe bruto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {datos.map(({ r, lineas }) => {
+              const nombre = personal[r.id]?.full_name || r.name
+              if (!lineas.length) return (
+                <tr key={r.id}><td className="nowrap">{nombre}</td><td colSpan={4} className="pr-muted">Nómina habitual, sin añadidos.</td></tr>
+              )
+              const sub = lineas.reduce((t, l) => t + l.importe, 0)
+              return [
+                ...lineas.map((l, i) => (
+                  <tr key={`${r.id}-${l.key}`}>
+                    <td className="nowrap">{i === 0 ? nombre : ''}</td>
+                    <td>{l.que}</td>
+                    <td className="num">{fmtHours(l.horas)}</td>
+                    <td className="num">{l.rate == null ? '—' : fmtEur(l.rate)}</td>
+                    <td className="num">{fmtEur(l.importe)}</td>
+                  </tr>
+                )),
+                <tr key={`${r.id}-sub`} className="pr-subtotal">
+                  <td /><td>Total a añadir como «Plus Productividad»</td><td /><td />
+                  <td className="num"><strong>{fmtEur(sub)}</strong></td>
+                </tr>,
+              ]
+            })}
+          </tbody>
+          <tfoot>
+            <tr><td>Total</td><td /><td /><td /><td className="num">{fmtEur(total)}</td></tr>
+          </tfoot>
+        </table>
+      </section>
+
+      <section className="pr-section">
+        <h2 className="pr-title">2. Criterios (todos los meses)</h2>
+        <ul className="pr-list">
+          <li>Las horas extra y las horas fuera de contrato van <b>dentro de la nómina</b>, al €/h indicado en <b>bruto</b>, como «Plus Productividad».</li>
+          <li>Si una línea lleva un €/h distinto del habitual es un acuerdo puntual para esas horas.</li>
+          <li>Los voluntarios y colaboradores <b>no van en nómina</b>: se les paga por transferencia.</li>
+          <li>Si hay huelga, baja u otra incidencia, indicadla en Observaciones de la nómina.</li>
+        </ul>
+      </section>
+
+      <footer className="pr-footer">
+        <span>{CLUB_NAME} · PED-{month}</span>
+        <span>Documento confidencial · contiene datos personales</span>
       </footer>
     </div></div>,
     document.body,
@@ -1019,9 +1268,17 @@ export default function PayrollSection() {
   }
   const kpiWho  = selPerson ? ` · ${selPerson.name}` : ''
 
+  // Qué documento se imprime: el informe del mes/persona o el pedido a la gestoría (25/11).
+  // Solo se monta uno a la vez para que el PDF no lleve los dos.
+  const [docKind, setDocKind] = useState('informe')
   function handlePrint() {
     const who = selPerson ? selPerson.name.replace(/\s+/g, '_') : 'todas'
+    flushSync(() => setDocKind('informe'))
     printReport(`Nomina_${who}_${month}`)
+  }
+  function handlePedido() {
+    flushSync(() => setDocKind('gestoria'))
+    printReport(`Pedido_gestoria_${month}`)
   }
 
   async function run(action, okMsg) {
@@ -1135,13 +1392,21 @@ export default function PayrollSection() {
               </button>
             )}
             {data && (
+              <button className="sa-pay-action sa-pay-print" onClick={handlePedido} title="Lo que hay que añadir a cada nómina este mes (horas extra con su motivo y horas fuera de contrato), para mandarlo a la gestoría">
+                📨 Pedido a la gestoría (PDF)
+              </button>
+            )}
+            {data && (
               <button className="sa-pay-action sa-pay-print" onClick={handlePrint}>
                 ⎙ {selPerson ? `Informe de ${selPerson.name}` : 'Informe del mes'} (PDF)
               </button>
             )}
-            <button className="sa-period__btn" onClick={() => setMonth(m => shiftMonth(m, -1))} aria-label="Mes anterior">◀</button>
-            <span className="sa-pay-month">{monthLabel(month)}</span>
-            <button className="sa-period__btn" onClick={() => setMonth(m => shiftMonth(m, 1))} aria-label="Mes siguiente">▶</button>
+            {/* 25/11: ◀ mes ▶ siempre juntos en una línea (antes se partían al bajar de renglón) */}
+            <span className="sa-pay-monthnav">
+              <button className="sa-period__btn" onClick={() => setMonth(m => shiftMonth(m, -1))} aria-label="Mes anterior">◀</button>
+              <span className="sa-pay-month">{monthLabel(month)}</span>
+              <button className="sa-period__btn" onClick={() => setMonth(m => shiftMonth(m, 1))} aria-label="Mes siguiente">▶</button>
+            </span>
           </div>
         </div>
 
@@ -1406,11 +1671,14 @@ export default function PayrollSection() {
         {data && <PayrollConfig people={people} config={data.config} onSaved={refreshAll} />}
       </details>
 
-      {data && (
+      {data && docKind === 'informe' && (
         <PayrollReport
           month={month} person={selPerson} personal={selPerson ? personal[selPerson.id] || {} : {}}
-          notes={notes} rows={shownRows} entries={shownEntries} totals={totals} byId={byId}
+          notes={notes} rows={shownRows} entries={shownEntries} totals={totals} byId={byId} config={data.config}
         />
+      )}
+      {data && docKind === 'gestoria' && (
+        <GestoriaPedido month={month} rows={rows} entries={entries} config={data.config} personal={personal} />
       )}
     </div>
   )

@@ -1411,3 +1411,16 @@ details[open] .sa-collapsible__arrow {
 /* Configuración de nóminas: «Cómo cobra» e importes calculados (25/11) */
 .sa-pay-mode { min-width: 104px; }
 .sa-pay-auto { display: block; font-size: 0.8rem; color: var(--color-text-secondary, #9a9a9a); white-space: nowrap; margin-top: 2px; }
+
+/* Informe del mes por forma de cobro y pedido a la gestoría (25/11) */
+.pr-grupo { margin: 0 0 12px; break-inside: avoid; }
+.pr-subtitle { font-size: 10pt; font-weight: 700; margin: 10px 0 2px; }
+.pr-muted { color: var(--pr-muted); font-size: 8.5pt; margin: 0 0 4px; }
+.pr-list { margin: 4px 0 0 16px; padding: 0; }
+.pr-list li { margin-bottom: 3px; }
+.pr-subtotal td { background: var(--pr-soft); font-size: 9pt; }
+.pr-vias { max-width: 70%; }
+.pr-table tr { break-inside: avoid; }
+.sa-pay-monthnav { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.sa-alta { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.sa-alta .sa-pay-file__input { max-width: 260px; }
