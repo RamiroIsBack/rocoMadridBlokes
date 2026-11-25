@@ -26662,7 +26662,7 @@ function cherifs_save_ical($request) {
     }
     unset($c['ical']);
     cherifs_put($c);
-    delete_transient('blokes_cherifs_ical');
+    delete_transient('blokes_cherifs_ical_v2');
     return rest_ensure_response(array('success' => true, 'ical_configured' => true));
 }
 
@@ -26672,7 +26672,7 @@ function cherifs_delete_ical($request) {
     $c['icals'] = array_values(array_filter($c['icals'], function ($cal) use ($id) { return $cal['id'] !== $id; }));
     unset($c['ical']);
     cherifs_put($c);
-    delete_transient('blokes_cherifs_ical');
+    delete_transient('blokes_cherifs_ical_v2');
     return rest_ensure_response(array('success' => true));
 }
 
@@ -26724,6 +26724,14 @@ function cherifs_ical_events($ics, $from, $to) {
         elseif ($name === 'DTEND') { list($ev['end']) = cherifs_ical_date($value, $params); }
         elseif ($name === 'SUMMARY') { $ev['title'] = $value; }
         elseif ($name === 'LOCATION') { $ev['location'] = $value; }
+        // 25/11 (tarde): descripción y enlace, para verlos al pulsar el día en el Dashboard.
+        // Google a veces manda la descripción en HTML: los enlaces quedan como «texto url».
+        elseif ($name === 'DESCRIPTION') {
+            $d = preg_replace('/<a\s[^>]*href="([^"]+)"[^>]*>(.*?)<\/a>/i', '$2 $1', $value);
+            $d = preg_replace('/<br\s*\/?>/i', ' ', $d);
+            $ev['description'] = mb_substr(trim(wp_strip_all_tags(html_entity_decode($d, ENT_QUOTES, 'UTF-8'))), 0, 600);
+        }
+        elseif ($name === 'URL') { $ev['url'] = esc_url_raw($value); }
         elseif ($name === 'RRULE') { $ev['rrule'] = $value; }
         elseif ($name === 'STATUS') { $ev['status'] = strtoupper($value); }
         elseif ($name === 'EXDATE') {
@@ -26745,6 +26753,8 @@ function cherifs_ical_expand($ev, $from, $to) {
         return array(
             'title'    => $ev['title'] ?? '(sin título)',
             'location' => $ev['location'] ?? '',
+            'description' => $ev['description'] ?? '',
+            'url'      => $ev['url'] ?? '',
             'allday'   => !empty($ev['allday']),
             'start'    => $d->format('Y-m-d\TH:i'),
             'end'      => $e->format('Y-m-d\TH:i'),
@@ -26811,7 +26821,7 @@ function cherifs_calendar() {
     $cumples = cherifs_birthdays($from, $to);
     $events = array();
     $failed = array();
-    $cached = $cals ? get_transient('blokes_cherifs_ical') : array('events' => array(), 'failed' => array());
+    $cached = $cals ? get_transient('blokes_cherifs_ical_v2') : array('events' => array(), 'failed' => array());
     if (is_array($cached) && isset($cached['events'])) {
         $events = $cached['events']; $failed = $cached['failed'];
     } else {
@@ -26823,7 +26833,7 @@ function cherifs_calendar() {
         if (!$cumples && !cherifs_meetings_get() && count($failed) === count($c['icals'])) {
             return new WP_Error('ical_error', 'No se pudo leer el calendario de Google', array('status' => 502));
         }
-        set_transient('blokes_cherifs_ical', array('events' => $events, 'failed' => $failed), 15 * MINUTE_IN_SECONDS);
+        set_transient('blokes_cherifs_ical_v2', array('events' => $events, 'failed' => $failed), 15 * MINUTE_IN_SECONDS);
     }
     $events = array_merge($cumples, cherifs_meeting_events($from, $to), $events);
     usort($events, function ($a, $b) { return strcmp($a['start'], $b['start']); });

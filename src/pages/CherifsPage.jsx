@@ -94,7 +94,7 @@ function Tablon() {
   const ultimo = (data?.messages || []).find(m => new Date(m.at.replace(' ', 'T')) >= lunes)
   const delBanco = BANCO_FRASES[(diaDelAño() + desfase) % BANCO_FRASES.length]
   const deLaSemana = (data?.songs || []).filter(s => s.week === semana)
-  const anteriores = (data?.songs || []).filter(s => s.week !== semana).slice(0, 5)
+  const anteriores = (data?.songs || []).filter(s => s.week !== semana).slice(0, 30)
 
   return (
     <section className="dash-card chf-tablon">
@@ -149,8 +149,8 @@ function Tablon() {
             <button className="dash-btn dash-btn--primary" disabled={busy}>Añadir</button>
           </form>
         )}
-        {editar && anteriores.length > 0 && (
-          <details className="chf-anteriores"><summary>Semanas anteriores</summary>
+        {anteriores.length > 0 && (
+          <details className="chf-anteriores"><summary>🎵 Temazos anteriores ({anteriores.length})</summary>
             <ul className="chf-songs">{anteriores.map(s => <li key={s.id}>{s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title || s.url}</a> : s.title}<span className="chf-songs__by"> · {s.by}</span></li>)}</ul>
           </details>
         )}
@@ -291,8 +291,9 @@ function Indicadores() {
       <Link className="dash-tile" to="/supervision?tab=grupos&vista=altas-bajas" style={{ '--tile': 'var(--state-good)' }}>
         <strong>↗</strong><span>Altas y bajas del mes</span>
       </Link>
-      <Link className="dash-tile" to="/diario?vista=horarios" style={{ '--tile': 'var(--color-accent)' }}>
-        <strong>{ahora.length}</strong><span>{ahora.length ? `Ahora en el Roco: ${ahora.map(a => a.person).join(', ')}` : 'Ahora no hay nadie en el Roco'}</span>
+      {/* 25/11: bombilla encendida (amarilla) si hay alguien en el Roco; apagada si no */}
+      <Link className={`dash-tile chf-roco${ahora.length ? ' chf-roco--on' : ''}`} to="/diario?vista=horarios" style={{ '--tile': 'var(--color-accent)' }}>
+        <strong><span className="chf-roco__bombilla" aria-hidden="true">💡</span>{ahora.length}</strong><span>{ahora.length ? `Ahora en el Roco: ${ahora.map(a => a.person).join(', ')}` : 'Ahora no hay nadie en el Roco'}</span>
       </Link>
     </div>
   )
@@ -415,6 +416,53 @@ function PidenProfes({ items }) {
 }
 
 // ─── Calendario de Google ───────────────────────────────────────────────────
+// ─── Un día del calendario en grande (25/11, tarde) ─────────────────────────
+// Todo lo del día: hora, título, lugar (con enlace a Google Maps, o el enlace si el lugar ya es
+// una dirección web), descripción con sus enlaces pulsables y el enlace del evento.
+const URL_RE = /(https?:\/\/[^\s<>"]+)/g
+function ConEnlaces({ texto }) {
+  return String(texto || '').split(URL_RE).map((t, i) => (i % 2
+    ? <a key={i} href={t} target="_blank" rel="noreferrer">{t.length > 60 ? `${t.slice(0, 57)}…` : t}</a>
+    : <span key={i}>{t}</span>))
+}
+function DiaEnGrande({ dia, hoy, eventos, varios, onClose }) {
+  const [y, m, d] = dia.split('-').map(Number)
+  const titulo = new Date(y, m - 1, d).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
+  return (
+    <div className="chf-modal" role="dialog" aria-modal="true" aria-label={`Calendario: ${titulo}`}
+      onClick={onClose} onKeyDown={e => e.key === 'Escape' && onClose()}>
+      <div className="chf-modal__caja" onClick={e => e.stopPropagation()}>
+        <div className="chf-modal__head">
+          <h3>{dia === hoy ? 'Hoy, ' : ''}{titulo}</h3>
+          <button type="button" className="dash-mini" onClick={onClose} autoFocus>Cerrar ✕</button>
+        </div>
+        <ul className="chf-modal__lista">
+          {eventos.map((ev, i) => {
+            const lugarEsUrl = /^https?:\/\//i.test(ev.location || '')
+            return (
+              <li key={i}>
+                <span className="chf-modal__hora">{ev.allday ? (ev.cumple ? '🎂' : 'Todo el día') : `${ev.start.slice(11, 16)}${ev.end && ev.end.slice(0, 10) === dia ? `–${ev.end.slice(11, 16)}` : ''}`}</span>
+                <div className="chf-modal__ev">
+                  <strong>{ev.title}</strong>
+                  {varios && ev.cal && !ev.cumple && <small className="chf-ical__tag">{ev.cal}</small>}
+                  {ev.location && (
+                    <span className="chf-modal__lugar">📍 {lugarEsUrl
+                      ? <a href={ev.location} target="_blank" rel="noreferrer">{ev.location}</a>
+                      : <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}`} target="_blank" rel="noreferrer" title="Abrir en Google Maps">{ev.location}</a>}
+                    </span>
+                  )}
+                  {ev.description && <p className="chf-modal__desc"><ConEnlaces texto={ev.description} /></p>}
+                  {ev.url && <a className="chf-modal__url" href={ev.url} target="_blank" rel="noreferrer">🔗 Abrir enlace</a>}
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
 function CalendarioGoogle() {
   const { data, error, reload } = useCherifsCalendar()
   const [url, setUrl] = useState('')
@@ -422,6 +470,7 @@ function CalendarioGoogle() {
   const [msg, setMsg] = useState('')
   const [nombre, setNombre] = useState('')
   const [verTodo, setVerTodo] = useState(false)
+  const [abierto, setAbierto] = useState(null)   // día abierto en grande (25/11)
   // 25/11: varios calendarios; cada uno con su nombre, que sale junto a sus eventos
   const guardar = async e => {
     e.preventDefault(); setMsg('')
@@ -476,7 +525,7 @@ function CalendarioGoogle() {
   // desde hoy; cada evento en una línea (el texto entero y el lugar, al pasar el ratón).
   const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
   const hoy = iso(new Date())
-  const VISIBLES = 7
+  const VISIBLES = 5
   const proximos = Object.keys(porDia).sort().filter(dia => dia >= hoy)
   const visibles = verTodo ? proximos : proximos.slice(0, VISIBLES)
 
@@ -523,7 +572,9 @@ function CalendarioGoogle() {
               const cambiaMes = i > 0 && visibles[i - 1].slice(0, 7) !== dia.slice(0, 7)
               return [
                 cambiaMes && <span key={`sep-${dia}`} className="chf-cal__sep">{MESES_CAL[mes]}</span>,
-                <div key={dia} className={`chf-cal__dia${dia === hoy ? ' chf-cal__dia--hoy' : ''}`}>
+                <div key={dia} className={`chf-cal__dia${dia === hoy ? ' chf-cal__dia--hoy' : ''}`}
+                  role="button" tabIndex={0} title="Pulsa para verlo en grande"
+                  onClick={() => setAbierto(dia)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setAbierto(dia) } }}>
                   <span className="chf-cal__hoja">
                     <span className="chf-cal__mes">{dia === hoy ? 'hoy' : MESES[mes]}</span>
                     <span className="chf-cal__num">{Number(dia.slice(8, 10))}</span>
@@ -542,6 +593,7 @@ function CalendarioGoogle() {
             })}
             {!proximos.length && <span className="chf-semana__nada">Nada en los próximos días.</span>}
           </div>
+          {abierto && porDia[abierto] && <DiaEnGrande dia={abierto} hoy={hoy} eventos={porDia[abierto]} varios={varios} onClose={() => setAbierto(null)} />}
           <div className="chf-cal__pie">
             {proximos.length > VISIBLES && (
               <button type="button" className="dash-mini" onClick={() => setVerTodo(v => !v)}>
