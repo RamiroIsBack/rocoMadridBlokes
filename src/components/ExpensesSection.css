@@ -65,6 +65,18 @@
 .exp-save-btn:disabled { opacity: 0.5; cursor: default; }
 .exp-save-btn--ok { background: #16a34a; border-color: #16a34a; color: #fff; }
 
+.exp-link-btn {
+  background: none;
+  border: none;
+  color: #f5c842;
+  font-size: 0.72rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.exp-link-btn:hover { color: #fff; }
+
 .exp-error { color: #ef4444; font-size: 0.78rem; margin: 4px 0 8px; }
 .exp-empty  { color: #555; font-size: 0.82rem; font-style: italic; }
 .exp-loading { color: #666; font-size: 0.82rem; padding: 12px 0; }

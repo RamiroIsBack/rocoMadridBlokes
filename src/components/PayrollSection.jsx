@@ -21,7 +21,8 @@ function useHorasHorario() {
   if (!data) return null
   return horasSemanaPorPersona(data.items || [])
 }
-const horasDe = (horario, p) => horario?.[nombreDePila(p.name)]?.hours ?? 0
+// Los socios no salen del cronograma: su nombre de pila puede ser el de un profe (Alvaro ↔ Álvaro L.)
+const horasDe = (horario, p) => p.type === 'socio' ? 0 : (horario?.[nombreDePila(p.name)]?.hours ?? 0)
 
 // Aviso arriba de Nóminas (23/11): quién no cuadra entre lo pactado y lo que dice el horario
 function HorarioVsNomina({ people, config }) {
@@ -122,6 +123,21 @@ function ResumenPagos({ rows, entries, totals, month }) {
     .filter(([, list]) => list.length > 0)
   const detalle = r => {
     const partes = []
+    if (r.cash_total != null && r.extras_in_bank) {
+      // 25/11: horas extra dentro de la nómina (Sigurd): banco = nómina + extras; efectivo = hasta el pactado
+      if ((r.nomina_outstanding || 0) > 0.01) {
+        const extras = r.pending_extras || 0
+        partes.push(`${fmtEur(r.nomina_outstanding)} por banco${extras > 0.01 ? ` (nómina + ${fmtHours(r.hours)} h extra ${fmtEur(extras)})` : ''}`)
+      }
+      if ((r.extras_outstanding || 0) > 0.01) partes.push(`${fmtEur(r.extras_outstanding)} en efectivo hasta el total pactado`)
+      return partes.join(' · ')
+    }
+    if ((r.contract_extra || 0) > 0.01 && (r.nomina_outstanding || 0) > 0.01) {
+      // Lucía: horas pactadas por encima del contrato, sumadas solas a la nómina
+      partes.push(`nómina ${fmtEur(r.nomina_outstanding)} (incluye ${fmtEur(r.contract_extra)} de horas fuera de contrato)`)
+      if ((r.extras_outstanding || 0) > 0.01) partes.push(`${fmtHours(r.hours)} h extra ${fmtEur(r.extras_outstanding)}`)
+      return partes.join(' · ')
+    }
     if (r.cash_total != null) {
       // Pago mixto (p. ej. Sigurd): el servidor guarda TODO el efectivo pendiente (lo que falta
       // hasta el total pactado + las horas extra) en extras_outstanding. Antes salía como si
@@ -261,6 +277,21 @@ function SociosNomina({ people, onChanged }) {
   )
 }
 
+// Cómo cobra cada persona (25/11). Igual que payroll_pay_mode() del servidor.
+const PAY_MODES = [
+  { id: 'nomina', label: 'Nómina' },
+  { id: 'horas',  label: 'Por horas' },
+  { id: 'fijo',   label: 'Fijo' },
+]
+function payModeDe(p, cfg) {
+  const m = cfg.pay_mode?.[p.id]
+  if (PAY_MODES.some(x => x.id === m)) return m
+  if (p.type === 'profesor') return 'nomina'
+  if (p.type === 'socio') return 'fijo'
+  if (p.type === 'voluntario' && cfg.base?.[p.id] != null) return 'fijo'
+  return 'horas'
+}
+
 function PayrollConfig({ people, config, onSaved }) {
   const active = sortByType(people.filter(p => p.active))
   const toForm = cfg => Object.fromEntries(active.map(p => [p.id, {
@@ -269,6 +300,8 @@ function PayrollConfig({ people, config, onSaved }) {
     note: cfg.notes?.[p.id] ?? '',
     cash: cfg.cash_total?.[p.id] ?? '',
     hours: cfg.weekly_hours?.[p.id] ?? '',
+    mode: payModeDe(p, cfg),
+    contract: cfg.contract_hours?.[p.id] ?? '',
   }]))
   const horario = useHorasHorario()
 
@@ -287,10 +320,17 @@ function PayrollConfig({ people, config, onSaved }) {
   // de cada voluntario (fijo vs por horas) se vea, no solo "Voluntario". Se deriva de si tiene
   // nómina base puesta, no es un campo nuevo -- la base ya es editable para cualquier
   // profesor/voluntario (hasBase), así que Carolina a 400 € es solo rellenar esa casilla.
-  const tipoDetalle = p => {
-    if (p.type !== 'voluntario') return typeLabel(p.type)
-    const base = parseFloat(form[p.id]?.base)
-    return base > 0 ? 'Voluntario · fijo' : 'Voluntario · por horas'
+  // 25/11: el «fijo / por horas» ya no se deduce de si hay base: se elige en «Cómo cobra».
+  const tipoDetalle = p => typeLabel(p.type)
+  // Importe del mes de quien cobra por horas: horas/sem × €/h × 4 (lo mismo que calcula el servidor)
+  const importeHoras = id => {
+    const h = parseFloat(form[id]?.hours) || 0, r = parseFloat(form[id]?.rate) || 0
+    return h > 0 && r > 0 ? Math.round(h * r * 4 * 100) / 100 : null
+  }
+  // Horas que pasan del contrato (solo nómina): (pactadas − contrato) × €/h × 4
+  const extraContrato = id => {
+    const h = parseFloat(form[id]?.hours) || 0, c = parseFloat(form[id]?.contract) || 0, r = parseFloat(form[id]?.rate) || 0
+    return c > 0 && h > c && r > 0 ? Math.round((h - c) * r * 4 * 100) / 100 : 0
   }
 
   async function handleSave() {
@@ -301,14 +341,20 @@ function PayrollConfig({ people, config, onSaved }) {
       const notes = {}
       const cash  = {}
       const hours = {}
+      const modes = {}
+      const contract = {}
       for (const p of active) {
-        if (hasBase(p.type)) base[p.id] = form[p.id]?.base ?? ''
-        if (hasBase(p.type)) cash[p.id] = form[p.id]?.cash ?? ''
+        const mode = form[p.id]?.mode
+        // Por horas: la base la calcula el servidor; no se toca lo que hubiera guardado
+        if (hasBase(p.type) && mode !== 'horas') base[p.id] = form[p.id]?.base ?? ''
+        if (hasBase(p.type)) cash[p.id] = mode === 'nomina' ? (form[p.id]?.cash ?? '') : ''
         rates[p.id] = form[p.id]?.rate ?? ''
         notes[p.id] = form[p.id]?.note ?? ''
         hours[p.id] = form[p.id]?.hours ?? ''
+        modes[p.id] = mode
+        contract[p.id] = mode === 'nomina' ? (form[p.id]?.contract ?? '') : ''
       }
-      const saved = await savePayrollConfig({ base, rates, notes, cash_total: cash, weekly_hours: hours })
+      const saved = await savePayrollConfig({ base, rates, notes, cash_total: cash, weekly_hours: hours, pay_mode: modes, contract_hours: contract })
       setForm(toForm(saved))
       setFeedback('✓ Guardado')
       onSaved()
@@ -326,11 +372,11 @@ function PayrollConfig({ people, config, onSaved }) {
         <h2 className="sa-section-title">Configuración</h2>
       </div>
       <p className="sa-pay-note">
-        Nómina base mensual fija (profesores y voluntarios; los externos cobran solo extras), su justificación y €/h de las horas extra.
-        La nómina base es el importe que se paga a la persona cada mes (no el coste de gestoría).
-        "Total pactado" solo para quien cobra parte en efectivo: el banco paga la nómina y el resto
-        hasta el total pactado, más las horas extra, se entrega en efectivo (si el banco paga menos, el efectivo sube).
-        Al marcar horas como pagadas se guarda el €/h de ese momento, así que cambiarlo no altera lo ya pagado.
+        <b>Cómo cobra</b> cada persona: <b>Nómina</b> (va en la nómina de la gestoría: pon el neto del recibo; las horas extra
+        van dentro de la nómina y, si das las «h/sem de contrato», las horas pactadas que pasen del contrato se suman solas
+        cada mes a su €/h); <b>Por horas</b> (transferencia: la web calcula horas/sem × €/h × 4); <b>Fijo</b> (transferencia
+        por un importe acordado). «Total pactado» solo en nómina, para quien cobra parte en efectivo: el efectivo es lo que
+        falta hasta ese total. Al marcar horas como pagadas se guarda el €/h de ese momento, así que cambiarlo no altera lo ya pagado.
       </p>
       <SociosNomina people={people} onChanged={onSaved} />
       <div className="sa-pay-scroll">
@@ -339,10 +385,12 @@ function PayrollConfig({ people, config, onSaved }) {
             <tr>
               <th>Persona</th>
               <th>Tipo</th>
-              <th className="sa-pay-num">Nómina base / mes</th>
+              <th>Cómo cobra</th>
+              <th className="sa-pay-num" title="Nómina: neto del recibo · Fijo: importe acordado · Por horas: lo calcula la web">Importe / mes</th>
               <th className="sa-pay-num" title="Solo si cobra parte en efectivo">Total pactado</th>
               <th className="sa-pay-num">€/h extra</th>
               <th className="sa-pay-num" title="Horas a la semana pactadas">Horas/sem pactadas</th>
+              <th className="sa-pay-num" title="Solo nómina: horas a la semana que cubre el contrato">h/sem de contrato</th>
               <th className="sa-pay-num" title="Lo que suma el cronograma del Diario">Según horario</th>
               <th>Justificación de la base</th>
             </tr>
@@ -352,16 +400,28 @@ function PayrollConfig({ people, config, onSaved }) {
               <tr key={p.id}>
                 <td className="sa-pay-nowrap"><span className="sa-pay-dot" style={{ background: p.color }} />{p.name}</td>
                 <td className="sa-pay-muted">{tipoDetalle(p)}</td>
+                <td>
+                  <select className="sa-pay-input sa-pay-mode" value={form[p.id]?.mode || 'horas'} onChange={e => set(p.id, 'mode', e.target.value)}>
+                    {PAY_MODES.filter(m => hasBase(p.type) || m.id === 'horas').map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+                  </select>
+                </td>
                 <td className="sa-pay-num">
-                  {hasBase(p.type)
-                    ? <input
-                        type="number" min="0" step="0.01" placeholder="—" className="sa-pay-input"
-                        value={form[p.id]?.base ?? ''} onChange={e => set(p.id, 'base', e.target.value)}
-                      />
+                  {form[p.id]?.mode === 'horas'
+                    ? <span className="sa-pay-auto" title="Horas/sem pactadas × €/h × 4">{importeHoras(p.id) != null ? fmtEur(importeHoras(p.id)) : <span className="sa-pay-muted">—</span>}</span>
+                    : hasBase(p.type)
+                    ? <>
+                        <input
+                          type="number" min="0" step="0.01" placeholder="—" className="sa-pay-input"
+                          value={form[p.id]?.base ?? ''} onChange={e => set(p.id, 'base', e.target.value)}
+                        />
+                        {form[p.id]?.mode === 'nomina' && extraContrato(p.id) > 0 && (
+                          <span className="sa-pay-auto" title="Horas pactadas que pasan del contrato × €/h × 4, se suman cada mes">+ {fmtEur(extraContrato(p.id))}</span>
+                        )}
+                      </>
                     : <span className="sa-pay-muted">—</span>}
                 </td>
                 <td className="sa-pay-num">
-                  {hasBase(p.type)
+                  {hasBase(p.type) && form[p.id]?.mode === 'nomina'
                     ? <input
                         type="number" min="0" step="0.01" placeholder="—" className="sa-pay-input"
                         title="Banco + efectivo. Déjalo vacío si cobra todo por banco"
@@ -380,6 +440,14 @@ function PayrollConfig({ people, config, onSaved }) {
                     type="number" min="0" step="0.5" placeholder="—" className="sa-pay-input"
                     value={form[p.id]?.hours ?? ''} onChange={e => set(p.id, 'hours', e.target.value)}
                   />
+                </td>
+                <td className="sa-pay-num">
+                  {form[p.id]?.mode === 'nomina'
+                    ? <input
+                        type="number" min="0" step="0.5" placeholder="—" className="sa-pay-input"
+                        value={form[p.id]?.contract ?? ''} onChange={e => set(p.id, 'contract', e.target.value)}
+                      />
+                    : <span className="sa-pay-muted">—</span>}
                 </td>
                 <td className="sa-pay-num">
                   {(() => {
