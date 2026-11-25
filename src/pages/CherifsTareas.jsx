@@ -3,7 +3,8 @@
 // Filtros por encargado, fecha, prioridad, área y estado; agrupadas por fecha,
 // encargado, prioridad o área. Paso 2 del traslado: «Copiar de Notion» (sin duplicar).
 import { useState, useMemo, useEffect } from 'react'
-import { useCherifsTasks, importNotionTasks } from '../hooks/useCherifs'
+import { useCherifsTasks, importNotionTasks, useCherifsMeetings, createMeeting, saveMeeting } from '../hooks/useCherifs'
+import CherifsReuniones, { conTareas } from './CherifsReuniones'
 import { createActivity, updateActivity, deleteActivity } from '../hooks/useCalendar'
 import './DashboardPage.css'
 
@@ -25,6 +26,9 @@ function leerFiltros() {
 
 export default function CherifsTareas() {
   const { data, error, reload, setData } = useCherifsTasks()
+  const { data: meet, error: meetErr, setData: setMeet } = useCherifsMeetings()
+  const [vista, setVista] = useState(() => { try { return localStorage.getItem('blokes-cherifs-tareas-vista') || 'tareas' } catch { return 'tareas' } })
+  useEffect(() => { try { localStorage.setItem('blokes-cherifs-tareas-vista', vista) } catch { /* sin almacenamiento */ } }, [vista])
   const [f, setF] = useState(leerFiltros)
   const [abierta, setAbierta] = useState(null)      // id de la tarea desplegada, o 'nueva'
   const [aviso, setAviso] = useState('')
@@ -127,12 +131,55 @@ export default function CherifsTareas() {
   }
   const visibles = grupos.flatMap(([, l]) => l.map(t => t.bid)).filter((b, i, a) => a.indexOf(b) === i)
   const nSel = sel ? sel.size : 0
+  // Selección → puntos del orden del día de una reunión (o de una nueva)
+  const alOrdenDelDia = async id => {
+    if (!id || !sel?.size) return
+    const bids = [...sel]
+    setAviso('')
+    try {
+      let m
+      if (id === 'nueva') {
+        const d = new Date(); d.setDate(d.getDate() + 7)
+        m = await createMeeting({ date: iso(d), time: '', title: 'Reunión de socios', points: conTareas({ points: [] }, bids).points })
+      } else {
+        const actual = proximas.find(x => x.id === id)
+        m = await saveMeeting(id, conTareas(actual, bids))
+      }
+      setMeet(d => ({ ...(d || {}), meetings: [...(d?.meetings || []).filter(x => x.id !== m.id), m] }))
+      setAviso(`✓ ${bids.length} tareas al orden del día de «${m.title}» (${m.date.slice(8, 10)}/${m.date.slice(5, 7)}).`)
+      setSel(new Set())
+    } catch (e) { setAviso(e.message) }
+  }
 
   const abiertasTotal = items.filter(t => !HECHAS.has(t.status?.name)).length
   const atrasadas = items.filter(t => t.start && t.start.slice(0, 10) < hoy && !HECHAS.has(t.status?.name)).length
 
+  // 25/11: dos vistas, la lista de tareas y las reuniones de socios (orden del día)
+  const proximas = (meet?.meetings || []).filter(m => !m.closed).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+  const nPendReu = proximas[0]?.points.filter(p => !p.done).length || 0
+  const vistas = (
+    <div className="chf-vistas">
+      <button type="button" className={`chf-vistas__b${vista === 'tareas' ? ' chf-vistas__b--on' : ''}`} onClick={() => setVista('tareas')}>Tareas</button>
+      <button type="button" className={`chf-vistas__b${vista === 'reuniones' ? ' chf-vistas__b--on' : ''}`} onClick={() => setVista('reuniones')}>
+        Reuniones{proximas[0] ? ` · próxima ${proximas[0].date.slice(8, 10)}/${proximas[0].date.slice(5, 7)}${nPendReu ? ` (${nPendReu})` : ''}` : ''}
+      </button>
+    </div>
+  )
+  if (vista === 'reuniones') {
+    return (
+      <div className="chf-tareas">
+        {vistas}
+        {meetErr && <p className="dash-error">{meetErr}</p>}
+        <CherifsReuniones meetings={meet?.meetings || (meet ? [] : null)}
+          setMeetings={fn => setMeet(d => ({ ...(d || {}), meetings: typeof fn === 'function' ? fn(d?.meetings || []) : fn }))}
+          tareas={items} owners={data?.owners || []} onTareaCreada={it => guardada(it)} />
+      </div>
+    )
+  }
+
   return (
     <div className="chf-tareas">
+      {vistas}
       <section className="dash-card">
         <div className="chf-tareas__cab">
           <div>
@@ -234,6 +281,11 @@ export default function CherifsTareas() {
               <select className="dash-input" value="" onChange={e => e.target.value && aplicar({ category: e.target.value }, `Área ${e.target.value}`)}>
                 <option value="">Área…</option>
                 {(data?.categories || []).map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select className="dash-input" value="" onChange={e => alOrdenDelDia(e.target.value)}>
+                <option value="">→ Al orden del día…</option>
+                {proximas.map(m => <option key={m.id} value={m.id}>{m.title} · {m.date.slice(8, 10)}/{m.date.slice(5, 7)}</option>)}
+                <option value="nueva">+ Reunión nueva (dentro de una semana)</option>
               </select>
             </div>
           )}

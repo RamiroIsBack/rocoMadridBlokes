@@ -40,3 +40,9 @@ export const deleteCherifsIcal = id => request(`/cherifs/ical/${id}`, 'DELETE')
 // 25/11: Tareas de Cherifs (las actividades que no son del calendario) y copia desde Notion
 export const useCherifsTasks   = () => useGet('/cherifs/tasks')
 export const importNotionTasks = () => request('/cherifs/tasks/import-notion', 'POST')
+
+// 25/11: reuniones de socios (orden del día)
+export const useCherifsMeetings = () => useGet('/cherifs/meetings')
+export const createMeeting = m => request('/cherifs/meetings', 'POST', m).then(j => j.meeting)
+export const saveMeeting   = (id, m) => request(`/cherifs/meetings/${id}`, 'PUT', m).then(j => j.meeting)
+export const deleteMeeting = id => request(`/cherifs/meetings/${id}`, 'DELETE')

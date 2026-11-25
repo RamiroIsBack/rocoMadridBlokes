@@ -25720,6 +25720,123 @@ function cherifs_tasks_import_notion() {
 }
 
 // ============================================================
+//  25/11/2026 — Reuniones de socios (orden del día), en Cherifs › Tareas
+//  Opción blokes_cherifs_meetings = [ {id, date, time, title, closed,
+//    points: [{id, task (bid de una tarea o 0), text, done, note}], created_by, updated_at} ]
+//  Solo socios. Salen en el calendario del Dashboard (cherifs_calendar).
+//  Se guarda la reunión entera cada vez (somos dos: Ramiro y Álvaro).
+// ============================================================
+
+function cherifs_meetings_get() {
+    $m = get_option('blokes_cherifs_meetings', array());
+    return is_array($m) ? $m : array();
+}
+
+function cherifs_meeting_clean($body, $old = null) {
+    $date = (string) ($body['date'] ?? ($old['date'] ?? ''));
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return new WP_Error('bad_date', 'Falta la fecha de la reunión', array('status' => 400));
+    $time = (string) ($body['time'] ?? ($old['time'] ?? ''));
+    if ($time !== '' && !preg_match('/^\d{2}:\d{2}$/', $time)) $time = '';
+    $title = mb_substr(sanitize_text_field((string) ($body['title'] ?? ($old['title'] ?? ''))), 0, 120);
+    $points = array();
+    $src = array_key_exists('points', $body) ? $body['points'] : ($old['points'] ?? array());
+    foreach (array_slice(is_array($src) ? $src : array(), 0, 80) as $p) {
+        if (!is_array($p)) continue;
+        $task = max(0, (int) ($p['task'] ?? 0));
+        $text = mb_substr(sanitize_text_field((string) ($p['text'] ?? '')), 0, 300);
+        if (!$task && $text === '') continue;
+        $id = preg_replace('/[^a-z0-9]/', '', (string) ($p['id'] ?? ''));
+        $points[] = array(
+            'id'   => $id !== '' ? substr($id, 0, 16) : substr(md5(uniqid('', true)), 0, 10),
+            'task' => $task,
+            'text' => $text,
+            'done' => !empty($p['done']),
+            'note' => mb_substr(sanitize_textarea_field((string) ($p['note'] ?? '')), 0, 3000),
+        );
+    }
+    return array(
+        'id'         => $old['id'] ?? ('m' . substr(md5(uniqid('', true)), 0, 10)),
+        'date'       => $date,
+        'time'       => $time,
+        'title'      => $title !== '' ? $title : 'Reunión de socios',
+        'closed'     => array_key_exists('closed', $body) ? !empty($body['closed']) : !empty($old['closed']),
+        'points'     => $points,
+        'created_by' => $old['created_by'] ?? activities_who(),
+        'updated_by' => activities_who(),
+        'updated_at' => current_time('mysql'),
+    );
+}
+
+function cherifs_meetings_sorted($all) {
+    usort($all, function ($a, $b) { return strcmp($b['date'] . $b['time'], $a['date'] . $a['time']); });
+    return array_values($all);
+}
+
+add_action('rest_api_init', function() {
+    register_rest_route('superadmin/v1', '/cherifs/meetings', array(
+        array('methods' => 'GET',  'callback' => 'cherifs_meetings_list',   'permission_callback' => 'cherifs_tasks_can'),
+        array('methods' => 'POST', 'callback' => 'cherifs_meetings_create', 'permission_callback' => 'cherifs_tasks_can'),
+    ));
+    register_rest_route('superadmin/v1', '/cherifs/meetings/(?P<id>m[a-z0-9]+)', array(
+        array('methods' => 'PUT',    'callback' => 'cherifs_meetings_update', 'permission_callback' => 'cherifs_tasks_can'),
+        array('methods' => 'DELETE', 'callback' => 'cherifs_meetings_delete', 'permission_callback' => 'cherifs_tasks_can'),
+    ));
+});
+
+function cherifs_meetings_list() {
+    return rest_ensure_response(array('meetings' => cherifs_meetings_sorted(cherifs_meetings_get())));
+}
+
+function cherifs_meetings_create($request) {
+    $m = cherifs_meeting_clean((array) $request->get_json_params());
+    if (is_wp_error($m)) return $m;
+    $all = cherifs_meetings_get();
+    $all[] = $m;
+    update_option('blokes_cherifs_meetings', cherifs_meetings_sorted($all), false);
+    return rest_ensure_response(array('success' => true, 'meeting' => $m));
+}
+
+function cherifs_meetings_update($request) {
+    $id  = (string) $request['id'];
+    $all = cherifs_meetings_get();
+    foreach ($all as $i => $old) {
+        if ($old['id'] !== $id) continue;
+        $m = cherifs_meeting_clean((array) $request->get_json_params(), $old);
+        if (is_wp_error($m)) return $m;
+        $all[$i] = $m;
+        update_option('blokes_cherifs_meetings', cherifs_meetings_sorted($all), false);
+        return rest_ensure_response(array('success' => true, 'meeting' => $m));
+    }
+    return new WP_Error('not_found', 'Esa reunión ya no existe', array('status' => 404));
+}
+
+function cherifs_meetings_delete($request) {
+    $id  = (string) $request['id'];
+    $all = array_values(array_filter(cherifs_meetings_get(), function ($m) use ($id) { return $m['id'] !== $id; }));
+    update_option('blokes_cherifs_meetings', $all, false);
+    return rest_ensure_response(array('success' => true));
+}
+
+// Para el calendario del Dashboard
+function cherifs_meeting_events($from, $to) {
+    $out = array();
+    foreach (cherifs_meetings_get() as $m) {
+        if ($m['date'] < $from->format('Y-m-d') || $m['date'] > $to->format('Y-m-d')) continue;
+        $n = count($m['points']);
+        $out[] = array(
+            'title'    => '🤝 ' . $m['title'] . ($n ? ' · ' . $n . ' puntos' : ''),
+            'start'    => $m['date'] . 'T' . ($m['time'] !== '' ? $m['time'] : '00:00'),
+            'end'      => '',
+            'allday'   => $m['time'] === '',
+            'location' => '',
+            'cal'      => 'Reuniones',
+            'reunion'  => $m['id'],
+        );
+    }
+    return $out;
+}
+
+// ============================================================
 //  superadmin/v1 — Diario: peticiones y sugerencias, compras y recordatorios
 //  (21/11/2026). Una sola tabla con el tipo de cada cosa.
 //  - Verlo y crear: quien ve el Diario (diario_can_view).
@@ -26577,12 +26694,12 @@ function cherifs_calendar() {
             if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) { $failed[] = $cal['name']; continue; }
             foreach (cherifs_ical_events(wp_remote_retrieve_body($res), $from, $to) as $ev) { $ev['cal'] = $cal['name']; $events[] = $ev; }
         }
-        if (!$cumples && count($failed) === count($c['icals'])) {
+        if (!$cumples && !cherifs_meetings_get() && count($failed) === count($c['icals'])) {
             return new WP_Error('ical_error', 'No se pudo leer el calendario de Google', array('status' => 502));
         }
         set_transient('blokes_cherifs_ical', array('events' => $events, 'failed' => $failed), 15 * MINUTE_IN_SECONDS);
     }
-    $events = array_merge($cumples, $events);
+    $events = array_merge($cumples, cherifs_meeting_events($from, $to), $events);
     usort($events, function ($a, $b) { return strcmp($a['start'], $b['start']); });
     $events = array_slice($events, 0, 200);
     return rest_ensure_response(array(

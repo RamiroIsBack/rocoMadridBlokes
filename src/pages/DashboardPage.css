@@ -629,3 +629,38 @@
 /* 7 días en una sola fila en pantallas anchas; en móvil, los que quepan */
 .chf-cal { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 @media (max-width: 900px) { .chf-cal { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); } }
+/* Tareas › Reuniones de socios (25/11) */
+.chf-vistas { display: inline-flex; align-self: flex-start; gap: 4px; padding: 4px; border-radius: 999px; background: var(--color-surface); border: 1px solid var(--color-border); }
+.chf-vistas__b { border: none; background: none; padding: 7px 16px; border-radius: 999px; font: inherit; font-weight: 700; color: var(--color-text-secondary); cursor: pointer; }
+.chf-vistas__b--on { background: var(--color-accent); color: #1d1d1b; }
+.chf-reus { display: flex; flex-direction: column; gap: 12px; }
+.chf-reus__cab { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.chf-reus__form { padding: 16px; }
+.chf-reu__cab { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.chf-reu__tit { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; background: none; border: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.chf-reu__tit b { font-size: 1.15rem; }
+.chf-reu__tit small { color: var(--color-text-secondary); font-size: 0.8rem; }
+.chf-reu__fecha { font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-accent-text); }
+.chf-reu__acc { display: flex; gap: 4px; flex-wrap: wrap; }
+.chf-reu--cerrada { opacity: 0.85; }
+.chf-reu--cerrada .chf-reu__fecha { color: var(--color-text-secondary); }
+.chf-reu__puntos { margin: 12px 0 0; padding: 0 0 0 22px; display: flex; flex-direction: column; }
+.chf-punto { padding: 6px 0; border-top: 1px solid var(--color-border); }
+.chf-punto:first-child { border-top: none; }
+.chf-punto::marker { color: var(--color-text-secondary); font-weight: 700; }
+.chf-punto__fila { display: flex; align-items: center; gap: 10px; }
+.chf-punto__txt { flex: 1; min-width: 0; }
+.chf-punto__meta { display: block; color: var(--color-text-secondary); font-size: 0.78rem; }
+.chf-punto--hecho .chf-punto__txt { color: var(--color-text-secondary); }
+.chf-punto--hecho .chf-t__check { border-color: var(--state-good); }
+.chf-punto__acc { flex: none; display: flex; gap: 3px; }
+.chf-punto__nota { margin: 6px 0 0 32px; width: calc(100% - 32px); }
+.chf-punto__tarea { padding: 8px 0 4px 32px; }
+.chf-reu__add { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.chf-reu__addfila { display: flex; gap: 6px; }
+.chf-reu__addfila .dash-input { flex: 1; }
+@media (max-width: 640px) {
+  .chf-punto__fila { flex-wrap: wrap; }
+  .chf-punto__acc { width: 100%; padding-left: 32px; }
+  .chf-punto__nota, .chf-punto__tarea { margin-left: 0; width: 100%; padding-left: 0; }
+}
