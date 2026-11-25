@@ -371,11 +371,13 @@ export function isExpensesXLSXFile(fileName) {
 
 function fmtFechaDDMMYYYY(d) {
   if (!(d instanceof Date) || isNaN(d.getTime())) return ''
-  // getUTC*, no getDate()/getMonth(): XLSX con cellDates:true representa el día de la celda en
-  // UTC — usar los getters locales desplazaría la fecha un día según la zona del navegador.
-  const dd = String(d.getUTCDate()).padStart(2, '0')
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
-  return `${dd}/${mm}/${d.getUTCFullYear()}`
+  // 25/11 (Ramiro, probado en vivo: "04/01/2026" en vez de "05/01/2026"): con cellDates:true,
+  // SheetJS construye el Date con el constructor LOCAL (medianoche hora del navegador), no en
+  // UTC — usar getUTC* en una zona por delante de UTC (Madrid) resta un día. Los getters
+  // locales (getDate/getMonth/getFullYear) son los que de verdad devuelven el día de la celda.
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}/${d.getFullYear()}`
 }
 
 // Mismo formato que ya trae el CSV del banco (punto de los miles, coma decimal) — tiene que
@@ -400,12 +402,17 @@ export function parseExpensesXLSX(arrayBuffer, learned = null) {
       const fecha      = fmtFechaDDMMYYYY(fechaDate)
       const fechaValor = fmtFechaDDMMYYYY(row[1]) || fecha
       const mesTxt     = String(row[2] || '').trim().toLowerCase()
-      const concepto   = String(row[3] || '').trim()
-      const importe    = Number(row[4])
+      // 25/11 (Ramiro, probado en vivo): espacios dobles en el concepto del xlsx no casaban con
+      // el texto ya guardado (solo recortado al extremo, sin colapsar espacios de en medio).
+      const concepto   = String(row[3] || '').trim().replace(/\s+/g, ' ')
+      // Redondeado a 2 decimales: Excel puede guardar el float con ruido (1.0799999999999998)
+      // que no cuadraría con el importe ya guardado al compararlo en PHP.
+      const importeRaw = Number(row[4])
+      const importe    = isNaN(importeRaw) ? NaN : Math.round(importeRaw * 100) / 100
       const saldo      = fmtSaldoEs(row[5])
       if (!fecha || !concepto || !importe || isNaN(importe)) continue
       const mesNum = MESES_ES[mesTxt]
-      const anio   = fechaDate instanceof Date ? fechaDate.getUTCFullYear() : null
+      const anio   = fechaDate instanceof Date ? fechaDate.getFullYear() : null
       const month  = (mesNum && anio) ? `${anio}-${String(mesNum).padStart(2, '0')}` : (parseMonth(fechaValor) || parseMonth(fecha))
       const isIncome = importe > 0
       const cat = autoCategory(concepto, isIncome, learned)

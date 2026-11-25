@@ -371,7 +371,9 @@ function UploadPanel({ onSaved }) {
               </div>
               {uniqueMonths.length > 1 && (
                 <p className="exp-hint" style={{ margin: '4px 0 0' }}>
-                  ⓘ El mes se decide por fecha valor: un extracto de un mes puede traer algún movimiento de otro (fin de mes). Guardar añade a lo que ya hubiera en cada mes, sin borrar nada — para sustituir un mes entero, bórralo primero desde "Gestionar".
+                  {hasFixedEntity
+                    ? 'ⓘ El mes es el de la columna "Mes" del xlsx (fecha de operación), no la fecha valor. Guardar añade a lo que ya hubiera en cada mes, sin borrar nada.'
+                    : 'ⓘ El mes se decide por fecha valor: un extracto de un mes puede traer algún movimiento de otro (fin de mes). Guardar añade a lo que ya hubiera en cada mes, sin borrar nada — para sustituir un mes entero, bórralo primero desde "Gestionar".'}
                 </p>
               )}
             </div>
