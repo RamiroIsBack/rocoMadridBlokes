@@ -23,6 +23,7 @@ const sumarDias = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); co
 const MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
 const fechaCorta = iso => { const [, m, d] = iso.slice(0, 10).split('-').map(Number); return `${d} ${MESES[m - 1]}` }
 const DIAS_SEM = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb']
+const MESES_CAL = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 const diaSemana = iso => { const [y, m, d] = iso.slice(0, 10).split('-').map(Number); return DIAS_SEM[new Date(y, m - 1, d).getDay()] }
 
 function Card({ icon, title, link, linkLabel = 'Ver →', children, className = '' }) {
@@ -515,17 +516,30 @@ function CalendarioGoogle() {
           {error && <p className="dash-error">{error}</p>}
           {data.failed?.length > 0 && <p className="chf-aviso chf-aviso--mal">⚠ No se pudo leer: {data.failed.join(', ')}. Quítalo y vuelve a ponerlo en «Calendarios».</p>}
           <div className="chf-cal">
-            {visibles.map(dia => (
-              <div key={dia} className={`chf-cal__dia${dia === hoy ? ' chf-cal__dia--hoy' : ''}`}>
-                <span className="chf-cal__fecha">{dia === hoy ? 'Hoy' : diaSemana(dia)} {fechaCorta(dia)}</span>
-                {porDia[dia].map((ev, i) => (
-                  <span key={i} className={`chf-cal__ev${ev.cumple ? ' chf-cal__ev--cumple' : ''}`}
-                    title={`${ev.title}${ev.location ? ` · ${ev.location}` : ''}${varios && ev.cal && !ev.cumple ? ` (${ev.cal})` : ''}`}>
-                    {!ev.allday && <b>{ev.start.slice(11, 16)}</b>} {ev.title}
+            {/* 25/11 (tarde): fecha como hoja de calendario (mes · día · día de la semana) a la
+                izquierda y un separador con el nombre del mes cada vez que cambia */}
+            {visibles.flatMap((dia, i) => {
+              const mes = Number(dia.slice(5, 7)) - 1
+              const cambiaMes = i > 0 && visibles[i - 1].slice(0, 7) !== dia.slice(0, 7)
+              return [
+                cambiaMes && <span key={`sep-${dia}`} className="chf-cal__sep">{MESES_CAL[mes]}</span>,
+                <div key={dia} className={`chf-cal__dia${dia === hoy ? ' chf-cal__dia--hoy' : ''}`}>
+                  <span className="chf-cal__hoja">
+                    <span className="chf-cal__mes">{dia === hoy ? 'hoy' : MESES[mes]}</span>
+                    <span className="chf-cal__num">{Number(dia.slice(8, 10))}</span>
+                    <span className="chf-cal__sem">{diaSemana(dia)}</span>
                   </span>
-                ))}
-              </div>
-            ))}
+                  <span className="chf-cal__evs">
+                    {porDia[dia].map((ev, k) => (
+                      <span key={k} className={`chf-cal__ev${ev.cumple ? ' chf-cal__ev--cumple' : ''}`}
+                        title={`${ev.title}${ev.location ? ` · ${ev.location}` : ''}${varios && ev.cal && !ev.cumple ? ` (${ev.cal})` : ''}`}>
+                        {!ev.allday && <b>{ev.start.slice(11, 16)}</b>} {ev.title}
+                      </span>
+                    ))}
+                  </span>
+                </div>,
+              ]
+            })}
             {!proximos.length && <span className="chf-semana__nada">Nada en los próximos días.</span>}
           </div>
           <div className="chf-cal__pie">

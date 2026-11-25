@@ -664,3 +664,19 @@
   .chf-punto__acc { width: 100%; padding-left: 32px; }
   .chf-punto__nota, .chf-punto__tarea { margin-left: 0; width: 100%; padding-left: 0; }
 }
+
+/* Calendario: fecha como hoja (mes · día · semana) y separador de meses (25/11 tarde) */
+.chf-cal { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+.chf-cal__dia { flex: 1 1 0; min-width: 120px; flex-direction: row; align-items: flex-start; gap: 8px; }
+.chf-cal__hoja { display: flex; flex-direction: column; align-items: center; flex: 0 0 34px; line-height: 1.05; padding-right: 8px; border-right: 1px solid var(--color-border); }
+.chf-cal__mes, .chf-cal__sem { font-size: 0.64rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-accent-text); }
+.chf-cal__num { font-family: var(--font-heading); font-size: 1.35rem; font-weight: 800; color: var(--color-text-primary); }
+.chf-cal__dia--hoy .chf-cal__mes { color: var(--color-text-primary); }
+.chf-cal__evs { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; padding-top: 1px; }
+.chf-cal__sep {
+  flex: 0 0 22px; display: flex; align-items: center; justify-content: center;
+  writing-mode: vertical-rl; transform: rotate(180deg);
+  background: var(--chf-mostaza, #d4a21a); color: #2b2100; border-radius: 6px;
+  font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; padding: 6px 0;
+}
+@media (max-width: 900px) { .chf-cal__dia { flex: 1 1 140px; } }
