@@ -551,9 +551,11 @@ function CalendarioGoogle() {
 
 // ─── Página: cajas que se pueden ordenar arrastrándolas (25/11) ─────────────
 // El orden se guarda en este navegador. Las cajas «anchas» ocupan toda la fila.
-const ORDEN_KEY = 'blokes-cherifs-orden'
-const CAJAS = ['tablon', 'indicadores', 'dinero', 'calendario', 'tareas', 'profes']
-const ANCHAS = new Set(['tablon', 'indicadores'])
+// 25/11 (tarde, Álvaro): el calendario va a todo el ancho y en horizontal, debajo de los
+// indicadores. La clave cambia (-v2) para que el orden guardado se reinicie una vez.
+const ORDEN_KEY = 'blokes-cherifs-orden-v2'
+const CAJAS = ['tablon', 'indicadores', 'calendario', 'dinero', 'tareas', 'profes']
+const ANCHAS = new Set(['tablon', 'indicadores', 'calendario'])
 
 function leerOrden() {
   try {

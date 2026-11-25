@@ -578,3 +578,30 @@
   .chf-t__meta { width: 100%; padding-left: 32px; }
   .chf-tform { padding-left: 0; }
 }
+
+/* ── 25/11 (tarde, Álvaro): Dashboard sobre fondo mostaza y calendario en horizontal ── */
+.chf {
+  --chf-mostaza: #d4a21a;
+  background: var(--chf-mostaza);
+  padding: 22px 24px 28px;
+  border-radius: 20px;
+}
+.chf .dash__date, .chf .dash__claim, .chf-head__hint { color: #2b2100; }
+.chf-head__hint .dash-link { color: #2b2100; text-decoration: underline; }
+.chf .chf-caja .dash-card, .chf .dash-tile { box-shadow: 0 2px 10px rgba(60, 40, 0, 0.12); }
+:root[data-theme="dark"] .chf { --chf-mostaza: #5f4a10; }
+:root[data-theme="dark"] .chf .dash__date,
+:root[data-theme="dark"] .chf .dash__claim,
+:root[data-theme="dark"] .chf-head__hint,
+:root[data-theme="dark"] .chf-head__hint .dash-link { color: #f6e6b4; }
+@media (max-width: 640px) { .chf { padding: 14px 12px 18px; border-radius: 14px; } }
+
+/* Calendario a todo el ancho: los días en columnas, uno al lado de otro */
+.chf-semana { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.chf-semana__dia { display: block; border: 1px solid var(--color-border); padding: 8px 10px; }
+.chf-semana__dia .chf-gcal__dia { display: block; margin-bottom: 4px; }
+.chf-semana__nada { grid-column: 1 / -1; }
+.chf-gcal__mes { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; align-items: start; }
+.chf-gcal__mes > .chf-tablon__lbl { grid-column: 1 / -1; }
+.chf-gcal__mes .chf-gcal { margin: 0; border: 1px solid var(--color-border); border-radius: 8px; padding: 8px 10px; }
+.chf-semana .chf-lista li, .chf-gcal__mes .chf-lista li { flex-wrap: wrap; gap: 2px 8px; font-size: 0.85rem; }
