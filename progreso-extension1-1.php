@@ -1835,14 +1835,27 @@ function blokes_coste_real_profe_mes($month) {
     return array('costes' => $out, 'fuentes' => $fuentes);
 }
 
+// Recorta y colapsa espacios internos del concepto, para que dos fuentes distintas del mismo
+// movimiento (CSV del banco, xlsx de reconciliación) den la misma clave aunque una traiga
+// espacios dobles en medio y la otra no (25/11, Ramiro, probado en vivo: el xlsx no casaba con
+// lo ya guardado por eso).
+function blokes_exp_normaliza_concepto($concepto) {
+    return trim(preg_replace('/\s+/', ' ', (string) ($concepto ?? '')));
+}
+
 // Clave de un movimiento para no duplicarlo: fecha de operación (no fecha valor — esa falta en
-// lo guardado antes de tenerla, así que no casaría con lo viejo), concepto, importe y saldo
-// posterior. El saldo es necesario porque fecha+concepto+importe no basta: dos transferencias
-// reales y distintas el mismo día por el mismo importe exacto (p. ej. dos alumnos pagando la
-// misma cuota) comparten esos tres datos y no son el mismo movimiento.
+// lo guardado antes de tenerla, así que no casaría con lo viejo), concepto normalizado e importe.
+// 25/11 (Ramiro, probado en vivo con el xlsx de reconciliación): el saldo SE QUITÓ de la clave —
+// antes se usaba para distinguir dos transferencias reales distintas el mismo día por el mismo
+// importe exacto (p. ej. dos alumnos pagando la misma cuota), pero el saldo guardado antes de
+// hoy no siempre existe (CSV viejos) y, cuando existe, el formato puede no casar entre fuentes
+// (CSV del banco vs. xlsx), así que casi ninguna fila casaba con lo ya guardado y "Comprobar"
+// quería añadir todo el año otra vez. Esos pagos iguales el mismo día se siguen distinguiendo
+// por CONTEO, no por esta clave — ver superadmin_save_expenses, que cuenta ocurrencias de la
+// clave en vez de fundirlas.
 function blokes_exp_item_key($item) {
     $fecha = $item['fecha'] ?? '';
-    return $fecha . '|' . trim((string) ($item['concepto'] ?? '')) . '|' . round(floatval($item['importe'] ?? 0), 2) . '|' . ($item['saldo'] ?? '');
+    return $fecha . '|' . blokes_exp_normaliza_concepto($item['concepto'] ?? '') . '|' . round(floatval($item['importe'] ?? 0), 2);
 }
 
 // Guarda los movimientos de un mes/entidad FUSIONANDO con lo que ya hubiera (por defecto):
@@ -1866,14 +1879,19 @@ function superadmin_save_expenses($request) {
         return new WP_Error('invalid_month', 'Formato de mes inválido', array('status' => 400));
     }
 
+    // 25/11 (Ramiro, "saldo guardado siempre como número"): a partir de ahora, si trae saldo se
+    // guarda ya parseado a número — nunca como texto con el formato de turno (CSV y xlsx no
+    // siempre coinciden). Sin saldo se guarda null (y no "", para no confundirlo con un saldo
+    // real de 0 €).
     $clean = array();
     foreach ($items as $item) {
+        $saldo_in = trim((string) ($item['saldo'] ?? ''));
         $clean[] = array(
             'fecha'      => sanitize_text_field($item['fecha']      ?? ''),
             'fechaValor' => sanitize_text_field($item['fechaValor'] ?? ($item['fecha'] ?? '')),
             'concepto'   => sanitize_text_field($item['concepto'] ?? ''),
             'importe'    => floatval($item['importe']  ?? 0),
-            'saldo'      => sanitize_text_field((string) ($item['saldo'] ?? '')),
+            'saldo'      => ($saldo_in === '') ? null : blokes_exp_parsear_saldo($saldo_in),
             'category'   => sanitize_text_field($item['category'] ?? 'otros'),
             'iva'        => intval($item['iva']      ?? 0),
             'excluded'   => (bool) ($item['excluded'] ?? false),
@@ -1936,11 +1954,42 @@ function superadmin_save_expenses($request) {
     }
 
     if ($simular) {
+        // 25/11 (Ramiro, "para verlo sin adivinar"): por cada fila que añadiría de verdad, su
+        // propia clave y, si no hay ninguna fila YA GUARDADA este mes con esa misma clave, la
+        // más parecida (misma fecha e importe, o si no, mismo concepto e importe) — así se ve a
+        // simple vista POR QUÉ no casa (fecha, concepto o importe distintos) sin tener que
+        // adivinarlo.
+        $existentes_planos = array();
+        if (!$replace) {
+            foreach ($existentes_por_key as $filas) {
+                foreach ($filas as $it) { $existentes_planos[] = $it; }
+            }
+        }
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'month' => $month, 'entity' => $entity,
             'existentesAntes' => $existentes_antes, 'totalTrasGuardar' => count($merged),
-            'nuevos' => array_map(function($it) {
-                return array('fecha' => $it['fecha'], 'concepto' => $it['concepto'], 'importe' => $it['importe'], 'saldo' => $it['saldo']);
+            'nuevos' => array_map(function($it) use ($existentes_planos) {
+                $out = array(
+                    'fecha' => $it['fecha'], 'concepto' => $it['concepto'], 'importe' => $it['importe'], 'saldo' => $it['saldo'],
+                    'clave' => blokes_exp_item_key($it),
+                );
+                $parecida = null;
+                foreach ($existentes_planos as $ex) {
+                    if ($ex['fecha'] === $it['fecha'] && abs(floatval($ex['importe']) - floatval($it['importe'])) < 0.005) { $parecida = $ex; break; }
+                }
+                if (!$parecida) {
+                    $concepto_it = blokes_exp_normaliza_concepto($it['concepto'] ?? '');
+                    foreach ($existentes_planos as $ex) {
+                        if (blokes_exp_normaliza_concepto($ex['concepto'] ?? '') === $concepto_it && abs(floatval($ex['importe']) - floatval($it['importe'])) < 0.005) { $parecida = $ex; break; }
+                    }
+                }
+                if ($parecida) {
+                    $out['masParecida'] = array(
+                        'fecha' => $parecida['fecha'], 'concepto' => $parecida['concepto'], 'importe' => $parecida['importe'],
+                        'clave' => blokes_exp_item_key($parecida),
+                    );
+                }
+                return $out;
             }, $nuevos),
         )));
     }
@@ -6217,7 +6266,13 @@ function blokes_expenses_iva_repercutido_real($from) {
 // histórico completo para poder arrastrar el último saldo conocido de un mes sin CSV nuevo (la
 // Rocoteca, que ya no tiene movimientos). Nada de apertura ni de sumar netos — eso nunca cuadra
 // con el banco de verdad (el neto quita traspasos internos que sí movieron la cuenta).
+// 25/11 (Ramiro, "saldo guardado siempre como número"): a partir de ahora se guarda ya como
+// número (float) al subir el xlsx — si se le pasa un número no hay que "desformatear" nada (si
+// se tratara como texto, (string) 15158.09 = "15158.09" perdería el punto decimal al tratarlo
+// como separador de miles). Lo guardado antes de hoy sigue viniendo como texto con el formato
+// español del CSV del banco ("15.158,09"), que es lo que seguimos parseando por debajo.
 function blokes_exp_parsear_saldo($saldo_raw) {
+    if (is_int($saldo_raw) || is_float($saldo_raw)) return floatval($saldo_raw);
     return floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', (string) $saldo_raw)));
 }
 
@@ -6282,16 +6337,6 @@ function blokes_expenses_saldo_mensual($entity) {
     return $out;
 }
 
-// Dedup SOLO para "Resultado neto mensual" (barras+línea): fecha+concepto+importe, sin saldo —
-// los CSV del banco se solapan (el de un mes trae alguna fila del mes siguiente) y el mismo
-// movimiento real puede traer un "Saldo Posterior" distinto según en qué extracto venga (24/11
-// 13:30), así que el saldo no sirve de desambiguador aquí (al revés que blokes_exp_item_key, que
-// sí lo usa para no fusionar al guardar dos pagos reales iguales el mismo día).
-function blokes_exp_net_dedup_key($item) {
-    $fecha = $item['fecha'] ?? '';
-    return $fecha . '|' . trim((string) ($item['concepto'] ?? '')) . '|' . round(floatval($item['importe'] ?? 0), 2);
-}
-
 // Neto real del mes de una entidad para "Resultado neto mensual" (24/11 13:30, regla única): TODOS
 // los movimientos, sin excluir nada (ni "Uso de Rocódromo" ni transferencias entre cuentas — con
 // "Todas" se anulan solos, sumando Club+Rocoteca). Agrupado por el mes real de la columna "Fecha"
@@ -6318,7 +6363,7 @@ function blokes_expenses_neto_mensual_real($entity) {
         if (!$saved || !is_array($saved['items'] ?? null)) continue;
         $cuenta_fichero = array();
         foreach ($saved['items'] as $item) {
-            $k = blokes_exp_net_dedup_key($item);
+            $k = blokes_exp_item_key($item);
             $cuenta_fichero[$k] = ($cuenta_fichero[$k] ?? 0) + 1;
             if (!isset($ejemplo_por_key[$k])) $ejemplo_por_key[$k] = $item;
         }
@@ -6363,7 +6408,7 @@ function blokes_expenses_apertura_linea($year, $entity) {
             if (!preg_match('#^(\d{1,2})/(\d{1,2})/(\d{4})#', $fecha, $m)) continue;
             $ts = mktime(0, 0, 0, intval($m[2]), intval($m[1]), intval($m[3]));
             if ($mejor !== null && $ts >= $mejor['ts']) continue;
-            $saldo  = floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', $saldo_raw)));
+            $saldo  = blokes_exp_parsear_saldo($item['saldo'] ?? '');
             $amt    = abs(floatval($item['importe'] ?? 0));
             $signed = (($item['section'] ?? 'costes') === 'costes') ? -$amt : $amt;
             $mejor  = array('ts' => $ts, 'apertura' => $saldo - $signed);
@@ -6406,7 +6451,7 @@ function blokes_expenses_saldo_real($entity) {
             $ts = mktime(0, 0, 0, intval($m[2]), intval($m[1]), intval($m[3]));
             if ($ts < $mejor_ts) continue; // a igual fecha, el último del CSV (orden del banco) gana
             $mejor_ts = $ts;
-            $saldo = floatval(str_replace(array('.', ','), array('', '.'), preg_replace('/[^\d,.\-]/', '', $saldo_raw)));
+            $saldo = blokes_exp_parsear_saldo($item['saldo'] ?? '');
             $fecha_txt = date('Y-m-d', $ts);
         }
     }

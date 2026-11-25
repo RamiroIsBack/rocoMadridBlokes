@@ -436,7 +436,14 @@ function UploadPanel({ onSaved }) {
                       <summary className="exp-hint" style={{ cursor: 'pointer' }}>Ver el detalle de las filas que se añadirían</summary>
                       <ul style={{ fontSize: '0.78rem', margin: '4px 0 0' }}>
                         {simPreview.flatMap(r => r.nuevos.map((it, i) => (
-                          <li key={`${r.entity}-${r.month}-${i}`}>{r.entity} · {fmtMonth(r.month)} · {it.fecha} · {it.concepto} · {it.importe} € · saldo {it.saldo}</li>
+                          <li key={`${r.entity}-${r.month}-${i}`}>
+                            {r.entity} · {fmtMonth(r.month)} · {it.fecha} · {it.concepto} · {it.importe} € · saldo {it.saldo ?? '—'}
+                            {it.masParecida && (
+                              <div style={{ color: 'var(--color-text-secondary)', marginLeft: 12 }}>
+                                ↳ más parecida ya guardada: {it.masParecida.fecha} · {it.masParecida.concepto} · {it.masParecida.importe} €
+                              </div>
+                            )}
+                          </li>
                         )))}
                       </ul>
                     </details>
