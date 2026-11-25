@@ -1086,8 +1086,10 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
   const [motivo, setMotivo]   = useState('')
   const [fechaVuelta, setFechaVuelta] = useState('')
   // "Congelar mes(es)" (19/11 21:30, punto 2) y "cancelar pedido pendiente" al pausar (punto 3).
+  // Eva/cowork, 25/11 17:00: por defecto a true — pausar sin cancelar el pendiente lo deja
+  // colgado en "Pendientes de cobro" como si hubiera que cobrarlo, aunque esté en pausa.
   const [mesesCongelar, setMesesCongelar] = useState(1)
-  const [cancelarPedidoPendiente, setCancelarPedidoPendiente] = useState(false)
+  const [cancelarPedidoPendiente, setCancelarPedidoPendiente] = useState(true)
   const [nota, setNota]       = useState(alumno.notas || '')
   // Excepción de precio en Marcar cobrado (NOTAS_PARA_CODE_pestanas_grupos.md, Ramiro 06/11
   // 16:00): cuando el importe no coincide con el total, hay que elegir una de las dos antes de
@@ -1825,6 +1827,7 @@ const PREVIEW_LABEL = {
   subId: 'Nº suscripción', estadoAntes: 'Estado ahora', pedidoExistente: 'Pedido ya creado',
   proximoPago: 'Próximo pago', mesQueCubre: 'Mes que paga',
   completaraPedidoExistente: 'Completa el pedido ya creado', seGuardaraComoAdelantado: 'Se guarda como pago adelantado (sin factura)',
+  creaPedidoDeEsteMes: 'Crea y cobra el pedido de este mes ahora (factura real)',
   adelantadoYaGuardado: 'Ya hay un adelantado guardado', pasaAActiva: 'Queda activa', mantienePausa: 'Sigue en pausa',
   importe: 'Importe', metodo: 'Método', fecha: 'Fecha', parcial: 'Pago parcial',
   reactivaLaSuscripcion: 'Reactiva la suscripción', pedidosACancelar: 'Pedidos sin pagar que se cancelan',
@@ -4601,18 +4604,29 @@ function PendientesCobroTab({ busquedaExterna = '' } = {}) {
                     )}
                   </td>
                   <td>
-                    <div className="sv-pc-viene">
-                      {PC_VIENE.map(([id, ic]) => (
-                        <button
-                          key={id} title={id}
-                          className={`sv-pc-viene__btn${(f.vieneEstado || 'sin_confirmar') === id ? ' sv-pc-viene__btn--on' : ''}`}
-                          onClick={() => id === 'no_viene' ? setConfirmBaja(f) : marcarViene(f.subId, id)}
-                        >{ic}</button>
-                      ))}
-                    </div>
-                    {f.vienePor && <div className="sv-ot-muted">{f.vienePor} · {(f.vieneFecha || '').slice(0, 16).replace('T', ' ')}</div>}
+                    {f.enPausa ? (
+                      <span className="sv-ot-muted" title={f.pausaMotivo || 'En pausa'}>
+                        ⏸ En pausa{f.pausaHasta ? ` hasta ${f.pausaHasta.split('-').reverse().join('/')}` : ''}
+                      </span>
+                    ) : (
+                      <>
+                        <div className="sv-pc-viene">
+                          {PC_VIENE.map(([id, ic]) => (
+                            <button
+                              key={id} title={id}
+                              className={`sv-pc-viene__btn${(f.vieneEstado || 'sin_confirmar') === id ? ' sv-pc-viene__btn--on' : ''}`}
+                              onClick={() => id === 'no_viene' ? setConfirmBaja(f) : marcarViene(f.subId, id)}
+                            >{ic}</button>
+                          ))}
+                        </div>
+                        {f.vienePor && <div className="sv-ot-muted">{f.vienePor} · {(f.vieneFecha || '').slice(0, 16).replace('T', ' ')}</div>}
+                      </>
+                    )}
                   </td>
                   <td className="sv-pc-acciones">
+                    {f.enPausa ? (
+                      <span className="sv-ot-muted">Sin acciones mientras esté en pausa.</span>
+                    ) : (<>
                     {f.etiqueta === 'duplicado' && (
                       <button className="sv-tests-select" onClick={() => setAccion({
                         tipo: 'fusionar', targetId: f.subId,
@@ -4654,6 +4668,7 @@ function PendientesCobroTab({ busquedaExterna = '' } = {}) {
                         tipo: 'dar_de_baja', targetId: f.subId,
                         alumno: { subId: f.subId, alumno: f.nombre, telefono: f.telefono, notas: '' },
                       })}>Dar de baja{f.etiqueta === 'duplicado_en_espera' ? ` #${f.subId}` : ''}</button>
+                    </>)}
                     </>)}
                   </td>
                 </tr>

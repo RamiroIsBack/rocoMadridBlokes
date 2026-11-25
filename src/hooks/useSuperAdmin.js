@@ -249,7 +249,7 @@ export const histPagosEstadisticas = () => gestionCall('GET', '/gestion/hist-pag
 
 // Pagos adelantados (NOTAS_PARA_CODE_grupos_como_excel.md, 1/11 18:55): transferencia/bizum/
 // tarjeta apuntados antes de que exista la renovación de WooCommerce.
-export const gestionAdelantadosGet    = ()  => gestionCall('GET', '/gestion/adelantados')
+export const gestionAdelantadosGet    = (subId = null) => gestionCall('GET', `/gestion/adelantados${subId ? `?sub_id=${subId}` : ''}`)
 export const gestionAdelantadoAnular  = id  => gestionPost(`/gestion/adelantados/${id}/anular`)
 
 // Sync Grupos ⇄ Excel, bandeja "Cambios hechos en el Excel" (NOTAS_PARA_CODE_sync_grupos.md,

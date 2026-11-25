@@ -4133,6 +4133,17 @@ function blokes_pendiente_cobro_fila($info, $etiqueta, $pedido, $estados, $cance
         'recordadoPor' => $estado['recordado_por'] ?? null, 'recordadoFecha' => $estado['recordado_fecha'] ?? null,
         'activoApp' => blokes_alumno_activo_en_app($info['uid'] ?? null),
     );
+    // Eva/cowork, 25/11 17:00: una suscripción en pausa (lesión/viaje) no necesita que se le
+    // pregunte "¿viene?" ni que se le ofrezca dar de baja — solo puede salir aquí porque su
+    // pedido pendiente quedó sin cancelar al pausar (antes era opcional, ver "Pausar" en
+    // Grupos). Se marca para que el frontend la enseñe como "En pausa" sin botones de baja, en
+    // vez de pedirle a Eva una decisión que no toca mientras siga en pausa.
+    $pausa_motivo = get_post_meta($sub_id, '_rm_pausa_motivo', true);
+    if ($pausa_motivo) {
+        $fila['enPausa'] = true;
+        $fila['pausaMotivo'] = $pausa_motivo;
+        $fila['pausaHasta'] = get_post_meta($sub_id, '_rm_pausa_hasta', true) ?: null;
+    }
     if ($cancelar) $fila['cancelar'] = $cancelar;
     // Cowork, 14/11 19:00 punto 1: en "duplicado en espera", $info YA es la de la suscripción
     // que se QUEDA (con su mesesPagadosExcel/activaId/motivo normales, de arriba) — lo único
@@ -12940,11 +12951,27 @@ function superadmin_gestion_marcar_cobrado($request) {
     // pago es el de ESE pedido — mismo criterio de "a qué mes pertenece un pedido" que ya usa
     // blokes_sync_grupos_sub_ya_cobrado_mes() (date_created, no date_paid). `next_payment` solo
     // sirve para el caso adelantado (sin pedido todavía, hay que mirar hacia delante de verdad).
+    // Eva/cowork, 25/11 17:00 (Dani Herrero #7749: sub creada el 05/11, único pedido el de
+    // octubre, next_payment salta directo al 03/12 — NUNCA hubo ciclo de noviembre): cuando no
+    // hay pedido pendiente Y el próximo pago programado cae en un mes POSTERIOR al actual, no es
+    // un simple "adelanto voluntario" (eso sería pagar ahora lo que toca el día 3 que viene) —
+    // es un HUECO real en el calendario de cobro que deja el mes en curso sin ninguna
+    // oportunidad de pagarse nunca. En ese caso concreto el pago de Eva es DE ESTE MES: se crea
+    // y completa el pedido de renovación de ahora mismo (factura real) en vez de guardarlo como
+    // adelantado de un mes que ni siquiera es el que se está cobrando.
+    $mes_actual_marcar_cobrado = date('Y-m', $fecha_ts);
+    $crear_pedido_mes_actual = false;
     if ($order) {
         $fecha_pedido = $order->get_date_created() ?: $order->get_date_paid();
         $periodo_cubre = $fecha_pedido ? $fecha_pedido->date('Y-m') : ($next_payment_ts ? date('Y-m', $next_payment_ts) : date('Y-m'));
     } else {
-        $periodo_cubre = $next_payment_ts ? date('Y-m', $next_payment_ts) : date('Y-m');
+        $periodo_futuro = $next_payment_ts ? date('Y-m', $next_payment_ts) : $mes_actual_marcar_cobrado;
+        if ($periodo_futuro > $mes_actual_marcar_cobrado && !blokes_sync_grupos_sub_ya_cobrado_mes($sub_id, $mes_actual_marcar_cobrado)) {
+            $periodo_cubre = $mes_actual_marcar_cobrado;
+            $crear_pedido_mes_actual = true;
+        } else {
+            $periodo_cubre = $periodo_futuro;
+        }
     }
 
     // Ya hay un adelantado guardado para este mismo mes de esta suscripción: avisar en la
@@ -12974,7 +13001,8 @@ function superadmin_gestion_marcar_cobrado($request) {
             'proximoPago'     => $next_payment_ts ? date_i18n('d/m/Y', $next_payment_ts) : 'desconocido',
             'mesQueCubre'     => $periodo_cubre,
             'completaraPedidoExistente' => (bool) $order,
-            'seGuardaraComoAdelantado'  => !$order,
+            'creaPedidoDeEsteMes'       => $crear_pedido_mes_actual,
+            'seGuardaraComoAdelantado'  => !$order && !$crear_pedido_mes_actual,
             'adelantadoYaGuardado'      => $adelantado_existente ? array(
                 'id' => intval($adelantado_existente['id']), 'importe' => floatval($adelantado_existente['importe']),
                 'fecha' => date_i18n('d/m/Y', strtotime($adelantado_existente['created_at'])), 'por' => $adelantado_existente['user_login'],
@@ -12993,9 +13021,9 @@ function superadmin_gestion_marcar_cobrado($request) {
             'bloqueadoBug1711'     => $bloqueado_bug_1711,
             'opciones' => !$importe_distinto ? null : array(
                 'solo_este_mes' => array(
-                    'disponible' => (bool) $order,
+                    'disponible' => (bool) $order || $crear_pedido_mes_actual,
                     'totalPedidoAntes' => $total_referencia, 'totalPedidoDespues' => $importe, 'totalFactura' => $importe,
-                    'aviso' => $order ? null : 'Todavía no existe el pedido de esta renovación — no se puede ajustar solo este mes hasta que exista (usa "y desde ahora" o espera a que se genere).',
+                    'aviso' => ($order || $crear_pedido_mes_actual) ? null : 'Todavía no existe el pedido de esta renovación — no se puede ajustar solo este mes hasta que exista (usa "y desde ahora" o espera a que se genere).',
                 ),
                 'desde_ahora' => array(
                     'disponible' => true,
@@ -13011,13 +13039,15 @@ function superadmin_gestion_marcar_cobrado($request) {
                         number_format($importe, 2, ',', '.'), number_format($total_referencia, 2, ',', '.'))
                     : ($order
                         ? 'Simulación: no se ha escrito nada en WooCommerce. De confirmarlo, SE EMITIRÁ FACTURA y se enviará a Hacienda (Verifactu).'
-                        : 'Simulación: todavía no existe el pedido de renovación. De confirmarlo, se guardará como "pagado por adelantado" (sin factura) y se aplicará solo cuando WooCommerce genere esa renovación.')),
+                        : ($crear_pedido_mes_actual
+                            ? 'Simulación: no existe ningún ciclo de cobro para el mes en curso — de confirmarlo, se CREARÁ el pedido de renovación de este mes y se completará ya mismo (SE EMITIRÁ FACTURA real, Verifactu).'
+                            : 'Simulación: todavía no existe el pedido de renovación. De confirmarlo, se guardará como "pagado por adelantado" (sin factura) y se aplicará solo cuando WooCommerce genere esa renovación.'))),
         );
         blokes_gestion_log($sub_id, 'marcar_cobrado_simulado', $antes, null, $preview);
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $preview));
     }
 
-    if ($importe_distinto && $ajustar_precio === 'solo_este_mes' && !$order) {
+    if ($importe_distinto && $ajustar_precio === 'solo_este_mes' && !$order && !$crear_pedido_mes_actual) {
         return new WP_Error('sin_pedido', 'Todavía no existe el pedido de esta renovación — no se puede ajustar el precio solo este mes hasta que exista. Usa "y desde ahora" o espera a que se genere.', array('status' => 409));
     }
 
@@ -13046,18 +13076,49 @@ function superadmin_gestion_marcar_cobrado($request) {
                 $adelantado_existente['user_login'], intval($adelantado_existente['id'])
             ), array('status' => 409));
         }
-        $user = wp_get_current_user();
-        $wpdb->insert(blokes_adelantados_table(), array(
-            'sub_id' => $sub_id, 'periodo' => $periodo_cubre, 'importe' => $importe, 'metodo' => $metodo,
-            'fecha_banco' => date('Y-m-d', $fecha_ts), 'nota' => $nota,
-            'user_id' => $user ? $user->ID : 0, 'user_login' => $user ? $user->user_login : '',
-            'created_at' => current_time('mysql'),
-        ));
-        $despues = array('adelantado' => true, 'periodo' => $periodo_cubre, 'importe' => $importe, 'metodo' => $metodo);
-        blokes_gestion_log($sub_id, 'marcar_cobrado_adelantado', $antes, $despues, array('fecha' => $fecha_txt, 'nota' => $nota));
-        return rest_ensure_response(array('success' => true, 'adelantado' => true, 'data' => array_merge($despues, array(
-            'aviso' => 'Guardado como pago por adelantado. Se aplicará automáticamente cuando se genere la renovación del día 3; no se crea factura todavía.',
-        ))));
+        if ($crear_pedido_mes_actual) {
+            // Crea la renovación de ESTE mes a mano, con la misma función que usa WooCommerce
+            // Subscriptions para generarla sola el día que toca — no es un pedido "inventado":
+            // nace con las líneas/importe/impuestos de la suscripción, enlazado como renovación
+            // de verdad, así que al completarlo más abajo (código ya existente, sin cambios)
+            // WooCommerce Subscriptions avanza el calendario de cobro exactamente igual que si
+            // esta renovación la hubiera generado el cron. Nunca se ha podido probar en vivo
+            // desde aquí — primera vez que se usa esta función en Blokes (25/11).
+            if (!function_exists('wcs_create_renewal_order')) {
+                return new WP_Error('wcs_renewal_no_disponible', 'WooCommerce Subscriptions no tiene disponible wcs_create_renewal_order() — no se puede crear el pedido de este mes a mano. Avisa a Ramiro/Code.', array('status' => 503));
+            }
+            $pedido_nuevo = blokes_gestion_sin_emails(function() use ($sub) { return wcs_create_renewal_order($sub); });
+            if (!$pedido_nuevo || is_wp_error($pedido_nuevo)) {
+                return new WP_Error('crear_pedido_mes_actual_fallo', 'No se ha podido crear el pedido de renovación de este mes: ' . (is_wp_error($pedido_nuevo) ? $pedido_nuevo->get_error_message() : 'error desconocido') . '.', array('status' => 500));
+            }
+            $order = $pedido_nuevo;
+            // Recalcula con el total REAL del pedido recién creado (antes se usaba el de la
+            // suscripción, una estimación) — afecta a si hace falta excepción de precio.
+            $total_referencia = floatval($order->get_total());
+            $importe_distinto = !$parcial && abs($importe - $total_referencia) > 0.009;
+            if ($importe_distinto && $ajustar_precio === '') {
+                return new WP_Error('importe_distinto', sprintf(
+                    'El importe (%s €) no coincide con el total real del pedido recién creado (%s €) — elige "solo este mes" o "y desde ahora" (ajustarPrecio) antes de confirmar.',
+                    number_format($importe, 2, ',', '.'), number_format($total_referencia, 2, ',', '.')
+                ), array('status' => 409));
+            }
+            // Sigue el código normal de abajo (excepción de precio sobre $order si toca, nota,
+            // payment_complete, factura, log, Excel) — $order ya existe, se trata exactamente
+            // igual que un pedido pendiente que ya hubiera generado WooCommerce.
+        } else {
+            $user = wp_get_current_user();
+            $wpdb->insert(blokes_adelantados_table(), array(
+                'sub_id' => $sub_id, 'periodo' => $periodo_cubre, 'importe' => $importe, 'metodo' => $metodo,
+                'fecha_banco' => date('Y-m-d', $fecha_ts), 'nota' => $nota,
+                'user_id' => $user ? $user->ID : 0, 'user_login' => $user ? $user->user_login : '',
+                'created_at' => current_time('mysql'),
+            ));
+            $despues = array('adelantado' => true, 'periodo' => $periodo_cubre, 'importe' => $importe, 'metodo' => $metodo);
+            blokes_gestion_log($sub_id, 'marcar_cobrado_adelantado', $antes, $despues, array('fecha' => $fecha_txt, 'nota' => $nota));
+            return rest_ensure_response(array('success' => true, 'adelantado' => true, 'data' => array_merge($despues, array(
+                'aviso' => 'Guardado como pago por adelantado. Se aplicará automáticamente cuando se genere la renovación del día 3; no se crea factura todavía.',
+            ))));
+        }
     }
 
     // Excepción de precio sobre el pedido ya existente — "solo este mes" (y también
@@ -13366,12 +13427,22 @@ function superadmin_gestion_facturas_pendientes_completar($request) {
 
 // Lista de adelantados sin aplicar (pendientes de que WooCommerce genere la renovación) y los
 // que no coincidieron en importe (a revisar a mano) — para el contador de "Cobrar este mes".
-function superadmin_gestion_adelantados_listar() {
+// `sub_id` (opcional, 25/11 17:00 — Eva/cowork, caso Dani Herrero #7749): para ver de un
+// vistazo cuántos adelantados tiene acumulados UNA sola suscripción, sin filtrar a mano la
+// lista entera.
+function superadmin_gestion_adelantados_listar($request = null) {
     global $wpdb;
     blokes_ensure_adelantados_table();
-    $rows = $wpdb->get_results(
-        "SELECT * FROM " . blokes_adelantados_table() . " WHERE aplicado_at IS NULL ORDER BY periodo ASC, id ASC", ARRAY_A
-    );
+    $sub_id_filtro = $request ? intval($request->get_param('sub_id')) : 0;
+    if ($sub_id_filtro) {
+        $rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT * FROM " . blokes_adelantados_table() . " WHERE aplicado_at IS NULL AND sub_id = %d ORDER BY periodo ASC, id ASC", $sub_id_filtro
+        ), ARRAY_A);
+    } else {
+        $rows = $wpdb->get_results(
+            "SELECT * FROM " . blokes_adelantados_table() . " WHERE aplicado_at IS NULL ORDER BY periodo ASC, id ASC", ARRAY_A
+        );
+    }
     $pendientes = array_values(array_filter($rows, function($r) { return !$r['revisar']; }));
     $a_revisar  = array_values(array_filter($rows, function($r) { return (bool) $r['revisar']; }));
     return rest_ensure_response(array('success' => true, 'data' => array(
