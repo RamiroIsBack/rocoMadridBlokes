@@ -513,14 +513,14 @@ function CalendarioGoogle() {
           {data.failed?.length > 0 && <p className="chf-aviso chf-aviso--mal">⚠ No se pudo leer: {data.failed.join(', ')}. Quítalo y vuelve a ponerlo en «Calendarios».</p>}
           <span className="chf-tablon__lbl">Esta semana</span>
           <div className="chf-semana">
-            {semana.map(dia => (
+            {/* 25/11: solo los días con algo */}
+            {semana.filter(dia => porDia[dia]).map(dia => (
               <div key={dia} className={`chf-semana__dia${dia === hoy ? ' chf-semana__dia--hoy' : ''}${dia < hoy ? ' chf-semana__dia--pasado' : ''}`}>
                 <span className="chf-gcal__dia">{dia === hoy ? 'Hoy' : diaSemana(dia)} {fechaCorta(dia)}</span>
-                {porDia[dia]
-                  ? <ul className="chf-lista">{porDia[dia].map((ev, i) => <Evento key={i} ev={ev} />)}</ul>
-                  : <span className="chf-semana__nada">—</span>}
+                <ul className="chf-lista">{porDia[dia].map((ev, i) => <Evento key={i} ev={ev} />)}</ul>
               </div>
             ))}
+            {!semana.some(dia => porDia[dia]) && <span className="chf-semana__nada">Nada esta semana.</span>}
           </div>
           {Object.keys(porMes).length > 0 && Object.entries(porMes).map(([ym, dias]) => (
             <div key={ym} className="chf-gcal__mes">
