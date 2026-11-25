@@ -61,7 +61,23 @@ function parseNomina(texto) {
     amount: parseAmount(liquido[1]),
     cost: coste ? parseAmount(coste[1]) : null,
     month: periodo && mes >= 0 ? `${periodo[2]}-${String(mes + 1).padStart(2, '0')}` : null,
+    avisos: avisosNomina(texto),
   }
+}
+
+// 25/11 (Álvaro): señales de que la nómina NO es la de un mes normal, para no usarla como base:
+// menos de 30 días de salario (huelga, baja…), incidencias en Observaciones y pagos puntuales
+// (conceptos de 1 unidad, como las horas extra en «Plus Productividad»).
+function avisosNomina(texto) {
+  const avisos = []
+  const dias = texto.match(/SALARIO BASE\s+(\d{1,2},\d{2})\s/i)
+  if (dias && parseAmount(dias[1]) < 30) avisos.push(`${dias[1]} días de salario en lugar de 30`)
+  const incid = texto.match(/\b(HUELGA|ENF\.?\s*COM[UÚ]N|ACC\.?\s*(?:DE\s+)?TRABAJO|BAJA|PERMISO|AUSENCIA)\b[^\n]*/gi) || []
+  incid.forEach(t => avisos.push(t.trim()))
+  const puntual = new RegExp(`^(PLUS [A-ZÁÉÍÓÚÑ ]+?|INCENTIVOS|HORAS? EXTRA[A-ZÁÉÍÓÚÑ ]*)\\s+1,00\\s+[\\d.,]+\\s+${AMOUNT}`, 'gim')
+  let m
+  while ((m = puntual.exec(texto))) avisos.push(`pago puntual: ${m[1].trim()} ${m[2]} €`)
+  return [...new Set(avisos)]
 }
 
 export async function parseNominasGestoriaPdf(file) {

@@ -33,7 +33,11 @@ export default function GestoriaReview({ month, people, personal, config, onConf
   // Poner el líquido de la gestoría como nómina base de esa persona (si lo pactado estaba desfasado)
   async function usarComoBase(l) {
     const p = people.find(x => x.id === l.person)
-    if (!window.confirm(`¿Poner ${fmtEur(l.amount)} como nómina base de ${p?.name} en Configuración?`)) return
+    // 25/11: una nómina con huelga, baja o pagos puntuales no es la de un mes normal
+    const raro = l.avisos?.length
+      ? `⚠ ESTA NÓMINA NO ES LA DE UN MES NORMAL:\n· ${l.avisos.join('\n· ')}\n\nSi la usas como base, Blokes esperará ${fmtEur(l.amount)} todos los meses. Lo normal es NO usarla y dejar la diferencia de este mes.\n\n`
+      : ''
+    if (!window.confirm(`${raro}¿Poner ${fmtEur(l.amount)} como nómina base de ${p?.name} en Configuración?`)) return
     setBusy(true); setError('')
     try {
       await savePayrollConfig({ base: { [l.person]: l.amount } })
@@ -118,6 +122,9 @@ export default function GestoriaReview({ month, people, personal, config, onConf
                         {options.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                       </select>
                       {l.by === 'ambiguo' && <span className="sa-pay-tag">revisar</span>}
+                      {l.avisos?.length > 0 && (
+                        <div className="sa-pay-warn gestoria__avisos" title="No es la nómina de un mes normal">⚠ {l.avisos.join(' · ')}</div>
+                      )}
                     </td>
                     <td className="sa-pay-num">{fmtEur(l.amount)}</td>
                     <td className="sa-pay-num">{l.person ? (l.pac ? fmtEur(l.pac) : <span className="sa-pay-muted">—</span>) : ''}</td>
@@ -140,7 +147,8 @@ export default function GestoriaReview({ month, people, personal, config, onConf
           </div>
           <p className="sa-pay-note">
             «Pactado en Blokes» es la nómina base de Configuración. Si la diferencia es un error de la gestoría, díselo antes de pagar;
-            si lo desfasado es Blokes, pulsa «Usar como nómina base». Cuando esté pagado, carga la remesa del banco (⬆) para marcarlo como pagado.
+            si lo desfasado es Blokes, pulsa «Usar como nómina base» — pero nunca con una nómina marcada con ⚠ (huelga, baja,
+            horas extra u otros pagos de ese mes), porque no es la de un mes normal. Cuando esté pagado, carga la remesa del banco (⬆) para marcarlo como pagado.
           </p>
         </>
       )}
