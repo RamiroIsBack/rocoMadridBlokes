@@ -393,9 +393,9 @@
 
 /* Indicadores */
 .chf-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-.chf-tiles .dash-tile { text-decoration: none; }
-.chf-tiles .dash-tile strong { font-size: 1.6rem; }
-.chf-tiles .dash-tile span { text-transform: none; letter-spacing: 0; font-size: 0.85rem; }
+.chf-tiles .dash-tile { text-decoration: none; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 6px; }
+.chf-tiles .dash-tile strong { font-size: 1.8rem; white-space: nowrap; }
+.chf-tiles .dash-tile span { text-transform: none; letter-spacing: 0; font-size: 0.85rem; line-height: 1.35; }
 
 /* Dinero */
 .chf-dinero { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
