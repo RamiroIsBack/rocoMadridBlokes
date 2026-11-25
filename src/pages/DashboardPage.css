@@ -534,3 +534,47 @@
 .chf-semana__nada { color: var(--color-text-secondary); font-size: 0.85rem; }
 .chf-gcal__mes { margin-top: 10px; }
 .chf-gcal__cumple span { font-weight: 700; }
+/* ─── Cherifs › Tareas (25/11) ─── */
+.dash-mini--on { background: var(--color-accent-soft); border-color: var(--color-accent); color: var(--color-text-primary); font-weight: 700; }
+.dash-btn--danger { color: var(--state-bad); border-color: currentColor; }
+.chf-tareas { display: flex; flex-direction: column; gap: 14px; max-width: 1000px; margin: 0 auto; }
+.chf-tareas__cab { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.chf-tareas__tit { margin: 0; font-family: var(--font-heading); font-size: 1.6rem; }
+.chf-tareas__paso { margin: 12px 0 0; padding: 12px 14px; border-radius: 10px; background: var(--color-accent-soft); border: 1px solid var(--color-accent); font-size: 0.9rem; line-height: 1.5; }
+.chf-tareas__paso .dash-btn { margin-top: 8px; }
+.chf-filtros { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.chf-filtros .dash-input { flex: 1 1 150px; width: auto; min-width: 0; }
+.chf-agrupar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; font-size: 0.85rem; color: var(--color-text-secondary); }
+.chf-tareas__seccion { padding-top: 12px; padding-bottom: 8px; }
+.chf-tareas__gtit { margin: 0 0 6px; font-size: 1rem; display: flex; align-items: baseline; gap: 8px; }
+.chf-tareas__gtit small { color: var(--color-text-secondary); font-weight: 600; }
+.chf-tareas__gtit--mal { color: var(--state-bad); }
+.chf-tareas__lista { list-style: none; margin: 0; padding: 0; }
+.chf-tareas__lista > li { border-top: 1px solid var(--color-border); }
+.chf-tareas__lista > li:first-child { border-top: none; }
+.chf-t { display: flex; align-items: center; gap: 10px; padding: 7px 0; }
+.chf-t__check { flex: none; width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--color-border); background: transparent; color: var(--state-good); font-weight: 900; cursor: pointer; display: grid; place-items: center; padding: 0; line-height: 1; }
+.chf-t__check:hover { border-color: var(--state-good); }
+.chf-t--hecha .chf-t__check { border-color: var(--state-good); }
+.chf-t--hecha .chf-t__titulo { text-decoration: line-through; color: var(--color-text-secondary); }
+.chf-t__main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; background: none; border: none; padding: 0; text-align: left; cursor: pointer; color: inherit; font: inherit; }
+.chf-t__titulo { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chf-t__meta { flex: none; display: flex; align-items: center; gap: 10px; font-size: 0.8rem; color: var(--color-text-secondary); }
+.chf-t__meta em { font-style: normal; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--color-border); }
+.chf-t__tarde { color: var(--state-bad); }
+.chf-prio { flex: none; font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 6px; border-radius: 4px; }
+.chf-prio--alta { background: var(--state-bad); color: #fff; }
+.chf-prio--media { background: var(--color-accent); color: #1d1d1b; }
+.chf-prio--baja { background: var(--color-border); color: var(--color-text-secondary); }
+.chf-tform { display: flex; flex-direction: column; gap: 8px; padding: 6px 0 14px 32px; }
+.chf-tareas > .dash-card > .chf-tform { padding-left: 0; margin-top: 12px; }
+.chf-tform__fila { display: flex; flex-wrap: wrap; gap: 8px; }
+.chf-tform__fila label { display: flex; flex-direction: column; gap: 3px; font-size: 0.75rem; font-weight: 700; color: var(--color-text-secondary); flex: 1 1 120px; }
+.chf-tform__ancho { flex: 1 1 240px !important; }
+.chf-tform__quien { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: 0.75rem; font-weight: 700; color: var(--color-text-secondary); }
+.chf-tform__quien > span { margin-right: 4px; }
+@media (max-width: 640px) {
+  .chf-t { flex-wrap: wrap; }
+  .chf-t__meta { width: 100%; padding-left: 32px; }
+  .chf-tform { padding-left: 0; }
+}

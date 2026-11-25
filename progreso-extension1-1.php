@@ -25334,7 +25334,8 @@ function diario_save_access($request) {
 function activities_table() { global $wpdb; return $wpdb->prefix . 'blokes_activities'; }
 
 function activities_ensure_table() {
-    if (get_option('blokes_activities_db_v') === '1') return;
+    // v2 (25/11): prioridad (Alta/Media/Baja) para las Tareas de Cherifs
+    if (get_option('blokes_activities_db_v') === '2') return;
     global $wpdb;
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
     dbDelta("CREATE TABLE " . activities_table() . " (
@@ -25344,6 +25345,7 @@ function activities_ensure_table() {
         end_at      varchar(16)  NOT NULL DEFAULT '',
         category    varchar(60)  NOT NULL DEFAULT '',
         status      varchar(60)  NOT NULL DEFAULT '',
+        priority    varchar(10)  NOT NULL DEFAULT '',
         owners      text         NOT NULL,
         concept     text         NOT NULL,
         comment     text         NOT NULL,
@@ -25358,7 +25360,7 @@ function activities_ensure_table() {
         KEY start_at (start_at),
         KEY notion_id (notion_id)
     ) " . $wpdb->get_charset_collate() . ";");
-    update_option('blokes_activities_db_v', '1', false);
+    update_option('blokes_activities_db_v', '2', false);
 }
 
 function activities_can_edit() {
@@ -25386,6 +25388,8 @@ function activities_to_item($r) {
         'end'      => $r['end_at'] !== '' ? $r['end_at'] : null,
         'category' => $r['category'] !== '' ? array('name' => $r['category'], 'color' => '') : null,
         'status'   => $r['status'] !== '' ? array('name' => $r['status'], 'color' => '') : null,
+        'priority' => (string) ($r['priority'] ?? ''),
+        'notion'   => ($r['notion_id'] ?? '') !== '',
         'owners'   => is_array($owners) ? $owners : array(),
         'concept'  => $r['concept'],
         'comment'  => $r['comment'],
@@ -25426,6 +25430,10 @@ function activities_fields_from_request($body, $partial = false) {
     if (!$partial || array_key_exists('end', $body))      $f['end_at']   = activities_clean_when($body['end'] ?? '');
     if (!$partial || array_key_exists('category', $body)) $f['category'] = mb_substr(sanitize_text_field($body['category'] ?? ''), 0, 60);
     if (!$partial || array_key_exists('status', $body))   $f['status']   = mb_substr(sanitize_text_field($body['status'] ?? ''), 0, 60);
+    if (!$partial || array_key_exists('priority', $body)) {
+        $pr = (string) ($body['priority'] ?? '');
+        $f['priority'] = in_array($pr, array('Alta', 'Media', 'Baja'), true) ? $pr : '';
+    }
     if (!$partial || array_key_exists('owners', $body)) {
         $owners = array();
         foreach ((is_array($body['owners'] ?? null) ? $body['owners'] : array()) as $o) {
@@ -25478,7 +25486,8 @@ function activities_create($request) {
     global $wpdb;
     activities_ensure_table();
     $f = activities_fields_from_request((array) $request->get_json_params());
-    if ($f['title'] === '' || $f['start_at'] === '') {
+    // 25/11: las tareas pueden ir sin fecha; las actividades del calendario no
+    if ($f['title'] === '' || ($f['start_at'] === '' && activities_is_calendar($f['category']))) {
         return new WP_Error('bad_activity', 'Falta el título o la fecha', array('status' => 400));
     }
     $now = current_time('mysql');
@@ -25495,9 +25504,11 @@ function activities_update($request) {
     global $wpdb;
     activities_ensure_table();
     $id = (int) $request['id'];
-    if (!activities_get_row($id)) return new WP_Error('not_found', 'Esa actividad ya no existe', array('status' => 404));
+    $row = activities_get_row($id);
+    if (!$row) return new WP_Error('not_found', 'Esa actividad ya no existe', array('status' => 404));
     $f = activities_fields_from_request((array) $request->get_json_params(), true);
-    if ((isset($f['title']) && $f['title'] === '') || (isset($f['start_at']) && $f['start_at'] === '')) {
+    $cat = $f['category'] ?? $row['category'];
+    if ((isset($f['title']) && $f['title'] === '') || (isset($f['start_at']) && $f['start_at'] === '' && activities_is_calendar($cat))) {
         return new WP_Error('bad_activity', 'Falta el título o la fecha', array('status' => 400));
     }
     $f['updated_by'] = activities_who();
@@ -25511,6 +25522,130 @@ function activities_delete($request) {
     activities_ensure_table();
     $wpdb->delete(activities_table(), array('id' => (int) $request['id']));
     return rest_ensure_response(array('success' => true));
+}
+
+// ============================================================
+//  25/11/2026 — Tareas de Cherifs y paso 2 del traslado de Notion
+//  - Las tareas son las actividades cuya categoría NO es del calendario
+//    (Tareas, Mantenimiento, Mejoras, ideas, marketing, Contabilidad…).
+//  - Copiar de Notion: recorre toda «Funciones Rocomadrid» (también lo hecho
+//    y archivado) y guarda en Blokes lo que aún no estaba (notion_id). Lo
+//    copiado deja de leerse de Notion (calendar_get_items ya lo quita).
+//  - Solo socios (Cherifs).
+// ============================================================
+
+function activities_is_calendar($category) {
+    return in_array((string) $category, array('Competicion', 'Cumpleaños', 'Evento', 'Sustitucion', 'Vacaciones'), true);
+}
+
+function cherifs_tasks_can() { return blokes_get_app_role() === 'socio'; }
+
+add_action('rest_api_init', function() {
+    register_rest_route('superadmin/v1', '/cherifs/tasks', array(
+        'methods' => 'GET', 'callback' => 'cherifs_tasks_list', 'permission_callback' => 'cherifs_tasks_can',
+    ));
+    register_rest_route('superadmin/v1', '/cherifs/tasks/import-notion', array(
+        'methods' => 'POST', 'callback' => 'cherifs_tasks_import_notion', 'permission_callback' => 'cherifs_tasks_can',
+    ));
+});
+
+function cherifs_tasks_list() {
+    global $wpdb;
+    activities_ensure_table();
+    $rows  = (array) $wpdb->get_results("SELECT * FROM " . activities_table() . " ORDER BY start_at = '', start_at, id", ARRAY_A);
+    $items = array();
+    $owners = array();
+    $cats = array('Tareas', 'Mantenimiento', 'Mejoras', 'ideas', 'marketing', 'Contabilidad', 'Becarios', 'Reunion', 'Acciones diarias');
+    foreach ($rows as $r) {
+        if (activities_is_calendar($r['category'])) continue;
+        $it = activities_to_item($r);
+        $items[] = $it;
+        foreach ($it['owners'] as $o) $owners[$o] = true;
+        if ($r['category'] !== '' && !in_array($r['category'], $cats, true)) $cats[] = $r['category'];
+    }
+    // Encargados: las personas de Nóminas y los que ya salen en alguna tarea
+    foreach (overtime_visible_people() as $p) if (!isset($p['active']) || $p['active']) $owners[$p['name']] = true;
+    $owners = array_keys($owners);
+    sort($owners, SORT_NATURAL | SORT_FLAG_CASE);
+    return rest_ensure_response(array(
+        'items'           => $items,
+        'owners'          => $owners,
+        'categories'      => $cats,
+        'notion_token'    => get_option('blokes_notion_token', '') !== '',
+        'notion_imported' => count(activities_imported_notion_ids()),
+    ));
+}
+
+// Fecha de Notion → "AAAA-MM-DD" o "AAAA-MM-DDTHH:MM" en hora de Madrid
+function activities_notion_when($v) {
+    $v = (string) $v;
+    if ($v === '') return '';
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $v)) return $v;
+    try { $d = new DateTime($v); $d->setTimezone(wp_timezone()); return $d->format('Y-m-d\TH:i'); }
+    catch (Exception $e) { return ''; }
+}
+
+function cherifs_tasks_import_notion() {
+    global $wpdb;
+    activities_ensure_table();
+    $token = get_option('blokes_notion_token', '');
+    if (!$token) return new WP_Error('notion_token', 'No hay token de Notion guardado (Calendario → conectar Notion)', array('status' => 400));
+    @set_time_limit(120);
+
+    $ya    = array_flip(activities_imported_notion_ids());
+    $body  = array('page_size' => 100);
+    $nuevas = 0; $repetidas = 0; $vistas = 0;
+    $now   = current_time('mysql');
+    for ($i = 0; $i < 30; $i++) {
+        $json = calendar_notion_query($token, $body);
+        if (is_wp_error($json)) return $json;
+        foreach ((array) ($json['results'] ?? array()) as $p) {
+            $vistas++;
+            if (!empty($p['in_trash']) || !empty($p['archived'])) continue;
+            if (isset($ya[$p['id']])) { $repetidas++; continue; }
+            $by = array();
+            foreach ((array) ($p['properties'] ?? array()) as $name => $v) $by[trim($name)] = $v;
+            $title = '';
+            foreach ($by as $v) if (($v['type'] ?? '') === 'title') $title = calendar_plain($v['title']);
+            $sel = function($k) use ($by) {
+                if (!isset($by[$k]['type'])) return '';
+                $v = $by[$k][$by[$k]['type']] ?? null;
+                return is_array($v) ? (string) ($v['name'] ?? '') : '';
+            };
+            $txt = function($k) use ($by) { return isset($by[$k]['rich_text']) ? calendar_plain($by[$k]['rich_text']) : ''; };
+            $owners = array();
+            foreach ((array) ($by['Encargado']['multi_select'] ?? array()) as $o) $owners[] = $o['name'];
+            $date = $by['Fecha']['date'] ?? null;
+            $comment = $txt('Comentario');
+            if ($txt('Respuesta') !== '') $comment .= ($comment !== '' ? "\n" : '') . 'Respuesta: ' . $txt('Respuesta');
+            if ($sel('Adelanto') !== '') $comment .= ($comment !== '' ? "\n" : '') . 'Adelanto: ' . $sel('Adelanto');
+            $creado = $now;
+            if (!empty($p['created_time'])) { try { $d = new DateTime($p['created_time']); $d->setTimezone(wp_timezone()); $creado = $d->format('Y-m-d H:i:s'); } catch (Exception $e) {} }
+            $ok = $wpdb->insert(activities_table(), array(
+                'title'      => mb_substr($title !== '' ? $title : 'Sin título', 0, 190),
+                'start_at'   => activities_notion_when($date['start'] ?? ''),
+                'end_at'     => activities_notion_when($date['end'] ?? ''),
+                'category'   => mb_substr($sel('Categoría'), 0, 60),
+                'status'     => mb_substr($sel('Estado'), 0, 60),
+                'priority'   => '',
+                'owners'     => wp_json_encode($owners),
+                'concept'    => $txt('Concepto'),
+                'comment'    => $comment,
+                'contact'    => $txt('Contacto'),
+                'price'      => isset($by['Precio']['number']) ? round((float) $by['Precio']['number'], 2) : null,
+                'notion_id'  => $p['id'],
+                'created_by' => 'Notion',
+                'updated_by' => 'Notion',
+                'created_at' => $creado,
+                'updated_at' => $now,
+            ));
+            if ($ok) { $ya[$p['id']] = true; $nuevas++; }
+        }
+        if (empty($json['has_more']) || empty($json['next_cursor'])) break;
+        $body['start_cursor'] = $json['next_cursor'];
+    }
+    update_option('blokes_notion_cache_v', time(), false);   // el calendario vuelve a leer sin lo copiado
+    return rest_ensure_response(array('success' => true, 'nuevas' => $nuevas, 'ya_estaban' => $repetidas, 'vistas' => $vistas));
 }
 
 // ============================================================

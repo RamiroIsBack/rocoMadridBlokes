@@ -7,7 +7,7 @@ import { useExpenses, usePendientesCobro } from '../hooks/useSuperAdmin'
 import { usePayroll } from '../hooks/useOvertime'
 import { useBookings, depositDue } from '../hooks/useEvents'
 import {
-  useCherifsBoard, useCherifsCalendar, addCherifsMessage, addCherifsSong, deleteCherifsItem, saveCherifsIcal, deleteCherifsIcal,
+  useCherifsBoard, useCherifsCalendar, addCherifsMessage, addCherifsSong, deleteCherifsItem, saveCherifsIcal, deleteCherifsIcal, useCherifsTasks,
 } from '../hooks/useCherifs'
 import { buildComparison } from '../utils/budget'
 import { clasesComoCronograma } from '../components/DiarioHorarios'
@@ -303,11 +303,17 @@ function Indicadores() {
 function Tareas({ items }) {
   const hoy = isoHoy()
   const { data: cal } = useCalendar(sumarDias(hoy, -30), sumarDias(hoy, 30), true)
+  // 25/11: las tareas ya viven en Cherifs › Tareas; aquí las abiertas atrasadas, las de los
+  // próximos 30 días y las de prioridad Alta sin fecha (+ lo que quede en Notion sin copiar)
+  const { data: blk } = useCherifsTasks()
   const abiertas = items.filter(isOpen)
-  const notion = (cal?.items || [])
-    .filter(it => it.source !== 'blokes' && !CALENDAR_CATEGORIES.includes(it.category?.name) && !['Listo', 'Archivo'].includes(it.status?.name))
-    .sort((a, b) => (a.start || '').localeCompare(b.start || ''))
-  const atrasadas = notion.filter(it => (it.start || '').slice(0, 10) < hoy)
+  const hasta = sumarDias(hoy, 30)
+  const deBlokes = (blk?.items || []).filter(it => !['Listo', 'Archivo'].includes(it.status?.name) &&
+    (it.start ? it.start.slice(0, 10) <= hasta : it.priority === 'Alta'))
+  const notion = [...deBlokes, ...(cal?.items || [])
+    .filter(it => it.source !== 'blokes' && !CALENDAR_CATEGORIES.includes(it.category?.name) && !['Listo', 'Archivo'].includes(it.status?.name))]
+    .sort((a, b) => (a.start || '9').localeCompare(b.start || '9'))
+  const atrasadas = notion.filter(it => it.start && it.start.slice(0, 10) < hoy)
   const porKind = k => abiertas.filter(it => k.includes(it.kind)).length
   // 25/11: ordenar por fecha o por persona encargada; cada tarea en una línea, detalle al pulsar
   const [orden, setOrden] = useState('fecha')
@@ -324,19 +330,21 @@ function Tareas({ items }) {
     : [[null, lista]]
 
   const fila = it => {
-    const tarde = (it.start || '').slice(0, 10) < hoy
+    const tarde = !!it.start && it.start.slice(0, 10) < hoy
     const open = abierta === it.id
     return (
       <li key={`${it.id}-${orden}`} className={`chf-tarea${tarde ? ' chf-lista--late' : ''}${open ? ' chf-tarea--open' : ''}`}>
         <button type="button" className="chf-tarea__main" onClick={() => setAbierta(open ? null : it.id)}>
-          <span className="chf-tarea__t">{it.title}</span>
+          <span className="chf-tarea__t">{it.priority && <span className={`chf-prio chf-prio--${it.priority.toLowerCase()}`}>{it.priority}</span>} {it.title}</span>
           {orden === 'fecha' && it.owners?.length > 0 && <span className="chf-tarea__quien">{it.owners.join(', ')}</span>}
           <b>{it.start ? fechaCorta(it.start) : ''}</b>
         </button>
         {open && (
           <div className="chf-tarea__det">
             <span>{it.category?.name || 'Sin categoría'}{it.status?.name ? ` · ${it.status.name}` : ''}{it.owners?.length ? ` · ${it.owners.join(', ')}` : ''}{tarde ? ' · atrasada' : ''}</span>
-            {it.url && <a href={it.url} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>}
+            {it.source === 'blokes'
+              ? <Link to="/cherifs?tab=tareas">Abrir en Tareas →</Link>
+              : it.url && <a href={it.url} target="_blank" rel="noreferrer">Abrir en Notion ↗</a>}
           </div>
         )}
       </li>
@@ -352,7 +360,7 @@ function Tareas({ items }) {
         <Link to="/diario?vista=tareas"><b>{porKind(['recordatorio'])}</b> recordatorios</Link>
       </div>
       <div className="chf-tareas__bar">
-        <span className="chf-fuente">De Notion ({notion.length}{atrasadas.length ? `, ${atrasadas.length} atrasadas` : ''})</span>
+        <Link to="/cherifs?tab=tareas" className="chf-fuente">Tareas ({notion.length}{atrasadas.length ? `, ${atrasadas.length} atrasadas` : ''}) →</Link>
         <div className="dash-form__seg">
           <button type="button" className={`dash-mini${orden === 'fecha' ? ' chf-on' : ''}`} onClick={() => setOrden('fecha')}>Por fecha</button>
           <button type="button" className={`dash-mini${orden === 'persona' ? ' chf-on' : ''}`} onClick={() => setOrden('persona')}>Por persona</button>
@@ -364,15 +372,16 @@ function Tareas({ items }) {
           <ul className="chf-lista">{its.map(fila)}</ul>
         </div>
       ))}
-      {notion.length === 0 && <p className="dash-empty">Nada pendiente en Notion para estas semanas.</p>}
+      {notion.length === 0 && <p className="dash-empty">Nada pendiente para estas semanas.</p>}
       {notion.length > 10 && (
         <button type="button" className="dash-link" onClick={() => setTodas(t => !t)}>{todas ? 'Ver menos' : `Ver las ${notion.length}`}</button>
       )}
       <button type="button" className="dash-link chf-explica__btn" onClick={() => setVerOrigen(v => !v)}>{verOrigen ? 'Ocultar' : '¿De dónde salen?'}</button>
       {verOrigen && (
         <p className="chf-nota">
-          De la base «Funciones Rocomadrid» de Notion: las tareas que no van al calendario (mantenimiento, mejoras, reuniones…),
-          sin terminar («Listo» o «Archivo» no salen) y con fecha entre hace 30 días y dentro de 30. Pulsa una para ver el detalle y abrirla en Notion.
+          De Cherifs › Tareas (lo que antes estaba en Notion): las que no están terminadas, con fecha hasta dentro de 30 días
+          (también las atrasadas) y las de prioridad Alta aunque no tengan fecha. Mientras quede algo en Notion sin copiar, también sale.
+          Pulsa una para ver el detalle.
         </p>
       )}
     </Card>

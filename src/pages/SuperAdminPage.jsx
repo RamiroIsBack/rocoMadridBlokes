@@ -17,6 +17,7 @@ import BlokesMapSection from '../components/BlokesMapSection'
 import CompePuntosTablaSection from '../components/CompePuntosTablaSection'
 import PlaygroundPage from './PlaygroundPage'
 import CherifsDashboard from './CherifsPage'
+import CherifsTareas from './CherifsTareas'
 import { getEventsAccess, saveEventsAccess } from '../hooks/useEvents'
 import { getDiarioAccess, saveDiarioAccess } from '../hooks/useDiario'
 import './SuperAdminPage.css'
@@ -1387,6 +1388,7 @@ function PLAccordion({ live2026, lastMonth }) {
 // (antes /playground) como una pestaña más.
 const SA_GROUPS = [
   { key: 'dashboard', label: 'Dashboard' },
+  { key: 'tareas', label: 'Tareas' },   // 25/11: las tareas que venían de Notion
   { key: 'tesoreria', label: 'Tesorería', tabs: [
     { key: 'ingresos',          label: 'Ingresos' },
     { key: 'clases',            label: 'Clases' },
@@ -1479,6 +1481,7 @@ export default function SuperAdminPage() {
       {saTab === 'compe-puntos' && <CompePuntosTablaSection />}
       {saTab === 'mapa'      && <BlokesMapSection />}
       {saTab === 'dashboard' && <CherifsDashboard />}
+      {saTab === 'tareas'    && <CherifsTareas />}
       {saTab === 'horarios'  && <PlaygroundPage />}
     </div>
   )

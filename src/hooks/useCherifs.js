@@ -36,3 +36,7 @@ export const addCherifsSong    = (title, url) => request('/cherifs/song', 'POST'
 export const deleteCherifsItem = (kind, id) => request(`/cherifs/item/${kind}/${id}`, 'DELETE')
 export const saveCherifsIcal   = (url, name = '') => request('/cherifs/ical', 'PUT', { url, name })
 export const deleteCherifsIcal = id => request(`/cherifs/ical/${id}`, 'DELETE')
+
+// 25/11: Tareas de Cherifs (las actividades que no son del calendario) y copia desde Notion
+export const useCherifsTasks   = () => useGet('/cherifs/tasks')
+export const importNotionTasks = () => request('/cherifs/tasks/import-notion', 'POST')
