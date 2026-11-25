@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useDiarioItems, useHorarios, isOpen, STATUS_LABELS, DIARIO_KINDS } from '../hooks/useDiario'
 import { useCalendar, CALENDAR_CATEGORIES } from '../hooks/useCalendar'
@@ -110,9 +110,11 @@ function Tablon() {
             </>
           : <>
               <p className="chf-tablon__frase" onClick={() => setEditar(true)} title="Pulsa para poner la vuestra">«{delBanco}»</p>
-              <span className="chf-tablon__quien">— del banco de frases
-                <button type="button" className="dash-mini" onClick={() => setDesfase(d => d + 1)} title="Ver otra del banco">↻ Otra</button>
-              </span>
+              {editar && (
+                <span className="chf-tablon__quien">— del banco de frases
+                  <button type="button" className="dash-mini" onClick={() => setDesfase(d => d + 1)} title="Ver otra del banco">↻ Otra</button>
+                </span>
+              )}
             </>}
         {editar && (
           <form className="chf-tablon__form" onSubmit={e => { e.preventDefault(); if (msg.trim()) run(async () => { const r = await addCherifsMessage(msg.trim()); setMsg(''); return r }) }}>
@@ -123,7 +125,7 @@ function Tablon() {
         )}
       </div>
       <div className="chf-tablon__songs">
-        <span className="chf-tablon__lbl">🎵 Canciones de la semana</span>
+        <span className="chf-tablon__lbl">🎵 Temazos de la semana</span>
         {deLaSemana.length === 0 && <p className="chf-tablon__vacio">Ninguna todavía. Pulsa ✎ para añadir.</p>}
         <ul className="chf-songs chf-songs--grandes">
           {deLaSemana.map(s => (
@@ -133,7 +135,7 @@ function Tablon() {
                 : <span className="chf-songs__cover chf-songs__cover--vacia" aria-hidden="true">♪</span>}
               <span className="chf-songs__txt">
                 {s.url ? <a href={s.url} target="_blank" rel="noreferrer">{s.title || 'Escuchar'}</a> : <span className="chf-songs__t">{s.title}</span>}
-                <span className="chf-songs__by">puesta por {s.by}</span>
+                <span className="chf-songs__by">Temazo recomendado{s.by ? ` por ${s.by}` : ''}</span>
               </span>
               {editar && <button type="button" className="chf-x" title="Quitar" onClick={() => run(() => deleteCherifsItem('song', s.id))}>×</button>}
             </li>
@@ -413,14 +415,39 @@ function CalendarioGoogle() {
     try { await saveCherifsIcal(url.trim()); setUrl(''); setEditar(false); reload() } catch (err) { setMsg(err.message) }
   }
   // 25/11: «Pegar» lee lo copiado; arrastrar la dirección al recuadro también vale
+  // 25/11 (2): Google a veces copia la dirección solo como HTML o con texto alrededor,
+  // así que se busca la dirección .ics dentro de todo lo copiado (texto y HTML)
+  const sacarIcal = txt => {
+    const t = String(txt || '')
+    const m = t.match(/(?:https|webcal):\/\/calendar\.google\.com\/calendar\/ical\/[^\s"'<>]+?\.ics(?:\?[^\s"'<>]*)?/i)
+    return m ? m[0].replace(/&amp;/g, '&') : t.trim()
+  }
+  const inputRef = useRef(null)
   const pegar = async () => {
     setMsg('')
-    try { const t = await navigator.clipboard.readText(); if (t) setUrl(t.trim()); else setMsg('No hay nada copiado.') }
-    catch { setMsg('El navegador no deja leer lo copiado: pulsa en el recuadro y usa Ctrl+V.') }
+    let encontrado = ''
+    try {
+      if (navigator.clipboard?.read) {
+        for (const item of await navigator.clipboard.read()) {
+          for (const tipo of item.types.filter(x => x.startsWith('text/'))) {
+            const t = sacarIcal(await (await item.getType(tipo)).text())
+            if (t) { encontrado = t; if (/\.ics/i.test(t)) break }
+          }
+          if (/\.ics/i.test(encontrado)) break
+        }
+      }
+      if (!encontrado && navigator.clipboard?.readText) encontrado = sacarIcal(await navigator.clipboard.readText())
+    } catch { /* sin permiso: se cae a Ctrl+V */ }
+    if (encontrado) setUrl(encontrado)
+    else { setMsg('El navegador no me deja leer lo copiado. Pulsa dentro del recuadro y pega con Ctrl+V (o clic derecho → Pegar).'); inputRef.current?.focus() }
+  }
+  const alPegar = e => {
+    const t = sacarIcal(e.clipboardData.getData('text/plain') || e.clipboardData.getData('text/html'))
+    if (t) { e.preventDefault(); setUrl(t); setMsg('') }
   }
   const soltar = e => {
-    const t = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
-    if (t) { e.preventDefault(); setUrl(t.trim()) }
+    const t = sacarIcal(e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text/html'))
+    if (t) { e.preventDefault(); setUrl(t) }
   }
   // Si la lectura falla (o no hay dirección), se enseña el recuadro para poner la dirección
   const sinConfigurar = (data && !data.configured) || (!data && !!error)
@@ -437,8 +464,8 @@ function CalendarioGoogle() {
           </p>
           {error && !data && <p className="dash-error">No se pudo leer el calendario ({error}). Vuelve a poner la dirección.</p>}
           <div className="chf-ical__fila">
-            <input className="dash-input" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" value={url}
-              onChange={e => setUrl(e.target.value)} onDrop={soltar} onDragOver={e => e.preventDefault()} />
+            <input ref={inputRef} className="dash-input" placeholder="Pulsa aquí y pega con Ctrl+V" value={url}
+              onChange={e => setUrl(e.target.value)} onPaste={alPegar} onDrop={soltar} onDragOver={e => e.preventDefault()} />
             <button type="button" className="dash-btn" onClick={pegar} title="Pegar lo que has copiado">📋 Pegar</button>
           </div>
           <div className="dash-form__actions">
