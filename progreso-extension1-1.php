@@ -8155,6 +8155,12 @@ function blokes_gestion_ajustar_precio_linea($pedido_o_sub, $importe_nuevo) {
     $item->save();
     $pedido_o_sub->calculate_taxes();
     $pedido_o_sub->calculate_totals(false);
+    // 26/11 (caso Sergio Díaz #7151): esta función nunca guardaba $pedido_o_sub, solo el $item —
+    // calculate_totals() deja el total nuevo en memoria, pero si quien llama no hace ->save()
+    // justo después (p. ej. el camino "desde_ahora" sobre la suscripción, que se recarga de la
+    // BD más abajo en marcar_cobrado ANTES de guardarse) el precio recurrente nuevo nunca llegaba
+    // a escribirse. Se guarda aquí para que esta función sea autosuficiente.
+    $pedido_o_sub->save();
     return true;
 }
 
