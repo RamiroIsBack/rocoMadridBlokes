@@ -13158,6 +13158,22 @@ function superadmin_gestion_marcar_cobrado($request) {
         }
     }
 
+    // 26/11 (Ramiro/cowork, caso Marta Verdú #6797: pagó diciembre pero el cálculo de arriba lo
+    // metía en noviembre porque mira el pedido pendiente/next_payment, no lo que diga Eva): con
+    // "periodo" (Y-m) Eva elige el mes a mano. Si no coincide con lo que se había detectado, el
+    // pedido pendiente que se hubiera usado (o la creación del pedido de este mes) ya NO vale
+    // para ese pago — se guarda como adelantado del mes indicado, sin tocar ningún pedido que sea
+    // de otro mes.
+    $periodo_param = sanitize_text_field((string) $request->get_param('periodo'));
+    if ($periodo_param && !preg_match('/^\d{4}-\d{2}$/', $periodo_param)) {
+        return new WP_Error('bad_request', 'periodo debe tener el formato Y-m (p. ej. 2026-12).', array('status' => 400));
+    }
+    if ($periodo_param && $periodo_param !== $periodo_cubre) {
+        $order = null;
+        $crear_pedido_mes_actual = false;
+        $periodo_cubre = $periodo_param;
+    }
+
     // Ya hay un adelantado guardado para este mismo mes de esta suscripción: avisar en la
     // simulación y no dejar duplicarlo al confirmar (cowork, 2/11 09:42, punto 3) — anúlalo
     // primero con el nuevo POST /gestion/adelantados/{id}/anular si quieres cambiarlo.
@@ -13358,14 +13374,22 @@ function superadmin_gestion_marcar_cobrado($request) {
             $order->delete_meta_data('_aeat_cancellation_csv');
             $order->save();
         }
-        $order->payment_complete();
-        // payment_complete() deja "processing" (el producto no es virtual/descargable):
-        // aquí se considera cobrado de verdad, así que pasa a "completado" — esto emite la
-        // factura real (Verifactu/AEAT) con la fecha de hoy, como confirmó Ramiro.
-        $order->update_status('completed', 'ExcelMuerte: pedido completado tras marcar cobrado.');
-        if ($fecha) {
-            $order->set_date_paid($fecha_ts);
-            $order->save();
+        // 26/11 (cowork, caso Paco Canillas #7543 — URGENTE): un pago parcial completaba el
+        // pedido y emitía factura Verifactu por el TOTAL del catálogo (86 €) aunque solo se
+        // hubieran cobrado 43 — la persona sigue debiendo el resto, así que ni se puede dar por
+        // cobrado ni se puede facturar por más de lo que ha entrado de verdad. Si es parcial, el
+        // pedido se queda como estaba (pending/on-hold) con lo cobrado hasta ahora anotado; nunca
+        // se llama a payment_complete()/update_status('completed') ni sale factura.
+        if (!$parcial) {
+            $order->payment_complete();
+            // payment_complete() deja "processing" (el producto no es virtual/descargable):
+            // aquí se considera cobrado de verdad, así que pasa a "completado" — esto emite la
+            // factura real (Verifactu/AEAT) con la fecha de hoy, como confirmó Ramiro.
+            $order->update_status('completed', 'ExcelMuerte: pedido completado tras marcar cobrado.');
+            if ($fecha) {
+                $order->set_date_paid($fecha_ts);
+                $order->save();
+            }
         }
     });
 
@@ -13384,6 +13408,14 @@ function superadmin_gestion_marcar_cobrado($request) {
 
     $sub = wcs_get_subscription($sub_id); // recarga tras el payment_complete (y la repausa, si toca)
     $despues = array('status' => $sub ? $sub->get_status() : null, 'order_id' => $order->get_id());
+    if ($parcial) {
+        $order_recargado_parcial = wc_get_order($order->get_id());
+        $despues['pedidoEstado'] = $order_recargado_parcial ? $order_recargado_parcial->get_status() : null;
+        $despues['aviso'] = sprintf(
+            'Pago PARCIAL de %s € anotado — el pedido #%d sigue sin completar ni facturar. Faltan %s € de esta renovación; vuelve a llamar a este endpoint cuando se cobre el resto (o con el total ya sumado).',
+            number_format($importe, 2, ',', '.'), $order->get_id(), number_format(max(0, $total_referencia - $importe), 2, ',', '.')
+        );
+    }
     blokes_gestion_log($sub_id, 'marcar_cobrado', $antes, $despues, array(
         'importe' => $importe, 'metodo' => $metodo, 'fecha' => $fecha_txt, 'parcial' => $parcial, 'nota' => $nota,
         'mantuvo_pausa' => $estaba_pausada && $mantener_pausa,
@@ -14086,7 +14118,12 @@ function blokes_buscar_sub_mas_nueva($sub_id_viejo) {
     $misma_clase = null; $otra_clase = null;
     foreach ($all as $s) {
         if (intval($s['id']) === $sub_id_viejo) continue;
-        $en_vigor = ($s['status'] ?? '') === 'active'; // ya incluye pending-cancel con status forzado a 'active'
+        // 26/11 (cowork, Fabiana/Lucía Lobato): antes solo valía 'active' (ya incluye
+        // pending-cancel con status forzado a 'active') — si la nueva también estaba "en
+        // espera" (on-hold, p. ej. por impago o pausa), fusionar daba 409 no_es_duplicado aunque
+        // sí era un duplicado real. on-hold sigue siendo una suscripción viva (no cancelada), así
+        // que también vale como "la nueva" a la que quedarse.
+        $en_vigor = in_array($s['status'] ?? '', array('active', 'on-hold'), true);
         if (!$en_vigor) continue;
         $mismo_cliente = $uid_viejo && blokes_alumno_customer_id_de_sub($s) === $uid_viejo;
         if (!$mismo_cliente) $mismo_cliente = !empty($viejo['email']) && !empty($s['email']) && strcasecmp($s['email'], $viejo['email']) === 0;
