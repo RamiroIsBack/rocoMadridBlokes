@@ -1448,6 +1448,12 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/informe-autoaplicados', array(
         'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_informe_autoaplicados', 'permission_callback' => $sa_perm,
     ));
+    // 26/11 08:35 (cowork, URGENTE antes del 3/12): adelantados de importe 0 que dejó el
+    // auto-aplicado, todavía sentados en wp_blokes_adelantados — de solo lectura, nunca borra
+    // nada (para eso ya existe POST /gestion/adelantados/{id}/anular).
+    register_rest_route('superadmin/v1', '/gestion/sync-grupos/informe-adelantados-cero', array(
+        'methods' => 'GET', 'callback' => 'superadmin_sync_grupos_informe_adelantados_cero', 'permission_callback' => $sa_perm,
+    ));
     // 18/11 (Ramiro): celdas "TA 17/11/2026" que la propia sincronización escribió en el Excel
     // de Eva por error — informe (solo lee) y limpieza (deja la celda vacía, nunca inventa un dato).
     register_rest_route('superadmin/v1', '/gestion/sync-grupos/informe-celdas-escritas', array(
@@ -10876,6 +10882,64 @@ function superadmin_sync_grupos_informe_autoaplicados($request) {
         );
     }
     return rest_ensure_response(array('success' => true, 'total' => count($informe), 'importeTotal' => round($total_importe, 2), 'filas' => $informe));
+}
+
+// 26/11 08:35 (cowork, URGENTE antes del 3/12 — Ramiro/Eva, 7 subs con adelantado falso de 0 €
+// del auto-aplicado: #7024, #7749, #7436, #7742, #7748, #7806, #6682): distinto de
+// informe-autoaplicados de arriba (ese lee el LOG — para 'marcar_cobrado_adelantado' el log
+// nunca guardó order_id, porque en ese momento todavía no existía ningún pedido). Este lee
+// wp_blokes_adelantados directamente, antes y después de aplicarse:
+// - pendientesImporteCero: siguen con aplicado_at NULL — si la renovación real del día 3 generara
+//   un pedido cuyo total también fuera 0 (precio especial corrupto por el mismo bug, por
+//   ejemplo), blokes_aplicar_adelantado_si_hay() los consumiría y marcaría ese mes "cobrado" sin
+//   dinero real. Hay que anularlos antes de esa fecha (POST /gestion/adelantados/{id}/anular,
+//   ya existente — este informe no borra nada, solo los lista).
+// - aplicadosImporteCero / aplicadosSinPagoReal: ya tienen aplicado_at — comprueba el pedido real
+//   que se completó con ese adelantado (orderTotal, _rm_importe_cobrado) para ver si alguno de
+//   los otros ~92 ya se consumió en noviembre dejando un pedido "completado" sin pago real.
+function superadmin_sync_grupos_informe_adelantados_cero($request) {
+    global $wpdb;
+    blokes_ensure_adelantados_table();
+    $rows = $wpdb->get_results(
+        "SELECT * FROM " . blokes_adelantados_table() . " WHERE importe = 0 ORDER BY (aplicado_at IS NULL) DESC, sub_id ASC, id ASC",
+        ARRAY_A
+    );
+    $pendientes = array();
+    $aplicados = array();
+    foreach ($rows as $r) {
+        $sub_id = intval($r['sub_id']);
+        $sub = function_exists('wcs_get_subscription') ? wcs_get_subscription($sub_id) : null;
+        $nombre = $sub ? trim($sub->get_billing_first_name() . ' ' . $sub->get_billing_last_name()) : null;
+        if (!$r['aplicado_at']) {
+            $pendientes[] = array(
+                'adelantadoId' => intval($r['id']), 'subId' => $sub_id, 'nombre' => $nombre,
+                'periodo' => $r['periodo'], 'creadoPor' => $r['user_login'], 'creadoEn' => $r['created_at'],
+            );
+            continue;
+        }
+        $order_id = intval($r['aplicado_order_id']);
+        $order_total = null; $order_estado = null; $importe_cobrado_meta = null;
+        if ($order_id && function_exists('wc_get_order')) {
+            $order = wc_get_order($order_id);
+            if ($order) {
+                $order_total = floatval($order->get_total());
+                $order_estado = $order->get_status();
+                $importe_cobrado_meta = $order->get_meta('_rm_importe_cobrado');
+            }
+        }
+        $sin_pago_real = $order_estado === 'completed' && $order_total !== null && $order_total < 0.01;
+        $aplicados[] = array(
+            'adelantadoId' => intval($r['id']), 'subId' => $sub_id, 'nombre' => $nombre,
+            'periodo' => $r['periodo'], 'aplicadoEn' => $r['aplicado_at'], 'orderId' => $order_id ?: null,
+            'orderEstado' => $order_estado, 'orderTotal' => $order_total, 'importeCobradoMeta' => $importe_cobrado_meta,
+            'sinPagoReal' => $sin_pago_real,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'pendientesImporteCero' => $pendientes, 'totalPendientes' => count($pendientes),
+        'aplicadosImporteCero' => $aplicados, 'totalAplicados' => count($aplicados),
+        'aplicadosSinPagoReal' => array_values(array_filter($aplicados, function($a) { return $a['sinPagoReal']; })),
+    )));
 }
 
 // 18/11 21:10 (cowork, GRAVE): esto dependía del log ('sync_grupos_cobro_escrito' cruzado con
