@@ -1186,6 +1186,12 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_pedido_corregir_completado',
         'permission_callback' => $sa_perm,
     ));
+    // 26/11 (cowork, nota 08:35 — facturas canceladas/devueltas a revisar): de solo lectura,
+    // nunca anula ni rectifica nada — junta lo necesario para decidir cada caso (duplicado,
+    // impago real, rectificativa) sin tener que abrir cada pedido/suscripción uno a uno.
+    register_rest_route('superadmin/v1', '/gestion/pedidos/auditoria', array(
+        'methods' => 'GET', 'callback' => 'superadmin_gestion_pedidos_auditoria', 'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/facturas-pendientes', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_gestion_facturas_pendientes',
@@ -13609,6 +13615,65 @@ function superadmin_gestion_pedido_corregir_completado($request) {
     blokes_gestion_log($sub_id_log, 'pedido_corregir_completado', $antes, $despues, array('orderId' => $order_id, 'motivo' => $motivo));
 
     return rest_ensure_response(array('success' => true, 'data' => array('antes' => $antes, 'despues' => $despues)));
+}
+
+// 26/11 (cowork, nota 08:35 — #7132, #7035, #6961, #6957, #6549 cancelados con factura AEAT sin
+// anular; #7695, #7172, #7491 devueltos a comprobar rectificativa): de solo lectura. Para cada
+// pedido de la lista, junta su propio estado + TODOS los pedidos de la misma suscripción (para
+// ver si ese mismo periodo se cobró de verdad en otro, lo que apunta a factura duplicada) + un
+// escaneo de toda su meta por cualquier clave que suene a factura/invoice/verifactu/aeat/csv/
+// rectificativ (nunca se adivina el nombre exacto del campo del plugin, se enseña tal cual).
+function superadmin_gestion_pedidos_auditoria($request) {
+    $ids_param = (string) $request->get_param('ids');
+    $ids = array_values(array_filter(array_map('intval', explode(',', $ids_param))));
+    if (!$ids) return new WP_Error('bad_request', 'Falta ids (lista de pedidos separados por comas).', array('status' => 400));
+
+    $escanear = function($o) {
+        $hallazgos = array();
+        foreach ($o->get_meta_data() as $meta) {
+            $k = $meta->key;
+            if (stripos($k, 'factura') !== false || stripos($k, 'invoice') !== false || stripos($k, 'verifactu') !== false
+                || stripos($k, 'aeat') !== false || stripos($k, 'csv') !== false || stripos($k, 'rectificativ') !== false) {
+                $v = $meta->value;
+                if ($v !== '' && $v !== null && !is_array($v)) $hallazgos[] = $k . ': ' . $v;
+            }
+        }
+        return $hallazgos;
+    };
+
+    $filas = array();
+    foreach ($ids as $order_id) {
+        $order = wc_get_order($order_id);
+        if (!$order) { $filas[] = array('orderId' => $order_id, 'error' => 'No encontrado.'); continue; }
+        $subs = function_exists('wcs_get_subscriptions_for_renewal_order') ? wcs_get_subscriptions_for_renewal_order($order_id) : array();
+        $sub = $subs ? reset($subs) : null;
+        $otros_pedidos = array();
+        if ($sub) {
+            $todos_ids = array_filter(array_merge(array($sub->get_parent_id()), $sub->get_related_orders('ids', 'renewal')));
+            foreach ($todos_ids as $oid) {
+                $oid = intval($oid);
+                if ($oid === $order_id) continue;
+                $o2 = wc_get_order($oid);
+                if (!$o2) continue;
+                $otros_pedidos[] = array(
+                    'orderId' => $oid, 'estado' => $o2->get_status(), 'total' => floatval($o2->get_total()),
+                    'dateCreated' => $o2->get_date_created() ? $o2->get_date_created()->date('Y-m-d') : null,
+                    'datePaid' => $o2->get_date_paid() ? $o2->get_date_paid()->date('Y-m-d') : null,
+                );
+            }
+        }
+        $filas[] = array(
+            'orderId' => $order_id, 'subId' => $sub ? intval($sub->get_id()) : null,
+            'alumno' => trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name()),
+            'estado' => $order->get_status(), 'total' => floatval($order->get_total()),
+            'dateCreated' => $order->get_date_created() ? $order->get_date_created()->date('Y-m-d') : null,
+            'datePaid' => $order->get_date_paid() ? $order->get_date_paid()->date('Y-m-d') : null,
+            'facturaAnuladaDetectada' => blokes_pedido_factura_anulada($order),
+            'metaFactura' => $escanear($order),
+            'otrosPedidosDeLaMismaSuscripcion' => $otros_pedidos,
+        );
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $filas));
 }
 
 // "Mandar factura" (NOTAS_PARA_CODE_pestanas_grupos.md, pestaña 3): pedidos de renovación de
