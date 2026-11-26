@@ -1193,11 +1193,26 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_pedido_reenganchar',
         'permission_callback' => $sa_perm,
     ));
+    // 26/11 (casos #7953/#7349): date_paid es de solo lectura por REST wc/v3 — corrección puntual.
+    register_rest_route('superadmin/v1', '/gestion/pedidos/(?P<id>\d+)/corregir-fecha-pago', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_pedido_corregir_fecha_pago',
+        'permission_callback' => $sa_perm,
+    ));
     // 26/11 (cowork, nota 08:35 — facturas canceladas/devueltas a revisar): de solo lectura,
     // nunca anula ni rectifica nada — junta lo necesario para decidir cada caso (duplicado,
     // impago real, rectificativa) sin tener que abrir cada pedido/suscripción uno a uno.
     register_rest_route('superadmin/v1', '/gestion/pedidos/auditoria', array(
         'methods' => 'GET', 'callback' => 'superadmin_gestion_pedidos_auditoria', 'permission_callback' => $sa_perm,
+    ));
+    // 26/11 (informe #2): pedidos sin enlazar + pending-cancel con fin pasado + cancelados por
+    // tiempo sin sub en vigor. Solo lectura.
+    register_rest_route('superadmin/v1', '/gestion/informe-pedidos-sin-enlazar', array(
+        'methods' => 'GET', 'callback' => 'superadmin_gestion_informe_pedidos_sin_enlazar', 'permission_callback' => $sa_perm,
+    ));
+    // 26/11 (para quitar Bizum del checkout en subs sin adivinar su id de gateway).
+    register_rest_route('superadmin/v1', '/gestion/payment-gateways', array(
+        'methods' => 'GET', 'callback' => 'superadmin_gestion_payment_gateways_listar', 'permission_callback' => $sa_perm,
     ));
     register_rest_route('superadmin/v1', '/gestion/facturas-pendientes', array(
         'methods'             => 'GET',
@@ -7083,6 +7098,12 @@ define('BLOKES_TARIFA_ADOL_1H_2D',   57.0);
 define('BLOKES_TARIFA_ADOL_1H_1D',   47.0);
 define('BLOKES_TARIFA_ADOL_1H30_2D', 65.0);
 define('BLOKES_TARIFA_ADOL_1H30_1D', 55.0);
+// 26/11 (decisión de Ramiro): trimestral de Adolescentes — plano, sin distinguir 1h/1h30 (eso
+// solo aplica al precio mensual). Coincide con lo que ya saca el catálogo público (55/65 × 3 ×
+// 0,95 de descuento trimestral = 156,75→157 y 185,25→185) — no se ha tocado el catálogo, solo
+// se usan estos mismos números aquí para comparar.
+define('BLOKES_TARIFA_ADOL_TRIM_2D', 185.0);
+define('BLOKES_TARIFA_ADOL_TRIM_1D', 157.0);
 define('BLOKES_TARIFA_YOGA', 30.0);
 define('BLOKES_WELLHUB_POR_CHECKIN', 4.88);
 
@@ -13738,6 +13759,10 @@ function superadmin_gestion_pedido_reenganchar($request) {
     $order_id  = intval($request['id']);
     $sub_id    = intval($request->get_param('subId'));
     $confirmar = (bool) $request->get_param('confirmar');
+    // 26/11 (cowork, caso Alejandro Acevedo #7349: quedó con date_paid de hoy en vez del pago
+    // real del 14/10) — igual que corregir-completado, date_paid es de solo lectura por REST
+    // (wc/v3), así que hace falta poder pasarlo aquí.
+    $fecha = sanitize_text_field((string) $request->get_param('fecha')); // 'Y-m-d', opcional
 
     $order = wc_get_order($order_id);
     if (!$order) return new WP_Error('not_found', 'Pedido no encontrado.', array('status' => 404));
@@ -13758,6 +13783,7 @@ function superadmin_gestion_pedido_reenganchar($request) {
     $meta_factura = $escanear_factura($order);
     $antes = array(
         'estado' => $order->get_status(), 'total' => floatval($order->get_total()),
+        'datePaid' => $order->get_date_paid() ? $order->get_date_paid()->date('Y-m-d') : null,
         'subscriptionRenewalMeta' => $order->get_meta('_subscription_renewal'),
         'facturaAnuladaDetectada' => blokes_pedido_factura_anulada($order), 'metaFactura' => $meta_factura,
     );
@@ -13774,23 +13800,181 @@ function superadmin_gestion_pedido_reenganchar($request) {
         return new WP_Error('sin_factura', 'Este pedido no tiene factura detectada — usa "Marcar cobrado" en vez de reenganchar.', array('status' => 409));
     }
 
-    $order->update_meta_data('_subscription_renewal', $sub_id);
-    $order->save();
-    if (!in_array($order->get_status(), array('completed', 'processing'), true)) {
-        $order->add_order_note(sprintf('ExcelMuerte: reenganchado a la suscripción #%d y completado otra vez (ya tenía factura, no debería emitirse una nueva).', $sub_id));
+    // 26/11 (cowork, probado en vivo con #6961 → 7748: funcionó, pero mandó "Nuevo pedido de
+    // renovación" a escala@ y "Pedido de renovación completado" al cliente) — como el resto de
+    // ExcelMuerte, esto nunca debe avisar a nadie, el pedido ya se cobró hace tiempo de verdad.
+    blokes_gestion_sin_emails(function() use ($order, $sub_id, $fecha) {
+        $order->update_meta_data('_subscription_renewal', $sub_id);
         $order->save();
-        $order->update_status('processing', 'ExcelMuerte: reenganchar — reabierto.');
-        $order->update_status('completed', 'ExcelMuerte: reenganchar — completado.');
-    }
+        if (!in_array($order->get_status(), array('completed', 'processing'), true)) {
+            $order->add_order_note(sprintf('ExcelMuerte: reenganchado a la suscripción #%d y completado otra vez (ya tenía factura, no debería emitirse una nueva).', $sub_id));
+            $order->save();
+            $order->update_status('processing', 'ExcelMuerte: reenganchar — reabierto.');
+            $order->update_status('completed', 'ExcelMuerte: reenganchar — completado.');
+        }
+        if ($fecha && strtotime($fecha)) {
+            $order->set_date_paid(strtotime($fecha . ' 12:00:00'));
+            $order->save();
+        }
+    });
 
     $order_recargado = wc_get_order($order_id);
     $despues = array(
         'estado' => $order_recargado->get_status(), 'total' => floatval($order_recargado->get_total()),
+        'datePaid' => $order_recargado->get_date_paid() ? $order_recargado->get_date_paid()->date('Y-m-d') : null,
         'subscriptionRenewalMeta' => $order_recargado->get_meta('_subscription_renewal'),
         'facturaAnuladaDetectada' => blokes_pedido_factura_anulada($order_recargado), 'metaFactura' => $escanear_factura($order_recargado),
     );
-    blokes_gestion_log($sub_id, 'pedido_reenganchar', $antes, $despues, array('orderId' => $order_id));
+    blokes_gestion_log($sub_id, 'pedido_reenganchar', $antes, $despues, array('orderId' => $order_id, 'fecha' => $fecha));
     return rest_ensure_response(array('success' => true, 'data' => array('antes' => $antes, 'despues' => $despues)));
+}
+
+// 26/11 (cowork, casos #7953 Marta Verdú y #7349 Alejandro Acevedo: date_paid quedó con la fecha
+// de hoy en vez del cobro real — y date_paid es de solo lectura por REST wc/v3, así que no se
+// puede corregir desde fuera) — un solo campo, sin tocar nada más (ni total, ni estado, ni
+// factura). Simula por defecto.
+function superadmin_gestion_pedido_corregir_fecha_pago($request) {
+    $order_id = intval($request['id']);
+    $fecha    = sanitize_text_field((string) $request->get_param('fecha')); // 'Y-m-d'
+    $confirmar = (bool) $request->get_param('confirmar');
+    if (!$fecha || !strtotime($fecha)) return new WP_Error('bad_request', 'Falta fecha (Y-m-d).', array('status' => 400));
+    $order = wc_get_order($order_id);
+    if (!$order) return new WP_Error('not_found', 'Pedido no encontrado.', array('status' => 404));
+
+    $antes = array('datePaid' => $order->get_date_paid() ? $order->get_date_paid()->date('Y-m-d') : null);
+    if (!$confirmar) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'antes' => $antes,
+            'aviso' => sprintf('Simulación: se pondría date_paid del pedido #%d a %s. Repite con confirmar=true.', $order_id, $fecha),
+        )));
+    }
+    $order->set_date_paid(strtotime($fecha . ' 12:00:00'));
+    $order->save();
+    $order_recargado = wc_get_order($order_id);
+    $despues = array('datePaid' => $order_recargado->get_date_paid() ? $order_recargado->get_date_paid()->date('Y-m-d') : null);
+    blokes_gestion_log(0, 'pedido_corregir_fecha_pago', $antes, $despues, array('orderId' => $order_id, 'fecha' => $fecha));
+    return rest_ensure_response(array('success' => true, 'data' => array('antes' => $antes, 'despues' => $despues)));
+}
+
+// 26/11 (quitar Bizum del checkout en subs — Ramiro): el plugin de Redsys/Bizum no está en este
+// repo (vive solo en el servidor), así que no adivino el id exacto de la pasarela de Bizum para
+// el filtro woocommerce_available_payment_gateways — de solo lectura, lista los gateways
+// registrados de verdad para coger el id correcto antes de tocar nada.
+function superadmin_gestion_payment_gateways_listar($request) {
+    if (!function_exists('WC') || !WC()->payment_gateways()) {
+        return new WP_Error('class_not_found', 'WooCommerce no disponible.', array('status' => 503));
+    }
+    $out = array();
+    foreach (WC()->payment_gateways()->payment_gateways() as $id => $gw) {
+        $out[] = array('id' => $id, 'title' => $gw->get_title(), 'enabled' => $gw->is_available(), 'method_title' => $gw->method_title ?? null);
+    }
+    return rest_ensure_response(array('success' => true, 'data' => $out));
+}
+
+// 26/11 (cowork, criterio dado para Guillermo Arce/Álvaro Herrero/Jimena Romero-Toro/Alejandro
+// Acevedo): de solo lectura, nunca enlaza, reactiva ni cancela nada — junta tres listas para
+// decidir caso por caso.
+function superadmin_gestion_informe_pedidos_sin_enlazar($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $dias = intval($request->get_param('dias')) ?: 90;
+    $desde_ts = strtotime("-{$dias} days");
+
+    $product_dias_sueltos = class_exists('RocoMadrid_Step_Form') ? RocoMadrid_Step_Form::product_dias_sueltos_id() : 0;
+    $product_tarifas      = class_exists('RocoMadrid_Step_Form') ? RocoMadrid_Step_Form::product_tarifas_id() : 0;
+    $product_pilates      = intval(get_option('rocomadrid_product_pilates', 0));
+    $product_yoga         = intval(get_option('rocomadrid_product_yoga', 0));
+    $product_ids = array_values(array_filter(array($product_dias_sueltos, $product_tarifas, $product_pilates, $product_yoga)));
+
+    $todas_subs = blokes_get_all_subscription_data();
+    $parent_ids = array();
+    foreach ($todas_subs as $s) {
+        $sub_obj = wcs_get_subscription(intval($s['id'] ?? 0));
+        if ($sub_obj) $parent_ids[intval($sub_obj->get_parent_id())] = true;
+    }
+    $tiene_producto_clase = function($o) use ($product_ids) {
+        foreach ($o->get_items() as $item) {
+            if (in_array(intval($item->get_product_id()), $product_ids, true)) return true;
+        }
+        return false;
+    };
+
+    // A) Pedidos completed/processing de Clases/Días sueltos/Pilates/Yoga sin _subscription_renewal
+    // y que no son el pedido padre de ninguna suscripción — mismo criterio que se usó a mano con
+    // Guillermo Arce (#7713): si además el cliente tiene una sub on-hold/pending-cancel del mismo
+    // horario sin pago de ese mes, se propone como candidata a enlazar.
+    $sin_enlazar = array();
+    foreach (wc_get_orders(array('status' => array('completed', 'processing'), 'limit' => -1, 'return' => 'objects')) as $o) {
+        $fecha_creado = $o->get_date_created();
+        if ($fecha_creado && $fecha_creado->getTimestamp() < $desde_ts) continue;
+        if ($o->get_meta('_subscription_renewal')) continue;
+        if (isset($parent_ids[$o->get_id()])) continue;
+        if (!$tiene_producto_clase($o)) continue;
+
+        $customer_id = intval($o->get_customer_id());
+        $telefono = $o->get_billing_phone();
+        $mes_pedido = $fecha_creado ? $fecha_creado->date('Y-m') : date('Y-m');
+        $candidatas = array();
+        foreach ($todas_subs as $s) {
+            if (!in_array($s['status_raw'] ?? $s['status'] ?? '', array('on-hold', 'pending-cancel'), true)) continue;
+            $uid_s = blokes_alumno_customer_id_de_sub($s);
+            $mismo = ($customer_id && $uid_s === $customer_id) || (!empty($telefono) && $telefono === ($s['telefono'] ?? ''));
+            if (!$mismo) continue;
+            if (blokes_sync_grupos_sub_ya_cobrado_mes(intval($s['id']), $mes_pedido)) continue;
+            $candidatas[] = array('subId' => intval($s['id']), 'dia' => $s['dia'] ?? '', 'horario' => $s['horario'] ?? '', 'statusRaw' => $s['status_raw'] ?? $s['status'] ?? '');
+        }
+        $sin_enlazar[] = array(
+            'orderId' => $o->get_id(), 'total' => floatval($o->get_total()), 'fecha' => $fecha_creado ? $fecha_creado->date('Y-m-d') : null,
+            'cliente' => trim($o->get_billing_first_name() . ' ' . $o->get_billing_last_name()),
+            'telefono' => $telefono, 'customerId' => $customer_id, 'subsCandidatas' => $candidatas,
+        );
+    }
+
+    // B) pending-cancel con fecha de fin ya pasada (debería haberse cancelado/reactivado solo).
+    $pending_cancel_fin_pasado = array();
+    $subs_pc = wcs_get_subscriptions(array('subscriptions_per_page' => -1, 'subscription_status' => array('pending-cancel')));
+    foreach ($subs_pc as $sub_obj) {
+        $fin = $sub_obj->get_date('end');
+        $fin_ts = $fin ? strtotime($fin) : null;
+        if (!$fin_ts || $fin_ts >= current_time('timestamp')) continue;
+        $tiene_pago_mes = blokes_sync_grupos_sub_ya_cobrado_mes($sub_obj->get_id(), date('Y-m'));
+        $pending_cancel_fin_pasado[] = array(
+            'subId' => $sub_obj->get_id(), 'cliente' => trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()),
+            'fin' => date('Y-m-d', $fin_ts), 'tienePagoDelMesActual' => $tiene_pago_mes,
+            'propuesta' => $tiene_pago_mes ? 'reactivar (tiene pago de este mes)' : 'cancelar (fin ya pasado, sin pago de este mes)',
+        );
+    }
+
+    // C) Cancelados por tiempo (pago no completado, p. ej. Bizum/Redsys sin notificación) cuyo
+    // cliente no tiene NINGUNA sub en vigor — para cruzar a mano contra "VENTA BIZUM" del
+    // extracto del banco (mismo importe, mismo día, últimos 3 dígitos del teléfono).
+    $en_vigor_por_cliente = array();
+    foreach ($todas_subs as $s) {
+        if (!in_array($s['status_raw'] ?? $s['status'] ?? '', array('active', 'on-hold', 'pending', 'pending-cancel'), true)) continue;
+        $uid_s = blokes_alumno_customer_id_de_sub($s);
+        if ($uid_s) $en_vigor_por_cliente[$uid_s] = true;
+    }
+    $cancelados_sin_sub = array();
+    foreach (wc_get_orders(array('status' => array('cancelled'), 'limit' => -1, 'return' => 'objects')) as $o) {
+        $fecha_creado = $o->get_date_created();
+        if ($fecha_creado && $fecha_creado->getTimestamp() < $desde_ts) continue;
+        if (!$tiene_producto_clase($o)) continue;
+        $customer_id = intval($o->get_customer_id());
+        if ($customer_id && isset($en_vigor_por_cliente[$customer_id])) continue;
+        $telefono = $o->get_billing_phone();
+        $cancelados_sin_sub[] = array(
+            'orderId' => $o->get_id(), 'total' => floatval($o->get_total()), 'fecha' => $fecha_creado ? $fecha_creado->date('Y-m-d') : null,
+            'cliente' => trim($o->get_billing_first_name() . ' ' . $o->get_billing_last_name()),
+            'telefono' => $telefono, 'telefonoUlt3' => $telefono ? substr(preg_replace('/\D/', '', $telefono), -3) : '',
+        );
+    }
+
+    return rest_ensure_response(array('success' => true, 'data' => array(
+        'pedidosSinEnlazar' => $sin_enlazar,
+        'pendingCancelFinPasado' => $pending_cancel_fin_pasado,
+        'canceladosPorTiempoSinSub' => $cancelados_sin_sub,
+    )));
 }
 
 // 26/11 (cowork, nota 08:35 — #7132, #7035, #6961, #6957, #6549 cancelados con factura AEAT sin
@@ -14059,12 +14243,39 @@ function superadmin_gestion_pausar($request) {
     return rest_ensure_response(array('success' => true, 'data' => $despues));
 }
 
+// 26/11 (Ramiro): si la sub vieja duplicada no tiene NINGÚN pedido pagado en los últimos 2 meses
+// ni ningún pendiente con factura, es el caso típico (una en espera olvidada) y gestión (Eva)
+// puede cancelarla sola — si no, sigue siendo cosa de un socio (regla del 19/11, sin cambios).
+function blokes_sub_segura_para_cancelar_duplicado($sub_obj) {
+    if (!$sub_obj) return false;
+    $order_ids = array_filter(array_merge(array($sub_obj->get_parent_id()), $sub_obj->get_related_orders('ids', 'renewal')));
+    $hace_2_meses = strtotime('-2 months');
+    foreach ($order_ids as $oid) {
+        $o = wc_get_order($oid);
+        if (!$o) continue;
+        $estado = $o->get_status();
+        if (in_array($estado, array('completed', 'processing'), true)) {
+            $fecha = $o->get_date_created() ?: $o->get_date_paid();
+            if ($fecha && $fecha->getTimestamp() >= $hace_2_meses) return false; // pagado hace poco
+        }
+        if (in_array($estado, array('pending', 'on-hold', 'failed'), true)) {
+            foreach ($o->get_meta_data() as $meta) {
+                $k = $meta->key;
+                if ((stripos($k, 'factura') !== false || stripos($k, 'invoice') !== false || stripos($k, 'verifactu') !== false)
+                    && $meta->value !== '' && $meta->value !== null && !is_array($meta->value)) return false; // pendiente con factura
+            }
+        }
+    }
+    return true;
+}
+
 // "Paga clases sueltas" (Ramiro, 26/11 — caso Fabiana/Lucía Lobato, resuelto a mano, Eva debe
 // poder hacerlo sola desde la ficha del alumno): botón único para cuando alguien deja la clase
 // semanal y pasa a pagar por sesión suelta. Reutiliza superadmin_gestion_pausar() tal cual (pausa
 // + motivo + cancela pendientes sin factura) y, además, si hay una suscripción VIEJA del mismo
-// alumno que se quedó colgando (nunca cancelada), la cancela también con "fusionar" — con el fix
-// de hoy, fusionar ya acepta que la "nueva" (esta misma, recién pausada) esté en espera.
+// alumno que se quedó colgando (nunca cancelada), la cancela también — directamente si es un caso
+// "seguro" (blokes_sub_segura_para_cancelar_duplicado, Eva puede hacerlo), si no con "fusionar"
+// (que sigue exigiendo un socio si gestión intenta cancelar algo menos evidente).
 function superadmin_gestion_paga_clases_sueltas($request) {
     if (!function_exists('wcs_get_subscription')) {
         return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
@@ -14100,12 +14311,18 @@ function superadmin_gestion_paga_clases_sueltas($request) {
     $req_pausar->set_param('cancelarPedidosPendientes', true);
     $req_pausar->set_param('simular', $simular);
 
+    $vieja_obj = $vieja ? wcs_get_subscription(intval($vieja['id'])) : null;
+    $vieja_segura = $vieja_obj ? blokes_sub_segura_para_cancelar_duplicado($vieja_obj) : false;
+
     if ($simular) {
         $resultado_pausar = superadmin_gestion_pausar($req_pausar);
         $data = is_wp_error($resultado_pausar) ? array() : $resultado_pausar->get_data()['data'];
         $data['subViejaDuplicada'] = $vieja ? intval($vieja['id']) : null;
+        $data['subViejaSeguraDeCancelar'] = $vieja ? $vieja_segura : null;
         if ($vieja) {
-            $data['aviso'] = ($data['aviso'] ?? '') . sprintf(' Se cancelaría también la suscripción vieja #%d (duplicada, "fusionar").', intval($vieja['id']));
+            $data['aviso'] = ($data['aviso'] ?? '') . ($vieja_segura
+                ? sprintf(' Se cancelaría también la suscripción vieja #%d (duplicada, sin pagos recientes ni pendientes con factura — se puede cancelar sin un socio).', intval($vieja['id']))
+                : sprintf(' Hay una suscripción vieja #%d que parece duplicada, pero tiene pagos recientes o pendientes con factura — su cancelación necesita que la confirme un socio ("fusionar").', intval($vieja['id'])));
         }
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $data));
     }
@@ -14115,7 +14332,15 @@ function superadmin_gestion_paga_clases_sueltas($request) {
     $data = $resultado_pausar->get_data()['data'];
 
     $fusion_resultado = null;
-    if ($vieja) {
+    if ($vieja_obj && $vieja_segura) {
+        $antes_vieja = array('status' => $vieja_obj->get_status());
+        blokes_gestion_sin_emails(function() use ($vieja_obj) {
+            $vieja_obj->update_status('cancelled', 'ExcelMuerte: Paga clases sueltas — duplicado viejo cancelado (sin pagos recientes ni pendientes con factura).');
+        });
+        $pedidos_vieja_cancelados = blokes_cancelar_pedidos_impagados($vieja_obj, false);
+        $fusion_resultado = array('status' => 'cancelled', 'pedidosCancelados' => $pedidos_vieja_cancelados, 'cancelacionAutomatica' => true);
+        blokes_gestion_log(intval($vieja['id']), 'fusionar', $antes_vieja, $fusion_resultado, array('viaPagaClasesSueltas' => $sub_id));
+    } elseif ($vieja) {
         $req_fusionar = new WP_REST_Request('POST', '/superadmin/v1/gestion/fusionar');
         $req_fusionar->set_param('sub_id_viejo', intval($vieja['id']));
         $req_fusionar->set_param('simular', false);
@@ -15104,9 +15329,17 @@ function superadmin_informe_precio_adolescentes_1h($request) {
         $total = floatval($sub_obj->get_total());
         $dia_pareja = blokes_dia_a_pareja($sub['dia'] ?? '');
         $es_2dias = strpos($dia_pareja, '-') !== false;
-        // Mismas tarifas que ya usa blokes_tarifa_mensual_esperada() para esta misma categoría
-        // (BLOKES_TARIFA_ADOL_1H_*) — aquí en vez de la de 1h30, que es la que esto detecta.
-        $esperado = $es_2dias ? BLOKES_TARIFA_ADOL_1H_2D : BLOKES_TARIFA_ADOL_1H_1D;
+        // 26/11 (cowork, Samuel González/Matilde Sabido/Gael Toledo: trimestrales de 157 € que
+        // esto comparaba contra la tarifa MENSUAL de 1h, 47/57, sin mirar nunca el periodo de
+        // cobro — 157 es justo lo que toca de trimestral, no un error). Con el ciclo trimestral
+        // (billing_period 'month', interval >= 3) se compara contra el plano de Ramiro
+        // (BLOKES_TARIFA_ADOL_TRIM_*, no distingue 1h/1h30); mensual sigue igual que siempre.
+        $periodo_fact = $sub_obj->get_billing_period();
+        $intervalo_fact = max(1, intval($sub_obj->get_billing_interval()));
+        $es_trimestral = $periodo_fact === 'month' && $intervalo_fact >= 3 && $intervalo_fact < 12;
+        $esperado = $es_trimestral
+            ? ($es_2dias ? BLOKES_TARIFA_ADOL_TRIM_2D : BLOKES_TARIFA_ADOL_TRIM_1D)
+            : ($es_2dias ? BLOKES_TARIFA_ADOL_1H_2D : BLOKES_TARIFA_ADOL_1H_1D);
         $out[] = array(
             'subId'        => $id,
             'alumno'       => trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()),
@@ -15114,6 +15347,7 @@ function superadmin_informe_precio_adolescentes_1h($request) {
             'dias'         => $es_2dias ? 2 : 1,
             'horario'      => $horario,
             'status'       => $status,
+            'ciclo'        => $es_trimestral ? 'trimestral' : 'mensual',
             'precioActual' => $total,
             'precioEsperado' => $esperado,
             // Margen de 2 € de redondeo, mismo criterio que blokes_tarifa_comparar().
@@ -15662,12 +15896,15 @@ function superadmin_gestion_alta_cliente($request) {
         $billing_period, $billing_interval, $precio_catalogo, $importe_final, $fecha_inicio,
         $primer_pago, $metodo, $fecha_pago, $ajustar_precio, $motivo_excepcion
     ) {
-        $gateways = WC()->payment_gateways()->payment_gateways();
-        $bacs_title = isset($gateways['bacs']) ? $gateways['bacs']->get_title() : 'Transferencia bancaria';
-
+        // 26/11 (cowork, caso Jimena Romero-Toro #7955: la sub quedó con método "Transferencia
+        // bancaria" aunque pagó por Bizum) — esto forzaba 'bacs' a ciegas en cuanto "ya_pagado"
+        // era true, sin mirar nunca el $metodo real; el título se corregía más abajo solo en el
+        // PEDIDO, nunca en la suscripción. Igual que marcar-cobrado (que nunca llama a
+        // set_payment_method con un gateway falso para un cobro manual), aquí no se fuerza nada
+        // todavía — el título correcto se pone una sola vez más abajo, en el pedido Y la
+        // suscripción, con el método real.
         $order = wc_create_order(array('customer_id' => $customer_id, 'created_via' => 'admin_assign'));
         if (is_wp_error($order)) return $order;
-        if ($primer_pago === 'ya_pagado') { $order->set_payment_method('bacs'); $order->set_payment_method_title($bacs_title); }
         $item_pedido_id = $order->add_product($producto_item, 1, array('subtotal' => $precio_catalogo, 'total' => $precio_catalogo));
         if ($tipo === 'clase') {
             $clave_dia = (strpos($dia_norm, '-') !== false) ? 'pa_dias' : 'pa_dia-suelto';
@@ -15689,7 +15926,6 @@ function superadmin_gestion_alta_cliente($request) {
             'customer_id' => $customer_id, 'created_via' => 'admin_assign',
         ));
         if (is_wp_error($subscription)) { $order->delete(true); return $subscription; }
-        if ($primer_pago === 'ya_pagado') { $subscription->set_payment_method('bacs'); $subscription->set_payment_method_title($bacs_title); }
         $item_sub = $subscription->add_product($producto_item, 1, array('subtotal' => $precio_catalogo, 'total' => $precio_catalogo));
         if ($tipo === 'clase') {
             $clave_dia = strpos($dia_norm, '-') !== false ? 'pa_dias' : 'pa_dia-suelto';
@@ -15704,15 +15940,24 @@ function superadmin_gestion_alta_cliente($request) {
         $subscription->set_address($billing, 'billing');
 
         $start_date = $fecha_inicio . ' 00:00:00';
+        // 26/11 (cowork, caso Jimena Romero-Toro #7955: fechaInicio 2026-12-01 porque ya pagó
+        // diciembre, pero el próximo pago salió el 03/12 — un mes antes de lo que toca): con
+        // fechaInicio EXPLÍCITO (distinto de hoy) este periodo ya está pagado, así que el
+        // próximo pago es sencillamente un ciclo después de fechaInicio — calcularlo con
+        // WC_Subscriptions_Synchroniser (que busca el día de sincronización más próximo a HOY,
+        // no a fechaInicio) no tiene sentido aquí. Con fechaInicio = hoy (el alta normal, de
+        // toda la vida) se deja exactamente como estaba, para no tocar el día de sincronización
+        // habitual (el 3) de las altas del día.
         $next_payment = null;
-        if (class_exists('WC_Subscriptions_Synchroniser')) {
+        $fecha_inicio_explicita = $fecha_inicio !== current_time('Y-m-d');
+        if (!$fecha_inicio_explicita && class_exists('WC_Subscriptions_Synchroniser')) {
             $first_payment_ts = WC_Subscriptions_Synchroniser::calculate_first_payment_date($producto_item, 'timestamp');
             if ($first_payment_ts > 0) $next_payment = gmdate('Y-m-d H:i:s', $first_payment_ts);
         }
         if (!$next_payment) {
             $next_payment = ($billing_period === 'year')
-                ? gmdate('Y-m-d H:i:s', strtotime('+1 year'))
-                : gmdate('Y-m-d H:i:s', strtotime('+' . $billing_interval . ' month'));
+                ? gmdate('Y-m-d H:i:s', strtotime($start_date . ' +1 year'))
+                : gmdate('Y-m-d H:i:s', strtotime($start_date . ' +' . $billing_interval . ' month'));
         }
         try { $subscription->update_dates(array('start' => $start_date, 'next_payment' => $next_payment)); } catch (Exception $e) {}
         $subscription->calculate_totals();
@@ -15736,6 +15981,8 @@ function superadmin_gestion_alta_cliente($request) {
             }
             $metodo_label = blokes_gestion_metodo_label($metodo);
             $order->set_payment_method_title($metodo_label);
+            $subscription->set_payment_method_title($metodo_label);
+            $subscription->save();
             $fecha_pago_ts = $fecha_pago ? strtotime($fecha_pago . ' 12:00:00') : time();
             $order->add_order_note(sprintf('ExcelMuerte: cobrado %s € (%s) el %s — primer pago del alta.', number_format($importe_final, 2, ',', '.'), $metodo_label, date_i18n('d/m/Y', $fecha_pago_ts)));
             $order->save();
