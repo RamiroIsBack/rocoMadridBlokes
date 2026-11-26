@@ -13845,7 +13845,7 @@ function superadmin_gestion_pedido_corregir_fecha_pago($request) {
     if (!$confirmar) {
         return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
             'antes' => $antes,
-            'aviso' => sprintf('Simulación: se pondría date_paid del pedido #%d a %s. Repite con confirmar=true.', $order_id, $fecha),
+            'aviso' => sprintf('SOLO SIMULACIÓN — todavía no se ha cambiado nada. Para fijar de verdad el date_paid del pedido #%d a %s, repite esta misma llamada añadiendo confirmar=true.', $order_id, $fecha),
         )));
     }
     $order->set_date_paid(strtotime($fecha . ' 12:00:00'));
@@ -13905,9 +13905,8 @@ function superadmin_gestion_informe_pedidos_sin_enlazar($request) {
     // Guillermo Arce (#7713): si además el cliente tiene una sub on-hold/pending-cancel del mismo
     // horario sin pago de ese mes, se propone como candidata a enlazar.
     $sin_enlazar = array();
-    foreach (wc_get_orders(array('status' => array('completed', 'processing'), 'limit' => -1, 'return' => 'objects')) as $o) {
+    foreach (wc_get_orders(array('status' => array('completed', 'processing'), 'date_after' => date('Y-m-d', $desde_ts), 'limit' => -1, 'return' => 'objects')) as $o) {
         $fecha_creado = $o->get_date_created();
-        if ($fecha_creado && $fecha_creado->getTimestamp() < $desde_ts) continue;
         if ($o->get_meta('_subscription_renewal')) continue;
         if (isset($parent_ids[$o->get_id()])) continue;
         if (!$tiene_producto_clase($o)) continue;
@@ -13956,9 +13955,8 @@ function superadmin_gestion_informe_pedidos_sin_enlazar($request) {
         if ($uid_s) $en_vigor_por_cliente[$uid_s] = true;
     }
     $cancelados_sin_sub = array();
-    foreach (wc_get_orders(array('status' => array('cancelled'), 'limit' => -1, 'return' => 'objects')) as $o) {
+    foreach (wc_get_orders(array('status' => array('cancelled'), 'date_after' => date('Y-m-d', $desde_ts), 'limit' => -1, 'return' => 'objects')) as $o) {
         $fecha_creado = $o->get_date_created();
-        if ($fecha_creado && $fecha_creado->getTimestamp() < $desde_ts) continue;
         if (!$tiene_producto_clase($o)) continue;
         $customer_id = intval($o->get_customer_id());
         if ($customer_id && isset($en_vigor_por_cliente[$customer_id])) continue;
