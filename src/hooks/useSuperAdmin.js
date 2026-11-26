@@ -125,6 +125,9 @@ export const gestionCongelarMes   = body => gestionPost('/gestion/congelar-mes',
 export const gestionNota          = body => gestionPost('/gestion/nota', body)
 export const gestionDarDeBaja     = body => gestionPost('/gestion/dar-de-baja', body)
 export const gestionFusionar      = body => gestionPost('/gestion/fusionar', body)
+// 26/11 (Ramiro, caso Fabiana/Lucía Lobato): pausa con motivo "Paga clases sueltas" + cancela
+// pendientes + cancela la sub vieja duplicada si la hay, todo en un botón.
+export const gestionPagaClasesSueltas = body => gestionPost('/gestion/paga-clases-sueltas', body)
 // 19/11 (cowork §06:25 punto 4): lo que rol gestión usa en vez de cancelar un duplicado de verdad.
 export const gestionAvisarDuplicado = body => gestionPost('/gestion/avisar-duplicado', body)
 export const gestionExento        = body => gestionPost('/gestion/exento', body)

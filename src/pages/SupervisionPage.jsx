@@ -24,7 +24,7 @@ function kpiColorTema(hex, oscuro) {
 }
 import {
   useClasses, usePeopleSummary, useGestionGrupos,
-  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionCongelarMes, gestionNota, gestionDarDeBaja, gestionFusionar, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente, gestionNombresPorRevisarGet, gestionNombreOmitir, gestionNinosAsociar, gestionNinosListadoGet, gestionVincularActividadGet, gestionVincularActividad,
+  gestionMarcarCobrado, gestionVuelveTrasLesion, gestionPausar, gestionReanudar, gestionCongelarMes, gestionNota, gestionDarDeBaja, gestionFusionar, gestionPagaClasesSueltas, gestionAvisarDuplicado, gestionExento, gestionCambiarGrupo, gestionOptinWhatsapp, gestionEditarAlumno, gestionBuscarAlumno, gestionAltaCliente, gestionNombresPorRevisarGet, gestionNombreOmitir, gestionNinosAsociar, gestionNinosListadoGet, gestionVincularActividadGet, gestionVincularActividad,
   gestionGrupoWellhubSet, gestionGrupoWellhubChecks, gestionGrupoBajoTarifaSet,
   gestionListaEsperaGet, gestionListaEsperaCrear, gestionListaEsperaActualizar, gestionListaEsperaBorrar,
   gestionExternoCrear, gestionExternoActualizar, gestionExternoBorrar, gestionExternoPago,
@@ -1150,13 +1150,13 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
   const titulos = {
     marcar_cobrado: 'Marcar cobrado', pausar: 'Pausar', reanudar: 'Reanudar', congelar_mes: 'Congelar mes(es)', nota: 'Nota',
     vuelve_tras_lesion: 'Vuelve tras lesión/ausencia',
-    dar_de_baja: 'Dar de baja', fusionar: 'Fusionar duplicado',
+    dar_de_baja: 'Dar de baja', fusionar: 'Fusionar duplicado', paga_clases_sueltas: 'Paga clases sueltas',
     exento: alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio',
     cambiar_grupo: 'Cambiar de grupo/horario',
     ext_cobrar: 'Marcar cobrado (fuera de la web)', ext_editar: alumno.externoId ? 'Editar datos' : 'Alta de alumno externo', ext_borrar: 'Eliminar alumno externo',
     optin_whatsapp: 'Consentimiento WhatsApp', editar_alumno: 'Editar nombre/teléfono',
   }
-  const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'congelar_mes', 'dar_de_baja', 'fusionar', 'cambiar_grupo', 'vuelve_tras_lesion'].includes(tipo)
+  const puedeSimular = ['marcar_cobrado', 'pausar', 'reanudar', 'congelar_mes', 'dar_de_baja', 'fusionar', 'cambiar_grupo', 'vuelve_tras_lesion', 'paga_clases_sueltas'].includes(tipo)
   // Cowork, 14/11 18:40 punto 6: "Cambiar de grupo" ofrecía las 163 variaciones de WooCommerce
   // (mañanas L/X/V, Martes 07:00, Sábado, "Menores"/"Children" repetidos…) en vez de las clases
   // que existen de verdad. Ahora sale de la MISMA lista de grupos de Supervisión → Grupos (ya
@@ -1208,6 +1208,8 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
         res = await gestionDarDeBaja({ sub_id: alumno.subId, modo: modoBaja, motivoCategoria: motivoBajaCategoria, motivo, simular: sim })
       } else if (tipo === 'fusionar') {
         res = await gestionFusionar({ sub_id_viejo: targetId, simular: sim })
+      } else if (tipo === 'paga_clases_sueltas') {
+        res = await gestionPagaClasesSueltas({ sub_id: alumno.subId, simular: sim })
       } else if (tipo === 'exento') {
         res = alumno.esExterno
           ? await gestionExternoActualizar(alumno.externoId, { dia: alumno.externoDia, horario: alumno.externoHorario, edad: alumno.externoEdad, nombre: alumno.alumno, telefono: alumno.telefono, notas: alumno.notas, exento: !alumno.exento })
@@ -1352,6 +1354,21 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
                   <input type="checkbox" checked={parcial} onChange={e => setParcial(e.target.checked)} />
                   Pago parcial / medio mes
                 </label>
+                {/* 26/11 (Ramiro, caso Paco Canillas): un "parcial" ya NO completa ni factura el
+                    pedido — pensado para quien de verdad debe el resto. Una vuelta de lesión a
+                    mitad de mes no debe nada, es mejor "Vuelve tras lesión" (cobra ese importe
+                    como el definitivo del mes, sin dejarlo como pendiente). */}
+                {parcial && alumno.estado === 'pausado'
+                  && /lesi[oó]n/i.test(alumno.pausaMotivo || '')
+                  && Number(importe) > 0 && alumno.importeCatalogo
+                  && Number(importe) < alumno.importeCatalogo * 0.75 && (
+                  <p className="sv-to-warn-txt">
+                    ⚠️ Esta persona está en pausa por "{alumno.pausaMotivo}" y el importe es poco más de la mitad del
+                    catálogo ({alumno.importeCatalogo} €) — si es la vuelta a mitad de mes, usa mejor <strong>"Vuelve tras
+                    lesión/ausencia"</strong> en vez de parcial: ahí {fmtEur(Number(importe))} es el cobro definitivo del
+                    mes, no queda nada pendiente.
+                  </p>
+                )}
                 <label className="sv-grp-field">Nota
                   <input className="sv-tests-input" type="text" value={nota} onChange={e => setNota(e.target.value)} placeholder="Opcional" />
                 </label>
@@ -1384,6 +1401,16 @@ function AccionModal({ alumno, tipo, targetId, grupos = [], onClose, onDone }) {
 
             {tipo === 'reanudar' && (
               <p>¿Reanudar esta suscripción (vuelve a «Activo»)?</p>
+            )}
+
+            {tipo === 'paga_clases_sueltas' && (
+              <p>
+                Pausa esta suscripción con motivo "Paga clases sueltas", cancela sus pedidos pendientes
+                sin cobrar (nunca factura algo que no va a venir) y, si hay una suscripción vieja
+                duplicada de esta misma persona sin cancelar, la cancela también. Si la vieja no se puede
+                cancelar sola (p. ej. hace falta un socio), la pausa y la cancelación de pendientes se
+                hacen igual — solo esa parte se queda avisada.
+              </p>
             )}
 
             {tipo === 'congelar_mes' && (
@@ -1790,6 +1817,10 @@ function AccionMenu({ alumno, onPick, onClose }) {
             suscripción, sin duplicar ni tener que arreglarlo a mano. */}
         <button onClick={() => onPick('vuelve_tras_lesion')}>Vuelve tras lesión/ausencia</button>
         {puedeBaja     && <button onClick={() => onPick('dar_de_baja')}>Dar de baja</button>}
+        {/* 26/11 (Ramiro, caso Fabiana/Lucía Lobato): deja de venir a clase semanal y pasa a
+            pagar por sesión suelta — pausa + motivo + cancela pendientes + cancela la vieja
+            duplicada si la hay, todo en un botón. */}
+        {puedePausar   && <button onClick={() => onPick('paga_clases_sueltas')}>Paga clases sueltas</button>}
         <button onClick={() => onPick('nota')}>Nota</button>
         <button onClick={() => onPick('exento')}>{alumno.exento ? 'Quitar exento/socio' : 'Marcar exento/socio'}</button>
         <button onClick={() => onPick('cambiar_grupo')}>Cambiar de grupo/horario</button>

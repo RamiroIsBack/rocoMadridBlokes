@@ -1186,6 +1186,13 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_pedido_corregir_completado',
         'permission_callback' => $sa_perm,
     ));
+    // 26/11 (caso Álvaro Herrero #6961): reenganchar un pedido YA facturado a la suscripción
+    // actual del alumno y completarlo otra vez, sin que FactuPress deba reemitir factura.
+    register_rest_route('superadmin/v1', '/gestion/pedidos/(?P<id>\d+)/reenganchar', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_pedido_reenganchar',
+        'permission_callback' => $sa_perm,
+    ));
     // 26/11 (cowork, nota 08:35 — facturas canceladas/devueltas a revisar): de solo lectura,
     // nunca anula ni rectifica nada — junta lo necesario para decidir cada caso (duplicado,
     // impago real, rectificativa) sin tener que abrir cada pedido/suscripción uno a uno.
@@ -1220,6 +1227,13 @@ add_action('rest_api_init', function() {
     register_rest_route('superadmin/v1', '/gestion/reanudar', array(
         'methods'             => 'POST',
         'callback'            => 'superadmin_gestion_reanudar',
+        'permission_callback' => $sa_perm,
+    ));
+    // "Paga clases sueltas" (26/11, Ramiro): pausa + motivo + cancela pendientes + cancela la
+    // sub vieja duplicada si la hay, todo en un botón — Eva lo hace sola desde la ficha.
+    register_rest_route('superadmin/v1', '/gestion/paga-clases-sueltas', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_paga_clases_sueltas',
         'permission_callback' => $sa_perm,
     ));
     // 19/11 21:30 (Eva/cowork, punto 2 — Borja Erice): congelar uno o varios meses de un
@@ -8307,6 +8321,25 @@ function blokes_aplicar_adelantado_si_hay($order, $subscription) {
 }
 add_filter('wcs_renewal_order_created', 'blokes_aplicar_adelantado_si_hay', 10, 2);
 
+// 26/11 (cowork, caso Alejandro Jiménez Beguiristain — #7132 se canceló por WP-admin sin anular
+// su factura CS-0831, así que siguió "facturado" a la AEAT aunque WooCommerce lo mostrara
+// cancelado): nunca bloquea la cancelación (eso puede romper flujos legítimos y no sabemos
+// disparar una anulación real de Veri*Factu desde aquí) — solo deja un aviso bien visible en el
+// propio pedido para que no se quede una factura viva sin que nadie se entere.
+add_action('woocommerce_order_status_cancelled', 'blokes_avisar_factura_viva_al_cancelar', 20, 1);
+function blokes_avisar_factura_viva_al_cancelar($order_id) {
+    $order = wc_get_order($order_id);
+    if (!$order) return;
+    $tiene_factura = false;
+    foreach ($order->get_meta_data() as $meta) {
+        $k = $meta->key;
+        if ((stripos($k, 'factura') !== false || stripos($k, 'invoice') !== false || stripos($k, 'verifactu') !== false)
+            && $meta->value !== '' && $meta->value !== null && !is_array($meta->value)) { $tiene_factura = true; break; }
+    }
+    if (!$tiene_factura || blokes_pedido_factura_anulada($order)) return;
+    $order->add_order_note('⚠️ ExcelMuerte: este pedido se ha cancelado pero su factura NO está anulada en FactuPress — anúlala a mano (Registros → Anular) o seguirá contando como facturada a la AEAT aunque el pedido esté "cancelled".');
+}
+
 // Pedidos sin pagar (pending/failed/on-hold) de la suscripción: se listan siempre, y si
 // $simular es false se cancelan de verdad (cancelar un pedido sin pagar no genera factura ni
 // email). Se usa al dar de baja, fusionar o reactivar por efectivo, para que el pedido viejo no
@@ -10389,6 +10422,30 @@ function blokes_sync_grupos_sub_ya_cobrado_mes($sub_id, $ym) {
     return false;
 }
 
+// 26/11 (cowork, caso Paco Canillas #7543 / adelantado #110 — URGENTE): el mismo pago físico
+// puede entrar dos veces sin que ninguno de los dos caminos se entere del otro — Eva lo marca a
+// mano (marcar-cobrado) y, un minuto después, "Aplicar" detecta la misma fila del Excel y la
+// trata como un pago nuevo. Antes de que "Aplicar" cree un pedido/adelantado, mira si ya hay un
+// "marcar_cobrado" reciente (últimos 7 días) en el log de ESTA MISMA suscripción con el mismo
+// importe y una fecha de banco a ±1 día — si lo hay, es casi seguro el mismo pago, no uno nuevo.
+function blokes_sync_grupos_pago_ya_registrado_recientemente($sub_id, $importe, $fecha_ts) {
+    global $wpdb;
+    blokes_ensure_gestion_log_table();
+    $filas = $wpdb->get_results($wpdb->prepare(
+        "SELECT detalle FROM " . blokes_gestion_log_table() . " WHERE sub_id = %d AND accion = 'marcar_cobrado' AND created_at >= %s ORDER BY id DESC LIMIT 20",
+        intval($sub_id), date('Y-m-d H:i:s', strtotime('-7 days'))
+    ), ARRAY_A);
+    foreach ($filas as $fila) {
+        $detalle = json_decode($fila['detalle'], true);
+        if (!is_array($detalle) || !isset($detalle['importe'], $detalle['fecha'])) continue;
+        if (abs(floatval($detalle['importe']) - floatval($importe)) > 0.009) continue;
+        $dt = DateTime::createFromFormat('d/m/Y', (string) $detalle['fecha']);
+        if (!$dt) continue;
+        if (abs($dt->getTimestamp() - $fecha_ts) <= DAY_IN_SECONDS) return true;
+    }
+    return false;
+}
+
 // Efecto real de un cambio: "pago_nuevo" reutiliza EXACTAMENTE el mismo camino que "Marcar
 // cobrado" a mano (con su protección de pagos adelantados incluida) o el cobro de un externo —
 // nunca lógica nueva para tocar dinero. "nota" copia el texto al perfil (post meta de la
@@ -10415,6 +10472,10 @@ function blokes_sync_grupos_aplicar_efecto($cambio, $datos, $simular = false, $c
             // la web se quedaba pendiente en Sync Grupos indefinidamente).
             if (!$simular && blokes_sync_grupos_sub_ya_cobrado_mes(intval($cambio['match_id']), (string) $cambio['mes'])) {
                 return rest_ensure_response(array('success' => true, 'yaCobrado' => true));
+            }
+            if (blokes_sync_grupos_pago_ya_registrado_recientemente(intval($cambio['match_id']), floatval($datos['importe'] ?? 0), strtotime($fecha))) {
+                return rest_ensure_response(array('success' => true, 'yaCobrado' => true, 'aviso' =>
+                    'Este pago ya se había registrado a mano (Marcar cobrado) con el mismo importe y una fecha de banco muy próxima — no se crea nada nuevo para no duplicarlo.'));
             }
             $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
             $req->set_param('sub_id', intval($cambio['match_id']));
@@ -13006,6 +13067,13 @@ function superadmin_gestion_marcar_cobrado($request) {
     }
     $sub = wcs_get_subscription($sub_id);
     if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+    // 26/11 (cowork, caso Alejandro Jiménez Beguiristain — su sub vieja 6656 cancelada seguía
+    // facturando): una suscripción cancelada no debe poder "cobrarse" nunca — ni a mano ni desde
+    // "Aplicar" (que llama a este mismo endpoint). Si el alumno tiene otra suscripción activa de
+    // verdad, el pago es de ESA, no de la cancelada.
+    if ($sub->has_status(array('cancelled', 'trash'))) {
+        return new WP_Error('sub_cancelada', 'Esta suscripción está cancelada — no se puede marcar cobrado. Si el alumno sigue viniendo, busca/crea su suscripción actual y aplica el pago ahí.', array('status' => 409));
+    }
 
     // 18/11 (Ramiro, URGENTE): "hasta que Code lo confirme, mejor que Eva no cobre ninguno de
     // esos 22" — el auto-aplicado (ya desactivado) completó el pedido pendiente real de estas 22
@@ -13343,7 +13411,7 @@ function superadmin_gestion_marcar_cobrado($request) {
         }
     }
 
-    blokes_gestion_sin_emails(function() use ($order, $metodo_label, $importe, $fecha_ts, $fecha_txt, $parcial, $nota, $importe_distinto, $ajustar_precio, $motivo_excepcion, $total_referencia) {
+    blokes_gestion_sin_emails(function() use ($order, $metodo_label, $importe, $fecha, $fecha_ts, $fecha_txt, $parcial, $nota, $importe_distinto, $ajustar_precio, $motivo_excepcion, $total_referencia) {
         $order->set_payment_method_title($metodo_label);
         $nota_txt = sprintf('ExcelMuerte: cobrado %s € (%s) el %s.', number_format($importe, 2, ',', '.'), $metodo_label, $fecha_txt);
         if ($importe_distinto && $ajustar_precio) {
@@ -13655,6 +13723,76 @@ function superadmin_gestion_pedido_corregir_completado($request) {
     return rest_ensure_response(array('success' => true, 'data' => array('antes' => $antes, 'despues' => $despues)));
 }
 
+// 26/11 (cowork, caso Álvaro Herrero #6961 — pagó de verdad en octubre con transferencia real y
+// factura CS-0580 válida, pero el pedido quedó cancelado y sin enganchar a su suscripción actual
+// 7748, así que octubre le sale vacío): reenganchar un pedido YA FACTURADO a la suscripción
+// actual y completarlo otra vez — solo para pedidos con una factura real (si no la tiene, usa
+// "Marcar cobrado"). Como ya tiene número de factura, FactuPress no debería emitir una nueva al
+// completarlo otra vez (mismo comportamiento confirmado con Sergio Díaz: una vez facturado, no
+// vuelve a facturar aunque se recomplete) — pero no se ha probado en vivo. Simula por defecto;
+// con confirmar=true escribe y siempre devuelve el pedido recargado de la BD.
+function superadmin_gestion_pedido_reenganchar($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $order_id  = intval($request['id']);
+    $sub_id    = intval($request->get_param('subId'));
+    $confirmar = (bool) $request->get_param('confirmar');
+
+    $order = wc_get_order($order_id);
+    if (!$order) return new WP_Error('not_found', 'Pedido no encontrado.', array('status' => 404));
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    $escanear_factura = function($o) {
+        $hallazgos = array();
+        foreach ($o->get_meta_data() as $meta) {
+            $k = $meta->key;
+            if (stripos($k, 'factura') !== false || stripos($k, 'invoice') !== false || stripos($k, 'verifactu') !== false || stripos($k, 'aeat') !== false) {
+                $v = $meta->value;
+                if ($v !== '' && $v !== null && !is_array($v)) $hallazgos[] = $k . ': ' . $v;
+            }
+        }
+        return $hallazgos;
+    };
+    $meta_factura = $escanear_factura($order);
+    $antes = array(
+        'estado' => $order->get_status(), 'total' => floatval($order->get_total()),
+        'subscriptionRenewalMeta' => $order->get_meta('_subscription_renewal'),
+        'facturaAnuladaDetectada' => blokes_pedido_factura_anulada($order), 'metaFactura' => $meta_factura,
+    );
+
+    if (!$confirmar) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'antes' => $antes,
+            'aviso' => $meta_factura
+                ? sprintf('Simulación: se pondría _subscription_renewal=%d en el pedido #%d y se completaría otra vez. Como ya tiene factura, FactuPress no debería emitir una nueva — pero no se ha probado en vivo; repite con confirmar=true y pega el resultado (sobre todo metaFactura de "despues").', $sub_id, $order_id)
+                : 'Este pedido no tiene ninguna factura detectada — esto es para reenganchar un pedido YA facturado. Si no se ha cobrado de verdad, usa "Marcar cobrado" en vez de esto.',
+        )));
+    }
+    if (!$meta_factura) {
+        return new WP_Error('sin_factura', 'Este pedido no tiene factura detectada — usa "Marcar cobrado" en vez de reenganchar.', array('status' => 409));
+    }
+
+    $order->update_meta_data('_subscription_renewal', $sub_id);
+    $order->save();
+    if (!in_array($order->get_status(), array('completed', 'processing'), true)) {
+        $order->add_order_note(sprintf('ExcelMuerte: reenganchado a la suscripción #%d y completado otra vez (ya tenía factura, no debería emitirse una nueva).', $sub_id));
+        $order->save();
+        $order->update_status('processing', 'ExcelMuerte: reenganchar — reabierto.');
+        $order->update_status('completed', 'ExcelMuerte: reenganchar — completado.');
+    }
+
+    $order_recargado = wc_get_order($order_id);
+    $despues = array(
+        'estado' => $order_recargado->get_status(), 'total' => floatval($order_recargado->get_total()),
+        'subscriptionRenewalMeta' => $order_recargado->get_meta('_subscription_renewal'),
+        'facturaAnuladaDetectada' => blokes_pedido_factura_anulada($order_recargado), 'metaFactura' => $escanear_factura($order_recargado),
+    );
+    blokes_gestion_log($sub_id, 'pedido_reenganchar', $antes, $despues, array('orderId' => $order_id));
+    return rest_ensure_response(array('success' => true, 'data' => array('antes' => $antes, 'despues' => $despues)));
+}
+
 // 26/11 (cowork, nota 08:35 — #7132, #7035, #6961, #6957, #6549 cancelados con factura AEAT sin
 // anular; #7695, #7172, #7491 devueltos a comprobar rectificativa): de solo lectura. Para cada
 // pedido de la lista, junta su propio estado + TODOS los pedidos de la misma suscripción (para
@@ -13919,6 +14057,78 @@ function superadmin_gestion_pausar($request) {
     blokes_gestion_log($sub_id, 'pausar', $antes, $despues);
 
     return rest_ensure_response(array('success' => true, 'data' => $despues));
+}
+
+// "Paga clases sueltas" (Ramiro, 26/11 — caso Fabiana/Lucía Lobato, resuelto a mano, Eva debe
+// poder hacerlo sola desde la ficha del alumno): botón único para cuando alguien deja la clase
+// semanal y pasa a pagar por sesión suelta. Reutiliza superadmin_gestion_pausar() tal cual (pausa
+// + motivo + cancela pendientes sin factura) y, además, si hay una suscripción VIEJA del mismo
+// alumno que se quedó colgando (nunca cancelada), la cancela también con "fusionar" — con el fix
+// de hoy, fusionar ya acepta que la "nueva" (esta misma, recién pausada) esté en espera.
+function superadmin_gestion_paga_clases_sueltas($request) {
+    if (!function_exists('wcs_get_subscription')) {
+        return new WP_Error('class_not_found', 'WooCommerce Subscriptions not available.', array('status' => 503));
+    }
+    $sub_id  = intval($request->get_param('sub_id'));
+    $motivo  = sanitize_text_field((string) $request->get_param('motivo')) ?: 'Paga clases sueltas';
+    $simular = (bool) $request->get_param('simular');
+    if (!$sub_id) return new WP_Error('bad_request', 'Falta sub_id.', array('status' => 400));
+    $sub = wcs_get_subscription($sub_id);
+    if (!$sub) return new WP_Error('not_found', 'Suscripción no encontrada.', array('status' => 404));
+
+    // Suscripción VIEJA (id menor) del mismo alumno que siga viva (nunca ya cancelada/trash) —
+    // mismo criterio de "mismo cliente" que blokes_buscar_sub_mas_nueva(), sin exigir misma clase
+    // (una duplicada de verdad puede estar en otra clase si cambió de grupo sin que se cancelara
+    // la anterior).
+    $vieja = null;
+    $all = blokes_get_all_subscription_data();
+    $uid_actual = blokes_alumno_customer_id_de_sub(array('id' => $sub_id), $sub);
+    foreach ($all as $s) {
+        $sid = intval($s['id'] ?? 0);
+        if ($sid >= $sub_id) continue;
+        if (in_array($s['status'] ?? '', array('cancelled', 'trash'), true)) continue;
+        $uid_s = blokes_alumno_customer_id_de_sub($s);
+        $mismo_cliente = $uid_actual && $uid_s === $uid_actual;
+        if (!$mismo_cliente) $mismo_cliente = !empty($s['email']) && $sub->get_billing_email() && strcasecmp($s['email'], $sub->get_billing_email()) === 0;
+        if (!$mismo_cliente) continue;
+        $vieja = $s; break;
+    }
+
+    $req_pausar = new WP_REST_Request('POST', '/superadmin/v1/gestion/pausar');
+    $req_pausar->set_param('sub_id', $sub_id);
+    $req_pausar->set_param('motivo', $motivo);
+    $req_pausar->set_param('cancelarPedidosPendientes', true);
+    $req_pausar->set_param('simular', $simular);
+
+    if ($simular) {
+        $resultado_pausar = superadmin_gestion_pausar($req_pausar);
+        $data = is_wp_error($resultado_pausar) ? array() : $resultado_pausar->get_data()['data'];
+        $data['subViejaDuplicada'] = $vieja ? intval($vieja['id']) : null;
+        if ($vieja) {
+            $data['aviso'] = ($data['aviso'] ?? '') . sprintf(' Se cancelaría también la suscripción vieja #%d (duplicada, "fusionar").', intval($vieja['id']));
+        }
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => $data));
+    }
+
+    $resultado_pausar = superadmin_gestion_pausar($req_pausar);
+    if (is_wp_error($resultado_pausar)) return $resultado_pausar;
+    $data = $resultado_pausar->get_data()['data'];
+
+    $fusion_resultado = null;
+    if ($vieja) {
+        $req_fusionar = new WP_REST_Request('POST', '/superadmin/v1/gestion/fusionar');
+        $req_fusionar->set_param('sub_id_viejo', intval($vieja['id']));
+        $req_fusionar->set_param('simular', false);
+        $r = superadmin_gestion_fusionar($req_fusionar);
+        $fusion_resultado = is_wp_error($r)
+            ? array('error' => $r->get_error_message())
+            : $r->get_data()['data'];
+    }
+    $data['subViejaCancelada'] = $vieja ? intval($vieja['id']) : null;
+    $data['fusion'] = $fusion_resultado;
+
+    blokes_gestion_log($sub_id, 'paga_clases_sueltas', array('status' => 'antes de pausar'), $data, array('motivo' => $motivo));
+    return rest_ensure_response(array('success' => true, 'data' => $data));
 }
 
 /** Reanudar: vuelve a activa y borra la marca de pausa. */
