@@ -1177,6 +1177,15 @@ add_action('rest_api_init', function() {
         'callback'            => 'superadmin_gestion_vuelve_tras_lesion',
         'permission_callback' => $sa_perm,
     ));
+    // 26/11 (caso Sergio Díaz #7151, URGENTE): corrección puntual de un pedido que YA está
+    // "completado" con total/fecha equivocados (vuelve-tras-lesion/marcar-cobrado no lo
+    // encuentran porque ya no está "pending") — simular por defecto, solo escribe con
+    // confirmar=true.
+    register_rest_route('superadmin/v1', '/gestion/pedidos/(?P<id>\d+)/corregir-completado', array(
+        'methods'             => 'POST',
+        'callback'            => 'superadmin_gestion_pedido_corregir_completado',
+        'permission_callback' => $sa_perm,
+    ));
     register_rest_route('superadmin/v1', '/gestion/facturas-pendientes', array(
         'methods'             => 'GET',
         'callback'            => 'superadmin_gestion_facturas_pendientes',
@@ -3397,8 +3406,13 @@ function blokes_sync_grupos_recomendar_duplicado($esta, $otras) {
 // sigue en estado "Completado" en WooCommerce (Ramiro no lo toca para no disparar nada más),
 // pero Ramiro decidió el 15/11 08:30 que no debe contar como cobrado en ningún sitio de Blokes
 // (son facturas duplicadas anuladas a mano, no reembolsos reales — 5 pedidos, 367 €).
+// 26/11 (caso Sergio Díaz #7151): la clave real que deja FactuPress al anular en "Registros →
+// Anular" es `_aeat_cancellation_csv` (confirmado mirando el pedido en vivo) — `_aeat_cancelled_invoice`
+// era una suposición de cuando se escribió esto, nunca confirmada contra el plugin real. Se
+// comprueban las dos para no dejar de detectar ninguna, por si alguna versión/caso puso la otra.
 function blokes_pedido_factura_anulada($order) {
-    return $order && $order->get_meta('_aeat_cancelled_invoice');
+    if (!$order) return false;
+    return (bool) ($order->get_meta('_aeat_cancelled_invoice') ?: $order->get_meta('_aeat_cancellation_csv'));
 }
 
 // 18/11 21:10 (cowork, GRAVE/URGENTE): firma exacta de las celdas que el bug del auto-aplicado
@@ -7156,7 +7170,8 @@ function blokes_tarifa_mensual_esperada($edad, $notas, $dia, $horario, $es_2dias
     if ($cat === 'adolescente') {
         // Duración desconocida (horario sin formato HH:MM-HH:MM): se mantiene la de 1h30, que
         // era el comportamiento de siempre — nunca se adivina a la baja sin saber la duración.
-        $duracion_1h = blokes_horario_duracion_horas($horario) === 1.0;
+        $duracion_1h_valor = blokes_horario_duracion_horas($horario);
+        $duracion_1h = $duracion_1h_valor !== null && abs($duracion_1h_valor - 1.0) < 0.01;
         if ($duracion_1h) return $es_2dias ? BLOKES_TARIFA_ADOL_1H_2D : BLOKES_TARIFA_ADOL_1H_1D;
         return $es_2dias ? BLOKES_TARIFA_ADOL_1H30_2D : BLOKES_TARIFA_ADOL_1H30_1D;
     }
@@ -13208,6 +13223,17 @@ function superadmin_gestion_marcar_cobrado($request) {
         return new WP_Error('sin_pedido', 'Todavía no existe el pedido de esta renovación — no se puede ajustar el precio solo este mes hasta que exista. Usa "y desde ahora" o espera a que se genere.', array('status' => 409));
     }
 
+    // 26/11 (caso Sergio Díaz #7151, URGENTE): limpia la marca de factura anulada de FactuPress
+    // ANTES de tocar nada del pedido — dejarla puesta hace que FactuPress trate el pedido como
+    // cerrado y (confirmado con este caso real) descarte en silencio cualquier cambio de
+    // total/fecha hecho después, además de no emitir factura nueva. Antes esto se limpiaba más
+    // abajo, DESPUÉS de ajustar el precio de la línea — demasiado tarde para ese propio ajuste.
+    if ($order && blokes_pedido_factura_anulada($order)) {
+        $order->delete_meta_data('_aeat_cancelled_invoice');
+        $order->delete_meta_data('_aeat_cancellation_csv');
+        $order->save();
+    }
+
     // "desde_ahora" cambia el precio recurrente de la suscripción YA (antes de completar el
     // pedido si existe, o aunque todavía no exista — así, si se guarda como adelantado, la
     // próxima renovación que genere WooCommerce nacerá ya con el precio nuevo y el adelantado
@@ -13308,13 +13334,16 @@ function superadmin_gestion_marcar_cobrado($request) {
         update_post_meta($order->get_id(), '_rm_metodo_cobro', $metodo);
         if ($parcial) update_post_meta($order->get_id(), '_rm_pago_parcial', $nota ?: '1');
         // 18/11 (cowork §11:00, pedido 3 de la limpieza del bug del auto-aplicado): este pedido
-        // puede llegar aquí con `_aeat_cancelled_invoice` de una anulación anterior (los 22 del
+        // puede llegar aquí con la marca de factura anulada de una anulación anterior (los 22 del
         // 17/11, vueltos a "pending" a propósito para que se pudieran cobrar de verdad) — si lo
         // estamos completando AHORA, de verdad, es que hay una factura nueva de camino (o ya
         // hecha) para este cobro; blokes_pedido_factura_anulada() nunca debe seguir excluyéndolo
-        // de los ingresos para siempre solo por una anulación vieja que ya quedó resuelta.
-        if ($order->get_meta('_aeat_cancelled_invoice')) {
+        // de los ingresos para siempre solo por una anulación vieja que ya quedó resuelta. Ya se
+        // limpia más arriba (antes de ajustar el precio/total) — esto se deja como red de
+        // seguridad, por si algo la volviera a poner entre medias.
+        if (blokes_pedido_factura_anulada($order)) {
             $order->delete_meta_data('_aeat_cancelled_invoice');
+            $order->delete_meta_data('_aeat_cancellation_csv');
             $order->save();
         }
         $order->payment_complete();
@@ -13439,8 +13468,21 @@ function superadmin_gestion_vuelve_tras_lesion($request) {
         $o->update_status('cancelled', 'Vuelve tras lesión/ausencia.');
     }
 
+    // 26/11 (caso Sergio Díaz #7151, URGENTE): limpiar la marca de factura anulada de FactuPress
+    // ANTES de redatar — si se deja puesta, FactuPress descarta en silencio el cambio de fecha
+    // (confirmado con este caso real: el redatado de abajo no tuvo ningún efecto).
+    if (blokes_pedido_factura_anulada($order_a_cobrar)) {
+        $order_a_cobrar->delete_meta_data('_aeat_cancelled_invoice');
+        $order_a_cobrar->delete_meta_data('_aeat_cancellation_csv');
+        $order_a_cobrar->save();
+    }
     $order_a_cobrar->set_date_created($fecha_ts);
     $order_a_cobrar->save();
+    // Verifica de verdad (recargando desde la BD) que el redatado se quedó escrito — si algo lo
+    // sigue descartando en silencio, mejor avisarlo en la respuesta que confiar a ciegas.
+    $order_a_cobrar_recargado = wc_get_order($order_a_cobrar->get_id());
+    $redatado_ok = $order_a_cobrar_recargado && $order_a_cobrar_recargado->get_date_created()
+        && $order_a_cobrar_recargado->get_date_created()->date('Y-m-d') === $fecha_ymd;
 
     $req = new WP_REST_Request('POST', '/superadmin/v1/gestion/marcar-cobrado');
     $req->set_param('sub_id', $sub_id);
@@ -13460,7 +13502,113 @@ function superadmin_gestion_vuelve_tras_lesion($request) {
     return rest_ensure_response(array('success' => true, 'data' => array(
         'subId' => $sub_id, 'pedidoCobrado' => $order_a_cobrar->get_id(), 'pedidosAnulados' => $ids_a_anular,
         'marcarCobrado' => $resultado->get_data(),
+        'redatadoOk' => $redatado_ok,
+        'aviso' => $redatado_ok ? null : sprintf('OJO: el pedido #%d no quedó redatado a %s — revísalo a mano (puede que algo siga descartando el cambio de fecha).', $order_a_cobrar->get_id(), $fecha_ymd),
     )));
+}
+
+// 26/11 (caso Sergio Díaz, sub 6526, pedido #7151, URGENTE — Ramiro dio el OK): corrige un
+// pedido que YA está "completed" con el total y la fecha equivocados — vuelve-tras-lesion y
+// marcar-cobrado no sirven aquí porque los dos buscan un pedido "pending/on-hold/failed", y éste
+// ya no lo es. Causa real confirmada con este caso: FactuPress deja `_aeat_cancellation_csv` al
+// anular una factura (no `_aeat_cancelled_invoice`, que es lo que comprobaba el código de
+// siempre) — con esa marca puesta, cualquier cambio de total/fecha que se intentara después se
+// descartaba en silencio, y al completar otra vez tampoco salía factura nueva (FactuPress lo veía
+// como ya cerrado). Simular por defecto; solo escribe con confirmar=true, y siempre devuelve el
+// pedido recargado de la BD (nunca lo que "debería" haber quedado) para poder comprobarlo.
+function superadmin_gestion_pedido_corregir_completado($request) {
+    $order_id = intval($request['id']);
+    $importe  = floatval($request->get_param('importe'));
+    $fecha    = sanitize_text_field((string) $request->get_param('fecha')); // Y-m-d
+    $motivo   = sanitize_text_field((string) $request->get_param('motivo')) ?: 'Corrección manual.';
+    $confirmar = (bool) $request->get_param('confirmar');
+
+    $order = wc_get_order($order_id);
+    if (!$order) return new WP_Error('not_found', 'Pedido no encontrado.', array('status' => 404));
+    if ($order->get_status() !== 'completed') {
+        return new WP_Error('no_completado', 'Este pedido no está "completed" — usa Marcar cobrado o Vuelve tras lesión normales.', array('status' => 409));
+    }
+    if ($importe <= 0 || !$fecha || !strtotime($fecha)) {
+        return new WP_Error('bad_request', 'Faltan importe o fecha (Y-m-d).', array('status' => 400));
+    }
+
+    $escanear_factura = function($o) {
+        $hallazgos = array();
+        foreach ($o->get_meta_data() as $meta) {
+            $k = $meta->key;
+            if (stripos($k, 'factura') !== false || stripos($k, 'invoice') !== false || stripos($k, 'verifactu') !== false || stripos($k, 'aeat') !== false) {
+                $v = $meta->value;
+                if ($v !== '' && $v !== null && !is_array($v)) $hallazgos[] = $k . ': ' . $v;
+            }
+        }
+        return $hallazgos;
+    };
+
+    $antes = array(
+        'total' => floatval($order->get_total()), 'estado' => $order->get_status(),
+        'dateCreated' => $order->get_date_created() ? $order->get_date_created()->date('Y-m-d') : null,
+        'datePaid' => $order->get_date_paid() ? $order->get_date_paid()->date('Y-m-d') : null,
+        'facturaAnuladaDetectada' => blokes_pedido_factura_anulada($order), 'metaFactura' => $escanear_factura($order),
+    );
+
+    if (!$confirmar) {
+        return rest_ensure_response(array('success' => true, 'simulado' => true, 'data' => array(
+            'antes' => $antes,
+            'aviso' => sprintf(
+                'Simulación: no se ha escrito nada. Se limpiaría la marca de factura anulada (si la hay), se pondría el total a %s €, la fecha a %s, y se forzaría a FactuPress a emitir factura nueva reabriendo y completando otra vez el pedido. Repite con confirmar=true para hacerlo de verdad.',
+                number_format($importe, 2, ',', '.'), date_i18n('d/m/Y', strtotime($fecha))
+            ),
+        )));
+    }
+
+    $fecha_ts = strtotime($fecha . ' 12:00:00');
+
+    // 1) Quitar la marca de factura anulada ANTES de tocar nada más — si se deja puesta,
+    //    FactuPress descarta en silencio cualquier cambio de total/fecha de abajo (confirmado).
+    if (blokes_pedido_factura_anulada($order)) {
+        $order->delete_meta_data('_aeat_cancelled_invoice');
+        $order->delete_meta_data('_aeat_cancellation_csv');
+        $order->save();
+    }
+
+    // 2) Total: misma función que ya usa Marcar cobrado para la excepción de precio.
+    $ok_precio = blokes_gestion_ajustar_precio_linea($order, $importe);
+    if (!$ok_precio) {
+        return new WP_Error('varias_lineas', 'Este pedido tiene más de una línea de producto — no se puede ajustar el precio a ciegas. Dímelo y lo reviso a mano.', array('status' => 409));
+    }
+
+    // 3) Fecha: a qué mes cuenta el pago (date_created, el mismo criterio que usa el resto de la
+    //    app) y date_paid, para que el recibo/factura también la lleve bien.
+    $order->set_date_created($fecha_ts);
+    $order->set_date_paid($fecha_ts);
+    $order->save();
+
+    // 4) Reabre y vuelve a completar de verdad (no un no-op: pasa por "processing" primero) para
+    //    que se dispare el mismo gancho que usa siempre esta app al completar un pedido — con la
+    //    marca de anulación ya fuera, debería salir factura nueva de FactuPress esta vez.
+    $order->add_order_note(sprintf(
+        'ExcelMuerte: corrección manual — total %s €, fecha %s. %s',
+        number_format($importe, 2, ',', '.'), date_i18n('d/m/Y', $fecha_ts), $motivo
+    ));
+    $order->save();
+    $order->update_status('processing', 'Corrección manual: reabierto para volver a completar.');
+    $order->save();
+    $order->update_status('completed', 'Corrección manual: completado otra vez tras el ajuste.');
+
+    // 5) Recarga de verdad desde la BD — nunca el objeto en memoria — para confirmar qué quedó
+    //    escrito, no lo que debería haber quedado.
+    $order_recargado = wc_get_order($order_id);
+    $despues = array(
+        'total' => floatval($order_recargado->get_total()), 'estado' => $order_recargado->get_status(),
+        'dateCreated' => $order_recargado->get_date_created() ? $order_recargado->get_date_created()->date('Y-m-d') : null,
+        'datePaid' => $order_recargado->get_date_paid() ? $order_recargado->get_date_paid()->date('Y-m-d') : null,
+        'facturaAnuladaDetectada' => blokes_pedido_factura_anulada($order_recargado), 'metaFactura' => $escanear_factura($order_recargado),
+    );
+    $subs_del_pedido = function_exists('wcs_get_subscriptions_for_renewal_order') ? wcs_get_subscriptions_for_renewal_order($order_id) : array();
+    $sub_id_log = $subs_del_pedido ? intval(reset($subs_del_pedido)->get_id()) : 0;
+    blokes_gestion_log($sub_id_log, 'pedido_corregir_completado', $antes, $despues, array('orderId' => $order_id, 'motivo' => $motivo));
+
+    return rest_ensure_response(array('success' => true, 'data' => array('antes' => $antes, 'despues' => $despues)));
 }
 
 // "Mandar factura" (NOTAS_PARA_CODE_pestanas_grupos.md, pestaña 3): pedidos de renovación de
@@ -14596,7 +14744,13 @@ function blokes_horario_duracion_horas($horario) {
     if (!preg_match('/(\d{1,2}):(\d{2})\s*[–—-]\s*(\d{1,2}):(\d{2})/u', trim((string) $horario), $m)) return null;
     $ini = intval($m[1]) * 60 + intval($m[2]);
     $fin = intval($m[3]) * 60 + intval($m[4]);
-    return ($fin > $ini) ? ($fin - $ini) / 60 : null;
+    // 26/11 (caso Informe Adolescentes 1h, cowork en vivo): dividir entre 60 (int) devuelve un
+    // INT cuando sale exacto (60/60 = 1) y un FLOAT si no (90/60 = 1.5) — es el propio operador
+    // `/` de PHP. Todo lo que comparaba esto contra 1.0 con === / !== (aquí abajo y en
+    // blokes_tarifa_mensual_esperada()) nunca encontraba ninguna franja de 1h de verdad, porque
+    // int(1) === float(1.0) da FALSE en PHP. Dividir entre 60.0 fuerza float siempre, para que
+    // esas comparaciones funcionen con cualquier franja exacta de 1h.
+    return ($fin > $ini) ? ($fin - $ini) / 60.0 : null;
 }
 // 25/11 (Eva: "devuelve [] y no debería" — M-J 18:30-19:30 tiene 6 alumnos a 65 €): sin acceso
 // a los datos de producción no se pudo reproducir aquí, así que además de hacer el filtro de
@@ -14618,24 +14772,38 @@ function superadmin_informe_precio_adolescentes_1h($request) {
         $horario = $sub['horario'] ?? '';
         $duracion = blokes_horario_duracion_horas($horario);
         $todos_adolescentes[] = array('subId' => intval($sub['id'] ?? 0), 'dia' => blokes_dia_a_pareja($sub['dia'] ?? ''), 'horario' => $horario, 'edad' => $edad, 'status' => $status, 'duracionHoras' => $duracion);
-        if ($duracion !== 1.0) continue; // solo la franja de 1h, nunca la de 1h30
+        // 26/11 (cowork en vivo, diagnóstico con 23 encontrados y 0 en data): la causa real era
+        // blokes_horario_duracion_horas() — ($fin-$ini)/60 da un INT cuando sale exacto (60/60=1)
+        // y en PHP int(1) !== float(1.0), así que esto descartaba TODAS las franjas de 1h de
+        // verdad. Arreglado en la propia función (ahora divide entre 60.0); se deja aquí además
+        // una comparación con margen, nunca estricta, por si el horario viene con algún segundo
+        // de redondeo.
+        if ($duracion === null || abs($duracion - 1.0) > 0.01) continue; // solo la franja de 1h, nunca la de 1h30
         $id = intval($sub['id'] ?? 0);
         if (!$id) continue;
         $sub_obj = wcs_get_subscription($id);
         if (!$sub_obj) continue;
         $total = floatval($sub_obj->get_total());
+        $dia_pareja = blokes_dia_a_pareja($sub['dia'] ?? '');
+        $es_2dias = strpos($dia_pareja, '-') !== false;
+        // Mismas tarifas que ya usa blokes_tarifa_mensual_esperada() para esta misma categoría
+        // (BLOKES_TARIFA_ADOL_1H_*) — aquí en vez de la de 1h30, que es la que esto detecta.
+        $esperado = $es_2dias ? BLOKES_TARIFA_ADOL_1H_2D : BLOKES_TARIFA_ADOL_1H_1D;
         $out[] = array(
             'subId'        => $id,
             'alumno'       => trim($sub_obj->get_billing_first_name() . ' ' . $sub_obj->get_billing_last_name()),
-            'dia'          => blokes_dia_a_pareja($sub['dia'] ?? ''),
+            'dia'          => $dia_pareja,
+            'dias'         => $es_2dias ? 2 : 1,
             'horario'      => $horario,
             'status'       => $status,
             'precioActual' => $total,
-            // Correcto de 1h: 47 € (1 día) / 57 € (2 días). Está cobrando la de 1h30: 55 € / 65 €.
-            'pagaDeMas'    => ($total >= 54.5), // 55 € o 65 € — con margen de redondeo
+            'precioEsperado' => $esperado,
+            // Margen de 2 € de redondeo, mismo criterio que blokes_tarifa_comparar().
+            'pagaDeMas'    => ($total - $esperado) > 2,
+            'noCoincide'   => abs($total - $esperado) > 2,
         );
     }
-    usort($out, function($a, $b) { return $b['pagaDeMas'] <=> $a['pagaDeMas']; });
+    usort($out, function($a, $b) { return $b['noCoincide'] <=> $a['noCoincide']; });
     return rest_ensure_response(array('success' => true, 'data' => $out, 'diagnostico' => array(
         'totalAdolescentesEncontrados' => count($todos_adolescentes),
         'detalle' => $todos_adolescentes,
@@ -23473,15 +23641,26 @@ function progreso_equip_get_competition_plan($request) {
          WHERE t.competition_id = %d ORDER BY t.task_date ASC, t.id ASC", $id
     ), ARRAY_A);
     $today = current_time('Y-m-d');
-    $hechas = 0; $retrasadas = 0;
+    $hechas = 0; $retrasadas = 0; $descartadas = 0;
     $out = array();
     foreach ($tasks as $t) {
-        if ($t['done']) $hechas++;
-        elseif (strtotime($t['task_date']) < strtotime($today)) $retrasadas++;
+        if ($t['done']) {
+            $hechas++;
+        } elseif ($t['status'] === 'descartada') {
+            // 26/11 (Ramiro, "que la semana que viene a Álvaro le salga todo limpio"): este
+            // contador solo miraba la fecha, nunca el status — "Cerrar arrastradas" (ya
+            // existente) marca una tarea vieja sin hacer como "descartada" para que deje de
+            // arrastrarse semana tras semana, pero aquí seguía contando en rojo igual. Ahora una
+            // descartada no cuenta como retrasada (se queda en su propio contador, visible pero
+            // aparte — nunca se borra).
+            $descartadas++;
+        } elseif (strtotime($t['task_date']) < strtotime($today)) {
+            $retrasadas++;
+        }
         $out[] = array(
             'id' => intval($t['id']), 'taskTypeId' => $t['task_type_id'], 'date' => $t['task_date'],
             'weekStart' => $t['week_start'], 'workerId' => intval($t['worker_id']), 'workerName' => $t['worker_name'],
-            'done' => (bool) $t['done'], 'assignmentId' => intval($t['assignment_id']),
+            'done' => (bool) $t['done'], 'status' => $t['status'] ?: 'pendiente', 'assignmentId' => intval($t['assignment_id']),
             'manual' => (bool) $t['manual'], 'params' => $t['params'] ? (json_decode($t['params'], true) ?: array()) : array(),
         );
     }
@@ -23503,7 +23682,7 @@ function progreso_equip_get_competition_plan($request) {
     }, $blocks);
 
     return rest_ensure_response(array('success' => true, 'data' => array(
-        'tasks' => $out, 'total' => $total, 'hechas' => $hechas, 'retrasadas' => $retrasadas,
+        'tasks' => $out, 'total' => $total, 'hechas' => $hechas, 'retrasadas' => $retrasadas, 'descartadas' => $descartadas,
         'pctHecho' => $total ? round($hechas / $total * 100) : 0,
         'blocks' => $out_blocks,
     )));
