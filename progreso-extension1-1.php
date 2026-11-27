@@ -15716,6 +15716,17 @@ function superadmin_gestion_alta_cliente($request) {
     // un commit anterior — esta vez en commit aparte, siempre pasa primero por $simular (abajo),
     // que es lo único que revela subsEnEsperaMismaClase para que el frontend pueda ofrecerlo.
     $reactivar_sub_id = intval($request->get_param('reactivarSubId'));
+    // 27/11 (Ramiro, caso Martina de Vicente Lucas): dos modos nuevos de "Añadir alumno".
+    // alumnoEsHijo = quien asiste (nombre/apellidos de arriba) y quien paga son personas
+    // distintas — la suscripción va en la cuenta de usarClienteId (el tutor), el nombre del
+    // alumno queda en el pedido/suscripción (nunca en la cuenta del tutor, ver más abajo) y el
+    // tutor se anota con _rm_tutor_nombre/_rm_tutor_telefono, igual que hace crear_nino en la
+    // pestaña Niños — así Grupos pinta "Martina · 👪 Álvaro de Vicente".
+    // exento = invitado/socio sin cobro: ni pedido completado ni factura — mismo _rm_exento que
+    // ya existe en Grupos, puesto desde el alta en vez de después a mano.
+    $alumno_es_hijo = (bool) $request->get_param('alumnoEsHijo');
+    $exento         = (bool) $request->get_param('exento');
+    $exento_motivo  = sanitize_text_field((string) $request->get_param('exentoMotivo'));
 
     if (!$nombre || (!$email && !$telefono)) {
         return new WP_Error('bad_request', 'Falta el nombre y al menos email o teléfono.', array('status' => 400));
@@ -15723,14 +15734,19 @@ function superadmin_gestion_alta_cliente($request) {
     if (!in_array($tipo, array('clase', 'abono'), true)) {
         return new WP_Error('bad_request', 'tipo debe ser "clase" o "abono".', array('status' => 400));
     }
-    if ($primer_pago === 'ya_pagado' && (!$metodo || $importe_pago <= 0)) {
-        return new WP_Error('bad_request', 'Falta el método o el importe del primer pago.', array('status' => 400));
+    if ($exento && $exento_motivo === '') {
+        return new WP_Error('falta_motivo', 'Falta el motivo de la exención (p. ej. "Invitada – hija de socio").', array('status' => 400));
     }
-    if ($primer_pago === 'ya_pagado' && !in_array($metodo, array('transferencia', 'tarjeta', 'efectivo', 'wellhub', 'bizum'), true)) {
-        return new WP_Error('bad_request', 'Método no reconocido. Usa transferencia, tarjeta, efectivo, bizum o wellhub.', array('status' => 400));
-    }
-    if (!in_array($primer_pago, array('ya_pagado', 'enlace_pago'), true)) {
-        return new WP_Error('bad_request', 'primerPago debe ser "ya_pagado" o "enlace_pago".', array('status' => 400));
+    if (!$exento) {
+        if ($primer_pago === 'ya_pagado' && (!$metodo || $importe_pago <= 0)) {
+            return new WP_Error('bad_request', 'Falta el método o el importe del primer pago.', array('status' => 400));
+        }
+        if ($primer_pago === 'ya_pagado' && !in_array($metodo, array('transferencia', 'tarjeta', 'efectivo', 'wellhub', 'bizum'), true)) {
+            return new WP_Error('bad_request', 'Método no reconocido. Usa transferencia, tarjeta, efectivo, bizum o wellhub.', array('status' => 400));
+        }
+        if (!in_array($primer_pago, array('ya_pagado', 'enlace_pago'), true)) {
+            return new WP_Error('bad_request', 'primerPago debe ser "ya_pagado" o "enlace_pago".', array('status' => 400));
+        }
     }
     if ($ajustar_precio !== '' && $motivo_excepcion === '') {
         return new WP_Error('falta_motivo', 'El motivo de la excepción de precio es obligatorio.', array('status' => 400));
@@ -15769,7 +15785,10 @@ function superadmin_gestion_alta_cliente($request) {
         $billing_period   = get_post_meta($producto_abono_id, '_subscription_period', true) ?: 'month';
         $billing_interval = max(1, intval(get_post_meta($producto_abono_id, '_subscription_period_interval', true) ?: 1));
     }
-    $importe_final = ($primer_pago === 'ya_pagado' && $importe_pago > 0) ? $importe_pago : $precio_catalogo;
+    if ($alumno_es_hijo && $tipo === 'clase' && !in_array($edad_norm, array('Menores (6-12 años)', 'Adolescentes (12-18 años)'), true)) {
+        return new WP_Error('bad_request', 'alumnoEsHijo solo tiene sentido para una clase de Menores o Adolescentes.', array('status' => 400));
+    }
+    $importe_final = $exento ? 0.0 : (($primer_pago === 'ya_pagado' && $importe_pago > 0) ? $importe_pago : $precio_catalogo);
 
     // --- Posible duplicado: mismo email (de verdad, WordPress no permite repetirlo) o
     // teléfono/nombre parecido ya visto en Grupos/externos/usuarios (reutiliza el mismo
@@ -15796,6 +15815,10 @@ function superadmin_gestion_alta_cliente($request) {
     if ($uid_por_email && !$usar_cliente_id) $usar_cliente_id = intval($uid_por_email);
     $hay_duplicado_sin_resolver = $duplicado && !$usar_cliente_id && !$confirmar_nuevo;
 
+    if ($alumno_es_hijo && !$usar_cliente_id) {
+        return new WP_Error('falta_tutor', 'alumnoEsHijo necesita elegir antes la cuenta del tutor (usarClienteId) — busca o crea primero la cuenta del padre/madre, y añade al hijo/a sobre esa cuenta.', array('status' => 400));
+    }
+
     // Ramiro, 15/11 08:35: aparte de si es la MISMA PERSONA (arriba), si esa persona YA tiene
     // una suscripción activa/en espera/pendiente, hay que preguntar antes de crearle otra más
     // — nunca automático, ni aunque ya se haya resuelto quién es.
@@ -15816,6 +15839,14 @@ function superadmin_gestion_alta_cliente($request) {
             'precioCatalogo' => $precio_catalogo, 'importeFinal' => $importe_final,
             'billingPeriod' => $billing_period, 'billingInterval' => $billing_interval, 'fechaInicio' => $fecha_inicio,
             'primerPago' => $primer_pago, 'usaClienteExistente' => $usar_cliente_id ?: null,
+            'alumnoEsHijo' => $alumno_es_hijo,
+            'tutor' => $alumno_es_hijo && $usar_cliente_id ? (function() use ($usar_cliente_id) {
+                $tu = get_user_by('id', $usar_cliente_id);
+                if (!$tu) return null;
+                $tn = trim(get_user_meta($usar_cliente_id, 'billing_first_name', true) . ' ' . get_user_meta($usar_cliente_id, 'billing_last_name', true));
+                return array('nombre' => $tn !== '' ? $tn : $tu->display_name, 'telefono' => (string) get_user_meta($usar_cliente_id, 'billing_phone', true));
+            })() : null,
+            'exento' => $exento, 'exentoMotivo' => $exento ? $exento_motivo : null,
             'posibleDuplicado' => $hay_duplicado_sin_resolver ? $duplicado : null,
             'posibleDuplicadoSub' => !empty($subs_en_vigor) ? $subs_en_vigor : null,
             'subsEnEsperaMismaClase' => !empty($subs_en_espera_misma_clase) ? $subs_en_espera_misma_clase : null,
@@ -15823,8 +15854,9 @@ function superadmin_gestion_alta_cliente($request) {
                 ? 'Ya hay alguien con ese teléfono/nombre parecido — elige "usar este cliente" o confirma que es una persona distinta antes de crear de verdad.'
                 : (!empty($subs_en_espera_misma_clase)
                     ? 'Esta persona ya tiene una suscripción en espera de esta misma clase — mejor reactivarla (reactivarSubId) que crear otra.'
-                    : ($uid_por_email ? 'Ya existe un usuario de WordPress con ese email — se usará esa cuenta (no se crea una nueva).'
-                        : 'Simulación: no se ha creado nada todavía.')),
+                    : ($exento ? 'Invitado/a-exento: no se cobrará nada ni se emitirá factura — el pedido se deja sin completar a propósito, nunca llega a "completado".'
+                        : ($uid_por_email ? 'Ya existe un usuario de WordPress con ese email — se usará esa cuenta (no se crea una nueva).'
+                            : 'Simulación: no se ha creado nada todavía.'))),
         )));
     }
 
@@ -15867,32 +15899,67 @@ function superadmin_gestion_alta_cliente($request) {
     }
 
     // --- Cliente: reutilizar o crear ---
-    $resultado_crear_usuario = function() use ($usar_cliente_id, $email, $nombre, $apellidos) {
+    // 27/11 (Ramiro, caso Martina): si hace falta crear cuenta nueva sin email (niños casi nunca
+    // tienen), ya no se corta con falta_email — se genera uno interno a partir del teléfono
+    // (telefono@rocomadrid.com, con sufijo si ya existe) para que WordPress tenga un email único
+    // que guardar, nunca pensado para recibir correo real.
+    $resultado_crear_usuario = function() use ($usar_cliente_id, $email, $nombre, $apellidos, $telefono) {
         if ($usar_cliente_id) {
             $u = get_user_by('id', $usar_cliente_id);
             return $u ? $u->ID : new WP_Error('cliente_no_encontrado', 'El cliente indicado no existe.', array('status' => 404));
         }
-        if (!$email) return new WP_Error('falta_email', 'Para crear un cliente nuevo hace falta un email.', array('status' => 400));
-        $uid = wc_create_new_customer($email, '', '', array('first_name' => $nombre, 'last_name' => $apellidos));
+        $email_real = $email;
+        if (!$email_real) {
+            if (!$telefono) return new WP_Error('falta_email', 'Para crear un cliente nuevo hace falta un email o un teléfono (para generar uno interno).', array('status' => 400));
+            $tel_limpio = preg_replace('/\D/', '', $telefono);
+            $email_real = $tel_limpio . '@rocomadrid.com';
+            $intento = 2;
+            while (email_exists($email_real)) { $email_real = $tel_limpio . '+' . $intento . '@rocomadrid.com'; $intento++; }
+        }
+        $uid = wc_create_new_customer($email_real, '', '', array('first_name' => $nombre, 'last_name' => $apellidos));
         return $uid;
     };
     $customer_id = $enviar_acceso ? $resultado_crear_usuario() : blokes_gestion_sin_emails($resultado_crear_usuario);
     if (is_wp_error($customer_id)) return $customer_id;
 
-    update_user_meta($customer_id, 'billing_first_name', $nombre);
-    update_user_meta($customer_id, 'billing_last_name', $apellidos);
-    if ($telefono) update_user_meta($customer_id, 'billing_phone', $telefono);
-    if ($email) update_user_meta($customer_id, 'billing_email', $email);
+    // 27/11 (Ramiro, caso Martina — URGENTE): con usarClienteId esto es SIEMPRE una cuenta que ya
+    // existe (normalmente la del tutor que paga, no necesariamente la del alumno) — nunca hay que
+    // tocar los datos de esa cuenta. Antes se pisaba billing_first_name/last_name del cliente
+    // reutilizado con el nombre de quien se está añadiendo ahora, y si eran personas distintas
+    // (el padre pagando por su hija) la cuenta del padre se quedaba renombrada con el nombre de
+    // la hija. El nombre/teléfono/email de este alta siguen yendo igual al pedido y a la
+    // suscripción (más abajo, $billing) — eso es lo que de verdad decide qué "alumno" se ve en
+    // Grupos — así que no hace falta tocar nunca la cuenta para que el alumno salga bien.
+    if (!$usar_cliente_id) {
+        update_user_meta($customer_id, 'billing_first_name', $nombre);
+        update_user_meta($customer_id, 'billing_last_name', $apellidos);
+        if ($telefono) update_user_meta($customer_id, 'billing_phone', $telefono);
+        if ($email) update_user_meta($customer_id, 'billing_email', $email);
+    }
 
     $billing = array(
         'first_name' => $nombre, 'last_name' => $apellidos, 'email' => $email ?: get_userdata($customer_id)->user_email,
         'phone' => $telefono, 'country' => 'ES',
     );
 
+    // alumnoEsHijo: el tutor es la cuenta reutilizada (usarClienteId) — su nombre/teléfono se
+    // leen de ahí (nunca de un campo nuevo que haya que volver a escribir a mano) y se guardan en
+    // la suscripción como _rm_tutor_nombre/_rm_tutor_telefono, igual que crear_nino en Niños.
+    $tutor_nombre_hijo = ''; $tutor_telefono_hijo = '';
+    if ($alumno_es_hijo) {
+        $tutor_user = get_user_by('id', $customer_id);
+        if ($tutor_user) {
+            $tn = trim(get_user_meta($customer_id, 'billing_first_name', true) . ' ' . get_user_meta($customer_id, 'billing_last_name', true));
+            $tutor_nombre_hijo = $tn !== '' ? $tn : $tutor_user->display_name;
+        }
+        $tutor_telefono_hijo = $telefono ?: (string) get_user_meta($customer_id, 'billing_phone', true);
+    }
+
     $crear_todo = function() use (
         $customer_id, $billing, $producto_item, $tipo, $dia_norm, $horario_norm, $edad_norm,
         $billing_period, $billing_interval, $precio_catalogo, $importe_final, $fecha_inicio,
-        $primer_pago, $metodo, $fecha_pago, $ajustar_precio, $motivo_excepcion
+        $primer_pago, $metodo, $fecha_pago, $ajustar_precio, $motivo_excepcion,
+        $alumno_es_hijo, $tutor_nombre_hijo, $tutor_telefono_hijo, $exento, $exento_motivo
     ) {
         // 26/11 (cowork, caso Jimena Romero-Toro #7955: la sub quedó con método "Transferencia
         // bancaria" aunque pagó por Bizum) — esto forzaba 'bacs' a ciegas en cuanto "ya_pagado"
@@ -15961,9 +16028,33 @@ function superadmin_gestion_alta_cliente($request) {
         $subscription->calculate_totals();
         $subscription->save();
 
+        // 27/11 (Ramiro, caso Martina): tutor (alumnoEsHijo) y exento/invitado se anotan en la
+        // suscripción, nunca en el pedido ni en ninguna cuenta de usuario.
+        if ($alumno_es_hijo) {
+            if ($tutor_nombre_hijo !== '')   update_post_meta($subscription->get_id(), '_rm_tutor_nombre', $tutor_nombre_hijo);
+            if ($tutor_telefono_hijo !== '') update_post_meta($subscription->get_id(), '_rm_tutor_telefono', $tutor_telefono_hijo);
+        }
+        if ($exento) {
+            update_post_meta($subscription->get_id(), '_rm_exento', '1');
+            update_post_meta($subscription->get_id(), '_rm_exento_motivo', $exento_motivo);
+        }
+
         $importe_distinto = abs($importe_final - $precio_catalogo) > 0.009;
         $pago_url = null;
-        if ($primer_pago === 'enlace_pago') {
+        if ($exento) {
+            // Invitado/a-exento: precio a 0 en pedido Y suscripción, y el pedido se deja en
+            // "processing" A PROPÓSITO (nunca "completed") — en este plugin, según lo ya
+            // confirmado con blokes_auto_factura_*, FactuPress/Verifactu solo emite factura real
+            // al llegar un pedido a "completed"; dejarlo en "processing" es la única forma, sin
+            // tocar el plugin de FactuPress, de garantizar que esta invitación no genera factura.
+            // La suscripción se activa directamente (igual que "Reanudar"), no depende del
+            // estado del pedido.
+            blokes_gestion_ajustar_precio_linea($order, 0);
+            blokes_gestion_ajustar_precio_linea($subscription, 0);
+            $order->add_order_note('ExcelMuerte: invitado/a-exento, sin cobro. Motivo: ' . $exento_motivo);
+            $order->update_status('processing', 'ExcelMuerte: invitado/a-exento — pedido dejado sin completar a propósito (sin factura).');
+            $subscription->update_status('active', 'ExcelMuerte: invitado/a-exento — activada directamente, sin cobro.');
+        } elseif ($primer_pago === 'enlace_pago') {
             $pago_url = $order->get_checkout_payment_url();
         } else {
             if ($importe_distinto && in_array($ajustar_precio, array('solo_este_mes', 'desde_ahora'), true)) {
@@ -15998,7 +16089,7 @@ function superadmin_gestion_alta_cliente($request) {
     $r = blokes_gestion_sin_emails($crear_todo);
     if (is_wp_error($r)) return $r;
 
-    if ($primer_pago === 'ya_pagado') {
+    if ($primer_pago === 'ya_pagado' && !$exento) {
         $periodo_alta = date('Y-m', strtotime($fecha_pago ?: $fecha_inicio));
         $dh = ($tipo === 'clase') ? array('dia' => $dia_norm, 'horario' => $horario_norm) : blokes_sync_grupos_dia_horario_de_sub($r['subscription']->get_id());
         blokes_sync_grupos_escribir_cobro(
@@ -16019,6 +16110,8 @@ function superadmin_gestion_alta_cliente($request) {
         'subId' => $r['subscription']->get_id(), 'orderId' => $r['order']->get_id(), 'customerId' => $customer_id,
         'tipo' => $tipo, 'dia' => $dia_norm ?: null, 'horario' => $horario_norm ?: null, 'edad' => $edad_norm ?: null,
         'precio' => $importe_final, 'primerPago' => $primer_pago, 'pagoUrl' => $r['pagoUrl'],
+        'alumnoEsHijo' => $alumno_es_hijo, 'tutorNombre' => $alumno_es_hijo ? $tutor_nombre_hijo : null,
+        'exento' => $exento, 'exentoMotivo' => $exento ? $exento_motivo : null,
     );
     blokes_gestion_log($r['subscription']->get_id(), 'alta_cliente', null, $despues);
 

@@ -1944,10 +1944,15 @@ function TablaAlumnos({ alumnos, meses, onWa, onMenu }) {
                       {' '}{a.bajoTarifaRevisado ? '✓' : '⚠'} bajo tarifa (−{a.diferenciaMensual != null ? fmtEur(Math.abs(a.diferenciaMensual)) : '?'}/mes)
                     </span>
                   )}
-                  {(a.edad || '').includes('Menores') && (
-                    a.tutorNombre || a.tutorTelefono
-                      ? <div className="sv-ot-muted sv-grp-tutor">👪 {a.tutorNombre || '—'}{a.tutorTelefono ? ` · ${a.tutorTelefono}` : ''}</div>
-                      : <div className="sv-to-warn-txt sv-grp-tutor">👪 falta el tutor</div>
+                  {/* 27/11: un Adolescente también puede tener tutor (p. ej. un hijo/a de socio
+                      dado de alta con "alumnoEsHijo") — se enseña igual que en Menores, pero sin
+                      el aviso "falta el tutor": en Adolescentes NO es obligatorio tener uno (la
+                      mayoría paga su propia cuenta), así que no se avisa de que "falta". */}
+                  {(a.tutorNombre || a.tutorTelefono) && ((a.edad || '').includes('Menores') || (a.edad || '').includes('Adolescentes')) && (
+                    <div className="sv-ot-muted sv-grp-tutor">👪 {a.tutorNombre || '—'}{a.tutorTelefono ? ` · ${a.tutorTelefono}` : ''}</div>
+                  )}
+                  {!(a.tutorNombre || a.tutorTelefono) && (a.edad || '').includes('Menores') && (
+                    <div className="sv-to-warn-txt sv-grp-tutor">👪 falta el tutor</div>
                   )}
                 </td>
                 <td className="sv-ot-muted">{a.telefono || '—'}</td>
@@ -2177,6 +2182,14 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
   // esta misma clase, reactivarla en vez de crear otra — se elige entre los candidatos que
   // devuelve la simulación (subsEnEsperaMismaClase), nunca un id libre.
   const [reactivarSubId, setReactivarSubId] = useState(null)
+  // 27/11 (Ramiro, caso Martina de Vicente Lucas): "Es hijo/a de este cliente" — la suscripción
+  // va en la cuenta ya elegida (usarClienteId, el tutor), el nombre/apellidos de arriba son los
+  // del alumno (nunca se tocan los datos del tutor). "Invitado/a - exento" reutiliza el mismo
+  // exento que ya existe en Grupos, pero desde el alta: sin cobro, sin pedido completado, sin
+  // factura.
+  const [alumnoEsHijo, setAlumnoEsHijo] = useState(false)
+  const [exento, setExento]       = useState(false)
+  const [exentoMotivo, setExentoMotivo] = useState('')
   const [preview, setPreview]     = useState(null)
   const [busy, setBusy]           = useState(false)
   const [err, setErr]             = useState(null)
@@ -2190,9 +2203,11 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
     setBusy(true); setErr(null)
     try {
       if (!nombre.trim()) throw new Error('Pon el nombre.')
-      if (!email.trim() && !telefono.trim()) throw new Error('Pon email o teléfono (al menos uno).')
+      if (!email.trim() && !telefono.trim()) throw new Error('Pon email o teléfono (al menos uno) — sin email, se genera uno interno a partir del teléfono.')
       if (tipo === 'clase' && !grupoNuevo) throw new Error('Elige el grupo.')
-      if (primerPago === 'ya_pagado' && (!importe || Number(importe) <= 0)) throw new Error('Pon el importe del primer pago.')
+      if (alumnoEsHijo && !usarClienteId) throw new Error('"Es hijo/a de este cliente" necesita elegir antes la cuenta del tutor (busca a la persona y pulsa "Usar este cliente").')
+      if (exento && !exentoMotivo.trim()) throw new Error('Pon el motivo de la exención (p. ej. "Invitada – hija de socio").')
+      if (!exento && primerPago === 'ya_pagado' && (!importe || Number(importe) <= 0)) throw new Error('Pon el importe del primer pago.')
       if (forzarReal && preview?.posibleDuplicadoSub && !confirmarDuplicado && !reactivarSubId) throw new Error('Confirma si es un duplicado, quieres crear otra suscripción, o reactiva la que ya está en espera.')
       const body = {
         nombre: nombre.trim(), apellidos: apellidos.trim(), email: email.trim(), telefono: telefono.trim(),
@@ -2202,8 +2217,9 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
         ...(preview?.posibleDuplicadoSub && !reactivarSubId ? { confirmarDuplicado } : {}),
         ...(reactivarSubId ? { reactivarSubId } : {}),
         ...(tipo === 'clase' ? { dia, horario, edad, plan } : { productoAbonoId: abonoId }),
-        ...(primerPago === 'ya_pagado' ? { metodo, importe: Number(importe), fechaPago } : {}),
-        ...(preview?.precioCatalogo != null && Number(importe) !== preview.precioCatalogo && ajustarPrecio ? { ajustarPrecio, motivoExcepcion } : {}),
+        ...(alumnoEsHijo ? { alumnoEsHijo: true } : {}),
+        ...(exento ? { exento: true, exentoMotivo: exentoMotivo.trim() } : (primerPago === 'ya_pagado' ? { metodo, importe: Number(importe), fechaPago } : {})),
+        ...(preview?.precioCatalogo != null && !exento && Number(importe) !== preview.precioCatalogo && ajustarPrecio ? { ajustarPrecio, motivoExcepcion } : {}),
       }
       const res = await gestionAltaCliente(body)
       if (!forzarReal) setPreview(res)
@@ -2232,7 +2248,12 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
               <li><span>Cliente</span><span>{preview.nombre} · {preview.email || preview.telefono}</span></li>
               <li><span>Grupo/producto</span><span>{preview.producto || '—'} {preview.dia ? `· ${preview.dia} · ${preview.horario} · ${preview.edad}` : ''}</span></li>
               <li><span>Precio catálogo</span><span>{fmtEurCent(preview.precioCatalogo)}</span></li>
-              <li><span>Primer pago</span><span>{preview.primerPago === 'ya_pagado' ? `${fmtEurCent(preview.importeFinal)} ya cobrado` : 'Enlace de pago con tarjeta'}</span></li>
+              <li><span>Primer pago</span><span>
+                {preview.exento ? `Sin cobro (exento/a: ${preview.exentoMotivo || '—'})` : (preview.primerPago === 'ya_pagado' ? `${fmtEurCent(preview.importeFinal)} ya cobrado` : 'Enlace de pago con tarjeta')}
+              </span></li>
+              {preview.alumnoEsHijo && (
+                <li><span>Tutor</span><span>👪 {preview.tutor?.nombre || '—'}{preview.tutor?.telefono ? ` · ${preview.tutor.telefono}` : ''}</span></li>
+              )}
               {preview.aviso && <li><span>Aviso</span><span>{preview.aviso}</span></li>}
             </ul>
             {preview.posibleDuplicado && (
@@ -2343,28 +2364,46 @@ function CrearClienteForm({ onClose, onVolver, qInicial, grupos = [], clientePre
                 </select>
               </label>
             )}
+            {usarClienteId && tipo === 'clase' && (edad || '').match(/Menores|Adolescentes/) && (
+              <label className="sv-grp-field sv-grp-field--check">
+                <input type="checkbox" checked={alumnoEsHijo} onChange={e => setAlumnoEsHijo(e.target.checked)} />
+                Es hijo/a de este cliente — el nombre de arriba es el del alumno; la suscripción y el cobro siguen en la cuenta ya elegida (el tutor)
+              </label>
+            )}
             <label className="sv-grp-field">Fecha de inicio
               <input className="sv-tests-input" type="date" value={fechaInicio} onChange={e => setFechaInicio(e.target.value)} />
             </label>
-            <label className="sv-grp-field">Primer pago
-              <select className="sv-tests-select" value={primerPago} onChange={e => setPrimerPago(e.target.value)}>
-                <option value="ya_pagado">Ya ha pagado</option>
-                <option value="enlace_pago">Mandarle enlace de pago con tarjeta</option>
-              </select>
+            <label className="sv-grp-field sv-grp-field--check">
+              <input type="checkbox" checked={exento} onChange={e => setExento(e.target.checked)} />
+              Invitado/a — exento/a (sin cobro, sin factura)
             </label>
-            {primerPago === 'ya_pagado' && (
+            {exento ? (
+              <label className="sv-grp-field">Motivo de la exención
+                <input className="sv-tests-input" type="text" value={exentoMotivo} onChange={e => setExentoMotivo(e.target.value)} placeholder="Invitada – hija de socio…" />
+              </label>
+            ) : (
               <>
-                <label className="sv-grp-field">Método
-                  <select className="sv-tests-select" value={metodo} onChange={e => setMetodo(e.target.value)}>
-                    {METODO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
+                <label className="sv-grp-field">Primer pago
+                  <select className="sv-tests-select" value={primerPago} onChange={e => setPrimerPago(e.target.value)}>
+                    <option value="ya_pagado">Ya ha pagado</option>
+                    <option value="enlace_pago">Mandarle enlace de pago con tarjeta</option>
                   </select>
                 </label>
-                <label className="sv-grp-field">Importe (€)
-                  <input className="sv-tests-input" type="number" step="0.01" min="0" value={importe} onChange={e => setImporte(e.target.value)} />
-                </label>
-                <label className="sv-grp-field">Fecha del pago
-                  <input className="sv-tests-input" type="date" value={fechaPago} onChange={e => setFechaPago(e.target.value)} />
-                </label>
+                {primerPago === 'ya_pagado' && (
+                  <>
+                    <label className="sv-grp-field">Método
+                      <select className="sv-tests-select" value={metodo} onChange={e => setMetodo(e.target.value)}>
+                        {METODO_OPCIONES.map(([id, lbl]) => <option key={id} value={id}>{lbl}</option>)}
+                      </select>
+                    </label>
+                    <label className="sv-grp-field">Importe (€)
+                      <input className="sv-tests-input" type="number" step="0.01" min="0" value={importe} onChange={e => setImporte(e.target.value)} />
+                    </label>
+                    <label className="sv-grp-field">Fecha del pago
+                      <input className="sv-tests-input" type="date" value={fechaPago} onChange={e => setFechaPago(e.target.value)} />
+                    </label>
+                  </>
+                )}
               </>
             )}
             <label className="sv-grp-field sv-grp-field--check">
