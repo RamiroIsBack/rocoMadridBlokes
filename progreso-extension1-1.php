@@ -667,6 +667,49 @@ function blokes_google_login_redirect_seguro($redirect_to) {
     return $validado ? $validado : home_url('/');
 }
 
+// Gmail trata "nombre.apellido+loquesea@gmail.com" y "nombreapellido@googlemail.com" como el
+// mismo buzón — si no normalizamos así, el mismo alumno con el email escrito distinto en WP
+// y en su cuenta de Google no encontraría su cuenta (Ramiro, 27/11).
+function blokes_google_normalizar_email($email) {
+    $email = strtolower(trim((string) $email));
+    if (strpos($email, '@') === false) return $email;
+    list($local, $dominio) = explode('@', $email, 2);
+    if ($dominio === 'gmail.com' || $dominio === 'googlemail.com') {
+        $local   = explode('+', $local, 2)[0];
+        $local   = str_replace('.', '', $local);
+        $dominio = 'gmail.com';
+    }
+    return $local . '@' . $dominio;
+}
+
+// Todas las cuentas de la red cuyo user_email o billing_email (WooCommerce, pedidos/subs
+// viejas enlazadas solo por ahí) normalizan igual que $email_normalizado. Es un recorrido de
+// toda la tabla porque la normalización (puntos/+) no se puede indexar — la red tiene unos
+// pocos miles de usuarios, así que es barato y solo pasa una vez por login con Google.
+function blokes_google_cuentas_por_email_normalizado($email_normalizado) {
+    global $wpdb;
+    $candidatos = array();
+
+    $todos_users = $wpdb->get_results("SELECT ID, user_email FROM {$wpdb->users}");
+    foreach ($todos_users as $u) {
+        if ($u->user_email && blokes_google_normalizar_email($u->user_email) === $email_normalizado) {
+            $candidatos[(int) $u->ID]['via_user_email'] = true;
+        }
+    }
+
+    $todos_billing = $wpdb->get_results($wpdb->prepare(
+        "SELECT user_id, meta_value FROM {$wpdb->usermeta} WHERE meta_key = %s",
+        'billing_email'
+    ));
+    foreach ($todos_billing as $m) {
+        if ($m->meta_value && blokes_google_normalizar_email($m->meta_value) === $email_normalizado) {
+            $candidatos[(int) $m->user_id]['via_billing_email'] = true;
+        }
+    }
+
+    return $candidatos;
+}
+
 function blokes_google_login_endpoint($request) {
     $credential = $request->get_param('credential');
     if (!$credential) {
@@ -685,14 +728,32 @@ function blokes_google_login_endpoint($request) {
     $user    = $por_sub ? $por_sub[0] : false;
 
     if (!$user) {
-        $por_email = get_user_by('email', $email);
-        if ($por_email) {
-            if (user_can($por_email, 'manage_options')) {
-                error_log('[blokes-google-login] bloqueado: ' . $email . ' tiene permisos de administración y todavía no vinculó Google a mano.');
-                return new WP_Error('admin_sin_vincular', 'Esta cuenta tiene permisos de administración. Entra con tu usuario y contraseña, y vincula Google desde Mi cuenta.', array('status' => 403));
+        $email_normalizado = blokes_google_normalizar_email($email);
+        $candidatos = blokes_google_cuentas_por_email_normalizado($email_normalizado);
+        $ids        = array_keys($candidatos);
+
+        if (count($ids) > 1) {
+            error_log('[blokes-google-login] varias cuentas para ' . $email . ' (normalizado ' . $email_normalizado . '): usuarios ' . implode(',', $ids) . ' — no se entra en ninguna.');
+            return new WP_Error('varias_cuentas', 'Tienes varias cuentas con este email. Pide a recepción que las unan antes de entrar con Google.', array('status' => 409));
+        }
+
+        if (count($ids) === 1) {
+            $candidato = get_user_by('id', $ids[0]);
+            if ($candidato && !empty($candidatos[$ids[0]]['via_user_email'])) {
+                // Email real de la cuenta (no solo de facturación) — se puede confiar y entrar
+                // en ESA misma cuenta, conservando todo su historial (pedidos, subs, progreso).
+                if (user_can($candidato, 'manage_options')) {
+                    error_log('[blokes-google-login] bloqueado: ' . $email . ' tiene permisos de administración y todavía no vinculó Google a mano.');
+                    return new WP_Error('admin_sin_vincular', 'Esta cuenta tiene permisos de administración. Entra con tu usuario y contraseña, y vincula Google desde Mi cuenta.', array('status' => 403));
+                }
+                $user = $candidato;
+                update_user_meta($user->ID, '_blokes_google_sub', $sub);
+            } elseif ($candidato) {
+                // Solo coincide por billing_email (sub/pedido viejo enlazado solo así) — no es
+                // prueba suficiente de que esa cuenta es la suya: avisar, nunca entrar sola.
+                error_log('[blokes-google-login] ' . $email . ' solo coincide con billing_email de la cuenta ' . $candidato->ID . ' (' . $candidato->user_login . ') — no se entra automáticamente, revisar a mano.');
+                return new WP_Error('solo_billing_email', 'Encontramos una suscripción antigua con este email, pero no tu cuenta. Pide a recepción que lo revise, o entra con tu usuario y contraseña.', array('status' => 404));
             }
-            $user = $por_email;
-            update_user_meta($user->ID, '_blokes_google_sub', $sub);
         }
     }
 
