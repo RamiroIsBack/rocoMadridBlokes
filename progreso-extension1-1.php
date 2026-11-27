@@ -13864,7 +13864,7 @@ function superadmin_gestion_pedido_corregir_fecha_pago($request) {
 // actualiza a mano (commit) cada vez que alguien aplica o revisa el parche en el servidor;
 // ver el README de esa carpeta para el procedimiento completo.
 if (!defined('BLOKES_REDSYS_PARCHE_VERSION_ESPERADA')) {
-    define('BLOKES_REDSYS_PARCHE_VERSION_ESPERADA', ''); // vacío = parche aún no aplicado/anotado
+    define('BLOKES_REDSYS_PARCHE_VERSION_ESPERADA', '32.0.0'); // cowork lo aplicó en vivo 27/11 ~14:30
 }
 function blokes_redsys_plugin_instalado_info() {
     if (!function_exists('get_plugins')) {
@@ -13896,6 +13896,129 @@ function blokes_aviso_parche_redsys_perdido() {
 }
 add_action('admin_notices', 'blokes_aviso_parche_redsys_perdido');
 add_action('network_admin_notices', 'blokes_aviso_parche_redsys_perdido');
+
+// 27/11 (cowork — red de seguridad Bizum en subs, parte 2): hook independiente, no toca el
+// plugin de Redsys. Prioridad 1 para correr ANTES que check_ipn_response() del plugin
+// (hooked en la misma acción a prioridad 10 por defecto) — así no depende de que el handler
+// real no haga exit()/wp_die() antes de que nos toque. Verificado contra el fichero completo
+// del plugin que dejó cowork en parches-terceros/redsys-forzar-tarjeta-en-subs/:
+// - Reusa WooRedsysAPI::verify_signature_notif() del propio plugin (ya hace comparación en
+//   tiempo constante y tolera el padding de Bizum) en vez de reimplementar la firma.
+// - OJO: Ds_Card_Number SIEMPRE llega 'unknown' en el flujo normal de pago porque el plugin
+//   tiene una variable muerta ($dscardnumbercompl se declara pero nunca se rellena antes de
+//   leer $dscardnumbercomp, sin la "l") — NO sirve para detectar Bizum, lo marcaría también
+//   en pagos con tarjeta normales. La señal fiable es Ds_Merchant_Identifier vacío: es el
+//   token de cobro recurrente (COF) que el propio plugin usa para decidir si puede guardar
+//   tarjeta para renovaciones (líneas ~8596-8658 del fichero completo) — vacío significa que
+//   no habrá forma de cobrar la renovación sola, sea Bizum o cualquier otro método sin token.
+// - Si ya dejamos el pedido pagado y con _redsys_done='yes', el propio handler real lo detecta
+//   solo (is_paid() e _redsys_done) y sale sin repetir nada — no hace falta coordinarse con su
+//   candado de IPN duplicado, que no tocamos.
+// - TODO el cuerpo va en try/catch: un fallo aquí no puede cortar la petición, porque el
+//   handler real de pagos con tarjeta corre en la MISMA acción justo después.
+function blokes_redsys_bizum_red_seguridad() {
+    try {
+        if (empty($_POST['Ds_MerchantParameters']) || empty($_POST['Ds_Signature']) || !empty($_POST['cres'])) {
+            return; // no es la notificación estándar (cres/pares/add-method van por otro camino)
+        }
+        if (!class_exists('WooRedsysAPI') || !class_exists('WC_Gateway_Redsys') || !function_exists('WC')
+            || !function_exists('WCRed') || !function_exists('wc_get_order')) {
+            return;
+        }
+
+        $data = sanitize_text_field(wp_unslash($_POST['Ds_MerchantParameters']));
+        $remote_sign = sanitize_text_field(wp_unslash($_POST['Ds_Signature']));
+
+        $mi_obj = new WooRedsysAPI();
+        $mi_obj->decode_merchant_parameters($data); // rellena vars_pay; AÚN sin verificar firma
+
+        $ds_order_raw = $mi_obj->get_parameter('Ds_Order');
+        if (!$ds_order_raw) return;
+
+        $response = (int) $mi_obj->get_parameter('Ds_Response');
+        $transaction_type = (string) $mi_obj->get_parameter('Ds_TransactionType');
+        $merchant_identifier = (string) $mi_obj->get_parameter('Ds_Merchant_Identifier');
+        $auth_code = sanitize_text_field((string) $mi_obj->get_parameter('Ds_AuthorisationCode'));
+        $ds_amount = (string) $mi_obj->get_parameter('Ds_Amount');
+
+        if ($response > 99) return; // no autorizado, que lo gestione el handler real
+        if ('0' !== $transaction_type && '1' !== $transaction_type) return; // no es una venta normal
+        if ($merchant_identifier !== '') return; // hay token de cobro recurrente, camino normal vale
+
+        if (!empty(WCRed()->is_add_method_operation($ds_order_raw))) return; // alta de tarjeta, no un cobro
+
+        $order_number = WCRed()->clean_order_number($ds_order_raw);
+        $order_id_from_sub = WCRed()->get_order_id_from_subscription($order_number);
+        $order_id = $order_id_from_sub ? (int) $order_id_from_sub : (int) $order_number;
+        $order = wc_get_order($order_id);
+        if (!$order) return;
+
+        if ($order->is_paid() || 'yes' === $order->get_meta('_redsys_done')) return; // nada que hacer
+
+        if (!function_exists('wcs_order_contains_subscription')
+            || !wcs_order_contains_subscription($order_id, array('parent', 'renewal'))) {
+            return; // la red de seguridad es solo para pedidos de suscripción
+        }
+
+        // Clave de firma: igual prioridad que successful_request() — transient por pedido,
+        // luego meta del pedido, y solo si no hay ninguno, el ajuste del gateway por usuario.
+        $usesecretsha256 = '';
+        $secret_transient = WCRed()->get_redsys_transient('redsys_signature_' . sanitize_text_field($ds_order_raw));
+        if (!empty($secret_transient)) {
+            $usesecretsha256 = trim($secret_transient);
+        } else {
+            $secret_meta = $order->get_meta('_redsys_secretsha256');
+            if ($secret_meta) {
+                $usesecretsha256 = trim($secret_meta);
+            } else {
+                $redsys_gw = new WC_Gateway_Redsys();
+                $usesecretsha256 = (string) $redsys_gw->get_redsys_sha256($order->get_customer_id());
+            }
+        }
+
+        if (!$mi_obj->verify_signature_notif($data, $remote_sign, $usesecretsha256)) {
+            blokes_gestion_log(0, 'redsys_bizum_red_seguridad_firma_invalida', null, null, array('orderId' => $order_id, 'dsOrder' => $ds_order_raw));
+            return; // firma no válida: no tocamos nada
+        }
+
+        // El importe notificado debe coincidir con el total del pedido (igual que hace el
+        // handler real antes de completar el pago).
+        $importe_pedido = ltrim(number_format($order->get_total(), 2, '', ''), '0');
+        $importe_notificado = ltrim($ds_amount, '0');
+        if ($importe_pedido !== $importe_notificado) {
+            blokes_gestion_log(0, 'redsys_bizum_red_seguridad_importe_no_coincide', null, null, array('orderId' => $order_id, 'esperado' => $importe_pedido, 'recibido' => $importe_notificado));
+            return;
+        }
+
+        // Todo cuadra: autorizado, sin token de cobro recurrente, pedido de suscripción, firma
+        // válida, importe correcto, pedido aún no pagado. Completar y poner en renovación
+        // manual (sin token no hay forma de cobrar la siguiente renovación sola).
+        $order->add_order_note('Pagado con Bizum, sin tarjeta guardada (red de seguridad propia — Ds_AuthorisationCode: ' . $auth_code . ').');
+        $order->update_meta_data('_redsys_done', 'yes');
+        $order->update_meta_data('_authorisation_code_redsys', $auth_code);
+        $order->save();
+        $order->payment_complete($auth_code);
+
+        if (function_exists('wcs_get_subscriptions_for_order')) {
+            foreach (wcs_get_subscriptions_for_order($order_id, array('order_type' => 'any')) as $sub) {
+                $sub->set_requires_manual_renewal(true);
+                $sub->add_order_note('Pago con Bizum sin tarjeta guardada — puesta en renovación manual (red de seguridad Redsys).');
+                $sub->save();
+                if ('active' !== $sub->get_status()) {
+                    $sub->update_status('active', 'Activada tras pago Bizum detectado por la red de seguridad.');
+                }
+                blokes_gestion_log($sub->get_id(), 'redsys_bizum_red_seguridad_pago_completado', null, null, array('orderId' => $order_id, 'dsOrder' => $ds_order_raw, 'auth' => $auth_code));
+            }
+        } else {
+            blokes_gestion_log(0, 'redsys_bizum_red_seguridad_pago_completado', null, null, array('orderId' => $order_id, 'dsOrder' => $ds_order_raw, 'auth' => $auth_code));
+        }
+    } catch (\Throwable $e) {
+        if (function_exists('blokes_gestion_log')) {
+            blokes_gestion_log(0, 'redsys_bizum_red_seguridad_excepcion', null, null, array('mensaje' => $e->getMessage()));
+        }
+    }
+}
+add_action('woocommerce_api_wc_gateway_redsys', 'blokes_redsys_bizum_red_seguridad', 1);
 
 // 26/11 (quitar Bizum del checkout en subs — Ramiro): el plugin de Redsys/Bizum no está en este
 // repo (vive solo en el servidor), así que no adivino el id exacto de la pasarela de Bizum para

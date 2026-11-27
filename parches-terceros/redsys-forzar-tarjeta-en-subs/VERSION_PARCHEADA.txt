@@ -1,3 +1,11 @@
+32.0.0
+
+Aplicado el 27/11/2026 ~14:30 desde el Administrador de archivos de SiteGround (el editor de plugins de WP revierte el cambio porque falla su loopback).
+Copia del original: rocomadrid.com/privado/redsys-v32.0.0-class-wc-gateway-redsys.ORIGINAL-27-11-2026.php.bak (fuera de public_html).
+Copia local del parcheado: class-wc-gateway-redsys.v32.0.0.parcheado.php (en esta carpeta).
+Las 3 líneas quedaron en una sola línea cada una, con el comentario // PARCHE BLOKES 27/11 al final (líneas 2012, 2017 y 2340).
+
+--- texto anterior ---
 Todavía no aplicado al plugin en vivo.
 
 Cuando cowork aplique el parche (ver README.md) en el servidor, anotar aquí la versión
