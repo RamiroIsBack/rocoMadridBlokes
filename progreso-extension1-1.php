@@ -13856,6 +13856,47 @@ function superadmin_gestion_pedido_corregir_fecha_pago($request) {
     return rest_ensure_response(array('success' => true, 'data' => array('antes' => $antes, 'despues' => $despues)));
 }
 
+// 27/11 (cowork — parche Redsys Bizum en subs): el parche en sí vive fuera de este fichero,
+// en parches-terceros/redsys-forzar-tarjeta-en-subs/ del repo, porque el plugin de Redsys no
+// es nuestro y una actualización suya lo pisa (solo progreso-extension1-1.php se sube al
+// servidor; esa carpeta no). Aquí solo comparamos versiones para avisar si probablemente se
+// ha perdido — no comprobamos el código del plugin (no vive en este repo). La constante se
+// actualiza a mano (commit) cada vez que alguien aplica o revisa el parche en el servidor;
+// ver el README de esa carpeta para el procedimiento completo.
+if (!defined('BLOKES_REDSYS_PARCHE_VERSION_ESPERADA')) {
+    define('BLOKES_REDSYS_PARCHE_VERSION_ESPERADA', ''); // vacío = parche aún no aplicado/anotado
+}
+function blokes_redsys_plugin_instalado_info() {
+    if (!function_exists('get_plugins')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+    foreach (get_plugins() as $plugin_path => $plugin_data) {
+        if (stripos($plugin_path, 'redsys') !== false) {
+            return array(
+                'path' => $plugin_path,
+                'version' => $plugin_data['Version'] ?? '',
+                'active' => is_plugin_active($plugin_path),
+            );
+        }
+    }
+    return null;
+}
+function blokes_aviso_parche_redsys_perdido() {
+    if (!current_user_can('manage_options')) return;
+    $info = blokes_redsys_plugin_instalado_info();
+    if (!$info || !$info['active']) return; // no está el plugin, no hay nada que avisar
+    $esperada = BLOKES_REDSYS_PARCHE_VERSION_ESPERADA;
+    if (empty($esperada)) {
+        echo '<div class="notice notice-warning"><p><strong>Parche Redsys (Bizum en suscripciones):</strong> todavía no se ha anotado como aplicado en el servidor. Ver <code>parches-terceros/redsys-forzar-tarjeta-en-subs/</code> en el repo.</p></div>';
+        return;
+    }
+    if ($info['version'] !== $esperada) {
+        echo '<div class="notice notice-error"><p><strong>¡Atención!</strong> El plugin de Redsys se actualizó a la versión ' . esc_html($info['version']) . ' (el parche de Bizum en suscripciones se anotó para la versión ' . esc_html($esperada) . '). El parche probablemente se ha perdido con la actualización. Revisar <code>parches-terceros/redsys-forzar-tarjeta-en-subs/</code> antes de que lleguen pagos con Bizum en suscripciones.</p></div>';
+    }
+}
+add_action('admin_notices', 'blokes_aviso_parche_redsys_perdido');
+add_action('network_admin_notices', 'blokes_aviso_parche_redsys_perdido');
+
 // 26/11 (quitar Bizum del checkout en subs — Ramiro): el plugin de Redsys/Bizum no está en este
 // repo (vive solo en el servidor), así que no adivino el id exacto de la pasarela de Bizum para
 // el filtro woocommerce_available_payment_gateways — de solo lectura, lista los gateways

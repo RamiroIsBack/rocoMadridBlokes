@@ -1,0 +1,28 @@
+--- Patrón a buscar y sustituir en classes/class-wc-gateway-redsys.php ---
+--- (woocommerce-gateway-redsys v32.0.0, José Conti) ---
+--- Aparece 3 veces: get_redsys_args() ~1745, get_redsys_args_p() ~2084, get_redsys_args_add_method() ~2608 ---
+
+ANTES (una línea, igual en los 3 sitios):
+
+    if ('T' === $this->check_payment_method()) $mi_obj->set_parameter('DS_MERCHANT_PAYMETHODS', 'T');
+
+DESPUÉS (sustituye esa línea, en los 3 sitios):
+
+    // PARCHE BLOKES 27/11 — ver parches-terceros/redsys-forzar-tarjeta-en-subs/README.md
+    // Si el pedido es una suscripción o una renovación, forzar 'C' (solo tarjeta) para que
+    // Redsys no ofrezca Bizum ahí, aunque el ajuste del gateway sea 'T' (tarjeta + iupay).
+    // Sin esto, un pago con Bizum en una suscripción llega como "PSD2 Subscription" sin
+    // token de tarjeta, el IPN no marca el pedido pagado y se cancela solo a las 2h aunque
+    // el banco ya haya cobrado.
+    if ('T' === $this->check_payment_method()) {
+        $order_id_parche = isset($order) && is_object($order) ? $order->get_id() : 0;
+        $es_sub_parche = $order_id_parche && function_exists('wcs_order_contains_subscription')
+            && (wcs_order_contains_subscription($order_id_parche)
+                || wcs_order_contains_subscription($order_id_parche, 'renewal'));
+        $mi_obj->set_parameter('DS_MERCHANT_PAYMETHODS', $es_sub_parche ? 'C' : 'T');
+    }
+
+NOTA: comprobar en el extracto real que la variable del pedido en ese punto se llama
+$order y está en scope (no $this->order, ni resuelta más abajo) en los 3 métodos antes de
+pegar esto a ciegas. Si el nombre difiere, cambiar $order por el nombre real en esa copia
+del bloque.

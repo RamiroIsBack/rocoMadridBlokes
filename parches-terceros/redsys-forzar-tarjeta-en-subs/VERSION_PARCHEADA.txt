@@ -1,0 +1,10 @@
+Todavía no aplicado al plugin en vivo.
+
+Cuando cowork aplique el parche (ver README.md) en el servidor, anotar aquí la versión
+del plugin woocommerce-gateway-redsys que quedó parcheada, por ejemplo:
+
+32.0.0
+
+El aviso del admin (blokes_aviso_parche_redsys_perdido en progreso-extension1-1.php)
+compara esta línea contra la versión instalada de verdad. Vacío o con este texto = el
+aviso saltará siempre, a propósito, hasta que se anote una versión real.
