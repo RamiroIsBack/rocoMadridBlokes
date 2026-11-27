@@ -1,28 +1,68 @@
 --- Patrón a buscar y sustituir en classes/class-wc-gateway-redsys.php ---
 --- (woocommerce-gateway-redsys v32.0.0, José Conti) ---
---- Aparece 3 veces: get_redsys_args() ~1745, get_redsys_args_p() ~2084, get_redsys_args_add_method() ~2608 ---
+--- Confirmado contra media_para_code/redsys_ipn_y_firma_extracto.php.txt (líneas 57-67, 88-90) ---
+--- y media_para_code/redsys_plugin_v32_extracto.php.txt (líneas 2013-2023, 2342-2344) ---
 
-ANTES (una línea, igual en los 3 sitios):
+Los 3 sitios reales (get_redsys_args_add_method ~2596 NO tiene nada que parchear, solo
+hace un WCRed()->log() con el valor ya calculado):
 
-    if ('T' === $this->check_payment_method()) $mi_obj->set_parameter('DS_MERCHANT_PAYMETHODS', 'T');
+=== SITIO 1 — get_redsys_args(), rama "elseif ('TD' === $this->redsysdirectdeb)" ===
 
-DESPUÉS (sustituye esa línea, en los 3 sitios):
+ANTES:
+		} elseif ( 'TD' === $this->redsysdirectdeb ) {
+			if ( 'T' === $this->check_payment_method() ) {
+				$mi_obj->set_parameter( 'DS_MERCHANT_PAYMETHODS', 'T' );
+			}
+			$mi_obj->set_parameter( 'Ds_Merchant_EMV3DS', $psd2 );
 
-    // PARCHE BLOKES 27/11 — ver parches-terceros/redsys-forzar-tarjeta-en-subs/README.md
-    // Si el pedido es una suscripción o una renovación, forzar 'C' (solo tarjeta) para que
-    // Redsys no ofrezca Bizum ahí, aunque el ajuste del gateway sea 'T' (tarjeta + iupay).
-    // Sin esto, un pago con Bizum en una suscripción llega como "PSD2 Subscription" sin
-    // token de tarjeta, el IPN no marca el pedido pagado y se cancela solo a las 2h aunque
-    // el banco ya haya cobrado.
-    if ('T' === $this->check_payment_method()) {
-        $order_id_parche = isset($order) && is_object($order) ? $order->get_id() : 0;
-        $es_sub_parche = $order_id_parche && function_exists('wcs_order_contains_subscription')
-            && (wcs_order_contains_subscription($order_id_parche)
-                || wcs_order_contains_subscription($order_id_parche, 'renewal'));
-        $mi_obj->set_parameter('DS_MERCHANT_PAYMETHODS', $es_sub_parche ? 'C' : 'T');
-    }
+DESPUÉS (solo cambia la línea interior del if):
+		} elseif ( 'TD' === $this->redsysdirectdeb ) {
+			if ( 'T' === $this->check_payment_method() ) {
+				// PARCHE BLOKES 27/11 — ver parches-terceros/redsys-forzar-tarjeta-en-subs/
+				$mi_obj->set_parameter( 'DS_MERCHANT_PAYMETHODS', ( function_exists( 'wcs_order_contains_subscription' ) && wcs_order_contains_subscription( $order_id, array( 'parent', 'renewal' ) ) ) ? 'C' : 'T' );
+			}
+			$mi_obj->set_parameter( 'Ds_Merchant_EMV3DS', $psd2 );
 
-NOTA: comprobar en el extracto real que la variable del pedido en ese punto se llama
-$order y está en scope (no $this->order, ni resuelta más abajo) en los 3 métodos antes de
-pegar esto a ciegas. Si el nombre difiere, cambiar $order por el nombre real en esa copia
-del bloque.
+=== SITIO 2 — get_redsys_args(), rama "else" (la que se usa normalmente, sin domiciliación) ===
+
+ANTES:
+		} else {
+			if ( 'T' === $this->check_payment_method() ) {
+				$mi_obj->set_parameter( 'DS_MERCHANT_PAYMETHODS', 'T' );
+			}
+			$mi_obj->set_parameter( 'Ds_Merchant_EMV3DS', $psd2 );
+		}
+
+DESPUÉS:
+		} else {
+			if ( 'T' === $this->check_payment_method() ) {
+				// PARCHE BLOKES 27/11 — ver parches-terceros/redsys-forzar-tarjeta-en-subs/
+				$mi_obj->set_parameter( 'DS_MERCHANT_PAYMETHODS', ( function_exists( 'wcs_order_contains_subscription' ) && wcs_order_contains_subscription( $order_id, array( 'parent', 'renewal' ) ) ) ? 'C' : 'T' );
+			}
+			$mi_obj->set_parameter( 'Ds_Merchant_EMV3DS', $psd2 );
+		}
+
+=== SITIO 3 — get_redsys_args_p() (PSD2/suscripciones — el que importa de verdad para Bizum en subs) ===
+
+ANTES:
+		$mi_obj->set_parameter( 'DS_MERCHANT_MERCHANTNAME', $redsys_data_send['merchant_name'] );
+		if ( 'T' === $redsys->check_payment_method() ) {
+			$mi_obj->set_parameter( 'DS_MERCHANT_PAYMETHODS', 'T' );
+		}
+		$order_id = WCRed()->clean_order_number( $redsys_data_send['transaction_id2'] );
+
+DESPUÉS (OJO: usar el $order_id que ya existe desde la línea 2090 — $order_id = $order->get_id() —
+NO el que se reasigna justo después en la línea siguiente, que es otra cosa; en esta rama
+$redsys es el objeto gateway, no $this):
+		$mi_obj->set_parameter( 'DS_MERCHANT_MERCHANTNAME', $redsys_data_send['merchant_name'] );
+		if ( 'T' === $redsys->check_payment_method() ) {
+			// PARCHE BLOKES 27/11 — ver parches-terceros/redsys-forzar-tarjeta-en-subs/
+			$mi_obj->set_parameter( 'DS_MERCHANT_PAYMETHODS', ( function_exists( 'wcs_order_contains_subscription' ) && wcs_order_contains_subscription( $order_id, array( 'parent', 'renewal' ) ) ) ? 'C' : 'T' );
+		}
+		$order_id = WCRed()->clean_order_number( $redsys_data_send['transaction_id2'] );
+
+NOTA: en SITIO 3 la línea "$order_id = WCRed()->clean_order_number(...)" que viene justo
+DESPUÉS reasigna $order_id a otra cosa (un número de pedido "limpio" para otros usos más
+abajo en la función) — por eso es importante parchear ANTES de esa reasignación, usando el
+$order_id "bueno" (el id real del pedido, puesto en la línea 2090: $order_id = $order->get_id();),
+tal y como queda arriba.

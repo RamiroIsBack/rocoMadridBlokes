@@ -22,40 +22,27 @@ el comportamiento para pedidos normales (días sueltos, etc.), que siguen en `'T
 
 Fichero: `classes/class-wc-gateway-redsys.php` (dentro del plugin, ~514 KB).
 
-Tres sitios, todos con el mismo patrón `if ('T' === $this->check_payment_method()) ...`:
+**Corregido 27/11 11:40 contra el extracto real** (la primera versión de este README/patch
+tenía el patrón y las líneas mal — una línea suelta en vez de un bloque if, y
+`get_redsys_args_add_method` no tiene nada que parchear). Confirmado en
+`media_para_code/redsys_ipn_y_firma_extracto.php.txt` (líneas 57-67, 88-90) y
+`media_para_code/redsys_plugin_v32_extracto.php.txt` (líneas 2013-2023, 2342-2344).
 
-| Método | Línea aprox. (v32.0.0) | Línea del `set_parameter` |
+Tres sitios reales, todos cambian solo la línea interior de un `if ('T' === ...check_payment_method())`:
+
+| Método | `$order_id` ya en scope desde | `set_parameter` a cambiar |
 |---|---|---|
-| `get_redsys_args()` | 1745 | 2012 |
-| `get_redsys_args_p()` (PSD2/suscripciones) | 2084 | 2017 |
-| `get_redsys_args_add_method()` | 2608 | 2340 |
+| `get_redsys_args()`, rama `elseif ('TD' === $this->redsysdirectdeb)` | línea 1763 (`$order_id = $order->get_id();`) | ~2015 |
+| `get_redsys_args()`, rama `else` (la que se usa normalmente) | línea 1763 (idem) | ~2020 |
+| `get_redsys_args_p()` (PSD2/suscripciones — la que de verdad importa para Bizum en subs) | línea 2090 (`$order_id = $order->get_id();`) | ~2343 |
 
-En cada uno, cambiar:
+`get_redsys_args_add_method()` (~2596) **no tiene nada que parchear** — solo hace un
+`WCRed()->log()` con el valor ya calculado por `check_payment_method()`, no construye los
+parámetros a enviar.
 
-```php
-if ('T' === $this->check_payment_method()) $mi_obj->set_parameter('DS_MERCHANT_PAYMETHODS', 'T');
-```
-
-por (ver `patch.diff` en esta misma carpeta para el bloque exacto a pegar):
-
-```php
-// PARCHE BLOKES 27/11 — ver parches-terceros/redsys-forzar-tarjeta-en-subs/
-// Si el pedido es una suscripción o una renovación, forzar 'C' (solo tarjeta) para que
-// Redsys no ofrezca Bizum ahí, aunque el ajuste del gateway sea 'T' (tarjeta + iupay).
-if ('T' === $this->check_payment_method()) {
-    $order_id_parche = isset($order) && is_object($order) ? $order->get_id() : 0;
-    $es_sub_parche = $order_id_parche && function_exists('wcs_order_contains_subscription')
-        && (wcs_order_contains_subscription($order_id_parche)
-            || wcs_order_contains_subscription($order_id_parche, 'renewal'));
-    $mi_obj->set_parameter('DS_MERCHANT_PAYMETHODS', $es_sub_parche ? 'C' : 'T');
-}
-```
-
-**Importante**: hay que confirmar con el extracto real (`media_para_code/redsys_plugin_v32_extracto.php.txt`)
-que en esos 3 métodos la variable del pedido se llama `$order` y está en scope en ese punto
-(en algunos gateways de Redsys se llama `$order`, en otros se resuelve unas líneas antes desde
-`$_GET['order_id']` o similar). Si no es así, hay que adaptar cómo se obtiene `$order_id_parche`
-método por método — no pegar el bloque a ciegas sin mirar el contexto real de cada sitio.
+Ver `patch.diff` en esta misma carpeta para el antes/después exacto de los 3 sitios,
+incluida la advertencia de en qué orden parchear el sitio 3 (antes de que `$order_id` se
+reasigne unas líneas más abajo a otra cosa).
 
 ## Cómo volver a aplicarlo
 
