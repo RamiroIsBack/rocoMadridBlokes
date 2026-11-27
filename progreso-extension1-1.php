@@ -550,6 +550,17 @@ add_filter('allowed_redirect_hosts', function($hosts) {
 //  mano una vez.
 // ============================================================
 
+// El sitio principal (blog 1) está en revisión del Kit Digital y tiene que seguir
+// funcionando EXACTAMENTE igual hasta que lo revisen — nada de Google ni del rediseño puede
+// verse ahí (Ramiro, 27/11 17:xx). Todo lo nuevo de login va solo en el club (blog 3, el
+// mismo que usa switch_to_blog(3) en server-index.php).
+if (!defined('BLOKES_CLUB_BLOG_ID')) {
+    define('BLOKES_CLUB_BLOG_ID', 3);
+}
+function blokes_es_blog_club() {
+    return (int) get_current_blog_id() === BLOKES_CLUB_BLOG_ID;
+}
+
 function blokes_google_base64url_decode($data) {
     $resto = strlen($data) % 4;
     if ($resto) {
@@ -792,12 +803,12 @@ add_action('rest_api_init', function() {
 // "Authorized redirect URI" en Google Cloud, solo el origen JS
 // (https://rocomadrid.com).
 add_action('login_enqueue_scripts', function() {
-    if (!defined('GOOGLE_CLIENT_ID') || !GOOGLE_CLIENT_ID) return;
+    if (!blokes_es_blog_club() || !defined('GOOGLE_CLIENT_ID') || !GOOGLE_CLIENT_ID) return;
     wp_enqueue_script('blokes-google-identity', 'https://accounts.google.com/gsi/client', array(), null, true);
 });
 
 add_action('login_form', function() {
-    if (!defined('GOOGLE_CLIENT_ID') || !GOOGLE_CLIENT_ID) return;
+    if (!blokes_es_blog_club() || !defined('GOOGLE_CLIENT_ID') || !GOOGLE_CLIENT_ID) return;
     $redirect_to = isset($_REQUEST['redirect_to']) ? wp_unslash($_REQUEST['redirect_to']) : '';
     ?>
     <div id="blokes-google-login" style="margin:18px 0;text-align:center;">
