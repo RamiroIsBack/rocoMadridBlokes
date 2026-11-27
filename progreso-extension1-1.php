@@ -523,6 +523,257 @@ add_filter('allowed_redirect_hosts', function($hosts) {
 });
 
 // ============================================================
+//  "Continuar con Google" — fase 1: verificación del ID token + botón en
+//  wp-login.php. Mi cuenta/checkout de WooCommerce y el botón en /blokes
+//  quedan para la fase 2 (NOTAS_PARA_CODE_pestanas_grupos.md).
+//
+//  Solo necesita GOOGLE_CLIENT_ID en wp-config.php (constante, nunca en el
+//  repo) — NO hace falta un client secret: solo verificamos el ID token que
+//  manda el botón de Google, no intercambiamos ningún código. Mientras la
+//  constante no esté definida, el botón no se pinta y el endpoint rechaza.
+//
+//  Verificación local (sin vendor/, igual que el JWT a mano de
+//  blokes_sync_grupos_access_token más abajo): se descarga el JWKS público
+//  de Google (cacheado 1h), se reconstruye la clave RSA a partir de n/e
+//  (ASN.1 DER a mano) y se comprueba la firma con openssl_verify. Así no
+//  dependemos de llamar a Google en cada login.
+//
+//  Emparejamiento (orden pedido por Ramiro):
+//   1) meta _blokes_google_sub = sub del token → entra.
+//   2) si no, user_email EXACTO igual al email verificado de Google → entra
+//      y guarda _blokes_google_sub (primera vez).
+//   3) si no, no se crea usuario — error "cuenta_no_encontrada".
+//  Una cuenta con permisos de administración (manage_options) NUNCA entra
+//  por el camino 2) — hay que vincular Google a mano desde Mi cuenta antes
+//  (evita que alguien tome una cuenta de admin solo por controlar ese
+//  email en Google). Por el camino 1) sí entra siempre: ya se vinculó a
+//  mano una vez.
+// ============================================================
+
+function blokes_google_base64url_decode($data) {
+    $resto = strlen($data) % 4;
+    if ($resto) {
+        $data .= str_repeat('=', 4 - $resto);
+    }
+    return base64_decode(strtr($data, '-_', '+/'));
+}
+
+function blokes_google_asn1_longitud($len) {
+    if ($len <= 0x7f) return chr($len);
+    $tmp = ltrim(pack('N', $len), "\x00");
+    return pack('Ca*', 0x80 | strlen($tmp), $tmp);
+}
+
+function blokes_google_asn1_entero($bin) {
+    if (strlen($bin) === 0 || ord($bin[0]) > 0x7f) {
+        $bin = "\x00" . $bin;
+    }
+    return "\x02" . blokes_google_asn1_longitud(strlen($bin)) . $bin;
+}
+
+// Reconstruye la clave pública RSA (PEM) a partir del "n"/"e" del JWKS de
+// Google — sin vendor/, igual que el resto del plugin. DER estándar
+// (RSAPublicKey dentro de SubjectPublicKeyInfo), el mismo que usan las
+// librerías JWT habituales.
+function blokes_google_jwk_a_pem($n_b64url, $e_b64url) {
+    $modulo    = blokes_google_asn1_entero(blokes_google_base64url_decode($n_b64url));
+    $exponente = blokes_google_asn1_entero(blokes_google_base64url_decode($e_b64url));
+    $rsa_pub   = "\x30" . blokes_google_asn1_longitud(strlen($modulo . $exponente)) . $modulo . $exponente;
+    $alg_id    = "\x30\x0d\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x01\x01\x05\x00"; // rsaEncryption
+    $bitstring = "\x00" . $rsa_pub; // 1 byte de "bits sin usar" = 0
+    $bitstring = "\x03" . blokes_google_asn1_longitud(strlen($bitstring)) . $bitstring;
+    $spki      = "\x30" . blokes_google_asn1_longitud(strlen($alg_id . $bitstring)) . $alg_id . $bitstring;
+    return "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode($spki), 64, "\n") . "-----END PUBLIC KEY-----\n";
+}
+
+function blokes_google_jwks($forzar = false) {
+    if (!$forzar) {
+        $cache = get_transient('blokes_google_jwks');
+        if ($cache) return $cache;
+    }
+    $res = wp_remote_get('https://www.googleapis.com/oauth2/v3/certs', array('timeout' => 15));
+    if (is_wp_error($res)) return $res;
+    $body = json_decode(wp_remote_retrieve_body($res), true);
+    if (wp_remote_retrieve_response_code($res) >= 300 || empty($body['keys']) || !is_array($body['keys'])) {
+        return new WP_Error('jwks_error', 'No se pudieron obtener las claves públicas de Google.');
+    }
+    set_transient('blokes_google_jwks', $body['keys'], HOUR_IN_SECONDS);
+    return $body['keys'];
+}
+
+// Verifica un ID token de Google Identity Services: firma RS256 contra el
+// JWKS público, y las claims aud/iss/exp/email_verified. Devuelve las
+// claims (array) o un WP_Error — nunca confía en nada del token sin pasar
+// por aquí primero.
+function blokes_google_verify_id_token($id_token) {
+    if (!defined('GOOGLE_CLIENT_ID') || !GOOGLE_CLIENT_ID) {
+        return new WP_Error('sin_configurar', 'Falta definir GOOGLE_CLIENT_ID en wp-config.php.');
+    }
+    $partes = explode('.', (string) $id_token);
+    if (count($partes) !== 3) {
+        return new WP_Error('token_invalido', 'El token de Google no tiene el formato esperado.');
+    }
+    list($header_b64, $claims_b64, $firma_b64) = $partes;
+    $header = json_decode(blokes_google_base64url_decode($header_b64), true);
+    $claims = json_decode(blokes_google_base64url_decode($claims_b64), true);
+    $firma  = blokes_google_base64url_decode($firma_b64);
+    if (!is_array($header) || !is_array($claims) || empty($header['kid']) || ($header['alg'] ?? '') !== 'RS256') {
+        return new WP_Error('token_invalido', 'El token de Google no se pudo decodificar.');
+    }
+
+    $jwks  = blokes_google_jwks();
+    if (is_wp_error($jwks)) return $jwks;
+    $clave = null;
+    foreach ($jwks as $k) {
+        if (($k['kid'] ?? null) === $header['kid']) { $clave = $k; break; }
+    }
+    if (!$clave) {
+        // La clave puede haber rotado justo ahora — una sola vez, sin cache.
+        $jwks = blokes_google_jwks(true);
+        if (is_wp_error($jwks)) return $jwks;
+        foreach ($jwks as $k) {
+            if (($k['kid'] ?? null) === $header['kid']) { $clave = $k; break; }
+        }
+    }
+    if (!$clave || ($clave['kty'] ?? '') !== 'RSA' || empty($clave['n']) || empty($clave['e'])) {
+        return new WP_Error('clave_no_encontrada', 'No se encontró la clave pública de Google para este token.');
+    }
+
+    $pem = blokes_google_jwk_a_pem($clave['n'], $clave['e']);
+    if (openssl_verify($header_b64 . '.' . $claims_b64, $firma, $pem, OPENSSL_ALGO_SHA256) !== 1) {
+        return new WP_Error('firma_invalida', 'La firma del token de Google no es válida.');
+    }
+
+    $ahora = time();
+    if (empty($claims['exp']) || $claims['exp'] < $ahora) {
+        return new WP_Error('token_expirado', 'El token de Google ha caducado, vuelve a intentarlo.');
+    }
+    if (empty($claims['aud']) || $claims['aud'] !== GOOGLE_CLIENT_ID) {
+        return new WP_Error('aud_invalido', 'Este token de Google no es para esta aplicación.');
+    }
+    if (empty($claims['iss']) || !in_array($claims['iss'], array('accounts.google.com', 'https://accounts.google.com'), true)) {
+        return new WP_Error('iss_invalido', 'El emisor del token de Google no es válido.');
+    }
+    if (empty($claims['email']) || empty($claims['email_verified'])) {
+        return new WP_Error('email_no_verificado', 'Tu cuenta de Google no tiene el email verificado.');
+    }
+    return $claims;
+}
+
+function blokes_google_login_redirect_seguro($redirect_to) {
+    $redirect_to = is_string($redirect_to) ? $redirect_to : '';
+    if ($redirect_to === '') return home_url('/');
+    $validado = wp_validate_redirect($redirect_to, home_url('/'));
+    return $validado ? $validado : home_url('/');
+}
+
+function blokes_google_login_endpoint($request) {
+    $credential = $request->get_param('credential');
+    if (!$credential) {
+        return new WP_Error('sin_credential', 'Falta el token de Google.', array('status' => 400));
+    }
+    $claims = blokes_google_verify_id_token($credential);
+    if (is_wp_error($claims)) {
+        error_log('[blokes-google-login] token rechazado (' . $claims->get_error_code() . '): ' . $claims->get_error_message());
+        return new WP_Error('google_no_valido', 'No se pudo verificar tu cuenta de Google. Vuelve a intentarlo.', array('status' => 401));
+    }
+
+    $sub   = sanitize_text_field($claims['sub']);
+    $email = sanitize_email($claims['email']);
+
+    $por_sub = get_users(array('meta_key' => '_blokes_google_sub', 'meta_value' => $sub, 'number' => 1));
+    $user    = $por_sub ? $por_sub[0] : false;
+
+    if (!$user) {
+        $por_email = get_user_by('email', $email);
+        if ($por_email) {
+            if (user_can($por_email, 'manage_options')) {
+                error_log('[blokes-google-login] bloqueado: ' . $email . ' tiene permisos de administración y todavía no vinculó Google a mano.');
+                return new WP_Error('admin_sin_vincular', 'Esta cuenta tiene permisos de administración. Entra con tu usuario y contraseña, y vincula Google desde Mi cuenta.', array('status' => 403));
+            }
+            $user = $por_email;
+            update_user_meta($user->ID, '_blokes_google_sub', $sub);
+        }
+    }
+
+    if (!$user) {
+        return new WP_Error('cuenta_no_encontrada', 'No encontramos tu cuenta. Entra con tu usuario y contraseña, y vincula Google desde Mi cuenta.', array('status' => 404));
+    }
+
+    wp_set_current_user($user->ID, $user->user_login);
+    wp_set_auth_cookie($user->ID, true);
+    do_action('wp_login', $user->user_login, $user);
+    update_user_meta($user->ID, '_blokes_google_last_login', current_time('mysql'));
+    error_log('[blokes-google-login] login correcto: ' . $user->user_login . ' (' . $email . ')');
+
+    return rest_ensure_response(array(
+        'success'      => true,
+        'redirect_to'  => blokes_google_login_redirect_seguro($request->get_param('redirect_to')),
+    ));
+}
+
+add_action('rest_api_init', function() {
+    register_rest_route('blokes/v1', '/google-login', array(
+        'methods'             => 'POST',
+        'callback'            => 'blokes_google_login_endpoint',
+        'permission_callback' => '__return_true',
+        'args' => array(
+            'credential'   => array('required' => true),
+            'redirect_to'  => array('required' => false),
+        ),
+    ));
+});
+
+// Botón en wp-login.php (solo en el formulario de login normal, no en
+// "olvidé mi contraseña" ni en registro). Flujo "callback" de Google
+// Identity Services: el token llega por fetch a nuestro endpoint, nunca por
+// una redirección de Google — así no hace falta registrar ninguna
+// "Authorized redirect URI" en Google Cloud, solo el origen JS
+// (https://rocomadrid.com).
+add_action('login_enqueue_scripts', function() {
+    if (!defined('GOOGLE_CLIENT_ID') || !GOOGLE_CLIENT_ID) return;
+    wp_enqueue_script('blokes-google-identity', 'https://accounts.google.com/gsi/client', array(), null, true);
+});
+
+add_action('login_form', function() {
+    if (!defined('GOOGLE_CLIENT_ID') || !GOOGLE_CLIENT_ID) return;
+    $redirect_to = isset($_REQUEST['redirect_to']) ? wp_unslash($_REQUEST['redirect_to']) : '';
+    ?>
+    <div id="blokes-google-login" style="margin:18px 0;text-align:center;">
+        <div id="g_id_onload"
+            data-client_id="<?php echo esc_attr(GOOGLE_CLIENT_ID); ?>"
+            data-callback="blokesHandleGoogleCredential"
+            data-auto_prompt="false"></div>
+        <div class="g_id_signin" data-type="standard" data-size="large" data-width="300" data-text="continue_with"></div>
+    </div>
+    <script>
+    function blokesHandleGoogleCredential(response) {
+        var caja = document.getElementById('blokes-google-login');
+        fetch('<?php echo esc_url_raw(rest_url('blokes/v1/google-login')); ?>', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                credential: response.credential,
+                redirect_to: '<?php echo esc_js($redirect_to); ?>'
+            })
+        }).then(function(r) {
+            return r.json().then(function(datos) { return { ok: r.ok, datos: datos }; });
+        }).then(function(resultado) {
+            if (resultado.ok && resultado.datos && resultado.datos.redirect_to) {
+                window.location.href = resultado.datos.redirect_to;
+            } else {
+                var mensaje = (resultado.datos && resultado.datos.message) ? resultado.datos.message : 'No se pudo entrar con Google.';
+                caja.insertAdjacentHTML('afterend', '<p class="message" style="border-left-color:#d63638;">' + mensaje + '</p>');
+            }
+        }).catch(function() {
+            caja.insertAdjacentHTML('afterend', '<p class="message" style="border-left-color:#d63638;">No se pudo contactar con el servidor.</p>');
+        });
+    }
+    </script>
+    <?php
+});
+
+// ============================================================
 //  REST routes — blokes/v1  (unchanged from v1.5.1)
 // ============================================================
 

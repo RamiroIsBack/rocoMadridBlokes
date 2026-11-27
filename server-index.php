@@ -36,11 +36,17 @@ $css_file  = $mas_reciente($css_files);
 $js_file   = $mas_reciente($js_files);
 $css_url   = $css_file ? $app_url . 'assets/' . basename($css_file) : '';
 $js_url    = $js_file  ? $app_url . 'assets/' . basename($js_file)  : '';
+$spa_url   = home_url('/' . $slug . '/');
 
 // Subscription data (club WP, blog 3)
 switch_to_blog(3);
-$club_nonce   = wp_create_nonce('wp_rest');
-$subscription = null;
+$club_nonce     = wp_create_nonce('wp_rest');
+// Comprobado (27/11): los usuarios son de toda la red, la cookie de sesión vale para todo
+// rocomadrid.com, y /blokes no comprueba pertenencia a ningún blog — basta con que el login
+// sea el del club (p.ej. ahí es donde vive el botón "Continuar con Google" de la fase 1).
+// $spa_url ya está calculada con el blog principal cargado (arriba), antes de este switch.
+$club_login_url = wp_login_url($spa_url);
+$subscription   = null;
 
 if (is_user_logged_in() && class_exists('RocoMadrid_SF_Stats')) {
     $me         = get_current_user_id();
@@ -91,13 +97,12 @@ $app_role = function_exists('blokes_get_app_role')
     ? blokes_get_app_role()
     : (is_user_logged_in() ? 'member' : 'guest');
 
-$spa_url   = home_url('/' . $slug . '/');
 $site_data = [
     'nonce'           => wp_create_nonce('wp_rest'),
     'clubNonce'       => $club_nonce,
     'isLoggedIn'      => is_user_logged_in(),
     'userId'          => get_current_user_id(),
-    'loginUrl'        => wp_login_url($spa_url),
+    'loginUrl'        => $club_login_url,
     'logoutUrl'       => wp_logout_url($spa_url),
     'userName'        => $user_name,
     'subscription'    => $subscription,
