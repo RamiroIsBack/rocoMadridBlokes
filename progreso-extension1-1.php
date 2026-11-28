@@ -972,10 +972,9 @@ function blokes_google_login_css() {
 
 .blokes-login-shell{max-width:1120px;margin:0 auto}
 .blokes-login-visual{position:relative;overflow:hidden;background:#1E1E1C}
-.blokes-login-cover{position:absolute!important;inset:0;width:100%!important;height:100%!important;max-width:none!important;object-fit:cover;object-position:center;margin:0!important}
-.blokes-login-visual::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(20,16,10,.5) 0%,rgba(20,16,10,0) 20%,rgba(20,16,10,0) 48%,rgba(20,16,10,.7) 78%,#1E1E1C 100%)}
-.blokes-login-logo-wrap{position:absolute;bottom:28px;left:28px;width:170px;z-index:2;filter:drop-shadow(0 2px 10px rgba(0,0,0,.5))}
-.blokes-login-logo-wrap svg{width:100%;height:auto;display:block}
+.blokes-login-cover{position:absolute!important;inset:0;width:100%!important;height:100%!important;max-width:none!important;object-fit:cover;object-position:left center;margin:0!important}
+.blokes-login-logo-plate{position:absolute;right:20px;bottom:20px;z-index:2;background:#1E1E1C;border-radius:10px;padding:14px 18px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.blokes-login-logo-plate svg{width:140px;height:auto;display:block}
 .blokes-login-card-col{display:flex;align-items:center;justify-content:center;padding:56px 24px}
 .blokes-login-card{width:100%;max-width:380px;margin:0 auto}
 .blokes-login-card h1{font-size:1.6rem;margin:0 0 8px}
@@ -995,8 +994,10 @@ function blokes_google_login_css() {
 @media (max-width:768px){
     .blokes-login-visual{display:flex;align-items:center;justify-content:center;padding-block:28px}
     .blokes-login-cover{display:none}
-    .blokes-login-visual::after{display:none}
-    .blokes-login-logo-wrap{position:static;width:150px;filter:none}
+    /* La banda entera ya es sólida #1E1E1C en móvil — el logo no necesita
+       su propia placa encima, solo centrarlo sin caja. */
+    .blokes-login-logo-plate{position:static;background:none;padding:0;border-radius:0;box-shadow:none}
+    .blokes-login-logo-plate svg{width:150px}
     .blokes-login-card-col{padding:28px 20px 40px}
 }
 
@@ -1007,7 +1008,9 @@ body.login #login h1 a{
     background-size:contain;background-repeat:no-repeat;background-position:center;
     width:170px;height:60px;margin:0 auto 26px;
 }
-body.login form#loginform{background:#fff;border-radius:10px;padding:26px 24px;box-shadow:0 10px 30px rgba(0,0,0,.25);border:none}
+body.login form#loginform{background:#fff;border-radius:10px;padding:26px 24px;box-shadow:0 10px 30px rgba(0,0,0,.25);border:none;display:flex;flex-direction:column}
+body.login form#loginform .blokes-google-boton{order:-2}
+body.login form#loginform .blokes-google-divider{order:-1}
 body.login .button-primary{width:100%;background:#d19d02;border-color:#846400;text-shadow:none;box-shadow:none;color:#2a1f00;font-weight:700}
 body.login #nav,body.login #backtoblog{text-align:center}
 body.login #nav a,body.login #backtoblog a{color:#f2eee3!important}
@@ -1043,6 +1046,11 @@ add_action('login_enqueue_scripts', function () {
     wp_add_inline_style('login', blokes_google_login_css());
 });
 
+// login_form fires right after el campo de contraseña (comprobado en
+// vivo), no al principio del formulario — por eso el orden visual
+// (Google → «o con tu email» → campos) se fuerza por CSS con
+// flex+order en #loginform más abajo, en vez de depender de un hook
+// que pinte antes, que no existe de forma fiable en wp-login.php.
 add_action('login_form', function () {
     if (!blokes_es_blog_club() || !defined('GOOGLE_CLIENT_ID') || !GOOGLE_CLIENT_ID) return;
     $redirect_to = isset($_REQUEST['redirect_to']) ? wp_unslash($_REQUEST['redirect_to']) : '';
@@ -1072,6 +1080,19 @@ add_action('woocommerce_checkout_login_form', function () {
     blokes_google_boton_html(wc_get_checkout_url());
 });
 
+// «Salir» no cerraba sesión al primer clic (Ramiro, 28/11): el menú
+// lateral de Mi cuenta y el desplegable de la cabecera (Neve,
+// My_Account::get_account_links()) construyen el enlace de logout con
+// wc_get_endpoint_url('customer-logout', ...), que NO lleva _wpnonce —
+// eso cae en la pantalla genérica de WordPress «¿Estás seguro?», que
+// pasa desapercibida y Ramiro interpreta como que no funciona.
+// wc_logout_url() sí lleva el nonce; con este filtro cualquier sitio que
+// pida la URL del endpoint customer-logout recibe esa en su lugar.
+add_filter('woocommerce_get_endpoint_url', function ($url, $endpoint, $value, $permalink) {
+    if (!blokes_es_blog_club() || $endpoint !== 'customer-logout') return $url;
+    return wc_logout_url($permalink);
+}, 10, 4);
+
 // ============================================================
 //  /club/mi-cuenta/ sin sesión — rediseño completo (Ramiro, 27-28/11).
 //  En vez de tocar la plantilla de WooCommerce/tema, se sustituye
@@ -1094,11 +1115,15 @@ add_action('wp', function () {
     remove_action('woocommerce_account_content', 'wc_print_notices', 10);
 });
 
-// ID del medio de la foto de portada del login — escala-en-rocomadrid.jpg
-// (Ramiro, 28/11: NO el medio 541). Vertical pendiente de que Ramiro elija
-// una; cuando la tenga, cambiar solo este número.
+// ID del medio de la foto de portada del login. Ramiro, 28/11: ni 541 ni
+// 5350 — la foto es la vertical login-foto-vertical-clase-ninos.jpg, ya
+// comprimida (1054×1400, ~233KB) en media_para_code/. Code no tiene vía
+// para subir a la biblioteca de medios (sin credenciales de la API REST
+// de WP): falta que cowork la suba y pase el ID real aquí. Hasta
+// entonces, 0 = sin foto (columna solo con el fondo oscuro y el logo),
+// nunca una de las fotos ya descartadas.
 if (!defined('BLOKES_LOGIN_FOTO_ID')) {
-    define('BLOKES_LOGIN_FOTO_ID', 5350);
+    define('BLOKES_LOGIN_FOTO_ID', 0);
 }
 
 add_filter('the_content', 'blokes_mi_cuenta_login_club', 20);
@@ -1117,7 +1142,7 @@ function blokes_render_mi_cuenta_login_html() {
             <?php if ($foto_portada) : ?>
                 <img class="blokes-login-cover" src="<?php echo esc_url($foto_portada); ?>" alt="" />
             <?php endif; ?>
-            <div class="blokes-login-logo-wrap"><?php echo blokes_google_logo_mostaza_svg(); ?></div>
+            <div class="blokes-login-logo-plate"><?php echo blokes_google_logo_mostaza_svg(); ?></div>
         </div>
         <div class="blokes-login-card-col">
             <div class="blokes-login-card">

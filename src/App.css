@@ -1433,31 +1433,58 @@
   .app-header__guest .app-header__link { font-size: 0.76rem; padding: 6px 12px; }
 }
 
-/* Móvil y tablet: lo que se abre con «⋯», alineado a la izquierda y repartido en dos
-   columnas (izquierda: apodo, suscripción, salir; derecha: ☀️/🌙, ojito del mapa, ver como);
-   los botones de clases y tecnificación abajo, a todo el ancho. */
+/* Móvil y tablet: lo que se abre con «⋯» — suscripción arriba (si hay), debajo Ver como /
+   Modo tablet / Salir / Mapa / tema todos juntos y pegados a la derecha (.app-header__acciones,
+   más abajo), los botones de clases y tecnificación al final, a todo el ancho. */
 @media (max-width: 999px) {
   .app-header__extra--abierto {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-areas:
-      "sub      mapa"
-      "vercomo  vercomo"
-      "salir    salir";
-    align-items: center;
-    justify-items: start;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
     text-align: left;
-    gap: 8px 12px;
+    gap: 8px;
   }
-  .app-header__extra--abierto .app-header__user-nick { grid-area: nick; }
-  .app-header__extra--abierto .app-header__sub        { grid-area: sub; margin-top: 0; }
-  .app-header__extra--abierto .app-header__logout-btn { grid-area: logout; margin-top: 0; }
-  .app-header__extra--abierto .app-header__tema-btn   { grid-area: tema; justify-self: end; margin-top: 0; height: 34px; padding: 0 10px; }
-  .app-header__extra--abierto .app-header__mapa-toggle { grid-area: mapa; justify-self: end; }
-  .app-header__extra--abierto .app-header__ver-como   { grid-area: vercomo; justify-self: start; margin-top: 0; }
-  .app-header__extra--abierto .app-header__links      { grid-area: links; justify-self: stretch; margin-top: 4px; }
-  .app-header__extra--abierto .app-header__link-wrap  { justify-content: flex-start; align-items: flex-start; }
-  .app-header__extra--abierto .app-header__link       { font-size: 0.76rem; padding: 6px 12px; }
+  .app-header__extra--abierto .app-header__sub   { margin-top: 0; }
+  .app-header__extra--abierto .app-header__links { margin-top: 4px; }
+  .app-header__extra--abierto .app-header__link-wrap { justify-content: flex-start; align-items: flex-start; }
+  .app-header__extra--abierto .app-header__link  { font-size: 0.76rem; padding: 6px 12px; }
+}
+
+/* Ver como / Modo tablet / Salir / Mapa+tema: una sola fila, pegados a la derecha, con el
+   mismo estilo de botón que Mapa — si no caben todos, envuelven a la línea siguiente
+   siguiendo pegados a la derecha, nunca sueltos a la izquierda (Ramiro, 28/11, captura móvil:
+   antes salían descolocados y «Salir» como un enlace subrayado diminuto). */
+.app-header__acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+}
+.app-header__acciones .app-header__ver-como,
+.app-header__acciones .app-header__salir {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
+  min-height: 0;
+  padding: 0 14px;
+  margin: 0;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+.app-header__acciones .app-header__ver-como:hover,
+.app-header__acciones .app-header__salir:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-primary);
 }
 
 /* Saludo encima del menú: «Hola, X» y la frase manuscrita de cada sección (22/11) */

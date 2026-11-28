@@ -286,20 +286,6 @@ export default function App() {
                       una sesión de prueba. En la cuenta tablet real (sin simular nada) se deja
                       como siempre. */}
                   {/* 22/11 (Álvaro): sin apodo ni «Log out» aquí */}
-                  {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
-                  {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
-                      EFECTIVO para que vean exactamente el mismo botón): su único "ver como"
-                      es pasar a la cuenta tablet y volver (Ramiro, 08/11 21:19).
-                      🐞 Ramiro 12/11 16:30: una vez YA en modo tablet, el rol efectivo pasa a
-                      ser "tablet" (no "profesor"/"gestion"), así que esta condición escondía el
-                      botón entero — con él se iba también el "mantén pulsado para salir" de
-                      dentro, y un profe se quedaba sin ninguna salida (a diferencia de un
-                      socio, que siempre tiene el banner "Viendo como..." aparte). Se añade el
-                      caso "ya estoy en tablet, entré como profe/gestión real" para que el botón
-                      (ahora en su versión "salir") siga ahí. */}
-                  {(['profesor', 'gestion'].includes(sd.userRole)
-                    || (sd.userRole === 'tablet' && ['profesor', 'gestion'].includes(sd.userRoleReal))
-                  ) && <ModoTabletToggleSimple sd={sd} />}
                   {sd.subscription && (
                     <div className="app-header__sub">
                       <span className={`app-header__sub-dot app-header__sub-dot--${sd.subscription.status === 'active' ? 'active' : 'inactive'}`} />
@@ -322,22 +308,41 @@ export default function App() {
                     </div>
                   )}
                   {/* 22/11 (Álvaro): con sesión no salen «Apúntate…» ni «Instalar la app» */}
-                  {/* Salir, discreto. En «Ver como: Tablet» no sale: cerraría la sesión REAL de
-                      quien lo simula (cowork, 09/11 09:05). */}
-                  {!(sd.userRole === 'tablet' && sd.userRoleReal !== 'tablet') && (
-                    <button type="button" className="app-header__salir" onClick={() => setLogoutOpen(true)}>Salir</button>
-                  )}
-                  {/* 22/11: botón corto «Mapa» (marcado cuando está a la vista); 23/11: ☀️/🌙 a su derecha */}
-                  <span className="app-header__mapa-tema">
-                    <button
-                      type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}
-                      onClick={() => setMapaAbierto(v => !v)}
-                      title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}
-                    >
-                      Mapa
-                    </button>
-                    <TemaToggle />
-                  </span>
+                  {/* 28/11: Ver como / Modo tablet / Salir / Mapa / tema, todos en la misma fila
+                      que Mapa, pegados a la derecha, mismo estilo de botón — antes salían
+                      sueltos y Salir se veía como un enlace pequeño (Ramiro, captura móvil). */}
+                  <div className="app-header__acciones">
+                    {sd.userRoleReal === 'socio' && <VerComoSelector sd={sd} />}
+                    {/* Profe/Eva (de verdad, o un socio viendo como Profe/Eva — se mira el rol
+                        EFECTIVO para que vean exactamente el mismo botón): su único "ver como"
+                        es pasar a la cuenta tablet y volver (Ramiro, 08/11 21:19).
+                        🐞 Ramiro 12/11 16:30: una vez YA en modo tablet, el rol efectivo pasa a
+                        ser "tablet" (no "profesor"/"gestion"), así que esta condición escondía el
+                        botón entero — con él se iba también el "mantén pulsado para salir" de
+                        dentro, y un profe se quedaba sin ninguna salida (a diferencia de un
+                        socio, que siempre tiene el banner "Viendo como..." aparte). Se añade el
+                        caso "ya estoy en tablet, entré como profe/gestión real" para que el botón
+                        (ahora en su versión "salir") siga ahí. */}
+                    {(['profesor', 'gestion'].includes(sd.userRole)
+                      || (sd.userRole === 'tablet' && ['profesor', 'gestion'].includes(sd.userRoleReal))
+                    ) && <ModoTabletToggleSimple sd={sd} />}
+                    {/* Salir. En «Ver como: Tablet» no sale: cerraría la sesión REAL de quien lo
+                        simula (cowork, 09/11 09:05). */}
+                    {!(sd.userRole === 'tablet' && sd.userRoleReal !== 'tablet') && (
+                      <button type="button" className="app-header__salir" onClick={() => setLogoutOpen(true)}>Salir</button>
+                    )}
+                    {/* 22/11: botón corto «Mapa» (marcado cuando está a la vista); 23/11: ☀️/🌙 a su derecha */}
+                    <span className="app-header__mapa-tema">
+                      <button
+                        type="button" className={`app-header__mapa-toggle${mapaAbierto ? ' app-header__mapa-toggle--on' : ''}`}
+                        onClick={() => setMapaAbierto(v => !v)}
+                        title={mapaAbierto ? 'Ocultar el mapa de salas' : 'Ver el mapa de salas'}
+                      >
+                        Mapa
+                      </button>
+                      <TemaToggle />
+                    </span>
+                  </div>
                 </div>
               </>
             ) : (
