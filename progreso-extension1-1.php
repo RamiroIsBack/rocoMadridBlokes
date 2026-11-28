@@ -901,13 +901,19 @@ function blokes_google_boton_script() {
             el.insertAdjacentElement('afterend', p);
         });
     }
+    // Vuelve a pintar el botón cada vez que se llama — limpia el
+    // contenedor antes, así que sirve tanto para el primer pintado como
+    // para el repintado al cambiar el ancho de la ventana (el ancho del
+    // botón de Google es fijo en píxeles, no "100%", así que si la
+    // columna cambia de ancho hay que volver a decírselo). El tope de
+    // 400 es el máximo que admite el botón oficial de Google.
     function blokesGoogleRenderButtons() {
         document.querySelectorAll('.blokes-google-boton').forEach(function (el) {
-            if (el.dataset.blokesRendered) return;
-            el.dataset.blokesRendered = '1';
+            el.innerHTML = '';
+            var ancho = Math.min(400, el.clientWidth || 300);
             google.accounts.id.renderButton(el, {
                 type: 'standard', theme: 'outline', size: 'large',
-                text: 'continue_with', locale: 'es', width: el.clientWidth || 300
+                text: 'continue_with', locale: 'es', width: ancho
             });
         });
     }
@@ -929,6 +935,12 @@ function blokes_google_boton_script() {
     if (window.google && window.google.accounts && window.google.accounts.id) {
         window.onGoogleLibraryLoad();
     }
+    var blokesGoogleResizeTimer = null;
+    window.addEventListener('resize', function () {
+        if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
+        clearTimeout(blokesGoogleResizeTimer);
+        blokesGoogleResizeTimer = setTimeout(blokesGoogleRenderButtons, 200);
+    });
     </script>
     <?php
 }
@@ -953,16 +965,16 @@ function blokes_google_boton_html($redirect_to = '') {
 function blokes_google_login_css() {
     $logo_b64 = BLOKES_LOGO_MOSTAZA_B64;
     return <<<CSS
-.blokes-google-boton{min-height:40px;margin:0 0 4px}
+.blokes-google-boton{display:block;width:100%;min-height:40px;margin:0 0 4px;overflow:visible}
 .blokes-google-divider{display:flex;align-items:center;gap:12px;margin:18px 0;color:#6b645a;font-size:.82rem}
 .blokes-google-divider::before,.blokes-google-divider::after{content:"";flex:1;height:1px;background:#e3dfd6}
 .blokes-google-error{color:#8a1f11;background:#fbeaea;border:1px solid #f1c6c0;border-radius:6px;padding:8px 12px;margin-top:10px;font-size:.85rem}
 
 .blokes-login-shell{max-width:1120px;margin:0 auto}
 .blokes-login-visual{position:relative;overflow:hidden;background:#1E1E1C}
-.blokes-login-cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;margin:0}
-.blokes-login-visual::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(20,16,10,.55) 0%,rgba(20,16,10,0) 22%,rgba(20,16,10,0) 45%,rgba(20,16,10,.75) 100%)}
-.blokes-login-logo-wrap{position:absolute;top:28px;left:28px;width:170px;z-index:2;filter:drop-shadow(0 2px 6px rgba(0,0,0,.35))}
+.blokes-login-cover{position:absolute!important;inset:0;width:100%!important;height:100%!important;max-width:none!important;object-fit:cover;object-position:center;margin:0!important}
+.blokes-login-visual::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(20,16,10,.5) 0%,rgba(20,16,10,0) 20%,rgba(20,16,10,0) 48%,rgba(20,16,10,.7) 78%,#1E1E1C 100%)}
+.blokes-login-logo-wrap{position:absolute;bottom:28px;left:28px;width:170px;z-index:2;filter:drop-shadow(0 2px 10px rgba(0,0,0,.5))}
 .blokes-login-logo-wrap svg{width:100%;height:auto;display:block}
 .blokes-login-card-col{display:flex;align-items:center;justify-content:center;padding:56px 24px}
 .blokes-login-card{width:100%;max-width:380px;margin:0 auto}
@@ -978,6 +990,7 @@ function blokes_google_login_css() {
 
 @media (min-width:769px){
     .blokes-login-shell{display:grid;grid-template-columns:1fr 1fr;min-height:560px}
+    .blokes-login-visual{min-height:560px}
 }
 @media (max-width:768px){
     .blokes-login-visual{display:flex;align-items:center;justify-content:center;padding-block:28px}
@@ -1081,6 +1094,13 @@ add_action('wp', function () {
     remove_action('woocommerce_account_content', 'wc_print_notices', 10);
 });
 
+// ID del medio de la foto de portada del login — escala-en-rocomadrid.jpg
+// (Ramiro, 28/11: NO el medio 541). Vertical pendiente de que Ramiro elija
+// una; cuando la tenga, cambiar solo este número.
+if (!defined('BLOKES_LOGIN_FOTO_ID')) {
+    define('BLOKES_LOGIN_FOTO_ID', 5350);
+}
+
 add_filter('the_content', 'blokes_mi_cuenta_login_club', 20);
 function blokes_mi_cuenta_login_club($content) {
     if (!blokes_es_blog_club() || is_user_logged_in()) return $content;
@@ -1089,7 +1109,7 @@ function blokes_mi_cuenta_login_club($content) {
 }
 
 function blokes_render_mi_cuenta_login_html() {
-    $foto_portada = wp_get_attachment_image_url(541, 'full');
+    $foto_portada = wp_get_attachment_image_url(BLOKES_LOGIN_FOTO_ID, 'full');
     ob_start();
     ?>
     <div class="blokes-login-shell">
