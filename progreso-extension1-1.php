@@ -1115,15 +1115,10 @@ add_action('wp', function () {
     remove_action('woocommerce_account_content', 'wc_print_notices', 10);
 });
 
-// ID del medio de la foto de portada del login. Ramiro, 28/11: ni 541 ni
-// 5350 — la foto es la vertical login-foto-vertical-clase-ninos.jpg, ya
-// comprimida (1054×1400, ~233KB) en media_para_code/. Code no tiene vía
-// para subir a la biblioteca de medios (sin credenciales de la API REST
-// de WP): falta que cowork la suba y pase el ID real aquí. Hasta
-// entonces, 0 = sin foto (columna solo con el fondo oscuro y el logo),
-// nunca una de las fotos ya descartadas.
+// ID del medio de la foto de portada del login — login-foto-vertical-
+// clase-ninos-comprimida.jpg (1054×1400), subida por cowork el 28/11.
 if (!defined('BLOKES_LOGIN_FOTO_ID')) {
-    define('BLOKES_LOGIN_FOTO_ID', 0);
+    define('BLOKES_LOGIN_FOTO_ID', 7968);
 }
 
 add_filter('the_content', 'blokes_mi_cuenta_login_club', 20);
