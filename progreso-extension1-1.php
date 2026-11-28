@@ -897,19 +897,34 @@ function blokes_google_boton_script() {
             el.insertAdjacentElement('afterend', p);
         });
     }
-    window.addEventListener('load', function () {
-        if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
-        google.accounts.id.initialize({
-            client_id: '<?php echo esc_js(GOOGLE_CLIENT_ID); ?>',
-            callback: blokesHandleGoogleCredential
-        });
+    function blokesGoogleRenderButtons() {
         document.querySelectorAll('.blokes-google-boton').forEach(function (el) {
+            if (el.dataset.blokesRendered) return;
+            el.dataset.blokesRendered = '1';
             google.accounts.id.renderButton(el, {
                 type: 'standard', theme: 'outline', size: 'large',
                 text: 'continue_with', locale: 'es', width: el.clientWidth || 300
             });
         });
-    });
+    }
+    // No usamos data-callback en un div g_id_onload: con SiteGround
+    // Optimizer combinando/retrasando el JS inline, este bloque puede
+    // ejecutarse después de que GSI ya haya leído ese div (y entonces
+    // GSI descarta la configuración, "callback is not a function"). En
+    // vez de depender del orden de carga, definimos el callback global
+    // que GSI mismo busca y llama en cuanto termina de cargar
+    // (window.onGoogleLibraryLoad) — y por si GSI cargó ANTES que este
+    // script, lo llamamos también a mano si ya existe.
+    window.onGoogleLibraryLoad = function () {
+        google.accounts.id.initialize({
+            client_id: '<?php echo esc_js(GOOGLE_CLIENT_ID); ?>',
+            callback: blokesHandleGoogleCredential
+        });
+        blokesGoogleRenderButtons();
+    };
+    if (window.google && window.google.accounts && window.google.accounts.id) {
+        window.onGoogleLibraryLoad();
+    }
     </script>
     <?php
 }
@@ -981,6 +996,21 @@ body.login #nav,body.login #backtoblog{text-align:center}
 body.login #nav a,body.login #backtoblog a{color:#f2eee3!important}
 CSS;
 }
+
+// SiteGround Optimizer combina/retrasa el JS inline de la página — el
+// script de blokesHandleGoogleCredential tiene que quedar FUERA de ese
+// combinado (si no, puede ejecutarse después de accounts.google.com/gsi/
+// client y GSI ya habría llamado a window.onGoogleLibraryLoad antes de
+// que exista; con el guard de arriba esto ya no rompe el login, pero
+// sigue siendo mejor que no lo toque). Mismo filtro que ya usa
+// sgo_javascript_combine_excluded_external_paths en custom.php del tema
+// (cowork, 28/11), aquí para contenido inline en vez de scripts externos.
+add_filter('sgo_javascript_combine_excluded_inline_content', function ($excluded) {
+    if (!blokes_es_blog_club()) return $excluded;
+    $excluded   = is_array($excluded) ? $excluded : array();
+    $excluded[] = 'blokesHandleGoogleCredential';
+    return $excluded;
+});
 
 // wp-login.php: GSI solo en el login normal del club (no en "olvidé mi
 // contraseña" ni registro), igual que en la fase 1.
