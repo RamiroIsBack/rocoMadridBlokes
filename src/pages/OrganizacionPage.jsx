@@ -3263,6 +3263,9 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
   const trayPointerRef = useRef(null)
   const [modoActivo, setModoActivo] = useState(!!comp.modoActivo)
   const [cambiandoModo, setCambiandoModo] = useState(false)
+  // 28/11 (Ramiro): filtro "qué presas uso, a qué zona van y con qué número" — útil para
+  // encontrar rápido dónde está cada juego de presas sin recorrer el mapa bloque a bloque.
+  const [filtroPresaId, setFiltroPresaId] = useState('')
 
   useEffect(() => { setBlocks(comp.blocks) }, [comp])
   useEffect(() => { setModoActivo(!!comp.modoActivo) }, [comp.modoActivo])
@@ -3439,6 +3442,17 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
   const unplaced = blocks.filter(b => b.xPct == null)
   const placed = blocks.filter(b => b.xPct != null)
 
+  const holdsetsOrdenados = useMemo(
+    () => [...holdsets].sort((a, b) => a.name.localeCompare(b.name)),
+    [holdsets]
+  )
+  const filtroPresaIdNum = filtroPresaId === '' ? null : Number(filtroPresaId)
+  const bloquesFiltrados = filtroPresaIdNum == null
+    ? []
+    : blocks
+        .filter(b => (b.holdSetIds || []).includes(filtroPresaIdNum))
+        .sort((a, b) => (a.subzone ?? 99) - (b.subzone ?? 99) || a.number - b.number)
+
   const removeComp = async () => {
     if (!window.confirm(`¿Borrar la competición "${comp.name}"? No se puede deshacer.`)) return
     try { await api('DELETE', `/equipacion/competitions/${comp.id}`); onBack() }
@@ -3546,6 +3560,37 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
         </div>
       )}
 
+      {/* 28/11 (Ramiro): elige un tipo de presas y dice a qué zona (subzona) y con qué número
+          va cada bloque que las lleva — resalta también las burbujas correspondientes en el
+          mapa, y atenúa el resto para que se vean a simple vista. */}
+      <div className="org__add-row org__comp-filtro-presas">
+        <label>Filtrar por tipo de presas</label>
+        <select value={filtroPresaId} onChange={e => setFiltroPresaId(e.target.value)}>
+          <option value="">Todas</option>
+          {holdsetsOrdenados.map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+        </select>
+      </div>
+      {filtroPresaIdNum != null && (
+        <div className="org__comp-filtro-resultado">
+          {bloquesFiltrados.length === 0 ? (
+            <p className="org__hint">Ningún bloque lleva estas presas todavía.</p>
+          ) : (
+            <>
+              <p className="org__hint">
+                {bloquesFiltrados.length} bloque{bloquesFiltrados.length === 1 ? '' : 's'} con estas presas:
+              </p>
+              <div className="org__comp-tray-chips">
+                {bloquesFiltrados.map(b => (
+                  <span key={b.id} className="org__comp-filtro-chip">
+                    {b.subzone != null ? `Zona #${b.subzone}` : 'sin colocar'} · bloque #{b.number}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div
         className="org__comp-map-wrap"
         ref={wrapRef}
@@ -3559,10 +3604,12 @@ function CompeMapEditor({ comp, config, workers, canManage, workerId, onBack }) 
           // van en el tooltip (hover/toque largo), junto con las instrucciones de siempre.
           const presasBurbuja = (b.holdSetIds || []).map(id => holdsets.find(h => h.id === id)?.name).filter(Boolean)
           const tituloBase = b.tested ? 'Forerun hecho — toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa' : 'Toca para ver la ficha, arrastra para mover, doble clic para quitar del mapa'
+          const coincideFiltro = filtroPresaIdNum != null && (b.holdSetIds || []).includes(filtroPresaIdNum)
+          const atenuadaPorFiltro = filtroPresaIdNum != null && !coincideFiltro
           return (
           <div
             key={b.id}
-            className={`org__comp-bubble${b.tested ? ' org__comp-bubble--tested' : ''}`}
+            className={`org__comp-bubble${b.tested ? ' org__comp-bubble--tested' : ''}${coincideFiltro ? ' org__comp-bubble--resaltada' : ''}${atenuadaPorFiltro ? ' org__comp-bubble--atenuada' : ''}`}
             style={{ left: `${b.xPct}%`, top: `${b.yPct}%`, borderColor: b.grade ? (GRADE_COLOR[b.grade] || '#fff') : undefined }}
             onPointerDown={startDrag(b.id)}
             onDoubleClick={() => unplace(b.id)}

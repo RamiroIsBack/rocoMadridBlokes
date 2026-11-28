@@ -478,6 +478,19 @@
 .org__comp-bubble:active { cursor: grabbing; }
 .org__comp-bubble--ghost { opacity: 0.6; pointer-events: none; border-style: dashed; }
 .org__comp-bubble--tested { box-shadow: 0 0 0 2px #22c55e, 0 2px 4px rgba(0,0,0,0.4); }
+
+/* Filtro "qué presas uso, a qué zona van" (28/11): resalta las burbujas con esas presas y
+   atenúa el resto, para encontrarlas a simple vista en el mapa. */
+.org__comp-bubble--resaltada { box-shadow: 0 0 0 3px #38bdf8, 0 2px 10px rgba(56, 189, 248, 0.7); z-index: 2; }
+.org__comp-bubble--atenuada { opacity: 0.3; }
+.org__comp-filtro-presas { margin-bottom: 12px; max-width: 280px; }
+.org__comp-filtro-resultado { margin-bottom: 12px; }
+.org__comp-filtro-chip {
+  display: inline-flex; align-items: center;
+  padding: 4px 10px; border-radius: 999px;
+  background: rgba(56, 189, 248, 0.16); border: 1px solid #38bdf8;
+  color: var(--color-text-primary); font-size: 0.8rem; font-weight: 600;
+}
 /* Marca de "probado (forerunning)" sobre la burbuja (Ramiro, 11/11 05:01) — el halo verde de
    arriba ya avisaba, pero quería un ✓ explícito, con "Forerun hecho" al pasar el ratón/tocar. */
 .org__comp-bubble__tested-mark {
