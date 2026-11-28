@@ -674,6 +674,10 @@ function blokes_google_verify_id_token($id_token) {
 function blokes_google_login_redirect_seguro($redirect_to) {
     $redirect_to = is_string($redirect_to) ? $redirect_to : '';
     if ($redirect_to === '') return home_url('/');
+    // Por si llega con entidades HTML (&amp; en vez de &, de un escape de
+    // más en algún sitio que lo generó) — decodificar antes de validar,
+    // nunca al revés (cowork, 28/11).
+    $redirect_to = html_entity_decode($redirect_to, ENT_QUOTES);
     $validado = wp_validate_redirect($redirect_to, home_url('/'));
     return $validado ? $validado : home_url('/');
 }
@@ -935,7 +939,7 @@ function blokes_google_boton_script() {
 function blokes_google_boton_html($redirect_to = '') {
     if (!defined('GOOGLE_CLIENT_ID') || !GOOGLE_CLIENT_ID) return;
     ?>
-    <script>window.blokesGoogleRedirectTo = '<?php echo esc_js($redirect_to); ?>';</script>
+    <script>window.blokesGoogleRedirectTo = <?php echo wp_json_encode((string) $redirect_to); ?>;</script>
     <div class="blokes-google-boton"></div>
     <div class="blokes-google-divider"><span>o con tu email</span></div>
     <?php
