@@ -1001,18 +1001,24 @@ body.login #nav a,body.login #backtoblog a{color:#f2eee3!important}
 CSS;
 }
 
-// SiteGround Optimizer combina/retrasa el JS inline de la página — el
-// script de blokesHandleGoogleCredential tiene que quedar FUERA de ese
-// combinado (si no, puede ejecutarse después de accounts.google.com/gsi/
-// client y GSI ya habría llamado a window.onGoogleLibraryLoad antes de
-// que exista; con el guard de arriba esto ya no rompe el login, pero
-// sigue siendo mejor que no lo toque). Mismo filtro que ya usa
-// sgo_javascript_combine_excluded_external_paths en custom.php del tema
-// (cowork, 28/11), aquí para contenido inline en vez de scripts externos.
+// SiteGround Optimizer combina/retrasa el JS inline de la página. Dos
+// scripts inline nuestros tienen que quedar FUERA de ese combinado:
+// - blokesHandleGoogleCredential: si entra en el combinado puede
+//   ejecutarse después de accounts.google.com/gsi/client y GSI ya habría
+//   llamado a window.onGoogleLibraryLoad antes de que exista (con el
+//   guard de más abajo esto ya no rompe el login, pero mejor no tocarlo).
+// - blokesGoogleRedirectTo: comprobado en vivo (28/11) que SI entra en
+//   el combinado — SGO genera un fichero .js distinto por cada valor de
+//   redirect_to (lo hashea junto con el contenido), así que no sirve mal
+//   a otra visita, pero deja en disco un fichero estático nuevo por cada
+//   pedido/página distinta — justo lo que evita excluirlo.
+// Mismo filtro que ya usa sgo_javascript_combine_excluded_external_paths
+// en custom.php del tema (cowork, 28/11), aquí para contenido inline.
 add_filter('sgo_javascript_combine_excluded_inline_content', function ($excluded) {
     if (!blokes_es_blog_club()) return $excluded;
     $excluded   = is_array($excluded) ? $excluded : array();
     $excluded[] = 'blokesHandleGoogleCredential';
+    $excluded[] = 'blokesGoogleRedirectTo';
     return $excluded;
 });
 
